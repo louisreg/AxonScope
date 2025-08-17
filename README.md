@@ -22,3 +22,21 @@
 - **Intracellular and extracellular stimulation mechanisms**.  
 - Performance comparable to NEURON, but **simpler and more modern**.  
 
+---
+
+## 🚧 TODO Roadmap
+
+- [x] Validate base implementation with a passive membrane
+- [ ] Validate base implementation of Hodgkin-Huxley and Rattay-Aberham models
+  - [x]  Check AP shape
+  - [ ]  Check propagation velocity against NRV  
+- [ ] Add performance benchmarking tooling  
+- [ ] Replace Explicit Euler solver with Crank–Nicholson + Thomas' algorithm  
+- [ ] Implement extracellular stimulation mechanisms  
+- [ ] Start integrating multicompartment models  
+- [ ] Benchmark different backends:  
+  - [ ] NumPy  
+  - [ ] PyTorch  
+  - [ ] JAX  
+  - [ ] Rust  
+- [ ] And many more things to do...
