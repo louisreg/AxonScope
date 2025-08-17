@@ -1,0 +1,24 @@
+[project]
+name = "AxonScope"
+version = "0.1.0"
+description = "Python package for axon simulations"
+authors = [{name="Louis Regnacq", email="l.regnacq@gmail.com"}]
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "pytest>=8.4.1",
+]
+readme = "README.md"
+requires-python = ">3.10"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-v"
+testpaths = [
+    "tests"
+]
+
+[dependency-groups]
+dev = [
+    "neuron>=8.2.7",
+]
