@@ -24,7 +24,7 @@
 
 ---
 
-## 🚧 TODO Roadmap
+## TODO Roadmap
 
 - [x] Validate base implementation with a passive membrane
 - [ ] Validate base implementation of Hodgkin-Huxley and Rattay-Aberham models
