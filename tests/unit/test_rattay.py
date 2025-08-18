@@ -39,7 +39,7 @@ def test_Iion_shape_and_units(axon):
     V = np.ones(axon.Nx) * -65.0
     axon.step_gates(0.1, V)  # update gates first
 
-    I = axon.Iion(t=0.0, V=V)
+    I = axon.Iion(V=V)
 
     # correct shape
     assert I.shape == (axon.Nx,)

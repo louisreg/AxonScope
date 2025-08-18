@@ -34,10 +34,10 @@ def test_solver_runs():
     axon = Passive(L=1000.0, d=1, Nx=11)
     axon.insert_I_Clamp(position=500, t_start=0.0, duration=1.0, amplitude=1.0)
     solver = Euler()
-    V_all, t_vec = solver.solve(axon, tsim=1.0, dt=1e-3)
-    assert V_all.shape[1] == axon.Nx
-    assert len(t_vec) == V_all.shape[0]
-    assert np.all(np.isfinite(V_all))
+    res = solver.solve(axon, tsim=1.0, dt=1e-3)
+    assert res.Vm.shape[1] == axon.Nx
+    assert len(res.t) == res.Vm.shape[0]
+    assert np.all(np.isfinite(res.Vm))
 
 
 def test_compare_nrv():
@@ -59,8 +59,9 @@ def test_compare_nrv():
     axon_py.insert_I_Clamp(position=0.5*L, t_start=t_start, duration=t_on, amplitude=I_inj_nA)
     
     solver = Euler()
-    V_all, t_vec = solver.solve(axon_py, tsim=Tsim, dt=None)
-    dt = t_vec[1]-t_vec[0]
+    res = solver.solve(axon_py, tsim=Tsim, dt=None)
+    
+    dt = res.t[1]-res.t[0]
 
     # ---- NRV Axon ----
     axon_nrv = NRV_axon(
@@ -82,7 +83,7 @@ def test_compare_nrv():
     Vm_nrv = results_NRV['V_mem'] 
 
     idx_ascope = np.argmin(np.abs(axon_py.x - L/2))
-    V_ascope_center = V_all[:, idx_ascope]
+    V_ascope_center = res.Vm[:, idx_ascope]
 
     x_rec = results_NRV['x_rec']          # positions [µm]
     Vm_nrv = results_NRV['V_mem']     

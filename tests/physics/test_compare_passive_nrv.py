@@ -7,7 +7,7 @@ from axonscope.solvers import Euler
 
 import sys
 sys.path.append("./external/")
-from uNRV import Axon as NRV_axon #for comparison  # adapter selon ton import NRV
+#from uNRV import Axon as NRV_axon #for comparison  --> importing uNRV AND nrv crashes but no passive in NRV :(
 
 def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     # ---- Parameters ----
@@ -33,8 +33,10 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     axon_py.insert_I_Clamp(position=0.5*L, t_start=t_start, duration=t_on, amplitude=I_inj_nA)
     
     solver = Euler()
-    V_all, t_vec = solver.solve(axon_py, tsim=Tsim, dt=1e-3)
-    dt = (t_vec[1]-t_vec[0])
+    res = solver.solve(axon_py, tsim=Tsim, dt=1e-3)
+    dt = (res.t[1]-res.t[0])
+
+    """
 
     # ---- NRV Axon ----
     axon_nrv = NRV_axon(
@@ -53,6 +55,7 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     )
     axon_nrv.insert_I_Clamp(0.5, t_start, t_on, I_inj_nA)
     results_NRV = axon_nrv.simulate(t_sim=Tsim)
+    """
 
     # ---- Choose positions along the axon ----
     x_positions = [0, L/3, L/2, 2*L/3, L]
@@ -60,23 +63,23 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
 
     fig, ax_x = plt.subplots(figsize=(8,5))
     for idx, xp in zip(indices, x_positions):
-        ax_x.plot(t_vec, V_all[:, idx], label=f'x = {xp:.1f} µm')
+        ax_x.plot(res.t, res.Vm[:, idx], label=f'x = {xp:.1f} µm')
     ax_x.set_xlabel('Time [ms]')
     ax_x.set_ylabel('V_m [mV]')
     ax_x.legend()
     ax_x.grid(True)
 
-    t = results_NRV['t'].ravel()          # s'assure que t est 1D
-    x_rec = results_NRV['x_rec']          # positions [µm]
-    Vm = results_NRV['V_mem']             # shape (Nt, Nx)
+    #t = results_NRV['t'].ravel()          # s'assure que t est 1D
+    #x_rec = results_NRV['x_rec']          # positions [µm]
+    #Vm = results_NRV['V_mem']             # shape (Nt, Nx)
 
-    L_p = x_rec[-1]
-    x_positions = [0, L_p/3, L_p/2, 2*L_p/3, L_p]
-    indices = [np.argmin(np.abs(x_rec - xp)) for xp in x_positions]
+    #L_p = x_rec[-1]
+    #x_positions = [0, L_p/3, L_p/2, 2*L_p/3, L_p]
+    #indices = [np.argmin(np.abs(x_rec - xp)) for xp in x_positions]
 
     
-    for idx, xp in zip(indices, x_positions):
-        ax_x.plot(t, Vm[idx, :],'--', label=f"x = {xp:.1f} µm - NRV")
+    #for idx, xp in zip(indices, x_positions):
+    #    ax_x.plot(t, Vm[idx, :],'--', label=f"x = {xp:.1f} µm - NRV")
     ax_x.legend()
     filename = save_path / "axon_compare_passive_nrv.png"
     fig.savefig(filename)
@@ -84,3 +87,4 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
 
 
     
+##

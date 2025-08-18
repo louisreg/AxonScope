@@ -318,7 +318,7 @@ extern void _cvode_abstol( Symbol**, double*, int);
  	hoc_register_cvode(_mechtype, _ode_count, _ode_map, _ode_spec, _ode_matsol);
  	hoc_register_tolerance(_mechtype, _hoc_state_tol, &_atollist);
  	hoc_register_var(hoc_scdoub, hoc_vdoub, hoc_intfunc);
- 	ivoc_help("help ?1 RattayAberham /Users/louisregnacq/Library/CloudStorage/Dropbox/Work/Model/HH_axon/uNRV/mods/RattayAberham.mod\n");
+ 	ivoc_help("help ?1 RattayAberham /Users/louisregnacq/Documents/Work/Model/AxonScope/external/mods/RattayAberham.mod\n");
  hoc_register_limits(_mechtype, _hoc_parm_limits);
  hoc_register_units(_mechtype, _hoc_parm_units);
  }
@@ -749,15 +749,15 @@ _first = 0;
 #endif
 
 #if NMODL_TEXT
-static const char* nmodl_filename = "/Users/louisregnacq/Library/CloudStorage/Dropbox/Work/Model/HH_axon/uNRV/mods/RattayAberham.mod";
+static const char* nmodl_filename = "/Users/louisregnacq/Documents/Work/Model/AxonScope/external/mods/RattayAberham.mod";
 static const char* nmodl_file_text = 
   "TITLE hh.mod   squid sodium, potassium, and leak channels\n"
   " \n"
   "COMMENT\n"
   "HH model using RattayAberham k=12 for 37degC\n"
   "\n"
-  " Remember to set celsius=37 in your HOC file.\n"
-  " Eric Musselman  December 5, 2017\n"
+  "Remember to set celsius=37 in your HOC file.\n"
+  "Eric Musselman  December 5, 2017\n"
   "ENDCOMMENT\n"
   " \n"
   "UNITS {\n"

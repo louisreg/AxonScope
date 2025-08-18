@@ -2,14 +2,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from axonscope.axons import RattayAberham
+from axonscope.axons import HodgkinHuxley
 from axonscope.solvers import Euler
 
 import nrv
 
-def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
+
+def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
     """
-    Physical test of the RattayAberham axon model with Euler solver.
+    Physical test of the HodgkinHuxley axon model with Euler solver.
     A current pulse is injected and the membrane potential is recorded.
     We compare result with NRV
     The resulting figure is saved to disk.
@@ -19,7 +20,7 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
     L = 1000    #in µm
     d = 0.5       # diameter in µm
     Nx = 101
-    axon = RattayAberham(L=L, d=d, Nx=Nx, celsius=37)
+    axon = HodgkinHuxley(L=L, d=d, Nx=Nx, celsius=6.3)
 
     #Inject current 1ms pulse 
     t_start = 1.0
@@ -36,15 +37,8 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
 
 
      # ---- NRV Axon ----
-    axon_nrv = nrv.unmyelinated(
-        y=0,
-        z=0,
-        d=d,
-        L = L,
-        Nsec = Nx,
-        dt = dt,
-        V_init = -70
-    )
+    axon_nrv = nrv.unmyelinated(0,0,d,L,dt=dt,Nsec=Nx, model = "HH", v_init = axon.Vinit, T = axon.celsius)
+                        
     axon_nrv.insert_I_Clamp(0.5, t_start, duration, amplitude)
     results_NRV = axon_nrv.simulate(t_sim=tsim)
 
@@ -94,7 +88,7 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
     cbar.set_label('membrane voltage - NRV (mV)')
 
     fig.tight_layout()
-    fig_path = save_dir + "/rattay_euler_vs_NRV.png"
+    fig_path = save_dir + "/HH_euler_vs_NRV.png"
     fig.savefig(fig_path)
 
 

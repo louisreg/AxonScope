@@ -2,24 +2,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from axonscope.axons import RattayAberham
+from axonscope.axons import RattayAberham as RA
 from axonscope.solvers import Euler
 
-import nrv
 
-def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
-    """
-    Physical test of the RattayAberham axon model with Euler solver.
-    A current pulse is injected and the membrane potential is recorded.
-    We compare result with NRV
-    The resulting figure is saved to disk.
-    """
+def test_rasterplot(save_dir="figures/physics_tests"):
 
     # --- axon parameters
     L = 1000    #in µm
     d = 0.5       # diameter in µm
     Nx = 101
-    axon = RattayAberham(L=L, d=d, Nx=Nx, celsius=37)
+    axon = RA(L=L, d=d, Nx=Nx, celsius=37)
 
     #Inject current 1ms pulse 
     t_start = 1.0
@@ -35,18 +28,6 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
     res = solver.solve(axon, tsim=tsim, dt=dt)
 
 
-     # ---- NRV Axon ----
-    axon_nrv = nrv.unmyelinated(
-        y=0,
-        z=0,
-        d=d,
-        L = L,
-        Nsec = Nx,
-        dt = dt,
-        V_init = -70
-    )
-    axon_nrv.insert_I_Clamp(0.5, t_start, duration, amplitude)
-    results_NRV = axon_nrv.simulate(t_sim=tsim)
 
     # ---- Choose positions along the axon ----
     x_positions = [L/4, L/3, L/2, 2*L/3, 3*L/4]
@@ -55,16 +36,6 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
     fig, axs = plt.subplots(1,3, figsize=(12,5))
     for idx, xp in zip(indices, x_positions):
         axs[0].plot(res.t, res.Vm[:, idx], label=f'x = {xp:.1f} µm')
-
-    t = results_NRV['t'].ravel()          # s'assure que t est 1D
-    x_rec = results_NRV['x_rec']          # positions [µm]
-    Vm = results_NRV['V_mem']             # shape (Nt, Nx)
-
-    indices = [np.argmin(np.abs(x_rec - xp)) for xp in x_positions]
-
-    for idx, xp in zip(indices, x_positions):
-        axs[0].plot(t, Vm[idx, :],'--', label=f"x = {xp:.1f} µm - NRV")
-    axs[0].legend()
 
     axs[0].set_xlabel('Time [ms]')
     axs[0].set_ylabel('Vm [mV]')
@@ -86,15 +57,11 @@ def test_rattay_euler_vs_NRV(save_dir="figures/physics_tests"):
     cbar = fig.colorbar(map)
     cbar.set_label('membrane voltage - AxonScope (mV)')
 
-
-    map = axs[2].pcolormesh(results_NRV['t'], results_NRV['x_rec'], results_NRV['V_mem'] ,shading='auto')
-    axs[2].set_xlabel('time (ms)')
-    axs[2].set_ylabel('position (µm)')
-    cbar = fig.colorbar(map)
-    cbar.set_label('membrane voltage - NRV (mV)')
+    ## -- Rasterplot
+    res.rasterplot(axs[2])
 
     fig.tight_layout()
-    fig_path = save_dir + "/rattay_euler_vs_NRV.png"
+    fig_path = save_dir + "/test_rasterplot.png"
     fig.savefig(fig_path)
 
 

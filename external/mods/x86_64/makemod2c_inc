@@ -1,6 +1,6 @@
 ./RattayAberham.c: ../RattayAberham.mod
 	@printf " -> $(C_GREEN)NMODL$(C_RESET) $<\\n"
-	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "RattayAberham.mod" -o "/Users/louisregnacq/Library/CloudStorage/Dropbox/Work/Model/HH_axon/uNRV/mods/x86_64")
+	(cd "..";  MODLUNIT=$(NRNUNITS) $(NOCMODL) "RattayAberham.mod" -o "/Users/louisregnacq/Documents/Work/Model/AxonScope/external/mods/x86_64")
 
 ./RattayAberham.o: ./RattayAberham.c
 	@printf " -> $(C_GREEN)Compiling$(C_RESET) $<\\n"

@@ -1,10 +1,12 @@
 import numpy as np 
 from abc import ABC, abstractmethod
 from axonscope.axons import Axon
+from axonscope.simresult import SimResult
+from numpy.typing import NDArray
 
 class Solver(ABC):
     @abstractmethod
-    def solve(self, axon: Axon, tsim, dt=None):
+    def solve(self, axon: Axon, tsim, dt=None) -> SimResult:
         pass
 
 
@@ -12,7 +14,7 @@ class Euler(Solver):
     def __init__(self): 
         pass 
     
-    def solve(self, axon, tsim, dt): 
+    def solve(self, axon: Axon, tsim, dt=None) -> SimResult: 
 
         if dt is None:  # stability margin
             dt_diff = (axon.ra * axon.cm * axon.dx_cm**2) / 2.0 
@@ -30,7 +32,7 @@ class Euler(Solver):
             V = self.euler_step(axon, V, dt, t) 
             t += dt 
             V_all[n, :] = V 
-        return V_all, t_vec 
+        return SimResult(axon, V_all, t_vec)
     
     def euler_step(self, axon, V, dt, t): 
         # second derivative in space

@@ -2,7 +2,8 @@ import math
 import numpy as np
 from neuron import h, load_mechanisms
 import time 
-
+from pathlib import Path
+#pathlib.Path(__file__).parent.resolve()
 
 #h.CVode.cache_efficient(True)
 
@@ -21,7 +22,7 @@ def purge_neuron():
     for section in h.allsec():
         section = None
 
-load_mechanisms( "./mods")
+load_mechanisms( f"{Path(__file__).parent}/mods")
 h.load_file("stdrun.hoc")
 
 class Axon():
@@ -35,7 +36,7 @@ class Axon():
         dt=0.001,
         Nsec=100,
         Ra = 100,
-        cm = 10,
+        cm = 1,
         e_pas = -70,
         g_pas = 0.001,
         V_init = None,
