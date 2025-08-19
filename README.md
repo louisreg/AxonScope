@@ -31,7 +31,9 @@
   - [x]  Check AP shape
   - [x]  Check propagation velocity against NRV  
     - We observe about 10% difference but we use difference velocity estimation method and different solver (for now).
-- [ ] Add performance benchmarking tooling  
+- [x] Add performance benchmarking tooling  
+      - Basic decorator for benchmarking is implemented, based on pyinstrument with filtering capabilities. See [this example](./benchmark/simple_benchmark.py). More features will be added to fully utilize pyinstrument capabilities. We might also implement memray for memory tracing.
+
 - [ ] Replace Explicit Euler solver with Crank–Nicholson + Thomas' algorithm  
 - [ ] Implement extracellular stimulation mechanisms  
 - [ ] Start integrating multicompartment models  

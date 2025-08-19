@@ -1,5 +1,8 @@
 import numpy as np
+from axonscope.benchmark import Benchmark
 
+bench = Benchmark()
+@bench.benchmark(level=3)  
 def vtrap(x, y):
     """Stable implementation of vtrap (from NEURON mod file)."""
     with np.errstate(over='ignore', invalid='ignore', divide='ignore'):

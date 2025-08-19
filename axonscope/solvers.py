@@ -1,8 +1,13 @@
 import numpy as np 
 from abc import ABC, abstractmethod
+from numpy.typing import NDArray
+
+
 from axonscope.axons import Axon
 from axonscope.simresult import SimResult
-from numpy.typing import NDArray
+from axonscope.benchmark import Benchmark
+
+bench = Benchmark()
 
 class Solver(ABC):
     @abstractmethod
@@ -14,6 +19,7 @@ class Euler(Solver):
     def __init__(self): 
         pass 
     
+    @bench.benchmark(level=1)  
     def solve(self, axon: Axon, tsim, dt=None) -> SimResult: 
 
         if dt is None:  # stability margin
@@ -34,6 +40,7 @@ class Euler(Solver):
             V_all[n, :] = V 
         return SimResult(axon, V_all, t_vec)
     
+    @bench.benchmark(level=2)  
     def euler_step(self, axon, V, dt, t): 
         # second derivative in space
         d2vdx2 = np.zeros_like(V) 

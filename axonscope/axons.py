@@ -2,6 +2,9 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 from axonscope.math_functions import vtrap
+from axonscope.benchmark import Benchmark
+
+bench = Benchmark()
 
 # -----------------------
 # Abstract classes
@@ -72,7 +75,7 @@ class Passive(Axon):
         self.rm = Rm / (2 * np.pi * self.a_cm)            # [Ω·cm]
         self.k = (1.0 / (self.rm * self.cm)) / 1000.0     # [1/ms]
 
-            
+    @bench.benchmark(level=2)        
     def Iion(self, V):
         """
         Passive leak ionic current [µA/cm²]
@@ -82,7 +85,7 @@ class Passive(Axon):
         g_leak = 1.0 / self.Rm  # [S/cm²]
         return g_leak * (V - self.EL) * 1e3  # mV→V and in µA/cm²
     
-    
+    @bench.benchmark(level=2)  
     def step_gates(self, dt_ms, V_mV):
         """
         not needed here
@@ -137,6 +140,7 @@ class RattayAberham(Axon):
         self.h[:] = hinf
         self.n[:] = ninf
 
+    @bench.benchmark(level=2)  
     def _rates(self, V_mV):
         v = np.asarray(V_mV, dtype=float)
         q10 = np.power(2.24659524757, (self.celsius - 6.3) / 10.0)
@@ -165,6 +169,7 @@ class RattayAberham(Axon):
         return minf, mtau, hinf, htau, ninf, ntau
 
     # ---- gating integration (cnexp style) ----
+    @bench.benchmark(level=2)  
     def step_gates(self, dt_ms, V_mV):
         """Advance gating variables with time step dt_ms (ms) and voltages V_mV (mV)."""
         if dt_ms <= 0.0:
@@ -185,6 +190,7 @@ class RattayAberham(Axon):
         self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
 
     # ---- ionic currents ----
+    @bench.benchmark(level=2)  
     def Iion(self, V):
         """Return ionic current density [µA/cm²] at time t (ms) for V (mV)."""
         V_arr = np.asarray(V, dtype=float)
@@ -249,7 +255,7 @@ class HodgkinHuxley(Axon):
         self.h[:] = hinf
         self.n[:] = ninf
 
-
+    @bench.benchmark(level=2)  
     def _rates(self, V_mV):
         """
         Compute minf, mtau, hinf, htau, ninf, ntau for V (mV).
@@ -283,6 +289,7 @@ class HodgkinHuxley(Axon):
         return minf, mtau, hinf, htau, ninf, ntau
 
     # -------- gating update (cnexp) --------
+    @bench.benchmark(level=2)  
     def step_gates(self, dt_ms, V_mV):
         """
         Advance gating variables with time step dt_ms (ms) and voltages V_mV (mV).
@@ -307,6 +314,7 @@ class HodgkinHuxley(Axon):
         self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
 
     # -------- ionic currents (no gate update) --------
+    @bench.benchmark(level=2)  
     def Iion(self, V):
         """
         Return ionic current density [µA/cm²] for voltage array V (mV).

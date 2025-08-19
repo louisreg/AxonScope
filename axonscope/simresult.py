@@ -4,6 +4,10 @@ import numpy as np
 from scipy.signal import find_peaks
 
 from axonscope.axons import Axon
+from axonscope.benchmark import Benchmark
+
+bench = Benchmark()
+
 from typing import Tuple
 
 @dataclass
@@ -12,6 +16,7 @@ class SimResult():
     Vm: NDArray
     t: NDArray
     
+    @bench.benchmark(level=3)  
     def rasterize(
         self, threshold: float = -10.0, min_distance: float = 1.0
     ) -> Tuple[np.ndarray, np.ndarray]:
