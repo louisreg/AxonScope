@@ -27,9 +27,10 @@
 ## TODO Roadmap
 
 - [x] Validate base implementation with a passive membrane
-- [ ] Validate base implementation of Hodgkin-Huxley and Rattay-Aberham models
+- [x] Validate base implementation of Hodgkin-Huxley and Rattay-Aberham models
   - [x]  Check AP shape
-  - [ ]  Check propagation velocity against NRV  
+  - [x]  Check propagation velocity against NRV  
+    - We observe about 10% difference but we use difference velocity estimation method and different solver (for now).
 - [ ] Add performance benchmarking tooling  
 - [ ] Replace Explicit Euler solver with Crank–Nicholson + Thomas' algorithm  
 - [ ] Implement extracellular stimulation mechanisms  

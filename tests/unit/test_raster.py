@@ -17,17 +17,14 @@ def fake_result():
     return SimResult(axon=axon, Vm=Vm, t=t)
 
 def test_rasterize_detects_spikes(fake_result):
-    spikes = fake_result.rasterize(threshold=0.0, min_distance=2.0)
-    assert len(spikes[0]) == 1
-    assert len(spikes[1]) == 1
-    assert spikes[2] == []
-    assert np.allclose(spikes[0][0], 10, atol=0.5)
-    assert np.allclose(spikes[1][0], 30, atol=0.5)
+    tAP, xAP = fake_result.rasterize(threshold=0.0, min_distance=2.0)
+    assert np.allclose(tAP, [10, 30], atol=0.5)
+    assert np.allclose(xAP, fake_result.axon.x[:2])
 
 def test_rasterplot_uses_axons_x(fake_result):
     import matplotlib.pyplot as plt
     _, ax = plt.subplots()
     fake_result.rasterplot(ax, threshold=0.0, min_distance=2.0)
-    assert ax is not None
+
     # y-label should contain "Axon position"
     assert "Axon position" in ax.get_ylabel()

@@ -4,6 +4,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 from axonscope.axons import Axon
+from typing import Tuple
 
 @dataclass
 class SimResult():
@@ -11,64 +12,119 @@ class SimResult():
     Vm: NDArray
     t: NDArray
     
-    def rasterize(self, threshold: float = -10.0, min_distance: float = 1.0) -> list[list[float]]:
+    def rasterize(
+        self, threshold: float = -10.0, min_distance: float = 1.0
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Detect action potentials (spikes) and return their timestamps per section.
-
-        Parameters
-        ----------
-        threshold : float, optional
-            Minimum height of Vm peak to be considered an AP (in mV).
-            Default = -10.0 mV.
-        min_distance : float, optional
-            Minimum refractory distance between two APs (in ms).
-            Default = 1.0 ms.
+        Detect action potentials and return their times and positions.
 
         Returns
         -------
-        spikes : list of list of float
-            spikes[i] is a list of spike times (ms) detected in section i.
+        tAP : np.ndarray
+            Array of spike times (ms)
+        xAP : np.ndarray
+            Array of spatial positions corresponding to each spike
         """
-        _, Nx = self.Vm.shape
-        spikes: list[list[float]] = []
-
+        Nx = self.Vm.shape[1]
         dt = float(self.t[1] - self.t[0])
         min_distance_pts = int(min_distance / dt)
 
+        tAP = []
+        xAP = []
+
         for j in range(Nx):
-            # detect peaks
+            # detect peaks in this compartment
             peaks, _ = find_peaks(
                 self.Vm[:, j],
                 height=threshold,
                 distance=min_distance_pts,
             )
-            # convert peak indices -> times
-            spike_times = self.t[peaks].tolist()
-            spikes.append(spike_times)
+            # append peak times and positions
+            tAP.extend(self.t[peaks])
+            xAP.extend([self.axon.x[j]] * len(peaks))
 
-        return spikes
+        return np.array(tAP), np.array(xAP)
 
     def rasterplot(self, ax, threshold: float = -10.0, min_distance: float = 1.0) -> None:
         """
-        Plot a raster diagram: section index (y) vs spike times (x).
+        Plot a raster diagram: axon position (y) vs spike times (x).
         """
-        spikes = self.rasterize(threshold=threshold, min_distance=min_distance)
-        for j, train in enumerate(spikes):
-            xpos = self.axon.x[j]  # spatial position of this compartment
-            ax.vlines(train, xpos - 0.5, xpos + 0.5, color="black", linewidth=1)
+        tAP, xAP = self.rasterize(threshold=threshold, min_distance=min_distance)
+
+        if len(tAP) == 0:
+            return  # rien à tracer
+
+        # chaque spike est une ligne verticale très fine centrée sur sa position spatiale
+        ax.vlines(tAP, xAP - 0.5, xAP + 0.5, color="black", linewidth=1)
 
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Axon position (µm)")
 
 
-    def average_velocity(self, threshold: float = -10.0, min_distance: float = 1.0) -> float:
-            """
-            Estimate action potential propagation velocity from the raster.
 
-            Returns
-            -------
-            float
-                Propagation velocity in units of distance / time (e.g., mm/ms).
-            """
-            TODO
-            return(0.0)
+    def average_velocity(self, threshold: float = -10.0, min_distance: float = 1.0) -> float:
+        """
+        Estimate the average velocity in m/s of the action potential along the axon
+        using linear regression between origin spike and axon ends.
+        """
+        tAP, xAP = self.rasterize(threshold=threshold, min_distance=min_distance)
+
+        if len(tAP) == 0:
+            return 0.0
+
+        t_flat = np.array(tAP)/1e3      #in s
+        x_flat = np.array(xAP)/1e6      #in m
+
+        # Sort spikes by time
+        sort_idx = np.argsort(t_flat)
+        t_flat = t_flat[sort_idx]
+        x_flat = x_flat[sort_idx]
+
+        # First detected spike as origin
+        x0 = x_flat[0]
+
+        x_min, x_max = self.axon.x[0], self.axon.x[-1]
+
+        # Forward velocity (toward x_max)
+        mask_forward = (x_flat >= x0) & (x_flat <= x_max)
+        v_forward = 0.0
+        if np.sum(mask_forward) >= 2:
+            t_sel = t_flat[mask_forward]
+            x_sel = x_flat[mask_forward]
+            sort_idx = np.argsort(t_sel)
+            t_sel = t_sel[sort_idx]
+            x_sel = x_sel[sort_idx]
+            coeff_forward = np.polyfit(t_sel, x_sel, 1)
+            #print(x_sel)
+            #print(t_sel)
+            #print(np.mean(x_sel/t_sel))
+            #exit()
+            v_forward = coeff_forward[0]
+
+        # Backward velocity (toward x_min)
+        mask_backward = (x_flat <= x0) & (x_flat >= x_min)
+        v_backward = 0.0
+        if np.sum(mask_backward) >= 2:
+            t_sel = t_flat[mask_backward]
+            x_sel = x_flat[mask_backward]
+            sort_idx = np.argsort(t_sel)
+            t_sel = t_sel[sort_idx]
+            x_sel = x_sel[sort_idx]
+            coeff_backward = np.polyfit(t_sel, x_sel, 1)
+            v_backward =         mask_backward = (x_flat <= x0) & (x_flat >= x_min)
+        v_backward = 0.0
+        if np.sum(mask_backward) >= 2:
+            t_sel = t_flat[mask_backward]
+            x_sel = x_flat[mask_backward]
+            sort_idx = np.argsort(t_sel)
+            t_sel = t_sel[sort_idx]
+            x_sel = x_sel[sort_idx]
+            x_sel = x_sel[::-1]
+            coeff_backward = np.polyfit(t_sel, x_sel, 1)
+            v_backward = coeff_backward[0]
+
+        # Average of forward/backward
+        velocities = [v for v in [v_forward, v_backward] if v != 0.0]
+        if len(velocities) == 0:
+            return 0.0
+        return np.mean(velocities)
