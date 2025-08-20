@@ -1,7 +1,7 @@
 from axonscope.benchmark import Benchmark
 
-# === Example Usage ===
-bench = Benchmark()  # singleton instance
+#simple example for benchmarking some code 
+bench = Benchmark() 
 
 @bench.benchmark(level=1)
 def step1(data):
@@ -22,7 +22,7 @@ def main_process():
     return process_data(data)
 
 if __name__ == "__main__":
-    bench.enable(level=2, auto_print=True)
+    bench.enable(level=2, auto_print=False)
     main_process()
-    #bench.stop()
-    #bench.print()
+    bench.stop()
+    bench.print()

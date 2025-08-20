@@ -65,18 +65,23 @@ class Benchmark:
                     cls._instance._enabled_level = 0
                     cls._instance._auto_print = False
                     cls._instance._logger = None
+                    cls._instance._df = None
         return cls._instance
 
     def benchmark(self, level=1):
         def decorator(func):
-            self._decorated_functions[func.__name__] = {"calls": 0, "level": level}
+            if self._enabled_level >= level:
+                self._decorated_functions[func.__name__] = {"calls": 0, "level": level}
 
             @wraps(func)
             def wrapper(*args, **kwargs):
-                if self._profiler_running:
-                    if self._enabled_level >= level:
+                if self._enabled_level >= level:
+                    if self._profiler_running:
                         with self._lock:
-                            self._decorated_functions[func.__name__]["calls"] += 1
+                            if func.__name__ not in self._decorated_functions.keys():
+                                self._decorated_functions[func.__name__] = {"calls": 1, "level": level}
+                            else:
+                                self._decorated_functions[func.__name__]["calls"] += 1
                 return func(*args, **kwargs)
             return wrapper
         return decorator

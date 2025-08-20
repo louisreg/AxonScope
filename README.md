@@ -39,7 +39,7 @@
 - [ ] Start integrating multicompartment models  
 - [ ] Benchmark different backends:  
   - [ ] NumPy  
-  - [ ] PyTorch  
+  - [ ] PyTorch/Pytorch compile
   - [ ] JAX  
   - [ ] Rust  
 - [ ] And many more things to do...

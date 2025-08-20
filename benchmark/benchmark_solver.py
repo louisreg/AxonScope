@@ -33,5 +33,6 @@ tsim = 10.0         # total simulation time [ms]
 dt = 0.001          # time step [ms]
 
 bench = Benchmark()
-bench.enable(level = 3)
+bench.enable(level = 1)
 res = solver.solve(axon, tsim=tsim, dt=dt)
+
