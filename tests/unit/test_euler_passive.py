@@ -59,7 +59,7 @@ def test_compare_nrv():
     axon_py.insert_I_Clamp(position=0.5*L, t_start=t_start, duration=t_on, amplitude=I_inj_nA)
     
     solver = Euler()
-    res = solver.solve(axon_py, tsim=Tsim, dt=None)
+    res = solver.solve(axon_py, tsim=Tsim, dt=0.001)
     
     dt = res.t[1]-res.t[0]
 
@@ -93,7 +93,7 @@ def test_compare_nrv():
 
 
     # check that the maximum difference is below tolerance
-    diff_max = np.max(np.abs(V_ascope_center - V_nrv_center))
+    diff_max = np.max(np.abs(V_ascope_center - V_nrv_center[:-1]))
     tol = 30  # tolerance in mV
     assert diff_max < tol, f"Max difference {diff_max:.4e} exceeds tolerance {tol}"
 

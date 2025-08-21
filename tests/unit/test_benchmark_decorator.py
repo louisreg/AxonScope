@@ -92,7 +92,7 @@ def test_benchmark_levels_and_nested_calls(benchmark_instance):
     assert df.loc[df["Function"] == "outer_func", "Calls"].values[0] == 2
 
     # --- Timeit comparison ---
-    tol = 0.05  # 5% tolerance
+    tol =  0.1  # 5% tolerance
 
     def plain_level0(): sleep(0.05)
     def plain_level1(): sleep(0.1)

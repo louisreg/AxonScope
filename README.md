@@ -35,6 +35,8 @@
       - Basic decorator for benchmarking is implemented, based on pyinstrument with filtering capabilities. See [this example](./benchmark/simple_benchmark.py). More features will be added to fully utilize pyinstrument capabilities. We might also implement memray for memory tracing.
 
 - [ ] Replace Explicit Euler solver with Crank–Nicholson + Thomas' algorithm  
+    - [x] Unoptimized Crank–Nicholson Solver based on Hines 1984 is implemented/validated
+    - [ ] Need to move from linsolve to better suited approaches (eg Thomas' algorithm )
 - [ ] Implement extracellular stimulation mechanisms  
 - [ ] Start integrating multicompartment models  
 - [ ] Benchmark different backends:  

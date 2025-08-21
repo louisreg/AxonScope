@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import NDArray
 from abc import ABC, abstractmethod
 
 from axonscope.math_functions import vtrap
@@ -20,6 +21,8 @@ class Axon(ABC):
         self.Ra = Ra                 # [Ω·cm]
         self.Vinit = Vinit           # [mV]
 
+        self.q10 = None                 #need proper handling of Temp
+
         self.a_cm = self.a * 1e-4
         self.L_cm = self.L * 1e-4
         self.dx_cm = self.dx * 1e-4
@@ -37,12 +40,20 @@ class Axon(ABC):
         self.inj_uA_per_cm2 = None
 
     @abstractmethod
-    def Iion(self, V):
+    def Iion(self, V) -> NDArray:
         pass
 
     @abstractmethod
     def step_gates(self, dt_ms, V_mV):
         pass
+
+    @abstractmethod
+    def half_step_gates(self, dt_ms, V_mV) -> None:
+        """Advance gating variables in half time step dt_ms (ms) and voltages V_mV (mV).
+        Used in the Crank Nicholson solver
+        """
+        pass
+
 
     def insert_I_Clamp(self, position, t_start, duration, amplitude): 
         """amplitude in µA/cm² directly"""
@@ -63,6 +74,23 @@ class Axon(ABC):
             else:
                 return np.zeros(self.Nx)
         return np.zeros(self.Nx)
+    
+
+    def update_gate_halfstep(self, g_prev, alpha_fun, beta_fun, V, dt):
+        """
+        Update a gating variable (m, h, n) at half step using the Hines CN scheme.
+
+        g_prev : value of g(t - dt/2)
+        alpha_fun, beta_fun : functions alpha(V), beta(V)
+        V : membrane potential [mV]
+        dt : time step [ms]
+        """
+        alpha = self.q10 * alpha_fun(V)
+        beta  = self.q10 * beta_fun(V)
+        denom = (1.0/dt) + 0.5*(alpha + beta)
+        term1 = alpha / denom
+        term2 = ((1.0/dt) - 0.5*(alpha + beta)) / denom * g_prev
+        return term1 + term2
 
 class Passive(Axon): 
     def __init__(self, L, d, Nx=101, Rm=1e4, Cm=1.0, Ra=100.0, EL=-70.0, Vinit=-70.0): 
@@ -85,8 +113,13 @@ class Passive(Axon):
         g_leak = 1.0 / self.Rm  # [S/cm²]
         return g_leak * (V - self.EL) * 1e3  # mV→V and in µA/cm²
     
-    @bench.benchmark(level=2)  
     def step_gates(self, dt_ms, V_mV):
+        """
+        not needed here
+        """
+        pass
+
+    def half_step_gates(self, dt_ms, V_mV) -> None:
         """
         not needed here
         """
@@ -127,6 +160,7 @@ class RattayAberham(Axon):
         self.ena = float(ena)
         self.ek = float(ek)
         self.celsius = float(celsius)
+        self.q10 = 2.24659524757**((celsius - 6.3)/10)
 
         # gating variables (per compartment)
         self.m = np.zeros(self.Nx, dtype=float)
@@ -140,33 +174,45 @@ class RattayAberham(Axon):
         self.h[:] = hinf
         self.n[:] = ninf
 
+    def alpha_m(self, V_m):
+        return(vtrap(2.5 - 0.1 * (V_m + 70.0), 1.0))
+
+    def beta_m(self, V_m):
+        return(4.0 * np.exp(-(V_m + 70.0) / 18.0))
+
+    def alpha_h(self, V_m):
+        return(0.07 * np.exp(-(V_m + 70.0) / 20.0))
+    
+    def beta_h(self, V_m):
+        return(1.0 / (np.exp(3.0 - 0.1 * (V_m + 70.0)) + 1.0))    
+
+    def alpha_n(self, V_m):
+        return(0.1 * vtrap(1.0 - 0.1 * (V_m + 70.0), 1.0))
+    
+    def beta_n(self, V_m):
+        return(0.125 * np.exp(-(V_m+70)/80))   
+    
     @bench.benchmark(level=2)  
     def _rates(self, V_mV):
         v = np.asarray(V_mV, dtype=float)
-        q10 = np.power(2.24659524757, (self.celsius - 6.3) / 10.0)
-
+        
         # m
-        alpha_m = vtrap(2.5 - 0.1 * (v + 70.0), 1.0)
-        beta_m = 4.0 * np.exp(-(v + 70.0) / 18.0)
-        sum_m = np.maximum(alpha_m + beta_m, 1e-12)
-        mtau = 1.0 / (q10 * sum_m)
-        minf = alpha_m / sum_m
+        sum_m = np.maximum(self.alpha_m(v) + self.beta_m(v), 1e-12)
+        mtau = 1.0 / (self.q10 * sum_m)
+        minf = self.alpha_m(v) / sum_m
 
         # h
-        alpha_h = 0.07 * np.exp(-(v + 70.0) / 20.0)
-        beta_h = 1.0 / (np.exp(3.0 - 0.1 * (v + 70.0)) + 1.0)
-        sum_h = np.maximum(alpha_h + beta_h, 1e-12)
-        htau = 1.0 / (q10 * sum_h)
-        hinf = alpha_h / sum_h
+        sum_h = np.maximum(self.alpha_h(v) + self.beta_h(v), 1e-12)
+        htau = 1.0 / (self.q10 * sum_h)
+        hinf = self.alpha_h(v) / sum_h
 
         # n
-        alpha_n = 0.1 * vtrap(1.0 - 0.1 * (v + 70.0), 1.0)
-        beta_n = 0.125 * np.exp(-(v + 70.0) / 80.0)
-        sum_n = np.maximum(alpha_n + beta_n, 1e-12)
-        ntau = 1.0 / (q10 * sum_n)
-        ninf = alpha_n / sum_n
+        sum_n = np.maximum(self.alpha_n(v) + self.beta_n(v), 1e-12)
+        ntau = 1.0 / (self.q10 * sum_n)
+        ninf = self.alpha_n(v) / sum_n
 
         return minf, mtau, hinf, htau, ninf, ntau
+
 
     # ---- gating integration (cnexp style) ----
     @bench.benchmark(level=2)  
@@ -189,6 +235,19 @@ class RattayAberham(Axon):
         self.h = hinf - (hinf - self.h) * np.exp(-dt_ms / htau)
         self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
 
+    def half_step_gates(self, dt_ms, V_mV):
+        if dt_ms <= 0.0:
+            return
+        
+        V = np.asarray(V_mV, dtype=float)
+        if V.shape != (self.Nx,):
+            V = np.full(self.Nx, float(V.item()))
+
+        self.m = self.update_gate_halfstep(self.m, self.alpha_m, self.beta_m, V, dt_ms)
+        self.h = self.update_gate_halfstep(self.h, self.alpha_h, self.beta_h, V, dt_ms)
+        self.n = self.update_gate_halfstep(self.n, self.alpha_n, self.beta_n, V, dt_ms)
+
+
     # ---- ionic currents ----
     @bench.benchmark(level=2)  
     def Iion(self, V):
@@ -206,7 +265,7 @@ class RattayAberham(Axon):
         il = gl * (V_arr - self.el) * 1e3
 
         return ina + ik + il
-
+    
 
 class HodgkinHuxley(Axon):
     """
@@ -243,6 +302,8 @@ class HodgkinHuxley(Axon):
         self.ek = float(ek)
         self.celsius = float(celsius)
 
+        self.q10 = np.power(3.0, (self.celsius - 6.3) / 10.0)
+
         # gating variables
         self.m = np.zeros(self.Nx, dtype=float)
         self.h = np.zeros(self.Nx, dtype=float)
@@ -255,6 +316,24 @@ class HodgkinHuxley(Axon):
         self.h[:] = hinf
         self.n[:] = ninf
 
+    def alpha_m(self, V_m):
+        return(0.1 * vtrap(-(V_m + 40.0), 10.0))
+
+    def beta_m(self, V_m):
+        return(4.0 * np.exp(-(V_m + 65.0) / 18.0))
+
+    def alpha_h(self, V_m):
+        return(0.07 * np.exp(-(V_m + 65.0) / 20.0))
+    
+    def beta_h(self, V_m):
+        return(1.0 / (np.exp(-(V_m + 35.0) / 10.0) + 1.0))    
+
+    def alpha_n(self, V_m):
+        return(0.01 * vtrap(-(V_m + 55.0), 10.0))
+    
+    def beta_n(self, V_m):
+        return(0.125 * np.exp(-(V_m + 65.0) / 80.0))   
+
     @bench.benchmark(level=2)  
     def _rates(self, V_mV):
         """
@@ -263,28 +342,22 @@ class HodgkinHuxley(Axon):
         mtau, htau, ntau returned in ms.
         """
         v = np.asarray(V_mV, dtype=float)
-        q10 = np.power(3.0, (self.celsius - 6.3) / 10.0)
+        
 
         # m
-        alpha_m = 0.1 * vtrap(-(v + 40.0), 10.0)
-        beta_m = 4.0 * np.exp(-(v + 65.0) / 18.0)
-        sum_m = np.maximum(alpha_m + beta_m, 1e-12)
-        mtau = 1.0 / (q10 * sum_m)
-        minf = alpha_m / sum_m
+        sum_m = np.maximum(self.alpha_m(v) + self.beta_m(v), 1e-12)
+        mtau = 1.0 / (self.q10 * sum_m)
+        minf = self.alpha_m(v) / sum_m
 
         # h
-        alpha_h = 0.07 * np.exp(-(v + 65.0) / 20.0)
-        beta_h = 1.0 / (np.exp(-(v + 35.0) / 10.0) + 1.0)
-        sum_h = np.maximum(alpha_h + beta_h, 1e-12)
-        htau = 1.0 / (q10 * sum_h)
-        hinf = alpha_h / sum_h
+        sum_h = np.maximum(self.alpha_h(v) + self.beta_h(v), 1e-12)
+        htau = 1.0 / (self.q10 * sum_h)
+        hinf = self.alpha_h(v) / sum_h
 
         # n
-        alpha_n = 0.01 * vtrap(-(v + 55.0), 10.0)
-        beta_n = 0.125 * np.exp(-(v + 65.0) / 80.0)
-        sum_n = np.maximum(alpha_n + beta_n, 1e-12)
-        ntau = 1.0 / (q10 * sum_n)
-        ninf = alpha_n / sum_n
+        sum_n = np.maximum(self.alpha_n(v) + self.beta_n(v), 1e-12)
+        ntau = 1.0 / (self.q10 * sum_n)
+        ninf = self.alpha_n(v) / sum_n
 
         return minf, mtau, hinf, htau, ninf, ntau
 
@@ -312,6 +385,18 @@ class HodgkinHuxley(Axon):
         self.m = minf - (minf - self.m) * np.exp(-dt_ms / mtau)
         self.h = hinf - (hinf - self.h) * np.exp(-dt_ms / htau)
         self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
+
+    def half_step_gates(self, dt_ms, V_mV) -> None:
+        if dt_ms <= 0.0:
+            return
+        
+        V = np.asarray(V_mV, dtype=float)
+        if V.shape != (self.Nx,):
+            V = np.full(self.Nx, float(V.item()))
+
+        self.m = self.update_gate_halfstep(self.m, self.alpha_m, self.beta_m, V, dt_ms)
+        self.h = self.update_gate_halfstep(self.h, self.alpha_h, self.beta_h, V, dt_ms)
+        self.n = self.update_gate_halfstep(self.n, self.alpha_n, self.beta_n, V, dt_ms)
 
     # -------- ionic currents (no gate update) --------
     @bench.benchmark(level=2)  

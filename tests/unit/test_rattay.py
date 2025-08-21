@@ -16,22 +16,21 @@ def test_initial_gates_in_bounds(axon):
     assert np.all((0 <= axon.n) & (axon.n <= 1))
 
 
-def test_step_gates_evolution(axon):
-    """Gates should evolve but remain in [0,1] after a step."""
-    V = np.ones(axon.Nx) * -60.0  # depolarized
+def test_step_gates_updates_and_bounds(axon):
+    # état dépolarisé pour activer les gates
+    V = np.ones(axon.Nx) * -50.0
     m0, h0, n0 = axon.m.copy(), axon.h.copy(), axon.n.copy()
 
     axon.step_gates(0.1, V)  # dt=0.1 ms
 
-    # gates should change a bit
-    assert not np.allclose(m0, axon.m)
-    assert not np.allclose(h0, axon.h)
-    assert not np.allclose(n0, axon.n)
+    # gates should evolve
+    assert not np.allclose(m0, axon.m), "m did not update"
+    assert not np.allclose(h0, axon.h), "h did not update"
+    assert not np.allclose(n0, axon.n), "n did not update"
 
-    # still bounded
-    assert np.all((0 <= axon.m) & (axon.m <= 1))
-    assert np.all((0 <= axon.h) & (axon.h <= 1))
-    assert np.all((0 <= axon.n) & (axon.n <= 1))
+    # still bounded between 0 and 1
+    for gate, name in [(axon.m, "m"), (axon.h, "h"), (axon.n, "n")]:
+        assert np.all((0 <= gate) & (gate <= 1)), f"{name} out of bounds"
 
 
 def test_Iion_shape_and_units(axon):
