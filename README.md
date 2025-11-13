@@ -44,4 +44,5 @@
   - [ ] PyTorch/Pytorch compile
   - [ ] JAX  
   - [ ] Rust  
+- [ ] Add support for a physical unit module (ex [pint](https://github.com/hgrecco/pint))
 - [ ] And many more things to do...

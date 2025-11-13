@@ -7,6 +7,47 @@ import pandas as pd
 from tabulate import tabulate
 import logging
 import atexit
+from timeit import timeit
+
+
+def minibench(func, *args, n_iter=10):
+    """
+    Benchmark a Python function with given arguments.
+
+    This function executes `func(*args)` once to capture its return value,
+    then measures the average execution time over multiple iterations
+    using the built-in `timeit` module.
+
+    Parameters
+    ----------
+    func : callable
+        The function to benchmark.
+    *args : any
+        Positional arguments to pass to the function.
+    n_iter : int, optional
+        Number of iterations for timing (default is 10).
+
+    Returns
+    -------
+    result : any
+        The output of a single call to the function.
+    avg_time : float
+        The average execution time per call (in seconds).
+    """
+    # Run once to get the function's result
+    result = func(*args)
+
+    # Measure average execution time
+    stmt = f"{func.__name__}(*args)"
+    t = timeit(
+        stmt,
+        number=n_iter,
+        globals={'func': func, 'args': args, func.__name__: func}
+    )
+
+    avg_time = t / n_iter
+    print(f"{func.__name__:<15} {avg_time:.8f} s / call ({n_iter} iterations)")
+    return result, avg_time
 
 """
 Benchmarking Singleton Class

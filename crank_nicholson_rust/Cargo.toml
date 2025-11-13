@@ -1,0 +1,21 @@
+[package]
+name = "crank_nicholson_rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ndarray = "0.17.1"#, features = ["rayon", "approx"] }
+ndarray-linalg = { version = "0.18.0", features = ["openblas-system"] }
+#ndarray-stats = "0.6.0"
+#intel-mkl-src = "0.8.1"
+plotters = "0.3.7"
+rayon = "1.11.0"
+#rayon = "1.11.0"
+#blas-src = { version = "0.14.0", features = ["accelerate-src"] }
+#lapack-src = { version = "0.13.0.0", features = ["accelerate"] }
+
+[profile.release]
+opt-level = 3         
+lto = true            
+codegen-units = 1     
+panic = 'abort'       
