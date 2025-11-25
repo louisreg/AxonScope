@@ -15,7 +15,7 @@ def test_compare_three_axons(save_dir="figures/physics_tests"):
     d = 1       # µm
     Nx = 101
     tsim = 25.0
-    dt_cn = 0.01
+    dt_cn = 0.001
     dt_euler = 0.001
 
     # --- Axons ---

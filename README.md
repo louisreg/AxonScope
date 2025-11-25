@@ -34,15 +34,23 @@
 - [x] Add performance benchmarking tooling  
       - Basic decorator for benchmarking is implemented, based on pyinstrument with filtering capabilities. See [this example](./benchmark/simple_benchmark.py). More features will be added to fully utilize pyinstrument capabilities. We might also implement memray for memory tracing.
 
-- [ ] Replace Explicit Euler solver with Crank–Nicholson + Thomas' algorithm  
+- [x] Replace Explicit Euler solver with Crank–Nicholson + tridiagonal diagonal solver  
     - [x] Unoptimized Crank–Nicholson Solver based on Hines 1984 is implemented/validated
-    - [ ] Need to move from linsolve to better suited approaches (eg Thomas' algorithm )
+    - [x] move from linsolve to a tridiagonal solver
 - [ ] Implement extracellular stimulation mechanisms  
 - [ ] Start integrating multicompartment models  
-- [ ] Benchmark different backends:  
-  - [ ] NumPy  
-  - [ ] PyTorch/Pytorch compile
-  - [ ] JAX  
-  - [ ] Rust  
+- [x] Benchmark different backends: See scripts and results [here](./benchmark/CrankNicholson_runtime/) 
+  - [x] NumPy 
+  - [x] Scipy 
+  - [x] PyTorch/Pytorch compile
+  - [x] JAX  
+  - [x] [Rust](./crank_nicholson_rust/) 
 - [ ] Add support for a physical unit module (ex [pint](https://github.com/hgrecco/pint))
+- [ ] Add static type checking (ex [mypy](https://github.com/python/mypy))
+- [ ] Add on-the-fly GPU ready post-processing (eg. rastering)
+- [ ] Add efficient data-saving method (eg. HDF5)
 - [ ] And many more things to do...
+  
+## Changelog
+
+See the [CHANGELOG.md](./CHANGELOG.md) file for a complete history of changes.

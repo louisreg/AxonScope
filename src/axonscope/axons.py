@@ -1,422 +1,296 @@
-import numpy as np
-from numpy.typing import NDArray
-from abc import ABC, abstractmethod
+from __future__ import annotations
+from typing import Optional
+import jax.numpy as jnp
 
-from axonscope.math_functions import vtrap
 from axonscope.benchmark import Benchmark
+
+from axonscope.channel_models.passive import PassiveICM
+from axonscope.channel_models.base_channel_model import IonChannelModelBase, CompositeICM
+from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
+from axonscope.channel_models.rattay_aberham import RattayAberhamICM
+from axonscope.channel_models.borg_kdr import BorgKDRICM
+from axonscope.channel_models.na_hh import NaHHICM
 
 bench = Benchmark()
 
-# -----------------------
-# Abstract classes
-# -----------------------
-class Axon(ABC):
-    def __init__(self, L, d, Nx=101, Cm=1.0, Ra=100.0, Vinit=-70.0):
-        self.L = L                  
-        self.Nx = Nx
-        self.dx = L / (Nx - 1)      
-        self.d = d                  
-        self.a = d / 2              
-        self.Cm = Cm                 # [µF/cm²]
-        self.Ra = Ra                 # [Ω·cm]
-        self.Vinit = Vinit           # [mV]
 
-        self.q10 = None                 #need proper handling of Temp
-
-        self.a_cm = self.a * 1e-4
-        self.L_cm = self.L * 1e-4
-        self.dx_cm = self.dx * 1e-4
-        self.x = np.linspace(0, L, Nx)
-
-        # Derived quantities
-        self.cm = 2.0 * np.pi * self.a_cm * Cm * 1e-6     # [F/cm]
-        self.ra = Ra / (np.pi * self.a_cm**2)             # [Ω/cm]
-        self.D = (1.0 / (self.ra * self.cm)) / 1000.0     # [cm²/ms]
-
-        self.stim = None
-        self.idx_inj = None
-        self.t_start_inj = None
-        self.t_stop_inj = None
-        self.inj_uA_per_cm2 = None
-
-    @abstractmethod
-    def Iion(self, V) -> NDArray:
-        pass
-
-    @abstractmethod
-    def step_gates(self, dt_ms, V_mV):
-        pass
-
-    @abstractmethod
-    def half_step_gates(self, dt_ms, V_mV) -> None:
-        """Advance gating variables in half time step dt_ms (ms) and voltages V_mV (mV).
-        Used in the Crank Nicholson solver
-        """
-        pass
-
-
-    def insert_I_Clamp(self, position, t_start, duration, amplitude): 
-        """amplitude in µA/cm² directly"""
-        self.idx_inj = np.argmin(np.abs(self.x - position)) 
-        self.inj_uA_per_cm2 = amplitude * 1e-3 / (2.0 * np.pi * self.a_cm * self.dx_cm)
-        self.t_start_inj = t_start 
-        self.t_stop_inj = t_start + duration 
-
-        self.stim = True 
-        
-    def Iinj_uAcm2(self, t):
-        """Return array of injected current density [µA/cm²]"""
-        if self.stim:
-            if self.t_start_inj <= t <= self.t_stop_inj:
-                arr = np.zeros(self.Nx)
-                arr[self.idx_inj] = self.inj_uA_per_cm2
-                return arr
-            else:
-                return np.zeros(self.Nx)
-        return np.zeros(self.Nx)
-    
-
-    def update_gate_halfstep(self, g_prev, alpha_fun, beta_fun, V, dt):
-        """
-        Update a gating variable (m, h, n) at half step using the Hines CN scheme.
-
-        g_prev : value of g(t - dt/2)
-        alpha_fun, beta_fun : functions alpha(V), beta(V)
-        V : membrane potential [mV]
-        dt : time step [ms]
-        """
-        alpha = self.q10 * alpha_fun(V)
-        beta  = self.q10 * beta_fun(V)
-        denom = (1.0/dt) + 0.5*(alpha + beta)
-        term1 = alpha / denom
-        term2 = ((1.0/dt) - 0.5*(alpha + beta)) / denom * g_prev
-        return term1 + term2
-
-class Passive(Axon): 
-    def __init__(self, L, d, Nx=101, Rm=1e4, Cm=1.0, Ra=100.0, EL=-70.0, Vinit=-70.0): 
-        super().__init__(L=L, d=d, Nx=Nx, Cm=Cm, Ra=Ra, Vinit=Vinit)
-         
-        self.Rm = Rm                 # [Ω·cm²]
-        self.EL = EL                 # [mV]
-
-        # Derived quantities
-        self.rm = Rm / (2 * np.pi * self.a_cm)            # [Ω·cm]
-        self.k = (1.0 / (self.rm * self.cm)) / 1000.0     # [1/ms]
-
-    @bench.benchmark(level=2)        
-    def Iion(self, V):
-        """
-        Passive leak ionic current [µA/cm²]
-        Ohm's law: I = g_leak * (V - E_L)
-        g_leak = 1 / Rm   in S/cm²
-        """
-        g_leak = 1.0 / self.Rm  # [S/cm²]
-        return g_leak * (V - self.EL) * 1e3  # mV→V and in µA/cm²
-    
-    def step_gates(self, dt_ms, V_mV):
-        """
-        not needed here
-        """
-        pass
-
-    def half_step_gates(self, dt_ms, V_mV) -> None:
-        """
-        not needed here
-        """
-        pass
-    
-
-class RattayAberham(Axon):
+class AxonBase:
     """
-    HH model 'RattayAberham' (from hh.mod).
-    - V in mV
-    - Iion(...) returns ionic current density in µA/cm²
-    - Gating variables updated by explicit call to step_gates(dt_ms, V)
+    Abstract base class for an axon with a given Ion Channel model.
+
+    Provides:
+    - Compartmental geometry
+    - Ion Channel voltage state
+    - Stimulus handling (point current injection)
+    - Physical properties for cable equation
+
+    Attributes
+    ----------
+    ion_channel : IonChannelModelBase
+        Ion Channel model instance (e.g., HH, Passive, Rattay-Aberham, Composite)
+    L : float
+        Axon length [µm]
+    d : float
+        Axon diameter [µm]
+    Nx : int
+        Number of compartments
+    Ra : float
+        Axial resistance [Ω·cm]
+    Vinit : float
+        Initial membrane potential [mV]
+    Temp : float
+        Temperature [°C]
+    V : jnp.ndarray
+        Membrane voltage array, shape (Nx,)
+    x : jnp.ndarray
+        Compartment positions along the axon [µm], shape (Nx,)
+    D : float
+        Diffusion coefficient for cable equation [cm²/ms]
+    cm : float
+        Membrane capacitance per unit length [F/cm]
+    ra : float
+        Axial resistance per unit length [Ω/cm]
+    stim : bool
+        Flag indicating if a stimulus is active
+    idx_inj : Optional[int]
+        Compartment index of current injection
+    t_start_inj : Optional[float]
+        Start time of injection [ms]
+    t_stop_inj : Optional[float]
+        Stop time of injection [ms]
+    inj_uA_per_cm2 : Optional[float]
+        Current injection amplitude [µA/cm²]
     """
 
     def __init__(
         self,
-        L,
-        d,
-        Nx=101,
-        Cm=1.0,
-        Ra=100.0,
-        Vinit=-70.0,
-        gnabar=0.12,   # S/cm^2
-        gkbar=0.036,   # S/cm^2
-        gl=0.0003,     # S/cm^2
-        el=-59.4,      # mV
-        ena=45.0,      # mV
-        ek=-82.0,      # mV
-        celsius=37.0,  # degC
+        ion_channel: IonChannelModelBase,
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Ra: float = 100.0,
+        Cm: float = 1.0,
+        Vinit: float = -70.0,
+        Temp: float = 37.0,
     ):
-        super().__init__(L=L, d=d, Nx=Nx, Cm=Cm, Ra=Ra, Vinit=Vinit)
+        self.L: float = L
+        self.d: float = d
+        self.Nx: int = Nx
+        self.dx: float = L / (Nx - 1)
+        self.a: float = d / 2.0
+        self.Ra: float = Ra
+        self.Vinit: float = Vinit
+        self.Temp: float = Temp
 
-        # channel parameters
-        self.gnabar = float(gnabar)
-        self.gkbar = float(gkbar)
-        self.gl = float(gl)
-        self.el = float(el)
-        self.ena = float(ena)
-        self.ek = float(ek)
-        self.celsius = float(celsius)
-        self.q10 = 2.24659524757**((celsius - 6.3)/10)
+        self.ion_channel: IonChannelModelBase = ion_channel
 
-        # gating variables (per compartment)
-        self.m = np.zeros(self.Nx, dtype=float)
-        self.h = np.zeros(self.Nx, dtype=float)
-        self.n = np.zeros(self.Nx, dtype=float)
+        self.Ra = Ra
+        self.Cm = Cm
 
-        # initialize gating variables at Vinit equilibrium
-        V0 = np.ones(self.Nx) * float(self.Vinit)
-        minf, mtau, hinf, htau, ninf, ntau = self._rates(V0)
-        self.m[:] = minf
-        self.h[:] = hinf
-        self.n[:] = ninf
+        # Physical conversion to cm
+        self.a_cm: float = self.a * 1e-4
+        self.dx_cm: float = self.dx * 1e-4
+        self.L_cm: float = self.L * 1e-4
 
-    def alpha_m(self, V_m):
-        return(vtrap(2.5 - 0.1 * (V_m + 70.0), 1.0))
+        # Compartment positions
+        self.x: jnp.ndarray = jnp.linspace(0.0, L, Nx)
 
-    def beta_m(self, V_m):
-        return(4.0 * np.exp(-(V_m + 70.0) / 18.0))
+        # Derived cable properties
+        self.cm: float = 2.0 * jnp.pi * self.a_cm * Cm * 1e-6  # [F/cm]
+        self.ra: float = Ra / (jnp.pi * self.a_cm**2)                           # [Ω/cm]
+        self.D: float = 1.0 / (self.ra * self.cm) / 1000.0                     # [cm²/ms]
 
-    def alpha_h(self, V_m):
-        return(0.07 * np.exp(-(V_m + 70.0) / 20.0))
-    
-    def beta_h(self, V_m):
-        return(1.0 / (np.exp(3.0 - 0.1 * (V_m + 70.0)) + 1.0))    
+        # Membrane voltage state
+        self.V: jnp.ndarray = jnp.full((Nx,), Vinit, dtype=ion_channel.dtype)
 
-    def alpha_n(self, V_m):
-        return(0.1 * vtrap(1.0 - 0.1 * (V_m + 70.0), 1.0))
-    
-    def beta_n(self, V_m):
-        return(0.125 * np.exp(-(V_m+70)/80))   
-    
-    @bench.benchmark(level=2)  
-    def _rates(self, V_mV):
-        v = np.asarray(V_mV, dtype=float)
-        
-        # m
-        sum_m = np.maximum(self.alpha_m(v) + self.beta_m(v), 1e-12)
-        mtau = 1.0 / (self.q10 * sum_m)
-        minf = self.alpha_m(v) / sum_m
+        # Stimulation attributes
+        self.stim: bool = False
+        self.idx_inj: Optional[int] = None
+        self.t_start_inj: Optional[float] = None
+        self.t_stop_inj: Optional[float] = None
+        self.inj_uA_per_cm2: Optional[float] = None
 
-        # h
-        sum_h = np.maximum(self.alpha_h(v) + self.beta_h(v), 1e-12)
-        htau = 1.0 / (self.q10 * sum_h)
-        hinf = self.alpha_h(v) / sum_h
+    # --------------------------
+    # Stimulus handling
+    # --------------------------
+    def insert_I_Clamp(
+        self, position: float, t_start: float, duration: float, amplitude: float
+    ) -> None:
+        """
+        Insert a point current injection (I-Clamp) at a given position along the axon.
 
-        # n
-        sum_n = np.maximum(self.alpha_n(v) + self.beta_n(v), 1e-12)
-        ntau = 1.0 / (self.q10 * sum_n)
-        ninf = self.alpha_n(v) / sum_n
+        Parameters
+        ----------
+        position : float
+            Injection position along the axon [µm]
+        t_start : float
+            Start time [ms]
+        duration : float
+            Duration of current injection [ms]
+        amplitude : float
+            Amplitude of injected current [µA/cm²]
+        """
+        self.idx_inj = int(jnp.argmin(jnp.abs(self.x - position)))
+        self.inj_uA_per_cm2 = amplitude * 1e-3 / (2.0 * jnp.pi * self.a_cm * self.dx_cm)
+        self.t_start_inj = t_start
+        self.t_stop_inj = t_start + duration
+        self.stim = True
 
-        return minf, mtau, hinf, htau, ninf, ntau
+    def Iinj_uAcm2(self, t: float) -> jnp.ndarray:
+        """
+        Compute the injected current density at time t.
 
+        Parameters
+        ----------
+        t : float
+            Time [ms]
 
-    # ---- gating integration (cnexp style) ----
-    @bench.benchmark(level=2)  
-    def step_gates(self, dt_ms, V_mV):
-        """Advance gating variables with time step dt_ms (ms) and voltages V_mV (mV)."""
-        if dt_ms <= 0.0:
-            return
-
-        V = np.asarray(V_mV, dtype=float)
-        if V.shape != (self.Nx,):
-            V = np.full(self.Nx, float(V.item()))
-
-        minf, mtau, hinf, htau, ninf, ntau = self._rates(V)
-
-        mtau = np.maximum(mtau, 1e-12)
-        htau = np.maximum(htau, 1e-12)
-        ntau = np.maximum(ntau, 1e-12)
-
-        self.m = minf - (minf - self.m) * np.exp(-dt_ms / mtau)
-        self.h = hinf - (hinf - self.h) * np.exp(-dt_ms / htau)
-        self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
-
-    def half_step_gates(self, dt_ms, V_mV):
-        if dt_ms <= 0.0:
-            return
-        
-        V = np.asarray(V_mV, dtype=float)
-        if V.shape != (self.Nx,):
-            V = np.full(self.Nx, float(V.item()))
-
-        self.m = self.update_gate_halfstep(self.m, self.alpha_m, self.beta_m, V, dt_ms)
-        self.h = self.update_gate_halfstep(self.h, self.alpha_h, self.beta_h, V, dt_ms)
-        self.n = self.update_gate_halfstep(self.n, self.alpha_n, self.beta_n, V, dt_ms)
+        Returns
+        -------
+        jnp.ndarray, shape (Nx,)
+            Current density array [µA/cm²], zero if outside stimulus window.
+        """
+        if self.stim and self.idx_inj is not None:
+            active = (self.t_start_inj <= t) & (t <= self.t_stop_inj)
+            return jnp.where(
+                active,
+                jnp.eye(self.Nx, dtype=self.ion_channel.dtype)[self.idx_inj] * self.inj_uA_per_cm2,
+                jnp.zeros(self.Nx, dtype=self.ion_channel.dtype),
+            )
+        return jnp.zeros(self.Nx, dtype=self.ion_channel.dtype)
 
 
-    # ---- ionic currents ----
-    @bench.benchmark(level=2)  
-    def Iion(self, V):
-        """Return ionic current density [µA/cm²] at time t (ms) for V (mV)."""
-        V_arr = np.asarray(V, dtype=float)
-        if V_arr.shape != (self.Nx,):
-            V_arr = np.full(self.Nx, float(V_arr.item()))
+# --------------------------
+# Generic Axon Classes
+# --------------------------
+class GenericAxon(AxonBase):
+    """Generic axon for cable simulations with a given ion channel model."""
+    def __init__(
+        self,
+        ion_channel: IonChannelModelBase,
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Ra: float = 100.0,
+        Cm: float = 1.0,
+        Vinit: float = -70.0,
+        Temp: float = 37.0,
+    ):
+        super().__init__(ion_channel=ion_channel, L=L, d=d, Nx=Nx, Ra=Ra, Cm=Cm, Vinit=Vinit, Temp=Temp)
 
-        gna = self.gnabar * (self.m ** 3) * self.h   # S/cm^2
-        gk = self.gkbar * (self.n ** 4)              # S/cm^2
-        gl = self.gl                                 # S/cm^2
 
-        ina = gna * (V_arr - self.ena) * 1e3  # µA/cm^2
-        ik = gk * (V_arr - self.ek) * 1e3
-        il = gl * (V_arr - self.el) * 1e3
+class Passive(AxonBase):
+    """Axon with passive membrane properties (leak conductance)."""
+    def __init__(
+        self,
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Rm: float = 1e4,
+        Cm: float = 1.0,
+        Ra: float = 100.0,
+        EL: float = -70.0,
+        Vinit: float = -70.0,
+        Temp: float = 37.0,
+    ):
+        ion_channel = PassiveICM(Rm=Rm, EL=EL)
+        super().__init__(ion_channel=ion_channel, L=L, d=d, Nx=Nx, Ra=Ra, Cm=Cm, Vinit=Vinit, Temp=Temp)
 
-        return ina + ik + il
-    
 
-class HodgkinHuxley(Axon):
+class HodgkinHuxley(AxonBase):
+    """Hodgkin-Huxley squid axon model."""
+    def __init__(
+        self,
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Ra: float = 200.0,
+        Cm: float = 1.0,
+        Vinit: float = -67.5,
+        gnabar: float = 0.12,
+        gkbar: float = 0.036,
+        gl: float = 0.0003,
+        el: float = -54.3,
+        ena: float = 50.0,
+        ek: float = -77.0,
+        celsius: float = 6.3,
+    ):
+        ion_channel = HodgkinHuxleyICM(gnabar=gnabar, gkbar=gkbar, gl=gl, el=el, ena=ena, ek=ek, celsius=celsius)
+        super().__init__(ion_channel=ion_channel, L=L, d=d, Nx=Nx, Ra=Ra, Cm=Cm, Vinit=Vinit, Temp=celsius)
+
+
+class RattayAberham(AxonBase):
+    """Rattay-Aberham axon model for mammalian myelinated fibers."""
+    def __init__(
+        self,
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Cm: float = 1.0,
+        Ra: float = 100.0,
+        Vinit: float = -70.0,
+        gnabar: float = 0.12,
+        gkbar: float = 0.036,
+        gl: float = 0.0003,
+        el: float = -59.4,
+        ena: float = 45.0,
+        ek: float = -82.0,
+        celsius: float = 37.0,
+    ):
+        ion_channel = RattayAberhamICM(gnabar=gnabar, gkbar=gkbar, gl=gl, el=el, ena=ena, ek=ek, celsius=celsius)
+        super().__init__(ion_channel=ion_channel, L=L, d=d, Nx=Nx, Ra=Ra, Cm=Cm, Vinit=Vinit, Temp=celsius)
+
+class Sundt(AxonBase):
     """
-    Hodgkin-Huxley squid model (from NEURON's hh.mod).
-    - V in mV
-    - Iion(t, V) returns ionic current density in µA/cm²
-    - step_gates(dt_ms, V_mV) updates m,h,n using cnexp (exact) updates
+    Sundt axon model combining Rattay-Aberham Na⁺ channels
+    with Borg-Graham-type K-DR channels.
+
+    This composite axon allows simulating both sodium and
+    potassium currents together in myelinated mammalian fibers.
+
+    Parameters
+    ----------
+    L : float
+        Axon length [µm]
+    d : float
+        Axon diameter [µm]
+    Nx : int
+        Number of compartments
+    Cm : float
+        Membrane capacitance [µF/cm²]
+    Ra : float
+        Axial resistance [Ω·cm]
+    Vinit : float
+        Initial membrane voltage [mV]
+    celsius : float
+        Temperature [°C]
     """
 
     def __init__(
         self,
-        L,
-        d,
-        Nx=101,
-        Cm=1.0,
-        Ra=200.0,
-        Vinit=-67.5,
-        gnabar=0.12,   # S/cm^2
-        gkbar=0.036,   # S/cm^2
-        gl=0.0003,     # S/cm^2
-        el=-54.3,      # mV
-        ena=50.0,      # mV 
-        ek=-77.0,      # mV
-        celsius=6.3,   # degC (squid default)
+        L: float,
+        d: float,
+        Nx: int = 101,
+        Cm: float = 1.0,
+        Ra: float = 100.0,
+        Vinit: float = -60.0,
+        celsius: float = 37.0,
+        gnabar: float = 0.04,
+        gkdrbar: float = 0.04,
+        ena: float = 45.0,          #! Not sure about this one
+        ek : float = -90.0,
+        Rm : float = 10000.0,
+        El : float = -60.0          #! Not goog but for testing
     ):
-        super().__init__(L=L, d=d, Nx=Nx, Cm=Cm, Ra=Ra, Vinit=Vinit)
+        # Create individual membrane models
+        na_model = NaHHICM(gnabar=gnabar, ena=ena, celsius=celsius)
+        kdr_model = BorgKDRICM(gkdrbar=gkdrbar, ek=ek, celsius=celsius)
+        passive_model = PassiveICM(Rm = Rm, EL = El)
 
-        # channel parameters
-        self.gnabar = float(gnabar)
-        self.gkbar = float(gkbar)
-        self.gl = float(gl)
-        self.el = float(el)
-        self.ena = float(ena)
-        self.ek = float(ek)
-        self.celsius = float(celsius)
+        # Combine into a composite membrane model
+        #composite_model = CompositeICM([na_model, kdr_model, passive_model])
+        composite_model = CompositeICM([na_model, kdr_model,passive_model])
+        #composite_model = CompositeMembraneModel([na_model, na_model])
 
-        self.q10 = np.power(3.0, (self.celsius - 6.3) / 10.0)
-
-        # gating variables
-        self.m = np.zeros(self.Nx, dtype=float)
-        self.h = np.zeros(self.Nx, dtype=float)
-        self.n = np.zeros(self.Nx, dtype=float)
-
-        # init gates at steady state for Vinit
-        V0 = np.ones(self.Nx) * float(self.Vinit)
-        minf, mtau, hinf, htau, ninf, ntau = self._rates(V0)
-        self.m[:] = minf
-        self.h[:] = hinf
-        self.n[:] = ninf
-
-    def alpha_m(self, V_m):
-        return(0.1 * vtrap(-(V_m + 40.0), 10.0))
-
-    def beta_m(self, V_m):
-        return(4.0 * np.exp(-(V_m + 65.0) / 18.0))
-
-    def alpha_h(self, V_m):
-        return(0.07 * np.exp(-(V_m + 65.0) / 20.0))
-    
-    def beta_h(self, V_m):
-        return(1.0 / (np.exp(-(V_m + 35.0) / 10.0) + 1.0))    
-
-    def alpha_n(self, V_m):
-        return(0.01 * vtrap(-(V_m + 55.0), 10.0))
-    
-    def beta_n(self, V_m):
-        return(0.125 * np.exp(-(V_m + 65.0) / 80.0))   
-
-    @bench.benchmark(level=2)  
-    def _rates(self, V_mV):
-        """
-        Compute minf, mtau, hinf, htau, ninf, ntau for V (mV).
-        Following hh.mod: q10 = 3^((celsius - 6.3)/10)
-        mtau, htau, ntau returned in ms.
-        """
-        v = np.asarray(V_mV, dtype=float)
-        
-
-        # m
-        sum_m = np.maximum(self.alpha_m(v) + self.beta_m(v), 1e-12)
-        mtau = 1.0 / (self.q10 * sum_m)
-        minf = self.alpha_m(v) / sum_m
-
-        # h
-        sum_h = np.maximum(self.alpha_h(v) + self.beta_h(v), 1e-12)
-        htau = 1.0 / (self.q10 * sum_h)
-        hinf = self.alpha_h(v) / sum_h
-
-        # n
-        sum_n = np.maximum(self.alpha_n(v) + self.beta_n(v), 1e-12)
-        ntau = 1.0 / (self.q10 * sum_n)
-        ninf = self.alpha_n(v) / sum_n
-
-        return minf, mtau, hinf, htau, ninf, ntau
-
-    # -------- gating update (cnexp) --------
-    @bench.benchmark(level=2)  
-    def step_gates(self, dt_ms, V_mV):
-        """
-        Advance gating variables with time step dt_ms (ms) and voltages V_mV (mV).
-        Uses exact CNEXP update: x <- x_inf - (x_inf - x)*exp(-dt/tau)
-        """
-        if dt_ms <= 0.0:
-            return
-
-        V = np.asarray(V_mV, dtype=float)
-        if V.shape != (self.Nx,):
-            V = np.full(self.Nx, float(V.item()))
-
-        minf, mtau, hinf, htau, ninf, ntau = self._rates(V)
-
-        # clamp taus
-        mtau = np.maximum(mtau, 1e-12)
-        htau = np.maximum(htau, 1e-12)
-        ntau = np.maximum(ntau, 1e-12)
-
-        self.m = minf - (minf - self.m) * np.exp(-dt_ms / mtau)
-        self.h = hinf - (hinf - self.h) * np.exp(-dt_ms / htau)
-        self.n = ninf - (ninf - self.n) * np.exp(-dt_ms / ntau)
-
-    def half_step_gates(self, dt_ms, V_mV) -> None:
-        if dt_ms <= 0.0:
-            return
-        
-        V = np.asarray(V_mV, dtype=float)
-        if V.shape != (self.Nx,):
-            V = np.full(self.Nx, float(V.item()))
-
-        self.m = self.update_gate_halfstep(self.m, self.alpha_m, self.beta_m, V, dt_ms)
-        self.h = self.update_gate_halfstep(self.h, self.alpha_h, self.beta_h, V, dt_ms)
-        self.n = self.update_gate_halfstep(self.n, self.alpha_n, self.beta_n, V, dt_ms)
-
-    # -------- ionic currents (no gate update) --------
-    @bench.benchmark(level=2)  
-    def Iion(self, V):
-        """
-        Return ionic current density [µA/cm²] for voltage array V (mV).
-        t is kept for API compatibility but not used here.
-        """
-        V_arr = np.asarray(V, dtype=float)
-        if V_arr.shape != (self.Nx,):
-            V_arr = np.full(self.Nx, float(V_arr.item()))
-
-        # conductances (S/cm^2)
-        gna = self.gnabar * (self.m ** 3) * self.h
-        gk = self.gkbar * (self.n ** 4)
-        gl = self.gl
-
-        # currents in µA/cm^2: I(µA/cm2) = g(S/cm2) * (V_mV - E_mV) * 1e3
-        ina = gna * (V_arr - self.ena) * 1e3
-        ik = gk * (V_arr - self.ek) * 1e3
-        il = gl * (V_arr - self.el) * 1e3
-
-        return ina + ik + il
+        # Initialize the axon base class with the composite model
+        super().__init__(ion_channel=composite_model, L=L, d=d, Nx=Nx, Ra=Ra, Cm=Cm, Vinit=Vinit, Temp=celsius)

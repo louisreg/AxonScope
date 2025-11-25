@@ -2,13 +2,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from axonscope.axons import HodgkinHuxley
-from axonscope.solvers import Euler
+from axonscope.axons import Sundt
+from axonscope.solvers import CrankNicholson
 
 import nrv
 
 
-def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
+def test_Sundt_vs_NRV(save_dir="figures/physics_tests"):
     """
     Physical test of the HodgkinHuxley axon model with Euler solver.
     A current pulse is injected and the membrane potential is recorded.
@@ -20,7 +20,7 @@ def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
     L = 1000    #in µm
     d = 0.5       # diameter in µm
     Nx = 101
-    axon = HodgkinHuxley(L=L, d=d, Nx=Nx, celsius=6.3)
+    axon = Sundt(L=L, d=d, Nx=Nx, celsius=37)
 
     #Inject current 1ms pulse 
     t_start = 1.0
@@ -29,7 +29,7 @@ def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
     axon.insert_I_Clamp(position=L / 2, t_start=t_start, duration=duration, amplitude=amplitude)
 
     # --- solver setup
-    solver = Euler()
+    solver = CrankNicholson()
     tsim = 10.0         # total simulation time [ms]
     dt = 0.001          # time step [ms]
 
@@ -37,7 +37,7 @@ def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
 
 
      # ---- NRV Axon ----
-    axon_nrv = nrv.unmyelinated(0,0,d,L,dt=dt,Nsec=Nx, model = "HH", v_init = axon.Vinit, T = axon.Temp)
+    axon_nrv = nrv.unmyelinated(0,0,d,L,dt=dt,Nsec=Nx, model = "Sundt", v_init = axon.Vinit, T = axon.Temp)
                         
     axon_nrv.insert_I_Clamp(0.5, t_start, duration, amplitude)
     results_NRV = axon_nrv.simulate(t_sim=tsim)
@@ -88,7 +88,7 @@ def test_HH_euler_vs_NRV(save_dir="figures/physics_tests"):
     cbar.set_label('membrane voltage - NRV (mV)')
 
     fig.tight_layout()
-    fig_path = save_dir + "/HH_euler_vs_NRV.png"
+    fig_path = save_dir + "/Sundt_CN_vs_NRV.png"
     fig.savefig(fig_path)
 
 

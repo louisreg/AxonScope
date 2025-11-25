@@ -36,8 +36,8 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     res = solver.solve(axon_py, tsim=Tsim, dt=1e-3)
     dt = (res.t[1]-res.t[0])
 
+    
     """
-
     # ---- NRV Axon ----
     axon_nrv = NRV_axon(
         y=0,
@@ -55,15 +55,16 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     )
     axon_nrv.insert_I_Clamp(0.5, t_start, t_on, I_inj_nA)
     results_NRV = axon_nrv.simulate(t_sim=Tsim)
+    
     """
-
     # ---- Choose positions along the axon ----
     x_positions = [0, L/3, L/2, 2*L/3, L]
     indices = [np.argmin(np.abs(axon_py.x - xp)) for xp in x_positions]
-
+    
     fig, ax_x = plt.subplots(figsize=(8,5))
     for idx, xp in zip(indices, x_positions):
         ax_x.plot(res.t, res.Vm[:, idx], label=f'x = {xp:.1f} µm')
+    
     ax_x.set_xlabel('Time [ms]')
     ax_x.set_ylabel('V_m [mV]')
     ax_x.legend()

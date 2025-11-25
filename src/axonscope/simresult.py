@@ -3,7 +3,7 @@ from numpy.typing import NDArray
 import numpy as np
 from scipy.signal import find_peaks
 
-from axonscope.axons import Axon
+from axonscope.axons import AxonBase
 from axonscope.benchmark import Benchmark
 
 bench = Benchmark()
@@ -12,7 +12,7 @@ from typing import Tuple
 
 @dataclass
 class SimResult():
-    axon: Axon
+    axon: AxonBase
     Vm: NDArray
     t: NDArray
     
