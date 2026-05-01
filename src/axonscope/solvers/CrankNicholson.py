@@ -55,6 +55,17 @@ from .runtime import (
 from .stimulus_runtime import build_intracellular_current_density_fn
 
 
+def _precomputed_vext_step(
+    vext_mid_all: jnp.ndarray,
+    vext_initial_previous: jnp.ndarray,
+    n: int,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    Vext = vext_mid_all[n]
+    previous_idx = jnp.maximum(n - 1, 0)
+    Vext_old = jnp.where(n == 0, vext_initial_previous, vext_mid_all[previous_idx])
+    return Vext, Vext_old
+
+
 def _solve_with_extracellular_generic(
     axon: AxonBase,
     tsim: float,
@@ -104,6 +115,8 @@ def _solve_with_extracellular_generic(
 
     inj_fun = stimulation.intracellular_current_density
     vext_fun = stimulation.extracellular_potential_mV
+    vext_mid_all = stimulation.extracellular_potential_mid_mV
+    vext_initial_previous = stimulation.extracellular_potential_initial_previous_mV
     I_bg = membrane_runtime.background_current
 
     def step(carry, n):
@@ -113,8 +126,15 @@ def _solve_with_extracellular_generic(
         t_mid: float = dtype_local(n) * dt + dt / 2.0
 
         Iinj_abs = inj_fun(t_mid) * area
-        Vext = vext_fun(t_mid)
-        Vext_old = vext_fun(t_mid - dt)
+        if vext_mid_all is not None and vext_initial_previous is not None:
+            Vext, Vext_old = _precomputed_vext_step(
+                vext_mid_all,
+                vext_initial_previous,
+                n,
+            )
+        else:
+            Vext = vext_fun(t_mid)
+            Vext_old = vext_fun(t_mid - dt)
 
         def one_linear_solve(
             linearization_gates: jnp.ndarray,
@@ -630,6 +650,8 @@ class CrankNicholson(Solver):
 
         inj_fun = stimulation.intracellular_current_density
         vext_fun = stimulation.extracellular_potential_mV
+        vext_mid_all = stimulation.extracellular_potential_mid_mV
+        vext_initial_previous = stimulation.extracellular_potential_initial_previous_mV
         I_bg = membrane_runtime.background_current
         state0 = membrane_runtime.state0
         n_extra = len(state0)
@@ -729,6 +751,7 @@ class CrankNicholson(Solver):
             return sol[:, 0], sol[:, 1]
 
         def _solve_voltage_step(
+            n: int,
             Vi: jnp.ndarray,
             Ve: jnp.ndarray,
             Vm: jnp.ndarray,
@@ -739,8 +762,15 @@ class CrankNicholson(Solver):
             I_corr_den: jnp.ndarray,
         ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
             if use_extracellular:
-                Vext = vext_fun(t_mid)
-                Vext_old = vext_fun(t_mid - dt)
+                if vext_mid_all is not None and vext_initial_previous is not None:
+                    Vext, Vext_old = _precomputed_vext_step(
+                        vext_mid_all,
+                        vext_initial_previous,
+                        n,
+                    )
+                else:
+                    Vext = vext_fun(t_mid)
+                    Vext_old = vext_fun(t_mid - dt)
                 Vi_new, Ve_new = _solve_intracellular_extracellular(
                     Vi=Vi,
                     Ve=Ve,
@@ -779,6 +809,7 @@ class CrankNicholson(Solver):
             if has_driven_extracellular:
                 linearization_gates = gates
             Vi_new, Ve_new, Vm_new = _solve_voltage_step(
+                n=n,
                 Vi=Vi,
                 Ve=Ve,
                 Vm=Vm,

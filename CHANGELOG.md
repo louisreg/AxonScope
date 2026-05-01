@@ -30,6 +30,8 @@ The format is inspired by Keep a Changelog.
   regression checks.
 - Added solver runtime preparation dataclasses and helpers to separate axon
   descriptions from solver-side arrays, initial states, and compiled stimuli.
+- Added solver-runtime precomputation of imposed extracellular `Vstim` samples
+  for Crank-Nicholson extracellular solves.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -44,6 +46,8 @@ The format is inspired by Keep a Changelog.
 - Kept solver/backend-specific JAX compilation in the solver runtime.
 - Moved shared solver recording helpers out of `CrankNicholson` so `Euler`
   no longer depends on Crank-Nicholson private internals.
+- Changed extracellular Crank-Nicholson stepping to index precomputed imposed
+  `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous

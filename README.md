@@ -205,6 +205,9 @@ Generated logs and figures are ignored by git.
 - `prepare_solver_runtime` is the first data-oriented boundary between axon
   descriptions and solver kernels. It gathers initial states, cable arrays, and
   compiled stimulation without mutating the axon.
+- Extracellular Crank-Nicholson solvers precompute imposed `Vstim` samples on
+  the solver time grid, then index those arrays inside the time loop. This is
+  the first step toward batch-friendly `Vstim[B, Nt, Nx]` inputs.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
 - `CompartmentMembraneLayout` assigns one membrane model per compartment.
 - `HeterogeneousICMBackend` evaluates heterogeneous membrane layouts.

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from axonscope.axons.base import AxonBase
 from axonscope.axons import HodgkinHuxley
+from axonscope.channel_models.passive import PassiveICM
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers.runtime import (
     precompute_extracellular_potential_mV,
@@ -51,3 +53,43 @@ def test_precompute_extracellular_potential_matches_callable_wrapper():
     assert np.allclose(sampled[0], np.asarray(axon.Vext_mV(0.1)))
     assert np.allclose(sampled[1], np.asarray(axon.Vext_mV(0.25)))
     assert np.allclose(sampled[2], np.asarray(axon.Vext_mV(0.5)))
+
+
+def test_prepare_solver_runtime_precomputes_extracellular_step_potentials():
+    axon = AxonBase(
+        ion_channel=PassiveICM(Rm=1e4, EL=-70.0),
+        L=300.0,
+        d=1.0,
+        Nx=11,
+        Vinit=-70.0,
+    )
+    axon.set_extracellular_layer(
+        xraxial_MOhm_per_cm=np.full((axon.Nx,), 1e8, dtype=float),
+        xg_S_per_cm2=np.full((axon.Nx,), 1e-3, dtype=float),
+        xc_uF_per_cm2=np.full((axon.Nx,), 0.01, dtype=float),
+        use_extracellular=True,
+    )
+    electrode = PointSourceElectrode(
+        x0_m=150e-6,
+        y0_m=100e-6,
+        sigma_S_m=0.2,
+    )
+    stim = Stimulus.pulse(start=0.2, duration=0.1, amplitude=10e-6)
+    axon.add_extracellular_ctx(electrode, stim, replace=True)
+
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=1.0,
+        dt_ms=0.1,
+        include_extracellular=True,
+    )
+
+    vext_mid = runtime.stimulation.extracellular_potential_mid_mV
+    vext_initial_previous = runtime.stimulation.extracellular_potential_initial_previous_mV
+    assert vext_mid is not None
+    assert vext_initial_previous is not None
+    assert vext_mid.shape == (runtime.grid.Nt, axon.Nx)
+    assert vext_initial_previous.shape == (axon.Nx,)
+    assert np.allclose(np.asarray(vext_mid[0]), np.asarray(axon.Vext_mV(0.05)))
+    assert np.allclose(np.asarray(vext_initial_previous), np.asarray(axon.Vext_mV(-0.05)))
+    assert np.allclose(np.asarray(vext_mid[2]), np.asarray(axon.Vext_mV(0.25)))

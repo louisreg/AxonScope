@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import jax
 import jax.numpy as jnp
 
 from axonscope.axons.base import AxonBase
@@ -69,6 +70,8 @@ class StimulationRuntime:
     intracellular_current_density: Callable[[float], Array]
     extracellular_potential_mV: Callable[[float], Array]
     has_driven_extracellular: bool
+    extracellular_potential_mid_mV: Array | None = None
+    extracellular_potential_initial_previous_mV: Array | None = None
 
 
 @dataclass(frozen=True)
@@ -145,15 +148,33 @@ def prepare_cable_runtime(
     return CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
 
 
-def prepare_stimulation_runtime(axon: AxonBase, dtype_local: jnp.dtype) -> StimulationRuntime:
-    del dtype_local
+def prepare_stimulation_runtime(
+    axon: AxonBase,
+    dtype_local: jnp.dtype,
+    *,
+    grid: SimulationGrid | None = None,
+    precompute_extracellular: bool = False,
+) -> StimulationRuntime:
     use_extracellular = bool(getattr(axon, "use_extracellular", False))
+    vext_fun = build_extracellular_potential_fn(axon)
+    vext_mid = None
+    vext_initial_previous = None
+    if precompute_extracellular and grid is not None:
+        t_mid = (jnp.arange(grid.Nt, dtype=dtype_local) + dtype_local(0.5)) * dtype_local(grid.dt_ms)
+        vext_mid = sample_extracellular_potential_mV(vext_fun, t_mid, dtype_local=dtype_local)
+        vext_initial_previous = sample_extracellular_potential_mV(
+            vext_fun,
+            jnp.asarray([-0.5 * grid.dt_ms], dtype=dtype_local),
+            dtype_local=dtype_local,
+        )[0]
     return StimulationRuntime(
         intracellular_current_density=build_intracellular_current_density_fn(axon),
-        extracellular_potential_mV=build_extracellular_potential_fn(axon),
+        extracellular_potential_mV=vext_fun,
         has_driven_extracellular=bool(
             use_extracellular and getattr(axon, "extracellular_contexts", ())
         ),
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_initial_previous,
     )
 
 
@@ -196,7 +217,12 @@ def prepare_solver_runtime(
     if include_area is None:
         include_area = True
     cable = prepare_cable_runtime(axon, membrane.dtype, include_area=include_area)
-    stimulation = prepare_stimulation_runtime(axon, membrane.dtype)
+    stimulation = prepare_stimulation_runtime(
+        axon,
+        membrane.dtype,
+        grid=grid,
+        precompute_extracellular=include_extracellular,
+    )
     extracellular = (
         prepare_extracellular_runtime(axon, membrane.dtype, cable)
         if include_extracellular
@@ -226,6 +252,17 @@ def precompute_extracellular_potential_mV(
     if dtype_local is None:
         runtime = prepare_membrane_runtime(axon)
         dtype_local = runtime.dtype
-    vext_fun = build_extracellular_potential_fn(axon)
     t = jnp.asarray(t_ms, dtype=dtype_local)
-    return jnp.stack([vext_fun(ti) for ti in t], axis=0)
+    vext_fun = build_extracellular_potential_fn(axon)
+    return sample_extracellular_potential_mV(vext_fun, t, dtype_local=dtype_local)
+
+
+def sample_extracellular_potential_mV(
+    potential_fn: Callable[[float], Array],
+    t_ms: Array,
+    *,
+    dtype_local: jnp.dtype,
+) -> Array:
+    """Sample a compiled Vstim function on a time grid, returning shape (Nt, Nx)."""
+    t = jnp.asarray(t_ms, dtype=dtype_local)
+    return jax.vmap(potential_fn)(t)
