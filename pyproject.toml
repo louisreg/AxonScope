@@ -8,15 +8,25 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy (>=1.26.4,<3.0.0)",
-    "matplotlib (>=3.10.5,<4.0.0)",
-    "scipy (>=1.16.1,<2.0.0)",
-    "pandas (>=2.3.1,<3.0.0)",
-    "jupyter (>=1.1.1,<2.0.0)",
-    "pyinstrument (>=5.1.1,<6.0.0)",
-    "seaborn (>=0.13.2,<0.14.0)"
+    "jax>=0.4.0",
+    "numpy>=1.26.4,<3.0.0",
+    "matplotlib>=3.10.5,<4.0.0",
+    "scipy>=1.16.1,<2.0.0",
+    "pandas>=2.3.1,<3.0.0",
+    "jupyter>=1.1.1,<2.0.0",
+    "pyinstrument>=5.1.1,<6.0.0",
+    "seaborn>=0.13.2,<0.14.0"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.1,<9.0.0",
+    "pytest-benchmark>=5.1.0,<6.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
+    "mypy>=1.11.0,<2.0.0",
+    "tabulate>=0.9.0,<1.0.0",
+    "psutil>=7.0.0,<8.0.0",
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -25,9 +35,33 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
 pytest-benchmark = "^5.1.0"
+pytest-cov = "^6.0.0"
+mypy = "^1.11.0"
 pyinstrument = "^5.1.1"
 tabulate = "^0.9.0"
 neuron = "^8.2.7"
 gmsh = "^4.14.0"
 psutil = "^7.0.0"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "nrv: requires NRV installed (slow)",
+    "nrv_intracellular: intracellular stimulation comparisons vs NRV",
+    "nrv_velocity: conduction velocity vs diameter comparisons vs NRV",
+    "nrv_extracellular: extracellular stimulation comparisons vs NRV",
+    "nrv_numerics: NRV-adjacent numerical and solver diagnostics",
+]
+
+[tool.coverage.run]
+source = ["src/axonscope"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true

@@ -1,0 +1,429 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Protocol
+
+import jax
+import jax.numpy as jnp
+from typing import Tuple, Callable
+
+from axonscope.channel_models.base_channel_model import IonChannelModelBase
+
+# ---------------------- Type aliases ----------------------
+Array1D = jnp.ndarray  # shape (N,)
+Array2D = jnp.ndarray  # shape (N, n_gates)
+GFunc = Callable[[Array2D, Array1D], Array2D]
+RateFunc = Callable[[Array1D], Array2D]
+
+
+class ICMBackend(Protocol):
+    dtype: jnp.dtype
+    n_gates_max: int
+    n_channels_max: int
+
+    @property
+    def Nx(self) -> int: ...
+
+    def init_gates(self, V0_mV: Array1D) -> Array2D: ...
+
+    def alpha(self, V_mV: Array1D) -> Array2D: ...
+
+    def beta(self, V_mV: Array1D) -> Array2D: ...
+
+    def conductances(self, gates: Array2D) -> Array2D: ...
+
+    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D: ...
+
+    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D: ...
+
+    def total_conductance(self, gates: Array2D) -> Array1D: ...
+
+    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]: ...
+
+    def background_current(self) -> Array1D: ...
+
+
+class Gating:
+    """
+    Utility class for gating variable dynamics and ionic currents.
+
+    Provides static methods to compute:
+    - Ionic currents from voltage and gating variables
+    - Steady-state values and time constants of gates
+    - Full-step CNEXP update
+    - Full-step Crank-Nicolson update for gating variables
+
+    All methods are vectorized for JAX arrays.
+    """
+
+    @staticmethod
+    def compute_currents(
+        V: Array1D,
+        gates: Array2D,
+        g_bar: Array1D,
+        g_func: GFunc,
+        E_rev: Array1D
+    ) -> Array1D:
+        """
+        Compute total ionic currents for each compartment.
+
+        Implements:
+            I_ion = Σ_i g_i(V, gates) * (V - E_i)
+        where g_i is computed from the gating variables.
+
+        Parameters
+        ----------
+        V : Array1D, shape (N,)
+            Membrane voltage (mV) for each compartment.
+        gates : Array2D, shape (N, n_gates)
+            Current gating variable values.
+        g_bar : Array1D, shape (n_channels,)
+            Maximum conductances for each channel.
+        g_func : Callable
+            Function computing conductances from gating variables: g_func(gates, g_bar).
+        E_rev : Array1D, shape (n_channels,)
+            Reversal potentials for each channel (mV).
+
+        Returns
+        -------
+        I_tot : Array1D, shape (N,)
+            Total ionic current for each compartment (µA/cm²).
+        """
+        V = jnp.atleast_1d(V)
+        g_vals = g_func(gates, g_bar)          # shape (N, n_channels)
+        delta_V = V[:, None] - E_rev[None, :]  # broadcasting
+        I_tot = jnp.sum(g_vals * delta_V, axis=1)
+        return I_tot
+
+    @staticmethod
+    def rates(
+        V: Array1D,
+        q10: float,
+        alpha_fun: RateFunc,
+        beta_fun: RateFunc
+    ) -> Tuple[Array2D, Array2D]:
+        """
+        Compute steady-state values and time constants for gating variables.
+
+        Gating dynamics follow:
+            dg/dt = α(V) * (1 - g) - β(V) * g
+        which can be rewritten as:
+            dg/dt = (g_inf - g) / τ
+        with:
+            g_inf = α / (α + β)
+            τ     = 1 / (q10 * (α + β))
+
+        Parameters
+        ----------
+        V : Array1D, shape (N,)
+            Membrane voltage (mV) for each compartment.
+        q10 : float
+            Temperature scaling factor.
+        alpha_fun : Callable
+            Function returning α(V), shape (N, n_gates)
+        beta_fun : Callable
+            Function returning β(V), shape (N, n_gates)
+
+        Returns
+        -------
+        g_inf : Array2D, shape (N, n_gates)
+            Steady-state gating values.
+        tau : Array2D, shape (N, n_gates)
+            Time constants (ms) for each gating variable.
+        """
+        alpha = alpha_fun(V)
+        beta = beta_fun(V)
+        sum_ab = jnp.maximum(alpha + beta, 1e-12)
+        g_inf = alpha / sum_ab
+        tau = 1.0 / (q10 * sum_ab)
+        return g_inf, tau
+
+    @staticmethod
+    def update_gates(
+        gates: Array2D,
+        V: Array1D,
+        dt: float,
+        q10: float,
+        alpha_fun: RateFunc,
+        beta_fun: RateFunc
+    ) -> Array2D:
+        """
+        CNEXP update for gating variables (full time step).
+
+        Implements:
+            g(t + dt) = g_inf - (g_inf - g) * exp(-dt / tau)
+
+        Parameters
+        ----------
+        gates : Array2D, shape (N, n_gates)
+            Current gating values.
+        V : Array1D, shape (N,)
+            Membrane voltage (mV).
+        dt : float
+            Time step (ms).
+        q10 : float
+            Temperature scaling factor.
+        alpha_fun : Callable
+            Function computing alpha rates α(V), shape (N, n_gates)
+        beta_fun : Callable
+            Function computing beta rates β(V), shape (N, n_gates)
+
+        Returns
+        -------
+        gates_new : Array2D, shape (N, n_gates)
+            Updated gating variables after dt.
+        """
+        g_inf, tau = Gating.rates(V, q10, alpha_fun, beta_fun)
+        return g_inf - (g_inf - gates) * jnp.exp(-dt / tau)
+
+    @staticmethod
+    def cn_gate_update(
+        g_prev: Array2D,
+        V: Array1D,
+        dt: float,
+        alpha_fun: RateFunc,
+        beta_fun: RateFunc,
+        q10: float = 1.0
+    ) -> Array2D:
+        """
+        Crank-Nicolson update for gating variables over one full time step `dt`.
+
+        This helper solves the linear scalar gating ODE
+            dg/dt = α(V) * (1 - g) - β(V) * g
+        with a Crank-Nicolson discretization evaluated at the provided voltage
+        `V`. In the current solvers, rates are frozen over the step and gates
+        are advanced directly from `t_n` to `t_{n+1}`.
+
+        Implements the Crank-Nicolson discretization of dg/dt = α(1-g) - βg:
+            g_new = (α/d) + ((1/dt - 0.5*(α+β))/d) * g_prev
+            with d = (1/dt) + 0.5*(α+β)
+
+        Parameters
+        ----------
+        g_prev : Array2D, shape (N, n_gates)
+            Gating variables at the start of the step.
+        V : Array1D, shape (N,)
+            Membrane voltage (mV) used to evaluate α and β.
+        dt : float
+            Time step duration (ms).
+        alpha_fun : Callable
+            Function computing alpha rates α(V), shape (N, n_gates).
+        beta_fun : Callable
+            Function computing beta rates β(V), shape (N, n_gates).
+        q10 : float, optional
+            Temperature scaling factor applied to α and β (default 1.0).
+
+        Returns
+        -------
+        g_new : Array2D, shape (N, n_gates)
+            Updated gating variables after dt.
+        """
+        alpha = q10 * jax.lax.stop_gradient(alpha_fun(V))
+        beta  = q10 * jax.lax.stop_gradient(beta_fun(V))
+        denom = jnp.maximum(1.0/dt + 0.5*(alpha + beta), 1e-12)
+        term1 = alpha / denom
+        term2 = ((1.0/dt) - 0.5*(alpha + beta)) / denom * g_prev
+        return term1 + term2
+
+
+    @staticmethod
+    def compute_total_conductance(gates, g_bar, g_func):
+        g_open = g_func(gates, g_bar)   # shape (N, n_channels), already scaled by g_bar
+        return jnp.sum(g_open, axis=1)  # shape (N,) – total conductance per compartment
+
+
+@dataclass(frozen=True)
+class UniformICMBackend:
+    """Backend for a spatially uniform ion-channel model."""
+
+    ion_channel: IonChannelModelBase
+    nx: int
+    n_gates_max: int
+    n_channels_max: int
+    dtype: jnp.dtype
+
+    @classmethod
+    def from_model(cls, ion_channel: IonChannelModelBase, nx: int) -> "UniformICMBackend":
+        if nx < 1:
+            raise ValueError(f"nx must be >= 1, got {nx}.")
+        n_gates = int(ion_channel.init_gates(jnp.array([0.0], dtype=ion_channel.dtype)).shape[1])
+        n_channels = int(ion_channel.g_bar.shape[0])
+        return cls(
+            ion_channel=ion_channel,
+            nx=int(nx),
+            n_gates_max=n_gates,
+            n_channels_max=n_channels,
+            dtype=ion_channel.dtype,
+        )
+
+    @property
+    def Nx(self) -> int:
+        return self.nx
+
+    def init_gates(self, V0_mV: Array1D) -> Array2D:
+        if V0_mV.shape[0] != self.Nx:
+            raise ValueError(f"V0_mV must have shape ({self.Nx},), got {V0_mV.shape}.")
+        return self.ion_channel.init_gates(V0_mV)
+
+    def alpha(self, V_mV: Array1D) -> Array2D:
+        return self.ion_channel.alpha_funcs(V_mV)
+
+    def beta(self, V_mV: Array1D) -> Array2D:
+        return self.ion_channel.beta_funcs(V_mV)
+
+    def conductances(self, gates: Array2D) -> Array2D:
+        return self.ion_channel.conductances(gates)
+
+    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
+        return self.ion_channel.cn_gate_update(g_prev=g_prev, V_mV=V_mV, dt=dt)
+
+    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+        return self.ion_channel.currents(V_mV=V_mV, gates=gates)
+
+    def total_conductance(self, gates: Array2D) -> Array1D:
+        return self.ion_channel.total_conductance(gates)
+
+    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
+        return self.ion_channel.membrane_conductance_terms(gates)
+
+    def background_current(self) -> Array1D:
+        return self.ion_channel.I_background(self.Nx)
+
+
+@dataclass(frozen=True)
+class HeterogeneousICMBackend:
+    """Backend for one ion-channel model instance per compartment."""
+
+    icm_vec: tuple[IonChannelModelBase, ...]
+    gate_sizes: tuple[int, ...]
+    channel_sizes: tuple[int, ...]
+    n_gates_max: int
+    n_channels_max: int
+    dtype: jnp.dtype
+
+    @classmethod
+    def from_icm_vec(cls, icm_vec: tuple[IonChannelModelBase, ...] | list[IonChannelModelBase]) -> "HeterogeneousICMBackend":
+        if len(icm_vec) == 0:
+            raise ValueError("icm_vec must contain at least one channel model.")
+
+        frozen = tuple(icm_vec)
+        gate_sizes = tuple(int(m.init_gates(jnp.array([0.0], dtype=m.dtype)).shape[1]) for m in frozen)
+        channel_sizes = tuple(int(m.g_bar.shape[0]) for m in frozen)
+        n_gates_max = max(gate_sizes) if gate_sizes else 0
+        n_channels_max = max(channel_sizes) if channel_sizes else 0
+
+        return cls(
+            icm_vec=frozen,
+            gate_sizes=gate_sizes,
+            channel_sizes=channel_sizes,
+            n_gates_max=n_gates_max,
+            n_channels_max=n_channels_max,
+            dtype=frozen[0].dtype,
+        )
+
+    @property
+    def Nx(self) -> int:
+        return len(self.icm_vec)
+
+    def init_gates(self, V0_mV: Array1D) -> Array2D:
+        if V0_mV.shape[0] != self.Nx:
+            raise ValueError(f"V0_mV must have shape ({self.Nx},), got {V0_mV.shape}.")
+        out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            if n_g == 0:
+                continue
+            gi = model.init_gates(V0_mV[i : i + 1])[0]
+            out = out.at[i, :n_g].set(gi)
+        return out
+
+    def alpha(self, V_mV: Array1D) -> Array2D:
+        out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            if n_g == 0:
+                continue
+            ai = model.alpha_funcs(V_mV[i : i + 1])[0]
+            out = out.at[i, :n_g].set(ai)
+        return out
+
+    def beta(self, V_mV: Array1D) -> Array2D:
+        out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            if n_g == 0:
+                continue
+            bi = model.beta_funcs(V_mV[i : i + 1])[0]
+            out = out.at[i, :n_g].set(bi)
+        return out
+
+    def conductances(self, gates: Array2D) -> Array2D:
+        if gates.shape != (self.Nx, self.n_gates_max):
+            raise ValueError(
+                f"gates must have shape ({self.Nx}, {self.n_gates_max}), got {gates.shape}."
+            )
+        out = jnp.zeros((self.Nx, self.n_channels_max), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            n_c = self.channel_sizes[i]
+            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
+            gvals = model.g_funcs(gi, model.g_bar)[0]
+            out = out.at[i, :n_c].set(gvals)
+        return out
+
+    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
+        if g_prev.shape != (self.Nx, self.n_gates_max):
+            raise ValueError(
+                f"g_prev must have shape ({self.Nx}, {self.n_gates_max}), got {g_prev.shape}."
+            )
+        out = jnp.zeros_like(g_prev)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            if n_g == 0:
+                continue
+            g_new = model.cn_gate_update(
+                g_prev=g_prev[i : i + 1, :n_g],
+                V_mV=V_mV[i : i + 1],
+                dt=dt,
+            )[0]
+            out = out.at[i, :n_g].set(g_new)
+        return out
+
+    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+        if V_mV.shape[0] != self.Nx:
+            raise ValueError(f"V_mV must have shape ({self.Nx},), got {V_mV.shape}.")
+        out = jnp.zeros((self.Nx,), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
+            Ii = model.currents(V_mV=V_mV[i : i + 1], gates=gi)[0]
+            out = out.at[i].set(Ii)
+        return out
+
+    def total_conductance(self, gates: Array2D) -> Array1D:
+        out = jnp.zeros((self.Nx,), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
+            out = out.at[i].set(model.total_conductance(gi)[0])
+        return out
+
+    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
+        if gates.shape != (self.Nx, self.n_gates_max):
+            raise ValueError(
+                f"gates must have shape ({self.Nx}, {self.n_gates_max}), got {gates.shape}."
+            )
+        Gm = jnp.zeros((self.Nx,), dtype=self.dtype)
+        GE = jnp.zeros((self.Nx,), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            n_g = self.gate_sizes[i]
+            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
+            gm_i, ge_i = model.membrane_conductance_terms(gi)
+            Gm = Gm.at[i].set(gm_i[0])
+            GE = GE.at[i].set(ge_i[0])
+        return Gm, GE
+
+    def background_current(self) -> Array1D:
+        out = jnp.zeros((self.Nx,), dtype=self.dtype)
+        for i, model in enumerate(self.icm_vec):
+            out = out.at[i].set(model.I_background(1)[0])
+        return out

@@ -1,0 +1,125 @@
+import pytest
+import jax.numpy as jnp
+import numpy as np
+
+from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
+from tests.unit.channel_models.fixtures import HHLeakICM, HHKICM, HHNaICM
+from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
+from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.axons.generic import GenericAxon
+
+
+def _assert_same_icm(mono: IonChannelModelBase, comp: CompositeICM):
+    V = jnp.linspace(-80.0, 40.0, 7)
+
+    a_mono = mono.alpha_funcs(V)
+    a_comp = comp.alpha_funcs(V)
+    assert a_mono.shape == a_comp.shape
+    assert np.allclose(a_mono, a_comp)
+
+    b_mono = mono.beta_funcs(V)
+    b_comp = comp.beta_funcs(V)
+    assert b_mono.shape == b_comp.shape
+    assert np.allclose(b_mono, b_comp)
+
+    g0_mono = mono.init_gates(V)
+    g0_comp = comp.init_gates(V)
+    assert g0_mono.shape == g0_comp.shape
+    assert np.allclose(g0_mono, g0_comp)
+
+    assert mono.g_bar.shape == comp.g_bar.shape
+    assert np.allclose(mono.g_bar, comp.g_bar)
+
+    gvals_mono = mono.g_funcs(g0_mono, mono.g_bar)
+    gvals_comp = comp.g_funcs(g0_comp, comp.g_bar)
+    assert gvals_mono.shape == gvals_comp.shape
+    assert np.allclose(gvals_mono, gvals_comp)
+
+
+def test_composite_single_na():
+    mono = HHNaICM()
+    comp = CompositeICM([HHNaICM()])
+    _assert_same_icm(mono, comp)
+
+
+def test_composite_single_k():
+    mono = HHKICM()
+    comp = CompositeICM([HHKICM()])
+    _assert_same_icm(mono, comp)
+
+
+def test_composite_single_leak():
+    mono = HHLeakICM()
+    comp = CompositeICM([HHLeakICM()])
+    _assert_same_icm(mono, comp)
+
+
+def test_composite_vs_full_hodgkin_huxley():
+    na = HHNaICM()
+    k  = HHKICM()
+    l  = HHLeakICM()
+
+    comp = CompositeICM([na, k, l])
+    hh   = HodgkinHuxleyICM()
+
+    V = jnp.linspace(-80.0, 40.0, 7)
+
+    a_comp = comp.alpha_funcs(V)
+    a_hh   = hh.alpha_funcs(V)
+    a_comp_reordered = jnp.concatenate([a_comp[:, 0:1], a_comp[:, 1:2], a_comp[:, 2:3]], axis=-1)
+    assert np.allclose(a_comp_reordered, a_hh), "alpha mismatch"
+
+    b_comp = comp.beta_funcs(V)
+    b_hh   = hh.beta_funcs(V)
+    b_comp_reordered = jnp.concatenate([b_comp[:, 0:1], b_comp[:, 1:2], b_comp[:, 2:3]], axis=-1)
+    assert np.allclose(b_comp_reordered, b_hh), "beta mismatch"
+
+    g0_comp = comp.init_gates(V)
+    g0_hh   = hh.init_gates(V)
+    g0_comp_reordered = jnp.concatenate([g0_comp[:, 0:1], g0_comp[:, 1:2], g0_comp[:, 2:3]], axis=-1)
+    assert np.allclose(g0_comp_reordered, g0_hh), "init_gates mismatch"
+
+    gbar_comp = comp.g_bar
+    gbar_hh   = hh.g_bar
+    gbar_comp_reordered = jnp.array([gbar_comp[0], gbar_comp[1], gbar_comp[2]])
+    assert np.allclose(gbar_comp_reordered, gbar_hh), "g_bar mismatch"
+
+    gvals_comp = comp.g_funcs(g0_comp, comp.g_bar)
+    gvals_hh   = hh.g_funcs(g0_hh, hh.g_bar)
+    assert gvals_comp.shape == gvals_hh.shape
+    assert np.allclose(gvals_comp, gvals_hh), "g_funcs mismatch"
+
+
+def test_composite_keeps_common_q10():
+    na = HHNaICM(celsius=6.3)
+    k = HHKICM(celsius=6.3)
+    l = HHLeakICM()
+
+    comp = CompositeICM([na, k, l])
+
+    assert np.isclose(float(comp.q10), float(na.q10))
+    assert np.isclose(float(comp.q10), float(k.q10))
+
+
+def test_axon_composite_vs_mono_hodgkin_huxley():
+    """End-to-end: CompositeICM(Na,K,Leak) vs HodgkinHuxleyICM — Vm must match within 0.1 mV."""
+    mono_icm = HodgkinHuxleyICM()
+    comp_icm = CompositeICM([HHNaICM(), HHKICM(), HHLeakICM()])
+
+    L, d, Nx = 1_000, 0.5, 11
+    ax_mono = GenericAxon(ion_channel=mono_icm, L=L, d=d, Nx=Nx, Temp=6.3)
+    ax_comp = GenericAxon(ion_channel=comp_icm, L=L, d=d, Nx=Nx, Temp=6.3)
+
+    solver = CrankNicholson()
+    ax_mono.insert_I_Clamp(position=L/2, t_start=1.0, duration=1.0, amplitude=5)
+    ax_comp.insert_I_Clamp(position=L/2, t_start=1.0, duration=1.0, amplitude=5)
+
+    res_mono = solver.solve(ax_mono, 10, 0.001)
+    res_comp = solver.solve(ax_comp, 10, 0.001)
+
+    Vm_mono = np.array(res_mono.Vm)
+    Vm_comp = np.array(res_comp.Vm)
+    assert Vm_mono.shape == Vm_comp.shape
+
+    max_err = np.abs(Vm_mono - Vm_comp).max()
+    assert max_err <= 0.001, f"Vm differ by {max_err:.4f} mV"

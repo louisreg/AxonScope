@@ -28,7 +28,7 @@ class PassiveICM(IonChannelModelBase):
     EL : float
         Leak reversal potential stored as JAX `dtype`.
     g_leak : float
-        Maximal leak conductance in µS/cm², computed as 1/Rm * 1e3.
+        Maximal leak conductance in mS/cm², computed as 1/Rm * 1e3.
         Constant over time and voltage.
     """
 
@@ -40,12 +40,12 @@ class PassiveICM(IonChannelModelBase):
         -----
         - All attributes are converted to JAX `dtype` for compatibility 
           with vectorized computations.
-        - Leak conductance g_leak is computed as g_leak = 1/Rm * 1e3 [µS/cm²].
+        - Leak conductance g_leak is computed as g_leak = 1/Rm * 1e3 [mS/cm²].
         """
         super().__init__()
         self.Rm: float = dtype(Rm)
         self.EL: float = dtype(EL)
-        self.g_leak: float = dtype(1.0 / Rm) * 1e3  # µS/cm²
+        self.g_leak: float = dtype(1.0 / Rm) * 1e3  # mS/cm²
 
     @property
     def E_rev(self) -> jnp.ndarray:
@@ -67,7 +67,7 @@ class PassiveICM(IonChannelModelBase):
         Returns
         -------
         g_bar : jnp.ndarray, shape (1,)
-            Constant maximal conductance in µS/cm².
+            Constant maximal conductance in mS/cm².
         """
         return jnp.array([self.g_leak], dtype=dtype)
 
@@ -144,3 +144,9 @@ class PassiveICM(IonChannelModelBase):
         """
         V0 = jnp.atleast_1d(V0_mV)
         return jnp.zeros((V0.shape[0], 0), dtype=dtype)
+
+    def conductance_names(self) -> tuple[str, ...]:
+        return ("g_l",)
+
+    def current_names(self) -> tuple[str, ...]:
+        return ("I_l",)

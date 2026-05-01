@@ -1,56 +1,193 @@
 # AxonScope
 
-**AxonScope** is an **on-going project** (currently in its early development stage) that aims to provide a **modern, user-friendly, and efficient Python module** for the simulation of realistic axons, based on well-established models from the literature.  
+AxonScope is an early-stage Python framework for axon simulations, with a focus on
+validated peripheral nerve models, extracellular stimulation, and solver backends
+that can eventually scale to large fiber populations.
 
----
+The project is currently in an active refactor. The codebase now separates:
 
-## Goals
+- axon descriptions and geometry
+- stimulus and electrode descriptions
+- membrane/channel models
+- solver/runtime compilation
+- NRV comparison tests
+- benchmark and profiling experiments
 
-- Provide a **dedicated framework** for axon modeling (unlike general-purpose simulators such as NEURON).  
-- Offer a **simple and modern Python interface** with **high performance**.  
-- Leverage **modern computing architectures**:
-  - **GPUs**  
-  - **Massive CPU multithreading**  
-  - **Hardware accelerators** (e.g., TPUs).  
+## Current Capabilities
 
----
+- Uniform and non-uniform one-dimensional cable geometries
+- Passive, Hodgkin-Huxley, Rattay-Aberham, Sundt, Tigerholm, Schild94/Schild97,
+  and MRG-style myelinated axons
+- Intracellular current clamps via `Stimulus`
+- Point-source extracellular stimulation via `Electrode` and `ExtracellularContext`
+- Crank-Nicholson/Hines-style solvers with extracellular one-layer coupling
+- Generic heterogeneous membrane layouts for multicompartment axons
+- NRV comparison tests for morphology, numerics, intracellular stimulation,
+  extracellular stimulation, and velocity trends
 
-## Features (planned)
+## Installation
 
-- **Single-compartment and multi-compartment axon models**.  
-- **Myelinated and unmyelinated fibers**.  
-- **Intracellular and extracellular stimulation mechanisms**.  
-- Performance comparable to NEURON, but **simpler and more modern**.  
+This repository uses a `src/` layout and Python 3.11+.
 
----
+```bash
+pip install -e .
+```
 
-## TODO Roadmap
+For development:
 
-- [x] Validate base implementation with a passive membrane
-- [x] Validate base implementation of Hodgkin-Huxley and Rattay-Aberham models
-  - [x]  Check AP shape
-  - [x]  Check propagation velocity against NRV  
-    - We observe about 10% difference but we use difference velocity estimation method and different solver (for now).
-- [x] Add performance benchmarking tooling  
-      - Basic decorator for benchmarking is implemented, based on pyinstrument with filtering capabilities. See [this example](./benchmark/simple_benchmark.py). More features will be added to fully utilize pyinstrument capabilities. We might also implement memray for memory tracing.
+```bash
+pip install -e ".[dev]"
+pytest -q tests/unit
+```
 
-- [x] Replace Explicit Euler solver with Crank–Nicholson + tridiagonal diagonal solver  
-    - [x] Unoptimized Crank–Nicholson Solver based on Hines 1984 is implemented/validated
-    - [x] move from linsolve to a tridiagonal solver
-- [ ] Implement extracellular stimulation mechanisms  
-- [ ] Start integrating multicompartment models  
-- [x] Benchmark different backends: See scripts and results [here](./benchmark/CrankNicholson_runtime/) 
-  - [x] NumPy 
-  - [x] Scipy 
-  - [x] PyTorch/Pytorch compile
-  - [x] JAX  
-  - [x] [Rust](./crank_nicholson_rust/) 
-- [ ] Add support for a physical unit module (ex [pint](https://github.com/hgrecco/pint))
-- [ ] Add static type checking (ex [mypy](https://github.com/python/mypy))
-- [ ] Add on-the-fly GPU ready post-processing (eg. rastering)
-- [ ] Add efficient data-saving method (eg. HDF5)
-- [ ] And many more things to do...
-  
+NRV comparison tests require a local NRV checkout/environment and are marked under
+`tests/nrv`.
+
+## Package Map
+
+```text
+src/axonscope/
+  axons/              axon descriptions, geometry, myelinated/unmyelinated models
+  channel_models/     membrane/channel models and composite dynamics
+  icm/                membrane compute backends and heterogeneous layouts
+  morphology/         morphology tables and interpolation helpers
+  solvers/            Euler and Crank-Nicholson solver families
+  stimulus.py         backend-independent stimulus descriptions
+  stimulus_eval.py    NumPy evaluation helpers for stimuli and extracellular contexts
+  stimulation.py      intracellular/extracellular stimulation descriptors
+  electrodes.py       electrode descriptions
+```
+
+## Quick Start: Intracellular Stimulation
+
+```python
+import numpy as np
+
+from axonscope.axons import HodgkinHuxley
+from axonscope.solvers import CrankNicholson
+from axonscope.stimulus import Stimulus
+
+axon = HodgkinHuxley(L=500.0, d=0.5, Nx=41, celsius=6.3)
+axon.insert_I_Clamp(
+    position=250.0,
+    stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
+)
+
+res = CrankNicholson().solve(axon, tsim=5.0, dt=0.01)
+center = int(np.argmin(np.abs(np.asarray(axon.x) - 250.0)))
+print(res.t.shape, res.Vm[:, center].shape)
+```
+
+`insert_I_Clamp` still accepts the legacy `t_start`, `duration`, `amplitude`
+arguments for compatibility, but new code should pass an explicit `Stimulus`.
+
+## Quick Start: Extracellular MRG Stimulation
+
+```python
+import numpy as np
+
+from axonscope.axons import MRG
+from axonscope.electrodes import PointSourceElectrode
+from axonscope.solvers import CrankNicholson
+from axonscope.stimulus import Stimulus
+
+axon = MRG(d=10.0, nodes=5)
+center_x_m = float(np.asarray(axon.x)[axon.Nx // 2]) * 1e-6
+
+electrode = PointSourceElectrode(x0_m=center_x_m, z0_m=500e-6, sigma_S_m=0.3)
+stimulus = Stimulus.biphasic(
+    start=0.5,
+    cathodic_amplitude=80e-6,
+    cathodic_duration=0.05,
+    interphase=0.02,
+)
+
+axon.add_extracellular_ctx(electrode, stimulus)
+res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
+```
+
+Extracellular contexts are descriptive objects. Solver-specific JAX compilation
+lives in `axonscope.solvers.stimulus_runtime`; NumPy evaluation helpers live in
+`axonscope.stimulus_eval`.
+
+## Recording Observables
+
+Solvers can record gates, currents, conductances, and optional membrane state
+variables.
+
+```python
+res = CrankNicholson().solve(
+    axon,
+    tsim=5.0,
+    dt=0.01,
+    record_observables=True,
+)
+
+print(res.recordings["gates"].keys())
+print(res.recordings["currents"].keys())
+```
+
+Dynamic membrane state is model-owned. Models such as Tigerholm and Schild declare
+their state variables through `MembraneStateSpec`; the base membrane model no
+longer hard-codes sodium, potassium, or calcium-specific flags.
+
+## Examples
+
+Runnable examples live in `examples/basic/`:
+
+```bash
+python examples/basic/stimulus_demo.py
+python examples/basic/point_source_electrode_demo.py
+python examples/basic/intracellular_solver_demo.py
+python examples/basic/mrg_extracellular_demo.py
+python examples/basic/environment_info_demo.py
+```
+
+The `playground/` directory contains exploratory diagnostics and comparison
+scripts. It is useful during development but is not treated as public API.
+
+## Tests
+
+Fast unit suite:
+
+```bash
+pytest -q tests/unit
+```
+
+NRV validation suite:
+
+```bash
+pytest -q tests/nrv
+```
+
+Useful targeted checks during solver work:
+
+```bash
+pytest -q tests/unit/solvers/test_extracellular.py
+pytest -q tests/nrv/extracellular/test_extracellular_systematic_vs_nrv.py
+pytest -q tests/nrv/numerics/test_mrg_morphology_vs_nrv.py
+pytest -q tests/nrv/numerics/test_mrg_compartment_geometry_vs_nrv.py
+```
+
+## Benchmarks
+
+Benchmark experiments are under `benchmark/CrankNicholson_runtime/`. These files
+compare standalone and backend-specific solver variants and are being consolidated
+around the newer `Solver` API.
+
+Generated logs and figures are ignored by git.
+
+## Architecture Notes
+
+- `Stimulus`, `Electrode`, `IntracellularCurrentClamp`, and
+  `ExtracellularContext` are backend-independent descriptions.
+- `JaxStimulus`, compiled extracellular contexts, and current-density builders
+  belong to the solver runtime.
+- `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
+- `CompartmentMembraneLayout` assigns one membrane model per compartment.
+- `HeterogeneousICMBackend` evaluates heterogeneous membrane layouts.
+- MRG uses a generic heterogeneous layout rather than an MRG-specific masked ICM.
+
 ## Changelog
 
-See the [CHANGELOG.md](./CHANGELOG.md) file for a complete history of changes.
+See [CHANGELOG.md](./CHANGELOG.md).

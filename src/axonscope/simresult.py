@@ -1,22 +1,23 @@
 from dataclasses import dataclass
-from numpy.typing import NDArray
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from axonscope.axons import AxonBase
-from axonscope.benchmark import Benchmark
+from axonscope.axons.base import AxonBase
 
-bench = Benchmark()
 
-from typing import Tuple
+RecordingDict = Dict[str, Dict[str, NDArray]]
 
 @dataclass
 class SimResult():
     axon: AxonBase
     Vm: NDArray
     t: NDArray
+    diagnostics: Optional[Dict[str, Any]] = None
+    recordings: Optional[RecordingDict] = None
     
-    @bench.benchmark(level=3)  
     def rasterize(
         self, threshold: float = -10.0, min_distance: float = 1.0
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -108,15 +109,6 @@ class SimResult():
 
         # Backward velocity (toward x_min)
         mask_backward = (x_flat <= x0) & (x_flat >= x_min)
-        v_backward = 0.0
-        if np.sum(mask_backward) >= 2:
-            t_sel = t_flat[mask_backward]
-            x_sel = x_flat[mask_backward]
-            sort_idx = np.argsort(t_sel)
-            t_sel = t_sel[sort_idx]
-            x_sel = x_sel[sort_idx]
-            coeff_backward = np.polyfit(t_sel, x_sel, 1)
-            v_backward =         mask_backward = (x_flat <= x0) & (x_flat >= x_min)
         v_backward = 0.0
         if np.sum(mask_backward) >= 2:
             t_sel = t_flat[mask_backward]

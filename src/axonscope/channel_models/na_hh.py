@@ -3,8 +3,8 @@ import jax.numpy as jnp
 
 from axonscope.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
-from axonscope.math_functions import expM1_jax as expM1
-from axonscope.icm_compute import Gating
+from axonscope.utils.math_functions import expM1_jax as expM1
+from axonscope.icm import Gating
 
 
 class NaHHICM(IonChannelModelBase):
@@ -44,8 +44,7 @@ class NaHHICM(IonChannelModelBase):
         self.gnabar = dtype(gnabar)
         self.ena = dtype(ena)
         self.celsius = dtype(celsius)
-        self.q10 = dtype(1)
-        self._q10 = dtype(3 ** ((self.celsius - 30.0) / 10.0))
+        self.q10 = dtype(3 ** ((celsius - 30.0) / 10.0))
 
         # Instance parameters (were class constants)
         self.mshift = dtype(mshift)
@@ -60,8 +59,8 @@ class NaHHICM(IonChannelModelBase):
         """
         V_m = V + 65.0
 
-        m = self._q10*0.32 * expM1(13.1 - (V_m + self.mshift), 4.0)
-        h = self._q10*0.128 * jnp.exp((17.0 - (V_m + self.hshift) + self.ishift) / 18.0)
+        m = 0.32 * expM1(13.1 - (V_m + self.mshift), 4.0)
+        h = 0.128 * jnp.exp((17.0 - (V_m + self.hshift) + self.ishift) / 18.0)
 
         return jnp.stack([m, h], axis=-1)
 
@@ -71,8 +70,8 @@ class NaHHICM(IonChannelModelBase):
         """
         V_m = V + 65.0
 
-        m = self._q10*0.28 * expM1((V_m + self.mshift) - 40.1, 5.0)
-        h = self._q10*4.0 / (jnp.exp((40.0 - (V_m + self.hshift)) / 5.0) + 1.0)
+        m = 0.28 * expM1((V_m + self.mshift) - 40.1, 5.0)
+        h = 4.0 / (jnp.exp((40.0 - (V_m + self.hshift)) / 5.0) + 1.0)
 
         return jnp.stack([m, h], axis=-1)
 
@@ -80,8 +79,29 @@ class NaHHICM(IonChannelModelBase):
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
         """Initialize gating variables at steady-state."""
+        # q10 cancels in g_inf = alpha/(alpha+beta), so the value doesn't matter here
         inf, _ = Gating.rates(V0_mV, self.q10, self.alpha_funcs, self.beta_funcs)
         return inf
+
+    def gate_names(self) -> tuple[str, ...]:
+        return ("m", "h")
+
+    def conductance_names(self) -> tuple[str, ...]:
+        return ("g_na",)
+
+    def current_names(self) -> tuple[str, ...]:
+        return ("I_na",)
+
+    def final_gate_update(
+        self,
+        gates_prev: jnp.ndarray,
+        V_mV_prev: jnp.ndarray,
+        V_mV_new: jnp.ndarray,
+        dt: float,
+        gates_predictor: jnp.ndarray,
+    ) -> jnp.ndarray:
+        _ = V_mV_prev, gates_predictor
+        return self.cn_gate_update(g_prev=gates_prev, V_mV=V_mV_new, dt=dt)
 
     # ------------------------------------------------------------------
 

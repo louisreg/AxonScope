@@ -2,34 +2,103 @@
 
 All notable changes to this project are documented here.
 
+The format is inspired by Keep a Changelog.
+
 ## [Unreleased]
 
-**Note:** Changes since the last release.
+### Added
 
-* ...
+- Added backend-independent `Stimulus`, `IntracellularCurrentClamp`, and
+  `ExtracellularContext` descriptors.
+- Added NumPy evaluation helpers in `axonscope.stimulus_eval`.
+- Added JAX solver-runtime stimulus compilation in
+  `axonscope.solvers.stimulus_runtime`.
+- Added `PointSourceElectrode` and extracellular context attachment helpers.
+- Added package-level exports for `axonscope.axons`, `axonscope.solvers`,
+  `axonscope.icm`, `axonscope.morphology`, and `axonscope.utils`.
+- Added MRG morphology helpers and NRV morphology/geometry comparison tests.
+- Added generic heterogeneous membrane layout support through
+  `CompartmentMembraneLayout` and `HeterogeneousMembraneModel`.
+- Added MRG myelinated axon support with nodal `AxnodeICM` and passive
+  internodal membrane models.
+- Added `MembraneStateSpec` for model-owned membrane state variables.
+- Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
+  backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
+- Added runnable examples under `examples/basic/`.
 
----
+### Changed
+
+- Split the old flat modules into packages:
+  `axons/`, `solvers/`, `icm/`, `morphology/`, `benchmarking/`, and `utils/`.
+- Removed the old monolithic `axons.py`, `solvers.py`, `icm_compute.py`, and
+  `math_functions.py` modules in favor of the package layout.
+- Moved NumPy stimulus evaluation out of the solver runtime.
+- Kept solver/backend-specific JAX compilation in the solver runtime.
+- Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
+  clamp handling from `AxonBase`.
+- Replaced the MRG-specific masked ICM layout with the generic heterogeneous
+  membrane layout.
+- Moved MRG node-count/length construction helpers to the myelinated axon layer;
+  `morphology.mrg` now focuses on morphology tables and interpolation.
+- Simplified `IonChannelModelBase` so sodium, potassium, and calcium-specific
+  dynamic helpers are no longer defined on every membrane model.
+- Updated README and examples to the current package API.
+- Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
+  local build artifacts.
+
+### Fixed
+
+- Fixed double-cable extracellular Crank-Nicholson RHS handling by including the
+  previous imposed extracellular potential term for capacitive extracellular
+  coupling.
+- Fixed MRG extracellular validation drift visible in the gating variable `m`
+  against NRV.
+- Fixed examples that still called removed stimulus/context convenience methods.
+- Fixed stale internal imports that referenced the old flat module layout.
+
+### Validation
+
+- Unit tests cover the current stimulus API, electrode evaluation, solver
+  extracellular behavior, heterogeneous ICM layouts, membrane state specs, and
+  public package exports.
+- NRV comparison tests cover MRG morphology, compartment geometry, intracellular
+  models, extracellular models, and velocity/numerical guardrails.
+
+### Known Notes
+
+- The generic heterogeneous MRG membrane layout is cleaner than the former masked
+  model but currently slower. Profiling and backend specialization are the next
+  planned cleanup step.
+- The `playground/` and `benchmark/CrankNicholson_runtime/` directories contain
+  active experiments and are not stable public API.
 
 ## [0.2.0] - 2025-11-25
 
-**Note:** This is the first version whose changes are formally tracked in this file.
+### Added
 
-### Added (New Features)
+- Introduced `IonChannelModelBase`.
+- Introduced `CompositeICM` for user-defined composite membrane models.
+- Added the initial Sundt model.
 
-* **Custom Ion Channels:** Introduced the `IonChannelModelBase` and `CompositeICM` classes to allow users to **create custom ion channel models** and **composite models**.
-* **Sundt Model:** Initial implementation of the **Sundt model** as seen in NRV (Note: There is a currently a known issue with the model behavior that requires further debugging).
+### Changed
 
-### Changed (Improvements/Updates)
+- Updated core axon and solver classes to support custom ion-channel models.
+- Upgraded the solver stack to use JAX tridiagonal solvers.
+- Improved runtime performance compared with earlier implementations.
 
-* **Core Integration:** The `Axon` and `Solver` classes have been updated to accept and utilize the new custom ion channel model classes.
-* **Performance Optimization:** The **Solver has been modified to utilize JAX 100** with the implementation of a dedicated **tridiagonal solver**. This combination yields the best performance results (see the `./benchmark/CrankNicholson_runtime/` directory).
+### Fixed
 
-### Fixed (Bug Fixes)
+- Improved internal solver consistency.
 
-* *N/A*
+## [0.1.0] and Earlier
 
----
+Initial development period including:
 
-## [0.1.0] and Earlier (Historical)
+- Passive membrane implementation
+- Hodgkin-Huxley validation
+- Rattay-Aberham implementation
+- First Crank-Nicholson solver versions
+- Early benchmarking experiments
 
-**Note:** Changes made during initial development (including base model validation and initial solver implementation) were not formally documented in this file. Please refer to the commit history for details on these earlier developments.
+These changes were not formally documented. Please refer to git history for
+details.

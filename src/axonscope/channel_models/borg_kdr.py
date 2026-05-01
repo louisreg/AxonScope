@@ -5,7 +5,7 @@ from typing import Tuple, Callable
 # Assuming these imports are necessary for the environment
 from axonscope.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
-from axonscope.icm_compute import Gating
+from axonscope.icm import Gating
 
 Array1D = jnp.ndarray
 Array2D = jnp.ndarray
@@ -15,9 +15,23 @@ class BorgKDRICM(IonChannelModelBase):
     """
     Borg-Graham type K-DR (delayed rectifier potassium) channel (1987).
 
-    Updated implementation to match the kinetic equations derived from the 
-    NEURON .mod file, ensuring equivalence in steady-state (g_inf) and 
-    time constants (tau).
+    Implementation matched to NRV/NEURON `kdr.mod`.
+
+    In the mod file the gates follow:
+
+        n_inf = 1 / (1 + alpn)
+        tau_n = betn / (q10 * a0n * (1 + alpn))
+
+    and similarly for `l`. When rewritten as
+
+        dg/dt = alpha * (1 - g) - beta * g
+
+    this gives:
+
+        alpha_n = a0n / betn
+        beta_n  = a0n * alpn / betn
+
+    with the solver applying the global `q10` factor.
     """
 
     def __init__(self,
@@ -40,10 +54,7 @@ class BorgKDRICM(IonChannelModelBase):
         self.gkdrbar = dtype(gkdrbar)
         self.ek = dtype(ek)
         self.celsius = dtype(celsius)
-        self.q10 = dtype(3 ** ((celsius - 30.0) / 10.0)) 
-        # Q10 factor calculation as in NEURON: 3^((celsius-30)/10)
-        self._q10 = dtype(3 ** ((celsius - 30.0) / 10.0)) 
-        self._q10 = 1
+        self.q10 = dtype(3 ** ((celsius - 30.0) / 10.0))
 
         # gating parameters
         self.vhalfn = dtype(vhalfn)
@@ -92,35 +103,35 @@ class BorgKDRICM(IonChannelModelBase):
 
     # ------------------------------------------------------------------
     # TRUE HODGKIN-HUXLEY ALPHA/BETA RATES (alpha_funcs and beta_funcs)
-    # These combine the intermediate terms with Q10 and a0 to calculate 
-    # the true alpha and beta rates (where g_inf = alpha/(alpha+beta)).
+    # These are arranged so that:
+    #   g_inf = alpha / (alpha + beta)
+    #   tau   = 1 / (q10 * (alpha + beta))
+    # exactly matches the NEURON `rates()` implementation.
 
     def alpha_funcs(self, V: Array1D) -> Array2D:
         """
         Compute true alpha rate constants for [n, l] gates.
-        Equivalent to: alpha = Q10 * a0 * A / B
+        Equivalent to the NEURON `rates()` formulation after factoring q10 out:
+            alpha = a0 / B
         """
-        A = self._rate_term_a(V) # A = alpn, alpl
-        B = self._rate_term_b(V) # B = betn, betl
+        B = self._rate_term_b(V)  # B = betn, betl
 
-        # alpha_n = Q10 * a0n * alpn / betn
-        alpha_n = self._q10 * self.a0n * A[:, 0] / B[:, 0]
-        # alpha_l = Q10 * a0l * alpl / betl
-        alpha_l = self._q10 * self.a0l * A[:, 1] / B[:, 1]
+        alpha_n = self.a0n / B[:, 0]
+        alpha_l = self.a0l / B[:, 1]
 
         return jnp.stack([alpha_n, alpha_l], axis=-1)
 
     def beta_funcs(self, V: Array1D) -> Array2D:
         """
         Compute true beta rate constants for [n, l] gates.
-        Equivalent to: beta = Q10 * a0 / B
+        Equivalent to the NEURON `rates()` formulation after factoring q10 out:
+            beta = a0 * A / B
         """
-        B = self._rate_term_b(V) # B = betn, betl
+        A = self._rate_term_a(V)  # A = alpn, alpl
+        B = self._rate_term_b(V)  # B = betn, betl
 
-        # beta_n = Q10 * a0n / betn
-        beta_n = self._q10 * self.a0n / B[:, 0]
-        # beta_l = Q10 * a0l / betl
-        beta_l = self._q10 * self.a0l / B[:, 1]
+        beta_n = self.a0n * A[:, 0] / B[:, 0]
+        beta_l = self.a0l * A[:, 1] / B[:, 1]
 
         return jnp.stack([beta_n, beta_l], axis=-1)
 
@@ -132,6 +143,26 @@ class BorgKDRICM(IonChannelModelBase):
         # Gating.rates uses the true alpha and beta functions above
         g_inf, _ = Gating.rates(V0_mV, self.q10, self.alpha_funcs, self.beta_funcs)
         return g_inf
+
+    def gate_names(self) -> tuple[str, ...]:
+        return ("n", "l")
+
+    def conductance_names(self) -> tuple[str, ...]:
+        return ("g_k",)
+
+    def current_names(self) -> tuple[str, ...]:
+        return ("I_k",)
+
+    def final_gate_update(
+        self,
+        gates_prev: Array2D,
+        V_mV_prev: Array1D,
+        V_mV_new: Array1D,
+        dt: float,
+        gates_predictor: Array2D,
+    ) -> Array2D:
+        _ = V_mV_prev, gates_predictor
+        return self.cn_gate_update(g_prev=gates_prev, V_mV=V_mV_new, dt=dt)
 
     # ------------------------------------------------------------------
 

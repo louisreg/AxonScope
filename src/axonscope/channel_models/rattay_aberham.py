@@ -1,9 +1,9 @@
 from __future__ import annotations
 import jax.numpy as jnp
-from axonscope.math_functions import vtrap_jax as vtrap
+from axonscope.utils.math_functions import vtrap_jax as vtrap
 from axonscope.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
-from axonscope.icm_compute import Gating
+from axonscope.icm import Gating
 
 class RattayAberhamICM(IonChannelModelBase):
     """
@@ -65,7 +65,7 @@ class RattayAberhamICM(IonChannelModelBase):
     Properties
     ----------
     g_bar
-        Maximum conductances [g_Na, g_K, g_L] in µS/cm².
+        Maximum conductances [g_Na, g_K, g_L] in mS/cm².
     E_rev
         Reversal potentials [E_Na, E_K, E_L] in mV.
     """
@@ -152,12 +152,12 @@ class RattayAberhamICM(IonChannelModelBase):
         gates : jnp.ndarray, shape (N,3)
             Gating variables [m, h, n].
         g_bar : jnp.ndarray, shape (3,)
-            Maximum conductances [g_Na, g_K, g_L] in S/cm².
+            Maximum conductances [g_Na, g_K, g_L] in mS/cm².
 
         Returns
         -------
         g : jnp.ndarray, shape (N,3)
-            Conductances for each channel in S/cm².
+            Conductances for each channel in mS/cm².
 
         Equations
         ---------
@@ -188,6 +188,26 @@ class RattayAberhamICM(IonChannelModelBase):
         g_inf, _ = Gating.rates(V0, self.q10, self.alpha_funcs, self.beta_funcs)
         return g_inf
 
+    def gate_names(self) -> tuple[str, ...]:
+        return ("m", "h", "n")
+
+    def conductance_names(self) -> tuple[str, ...]:
+        return ("g_na", "g_k", "g_l")
+
+    def current_names(self) -> tuple[str, ...]:
+        return ("I_na", "I_k", "I_l")
+
+    def final_gate_update(
+        self,
+        gates_prev: jnp.ndarray,
+        V_mV_prev: jnp.ndarray,
+        V_mV_new: jnp.ndarray,
+        dt: float,
+        gates_predictor: jnp.ndarray,
+    ) -> jnp.ndarray:
+        _ = V_mV_prev, gates_predictor
+        return self.cn_gate_update(g_prev=gates_prev, V_mV=V_mV_new, dt=dt)
+
     @property
     def g_bar(self) -> jnp.ndarray:
         """
@@ -196,7 +216,7 @@ class RattayAberhamICM(IonChannelModelBase):
         Returns
         -------
         g_bar : jnp.ndarray, shape (3,)
-            [g_Na, g_K, g_L] in µS/cm²
+            [g_Na, g_K, g_L] in mS/cm²
         """
         return jnp.array([self.gnabar, self.gkbar, self.gl], dtype=dtype) * 1e3
 
