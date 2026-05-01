@@ -47,6 +47,7 @@ from .common import (
     build_dense_from_tridiagonal,
     solve_block_tridiagonal_2x2_scalar,
 )
+from .kernels import DoubleCableKernel, SingleCableKernel
 from .recording import observable_matrices, package_recordings
 from .runtime import (
     prepare_membrane_runtime,
@@ -623,315 +624,28 @@ class CrankNicholson(Solver):
             include_extracellular=use_extracellular,
             include_area=use_extracellular,
         )
-        membrane_runtime = runtime.membrane
-        grid = runtime.grid
-        cable = runtime.cable
-        stimulation = runtime.stimulation
-        extracellular = runtime.extracellular
-
-        Nx: int = membrane_runtime.Nx
-        Nt: int = grid.Nt
-        backend = membrane_runtime.backend
-        membrane = membrane_runtime.membrane
-        diagnostic_names = membrane_runtime.diagnostic_names
-        observable_names = membrane_runtime.observable_names
-        dtype_local = membrane_runtime.dtype
-
-        Vm0: jnp.ndarray = membrane_runtime.Vm0_mV
-        Ve0: jnp.ndarray = jnp.full((Nx,), dtype_local(getattr(axon, "Veinit", 0.0)), dtype=dtype_local)
-        Vi0: jnp.ndarray = Vm0 + Ve0
-        gates0: jnp.ndarray = membrane_runtime.gates0
-
-        lower, diag, upper = cable.lower, cable.diag, cable.upper
-        dl, d, du = build_cn_tridiagonal(lower, diag, upper, dt, dtype_local)
-        Cm = jnp.asarray(axon.Cm, dtype=dtype_local)
-
-        inj_fun = stimulation.intracellular_current_density
-        vext_fun = stimulation.extracellular_potential_mV
-        vext_mid_all = stimulation.extracellular_potential_mid_mV
-        vext_initial_previous = stimulation.extracellular_potential_initial_previous_mV
-        I_bg = membrane_runtime.background_current
-        state0 = membrane_runtime.state0
-        n_extra = len(state0)
-
-        area = cable.area_cm2
-        has_driven_extracellular = stimulation.has_driven_extracellular
-
         if use_extracellular:
-            assert extracellular is not None
-            Cm_abs = extracellular.Cm_abs
-            Cx_abs = extracellular.Cx_abs
-            Gx_abs = extracellular.Gx_abs
-            Gax_e = extracellular.Gax_e
-            Gax_i = extracellular.Gax_i
-            left_i = extracellular.left_i
-            right_i = extracellular.right_i
-            left_e = extracellular.left_e
-            right_e = extracellular.right_e
-
-        def _unpack_voltage_state(carry, n_extra: int):
-            if use_extracellular:
-                Vi, Ve, gates, *extra = carry
-                if len(extra) != n_extra:
-                    raise ValueError(f"Expected {n_extra} extra state arrays, got {len(extra)}.")
-                Vm = Vi - Ve
-                return Vi, Ve, Vm, gates, tuple(extra)
-
-            Vm, gates, *extra = carry
-            if len(extra) != n_extra:
-                raise ValueError(f"Expected {n_extra} extra state arrays, got {len(extra)}.")
-            Vi = Vm
-            Ve = jnp.zeros_like(Vm)
-            return Vi, Ve, Vm, gates, tuple(extra)
-
-        def _pack_voltage_state(
-            Vi_new: jnp.ndarray,
-            Ve_new: jnp.ndarray,
-            Vm_new: jnp.ndarray,
-            gates_new: jnp.ndarray,
-            extra_state: tuple[jnp.ndarray, ...],
-        ):
-            if use_extracellular:
-                return (Vi_new, Ve_new, gates_new, *extra_state)
-            return (Vm_new, gates_new, *extra_state)
-
-        def _channel_step(Vm: jnp.ndarray, gates: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-            gates_new = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt)
-            Iion = backend.currents(V_mV=Vm, gates=gates_new)
-            return gates_new, Iion
-
-        def _solve_intracellular_extracellular(
-            Vi: jnp.ndarray,
-            Ve: jnp.ndarray,
-            gates_new: jnp.ndarray,
-            Iinj_den: jnp.ndarray,
-            I_bg_den: jnp.ndarray,
-            I_corr_den: jnp.ndarray,
-            Vext_mV: jnp.ndarray,
-            Vext_old_mV: jnp.ndarray,
-        ) -> tuple[jnp.ndarray, jnp.ndarray]:
-            Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
-            Gm_abs = Gm_den * area
-            GE_abs = GE_den * area
-
-            Iinj_abs = Iinj_den * area
-            I_bg_abs = I_bg_den * area
-            I_corr_abs = I_corr_den * area
-            Vm = Vi - Ve
-
-            a00 = Cm_abs / dt + Gm_abs + left_i + right_i
-            a01 = -(Cm_abs / dt + Gm_abs)
-            rhs0 = (Cm_abs / dt) * Vm + GE_abs + Iinj_abs - I_bg_abs - I_corr_abs
-
-            a10 = a01
-            a11 = Cm_abs / dt + Gm_abs + Cx_abs / dt + Gx_abs + left_e + right_e
-            rhs1 = (
-                -(Cm_abs / dt) * Vm
-                - GE_abs
-                + (Cx_abs / dt) * Ve
-                - (Cx_abs / dt) * Vext_old_mV
-                + (Cx_abs / dt + Gx_abs) * Vext_mV
-                + I_bg_abs
-                + I_corr_abs
+            kernel = DoubleCableKernel(
+                runtime=runtime,
+                Veinit_mV=float(getattr(axon, "Veinit", 0.0)),
+            )
+        else:
+            kernel = SingleCableKernel(
+                runtime=runtime,
+                Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
             )
 
-            return solve_block_tridiagonal_2x2_scalar(
-                a00,
-                a01,
-                a10,
-                a11,
-                -Gax_i,
-                -Gax_e,
-                rhs0,
-                rhs1,
-            )
-
-        def _solve_voltage_step(
-            n: int,
-            Vi: jnp.ndarray,
-            Ve: jnp.ndarray,
-            Vm: jnp.ndarray,
-            gates_new: jnp.ndarray,
-            t_mid: float,
-            Iinj_den: jnp.ndarray,
-            I_outward_den: jnp.ndarray,
-            I_corr_den: jnp.ndarray,
-        ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-            if use_extracellular:
-                if vext_mid_all is not None and vext_initial_previous is not None:
-                    Vext, Vext_old = _precomputed_vext_step(
-                        vext_mid_all,
-                        vext_initial_previous,
-                        n,
-                    )
-                else:
-                    Vext = vext_fun(t_mid)
-                    Vext_old = vext_fun(t_mid - dt)
-                Vi_new, Ve_new = _solve_intracellular_extracellular(
-                    Vi=Vi,
-                    Ve=Ve,
-                    gates_new=gates_new,
-                    Iinj_den=Iinj_den,
-                    I_bg_den=I_outward_den,
-                    I_corr_den=I_corr_den,
-                    Vext_mV=Vext,
-                    Vext_old_mV=Vext_old,
-                )
-                return Vi_new, Ve_new, Vi_new - Ve_new
-
-            diffusion = apply_diffusion_operator(Vm, lower, diag, upper)
-            rhs = Vm + dtype_local(0.5) * dt * diffusion + (dtype_local(dt) / Cm) * (
-                Iinj_den - I_outward_den - I_corr_den
-            )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
-            return Vm_new, jnp.zeros_like(Vm_new), Vm_new
-
-        def step(carry: Carry, n: int):
-            Vi, Ve, Vm, gates, extra = _unpack_voltage_state(carry, n_extra=n_extra)
-            t_mid: float = dtype_local(n) * dt + dt / 2.0
-
-            gates_pred, Iion_pred = _channel_step(Vm, gates)
-            Iinj: jnp.ndarray = inj_fun(t_mid)
-            step_plan_pred = membrane.prepare_membrane_step(
-                V_mV=Vm,
-                gates_prev=gates,
-                gates_new=gates_pred,
-                state=extra,
-                dt=dt,
-                I_ion=Iion_pred,
-                I_background=I_bg,
-            )
-            linearization_gates = step_plan_pred.linearization_gates
-            if has_driven_extracellular:
-                linearization_gates = gates
-            Vi_new, Ve_new, Vm_new = _solve_voltage_step(
-                n=n,
-                Vi=Vi,
-                Ve=Ve,
-                Vm=Vm,
-                gates_new=linearization_gates,
-                t_mid=t_mid,
-                Iinj_den=Iinj,
-                I_outward_den=(
-                    step_plan_pred.explicit_outward_current
-                    if use_extracellular
-                    else step_plan_pred.total_outward_current
-                ),
-                I_corr_den=step_plan_pred.correction_current,
-            )
-            gates_new = membrane.final_gate_update(
-                gates_prev=gates,
-                V_mV_prev=Vm,
-                V_mV_new=Vm_new,
-                dt=dt,
-                gates_predictor=gates_pred,
-            )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
-            step_plan = membrane.prepare_membrane_step(
-                V_mV=Vm_new,
-                gates_prev=gates,
-                gates_new=gates_new,
-                state=extra,
-                dt=dt,
-                I_ion=Iion_new,
-                I_background=I_bg,
-            )
-            state_new = membrane.finalize_membrane_step(
-                V_mV_prev=Vm,
-                V_mV_new=Vm_new,
-                gates_prev=gates,
-                gates_new=gates_new,
-                state_prev=extra,
-                step_plan=step_plan,
-                dt=dt,
-            )
-            carry_out = _pack_voltage_state(Vi_new, Ve_new, Vm_new, gates_new, state_new)
-
-            if record_observables:
-                gate_obs, current_obs, conductance_obs, state_obs = observable_matrices(
-                    membrane, Vm_new, gates_new, state_new
-                )
-                if record_diagnostics and diagnostic_names:
-                    diag_vals = membrane.compute_step_diagnostics(
-                        V_mV_prev=Vm,
-                        V_mV_new=Vm_new,
-                        gates_prev=gates,
-                        gates_new=gates_new,
-                        state_prev=extra,
-                        state_new=state_new,
-                        step_plan=step_plan,
-                        I_ion=Iion_new,
-                    )
-                    return carry_out, (
-                        Vm_new,
-                        gate_obs,
-                        current_obs,
-                        conductance_obs,
-                        state_obs,
-                        *diag_vals,
-                    )
-                return carry_out, (Vm_new, gate_obs, current_obs, conductance_obs, state_obs)
-
-            if record_diagnostics and diagnostic_names:
-                diag_vals = membrane.compute_step_diagnostics(
-                    V_mV_prev=Vm,
-                    V_mV_new=Vm_new,
-                    gates_prev=gates,
-                    gates_new=gates_new,
-                    state_prev=extra,
-                    state_new=state_new,
-                    step_plan=step_plan,
-                    I_ion=Iion_new,
-                )
-                return carry_out, (Vm_new, *diag_vals)
-
-            return carry_out, Vm_new
-
-        init_carry = (
-            (Vi0, Ve0, gates0, *state0)
-            if use_extracellular
-            else (Vm0, gates0, *state0)
+        out = kernel.run(
+            record_diagnostics=record_diagnostics,
+            record_observables=record_observables,
         )
-        t_vec = grid.t_vec_ms
-        if record_observables and record_diagnostics and diagnostic_names:
-            _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-            V_all = out[0]
-            recordings = package_recordings(
-                observable_names,
-                out[1],
-                out[2],
-                out[3],
-                out[4],
-            )
-            diagnostics = {
-                name: values
-                for name, values in zip(diagnostic_names, out[5:], strict=False)
-            }
-            return SimResult(axon, V_all, t_vec, diagnostics=diagnostics, recordings=recordings)
-
-        if record_observables:
-            _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-            V_all = out[0]
-            recordings = package_recordings(
-                observable_names,
-                out[1],
-                out[2],
-                out[3],
-                out[4],
-            )
-            return SimResult(axon, V_all, t_vec, recordings=recordings)
-
-        if record_diagnostics and diagnostic_names:
-            _, diag_out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-            V_all = diag_out[0]
-            diagnostics = {
-                name: values
-                for name, values in zip(diagnostic_names, diag_out[1:], strict=False)
-            }
-            return SimResult(axon, V_all, t_vec, diagnostics=diagnostics)
-
-        _, V_all = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-        return SimResult(axon, V_all, t_vec)
+        return SimResult(
+            axon,
+            out.Vm,
+            out.t,
+            diagnostics=out.diagnostics,
+            recordings=out.recordings,
+        )
 
 # -----------------------------------------------------------------------------
 # Semi-implicit Crank–Nicolson (linearized ionic currents)

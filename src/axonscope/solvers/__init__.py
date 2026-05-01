@@ -9,6 +9,7 @@ from axonscope.solvers.CrankNicholson import (
     CrankNicholson_unoptimized,
 )
 from axonscope.solvers.Euler import Euler
+from axonscope.solvers.kernels import DoubleCableKernel, KernelResult, SingleCableKernel
 from axonscope.solvers.runtime import (
     CableRuntime,
     ExtracellularRuntime,
@@ -16,6 +17,7 @@ from axonscope.solvers.runtime import (
     SimulationGrid,
     SolverRuntime,
     StimulationRuntime,
+    precompute_intracellular_current_density,
     precompute_extracellular_potential_mV,
     prepare_solver_runtime,
 )
@@ -30,12 +32,16 @@ __all__ = [
     "CrankNicholsonImplicitFast",
     "CrankNicholsonImplicitFastMultiStep",
     "CrankNicholsonQuasiNewtonFast",
+    "SingleCableKernel",
+    "DoubleCableKernel",
+    "KernelResult",
     "CableRuntime",
     "ExtracellularRuntime",
     "MembraneRuntime",
     "SimulationGrid",
     "SolverRuntime",
     "StimulationRuntime",
+    "precompute_intracellular_current_density",
     "precompute_extracellular_potential_mV",
     "prepare_solver_runtime",
 ]

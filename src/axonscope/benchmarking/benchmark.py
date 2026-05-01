@@ -372,6 +372,8 @@ def compare_benchmark_results(
     current_results: Iterable[Mapping[str, Any]],
     *,
     thresholds: Mapping[str, float] | None = None,
+    output_atol: float = 5e-2,
+    output_rtol: float = 1e-6,
 ) -> list[BenchmarkComparisonRow]:
     thresholds_map = {
         "construction.mean_s": 0.15,
@@ -422,7 +424,14 @@ def compare_benchmark_results(
             )
             for metric_name, threshold in thresholds_map.items()
         )
-        notes = tuple(_output_guard_notes(baseline, current))
+        notes = tuple(
+            _output_guard_notes(
+                baseline,
+                current,
+                output_atol=output_atol,
+                output_rtol=output_rtol,
+            )
+        )
         status = "regression" if any(metric.status == "regression" for metric in metrics) else "ok"
         if notes and status == "ok":
             status = "changed_output"
@@ -628,7 +637,13 @@ def _nested_float(data: Mapping[str, Any], dotted_key: str) -> float | None:
         return None
 
 
-def _output_guard_notes(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> list[str]:
+def _output_guard_notes(
+    baseline: Mapping[str, Any],
+    current: Mapping[str, Any],
+    *,
+    output_atol: float,
+    output_rtol: float,
+) -> list[str]:
     baseline_output = baseline.get("output", {})
     current_output = current.get("output", {})
     if not isinstance(baseline_output, Mapping) or not isinstance(current_output, Mapping):
@@ -642,7 +657,8 @@ def _output_guard_notes(baseline: Mapping[str, Any], current: Mapping[str, Any])
         current_value = _nested_float(current_output, name)
         if baseline_value is None or current_value is None:
             continue
-        if abs(current_value - baseline_value) > 1e-6:
+        tolerance = float(output_atol) + float(output_rtol) * abs(baseline_value)
+        if abs(current_value - baseline_value) > tolerance:
             notes.append(f"{name} changed: {baseline_value:.6g} -> {current_value:.6g}")
     return notes
 

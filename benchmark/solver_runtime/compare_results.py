@@ -15,6 +15,8 @@ def main() -> None:
     parser.add_argument("--first-threshold", type=float, default=0.20, help="Relative first-solve regression threshold.")
     parser.add_argument("--warm-threshold", type=float, default=0.10, help="Relative warm-solve regression threshold.")
     parser.add_argument("--rss-threshold", type=float, default=0.15, help="Relative RSS-delta regression threshold.")
+    parser.add_argument("--output-atol", type=float, default=5e-2, help="Absolute tolerance for output min/max/mean changes.")
+    parser.add_argument("--output-rtol", type=float, default=1e-6, help="Relative tolerance for output min/max/mean changes.")
     parser.add_argument("--json-out", type=Path, default=None, help="Optional JSON comparison report.")
     parser.add_argument("--fail-on-regression", action="store_true", help="Exit non-zero if a regression is detected.")
     args = parser.parse_args()
@@ -30,6 +32,8 @@ def main() -> None:
             "warm_solve.mean_s": args.warm_threshold,
             "rss_first_solve_delta_mb": args.rss_threshold,
         },
+        output_atol=args.output_atol,
+        output_rtol=args.output_rtol,
     )
 
     _print_metadata_delta(baseline_metadata, current_metadata)

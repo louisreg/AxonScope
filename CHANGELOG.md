@@ -32,8 +32,16 @@ The format is inspired by Keep a Changelog.
   descriptions from solver-side arrays, initial states, and compiled stimuli.
 - Added solver-runtime precomputation of imposed extracellular `Vstim` samples
   for Crank-Nicholson extracellular solves.
+- Added optional solver-runtime precomputation of intracellular current-density
+  samples for future batch/chunk kernels.
+- Added explicit `SingleCableKernel` and `DoubleCableKernel` solver kernels
+  for the optimized Crank-Nicholson path.
 - Added an HH NRV/AxonScope validation sweep script over `dt`, `Nx`, and
   simulation duration.
+- Added NRV/AxonScope validation sweep profiles for HH and MRG intracellular
+  and extracellular workloads with blocked AxonScope timings, spike metrics,
+  velocity estimates, spatial alignment diagnostics, and optional `m` gate
+  comparison metrics.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -50,6 +58,8 @@ The format is inspired by Keep a Changelog.
   no longer depends on Crank-Nicholson private internals.
 - Changed extracellular Crank-Nicholson stepping to index precomputed imposed
   `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
+- Changed optimized Crank-Nicholson to dispatch to specialized single-cable and
+  double-cable kernels instead of carrying both voltage layouts in one scan body.
 - Specialized the double-cable 2x2 block-tridiagonal solve to operate on scalar
   coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
@@ -61,6 +71,8 @@ The format is inspired by Keep a Changelog.
 - Simplified `IonChannelModelBase` so sodium, potassium, and calcium-specific
   dynamic helpers are no longer defined on every membrane model.
 - Updated README and examples to the current package API.
+- Updated solver benchmark comparison output guards to tolerate tiny numerical
+  output drift before reporting `changed_output`.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 

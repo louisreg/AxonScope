@@ -5,7 +5,9 @@ from axonscope.icm import CompartmentMembraneLayout, HeterogeneousICMBackend
 from axonscope.morphology import get_mrg_morphology
 from axonscope.solvers import (
     CrankNicholson,
+    DoubleCableKernel,
     Euler,
+    SingleCableKernel,
     prepare_solver_runtime,
 )
 
@@ -18,6 +20,8 @@ def test_public_package_imports_are_available():
     assert Passive is not None
     assert MRG is not None
     assert CrankNicholson is not None
+    assert SingleCableKernel is not None
+    assert DoubleCableKernel is not None
     assert Euler is not None
     assert prepare_solver_runtime is not None
     assert IonChannelModelBase is not None

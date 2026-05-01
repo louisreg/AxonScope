@@ -183,8 +183,13 @@ NRV/AxonScope validation sweeps over `dt`, `Nx`, and `Tsim` write JSON/CSV
 comparison tables:
 
 ```bash
+python benchmark/solver_validation/nrv_axonscope_grid.py --list
+python benchmark/solver_validation/nrv_axonscope_grid.py --profile full --dry-run
 python benchmark/solver_validation/nrv_axonscope_grid.py \
-  --model hh --dt 0.005 0.01 --nx 51 101 --tsim 5 10
+  --profile smoke
+python benchmark/solver_validation/nrv_axonscope_grid.py \
+  --model mrg_extracellular --dt 0.005 0.01 --nodes 5 9 --tsim 4 \
+  --record-gates
 ```
 
 Compare two runs after a solver refactor:
@@ -194,6 +199,10 @@ python benchmark/solver_runtime/compare_results.py \
   benchmark/results/solver_runtime/baseline.json \
   benchmark/results/solver_runtime/current.json
 ```
+
+The NRV/AxonScope grid reports blocked AxonScope timings, NRV simulation
+timings, Vm error metrics, spike timing metrics, velocity estimates, spatial
+alignment error, and optional `m` gate metrics for gate-level diagnostics.
 
 The first default workloads cover HH intracellular, Rattay-Aberham
 intracellular, Schild97 intracellular, and MRG extracellular stimulation.

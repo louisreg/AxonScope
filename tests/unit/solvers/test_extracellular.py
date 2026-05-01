@@ -22,6 +22,8 @@ from axonscope.solvers.CrankNicholson import (
     CrankNicholsonImplicitFastMultiStep,
     CrankNicholsonQuasiNewtonFast,
 )
+from axonscope.solvers.kernels import DoubleCableKernel
+from axonscope.solvers.runtime import prepare_solver_runtime
 
 
 ALL_SOLVERS = [
@@ -178,6 +180,29 @@ def test_myelinated_prefers_inline_extracellular_solver(monkeypatch):
 
     assert res.Vm.shape[1] == ax.Nx
     assert np.isfinite(np.asarray(res.Vm)).all()
+
+
+def test_double_cable_kernel_matches_public_solver_path():
+    ax = MRG(d=10.0, nodes=5)
+    center_node = int(ax.node_indices.shape[0] // 2)
+    pos_um = float(ax.x[int(ax.node_indices[center_node])])
+    ax.insert_I_Clamp(position=pos_um, t_start=0.5, duration=0.05, amplitude=1.0)
+
+    runtime = prepare_solver_runtime(
+        ax,
+        tsim_ms=1.0,
+        dt_ms=0.01,
+        include_extracellular=True,
+        include_area=True,
+    )
+    direct = DoubleCableKernel(
+        runtime=runtime,
+        Veinit_mV=float(getattr(ax, "Veinit", 0.0)),
+    ).run()
+    public = CrankNicholson().solve(ax, tsim=1.0, dt=0.01)
+
+    np.testing.assert_allclose(np.asarray(direct.t), np.asarray(public.t), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(direct.Vm), np.asarray(public.Vm), atol=0.0, rtol=0.0)
 
 
 def test_euler_raises_on_extracellular():

@@ -12,6 +12,8 @@ from axonscope.solvers.CrankNicholson import (
     CrankNicholsonImplicitFastMultiStep,
     CrankNicholsonQuasiNewtonFast,
 )
+from axonscope.solvers.kernels import SingleCableKernel
+from axonscope.solvers.runtime import prepare_solver_runtime
 
 from axonscope.solvers.Euler import Euler
 
@@ -62,6 +64,36 @@ def test_cranknicholson_dense_and_tridiagonal_match():
     np.testing.assert_allclose(np.asarray(dense.t), np.asarray(optimized.t), atol=0.0, rtol=0.0)
     np.testing.assert_allclose(np.asarray(dense.t[0]), 0.01, atol=1e-8, rtol=0.0)
     np.testing.assert_allclose(np.asarray(dense.Vm), np.asarray(optimized.Vm), atol=1.5e-4, rtol=0.0)
+
+
+def test_single_cable_kernel_matches_public_solver_path():
+    axon = _hh_axon(Nx=31)
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=2.0,
+        dt_ms=0.01,
+        include_extracellular=False,
+        include_area=False,
+    )
+
+    direct = SingleCableKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+    ).run()
+    public = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
+
+    np.testing.assert_allclose(np.asarray(direct.t), np.asarray(public.t), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(direct.Vm), np.asarray(public.Vm), atol=0.0, rtol=0.0)
+
+    precomputed_runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=2.0,
+        dt_ms=0.01,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=True,
+    )
+    assert precomputed_runtime.stimulation.intracellular_current_density_mid is not None
 
 
 @pytest.mark.parametrize(("solver", "dt", "tsim"), CONCRETE_SOLVERS)

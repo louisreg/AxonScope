@@ -70,6 +70,7 @@ class StimulationRuntime:
     intracellular_current_density: Callable[[float], Array]
     extracellular_potential_mV: Callable[[float], Array]
     has_driven_extracellular: bool
+    intracellular_current_density_mid: Array | None = None
     extracellular_potential_mid_mV: Array | None = None
     extracellular_potential_initial_previous_mV: Array | None = None
 
@@ -153,14 +154,24 @@ def prepare_stimulation_runtime(
     dtype_local: jnp.dtype,
     *,
     grid: SimulationGrid | None = None,
+    precompute_intracellular: bool = False,
     precompute_extracellular: bool = False,
 ) -> StimulationRuntime:
     use_extracellular = bool(getattr(axon, "use_extracellular", False))
+    inj_fun = build_intracellular_current_density_fn(axon)
     vext_fun = build_extracellular_potential_fn(axon)
+    iinj_mid = None
     vext_mid = None
     vext_initial_previous = None
-    if precompute_extracellular and grid is not None:
+    if grid is not None and (precompute_intracellular or precompute_extracellular):
         t_mid = (jnp.arange(grid.Nt, dtype=dtype_local) + dtype_local(0.5)) * dtype_local(grid.dt_ms)
+        if precompute_intracellular:
+            iinj_mid = sample_intracellular_current_density(
+                inj_fun,
+                t_mid,
+                dtype_local=dtype_local,
+            )
+    if precompute_extracellular and grid is not None:
         vext_mid = sample_extracellular_potential_mV(vext_fun, t_mid, dtype_local=dtype_local)
         vext_initial_previous = sample_extracellular_potential_mV(
             vext_fun,
@@ -168,11 +179,12 @@ def prepare_stimulation_runtime(
             dtype_local=dtype_local,
         )[0]
     return StimulationRuntime(
-        intracellular_current_density=build_intracellular_current_density_fn(axon),
+        intracellular_current_density=inj_fun,
         extracellular_potential_mV=vext_fun,
         has_driven_extracellular=bool(
             use_extracellular and getattr(axon, "extracellular_contexts", ())
         ),
+        intracellular_current_density_mid=iinj_mid,
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_initial_previous,
     )
@@ -209,6 +221,7 @@ def prepare_solver_runtime(
     *,
     include_extracellular: bool | None = None,
     include_area: bool | None = None,
+    precompute_intracellular: bool = False,
 ) -> SolverRuntime:
     membrane = prepare_membrane_runtime(axon)
     grid = prepare_simulation_grid(tsim_ms, dt_ms, membrane.dtype)
@@ -221,6 +234,7 @@ def prepare_solver_runtime(
         axon,
         membrane.dtype,
         grid=grid,
+        precompute_intracellular=precompute_intracellular,
         precompute_extracellular=include_extracellular,
     )
     extracellular = (
@@ -255,6 +269,32 @@ def precompute_extracellular_potential_mV(
     t = jnp.asarray(t_ms, dtype=dtype_local)
     vext_fun = build_extracellular_potential_fn(axon)
     return sample_extracellular_potential_mV(vext_fun, t, dtype_local=dtype_local)
+
+
+def precompute_intracellular_current_density(
+    axon: AxonBase,
+    t_ms: Array,
+    *,
+    dtype_local: jnp.dtype | None = None,
+) -> Array:
+    """Sample intracellular current density on a time grid, returning shape (Nt, Nx)."""
+    if dtype_local is None:
+        runtime = prepare_membrane_runtime(axon)
+        dtype_local = runtime.dtype
+    t = jnp.asarray(t_ms, dtype=dtype_local)
+    inj_fun = build_intracellular_current_density_fn(axon)
+    return sample_intracellular_current_density(inj_fun, t, dtype_local=dtype_local)
+
+
+def sample_intracellular_current_density(
+    current_density_fn: Callable[[float], Array],
+    t_ms: Array,
+    *,
+    dtype_local: jnp.dtype,
+) -> Array:
+    """Sample a compiled intracellular current-density function on a time grid."""
+    t = jnp.asarray(t_ms, dtype=dtype_local)
+    return jax.vmap(current_density_fn)(t)
 
 
 def sample_extracellular_potential_mV(
