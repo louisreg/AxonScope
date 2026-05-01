@@ -208,6 +208,8 @@ Generated logs and figures are ignored by git.
 - Extracellular Crank-Nicholson solvers precompute imposed `Vstim` samples on
   the solver time grid, then index those arrays inside the time loop. This is
   the first step toward batch-friendly `Vstim[B, Nt, Nx]` inputs.
+- The full double-cable reference path uses scalar coefficient arrays for its
+  2x2 block solve, avoiding per-step materialization of `(Nx, 2, 2)` matrices.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
 - `CompartmentMembraneLayout` assigns one membrane model per compartment.
 - `HeterogeneousICMBackend` evaluates heterogeneous membrane layouts.

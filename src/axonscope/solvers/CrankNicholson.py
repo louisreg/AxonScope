@@ -45,7 +45,7 @@ from .common import (
     Array,
     build_cn_tridiagonal,
     build_dense_from_tridiagonal,
-    solve_block_tridiagonal_2x2,
+    solve_block_tridiagonal_2x2_scalar,
 )
 from .recording import observable_matrices, package_recordings
 from .runtime import (
@@ -147,18 +147,13 @@ def _solve_with_extracellular_generic(
             I_outward_abs = outward_current * area
             I_corr_abs = correction_current * area
 
-            A_diag = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            A_lower = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            A_upper = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            rhs = jnp.zeros((Nx, 2), dtype=dtype_local)
+            a00 = Cm_abs / dt + Gm_abs + left_i + right_i
+            a01 = -(Cm_abs / dt + Gm_abs)
+            rhs0 = (Cm_abs / dt) * Vm_old + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
 
-            A_diag = A_diag.at[:, 0, 0].set(Cm_abs / dt + Gm_abs + left_i + right_i)
-            A_diag = A_diag.at[:, 0, 1].set(-(Cm_abs / dt + Gm_abs))
-            rhs = rhs.at[:, 0].set((Cm_abs / dt) * Vm_old + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs)
-
-            A_diag = A_diag.at[:, 1, 0].set(-(Cm_abs / dt + Gm_abs))
-            A_diag = A_diag.at[:, 1, 1].set(Cm_abs / dt + Gm_abs + Cx_abs / dt + Gx_abs + left_e + right_e)
-            rhs = rhs.at[:, 1].set(
+            a10 = a01
+            a11 = Cm_abs / dt + Gm_abs + Cx_abs / dt + Gx_abs + left_e + right_e
+            rhs1 = (
                 -(Cm_abs / dt) * Vm_old
                 - GE_abs
                 + (Cx_abs / dt) * Ve_old
@@ -168,13 +163,16 @@ def _solve_with_extracellular_generic(
                 + I_corr_abs
             )
 
-            A_lower = A_lower.at[1:, 0, 0].set(-Gax_i)
-            A_upper = A_upper.at[:-1, 0, 0].set(-Gax_i)
-            A_lower = A_lower.at[1:, 1, 1].set(-Gax_e)
-            A_upper = A_upper.at[:-1, 1, 1].set(-Gax_e)
-
-            sol = solve_block_tridiagonal_2x2(A_lower, A_diag, A_upper, rhs)
-            return sol[:, 0], sol[:, 1]
+            return solve_block_tridiagonal_2x2_scalar(
+                a00,
+                a01,
+                a10,
+                a11,
+                -Gax_i,
+                -Gax_e,
+                rhs0,
+                rhs1,
+            )
 
         def iter_body(_, state):
             Vm_guess, gates_last, step_plan_last, Vi_last, Ve_last = state
@@ -721,18 +719,13 @@ class CrankNicholson(Solver):
             I_corr_abs = I_corr_den * area
             Vm = Vi - Ve
 
-            A_diag = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            A_lower = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            A_upper = jnp.zeros((Nx, 2, 2), dtype=dtype_local)
-            rhs = jnp.zeros((Nx, 2), dtype=dtype_local)
+            a00 = Cm_abs / dt + Gm_abs + left_i + right_i
+            a01 = -(Cm_abs / dt + Gm_abs)
+            rhs0 = (Cm_abs / dt) * Vm + GE_abs + Iinj_abs - I_bg_abs - I_corr_abs
 
-            A_diag = A_diag.at[:, 0, 0].set(Cm_abs / dt + Gm_abs + left_i + right_i)
-            A_diag = A_diag.at[:, 0, 1].set(-(Cm_abs / dt + Gm_abs))
-            rhs = rhs.at[:, 0].set((Cm_abs / dt) * Vm + GE_abs + Iinj_abs - I_bg_abs - I_corr_abs)
-
-            A_diag = A_diag.at[:, 1, 0].set(-(Cm_abs / dt + Gm_abs))
-            A_diag = A_diag.at[:, 1, 1].set(Cm_abs / dt + Gm_abs + Cx_abs / dt + Gx_abs + left_e + right_e)
-            rhs = rhs.at[:, 1].set(
+            a10 = a01
+            a11 = Cm_abs / dt + Gm_abs + Cx_abs / dt + Gx_abs + left_e + right_e
+            rhs1 = (
                 -(Cm_abs / dt) * Vm
                 - GE_abs
                 + (Cx_abs / dt) * Ve
@@ -742,13 +735,16 @@ class CrankNicholson(Solver):
                 + I_corr_abs
             )
 
-            A_lower = A_lower.at[1:, 0, 0].set(-Gax_i)
-            A_upper = A_upper.at[:-1, 0, 0].set(-Gax_i)
-            A_lower = A_lower.at[1:, 1, 1].set(-Gax_e)
-            A_upper = A_upper.at[:-1, 1, 1].set(-Gax_e)
-
-            sol = solve_block_tridiagonal_2x2(A_lower, A_diag, A_upper, rhs)
-            return sol[:, 0], sol[:, 1]
+            return solve_block_tridiagonal_2x2_scalar(
+                a00,
+                a01,
+                a10,
+                a11,
+                -Gax_i,
+                -Gax_e,
+                rhs0,
+                rhs1,
+            )
 
         def _solve_voltage_step(
             n: int,

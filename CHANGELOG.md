@@ -48,6 +48,8 @@ The format is inspired by Keep a Changelog.
   no longer depends on Crank-Nicholson private internals.
 - Changed extracellular Crank-Nicholson stepping to index precomputed imposed
   `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
+- Specialized the double-cable 2x2 block-tridiagonal solve to operate on scalar
+  coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous
