@@ -171,9 +171,20 @@ pytest -q tests/nrv/numerics/test_mrg_compartment_geometry_vs_nrv.py
 
 ## Benchmarks
 
-Benchmark experiments are under `benchmark/CrankNicholson_runtime/`. These files
-compare standalone and backend-specific solver variants and are being consolidated
-around the newer `Solver` API.
+Solver benchmarks start from the shared `Solver` API and write JSON/CSV results:
+
+```bash
+python benchmark/solver_runtime/benchmark_solver.py --list
+python benchmark/solver_runtime/benchmark_solver.py --cases hh_intracellular_small --repeats 3
+python benchmark/solver_runtime/benchmark_solver.py --cases all --repeats 3
+```
+
+The first default workloads cover HH intracellular, Rattay-Aberham
+intracellular, Schild97 intracellular, and MRG extracellular stimulation.
+
+Reference and experimental backend comparisons remain under
+`benchmark/CrankNicholson_runtime/`; those scripts are being consolidated around
+the shared benchmark runner.
 
 Generated logs and figures are ignored by git.
 

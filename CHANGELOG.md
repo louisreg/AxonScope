@@ -22,6 +22,10 @@ The format is inspired by Keep a Changelog.
 - Added MRG myelinated axon support with nodal `AxnodeICM` and passive
   internodal membrane models.
 - Added `MembraneStateSpec` for model-owned membrane state variables.
+- Added MRG extracellular AxonScope-vs-NRV baseline export under
+  `benchmark/solver_baseline/`.
+- Added a shared `Solver` benchmark runner with JSON/CSV output under
+  `benchmark/solver_runtime/`.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -69,8 +73,8 @@ The format is inspired by Keep a Changelog.
 - The generic heterogeneous MRG membrane layout is cleaner than the former masked
   model but currently slower. Profiling and backend specialization are the next
   planned cleanup step.
-- The `playground/` and `benchmark/CrankNicholson_runtime/` directories contain
-  active experiments and are not stable public API.
+- The `playground/` and legacy `benchmark/CrankNicholson_runtime/` directories
+  contain active experiments and are not stable public API.
 
 ## [0.2.0] - 2025-11-25
 
