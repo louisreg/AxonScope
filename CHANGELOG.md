@@ -34,6 +34,8 @@ The format is inspired by Keep a Changelog.
   for Crank-Nicholson extracellular solves.
 - Added reduced Crank-Nicholson voltage output modes for probe traces and final
   state snapshots.
+- Added an HH NRV/AxonScope validation sweep script over `dt`, `Nx`, and
+  simulation duration.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.

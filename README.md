@@ -181,6 +181,15 @@ python benchmark/solver_runtime/benchmark_solver.py --cases all --output-mode pr
 python benchmark/solver_runtime/benchmark_solver.py --cases all --output-mode final_state
 ```
 
+NRV/AxonScope validation sweeps over `dt`, `Nx`, and `Tsim` write JSON/CSV
+comparison tables:
+
+```bash
+python benchmark/solver_validation/nrv_axonscope_grid.py \
+  --model hh --dt 0.005 0.01 --nx 51 101 --tsim 5 10 \
+  --output-mode probes --probe-positions-um 0 500 1000
+```
+
 Compare two runs after a solver refactor:
 
 ```bash
