@@ -442,7 +442,7 @@ def compare_benchmark_results(
 def summarize_sim_result(result: SimResult | Any) -> dict[str, Any]:
     vm = np.asarray(result.Vm, dtype=float)
     t = np.asarray(result.t, dtype=float)
-    return {
+    summary = {
         "vm_shape": tuple(int(x) for x in vm.shape),
         "t_size": int(t.size),
         "vm_min_mV": float(np.min(vm)),
@@ -451,6 +451,15 @@ def summarize_sim_result(result: SimResult | Any) -> dict[str, Any]:
         "t_start_ms": float(t[0]) if t.size else None,
         "t_stop_ms": float(t[-1]) if t.size else None,
     }
+    metadata = getattr(result, "metadata", None)
+    if isinstance(metadata, Mapping):
+        output_mode = metadata.get("output_mode")
+        if output_mode is not None:
+            summary["output_mode"] = str(output_mode)
+        probe_indices = metadata.get("probe_indices")
+        if probe_indices is not None:
+            summary["probe_indices"] = tuple(int(i) for i in probe_indices)
+    return summary
 
 
 def _time_call(func: Callable[[], Any]) -> tuple[float, Any]:

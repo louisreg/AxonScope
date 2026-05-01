@@ -31,7 +31,7 @@ Author: l.regnacq
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 from axonscope.axons.base import AxonBase
 from axonscope.simresult import SimResult
@@ -46,6 +46,12 @@ from .common import (
     build_cn_tridiagonal,
     build_dense_from_tridiagonal,
     solve_block_tridiagonal_2x2_scalar,
+)
+from .output import (
+    SolverOutputSpec,
+    output_metadata,
+    resolve_solver_output_spec,
+    step_voltage_output,
 )
 from .recording import observable_matrices, package_recordings
 from .runtime import (
@@ -66,14 +72,62 @@ def _precomputed_vext_step(
     return Vext, Vext_old
 
 
+def _voltage_from_carry(carry, *, use_extracellular: bool) -> jnp.ndarray:
+    if use_extracellular:
+        Vi, Ve, *_ = carry
+        return Vi - Ve
+    Vm, *_ = carry
+    return Vm
+
+
+def _run_voltage_output_scan(
+    step,
+    init_carry,
+    t_vec: jnp.ndarray,
+    Nt: int,
+    output_spec: SolverOutputSpec,
+    *,
+    use_extracellular: bool,
+    axon: AxonBase,
+) -> SimResult:
+    metadata = output_metadata(axon, output_spec)
+    if output_spec.mode == "final_state":
+        def body(n, carry):
+            carry_out, _ = step(carry, n)
+            return carry_out
+
+        final_carry = jax.lax.fori_loop(0, Nt, body, init_carry)
+        Vm_final = _voltage_from_carry(final_carry, use_extracellular=use_extracellular)
+        return SimResult(axon, Vm_final[None, :], t_vec[-1:], metadata=metadata)
+
+    def output_step(carry, n):
+        carry_out, Vm_new = step(carry, n)
+        return carry_out, step_voltage_output(Vm_new, output_spec)
+
+    _, V_out = jax.lax.scan(output_step, init_carry, jnp.arange(Nt))
+    return SimResult(axon, V_out, t_vec, metadata=metadata)
+
+
 def _solve_with_extracellular_generic(
     axon: AxonBase,
     tsim: float,
     dt: float,
     record_diagnostics: bool = False,
     record_observables: bool = False,
+    output_mode: str = "full_trace",
+    probe_indices: Sequence[int] | None = None,
+    probe_positions_um: Sequence[float] | None = None,
 ) -> SimResult:
     """Generic extracellular (Vi/Ve) integration shared by the solver family."""
+    output_spec = resolve_solver_output_spec(
+        axon,
+        output_mode=output_mode,
+        probe_indices=probe_indices,
+        probe_positions_um=probe_positions_um,
+    )
+    if (record_observables or record_diagnostics) and not output_spec.stores_full_trace:
+        raise ValueError("record_observables/record_diagnostics require output_mode='full_trace'.")
+
     runtime = prepare_solver_runtime(
         axon,
         tsim,
@@ -293,8 +347,15 @@ def _solve_with_extracellular_generic(
         }
         return SimResult(axon, V_all, t_vec, diagnostics=diagnostics)
 
-    _, V_all = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-    return SimResult(axon, V_all, t_vec)
+    return _run_voltage_output_scan(
+        step,
+        init_carry,
+        t_vec,
+        Nt,
+        output_spec,
+        use_extracellular=True,
+        axon=axon,
+    )
 
 
 def _maybe_solve_with_extracellular_generic(
@@ -303,6 +364,9 @@ def _maybe_solve_with_extracellular_generic(
     dt: float,
     record_diagnostics: bool = False,
     record_observables: bool = False,
+    output_mode: str = "full_trace",
+    probe_indices: Sequence[int] | None = None,
+    probe_positions_um: Sequence[float] | None = None,
 ) -> Optional[SimResult]:
     if bool(getattr(axon, "use_extracellular", False)):
         return _solve_with_extracellular_generic(
@@ -311,6 +375,9 @@ def _maybe_solve_with_extracellular_generic(
             dt,
             record_diagnostics=record_diagnostics,
             record_observables=record_observables,
+            output_mode=output_mode,
+            probe_indices=probe_indices,
+            probe_positions_um=probe_positions_um,
         )
     return None
 
@@ -586,6 +653,9 @@ class CrankNicholson(Solver):
         dt: float,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        output_mode: str = "full_trace",
+        probe_indices: Sequence[int] | None = None,
+        probe_positions_um: Sequence[float] | None = None,
     ) -> SimResult:
         """
         Execute an optimized Crank–Nicolson simulation.
@@ -604,6 +674,15 @@ class CrankNicholson(Solver):
         SimResult
             Contains V_all (Nt × Nx) and t_vec (Nt).
         """
+        output_spec = resolve_solver_output_spec(
+            axon,
+            output_mode=output_mode,
+            probe_indices=probe_indices,
+            probe_positions_um=probe_positions_um,
+        )
+        if (record_observables or record_diagnostics) and not output_spec.stores_full_trace:
+            raise ValueError("record_observables/record_diagnostics require output_mode='full_trace'.")
+
         if not bool(getattr(axon, "prefer_inline_extracellular_solver", False)):
             extracellular_res = _maybe_solve_with_extracellular_generic(
                 axon,
@@ -611,6 +690,9 @@ class CrankNicholson(Solver):
                 dt,
                 record_diagnostics=record_diagnostics,
                 record_observables=record_observables,
+                output_mode=output_mode,
+                probe_indices=probe_indices,
+                probe_positions_um=probe_positions_um,
             )
             if extracellular_res is not None:
                 return extracellular_res
@@ -930,8 +1012,15 @@ class CrankNicholson(Solver):
             }
             return SimResult(axon, V_all, t_vec, diagnostics=diagnostics)
 
-        _, V_all = jax.lax.scan(step, init_carry, jnp.arange(Nt))
-        return SimResult(axon, V_all, t_vec)
+        return _run_voltage_output_scan(
+            step,
+            init_carry,
+            t_vec,
+            Nt,
+            output_spec,
+            use_extracellular=use_extracellular,
+            axon=axon,
+        )
 
 # -----------------------------------------------------------------------------
 # Semi-implicit Crank–Nicolson (linearized ionic currents)

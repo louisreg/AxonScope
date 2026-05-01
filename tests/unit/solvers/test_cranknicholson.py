@@ -138,3 +138,71 @@ def test_cranknicholson_aggregates_duplicate_current_and_conductance_names():
     assert "I_l_2" not in res.recordings["currents"]
     assert "g_l" in res.recordings["conductances"]
     assert "g_l_2" not in res.recordings["conductances"]
+
+
+def test_cranknicholson_probe_output_matches_full_trace_columns():
+    axon = _hh_axon(Nx=21)
+    probe_indices = [0, 10, 20]
+
+    full = CrankNicholson().solve(axon, tsim=1.5, dt=0.01)
+    probes = CrankNicholson().solve(
+        axon,
+        tsim=1.5,
+        dt=0.01,
+        output_mode="probes",
+        probe_indices=probe_indices,
+    )
+
+    assert probes.Vm.shape == (full.Vm.shape[0], len(probe_indices))
+    np.testing.assert_allclose(np.asarray(probes.t), np.asarray(full.t), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(
+        np.asarray(probes.Vm),
+        np.asarray(full.Vm)[:, probe_indices],
+        atol=0.0,
+        rtol=0.0,
+    )
+    assert probes.metadata is not None
+    assert probes.metadata["output_mode"] == "probes"
+    assert probes.metadata["probe_indices"] == tuple(probe_indices)
+
+
+def test_cranknicholson_probe_positions_resolve_to_nearest_compartments():
+    axon = _hh_axon(Nx=21)
+    probes = CrankNicholson().solve(
+        axon,
+        tsim=0.5,
+        dt=0.01,
+        output_mode="probes",
+        probe_positions_um=[0.0, 499.0, 1000.0],
+    )
+
+    assert probes.Vm.shape[1] == 3
+    assert probes.metadata is not None
+    assert probes.metadata["probe_indices"] == (0, 10, 20)
+    np.testing.assert_allclose(probes.spatial_positions_um(), [0.0, 500.0, 1000.0])
+
+
+def test_cranknicholson_final_state_output_matches_last_full_sample():
+    axon = _hh_axon(Nx=21)
+
+    full = CrankNicholson().solve(axon, tsim=1.5, dt=0.01)
+    final = CrankNicholson().solve(axon, tsim=1.5, dt=0.01, output_mode="final_state")
+
+    assert final.Vm.shape == (1, axon.Nx)
+    assert final.t.shape == (1,)
+    np.testing.assert_allclose(np.asarray(final.t[0]), np.asarray(full.t[-1]), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(final.Vm[0]), np.asarray(full.Vm[-1]), atol=0.0, rtol=0.0)
+    assert final.metadata is not None
+    assert final.metadata["output_mode"] == "final_state"
+
+
+def test_cranknicholson_rejects_reduced_output_with_recordings():
+    with pytest.raises(ValueError, match="require output_mode='full_trace'"):
+        CrankNicholson().solve(
+            _hh_axon(Nx=21),
+            tsim=0.5,
+            dt=0.01,
+            output_mode="probes",
+            probe_indices=[10],
+            record_observables=True,
+        )

@@ -161,6 +161,48 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
     np.testing.assert_allclose(np.asarray(res.Vm), -70.0, rtol=0.0, atol=2e-3)
 
 
+def test_extracellular_probe_output_matches_full_trace_columns():
+    ax = AxonBase(
+        PassiveICM(Rm=1e4, EL=-70.0),
+        d=1.0,
+        Nx=7,
+        L=120.0,
+        Ra=100.0,
+        Cm=1.0,
+        Vinit=-70.0,
+    )
+    ax.set_extracellular_layer(
+        xraxial_MOhm_per_cm=np.full((ax.Nx,), 1e8, dtype=float),
+        xg_S_per_cm2=np.full((ax.Nx,), 1e-3, dtype=float),
+        xc_uF_per_cm2=np.full((ax.Nx,), 0.01, dtype=float),
+        use_extracellular=True,
+        Veinit=0.0,
+    )
+    ax.attach_extracellular_stimulus(
+        _UniformFieldElectrode(1000.0).attach_stimulus(
+            Stimulus.pulse(start=0.1, duration=0.1, amplitude=10e-6)
+        )
+    )
+    probe_indices = [0, 3, 6]
+
+    full = CrankNicholson().solve(ax, tsim=0.3, dt=0.01)
+    probes = CrankNicholson().solve(
+        ax,
+        tsim=0.3,
+        dt=0.01,
+        output_mode="probes",
+        probe_indices=probe_indices,
+    )
+
+    assert probes.Vm.shape == (full.Vm.shape[0], len(probe_indices))
+    np.testing.assert_allclose(
+        np.asarray(probes.Vm),
+        np.asarray(full.Vm)[:, probe_indices],
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
 def test_myelinated_prefers_inline_extracellular_solver(monkeypatch):
     cn_mod = importlib.import_module("axonscope.solvers.CrankNicholson")
 
