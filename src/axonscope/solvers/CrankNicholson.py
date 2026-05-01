@@ -47,63 +47,13 @@ from .common import (
     build_dense_from_tridiagonal,
     solve_block_tridiagonal_2x2,
 )
+from .recording import observable_matrices, package_recordings
 from .runtime import (
-    membrane_observable_names,
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
 from .stimulus_runtime import build_intracellular_current_density_fn
 
-
-def _observable_names(membrane) -> dict[str, tuple[str, ...]]:
-    return membrane_observable_names(membrane)
-
-
-def _observable_matrices(
-    membrane,
-    V_mV: jnp.ndarray,
-    gates: jnp.ndarray,
-    state: tuple[jnp.ndarray, ...],
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    Nx = V_mV.shape[0]
-    gate_obs = membrane.gate_trace_matrix(gates, state)
-    current_obs = membrane.ionic_current_trace_matrix(V_mV, gates, state)
-    conductance_obs = membrane.conductance_trace_matrix(gates, state)
-    if membrane.membrane_state_names():
-        state_obs = membrane.membrane_state_trace_matrix(state)
-    else:
-        state_obs = jnp.zeros((Nx, 0), dtype=V_mV.dtype)
-    return gate_obs, current_obs, conductance_obs, state_obs
-
-
-def _package_recordings(
-    names: dict[str, tuple[str, ...]],
-    gate_obs: jnp.ndarray,
-    current_obs: jnp.ndarray,
-    conductance_obs: jnp.ndarray,
-    state_obs: jnp.ndarray,
-) -> dict[str, dict[str, jnp.ndarray]]:
-    recordings: dict[str, dict[str, jnp.ndarray]] = {}
-    packed = {
-        "gates": gate_obs,
-        "currents": current_obs,
-        "conductances": conductance_obs,
-        "states": state_obs,
-    }
-    for group_name, group_names in names.items():
-        if not group_names:
-            continue
-        values = packed[group_name]
-        group_recordings: dict[str, jnp.ndarray] = {}
-        sum_duplicates = group_name in {"currents", "conductances"}
-        for i, name in enumerate(group_names):
-            column = values[:, :, i]
-            if sum_duplicates and name in group_recordings:
-                group_recordings[name] = group_recordings[name] + column
-            else:
-                group_recordings[name] = column
-        recordings[group_name] = group_recordings
-    return recordings
 
 def _solve_with_extracellular_generic(
     axon: AxonBase,
@@ -255,7 +205,7 @@ def _solve_with_extracellular_generic(
         )
         carry_out = (Vi_new, Ve_new, gates_new, *state_new)
         if record_observables:
-            gate_obs, current_obs, conductance_obs, state_obs = _observable_matrices(
+            gate_obs, current_obs, conductance_obs, state_obs = observable_matrices(
                 membrane, Vm_new, gates_new, state_new
             )
             if record_diagnostics and diagnostic_names:
@@ -291,7 +241,7 @@ def _solve_with_extracellular_generic(
     if record_observables and record_diagnostics and diagnostic_names:
         _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
         V_all = out[0]
-        recordings = _package_recordings(
+        recordings = package_recordings(
             observable_names,
             out[1],
             out[2],
@@ -307,7 +257,7 @@ def _solve_with_extracellular_generic(
     if record_observables:
         _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
         V_all = out[0]
-        recordings = _package_recordings(
+        recordings = package_recordings(
             observable_names,
             out[1],
             out[2],
@@ -373,13 +323,6 @@ def _cn_channel_step(
     Iion = backend.currents(V_mV=V_mV, gates=gates_new)
     Gtot = backend.total_conductance(gates_new)
     return gates_new, Iion, Gtot
-
-
-def _single_cable_diffusion_setup(
-    axon: AxonBase,
-    dtype_local: jnp.dtype,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    return diffusion_operator_coeffs(axon, dtype_local)
 
 
 def _implicit_fast_linear_terms(
@@ -512,7 +455,7 @@ class CrankNicholson_unoptimized(Solver):
 
         t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * dt
 
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype_local)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
         dl, d, du = build_cn_tridiagonal(lower, diag, upper, dt, dtype_local)
         A: jnp.ndarray = build_dense_from_tridiagonal(dl, d, du, dtype_local)
         I_bg = backend.background_current()
@@ -878,7 +821,7 @@ class CrankNicholson(Solver):
             carry_out = _pack_voltage_state(Vi_new, Ve_new, Vm_new, gates_new, state_new)
 
             if record_observables:
-                gate_obs, current_obs, conductance_obs, state_obs = _observable_matrices(
+                gate_obs, current_obs, conductance_obs, state_obs = observable_matrices(
                     membrane, Vm_new, gates_new, state_new
                 )
                 if record_diagnostics and diagnostic_names:
@@ -926,7 +869,7 @@ class CrankNicholson(Solver):
         if record_observables and record_diagnostics and diagnostic_names:
             _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
             V_all = out[0]
-            recordings = _package_recordings(
+            recordings = package_recordings(
                 observable_names,
                 out[1],
                 out[2],
@@ -942,7 +885,7 @@ class CrankNicholson(Solver):
         if record_observables:
             _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
             V_all = out[0]
-            recordings = _package_recordings(
+            recordings = package_recordings(
                 observable_names,
                 out[1],
                 out[2],
@@ -990,7 +933,7 @@ class CrankNicholsonSemiImplicit(Solver):
         # -------------------------
         # Diffusion operator (matrix form ONLY here)
         # -------------------------
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
 
         # CN matrix: (I - dt/2 L)
         dl = -0.5 * dt_local * lower
@@ -1141,7 +1084,7 @@ class CrankNicholsonImplicit(Solver):
         Cm_over_dt: float = Cm / dt
 
         # Sealed-end Neumann diffusion operator (shared helpers)
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype_local)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
 
         # Newton Jacobian off-diagonals: J = (Cm/dt) I - (1/2) L + diag(G_tot/2)
         dl_base: jnp.ndarray = -0.5 * lower
@@ -1241,7 +1184,7 @@ class CrankNicholsonImplicitFast(Solver):
         Nt = int(jnp.ceil(tsim / dt))
 
         Cm = axon.Cm
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
         dl, du, d_static = _implicit_fast_linear_terms(Cm, lower, diag, upper, dt)
 
         inj_fun = build_intracellular_current_density_fn(axon)
@@ -1286,7 +1229,7 @@ class CrankNicholsonImplicitFastMultiStep(Solver):
         Nt = int(jnp.ceil(tsim / dt))
 
         Cm = axon.Cm
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
         dl, du, d_static = _implicit_fast_linear_terms(Cm, lower, diag, upper, dt)
 
         inj_fun = build_intracellular_current_density_fn(axon)
@@ -1364,7 +1307,7 @@ class CrankNicholsonQuasiNewtonFast(Solver):
         Nt = int(jnp.ceil(tsim / dt))
 
         Cm = axon.Cm
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype)
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
 
         inj_fun = build_intracellular_current_density_fn(axon)
 

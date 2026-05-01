@@ -1,7 +1,7 @@
 from .base import Solver
 from .common import apply_diffusion_operator
+from .recording import observable_matrices, package_recordings
 from .runtime import prepare_solver_runtime
-from .CrankNicholson import _observable_matrices, _package_recordings
 from axonscope.axons.base import AxonBase
 from axonscope.simresult import SimResult
 
@@ -162,7 +162,7 @@ class Euler(Solver):
             )
 
             if record_observables:
-                gate_obs, current_obs, conductance_obs, state_obs = _observable_matrices(
+                gate_obs, current_obs, conductance_obs, state_obs = observable_matrices(
                     membrane, V_new, gates_new, state_new
                 )
                 return (V_new, gates_new, *state_new), (
@@ -179,7 +179,7 @@ class Euler(Solver):
         _, out = jax.lax.scan(step, (V0, gates0, *state0), jnp.arange(Nt))
         if record_observables:
             V_all = out[0]
-            recordings = _package_recordings(
+            recordings = package_recordings(
                 observable_names,
                 out[1],
                 out[2],

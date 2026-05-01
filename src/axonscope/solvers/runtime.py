@@ -14,6 +14,7 @@ from .common import (
     extracellular_absolute_arrays,
     initial_voltage,
 )
+from .recording import membrane_observable_names
 from .stimulus_runtime import (
     build_extracellular_potential_fn,
     build_intracellular_current_density_fn,
@@ -94,15 +95,6 @@ class SolverRuntime:
     cable: CableRuntime
     stimulation: StimulationRuntime
     extracellular: ExtracellularRuntime | None = None
-
-
-def membrane_observable_names(membrane: Any) -> dict[str, tuple[str, ...]]:
-    return {
-        "gates": membrane.gate_names(),
-        "currents": membrane.current_names(),
-        "conductances": membrane.conductance_names(),
-        "states": membrane.membrane_state_names(),
-    }
 
 
 def prepare_simulation_grid(tsim_ms: float, dt_ms: float, dtype_local: jnp.dtype) -> SimulationGrid:

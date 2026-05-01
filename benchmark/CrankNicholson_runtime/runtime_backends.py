@@ -11,7 +11,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
-from axonscope.solvers.CrankNicholson import _build_cn_tridiagonal, _diffusion_operator_coeffs
+from axonscope.solvers.common import build_cn_tridiagonal, diffusion_operator_coeffs
 
 
 jax.config.update("jax_enable_x64", True)
@@ -97,8 +97,8 @@ def _hh_rates_torch(V: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
 
 def _init_numpy(problem) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    lower, diag, upper = _diffusion_operator_coeffs(problem.axon, jnp.float64)
-    dl, d, du = _build_cn_tridiagonal(lower, diag, upper, problem.dt, jnp.float64)
+    lower, diag, upper = diffusion_operator_coeffs(problem.axon, jnp.float64)
+    dl, d, du = build_cn_tridiagonal(lower, diag, upper, problem.dt, jnp.float64)
     V0 = np.full(problem.Nx, float(problem.axon.Vinit), dtype=np.float64)
     alpha, beta = _hh_rates_numpy(V0)
     gates0 = alpha / np.maximum(alpha + beta, 1e-12)
@@ -113,8 +113,8 @@ def _init_numpy(problem) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray
 
 
 def _init_jax(problem, dtype) -> tuple[tuple[jnp.ndarray, ...], jnp.ndarray, jnp.ndarray]:
-    lower, diag, upper = _diffusion_operator_coeffs(problem.axon, dtype)
-    dl, d, du = _build_cn_tridiagonal(lower, diag, upper, problem.dt, dtype)
+    lower, diag, upper = diffusion_operator_coeffs(problem.axon, dtype)
+    dl, d, du = build_cn_tridiagonal(lower, diag, upper, problem.dt, dtype)
     V0 = jnp.full((problem.Nx,), problem.axon.Vinit, dtype=dtype)
     alpha, beta = _hh_rates_jax(V0)
     gates0 = alpha / jnp.maximum(alpha + beta, 1e-12)

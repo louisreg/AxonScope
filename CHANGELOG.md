@@ -42,6 +42,8 @@ The format is inspired by Keep a Changelog.
   `math_functions.py` modules in favor of the package layout.
 - Moved NumPy stimulus evaluation out of the solver runtime.
 - Kept solver/backend-specific JAX compilation in the solver runtime.
+- Moved shared solver recording helpers out of `CrankNicholson` so `Euler`
+  no longer depends on Crank-Nicholson private internals.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous
@@ -63,6 +65,8 @@ The format is inspired by Keep a Changelog.
   against NRV.
 - Fixed examples that still called removed stimulus/context convenience methods.
 - Fixed stale internal imports that referenced the old flat module layout.
+- Fixed legacy Crank-Nicholson runtime benchmark imports to use public solver
+  common helpers instead of removed private aliases.
 
 ### Validation
 
