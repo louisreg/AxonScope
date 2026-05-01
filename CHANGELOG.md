@@ -26,6 +26,8 @@ The format is inspired by Keep a Changelog.
   `benchmark/solver_baseline/`.
 - Added a shared `Solver` benchmark runner with JSON/CSV output under
   `benchmark/solver_runtime/`.
+- Added benchmark run metadata and JSON comparison tooling for performance
+  regression checks.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.

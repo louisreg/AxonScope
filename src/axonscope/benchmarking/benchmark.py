@@ -3,9 +3,13 @@ from __future__ import annotations
 import csv
 import inspect
 import json
+import platform
 import statistics
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
@@ -16,6 +20,26 @@ from axonscope.simresult import SimResult
 
 AxonFactory = Callable[[], Any]
 SolverFactory = Callable[[], Any]
+
+
+@dataclass(frozen=True)
+class BenchmarkComparisonMetric:
+    metric: str
+    baseline: float | None
+    current: float | None
+    delta: float | None
+    relative_delta: float | None
+    threshold: float | None
+    status: str
+
+
+@dataclass(frozen=True)
+class BenchmarkComparisonRow:
+    case_name: str
+    solver_name: str
+    metrics: tuple[BenchmarkComparisonMetric, ...]
+    status: str
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -276,14 +300,15 @@ def write_benchmark_results(
     out_dir: Path,
     *,
     prefix: str = "solver_benchmark",
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[Path, Path]:
     result_list = list(results)
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / f"{prefix}.json"
     csv_path = out_dir / f"{prefix}.csv"
 
-    json_payload = [_jsonable(result.to_dict()) for result in result_list]
-    json_path.write_text(json.dumps(json_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_payload = benchmark_results_document(result_list, run_metadata=run_metadata)
+    json_path.write_text(json.dumps(_jsonable(json_payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     rows = [_flatten_result(result) for result in result_list]
     fieldnames = sorted({key for row in rows for key in row})
@@ -293,6 +318,125 @@ def write_benchmark_results(
         writer.writerows(rows)
 
     return json_path, csv_path
+
+
+def benchmark_results_document(
+    results: Iterable[SolverBenchmarkResult],
+    *,
+    run_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = collect_benchmark_metadata()
+    if run_metadata:
+        metadata.update(dict(run_metadata))
+    return {
+        "schema_version": 1,
+        "metadata": metadata,
+        "results": [result.to_dict() for result in results],
+    }
+
+
+def collect_benchmark_metadata() -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "numpy": np.__version__,
+        "git": _git_metadata(),
+    }
+    try:
+        import jax
+
+        metadata["jax"] = jax.__version__
+        metadata["jax_devices"] = [str(device) for device in jax.devices()]
+    except Exception as exc:
+        metadata["jax_error"] = str(exc)
+    return metadata
+
+
+def load_benchmark_results(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return payload, {}
+    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return payload["results"], metadata
+    raise ValueError(f"Unsupported benchmark result JSON schema in {path}.")
+
+
+def compare_benchmark_results(
+    baseline_results: Iterable[Mapping[str, Any]],
+    current_results: Iterable[Mapping[str, Any]],
+    *,
+    thresholds: Mapping[str, float] | None = None,
+) -> list[BenchmarkComparisonRow]:
+    thresholds_map = {
+        "construction.mean_s": 0.15,
+        "first_solve_s": 0.20,
+        "warm_solve.mean_s": 0.10,
+        "rss_first_solve_delta_mb": 0.15,
+    }
+    if thresholds is not None:
+        thresholds_map.update(thresholds)
+
+    baseline_by_key = {_result_key(result): dict(result) for result in baseline_results}
+    current_by_key = {_result_key(result): dict(result) for result in current_results}
+    rows: list[BenchmarkComparisonRow] = []
+
+    for key in sorted(set(baseline_by_key) | set(current_by_key)):
+        case_name, solver_name = key
+        baseline = baseline_by_key.get(key)
+        current = current_by_key.get(key)
+        if baseline is None:
+            rows.append(
+                BenchmarkComparisonRow(
+                    case_name=case_name,
+                    solver_name=solver_name,
+                    metrics=(),
+                    status="missing_baseline",
+                    notes=("Result exists only in current run.",),
+                )
+            )
+            continue
+        if current is None:
+            rows.append(
+                BenchmarkComparisonRow(
+                    case_name=case_name,
+                    solver_name=solver_name,
+                    metrics=(),
+                    status="missing_current",
+                    notes=("Result exists only in baseline run.",),
+                )
+            )
+            continue
+
+        metrics = tuple(
+            _compare_metric(
+                metric_name,
+                baseline,
+                current,
+                threshold=threshold,
+            )
+            for metric_name, threshold in thresholds_map.items()
+        )
+        notes = tuple(_output_guard_notes(baseline, current))
+        status = "regression" if any(metric.status == "regression" for metric in metrics) else "ok"
+        if notes and status == "ok":
+            status = "changed_output"
+
+        rows.append(
+            BenchmarkComparisonRow(
+                case_name=case_name,
+                solver_name=solver_name,
+                metrics=metrics,
+                status=status,
+                notes=notes,
+            )
+        )
+    return rows
 
 
 def summarize_sim_result(result: SimResult | Any) -> dict[str, Any]:
@@ -372,6 +516,43 @@ def _rss_mb() -> float | None:
         return None
 
 
+def _git_metadata() -> dict[str, Any]:
+    return {
+        "sha": _run_git(["rev-parse", "--short", "HEAD"]),
+        "branch": _run_git(["branch", "--show-current"]),
+        "dirty": _run_git_dirty(),
+    }
+
+
+def _run_git(args: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def _run_git_dirty() -> bool | None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return None
+    return bool(result.stdout.strip())
+
+
 def _flatten_result(result: SolverBenchmarkResult) -> dict[str, Any]:
     payload = result.to_dict()
     row: dict[str, Any] = {
@@ -392,7 +573,83 @@ def _flatten_result(result: SolverBenchmarkResult) -> dict[str, Any]:
     return row
 
 
+def _result_key(result: Mapping[str, Any]) -> tuple[str, str]:
+    return str(result.get("case_name", "")), str(result.get("solver_name", ""))
+
+
+def _compare_metric(
+    metric: str,
+    baseline: Mapping[str, Any],
+    current: Mapping[str, Any],
+    *,
+    threshold: float | None,
+) -> BenchmarkComparisonMetric:
+    baseline_value = _nested_float(baseline, metric)
+    current_value = _nested_float(current, metric)
+    if baseline_value is None or current_value is None:
+        return BenchmarkComparisonMetric(
+            metric=metric,
+            baseline=baseline_value,
+            current=current_value,
+            delta=None,
+            relative_delta=None,
+            threshold=threshold,
+            status="missing",
+        )
+
+    delta = current_value - baseline_value
+    if baseline_value == 0.0:
+        relative_delta = 0.0 if current_value == 0.0 else float("inf")
+    else:
+        relative_delta = delta / abs(baseline_value)
+    status = "regression" if threshold is not None and relative_delta > threshold else "ok"
+    return BenchmarkComparisonMetric(
+        metric=metric,
+        baseline=baseline_value,
+        current=current_value,
+        delta=delta,
+        relative_delta=relative_delta,
+        threshold=threshold,
+        status=status,
+    )
+
+
+def _nested_float(data: Mapping[str, Any], dotted_key: str) -> float | None:
+    value: Any = data
+    for part in dotted_key.split("."):
+        if not isinstance(value, Mapping) or part not in value:
+            return None
+        value = value[part]
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _output_guard_notes(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> list[str]:
+    baseline_output = baseline.get("output", {})
+    current_output = current.get("output", {})
+    if not isinstance(baseline_output, Mapping) or not isinstance(current_output, Mapping):
+        return []
+
+    notes: list[str] = []
+    if baseline_output.get("vm_shape") != current_output.get("vm_shape"):
+        notes.append(f"Vm shape changed: {baseline_output.get('vm_shape')} -> {current_output.get('vm_shape')}")
+    for name in ("vm_min_mV", "vm_max_mV", "vm_mean_mV"):
+        baseline_value = _nested_float(baseline_output, name)
+        current_value = _nested_float(current_output, name)
+        if baseline_value is None or current_value is None:
+            continue
+        if abs(current_value - baseline_value) > 1e-6:
+            notes.append(f"{name} changed: {baseline_value:.6g} -> {current_value:.6g}")
+    return notes
+
+
 def _jsonable(value: Any) -> Any:
+    if hasattr(value, "__dataclass_fields__"):
+        return {key: _jsonable(getattr(value, key)) for key in value.__dataclass_fields__}
     if isinstance(value, Mapping):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, tuple):

@@ -8,6 +8,8 @@ import numpy as np
 from axonscope.benchmarking import (
     SolverBenchmarkCase,
     TimingStats,
+    compare_benchmark_results,
+    load_benchmark_results,
     run_solver_benchmark_case,
     write_benchmark_results,
 )
@@ -91,5 +93,76 @@ def test_write_benchmark_results(tmp_path: Path):
 
     assert json_path.exists()
     assert csv_path.exists()
-    assert "dummy" in json_path.read_text(encoding="utf-8")
+    results, metadata = load_benchmark_results(json_path)
+    assert results[0]["case_name"] == "dummy"
+    assert "python" in metadata
     assert "case_name" in csv_path.read_text(encoding="utf-8")
+
+
+def test_load_benchmark_results_supports_legacy_list_schema(tmp_path: Path):
+    path = tmp_path / "legacy.json"
+    path.write_text('[{"case_name": "old", "solver_name": "DummySolver"}]\n', encoding="utf-8")
+
+    results, metadata = load_benchmark_results(path)
+
+    assert results == [{"case_name": "old", "solver_name": "DummySolver"}]
+    assert metadata == {}
+
+
+def test_compare_benchmark_results_flags_warm_solve_regression():
+    baseline = [
+        {
+            "case_name": "case",
+            "solver_name": "Solver",
+            "construction": {"mean_s": 1.0},
+            "first_solve_s": 2.0,
+            "warm_solve": {"mean_s": 1.0},
+            "rss_first_solve_delta_mb": 10.0,
+            "output": {"vm_shape": [2, 3], "vm_min_mV": -70.0, "vm_max_mV": -60.0, "vm_mean_mV": -65.0},
+        }
+    ]
+    current = [
+        {
+            "case_name": "case",
+            "solver_name": "Solver",
+            "construction": {"mean_s": 1.0},
+            "first_solve_s": 2.0,
+            "warm_solve": {"mean_s": 1.2},
+            "rss_first_solve_delta_mb": 10.0,
+            "output": {"vm_shape": [2, 3], "vm_min_mV": -70.0, "vm_max_mV": -60.0, "vm_mean_mV": -65.0},
+        }
+    ]
+
+    rows = compare_benchmark_results(baseline, current, thresholds={"warm_solve.mean_s": 0.10})
+
+    assert rows[0].status == "regression"
+    warm_metric = {metric.metric: metric for metric in rows[0].metrics}["warm_solve.mean_s"]
+    assert np.isclose(warm_metric.relative_delta, 0.2)
+
+
+def test_compare_benchmark_results_notes_output_changes():
+    baseline = [
+        {
+            "case_name": "case",
+            "solver_name": "Solver",
+            "construction": {"mean_s": 1.0},
+            "first_solve_s": 2.0,
+            "warm_solve": {"mean_s": 1.0},
+            "output": {"vm_shape": [2, 3], "vm_min_mV": -70.0, "vm_max_mV": -60.0, "vm_mean_mV": -65.0},
+        }
+    ]
+    current = [
+        {
+            "case_name": "case",
+            "solver_name": "Solver",
+            "construction": {"mean_s": 1.0},
+            "first_solve_s": 2.0,
+            "warm_solve": {"mean_s": 1.0},
+            "output": {"vm_shape": [2, 4], "vm_min_mV": -70.0, "vm_max_mV": -60.0, "vm_mean_mV": -65.0},
+        }
+    ]
+
+    rows = compare_benchmark_results(baseline, current)
+
+    assert rows[0].status == "changed_output"
+    assert rows[0].notes

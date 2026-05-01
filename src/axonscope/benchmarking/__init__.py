@@ -1,9 +1,15 @@
 from axonscope.benchmarking.benchmark import (
+    BenchmarkComparisonMetric,
+    BenchmarkComparisonRow,
     SolverBenchmarkCase,
     SolverBenchmarkResult,
     TimingStats,
+    benchmark_results_document,
+    collect_benchmark_metadata,
+    compare_benchmark_results,
     default_solver_benchmark_cases,
     default_solver_factories,
+    load_benchmark_results,
     run_solver_benchmark_case,
     run_solver_benchmark_suite,
     summarize_sim_result,
@@ -11,11 +17,17 @@ from axonscope.benchmarking.benchmark import (
 )
 
 __all__ = [
+    "BenchmarkComparisonMetric",
+    "BenchmarkComparisonRow",
     "SolverBenchmarkCase",
     "SolverBenchmarkResult",
     "TimingStats",
+    "benchmark_results_document",
+    "collect_benchmark_metadata",
+    "compare_benchmark_results",
     "default_solver_benchmark_cases",
     "default_solver_factories",
+    "load_benchmark_results",
     "run_solver_benchmark_case",
     "run_solver_benchmark_suite",
     "summarize_sim_result",

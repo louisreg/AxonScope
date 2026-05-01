@@ -179,6 +179,14 @@ python benchmark/solver_runtime/benchmark_solver.py --cases hh_intracellular_sma
 python benchmark/solver_runtime/benchmark_solver.py --cases all --repeats 3
 ```
 
+Compare two runs after a solver refactor:
+
+```bash
+python benchmark/solver_runtime/compare_results.py \
+  benchmark/results/solver_runtime/baseline.json \
+  benchmark/results/solver_runtime/current.json
+```
+
 The first default workloads cover HH intracellular, Rattay-Aberham
 intracellular, Schild97 intracellular, and MRG extracellular stimulation.
 
