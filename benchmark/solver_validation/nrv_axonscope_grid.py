@@ -32,19 +32,6 @@ def main() -> None:
     parser.add_argument("--nx", nargs="+", type=int, default=[51, 101])
     parser.add_argument("--tsim", nargs="+", type=float, default=[5.0, 10.0])
     parser.add_argument(
-        "--output-mode",
-        choices=["full_trace", "probes"],
-        default="probes",
-        help="AxonScope voltage output mode. Use probes for large sweeps.",
-    )
-    parser.add_argument(
-        "--probe-positions-um",
-        nargs="+",
-        type=float,
-        default=[0.0, 500.0, 1000.0],
-        help="Probe positions used with --output-mode probes.",
-    )
-    parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path("benchmark/results/nrv_axonscope_grid"),
@@ -59,11 +46,7 @@ def main() -> None:
         for tsim in args.tsim
     ]
     rows = [
-        run_case(
-            case,
-            output_mode=args.output_mode,
-            probe_positions_um=tuple(args.probe_positions_um),
-        )
+        run_case(case)
         for case in cases
     ]
     prefix = args.prefix or datetime.now().strftime("nrv_axonscope_grid_%Y%m%d_%H%M%S")
@@ -81,26 +64,17 @@ def main() -> None:
     print(f"csv : {csv_path}")
 
 
-def run_case(
-    case: GridCase,
-    *,
-    output_mode: str,
-    probe_positions_um: tuple[float, ...],
-) -> dict[str, Any]:
+def run_case(case: GridCase) -> dict[str, Any]:
     if case.model != "hh":
         raise ValueError(f"Unsupported model: {case.model}")
 
     axon_as = _make_hh_axonscope(case.nx)
-    solve_kwargs: dict[str, Any] = {"output_mode": output_mode}
-    if output_mode == "probes":
-        solve_kwargs["probe_positions_um"] = probe_positions_um
 
     start = time.perf_counter()
     res_as = CrankNicholson().solve(
         axon_as,
         tsim=case.tsim_ms,
         dt=case.dt_ms,
-        **solve_kwargs,
     )
     axonscope_runtime_s = time.perf_counter() - start
 
@@ -112,7 +86,7 @@ def run_case(
 
     vm_as = np.asarray(res_as.Vm, dtype=float).T
     t_as = np.asarray(res_as.t, dtype=float).ravel()
-    x_as = res_as.spatial_positions_um()
+    x_as = np.asarray(axon_as.x, dtype=float)
     vm_nrv, x_nrv, t_nrv = _nrv_vm_matrix(res_nrv)
     _, vm_nrv_aligned, _ = _align_rows_to_target_x(x_nrv, vm_nrv, x_as)
     vm_nrv_interp = _interp_rows(vm_nrv_aligned, t_nrv, t_as)
@@ -124,8 +98,6 @@ def run_case(
         "dt_ms": float(case.dt_ms),
         "nx": int(case.nx),
         "tsim_ms": float(case.tsim_ms),
-        "output_mode": output_mode,
-        "probe_positions_um": tuple(float(x) for x in x_as),
         "axonscope_runtime_s": float(axonscope_runtime_s),
         "nrv_runtime_s": float(nrv_runtime_s),
         "vm_rmse_mV": rmse,

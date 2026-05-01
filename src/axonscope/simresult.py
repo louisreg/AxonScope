@@ -17,14 +17,6 @@ class SimResult():
     t: NDArray
     diagnostics: Optional[Dict[str, Any]] = None
     recordings: Optional[RecordingDict] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-    def spatial_positions_um(self) -> np.ndarray:
-        """Return the spatial positions represented by the Vm columns."""
-        metadata = self.metadata or {}
-        if "x_um" in metadata:
-            return np.asarray(metadata["x_um"], dtype=float)
-        return np.asarray(self.axon.x, dtype=float)
     
     def rasterize(
         self, threshold: float = -10.0, min_distance: float = 1.0
@@ -39,10 +31,7 @@ class SimResult():
         xAP : np.ndarray
             Array of spatial positions corresponding to each spike
         """
-        x_um = self.spatial_positions_um()
         Nx = self.Vm.shape[1]
-        if self.t.shape[0] < 2:
-            return np.array([]), np.array([])
         dt = float(self.t[1] - self.t[0])
         min_distance_pts = int(min_distance / dt)
 
@@ -58,7 +47,7 @@ class SimResult():
             )
             # append peak times and positions
             tAP.extend(self.t[peaks])
-            xAP.extend([x_um[j]] * len(peaks))
+            xAP.extend([self.axon.x[j]] * len(peaks))
 
         return np.array(tAP), np.array(xAP)
 
@@ -100,8 +89,7 @@ class SimResult():
         # First detected spike as origin
         x0 = x_flat[0]
 
-        x_um = self.spatial_positions_um()
-        x_min, x_max = x_um[0], x_um[-1]
+        x_min, x_max = self.axon.x[0], self.axon.x[-1]
 
         # Forward velocity (toward x_max)
         mask_forward = (x_flat >= x0) & (x_flat <= x_max)

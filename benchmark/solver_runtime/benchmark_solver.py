@@ -42,26 +42,6 @@ def main() -> None:
     parser.add_argument("--prefix", default=None, help="Output filename prefix.")
     parser.add_argument("--record-observables", action="store_true", help="Record gates/currents/states during solves.")
     parser.add_argument("--record-diagnostics", action="store_true", help="Record model diagnostics during solves.")
-    parser.add_argument(
-        "--output-mode",
-        default="full_trace",
-        choices=["full_trace", "probes", "final_state"],
-        help="Voltage output mode for solvers that support reduced output.",
-    )
-    parser.add_argument(
-        "--probe-indices",
-        nargs="*",
-        type=int,
-        default=None,
-        help="Compartment indices used with --output-mode probes.",
-    )
-    parser.add_argument(
-        "--probe-positions-um",
-        nargs="*",
-        type=float,
-        default=None,
-        help="Compartment positions used with --output-mode probes.",
-    )
     parser.add_argument("--list", action="store_true", help="List available cases and solvers, then exit.")
     args = parser.parse_args()
 
@@ -79,12 +59,7 @@ def main() -> None:
     solve_kwargs = {
         "record_observables": bool(args.record_observables),
         "record_diagnostics": bool(args.record_diagnostics),
-        "output_mode": args.output_mode,
     }
-    if args.probe_indices is not None:
-        solve_kwargs["probe_indices"] = tuple(args.probe_indices)
-    if args.probe_positions_um is not None:
-        solve_kwargs["probe_positions_um"] = tuple(args.probe_positions_um)
 
     results = run_solver_benchmark_suite(
         selected_cases,

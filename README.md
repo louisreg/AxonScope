@@ -177,8 +177,6 @@ Solver benchmarks start from the shared `Solver` API and write JSON/CSV results:
 python benchmark/solver_runtime/benchmark_solver.py --list
 python benchmark/solver_runtime/benchmark_solver.py --cases hh_intracellular_small --repeats 3
 python benchmark/solver_runtime/benchmark_solver.py --cases all --repeats 3
-python benchmark/solver_runtime/benchmark_solver.py --cases all --output-mode probes --probe-indices 0 10 20
-python benchmark/solver_runtime/benchmark_solver.py --cases all --output-mode final_state
 ```
 
 NRV/AxonScope validation sweeps over `dt`, `Nx`, and `Tsim` write JSON/CSV
@@ -186,8 +184,7 @@ comparison tables:
 
 ```bash
 python benchmark/solver_validation/nrv_axonscope_grid.py \
-  --model hh --dt 0.005 0.01 --nx 51 101 --tsim 5 10 \
-  --output-mode probes --probe-positions-um 0 500 1000
+  --model hh --dt 0.005 0.01 --nx 51 101 --tsim 5 10
 ```
 
 Compare two runs after a solver refactor:
@@ -221,8 +218,6 @@ Generated logs and figures are ignored by git.
   the first step toward batch-friendly `Vstim[B, Nt, Nx]` inputs.
 - The full double-cable reference path uses scalar coefficient arrays for its
   2x2 block solve, avoiding per-step materialization of `(Nx, 2, 2)` matrices.
-- `CrankNicholson.solve(..., output_mode="probes" | "final_state")` can reduce
-  voltage output memory for sweeps and future population batches.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
 - `CompartmentMembraneLayout` assigns one membrane model per compartment.
 - `HeterogeneousICMBackend` evaluates heterogeneous membrane layouts.

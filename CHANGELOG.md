@@ -32,8 +32,6 @@ The format is inspired by Keep a Changelog.
   descriptions from solver-side arrays, initial states, and compiled stimuli.
 - Added solver-runtime precomputation of imposed extracellular `Vstim` samples
   for Crank-Nicholson extracellular solves.
-- Added reduced Crank-Nicholson voltage output modes for probe traces and final
-  state snapshots.
 - Added an HH NRV/AxonScope validation sweep script over `dt`, `Nx`, and
   simulation duration.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
@@ -54,8 +52,6 @@ The format is inspired by Keep a Changelog.
   `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
 - Specialized the double-cable 2x2 block-tridiagonal solve to operate on scalar
   coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
-- Extended solver benchmarks with output-mode/probe options for memory-oriented
-  runtime checks.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous

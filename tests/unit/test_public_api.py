@@ -6,9 +6,7 @@ from axonscope.morphology import get_mrg_morphology
 from axonscope.solvers import (
     CrankNicholson,
     Euler,
-    SolverOutputSpec,
     prepare_solver_runtime,
-    resolve_solver_output_spec,
 )
 
 
@@ -21,8 +19,6 @@ def test_public_package_imports_are_available():
     assert MRG is not None
     assert CrankNicholson is not None
     assert Euler is not None
-    assert SolverOutputSpec is not None
-    assert resolve_solver_output_spec is not None
     assert prepare_solver_runtime is not None
     assert IonChannelModelBase is not None
     assert PassiveICM is not None
