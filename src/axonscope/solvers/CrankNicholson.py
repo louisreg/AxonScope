@@ -45,23 +45,18 @@ from .common import (
     Array,
     build_cn_tridiagonal,
     build_dense_from_tridiagonal,
-    compartment_area_cm2,
-    extracellular_absolute_arrays,
     solve_block_tridiagonal_2x2,
 )
-from .stimulus_runtime import (
-    build_extracellular_potential_fn,
-    build_intracellular_current_density_fn,
+from .runtime import (
+    membrane_observable_names,
+    prepare_membrane_runtime,
+    prepare_solver_runtime,
 )
+from .stimulus_runtime import build_intracellular_current_density_fn
 
 
 def _observable_names(membrane) -> dict[str, tuple[str, ...]]:
-    return {
-        "gates": membrane.gate_names(),
-        "currents": membrane.current_names(),
-        "conductances": membrane.conductance_names(),
-        "states": membrane.membrane_state_names(),
-    }
+    return membrane_observable_names(membrane)
 
 
 def _observable_matrices(
@@ -118,32 +113,48 @@ def _solve_with_extracellular_generic(
     record_observables: bool = False,
 ) -> SimResult:
     """Generic extracellular (Vi/Ve) integration shared by the solver family."""
-    Nx: int = axon.Nx
-    Nt: int = int(jnp.ceil(tsim / dt))
-    backend = axon.build_icm_backend()
-    membrane = axon.ion_channel
-    diagnostic_names = membrane.diagnostic_names()
-    observable_names = _observable_names(membrane)
-    dtype_local = backend.dtype
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim,
+        dt,
+        include_extracellular=True,
+        include_area=True,
+    )
+    membrane_runtime = runtime.membrane
+    grid = runtime.grid
+    cable = runtime.cable
+    stimulation = runtime.stimulation
+    extracellular = runtime.extracellular
+    assert extracellular is not None
 
-    Vm0: jnp.ndarray = initial_voltage(axon, Nx, dtype_local)
+    Nx: int = membrane_runtime.Nx
+    Nt: int = grid.Nt
+    backend = membrane_runtime.backend
+    membrane = membrane_runtime.membrane
+    diagnostic_names = membrane_runtime.diagnostic_names
+    observable_names = membrane_runtime.observable_names
+    dtype_local = membrane_runtime.dtype
+
+    Vm0: jnp.ndarray = membrane_runtime.Vm0_mV
     Ve0: jnp.ndarray = jnp.full((Nx,), dtype_local(getattr(axon, "Veinit", 0.0)), dtype=dtype_local)
     Vi0: jnp.ndarray = Vm0 + Ve0
-    gates0: jnp.ndarray = backend.init_gates(V0_mV=Vm0)
-    state0 = membrane.init_membrane_state(Nx=Nx, dtype_local=dtype_local, V0_mV=Vm0)
+    gates0: jnp.ndarray = membrane_runtime.gates0
+    state0 = membrane_runtime.state0
 
-    lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
-    area = compartment_area_cm2(axon, dtype_local)
-    Cm_abs, Cx_abs, Gx_abs, Gax_e = extracellular_absolute_arrays(axon, dtype_local)
-    Gax_i = 0.5 * (upper[:-1] * Cm_abs[:-1] + lower[1:] * Cm_abs[1:])
-    left_i = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_i])
-    right_i = jnp.concatenate([Gax_i, jnp.zeros((1,), dtype=dtype_local)])
-    left_e = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_e])
-    right_e = jnp.concatenate([Gax_e, jnp.zeros((1,), dtype=dtype_local)])
+    area = cable.area_cm2
+    Cm_abs = extracellular.Cm_abs
+    Cx_abs = extracellular.Cx_abs
+    Gx_abs = extracellular.Gx_abs
+    Gax_e = extracellular.Gax_e
+    Gax_i = extracellular.Gax_i
+    left_i = extracellular.left_i
+    right_i = extracellular.right_i
+    left_e = extracellular.left_e
+    right_e = extracellular.right_e
 
-    inj_fun = build_intracellular_current_density_fn(axon)
-    vext_fun = build_extracellular_potential_fn(axon)
-    I_bg = backend.background_current()
+    inj_fun = stimulation.intracellular_current_density
+    vext_fun = stimulation.extracellular_potential_mV
+    I_bg = membrane_runtime.background_current
 
     def step(carry, n):
         Vi_old, Ve_old, gates, *state_prev = carry
@@ -276,7 +287,7 @@ def _solve_with_extracellular_generic(
         return carry_out, Vm_new
 
     init_carry = (Vi0, Ve0, gates0, *state0)
-    t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * dt
+    t_vec: jnp.ndarray = grid.t_vec_ms
     if record_observables and record_diagnostics and diagnostic_names:
         _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
         V_all = out[0]
@@ -340,13 +351,15 @@ def _single_cable_backend_setup(
     axon: AxonBase,
 ) -> tuple[object, jnp.dtype, int, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Build the generic membrane backend used by single-cable solvers."""
-    backend = axon.build_icm_backend()
-    dtype_local = backend.dtype
-    Nx = axon.Nx
-    V0 = initial_voltage(axon, Nx, dtype_local)
-    gates0 = backend.init_gates(V0_mV=V0)
-    I_bg = backend.background_current()
-    return backend, dtype_local, Nx, V0, gates0, I_bg
+    runtime = prepare_membrane_runtime(axon)
+    return (
+        runtime.backend,
+        runtime.dtype,
+        runtime.Nx,
+        runtime.Vm0_mV,
+        runtime.gates0,
+        runtime.background_current,
+    )
 
 
 def _cn_channel_step(
@@ -641,40 +654,57 @@ class CrankNicholson(Solver):
             if extracellular_res is not None:
                 return extracellular_res
 
-        Nx: int = axon.Nx
-        Nt: int = int(jnp.ceil(tsim / dt))
-        backend = axon.build_icm_backend()
-        membrane = axon.ion_channel
-        diagnostic_names = membrane.diagnostic_names()
-        observable_names = _observable_names(membrane)
-        dtype_local = backend.dtype
         use_extracellular = bool(getattr(axon, "use_extracellular", False))
+        runtime = prepare_solver_runtime(
+            axon,
+            tsim,
+            dt,
+            include_extracellular=use_extracellular,
+            include_area=use_extracellular,
+        )
+        membrane_runtime = runtime.membrane
+        grid = runtime.grid
+        cable = runtime.cable
+        stimulation = runtime.stimulation
+        extracellular = runtime.extracellular
 
-        Vm0: jnp.ndarray = initial_voltage(axon, Nx, dtype_local)
+        Nx: int = membrane_runtime.Nx
+        Nt: int = grid.Nt
+        backend = membrane_runtime.backend
+        membrane = membrane_runtime.membrane
+        diagnostic_names = membrane_runtime.diagnostic_names
+        observable_names = membrane_runtime.observable_names
+        dtype_local = membrane_runtime.dtype
+
+        Vm0: jnp.ndarray = membrane_runtime.Vm0_mV
         Ve0: jnp.ndarray = jnp.full((Nx,), dtype_local(getattr(axon, "Veinit", 0.0)), dtype=dtype_local)
         Vi0: jnp.ndarray = Vm0 + Ve0
-        gates0: jnp.ndarray = backend.init_gates(V0_mV=Vm0)
+        gates0: jnp.ndarray = membrane_runtime.gates0
 
-        lower, diag, upper = _single_cable_diffusion_setup(axon, dtype_local)
+        lower, diag, upper = cable.lower, cable.diag, cable.upper
         dl, d, du = build_cn_tridiagonal(lower, diag, upper, dt, dtype_local)
         Cm = jnp.asarray(axon.Cm, dtype=dtype_local)
 
-        inj_fun = build_intracellular_current_density_fn(axon)
-        vext_fun = build_extracellular_potential_fn(axon)
-        I_bg = backend.background_current()
-        state0 = membrane.init_membrane_state(Nx=Nx, dtype_local=dtype_local, V0_mV=Vm0)
+        inj_fun = stimulation.intracellular_current_density
+        vext_fun = stimulation.extracellular_potential_mV
+        I_bg = membrane_runtime.background_current
+        state0 = membrane_runtime.state0
         n_extra = len(state0)
 
-        area = compartment_area_cm2(axon, dtype_local)
-        has_driven_extracellular = bool(use_extracellular and getattr(axon, "extracellular_contexts", ()))
+        area = cable.area_cm2
+        has_driven_extracellular = stimulation.has_driven_extracellular
 
         if use_extracellular:
-            Cm_abs, Cx_abs, Gx_abs, Gax_e = extracellular_absolute_arrays(axon, dtype_local)
-            Gax_i = 0.5 * (upper[:-1] * Cm_abs[:-1] + lower[1:] * Cm_abs[1:])
-            left_i = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_i])
-            right_i = jnp.concatenate([Gax_i, jnp.zeros((1,), dtype=dtype_local)])
-            left_e = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_e])
-            right_e = jnp.concatenate([Gax_e, jnp.zeros((1,), dtype=dtype_local)])
+            assert extracellular is not None
+            Cm_abs = extracellular.Cm_abs
+            Cx_abs = extracellular.Cx_abs
+            Gx_abs = extracellular.Gx_abs
+            Gax_e = extracellular.Gax_e
+            Gax_i = extracellular.Gax_i
+            left_i = extracellular.left_i
+            right_i = extracellular.right_i
+            left_e = extracellular.left_e
+            right_e = extracellular.right_e
 
         def _unpack_voltage_state(carry, n_extra: int):
             if use_extracellular:
@@ -892,7 +922,7 @@ class CrankNicholson(Solver):
             if use_extracellular
             else (Vm0, gates0, *state0)
         )
-        t_vec = (jnp.arange(Nt, dtype=dtype_local) + dtype_local(1.0)) * dt
+        t_vec = grid.t_vec_ms
         if record_observables and record_diagnostics and diagnostic_names:
             _, out = jax.lax.scan(step, init_carry, jnp.arange(Nt))
             V_all = out[0]

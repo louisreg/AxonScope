@@ -28,6 +28,8 @@ The format is inspired by Keep a Changelog.
   `benchmark/solver_runtime/`.
 - Added benchmark run metadata and JSON comparison tooling for performance
   regression checks.
+- Added solver runtime preparation dataclasses and helpers to separate axon
+  descriptions from solver-side arrays, initial states, and compiled stimuli.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.

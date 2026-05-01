@@ -202,6 +202,9 @@ Generated logs and figures are ignored by git.
   `ExtracellularContext` are backend-independent descriptions.
 - `JaxStimulus`, compiled extracellular contexts, and current-density builders
   belong to the solver runtime.
+- `prepare_solver_runtime` is the first data-oriented boundary between axon
+  descriptions and solver kernels. It gathers initial states, cable arrays, and
+  compiled stimulation without mutating the axon.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
 - `CompartmentMembraneLayout` assigns one membrane model per compartment.
 - `HeterogeneousICMBackend` evaluates heterogeneous membrane layouts.

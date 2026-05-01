@@ -8,18 +8,14 @@ from axonscope.channel_models.passive import PassiveICM
 def test_eulerjax_passive_simulation():
     # Création d'un axon minimal avec un modèle passif
     class DummyAxon(AxonBase):
-        Nx = 5
-        Vinit = -65.0
-        dx_cm = jnp.full((Nx,), 0.01, dtype=jnp.float32)
-        h_cm = jnp.full((Nx - 1,), 0.01, dtype=jnp.float32)
-        D = 1e-4
-
         def __init__(self):
-            self.ion_channel = PassiveICM(Rm=1e4, EL=-70.0)
-            self.Cm = 1.0
-
-        def Iinj_uAcm2(self, t):
-            return jnp.zeros(self.Nx)  # pas de courant injecté
+            super().__init__(
+                ion_channel=PassiveICM(Rm=1e4, EL=-70.0),
+                L=400.0,
+                d=1.0,
+                Nx=5,
+                Vinit=-65.0,
+            )
 
     axon = DummyAxon()
     solver = Euler()

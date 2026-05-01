@@ -1,17 +1,12 @@
 from .base import Solver
-from .common import initial_voltage, diffusion_operator_coeffs, apply_diffusion_operator, Carry
-from .stimulus_runtime import build_intracellular_current_density_fn
-from .CrankNicholson import _observable_matrices, _observable_names, _package_recordings
+from .common import apply_diffusion_operator
+from .runtime import prepare_solver_runtime
+from .CrankNicholson import _observable_matrices, _package_recordings
 from axonscope.axons.base import AxonBase
 from axonscope.simresult import SimResult
 
 import jax.numpy as jnp
 import jax
-
-from typing import Tuple
-
-
-
 
 # -----------------------------------------------------------------------------
 # Euler explicit solver
@@ -79,27 +74,34 @@ class Euler(Solver):
                 "Use a Crank-Nicholson solver instead."
             )
 
-        Nt: int = int(jnp.ceil(tsim / dt))
-        Nx: int = axon.Nx
+        runtime = prepare_solver_runtime(
+            axon,
+            tsim,
+            dt,
+            include_extracellular=False,
+            include_area=False,
+        )
+        membrane_runtime = runtime.membrane
+        grid = runtime.grid
+        cable = runtime.cable
+        stimulation = runtime.stimulation
 
-        backend = axon.build_icm_backend()
-        membrane = axon.ion_channel
-        observable_names = _observable_names(membrane)
-        dtype_local = backend.dtype
-        inj_fun = build_intracellular_current_density_fn(axon)
-        # Initial conditions
-        V0: jnp.ndarray = initial_voltage(axon, Nx, dtype_local)
-        gates0: jnp.ndarray = backend.init_gates(V0_mV=V0)
-        state0 = membrane.init_membrane_state(Nx=Nx, dtype_local=dtype_local, V0_mV=V0)
-
-        # Stored states are V_{n+1}, so associated timestamps start at dt.
-        t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * dt
+        Nt: int = grid.Nt
+        backend = membrane_runtime.backend
+        membrane = membrane_runtime.membrane
+        observable_names = membrane_runtime.observable_names
+        dtype_local = membrane_runtime.dtype
+        inj_fun = stimulation.intracellular_current_density
+        V0: jnp.ndarray = membrane_runtime.Vm0_mV
+        gates0: jnp.ndarray = membrane_runtime.gates0
+        state0 = membrane_runtime.state0
+        t_vec: jnp.ndarray = grid.t_vec_ms
 
         # Extract ion channel helpers (function objects) once for efficiency
         Cm: float = axon.Cm
 
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
-        I_bg = backend.background_current()
+        lower, diag, upper = cable.lower, cable.diag, cable.upper
+        I_bg = membrane_runtime.background_current
 
         def step(carry, n: int):
             """
