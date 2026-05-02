@@ -12,6 +12,8 @@ from axonscope.solvers import (
     DoubleCableBatchKernel,
     DoubleCableKernel,
     SingleCableVStimBatchKernel,
+    build_footprint_vstim_initial_previous_batch,
+    build_footprint_vstim_midpoint_batch,
     build_vstim_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
@@ -148,6 +150,55 @@ def test_build_vstim_batch_accepts_per_row_positions():
 
     assert vext_batch.shape == (2, 1, axon.Nx)
     assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0
+
+
+def test_build_footprint_vstim_batch_matches_generic_context_builder():
+    axon = _hh_extracellular_axon()
+    base_context = axon.extracellular_contexts[0]
+    tsim = 1.2
+    dt = 0.01
+    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    shifted_x_m = base_x_m + 25e-6
+    x_positions_m = np.stack([base_x_m, shifted_x_m])
+    footprint = np.stack(
+        [
+            base_context.electrode.footprint(base_x_m),
+            base_context.electrode.footprint(shifted_x_m),
+        ]
+    )
+
+    generic = build_vstim_midpoint_batch(
+        axon,
+        [
+            base_context,
+            scale_extracellular_contexts((base_context,), 0.5),
+        ],
+        tsim_ms=tsim,
+        dt_ms=dt,
+        x_positions_m=x_positions_m,
+    )
+    from_footprint = build_footprint_vstim_midpoint_batch(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=jnp.asarray([1.0, 0.5]),
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    previous = build_footprint_vstim_initial_previous_batch(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=jnp.asarray([1.0, 0.5]),
+        dt_ms=dt,
+    )
+
+    assert from_footprint.shape == generic.shape
+    assert previous.shape == (2, axon.Nx)
+    np.testing.assert_allclose(
+        np.asarray(from_footprint),
+        np.asarray(generic),
+        atol=1e-6,
+        rtol=1e-6,
+    )
 
 
 def test_double_cable_batch_matches_scalar_loop_rows():

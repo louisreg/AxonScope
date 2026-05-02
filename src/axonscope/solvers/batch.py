@@ -2,17 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Sequence
+from typing import Literal, Sequence
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from axonscope.stimulation import ExtracellularContext
+from axonscope.stimulus import Stimulus
+from axonscope.stimulus_eval import evaluate_stimulus_numpy
 
 from .common import Array, apply_diffusion_operator
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .runtime import SolverRuntime
-from .stimulus_runtime import compile_extracellular_context
+from .stimulus_runtime import compile_extracellular_context, compile_stimulus
 
 
 ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
@@ -79,6 +82,117 @@ def build_vstim_initial_previous_batch(
         dtype_local=dtype,
     )
     return samples[:, 0, :]
+
+
+def build_footprint_vstim_midpoint_batch(
+    *,
+    stimulus: Stimulus,
+    footprint_V_per_A: Array,
+    tsim_ms: float,
+    dt_ms: float,
+    amplitude_scale: float | Array = 1.0,
+    dtype_local: jnp.dtype | None = None,
+    engine: Literal["numpy", "jax"] = "numpy",
+) -> Array:
+    """Build midpoint Vstim from precomputed electrode footprints.
+
+    This is the preferred population fast path for production use. The
+    footprint can come from an analytic electrode, FEM interpolation, or any
+    external field model, with shape ``(Nx,)`` or ``(B, Nx)`` in V/A.
+    """
+
+    dtype = jnp.float32 if dtype_local is None else dtype_local
+    nt = int(jnp.ceil(tsim_ms / dt_ms))
+    t_mid_ms = (
+        jnp.arange(nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
+    ) * jnp.asarray(dt_ms, dtype=dtype)
+    return build_footprint_vstim_batch(
+        stimulus=stimulus,
+        footprint_V_per_A=footprint_V_per_A,
+        t_ms=t_mid_ms,
+        amplitude_scale=amplitude_scale,
+        dtype_local=dtype,
+        engine=engine,
+    )
+
+
+def build_footprint_vstim_initial_previous_batch(
+    *,
+    stimulus: Stimulus,
+    footprint_V_per_A: Array,
+    dt_ms: float,
+    amplitude_scale: float | Array = 1.0,
+    dtype_local: jnp.dtype | None = None,
+    engine: Literal["numpy", "jax"] = "numpy",
+) -> Array:
+    """Build the previous imposed field from precomputed footprints.
+
+    Returns ``Vstim[B, Nx]`` sampled at ``t = -dt/2`` in mV.
+    """
+
+    dtype = jnp.float32 if dtype_local is None else dtype_local
+    samples = build_footprint_vstim_batch(
+        stimulus=stimulus,
+        footprint_V_per_A=footprint_V_per_A,
+        t_ms=jnp.asarray([-0.5 * dt_ms], dtype=dtype),
+        amplitude_scale=amplitude_scale,
+        dtype_local=dtype,
+        engine=engine,
+    )
+    return samples[:, 0, :]
+
+
+def build_footprint_vstim_batch(
+    *,
+    stimulus: Stimulus,
+    footprint_V_per_A: Array,
+    t_ms: Array,
+    amplitude_scale: float | Array = 1.0,
+    dtype_local: jnp.dtype | None = None,
+    engine: Literal["numpy", "jax"] = "numpy",
+) -> Array:
+    """Build Vstim samples from batched electrode footprints.
+
+    ``footprint_V_per_A`` is the static spatial field per ampere. The returned
+    array has shape ``(B, Nt, Nx)`` and units mV.
+    """
+
+    dtype = jnp.float32 if dtype_local is None else dtype_local
+    if engine == "numpy":
+        return _build_footprint_vstim_batch_numpy(
+            stimulus=stimulus,
+            footprint_V_per_A=footprint_V_per_A,
+            t_ms=t_ms,
+            amplitude_scale=amplitude_scale,
+            dtype_local=dtype,
+        )
+    if engine != "jax":
+        raise ValueError(f"engine must be 'numpy' or 'jax', got {engine!r}.")
+
+    t = jnp.asarray(t_ms, dtype=dtype)
+    if t.ndim != 1:
+        raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
+
+    batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
+    footprint = _as_footprint_batch(
+        "footprint_V_per_A",
+        footprint_V_per_A,
+        batch_size=batch_size,
+        dtype_local=dtype,
+    )
+    scale = _as_batch_vector(
+        "amplitude_scale",
+        amplitude_scale,
+        batch_size=batch_size,
+        dtype_local=dtype,
+    )
+    current_A = jax.vmap(compile_stimulus(stimulus, dtype_local=dtype))(t)
+    return (
+        scale[:, None, None]
+        * current_A[None, :, None]
+        * footprint[:, None, :]
+        * jnp.asarray(1e3, dtype=dtype)
+    )
 
 
 def build_vstim_batch(
@@ -628,8 +742,154 @@ def _resolve_x_positions_m(
     raise ValueError(f"x_positions_m must have shape (Nx,) or (B, Nx), got {x.shape}.")
 
 
+def _build_footprint_vstim_batch_numpy(
+    *,
+    stimulus: Stimulus,
+    footprint_V_per_A: Array,
+    t_ms: Array,
+    amplitude_scale: float | Array,
+    dtype_local: jnp.dtype,
+) -> Array:
+    np_dtype = np.dtype(dtype_local)
+    t = np.asarray(t_ms, dtype=np_dtype)
+    if t.ndim != 1:
+        raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
+
+    batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
+    footprint = _as_footprint_batch_numpy(
+        "footprint_V_per_A",
+        footprint_V_per_A,
+        batch_size=batch_size,
+        dtype_local=np_dtype,
+    )
+    scale = _as_batch_vector_numpy(
+        "amplitude_scale",
+        amplitude_scale,
+        batch_size=batch_size,
+        dtype_local=np_dtype,
+    )
+    current_A = evaluate_stimulus_numpy(stimulus, t).astype(np_dtype, copy=False)
+    vstim_mV = scale[:, None, None] * current_A[None, :, None] * footprint[:, None, :]
+    vstim_mV = vstim_mV * np.asarray(1e3, dtype=np_dtype)
+    return jnp.asarray(vstim_mV, dtype=dtype_local)
+
+
+def _infer_footprint_batch_size(footprint_V_per_A: Array, params: Sequence[object]) -> int:
+    candidates = []
+    footprint_shape, footprint_ndim = _shape_and_ndim(footprint_V_per_A)
+    if footprint_ndim == 2:
+        candidates.append(int(footprint_shape[0]))
+    elif footprint_ndim != 1:
+        raise ValueError(
+            "footprint_V_per_A must have shape (Nx,) or (B, Nx), "
+            f"got {footprint_shape}."
+        )
+
+    for values in params:
+        shape, ndim = _shape_and_ndim(values)
+        if ndim == 1 and shape[0] != 1:
+            candidates.append(int(shape[0]))
+        elif ndim > 1:
+            raise ValueError(f"batched parameter must be scalar or shape (B,), got {shape}.")
+
+    if not candidates:
+        return 1
+    batch_size = candidates[0]
+    if any(candidate != batch_size for candidate in candidates):
+        raise ValueError(f"batched inputs disagree on batch size: {candidates}.")
+    return batch_size
+
+
+def _as_footprint_batch(
+    name: str,
+    values: Array,
+    *,
+    batch_size: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 1:
+        return jnp.broadcast_to(arr[jnp.newaxis, :], (batch_size, arr.shape[0]))
+    if arr.ndim == 2:
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            return jnp.broadcast_to(arr, (batch_size, arr.shape[1]))
+        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+    raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
+
+
+def _as_footprint_batch_numpy(
+    name: str,
+    values: Array,
+    *,
+    batch_size: int,
+    dtype_local: np.dtype,
+) -> np.ndarray:
+    arr = np.asarray(values, dtype=dtype_local)
+    if arr.ndim == 1:
+        return np.broadcast_to(arr[None, :], (batch_size, arr.shape[0]))
+    if arr.ndim == 2:
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            return np.broadcast_to(arr, (batch_size, arr.shape[1]))
+        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+    raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
+
+
+def _as_batch_vector(
+    name: str,
+    values: float | Array,
+    *,
+    batch_size: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 0:
+        return jnp.full((batch_size,), arr, dtype=dtype_local)
+    if arr.ndim == 1:
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            return jnp.broadcast_to(arr, (batch_size,))
+        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+    raise ValueError(f"{name} must be scalar or have shape (B,), got {arr.shape}.")
+
+
+def _as_batch_vector_numpy(
+    name: str,
+    values: float | Array,
+    *,
+    batch_size: int,
+    dtype_local: np.dtype,
+) -> np.ndarray:
+    arr = np.asarray(values, dtype=dtype_local)
+    if arr.ndim == 0:
+        return np.full((batch_size,), arr, dtype=dtype_local)
+    if arr.ndim == 1:
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            return np.broadcast_to(arr, (batch_size,))
+        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+    raise ValueError(f"{name} must be scalar or have shape (B,), got {arr.shape}.")
+
+
+def _shape_and_ndim(values: object) -> tuple[tuple[int, ...], int]:
+    shape = getattr(values, "shape", None)
+    ndim = getattr(values, "ndim", None)
+    if shape is not None and ndim is not None:
+        return tuple(int(dim) for dim in shape), int(ndim)
+    arr = np.asarray(values)
+    return arr.shape, arr.ndim
+
+
 __all__ = [
     "BatchKernelResult",
+    "build_footprint_vstim_batch",
+    "build_footprint_vstim_initial_previous_batch",
+    "build_footprint_vstim_midpoint_batch",
     "build_vstim_batch",
     "build_vstim_initial_previous_batch",
     "build_vstim_midpoint_batch",

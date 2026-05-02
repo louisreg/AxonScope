@@ -30,6 +30,8 @@ from axonscope.solvers import (
     DoubleCableKernel,
     SingleCableKernel,
     SingleCableVStimBatchKernel,
+    build_footprint_vstim_initial_previous_batch,
+    build_footprint_vstim_midpoint_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
     prepare_solver_runtime,
@@ -45,6 +47,8 @@ Mode = Literal["single", "double"]
 class PopulationInputs:
     axon: HodgkinHuxley
     context_batch: list[tuple[ExtracellularContext, ...]]
+    stimulus: Stimulus
+    footprint_V_per_A: np.ndarray
     x_positions_m: np.ndarray
     radial_um: np.ndarray
     longitudinal_offsets_um: np.ndarray
@@ -56,6 +60,7 @@ class PopulationTiming:
     fibers: int
     nx: int
     nt: int
+    vstim_builder: str
     vstim_build_s: float
     scalar_warm_s: float | None
     batch_warm_s: float
@@ -82,6 +87,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--batch-only",
         action="store_true",
         help="Skip the scalar loop comparison. Useful for low-memory profiler runs.",
+    )
+    parser.add_argument(
+        "--generic-vstim",
+        action="store_true",
+        help="Use the generic context-based Vstim builder instead of the footprint fast path.",
     )
     parser.add_argument("--plot", action="store_true", help="Show a small peak-Vm population plot.")
     parser.add_argument(
@@ -128,6 +138,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 repeats=args.repeats,
                 warmups=args.warmups,
                 batch_only=bool(args.batch_only),
+                use_generic_vstim=bool(args.generic_vstim),
             )
             for mode in modes
         ]
@@ -168,7 +179,8 @@ def build_population_inputs(
     x_positions_m = base_x_m[None, :] + longitudinal_offsets_um[:, None] * 1e-6
 
     context_batch = []
-    for radial in radial_um:
+    footprint_rows = []
+    for fiber_index, radial in enumerate(radial_um):
         electrode = PointSourceElectrode(
             x0_m=(length_um / 2.0) * 1e-6,
             y0_m=float(radial) * 1e-6,
@@ -176,10 +188,13 @@ def build_population_inputs(
             sigma_S_m=0.3,
         )
         context_batch.append((electrode.attach_stimulus(stimulus),))
+        footprint_rows.append(electrode.footprint(x_positions_m[fiber_index]))
 
     return PopulationInputs(
         axon=axon,
         context_batch=context_batch,
+        stimulus=stimulus,
+        footprint_V_per_A=np.asarray(footprint_rows, dtype=float),
         x_positions_m=x_positions_m,
         radial_um=radial_um,
         longitudinal_offsets_um=longitudinal_offsets_um,
@@ -195,6 +210,7 @@ def run_population_mode(
     repeats: int,
     warmups: int,
     batch_only: bool = False,
+    use_generic_vstim: bool = False,
 ) -> PopulationTiming:
     axon = population.axon
     include_extracellular = mode == "double"
@@ -209,25 +225,46 @@ def run_population_mode(
     )
 
     with trace_annotation(f"population/{mode}/build_vstim"):
-        vstim_build_s, vstim_mid = time_call(
-            lambda: build_vstim_midpoint_batch(
-                axon,
-                population.context_batch,
-                tsim_ms=tsim_ms,
-                dt_ms=dt_ms,
-                x_positions_m=population.x_positions_m,
-            )
-        )
-        vstim_previous = None
-        if mode == "double":
-            previous_s, vstim_previous = time_call(
-                lambda: build_vstim_initial_previous_batch(
+        if use_generic_vstim:
+            vstim_builder = "generic-context"
+            vstim_build_s, vstim_mid = time_call(
+                lambda: build_vstim_midpoint_batch(
                     axon,
                     population.context_batch,
+                    tsim_ms=tsim_ms,
                     dt_ms=dt_ms,
                     x_positions_m=population.x_positions_m,
                 )
             )
+        else:
+            vstim_builder = "footprint"
+            vstim_build_s, vstim_mid = time_call(
+                lambda: build_footprint_vstim_midpoint_batch(
+                    stimulus=population.stimulus,
+                    footprint_V_per_A=population.footprint_V_per_A,
+                    tsim_ms=tsim_ms,
+                    dt_ms=dt_ms,
+                )
+            )
+        vstim_previous = None
+        if mode == "double":
+            if use_generic_vstim:
+                previous_s, vstim_previous = time_call(
+                    lambda: build_vstim_initial_previous_batch(
+                        axon,
+                        population.context_batch,
+                        dt_ms=dt_ms,
+                        x_positions_m=population.x_positions_m,
+                    )
+                )
+            else:
+                previous_s, vstim_previous = time_call(
+                    lambda: build_footprint_vstim_initial_previous_batch(
+                        stimulus=population.stimulus,
+                        footprint_V_per_A=population.footprint_V_per_A,
+                        dt_ms=dt_ms,
+                    )
+                )
             vstim_build_s += previous_s
 
     scalar_fn = _single_scalar_loop if mode == "single" else _double_scalar_loop
@@ -289,6 +326,7 @@ def run_population_mode(
         fibers=int(vstim_mid.shape[0]),
         nx=int(runtime.membrane.Nx),
         nt=int(runtime.grid.Nt),
+        vstim_builder=vstim_builder,
         vstim_build_s=float(vstim_build_s),
         scalar_warm_s=scalar_warm,
         batch_warm_s=batch_warm,
@@ -402,6 +440,7 @@ def print_summary(
         diff = "n/a" if timing.max_abs_diff_mV is None else f"{timing.max_abs_diff_mV:.4g} mV"
         print(
             f"{timing.mode:6s} "
+            f"builder={timing.vstim_builder} "
             f"Vstim_build={timing.vstim_build_s:.4f}s "
             f"scalar={scalar} "
             f"batch={timing.batch_warm_s:.4f}s "

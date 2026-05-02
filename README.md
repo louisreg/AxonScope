@@ -252,6 +252,8 @@ contexts that are summed, or `None` for a zero-field control row:
 from axonscope.solvers import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
+    build_footprint_vstim_initial_previous_batch,
+    build_footprint_vstim_midpoint_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
     prepare_solver_runtime,
@@ -277,6 +279,29 @@ vstim_mid = build_vstim_midpoint_batch(
 
 Pass `x_positions_m` with shape `(B, Nx)` to the `Vstim` builders when each
 batch row represents a fiber translated relative to the electrode.
+
+For population runs, the preferred fast path is to pass precomputed electrode
+footprints directly. This is the shape expected from FEM/interpolation
+workflows:
+
+```python
+# footprint_V_per_A has shape (B, Nx), in V/A.
+vstim_mid = build_footprint_vstim_midpoint_batch(
+    stimulus=stimulus,
+    footprint_V_per_A=footprint_V_per_A,
+    tsim_ms=tsim_ms,
+    dt_ms=dt_ms,
+)
+vstim_previous = build_footprint_vstim_initial_previous_batch(
+    stimulus=stimulus,
+    footprint_V_per_A=footprint_V_per_A,
+    dt_ms=dt_ms,
+)
+```
+
+This builder uses a NumPy data-prep path by default, then returns a JAX array
+for the solver. Use `engine="jax"` only when you specifically want JAX-side
+stimulus/footprint multiplication.
 
 For homogeneous single-cable extracellular batches, use imposed-field forcing:
 
@@ -335,6 +360,8 @@ python examples/basic/population_batch_demo.py \
 
 It builds a small population with per-fiber longitudinal offsets and radial
 distances, compares scalar-loop and batched execution, and prints warm speedups.
+The demo uses a point-source footprint only as a compact debug source; pass
+`--generic-vstim` to compare the slower context-based builder.
 Capture a JAX profiler trace around the same workflow with:
 
 ```bash
