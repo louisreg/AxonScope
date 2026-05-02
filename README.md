@@ -381,6 +381,17 @@ The demo uses a point-source footprint only as a compact debug source; pass
 For low-memory runs, combine `--batch-only`, `--record`, and
 `--time-chunk-steps`; in that mode the demo streams `Vstim` from the footprint
 rather than building the whole `B x Nt x Nx` array first.
+Use the runtime benchmark to compare the dominant tensor sizes and timings:
+
+```bash
+python benchmark/runtime/population_memory.py \
+  --mode double \
+  --fibers 128 \
+  --nx 201 \
+  --tsim 2.0 \
+  --scenarios full center center_chunked probes_chunked
+```
+
 Capture a JAX profiler trace around the same workflow with:
 
 ```bash

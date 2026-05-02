@@ -103,6 +103,8 @@ def row_to_dict(row: object) -> dict[str, object]:
 def flatten_row(row: dict[str, object]) -> dict[str, object]:
     flat = dict(row)
     for key in ("scalar_warm", "batch_warm"):
+        if key not in flat:
+            continue
         stats = flat.pop(key)
         if isinstance(stats, dict):
             for stat_name, value in stats.items():

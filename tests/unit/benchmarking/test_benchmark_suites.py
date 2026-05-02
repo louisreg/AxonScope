@@ -50,3 +50,19 @@ def test_runtime_suites_forward_to_benchmark_solver():
     assert argv[-1] == "--record-diagnostics"
     assert argv[argv.index("--out-dir") + 1] == "runtime-out"
     assert argv[argv.index("--prefix") + 1] == "smoke"
+
+
+def test_runtime_population_memory_suite_is_registered_and_forwardable():
+    suite = RUNTIME_SUITES["population_memory"]
+
+    argv = runtime_suite_argv(
+        suite,
+        out_dir=Path("runtime-out"),
+        prefix="population",
+        extra_args=("--", "--scenarios", "full"),
+    )
+
+    assert suite.runner == "population_memory"
+    assert argv[argv.index("--fibers") + 1] == "128"
+    assert argv[argv.index("--nx") + 1] == "201"
+    assert argv[-2:] == ["--scenarios", "full"]

@@ -61,6 +61,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         benchmark_double_cable_batch.main(runner_argv)
         return
+    if suite.runner == "population_memory":
+        from benchmark.runtime import population_memory
+
+        population_memory.main(runner_argv)
+        return
 
     raise ValueError(f"Unsupported runtime runner: {suite.runner}")
 
