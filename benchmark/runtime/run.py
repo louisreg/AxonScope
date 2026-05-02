@@ -51,6 +51,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         benchmark_solver.main(runner_argv)
         return
+    if suite.runner == "benchmark_vstim_batch":
+        from benchmark.runtime import benchmark_vstim_batch
+
+        benchmark_vstim_batch.main(runner_argv)
+        return
 
     raise ValueError(f"Unsupported runtime runner: {suite.runner}")
 

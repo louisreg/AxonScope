@@ -235,6 +235,7 @@ python benchmark/runtime/run.py --suite smoke
 python benchmark/runtime/run.py --suite full --prefix solver_runtime_current
 python benchmark/runtime/run.py --suite reference_solvers --prefix cn_reference_compare
 python benchmark/runtime/run.py --suite vstim_forcing --prefix hh_vstim_forcing_compare
+python benchmark/runtime/run.py --suite vstim_batch --prefix hh_vstim_batch_compare
 python benchmark/runtime/run.py \
   --suite profiled \
   --prefix solver_runtime_current \
