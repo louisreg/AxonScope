@@ -1,4 +1,4 @@
-from benchmark.validation.nrv_axonscope_grid import main
+from benchmark.nrv_performance.nrv_axonscope_grid import main
 
 
 if __name__ == "__main__":

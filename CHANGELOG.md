@@ -23,7 +23,7 @@ The format is inspired by Keep a Changelog.
   internodal membrane models.
 - Added `MembraneStateSpec` for model-owned membrane state variables.
 - Added MRG extracellular AxonScope-vs-NRV baseline export under
-  `benchmark/validation/baselines/`.
+  `benchmark/nrv_performance/baselines/`.
 - Added a shared `Solver` benchmark runner with JSON/CSV output under
   `benchmark/runtime/`.
 - Added benchmark run metadata and JSON comparison tooling for performance
@@ -38,19 +38,19 @@ The format is inspired by Keep a Changelog.
   for the optimized Crank-Nicholson path.
 - Added explicit JIT-compiled VM-only paths inside `SingleCableKernel` and
   `DoubleCableKernel` for the default Crank-Nicholson solve.
-- Added an HH NRV/AxonScope validation sweep script over `dt`, `Nx`, and
+- Added an HH NRV/AxonScope performance comparison script over `dt`, `Nx`, and
   simulation duration.
-- Added NRV/AxonScope validation sweep profiles for HH and MRG intracellular
-  and extracellular workloads with blocked AxonScope timings, spike metrics,
-  velocity estimates, spatial alignment diagnostics, and optional `m` gate
-  comparison metrics.
+- Added NRV/AxonScope performance comparison profiles for HH and MRG
+  intracellular and extracellular workloads with blocked AxonScope timings,
+  spike metrics, velocity estimates, spatial alignment diagnostics, and optional
+  `m` gate comparison metrics.
 - Added explicit NRV and AxonScope output materialization timings to the
   NRV/AxonScope validation sweep so runtime comparisons include usable traces.
 - Added solve, materialization, total usable-output, and compile-estimate
   timings to the shared solver benchmark runner.
 - Added named benchmark suite manifests and runners under `benchmark/runtime/`
-  and `benchmark/validation/`, with NRV-focused suites for smoke, full, MRG,
-  and MRG extracellular gate diagnostics.
+  and `benchmark/nrv_performance/`, with NRV performance suites for smoke, full,
+  MRG, and MRG extracellular gate diagnostics.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -85,8 +85,9 @@ The format is inspired by Keep a Changelog.
 - Updated solver benchmark comparison output guards to tolerate tiny numerical
   output drift before reporting `changed_output`.
 - Reorganized benchmark scripts into `benchmark/runtime/`,
-  `benchmark/validation/`, and `benchmark/experiments/`, keeping legacy
-  `benchmark/solver_*` entry points as compatibility wrappers.
+  `benchmark/nrv_performance/`, and `benchmark/experiments/`, keeping legacy
+  `benchmark/validation/` and `benchmark/solver_*` entry points as compatibility
+  wrappers.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 

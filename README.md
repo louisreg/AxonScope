@@ -176,29 +176,32 @@ Benchmarks are grouped by intent:
 ```text
 benchmark/
   runtime/       official solver performance benchmarks
-  validation/    AxonScope-vs-NRV correctness and timing sweeps
+  nrv_performance/
+                 AxonScope-vs-NRV compute performance comparisons
   experiments/   backend prototypes and exploratory scripts
   results/       generated JSON/CSV/trace outputs, ignored by git
   reports/       generated HTML/PNG/CSV reports, ignored by git
 ```
 
-The NRV comparison workflow is the main validation entry point. Named suites are
-declared in `benchmark/validation/suites.py`:
+Numerical validity against NRV belongs in `tests/nrv`. The benchmark workflow
+below is for measuring compute performance against NRV after those tests already
+guard correctness. Named suites are declared in
+`benchmark/nrv_performance/suites.py`:
 
 ```bash
-python benchmark/validation/run.py --list
-python benchmark/validation/run.py --suite nrv_smoke --dry-run
-python benchmark/validation/run.py --suite nrv_smoke
-python benchmark/validation/run.py --suite nrv_mrg_extracellular_gates
+python benchmark/nrv_performance/run.py --list
+python benchmark/nrv_performance/run.py --suite smoke --dry-run
+python benchmark/nrv_performance/run.py --suite smoke
+python benchmark/nrv_performance/run.py --suite mrg_extracellular_gates
 ```
 
-The validation runner forwards additional options to
-`benchmark/validation/nrv_axonscope_grid.py` after `--`, so focused NRV sweeps
-stay easy to launch:
+The NRV performance runner forwards additional options to
+`benchmark/nrv_performance/nrv_axonscope_grid.py` after `--`, so focused runtime
+sweeps stay easy to launch:
 
 ```bash
-python benchmark/validation/run.py \
-  --suite nrv_smoke \
+python benchmark/nrv_performance/run.py \
+  --suite smoke \
   --prefix hh_dt_probe \
   -- \
   --dt 0.005 0.01 \
@@ -272,11 +275,11 @@ The lower-level NRV grid script remains available when you want to bypass named
 suites entirely:
 
 ```bash
-python benchmark/validation/nrv_axonscope_grid.py --list
-python benchmark/validation/nrv_axonscope_grid.py --profile full --dry-run
-python benchmark/validation/nrv_axonscope_grid.py \
+python benchmark/nrv_performance/nrv_axonscope_grid.py --list
+python benchmark/nrv_performance/nrv_axonscope_grid.py --profile full --dry-run
+python benchmark/nrv_performance/nrv_axonscope_grid.py \
   --profile smoke
-python benchmark/validation/nrv_axonscope_grid.py \
+python benchmark/nrv_performance/nrv_axonscope_grid.py \
   --model mrg_extracellular --dt 0.005 0.01 --nodes 5 9 --tsim 4 \
   --record-gates
 ```
@@ -314,8 +317,9 @@ intracellular, Schild97 intracellular, and MRG extracellular stimulation.
 
 Reference and experimental backend comparisons live under
 `benchmark/experiments/crank_nicholson_backends/`; those scripts are not stable
-public workflows. Legacy `benchmark/solver_*` entry points remain as compatibility
-wrappers while downstream scripts migrate to the new layout.
+public workflows. Legacy `benchmark/validation/` and `benchmark/solver_*` entry
+points remain as compatibility wrappers while downstream scripts migrate to the
+new layout.
 
 Generated logs and figures are ignored by git.
 

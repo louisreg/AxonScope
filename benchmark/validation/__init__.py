@@ -1,1 +1,1 @@
-"""AxonScope-vs-reference validation benchmark workflows."""
+"""Compatibility wrappers for the former validation benchmark package."""
