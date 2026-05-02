@@ -244,6 +244,85 @@ python benchmark/runtime/run.py \
   --jax-profile-name solver_runtime_current
 ```
 
+Batch solvers consume imposed extracellular fields with a leading batch axis.
+Each row in `context_batch` can be one `ExtracellularContext`, a tuple/list of
+contexts that are summed, or `None` for a zero-field control row:
+
+```python
+from axonscope.solvers import (
+    DoubleCableBatchKernel,
+    SingleCableVStimBatchKernel,
+    build_vstim_initial_previous_batch,
+    build_vstim_midpoint_batch,
+    prepare_solver_runtime,
+    scale_extracellular_contexts,
+)
+
+tsim_ms = 1.2
+dt_ms = 0.01
+base_contexts = tuple(axon.extracellular_contexts)
+context_batch = [
+    base_contexts,
+    scale_extracellular_contexts(base_contexts, 0.5),
+    None,
+]
+
+vstim_mid = build_vstim_midpoint_batch(
+    axon,
+    context_batch,
+    tsim_ms=tsim_ms,
+    dt_ms=dt_ms,
+)
+```
+
+Pass `x_positions_m` with shape `(B, Nx)` to the `Vstim` builders when each
+batch row represents a fiber translated relative to the electrode.
+
+For homogeneous single-cable extracellular batches, use imposed-field forcing:
+
+```python
+runtime = prepare_solver_runtime(
+    axon,
+    tsim_ms=tsim_ms,
+    dt_ms=dt_ms,
+    include_extracellular=False,
+    include_area=False,
+    precompute_intracellular=True,
+    precompute_extracellular=False,
+)
+
+result = SingleCableVStimBatchKernel(runtime, Cm_uF_cm2=axon.Cm).run(
+    extracellular_potential_mid_mV=vstim_mid,
+)
+# result.Vm has shape (B, Nt, Nx)
+```
+
+For full double-cable batches, keep all cable/membrane arrays shared for now and
+provide the additional previous imposed field sample required by the
+extracellular state equation:
+
+```python
+runtime = prepare_solver_runtime(
+    axon,
+    tsim_ms=tsim_ms,
+    dt_ms=dt_ms,
+    include_extracellular=True,
+    include_area=True,
+    precompute_intracellular=True,
+    precompute_extracellular=False,
+)
+vstim_previous = build_vstim_initial_previous_batch(
+    axon,
+    context_batch,
+    dt_ms=dt_ms,
+)
+
+result = DoubleCableBatchKernel(runtime, Veinit_mV=axon.Veinit).run(
+    extracellular_potential_mid_mV=vstim_mid,
+    extracellular_potential_initial_previous_mV=vstim_previous,
+)
+```
+
 Then build a static HTML report and summarize the JAX trace:
 
 ```bash
@@ -362,6 +441,8 @@ Generated logs and figures are ignored by git.
   it accepts imposed fields shaped `(B, Nt, Nx)` and returns `Vm[B, Nt, Nx]`.
 - `build_vstim_midpoint_batch` generates those imposed fields directly from
   batched extracellular context rows, including per-row `(B, Nx)` fiber positions.
+  `build_vstim_initial_previous_batch` provides the matching `t=-dt/2` sample
+  needed by double-cable kernels.
 - `DoubleCableBatchKernel` keeps the first double-cable batch policy simple:
   shared axon structure and extracellular parameters, batched `Vstim`/`Iinj`.
 - The optimized Crank-Nicholson default path precomputes intracellular current

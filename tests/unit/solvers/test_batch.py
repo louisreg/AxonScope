@@ -13,6 +13,7 @@ from axonscope.solvers import (
     DoubleCableKernel,
     SingleCableVStimBatchKernel,
     build_vstim_batch,
+    build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
     scale_extracellular_contexts,
 )
@@ -168,11 +169,11 @@ def test_double_cable_batch_matches_scalar_loop_rows():
         scale_extracellular_contexts(base_contexts, 0.5),
     ]
     vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
-    vext_previous = build_vstim_batch(
+    vext_previous = build_vstim_initial_previous_batch(
         axon,
         context_batch,
-        t_ms=jnp.asarray([-0.5 * dt]),
-    )[:, 0, :]
+        dt_ms=dt,
+    )
 
     batch = DoubleCableBatchKernel(
         runtime=runtime,

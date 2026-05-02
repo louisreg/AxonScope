@@ -56,6 +56,31 @@ def build_vstim_midpoint_batch(
     )
 
 
+def build_vstim_initial_previous_batch(
+    axon,
+    contexts_batch: Sequence[ContextBatchRow],
+    *,
+    dt_ms: float,
+    x_positions_m: Array | None = None,
+    dtype_local: jnp.dtype | None = None,
+) -> Array:
+    """Build the initial previous imposed field used by double-cable batches.
+
+    Returns ``Vstim[B, Nx]`` sampled at ``t = -dt/2`` in mV. This pairs with
+    ``build_vstim_midpoint_batch`` for full double-cable kernels.
+    """
+
+    dtype = _resolve_dtype(axon, dtype_local)
+    samples = build_vstim_batch(
+        axon,
+        contexts_batch,
+        t_ms=jnp.asarray([-0.5 * dt_ms], dtype=dtype),
+        x_positions_m=x_positions_m,
+        dtype_local=dtype,
+    )
+    return samples[:, 0, :]
+
+
 def build_vstim_batch(
     axon,
     contexts_batch: Sequence[ContextBatchRow],
@@ -606,6 +631,7 @@ def _resolve_x_positions_m(
 __all__ = [
     "BatchKernelResult",
     "build_vstim_batch",
+    "build_vstim_initial_previous_batch",
     "build_vstim_midpoint_batch",
     "scale_extracellular_contexts",
     "SingleCableVStimBatchKernel",

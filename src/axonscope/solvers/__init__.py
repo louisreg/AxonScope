@@ -4,6 +4,7 @@ from axonscope.solvers.batch import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
     build_vstim_batch,
+    build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
     scale_extracellular_contexts,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "DoubleCableBatchKernel",
     "SingleCableVStimBatchKernel",
     "build_vstim_batch",
+    "build_vstim_initial_previous_batch",
     "build_vstim_midpoint_batch",
     "scale_extracellular_contexts",
     "SingleCableKernel",

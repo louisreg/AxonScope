@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
-import statistics
 import sys
-import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[2]
@@ -20,38 +16,20 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.axons import HodgkinHuxley
-from axonscope.benchmarking import collect_benchmark_metadata
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers import (
     SingleCableKernel,
     SingleCableVStimBatchKernel,
     build_vstim_midpoint_batch,
-    scale_extracellular_contexts,
 )
 from axonscope.solvers.runtime import SolverRuntime, prepare_solver_runtime
 from axonscope.stimulus import Stimulus
-
-
-@dataclass(frozen=True)
-class TimingStats:
-    repeats: int
-    mean_s: float
-    median_s: float
-    min_s: float
-    max_s: float
-    std_s: float
-
-    @classmethod
-    def from_samples(cls, samples_s: Sequence[float]) -> "TimingStats":
-        samples = [float(value) for value in samples_s]
-        return cls(
-            repeats=len(samples),
-            mean_s=float(statistics.fmean(samples)),
-            median_s=float(statistics.median(samples)),
-            min_s=float(min(samples)),
-            max_s=float(max(samples)),
-            std_s=float(statistics.pstdev(samples)) if len(samples) > 1 else 0.0,
-        )
+from benchmark.runtime.batch_utils import (
+    TimingStats,
+    scaled_context_batch,
+    time_call,
+    write_rows,
+)
 
 
 @dataclass(frozen=True)
@@ -126,7 +104,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     ]
 
     prefix = args.prefix or datetime.now().strftime("vstim_batch_%Y%m%d_%H%M%S")
-    json_path, csv_path = write_results(
+    json_path, csv_path = write_rows(
         rows,
         args.out_dir,
         prefix=prefix,
@@ -171,23 +149,23 @@ def benchmark_batch_size(
     )
     batch_kernel = SingleCableVStimBatchKernel(runtime=runtime, Cm_uF_cm2=cm_uF_cm2)
 
-    scalar_first_s, scalar_first = _time_call(
+    scalar_first_s, scalar_first = time_call(
         lambda: _run_scalar_loop(runtime, cm_uF_cm2, vext_batch)
     )
-    batch_first_s, batch_first = _time_call(
+    batch_first_s, batch_first = time_call(
         lambda: batch_kernel.run(extracellular_potential_mid_mV=vext_batch).Vm
     )
 
     for _ in range(warmups):
-        _time_call(lambda: _run_scalar_loop(runtime, cm_uF_cm2, vext_batch))
-        _time_call(lambda: batch_kernel.run(extracellular_potential_mid_mV=vext_batch).Vm)
+        time_call(lambda: _run_scalar_loop(runtime, cm_uF_cm2, vext_batch))
+        time_call(lambda: batch_kernel.run(extracellular_potential_mid_mV=vext_batch).Vm)
 
     scalar_samples = [
-        _time_call(lambda: _run_scalar_loop(runtime, cm_uF_cm2, vext_batch))[0]
+        time_call(lambda: _run_scalar_loop(runtime, cm_uF_cm2, vext_batch))[0]
         for _ in range(repeats)
     ]
     batch_samples = [
-        _time_call(lambda: batch_kernel.run(extracellular_potential_mid_mV=vext_batch).Vm)[0]
+        time_call(lambda: batch_kernel.run(extracellular_potential_mid_mV=vext_batch).Vm)[0]
         for _ in range(repeats)
     ]
 
@@ -228,22 +206,6 @@ def _run_scalar_loop(runtime: SolverRuntime, cm_uF_cm2, vext_batch):
     return jnp.stack(rows)
 
 
-def _time_call(fn: Callable[[], object]) -> tuple[float, object]:
-    start = time.perf_counter()
-    value = fn()
-    _block_until_ready(value)
-    return time.perf_counter() - start, value
-
-
-def _block_until_ready(value: object) -> None:
-    if hasattr(value, "block_until_ready"):
-        value.block_until_ready()
-        return
-    if isinstance(value, (tuple, list)):
-        for item in value:
-            _block_until_ready(item)
-
-
 def _make_scaled_vstim_context_batch(
     axon: HodgkinHuxley,
     *,
@@ -252,14 +214,9 @@ def _make_scaled_vstim_context_batch(
     batch_size: int,
 ):
     base_contexts = tuple(axon.extracellular_contexts)
-    scales = np.linspace(0.5, 1.5, batch_size)
-    context_batch = [
-        scale_extracellular_contexts(base_contexts, float(scale))
-        for scale in scales
-    ]
     return build_vstim_midpoint_batch(
         axon,
-        context_batch,
+        scaled_context_batch(base_contexts, batch_size=batch_size),
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
     )
@@ -281,47 +238,6 @@ def _build_hh_extracellular(nx: int) -> HodgkinHuxley:
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
     axon.add_extracellular_context(electrode, stim, replace=True)
     return axon
-
-
-def write_results(
-    rows: Sequence[VStimBatchBenchmarkRow],
-    out_dir: Path,
-    *,
-    prefix: str,
-    metadata: dict[str, object],
-) -> tuple[Path, Path]:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / f"{prefix}.json"
-    csv_path = out_dir / f"{prefix}.csv"
-
-    payload = {
-        "schema_version": 1,
-        "metadata": {**collect_benchmark_metadata(), **metadata},
-        "results": [row_to_dict(row) for row in rows],
-    }
-    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-    flat_rows = [flatten_row(row_to_dict(row)) for row in rows]
-    fieldnames = sorted({key for row in flat_rows for key in row})
-    with csv_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(flat_rows)
-    return json_path, csv_path
-
-
-def row_to_dict(row: VStimBatchBenchmarkRow) -> dict[str, object]:
-    return asdict(row)
-
-
-def flatten_row(row: dict[str, object]) -> dict[str, object]:
-    flat = dict(row)
-    for key in ("scalar_warm", "batch_warm"):
-        stats = flat.pop(key)
-        if isinstance(stats, dict):
-            for stat_name, value in stats.items():
-                flat[f"{key}.{stat_name}"] = value
-    return flat
 
 
 if __name__ == "__main__":
