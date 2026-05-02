@@ -132,14 +132,16 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     print("=== NRV/AxonScope grid ===")
     for row in rows:
-        speedup = _fmt_optional(row.get("speedup_nrv_over_as_total_first"))
+        speedup_first = _fmt_optional(row.get("speedup_nrv_over_as_total_first"))
+        speedup_warm = _fmt_optional(row.get("speedup_nrv_over_as_total_warm"))
         warm = _fmt_optional(row.get("as_warm_total_median_s"))
         print(
             f"{row['model']:20s} dt={row['dt_ms']:g} ms "
             f"nx={row['axon_nx']:4d} tsim={row['tsim_ms']:g} ms "
             f"rmse={row['vm_rmse_mV']:.4f} mV max={row['vm_max_abs_mV']:.4f} mV "
             f"AS_total={row['as_total_first_s']:.3f}s AS_warm={warm}s "
-            f"NRV_total={row['nrv_total_s']:.3f}s speedup={speedup}"
+            f"NRV_total={row['nrv_total_s']:.3f}s "
+            f"speedup_first={speedup_first} speedup_warm={speedup_warm}"
         )
     print(f"json: {json_path}")
     print(f"csv : {csv_path}")
