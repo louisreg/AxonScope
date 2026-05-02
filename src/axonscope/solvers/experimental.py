@@ -1,4 +1,11 @@
-"""Experimental and reference Crank-Nicholson solver variants."""
+"""Experimental and reference Crank-Nicholson solver variants.
+
+Kept variants:
+- ``CrankNicholsonVStimForcing``: imposed-field single-cable extracellular path.
+- ``CrankNicholson_unoptimized``: dense reference implementation.
+- ``CrankNicholsonSemiImplicit``: one-shot ionic-current linearization.
+- ``CrankNicholsonImplicit``: Newton-style nonlinear solve prototype.
+"""
 
 from __future__ import annotations
 
@@ -51,41 +58,6 @@ def _cn_channel_step(
     Iion = backend.currents(V_mV=V_mV, gates=gates_new)
     Gtot = backend.total_conductance(gates_new)
     return gates_new, Iion, Gtot
-
-
-def _implicit_fast_linear_terms(
-    Cm: float,
-    lower: jnp.ndarray,
-    diag: jnp.ndarray,
-    upper: jnp.ndarray,
-    dt: float,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    dl = -0.5 * Cm * lower
-    du = -0.5 * Cm * upper
-    d_static = (Cm / dt) - 0.5 * Cm * diag
-    return dl, du, d_static
-
-
-def _linearized_cn_rhs(
-    V: jnp.ndarray,
-    lower: jnp.ndarray,
-    diag: jnp.ndarray,
-    upper: jnp.ndarray,
-    Cm: float,
-    dt: float,
-    Iinj: jnp.ndarray,
-    Iion: jnp.ndarray,
-    I_bg: jnp.ndarray,
-    Gtot: jnp.ndarray,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
-    LV = apply_diffusion_operator(V, lower, diag, upper)
-    rhs = (
-        Cm / dt * V
-        + 0.5 * Cm * LV
-        + (Iinj - Iion - I_bg)
-        + 0.5 * Gtot * V
-    )
-    return LV, rhs
 
 
 class CrankNicholsonVStimForcing(Solver):
@@ -370,7 +342,7 @@ class CrankNicholsonImplicit(Solver):
     V_n, this solver solves the full nonlinear CN system at each step:
 
         F(V_{n+1}) = Cm (V_{n+1} - V_n) / dt
-                   - (1/2) ( L V_{n+1} + L V_n )
+                   - (Cm/2) ( L V_{n+1} + L V_n )
                    + (1/2) ( I_ion(V_{n+1}, g_{n+1/2}) + I_ion(V_n, g_{n+1/2}) )
                    - I_inj^{n+1/2}
                    = 0
@@ -380,7 +352,7 @@ class CrankNicholsonImplicit(Solver):
         V^{(k+1)} = V^{(k)} - J^{-1} · F(V^{(k)})
 
     where the Jacobian J = ∂F/∂V is tridiagonal:
-        J = (Cm/dt) I - (1/2) L + (1/2) diag(G_tot(V^{(k)}))
+        J = (Cm/dt) I - (Cm/2) L + (1/2) diag(G_tot(V^{(k)}))
 
     Since J is tridiagonal, each Newton step has the same cost as one
     tridiagonal solve. In practice 2–3 Newton iterations per step are
@@ -456,11 +428,13 @@ class CrankNicholsonImplicit(Solver):
         # Sealed-end Neumann diffusion operator (shared helpers)
         lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
 
-        # Newton Jacobian off-diagonals: J = (Cm/dt) I - (1/2) L + diag(G_tot/2)
-        dl_base: jnp.ndarray = -0.5 * lower
-        du_base: jnp.ndarray = -0.5 * upper
-        # Static diagonal: Cm/dt - (1/2) * L_diag  (L_diag is negative, so this adds)
-        d_static: jnp.ndarray = dtype_local(Cm_over_dt) * jnp.ones((Nx,), dtype=dtype_local) - 0.5 * diag
+        # Newton Jacobian: Cm/dt * I - 0.5 * Cm * L + diag(Gtot/2).
+        dl_base: jnp.ndarray = -0.5 * dtype_local(Cm) * lower
+        du_base: jnp.ndarray = -0.5 * dtype_local(Cm) * upper
+        d_static: jnp.ndarray = (
+            dtype_local(Cm_over_dt) * jnp.ones((Nx,), dtype=dtype_local)
+            - 0.5 * dtype_local(Cm) * diag
+        )
 
         inj_fun = build_intracellular_current_density_fn(axon)
 
@@ -475,7 +449,7 @@ class CrankNicholsonImplicit(Solver):
             Nonlinear residual F(V_k) for the implicit CN step.
 
             F(V_k) = Cm/dt (V_k - V_n)
-                   - (1/2)(L V_k + L V_n)
+                   - (Cm/2)(L V_k + L V_n)
                    + (1/2)(I_ion(V_k, g) + I_ion(V_n, g))
                    - I_inj
             """
@@ -483,7 +457,7 @@ class CrankNicholsonImplicit(Solver):
             Iion_k = backend.currents(V_mV=V_k, gates=gates_new)
             return (
                 Cm_over_dt * (V_k - V_n)
-                - 0.5 * (LV_k + LV_n)
+                - 0.5 * Cm * (LV_k + LV_n)
                 + 0.5 * (Iion_k + Iion_n)
                 - Iinj
                 + I_bg
@@ -523,7 +497,7 @@ class CrankNicholsonImplicit(Solver):
                 # Local conductance slope at V_k, used for the Jacobian diagonal
                 G_tot_k = backend.total_conductance(gates=gates_new)
 
-                # Jacobian diagonal: Cm/dt - (1/2)*L_diag + (1/2)*G_tot
+                # Jacobian diagonal: Cm/dt - (Cm/2)*L_diag + (1/2)*G_tot
                 d_k = d_static + 0.5 * G_tot_k
 
                 dV = jax.lax.linalg.tridiagonal_solve(
@@ -543,221 +517,9 @@ class CrankNicholsonImplicit(Solver):
         return SimResult(axon, V_all, t_vec)
 
 
-class CrankNicholsonImplicitFast(Solver):
-
-    def solve(self, axon, tsim, dt):
-        extracellular_res = _maybe_solve_with_extracellular_generic(axon, tsim, dt)
-        if extracellular_res is not None:
-            return extracellular_res
-
-        backend, dtype, Nx, V, gates, I_bg = _single_cable_backend_setup(axon)
-        Nt = int(jnp.ceil(tsim / dt))
-
-        Cm = axon.Cm
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
-        dl, du, d_static = _implicit_fast_linear_terms(Cm, lower, diag, upper, dt)
-
-        inj_fun = build_intracellular_current_density_fn(axon)
-
-        def step(carry, n):
-            V, gates = carry
-            t_mid = (n + 0.5) * dt
-
-            gates_new, Iion, Gtot = _cn_channel_step(backend, V, gates, dt)
-
-            Iinj = inj_fun(t_mid)
-
-            _, rhs = _linearized_cn_rhs(V, lower, diag, upper, Cm, dt, Iinj, Iion, I_bg, Gtot)
-
-            d = d_static + 0.5 * Gtot
-
-            V_new = jax.lax.linalg.tridiagonal_solve(
-                dl, d, du, rhs[:, None]
-            )[:, 0]
-
-            return (V_new, gates_new), V_new
-
-        (_, _), V_all = jax.lax.scan(step, (V, gates), jnp.arange(Nt))
-
-        t_vec = (jnp.arange(Nt, dtype=dtype) + 1.0) * dt
-
-        return SimResult(axon, V_all, t_vec)
-
-
-class CrankNicholsonImplicitFastMultiStep(Solver):
-
-    def __init__(self, K: int = 5):
-        self.K = int(K)
-
-    def solve(self, axon, tsim, dt):
-        extracellular_res = _maybe_solve_with_extracellular_generic(axon, tsim, dt)
-        if extracellular_res is not None:
-            return extracellular_res
-
-        backend, dtype, Nx, V, gates, I_bg = _single_cable_backend_setup(axon)
-        K = self.K
-
-        Nt = int(jnp.ceil(tsim / dt))
-
-        Cm = axon.Cm
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
-        dl, du, d_static = _implicit_fast_linear_terms(Cm, lower, diag, upper, dt)
-
-        inj_fun = build_intracellular_current_density_fn(axon)
-
-        def step(V, gates, t):
-
-            gates_new, Iion, Gtot = _cn_channel_step(backend, V, gates, dt)
-
-            Iinj = inj_fun(t + 0.5 * dt)
-
-            _, rhs = _linearized_cn_rhs(V, lower, diag, upper, Cm, dt, Iinj, Iion, I_bg, Gtot)
-
-            d = d_static + 0.5 * Gtot
-
-            V_new = jax.lax.linalg.tridiagonal_solve(
-                dl, d, du, rhs[:, None]
-            )[:, 0]
-
-            return V_new, gates_new
-
-        def block_step(carry, b):
-            V, gates, t0 = carry
-
-            def body(carry, k):
-                V, gates, t = carry
-                V_new, gates_new = step(V, gates, t)
-                return (V_new, gates_new, t + dt), V_new
-
-            (V, gates, t_end), Vs = jax.lax.scan(
-                body,
-                (V, gates, t0),
-                jnp.arange(K)
-            )
-
-            return (V, gates, t_end), Vs
-
-        n_full_blocks = Nt // K
-        n_tail = Nt % K
-
-        (V, gates, t_end), V_blocks = jax.lax.scan(
-            block_step,
-            (V, gates, dtype(0.0)),
-            jnp.arange(n_full_blocks)
-        )
-
-        V_all = V_blocks.reshape((-1, Nx)) if n_full_blocks > 0 else jnp.zeros((0, Nx), dtype=dtype)
-
-        if n_tail > 0:
-            def tail_body(carry, k):
-                V, gates, t = carry
-                V_new, gates_new = step(V, gates, t)
-                return (V_new, gates_new, t + dt), V_new
-
-            (V, gates, t_end), V_tail = jax.lax.scan(
-                tail_body,
-                (V, gates, t_end),
-                jnp.arange(n_tail)
-            )
-            V_all = jnp.concatenate([V_all, V_tail], axis=0)
-
-        t_vec = (jnp.arange(Nt, dtype=dtype) + 1.0) * dt
-
-        return SimResult(axon, V_all, t_vec)
-
-
-class CrankNicholsonQuasiNewtonFast(Solver):
-
-    def solve(self, axon, tsim, dt):
-        extracellular_res = _maybe_solve_with_extracellular_generic(axon, tsim, dt)
-        if extracellular_res is not None:
-            return extracellular_res
-
-        backend, dtype, Nx, V, gates, I_bg = _single_cable_backend_setup(axon)
-        Nt = int(jnp.ceil(tsim / dt))
-
-        Cm = axon.Cm
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype)
-
-        inj_fun = build_intracellular_current_density_fn(axon)
-
-        # -------------------------
-        # CN diffusion operators
-        # -------------------------
-        dl, du, d_static = _implicit_fast_linear_terms(Cm, lower, diag, upper, dt)
-
-        # relaxation (important for stability)
-        omega = 0.6
-
-        def step(carry, n):
-            V, gates = carry
-            t_mid = (n + 0.5) * dt
-
-            # -------------------------
-            # gating (unchanged stable CNEXP)
-            # -------------------------
-            gates_new, Iion, Gtot = _cn_channel_step(backend, V, gates, dt)
-
-            Iinj = inj_fun(t_mid)
-
-            # -------------------------
-            # freeze Jacobian at V_n
-            # -------------------------
-            d = d_static + 0.5 * Gtot
-
-            # LU factorization ONLY ONCE
-            def linear_solve(rhs):
-                return jax.lax.linalg.tridiagonal_solve(
-                    dl, d, du, rhs[:, None]
-                )[:, 0]
-
-            # -------------------------
-            # RHS CN
-            # -------------------------
-            _, rhs = _linearized_cn_rhs(V, lower, diag, upper, Cm, dt, Iinj, Iion, I_bg, Gtot)
-
-            # -------------------------
-            # STEP 1: quasi-Newton solve
-            # -------------------------
-            V_new = linear_solve(rhs)
-
-            # -------------------------
-            # STEP 2: 1 correction only (cheap)
-            # -------------------------
-            for _ in range(1):
-                Iion_new = backend.currents(V_mV=V_new, gates=gates_new)
-                LV_new = apply_diffusion_operator(V_new, lower, diag, upper)
-                rhs_corr = (
-                    Cm / dt * V
-                    + 0.5 * Cm * LV_new
-                    + (Iinj - Iion_new - I_bg)
-                    + 0.5 * Gtot * V
-                )
-
-                V_corr = linear_solve(rhs_corr)
-
-                # relaxation
-                V_new = (1 - omega) * V_new + omega * V_corr
-
-            return (V_new, gates_new), V_new
-
-        (_, _), V_all = jax.lax.scan(
-            step,
-            (V, gates),
-            jnp.arange(Nt)
-        )
-
-        t_vec = (jnp.arange(Nt, dtype=dtype) + 1.0) * dt
-
-        return SimResult(axon, V_all, t_vec)
-
-
 __all__ = [
     "CrankNicholsonVStimForcing",
     "CrankNicholson_unoptimized",
     "CrankNicholsonSemiImplicit",
     "CrankNicholsonImplicit",
-    "CrankNicholsonImplicitFast",
-    "CrankNicholsonImplicitFastMultiStep",
-    "CrankNicholsonQuasiNewtonFast",
 ]

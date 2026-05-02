@@ -21,9 +21,6 @@ from axonscope.solvers.experimental import (
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
     CrankNicholsonImplicit,
-    CrankNicholsonImplicitFast,
-    CrankNicholsonImplicitFastMultiStep,
-    CrankNicholsonQuasiNewtonFast,
 )
 from axonscope.solvers.kernels import DoubleCableKernel
 from axonscope.solvers.runtime import prepare_solver_runtime
@@ -34,9 +31,6 @@ ALL_SOLVERS = [
     CrankNicholson(),
     CrankNicholsonSemiImplicit(),
     CrankNicholsonImplicit(n_newton=3),
-    CrankNicholsonImplicitFast(),
-    CrankNicholsonImplicitFastMultiStep(),
-    CrankNicholsonQuasiNewtonFast(),
 ]
 
 

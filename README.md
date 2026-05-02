@@ -358,6 +358,9 @@ Generated logs and figures are ignored by git.
 - The optimized Crank-Nicholson default path precomputes intracellular current
   density samples and calls explicit JIT-compiled VM-only single-cable or
   double-cable kernels. Recording observables still uses the more general path.
+- `axonscope.solvers.experimental` intentionally keeps only a small set of
+  reference/prototype solvers: dense CN, imposed-field Vstim forcing,
+  semi-implicit ionic linearization, and a Newton-style implicit prototype.
 - The full double-cable reference path uses scalar coefficient arrays for its
   2x2 block solve, avoiding per-step materialization of `(Nx, 2, 2)` matrices.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.
