@@ -15,6 +15,8 @@ from axonscope.stimulus_eval import evaluate_stimulus_numpy
 from axonscope.solvers.euler import Euler
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
+)
+from axonscope.solvers.experimental import (
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
     CrankNicholsonImplicit,

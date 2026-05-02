@@ -1,12 +1,11 @@
 """
-Extracellular — MRG myelinated fiber activation threshold vs diameter, compared to NRV.
+Extracellular — MRG myelinated fiber activation threshold monotonicity.
 
 Protocol:
   - Point-source electrode, fixed position (100 µm above fiber center).
   - Cathodic monophasic pulse, fixed duration (100 µs).
   - Binary search for threshold amplitude that triggers 1 AP propagation.
   - Diameters: [5.7, 7.3, 8.7, 10.0, 11.5, 14.0] µm (MRG standard diameters).
-  - Tolerance: 10 % relative on threshold current.
 """
 
 import numpy as np
@@ -24,7 +23,6 @@ SIGMA_S_M = 0.2
 NODES = 21
 TSIM = 5.0
 DT = 0.005
-RTOL = 0.10
 
 
 def _has_ap(ax: MRG, amp_uA: float) -> bool:
@@ -51,11 +49,6 @@ def _binary_search_threshold(d: float, lo: float = 1.0, hi: float = 500.0, tol: 
         if (hi - lo) < tol:
             break
     return (lo + hi) / 2.0
-
-
-@pytest.mark.nrv_extracellular
-def test_myelinated_threshold_vs_diameter_nrv():
-    pytest.skip("TODO: run NRV binary-search threshold and compare")
 
 
 @pytest.mark.nrv_extracellular

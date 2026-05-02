@@ -5,6 +5,8 @@ import pytest
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
+)
+from axonscope.solvers.experimental import (
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
     CrankNicholsonImplicit,

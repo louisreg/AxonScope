@@ -1,12 +1,6 @@
 from axonscope.solvers.base import Solver
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
-    CrankNicholsonImplicit,
-    CrankNicholsonImplicitFast,
-    CrankNicholsonImplicitFastMultiStep,
-    CrankNicholsonQuasiNewtonFast,
-    CrankNicholsonSemiImplicit,
-    CrankNicholson_unoptimized,
 )
 from axonscope.solvers.euler import Euler
 from axonscope.solvers.kernels import DoubleCableKernel, KernelResult, SingleCableKernel
@@ -26,12 +20,6 @@ __all__ = [
     "Solver",
     "Euler",
     "CrankNicholson",
-    "CrankNicholson_unoptimized",
-    "CrankNicholsonSemiImplicit",
-    "CrankNicholsonImplicit",
-    "CrankNicholsonImplicitFast",
-    "CrankNicholsonImplicitFastMultiStep",
-    "CrankNicholsonQuasiNewtonFast",
     "SingleCableKernel",
     "DoubleCableKernel",
     "KernelResult",

@@ -1,12 +1,11 @@
 """
-Extracellular — Tigerholm C-fiber activation threshold vs diameter, compared to NRV.
+Extracellular — Tigerholm C-fiber activation threshold monotonicity.
 
 Protocol:
   - Point-source electrode, 100 µm above fiber center.
   - Cathodic monophasic pulse, 100 µs.
   - Binary search for threshold amplitude.
   - Diameters: [0.3, 0.5, 0.7, 0.8, 1.0, 1.2] µm.
-  - Tolerance: 10 % relative on threshold current.
 """
 
 import numpy as np
@@ -26,7 +25,6 @@ NX = 101
 CELSIUS = 37.0
 TSIM = 30.0
 DT = 0.025
-RTOL = 0.10
 
 
 def _has_ap(d: float, amp_uA: float) -> bool:
@@ -52,11 +50,6 @@ def _binary_search_threshold(d: float, lo: float = 1.0, hi: float = 1000.0, tol:
         if (hi - lo) < tol:
             break
     return (lo + hi) / 2.0
-
-
-@pytest.mark.nrv_extracellular
-def test_unmyelinated_threshold_vs_diameter_nrv():
-    pytest.skip("TODO: run NRV binary-search threshold and compare")
 
 
 @pytest.mark.nrv_extracellular

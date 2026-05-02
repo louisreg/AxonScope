@@ -93,6 +93,9 @@ The format is inspired by Keep a Changelog.
 - Simplified the axon stimulation API so intracellular clamps now receive an
   explicit `Stimulus` object.
 - Renamed solver modules to lowercase `crank_nicholson.py` and `euler.py`.
+- Moved Crank-Nicholson reference and prototype variants to
+  `axonscope.solvers.experimental`, leaving `axonscope.solvers` focused on
+  production solvers and runtime helpers.
 - Renamed extracellular context helpers to `add_extracellular_context`,
   `clear_extracellular_contexts`, and `extracellular_potential_mV`.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
@@ -109,6 +112,8 @@ The format is inspired by Keep a Changelog.
 - Fixed stale internal imports that referenced the old flat module layout.
 - Removed stale playground diagnostics and Crank-Nicholson backend experiments
   that referenced older runtime internals.
+- Removed skipped NRV threshold placeholder tests now covered by monotonicity
+  checks and existing systematic NRV validations.
 
 ### Validation
 
