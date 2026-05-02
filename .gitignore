@@ -43,6 +43,7 @@ target
 .claude/
 benchmark/CrankNicholson_runtime/logs/
 benchmark/CrankNicholson_runtime/figures/
+benchmark/reports/
 benchmark/results/
 figures/nrv_tests/
 figures/physics_tests/*.png

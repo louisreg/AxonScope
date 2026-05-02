@@ -195,6 +195,11 @@ python benchmark/solver_runtime/visualize_results.py \
   benchmark/results/solver_runtime/solver_runtime_current.json \
   --out-dir benchmark/reports/solver_runtime \
   --prefix solver_runtime_current
+
+python benchmark/solver_runtime/summarize_trace.py \
+  benchmark/results/jax_profiles/solver_runtime_current \
+  --timeline \
+  --csv-out benchmark/reports/solver_runtime/solver_runtime_current_trace.csv
 ```
 
 The profiler trace is written under:
@@ -208,6 +213,10 @@ JAX emits phase annotations such as `build_axon`, `first_solve`,
 Python object construction, XLA compilation, blocked solver execution, and output
 materialization. Add `--jax-profile-perfetto` when you want JAX to also emit a
 local Perfetto trace file, if supported by the installed JAX version.
+
+Use `summarize_trace.py` when the Perfetto timeline is too dense: it extracts
+only the `benchmark/...` annotations and reports `count`, `total_ms`, `mean_ms`,
+`median_ms`, `min_ms`, and `max_ms` per phase.
 
 Example runtime output from a local optimized run:
 
