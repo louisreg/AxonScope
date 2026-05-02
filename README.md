@@ -179,6 +179,55 @@ python benchmark/solver_runtime/benchmark_solver.py --cases hh_intracellular_sma
 python benchmark/solver_runtime/benchmark_solver.py --cases all --repeats 3
 ```
 
+For a typical solver refactor pass, run the full runtime suite with explicit
+warmups, capture a JAX profiler trace, then build a static HTML report:
+
+```bash
+python benchmark/solver_runtime/benchmark_solver.py \
+  --cases all \
+  --repeats 3 \
+  --warmups 1 \
+  --prefix solver_runtime_current \
+  --jax-profile-dir benchmark/results/jax_profiles \
+  --jax-profile-name solver_runtime_current
+
+python benchmark/solver_runtime/visualize_results.py \
+  benchmark/results/solver_runtime/solver_runtime_current.json \
+  --out-dir benchmark/reports/solver_runtime \
+  --prefix solver_runtime_current
+```
+
+The profiler trace is written under:
+
+```text
+benchmark/results/jax_profiles/solver_runtime_current/plugins/profile/...
+```
+
+JAX emits phase annotations such as `build_axon`, `first_solve`,
+`measured_solve`, and `measured_materialize`, which makes it easier to separate
+Python object construction, XLA compilation, blocked solver execution, and output
+materialization. Add `--jax-profile-perfetto` when you want JAX to also emit a
+local Perfetto trace file, if supported by the installed JAX version.
+
+Example runtime output from a local optimized run:
+
+```text
+hh_intracellular_small           CrankNicholson build=0.9271s first=4.5201s compile_est=4.5017s mat=0.0002s total=4.5202s warm=0.0186s warm_total=0.0187s
+rattay_intracellular_small       CrankNicholson build=0.0073s first=3.6078s compile_est=3.5876s mat=0.0001s total=3.6080s warm=0.0208s warm_total=0.0209s
+schild97_intracellular_small     CrankNicholson build=0.0180s first=4.3731s compile_est=4.2839s mat=0.0001s total=4.3732s warm=0.0892s warm_total=0.0893s
+mrg_extracellular_small          CrankNicholson build=0.0154s first=4.3919s compile_est=4.3310s mat=0.0001s total=4.3920s warm=0.0617s warm_total=0.0618s
+```
+
+Read the columns as:
+
+- `first`: first blocked solve, dominated by JAX compilation on new signatures.
+- `compile_est`: `first` minus the fastest warm solve; useful as a tracking
+  signal, not as a replacement for the profiler.
+- `warm`: blocked solve on rebuilt but equivalent workloads, the main runtime
+  metric for solver-loop optimizations.
+- `mat`: time to materialize and summarize the output arrays.
+- `warm_total`: warm solve plus materialization, closest to usable-output time.
+
 NRV/AxonScope validation sweeps over `dt`, `Nx`, and `Tsim` write JSON/CSV
 comparison tables:
 
@@ -198,6 +247,16 @@ Compare two runs after a solver refactor:
 python benchmark/solver_runtime/compare_results.py \
   benchmark/results/solver_runtime/baseline.json \
   benchmark/results/solver_runtime/current.json
+```
+
+The visual report can also compare several JSON files in one page:
+
+```bash
+python benchmark/solver_runtime/visualize_results.py \
+  benchmark/results/solver_runtime/baseline.json \
+  benchmark/results/solver_runtime/current.json \
+  --out-dir benchmark/reports/solver_runtime \
+  --prefix baseline_vs_current
 ```
 
 The NRV/AxonScope grid reports blocked AxonScope solve timings, explicit output
