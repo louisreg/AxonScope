@@ -82,6 +82,9 @@ The format is inspired by Keep a Changelog.
   use `jax.lax.scan`, reducing indexed array updates inside the JIT time loop.
 - Hoisted double-cable VM-only invariant terms and time-sampled drive inputs
   outside the scan body to simplify the optimized Vi/Ve kernel.
+- Skipped unused membrane-current planning work in the stateless double-cable
+  VM-only path, keeping the optimized Vi/Ve loop focused on gate prediction and
+  block solves.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous

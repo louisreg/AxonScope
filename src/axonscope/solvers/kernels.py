@@ -241,27 +241,35 @@ def _run_double_cable_vm_scan(
         Vm = Vi - Ve
 
         gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
-        Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
-        step_plan_pred = membrane.prepare_membrane_step(
-            V_mV=Vm,
-            gates_prev=gates,
-            gates_new=gates_pred,
-            state=extra,
-            dt=dt_ms,
-            I_ion=Iion_pred,
-            I_background=I_background,
-        )
-        linearization_gates = step_plan_pred.linearization_gates
-        if has_driven_extracellular:
-            linearization_gates = gates
+
+        if stateless_vm_only:
+            linearization_gates = gates if has_driven_extracellular else gates_pred
+            explicit_outward_current = I_background
+            correction_current = jnp.zeros_like(Vm)
+        else:
+            Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+            step_plan_pred = membrane.prepare_membrane_step(
+                V_mV=Vm,
+                gates_prev=gates,
+                gates_new=gates_pred,
+                state=extra,
+                dt=dt_ms,
+                I_ion=Iion_pred,
+                I_background=I_background,
+            )
+            linearization_gates = step_plan_pred.linearization_gates
+            if has_driven_extracellular:
+                linearization_gates = gates
+            explicit_outward_current = step_plan_pred.explicit_outward_current
+            correction_current = step_plan_pred.correction_current
 
         Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
             Iinj_abs=Iinj_abs,
-            I_outward_den=step_plan_pred.explicit_outward_current,
-            I_corr_den=step_plan_pred.correction_current,
+            I_outward_den=explicit_outward_current,
+            I_corr_den=correction_current,
             extracellular_drive_abs=extracellular_drive_abs,
         )
         Vm_new = Vi_new - Ve_new
