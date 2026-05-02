@@ -1,6 +1,7 @@
 from axonscope.solvers.base import Solver
 from axonscope.solvers.batch import (
     BatchKernelResult,
+    DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
     build_vstim_batch,
     build_vstim_midpoint_batch,
@@ -28,6 +29,7 @@ __all__ = [
     "Euler",
     "CrankNicholson",
     "BatchKernelResult",
+    "DoubleCableBatchKernel",
     "SingleCableVStimBatchKernel",
     "build_vstim_batch",
     "build_vstim_midpoint_batch",

@@ -361,6 +361,8 @@ Generated logs and figures are ignored by git.
   it accepts imposed fields shaped `(B, Nt, Nx)` and returns `Vm[B, Nt, Nx]`.
 - `build_vstim_midpoint_batch` generates those imposed fields directly from
   batched extracellular context rows, including per-row `(B, Nx)` fiber positions.
+- `DoubleCableBatchKernel` keeps the first double-cable batch policy simple:
+  shared axon structure and extracellular parameters, batched `Vstim`/`Iinj`.
 - The optimized Crank-Nicholson default path precomputes intracellular current
   density samples and calls explicit JIT-compiled VM-only single-cable or
   double-cable kernels. Recording observables still uses the more general path.

@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from axonscope.stimulation import ExtracellularContext
 
 from .common import Array, apply_diffusion_operator
-from .kernels import _run_single_cable_vstim_vm_scan
+from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .runtime import SolverRuntime
 from .stimulus_runtime import compile_extracellular_context
 
@@ -184,6 +184,77 @@ def _run_single_cable_vstim_batch_vm_scan(
     )
 
 
+@partial(
+    jax.jit,
+    static_argnames=(
+        "backend",
+        "membrane",
+        "has_driven_extracellular",
+        "stateless_vm_only",
+    ),
+)
+def _run_double_cable_batch_vm_scan(
+    *,
+    backend,
+    membrane,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    Vi0_mV: Array,
+    Ve0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
+    intracellular_current_density_mid: Array,
+    extracellular_potential_mid_mV: Array,
+    extracellular_potential_initial_previous_mV: Array,
+    dt_ms: Array,
+) -> Array:
+    """Run the full double-cable scan over a leading batch axis."""
+
+    def one_batch(Iinj_mid: Array, vext_mid: Array, vext_previous: Array) -> Array:
+        return _run_double_cable_vm_scan(
+            backend=backend,
+            membrane=membrane,
+            has_driven_extracellular=has_driven_extracellular,
+            stateless_vm_only=stateless_vm_only,
+            Vi0_mV=Vi0_mV,
+            Ve0_mV=Ve0_mV,
+            gates0=gates0,
+            state0=state0,
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            intracellular_current_density_mid=Iinj_mid,
+            extracellular_potential_mid_mV=vext_mid,
+            extracellular_potential_initial_previous_mV=vext_previous,
+            dt_ms=dt_ms,
+        )
+
+    return jax.vmap(one_batch)(
+        intracellular_current_density_mid,
+        extracellular_potential_mid_mV,
+        extracellular_potential_initial_previous_mV,
+    )
+
+
 @dataclass(frozen=True)
 class SingleCableVStimBatchKernel:
     """Batch-oriented imposed-field kernel for homogeneous single-cable axons.
@@ -279,6 +350,129 @@ class SingleCableVStimBatchKernel:
         return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
 
 
+@dataclass(frozen=True)
+class DoubleCableBatchKernel:
+    """Batch-oriented full double-cable kernel with shared axon structure.
+
+    This intentionally keeps the first population constraint simple: all batch
+    rows share geometry, membrane model, extracellular parameters, initial
+    state, and time grid. Only imposed ``Vstim`` and optional ``Iinj`` vary.
+    """
+
+    runtime: SolverRuntime
+    Veinit_mV: float = 0.0
+    has_driven_extracellular: bool | None = None
+
+    def run(
+        self,
+        *,
+        extracellular_potential_mid_mV: Array | None = None,
+        extracellular_potential_initial_previous_mV: Array | None = None,
+        intracellular_current_density_mid: Array | None = None,
+    ) -> BatchKernelResult:
+        runtime = self.runtime
+        extracellular = runtime.extracellular
+        if extracellular is None:
+            raise ValueError(
+                "DoubleCableBatchKernel requires extracellular runtime arrays; "
+                "prepare it with include_extracellular=True."
+            )
+
+        membrane_runtime = runtime.membrane
+        grid = runtime.grid
+        cable = runtime.cable
+        dtype_local = membrane_runtime.dtype
+        nx = membrane_runtime.Nx
+
+        vext_mid = (
+            runtime.stimulation.extracellular_potential_mid_mV
+            if extracellular_potential_mid_mV is None
+            else extracellular_potential_mid_mV
+        )
+        if vext_mid is None:
+            raise ValueError(
+                "extracellular_potential_mid_mV is required for double-cable batching."
+            )
+        vext_batch = _as_batched_time_space_array(
+            "extracellular_potential_mid_mV",
+            vext_mid,
+            nt=grid.Nt,
+            nx=nx,
+            dtype_local=dtype_local,
+        )
+        batch_size = int(vext_batch.shape[0])
+
+        vext_previous = (
+            runtime.stimulation.extracellular_potential_initial_previous_mV
+            if extracellular_potential_initial_previous_mV is None
+            else extracellular_potential_initial_previous_mV
+        )
+        if vext_previous is None:
+            raise ValueError(
+                "extracellular_potential_initial_previous_mV is required for double-cable batching."
+            )
+        vext_previous_batch = _as_batched_space_array(
+            "extracellular_potential_initial_previous_mV",
+            vext_previous,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+
+        iinj_mid = (
+            runtime.stimulation.intracellular_current_density_mid
+            if intracellular_current_density_mid is None
+            else intracellular_current_density_mid
+        )
+        if iinj_mid is None:
+            raise ValueError(
+                "intracellular_current_density_mid is required for double-cable batching."
+            )
+        iinj_batch = _as_batched_time_space_array(
+            "intracellular_current_density_mid",
+            iinj_mid,
+            nt=grid.Nt,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+
+        Ve0 = jnp.full((nx,), dtype_local(self.Veinit_mV), dtype=dtype_local)
+        Vm0 = membrane_runtime.Vm0_mV
+        out = _run_double_cable_batch_vm_scan(
+            backend=membrane_runtime.backend,
+            membrane=membrane_runtime.membrane,
+            has_driven_extracellular=(
+                runtime.stimulation.has_driven_extracellular
+                if self.has_driven_extracellular is None
+                else bool(self.has_driven_extracellular)
+            ),
+            stateless_vm_only=bool(
+                membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
+            ),
+            Vi0_mV=Vm0 + Ve0,
+            Ve0_mV=Ve0,
+            gates0=membrane_runtime.gates0,
+            state0=membrane_runtime.state0,
+            area_cm2=cable.area_cm2,
+            Cm_abs=extracellular.Cm_abs,
+            Cx_abs=extracellular.Cx_abs,
+            Gx_abs=extracellular.Gx_abs,
+            Gax_e=extracellular.Gax_e,
+            Gax_i=extracellular.Gax_i,
+            left_i=extracellular.left_i,
+            right_i=extracellular.right_i,
+            left_e=extracellular.left_e,
+            right_e=extracellular.right_e,
+            I_background=membrane_runtime.background_current,
+            intracellular_current_density_mid=iinj_batch,
+            extracellular_potential_mid_mV=vext_batch,
+            extracellular_potential_initial_previous_mV=vext_previous_batch,
+            dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+        )
+        return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
+
+
 def _as_batched_time_space_array(
     name: str,
     values: Array,
@@ -313,6 +507,38 @@ def _as_batched_time_space_array(
         return arr
     if arr.shape[0] == 1:
         return jnp.broadcast_to(arr, (batch_size, nt, nx))
+    raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+
+
+def _as_batched_space_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+    batch_size: int | None = None,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 1:
+        if arr.shape != (nx,):
+            raise ValueError(
+                f"{name} must have shape (Nx,)=({nx},) or (B, Nx), got {arr.shape}."
+            )
+        arr = arr[jnp.newaxis, :]
+    elif arr.ndim == 2:
+        if arr.shape[1:] != (nx,):
+            raise ValueError(
+                f"{name} must have trailing shape (Nx,)=({nx},), got {arr.shape}."
+            )
+    else:
+        raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
+
+    if batch_size is None:
+        return arr
+    if arr.shape[0] == batch_size:
+        return arr
+    if arr.shape[0] == 1:
+        return jnp.broadcast_to(arr, (batch_size, nx))
     raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
 
 
@@ -383,4 +609,5 @@ __all__ = [
     "build_vstim_midpoint_batch",
     "scale_extracellular_contexts",
     "SingleCableVStimBatchKernel",
+    "DoubleCableBatchKernel",
 ]

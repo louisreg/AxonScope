@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import jax.numpy as jnp
 import pytest
@@ -7,6 +9,8 @@ import pytest
 from axonscope.axons import HodgkinHuxley
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers import (
+    DoubleCableBatchKernel,
+    DoubleCableKernel,
     SingleCableVStimBatchKernel,
     build_vstim_batch,
     build_vstim_midpoint_batch,
@@ -143,3 +147,83 @@ def test_build_vstim_batch_accepts_per_row_positions():
 
     assert vext_batch.shape == (2, 1, axon.Nx)
     assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0
+
+
+def test_double_cable_batch_matches_scalar_loop_rows():
+    axon = _hh_extracellular_axon()
+    tsim = 0.8
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=True,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [
+        base_contexts,
+        scale_extracellular_contexts(base_contexts, 0.5),
+    ]
+    vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
+    vext_previous = build_vstim_batch(
+        axon,
+        context_batch,
+        t_ms=jnp.asarray([-0.5 * dt]),
+    )[:, 0, :]
+
+    batch = DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    ).run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+    )
+
+    scalar_rows = []
+    for batch_index in range(vext_mid.shape[0]):
+        row_stimulation = replace(
+            runtime.stimulation,
+            extracellular_potential_mid_mV=vext_mid[batch_index],
+            extracellular_potential_initial_previous_mV=vext_previous[batch_index],
+        )
+        row_runtime = replace(runtime, stimulation=row_stimulation)
+        scalar_rows.append(
+            DoubleCableKernel(
+                runtime=row_runtime,
+                Veinit_mV=float(axon.Veinit),
+            ).run().Vm
+        )
+    scalar = jnp.stack(scalar_rows)
+
+    assert batch.Vm.shape == scalar.shape
+    np.testing.assert_allclose(
+        np.asarray(batch.t),
+        np.asarray(runtime.grid.t_vec_ms),
+        atol=0.0,
+        rtol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(batch.Vm),
+        np.asarray(scalar),
+        atol=1e-3,
+        rtol=0.0,
+    )
+
+
+def test_double_cable_batch_requires_extracellular_runtime():
+    axon = _hh_extracellular_axon()
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=0.2,
+        dt_ms=0.01,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=True,
+        precompute_extracellular=True,
+    )
+
+    with pytest.raises(ValueError, match="include_extracellular=True"):
+        DoubleCableBatchKernel(runtime=runtime).run()
