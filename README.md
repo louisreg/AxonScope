@@ -233,7 +233,7 @@ For runtime-only solver work, use the runtime suites:
 python benchmark/runtime/run.py --list
 python benchmark/runtime/run.py --suite smoke
 python benchmark/runtime/run.py --suite full --prefix solver_runtime_current
-python benchmark/runtime/run.py --suite experimental_solvers --prefix cn_experimental_compare
+python benchmark/runtime/run.py --suite reference_solvers --prefix cn_reference_compare
 python benchmark/runtime/run.py --suite vstim_forcing --prefix hh_vstim_forcing_compare
 python benchmark/runtime/run.py \
   --suite profiled \
@@ -356,12 +356,13 @@ Generated logs and figures are ignored by git.
   samples on the solver time grid, then add `L(Vstim)` as a known axial forcing
   term inside the time loop. This is the first step toward batch-friendly
   `Vstim[B, Nt, Nx]` inputs.
+- `SingleCableVStimBatchKernel` is the first low-level batch API for this path:
+  it accepts imposed fields shaped `(B, Nt, Nx)` and returns `Vm[B, Nt, Nx]`.
 - The optimized Crank-Nicholson default path precomputes intracellular current
   density samples and calls explicit JIT-compiled VM-only single-cable or
   double-cable kernels. Recording observables still uses the more general path.
-- `axonscope.solvers.experimental` intentionally keeps only a small set of
-  reference/prototype solvers: dense CN, imposed-field Vstim forcing,
-  semi-implicit ionic linearization, and a Newton-style implicit prototype.
+- `axonscope.solvers.experimental` intentionally keeps only the maintained
+  reference/prototype solvers: dense CN and imposed-field Vstim forcing.
 - The full double-cable reference path uses scalar coefficient arrays for its
   2x2 block solve, avoiding per-step materialization of `(Nx, 2, 2)` matrices.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.

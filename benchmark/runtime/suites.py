@@ -58,9 +58,9 @@ RUNTIME_SUITES: dict[str, RuntimeSuite] = {
             "1",
         ),
     ),
-    "experimental_solvers": RuntimeSuite(
-        name="experimental_solvers",
-        description="Focused HH benchmark for maintained experimental CN variants.",
+    "reference_solvers": RuntimeSuite(
+        name="reference_solvers",
+        description="Focused HH benchmark for optimized CN against the dense reference solver.",
         runner="benchmark_solver",
         args=(
             "--cases",
@@ -68,8 +68,6 @@ RUNTIME_SUITES: dict[str, RuntimeSuite] = {
             "--solvers",
             "crank_nicholson",
             "crank_nicholson_dense_reference",
-            "crank_nicholson_semi_implicit",
-            "crank_nicholson_implicit",
             "--repeats",
             "5",
             "--warmups",

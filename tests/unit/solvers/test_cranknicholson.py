@@ -2,16 +2,12 @@ import numpy as np
 import jax.numpy as jnp
 import pytest
 
-from axonscope.axons.base import AxonBase
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.channel_models.passive import PassiveICM
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
 from axonscope.solvers.experimental import (
     CrankNicholson_unoptimized,
-    CrankNicholsonSemiImplicit,
-    CrankNicholsonImplicit,
 )
 from axonscope.solvers.kernels import SingleCableKernel
 from axonscope.solvers.runtime import prepare_solver_runtime
@@ -33,16 +29,12 @@ CONCRETE_SOLVERS = [
     pytest.param(Euler(), 0.001, 5.0, id="Euler"),
     pytest.param(CrankNicholson_unoptimized(), 0.01, 5.0, id="CrankNicholson_unoptimized"),
     pytest.param(CrankNicholson(), 0.01, 5.0, id="CrankNicholson"),
-    pytest.param(CrankNicholsonSemiImplicit(), 0.01, 5.0, id="CrankNicholsonSemiImplicit"),
-    pytest.param(CrankNicholsonImplicit(n_newton=3), 0.01, 5.0, id="CrankNicholsonImplicit"),
 ]
 
 
 CN_FAMILY = [
     pytest.param(CrankNicholson_unoptimized(), 0.01, id="dense"),
     pytest.param(CrankNicholson(), 0.01, id="tridiag"),
-    pytest.param(CrankNicholsonSemiImplicit(), 0.01, id="semi-implicit"),
-    pytest.param(CrankNicholsonImplicit(n_newton=3), 0.01, id="implicit"),
 ]
 
 
@@ -114,45 +106,6 @@ def test_cn_family_propagates_action_potential(solver, dt):
     velocity = res.average_velocity()
     assert np.isfinite(velocity)
     assert velocity > 0.0
-
-
-def test_implicit_variants_close_to_dense_reference_with_non_unit_cm():
-    def passive_axon() -> AxonBase:
-        axon = AxonBase(
-            PassiveICM(Rm=1e4, EL=-70.0),
-            d=1.0,
-            Nx=31,
-            L=1000.0,
-            Ra=100.0,
-            Cm=2.0,
-            Vinit=-70.0,
-        )
-        axon.insert_I_Clamp(
-            position=500.0,
-            stimulus=Stimulus.pulse(start=0.1, duration=0.5, amplitude=1.0),
-        )
-        return axon
-
-    ref = CrankNicholson_unoptimized().solve(passive_axon(), tsim=1.0, dt=0.01)
-    ref_vm = np.asarray(ref.Vm)
-
-    for solver in (
-        CrankNicholsonSemiImplicit(),
-        CrankNicholsonImplicit(n_newton=3),
-    ):
-        res = solver.solve(passive_axon(), tsim=1.0, dt=0.01)
-        diff = np.asarray(res.Vm) - ref_vm
-        assert float(np.max(np.abs(diff))) < 0.02
-
-
-def test_semi_implicit_close_to_implicit_reference():
-    ref = CrankNicholsonImplicit(n_newton=3).solve(_hh_axon(), tsim=10.0, dt=0.01)
-    v_ref = ref.average_velocity()
-
-    res = CrankNicholsonSemiImplicit().solve(_hh_axon(), tsim=10.0, dt=0.01)
-    v = res.average_velocity()
-    assert np.isfinite(v)
-    assert abs(v - v_ref) < 0.02
 
 
 def test_cranknicholson_can_record_generic_membrane_observables():

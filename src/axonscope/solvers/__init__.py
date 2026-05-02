@@ -1,4 +1,5 @@
 from axonscope.solvers.base import Solver
+from axonscope.solvers.batch import BatchKernelResult, SingleCableVStimBatchKernel
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
@@ -20,6 +21,8 @@ __all__ = [
     "Solver",
     "Euler",
     "CrankNicholson",
+    "BatchKernelResult",
+    "SingleCableVStimBatchKernel",
     "SingleCableKernel",
     "DoubleCableKernel",
     "KernelResult",
