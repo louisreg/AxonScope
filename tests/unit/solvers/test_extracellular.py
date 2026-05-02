@@ -17,6 +17,7 @@ from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
 from axonscope.solvers.experimental import (
+    CrankNicholsonVStimForcing,
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
     CrankNicholsonImplicit,
@@ -165,6 +166,52 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
     res = CrankNicholson().solve(ax, tsim=0.5, dt=0.01)
 
     np.testing.assert_allclose(np.asarray(res.Vm), -70.0, rtol=0.0, atol=2e-3)
+
+
+def test_vstim_forcing_stays_close_to_double_cable_for_uniform_vstim():
+    def build_axon() -> HodgkinHuxley:
+        ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
+        ax.insert_I_Clamp(
+            position=200.0,
+            stimulus=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+        )
+        ax.set_extracellular_layer(Veinit=20.0)
+        ax.add_extracellular_context(
+            _UniformFieldElectrode(1000.0),
+            Stimulus.constant(20e-6, start=0.0),
+            replace=True,
+        )
+        return ax
+
+    forced = CrankNicholsonVStimForcing().solve(build_axon(), tsim=1.0, dt=0.01)
+    reference = CrankNicholson().solve(build_axon(), tsim=1.0, dt=0.01)
+
+    np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=2e-1, rtol=0.0)
+
+
+def test_vstim_forcing_is_close_to_double_cable_for_unmyelinated_nrv_defaults():
+    def build_axon() -> HodgkinHuxley:
+        ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
+        electrode = PointSourceElectrode(x0_m=200e-6, y0_m=100e-6, z0_m=100e-6, sigma_S_m=0.3)
+        stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
+        ax.add_extracellular_context(electrode, stim, replace=True)
+        ax.insert_I_Clamp(
+            position=200.0,
+            stimulus=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+        )
+        return ax
+
+    reference = CrankNicholson().solve(build_axon(), tsim=1.2, dt=0.01)
+    forced = CrankNicholsonVStimForcing().solve(build_axon(), tsim=1.2, dt=0.01)
+
+    np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=5e-1, rtol=0.0)
+
+
+def test_vstim_forcing_rejects_double_cable_axons():
+    ax = MRG(d=10.0, nodes=5)
+
+    with pytest.raises(ValueError, match="single-cable solver"):
+        CrankNicholsonVStimForcing().solve(ax, tsim=1.0, dt=0.01)
 
 
 def test_myelinated_prefers_inline_extracellular_solver(monkeypatch):

@@ -222,11 +222,14 @@ def prepare_solver_runtime(
     include_extracellular: bool | None = None,
     include_area: bool | None = None,
     precompute_intracellular: bool = False,
+    precompute_extracellular: bool | None = None,
 ) -> SolverRuntime:
     membrane = prepare_membrane_runtime(axon)
     grid = prepare_simulation_grid(tsim_ms, dt_ms, membrane.dtype)
     if include_extracellular is None:
         include_extracellular = bool(getattr(axon, "use_extracellular", False))
+    if precompute_extracellular is None:
+        precompute_extracellular = include_extracellular
     if include_area is None:
         include_area = True
     cable = prepare_cable_runtime(axon, membrane.dtype, include_area=include_area)
@@ -235,7 +238,7 @@ def prepare_solver_runtime(
         membrane.dtype,
         grid=grid,
         precompute_intracellular=precompute_intracellular,
-        precompute_extracellular=include_extracellular,
+        precompute_extracellular=precompute_extracellular,
     )
     extracellular = (
         prepare_extracellular_runtime(axon, membrane.dtype, cable)

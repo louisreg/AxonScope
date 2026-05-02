@@ -141,6 +141,121 @@ def _run_single_cable_vm_scan(
     jax.jit,
     static_argnames=("backend", "membrane", "has_driven_extracellular", "stateless_vm_only"),
 )
+def _run_single_cable_vstim_vm_scan(
+    *,
+    backend,
+    membrane,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    dl: Array,
+    d_static: Array,
+    du: Array,
+    Cm_uF_cm2: Array,
+    I_background: Array,
+    Vm0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    intracellular_current_density_mid: Array,
+    extracellular_diffusion_forcing_mid: Array,
+    dt_ms: Array,
+) -> Array:
+    """Jitted Vm-only single-cable scan with imposed extracellular forcing.
+
+    The imposed extracellular field is treated as a known mid-step potential:
+    Vi = Vm + Vstim. This is the scalar limit of the current double-cable
+    extracellular solve, with implicit axial diffusion and the known axial
+    drive ``dt * L(Vstim_mid)`` on the RHS.
+    """
+
+    def step(carry, step_inputs):
+        Iinj, vstim_force = step_inputs
+        Vm, gates, *extra = carry
+        extra = tuple(extra)
+
+        gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+        if stateless_vm_only:
+            linearization_gates = gates if has_driven_extracellular else gates_pred
+            explicit_outward_current = I_background
+            correction_current = jnp.zeros_like(Vm)
+        else:
+            Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+            step_plan_pred = membrane.prepare_membrane_step(
+                V_mV=Vm,
+                gates_prev=gates,
+                gates_new=gates_pred,
+                state=extra,
+                dt=dt_ms,
+                I_ion=Iion_pred,
+                I_background=I_background,
+            )
+            linearization_gates = step_plan_pred.linearization_gates
+            if has_driven_extracellular:
+                linearization_gates = gates
+            explicit_outward_current = step_plan_pred.explicit_outward_current
+            correction_current = step_plan_pred.correction_current
+
+        Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+        d = d_static + (dt_ms / Cm_uF_cm2) * Gm
+        rhs = (
+            Vm
+            + dt_ms * vstim_force
+            + (dt_ms / Cm_uF_cm2)
+            * (
+                GE
+                + Iinj
+                - explicit_outward_current
+                - correction_current
+            )
+        )
+        Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+
+        if stateless_vm_only:
+            return (Vm_new, gates_pred, *extra), Vm_new
+
+        gates_new = membrane.final_gate_update(
+            gates_prev=gates,
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            dt=dt_ms,
+            gates_predictor=gates_pred,
+        )
+        Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+        step_plan = membrane.prepare_membrane_step(
+            V_mV=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_new,
+            I_background=I_background,
+        )
+        state_new = membrane.finalize_membrane_step(
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state_prev=extra,
+            step_plan=step_plan,
+            dt=dt_ms,
+        )
+        return (Vm_new, gates_new, *state_new), Vm_new
+
+    init_carry = (Vm0_mV, gates0, *state0)
+    _, Vm_trace = jax.lax.scan(
+        step,
+        init_carry,
+        (intracellular_current_density_mid, extracellular_diffusion_forcing_mid),
+    )
+    return Vm_trace
+
+
+@partial(
+    jax.jit,
+    static_argnames=("backend", "membrane", "has_driven_extracellular", "stateless_vm_only"),
+)
 def _run_double_cable_vm_scan(
     *,
     backend,
@@ -390,10 +505,47 @@ class SingleCableKernel:
 
         lower, diag, upper = cable.lower, cable.diag, cable.upper
         dl, d, du = build_cn_tridiagonal(lower, diag, upper, grid.dt_ms, dtype_local)
+        dt_arr = jnp.asarray(grid.dt_ms, dtype=dtype_local)
+        dl_vstim = -dt_arr * lower
+        d_vstim_static = jnp.ones_like(diag) - dt_arr * diag
+        du_vstim = -dt_arr * upper
         Cm = jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local)
         I_bg = membrane_runtime.background_current
         state0 = membrane_runtime.state0
         Iinj_mid = runtime.stimulation.intracellular_current_density_mid
+        vext_mid = runtime.stimulation.extracellular_potential_mid_mV
+        has_imposed_vstim = vext_mid is not None
+
+        if (
+            not record_observables
+            and not record_diagnostics
+            and Iinj_mid is not None
+            and has_imposed_vstim
+        ):
+            vstim_forcing_mid = jax.vmap(
+                lambda values: apply_diffusion_operator(values, lower, diag, upper)
+            )(vext_mid)
+            out = _run_single_cable_vstim_vm_scan(
+                backend=backend,
+                membrane=membrane,
+                has_driven_extracellular=runtime.stimulation.has_driven_extracellular,
+                stateless_vm_only=bool(membrane.supports_stateless_vm_only_fast_path()),
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=dl_vstim,
+                d_static=d_vstim_static,
+                du=du_vstim,
+                Cm_uF_cm2=Cm,
+                I_background=I_bg,
+                Vm0_mV=membrane_runtime.Vm0_mV,
+                gates0=membrane_runtime.gates0,
+                state0=state0,
+                intracellular_current_density_mid=Iinj_mid,
+                extracellular_diffusion_forcing_mid=vstim_forcing_mid,
+                dt_ms=dt_arr,
+            )
+            return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
         if (
             not record_observables
@@ -429,6 +581,11 @@ class SingleCableKernel:
             gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=grid.dt_ms)
             Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
             Iinj = _intracellular_current_at(runtime, n, t_mid)
+            vstim_forcing = (
+                apply_diffusion_operator(vext_mid[n], lower, diag, upper)
+                if has_imposed_vstim
+                else jnp.zeros_like(Vm)
+            )
             step_plan_pred = membrane.prepare_membrane_step(
                 V_mV=Vm,
                 gates_prev=gates,
@@ -439,13 +596,42 @@ class SingleCableKernel:
                 I_background=I_bg,
             )
 
-            diffusion = apply_diffusion_operator(Vm, lower, diag, upper)
-            rhs = Vm + dtype_local(0.5) * dt * diffusion + (dt / Cm) * (
-                Iinj
-                - step_plan_pred.total_outward_current
-                - step_plan_pred.correction_current
-            )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+            if has_imposed_vstim:
+                linearization_gates = step_plan_pred.linearization_gates
+                if runtime.stimulation.has_driven_extracellular:
+                    linearization_gates = gates
+                Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+                d_step = d_vstim_static + (dt / Cm) * Gm
+                rhs = (
+                    Vm
+                    + dt * vstim_forcing
+                    + (dt / Cm)
+                    * (
+                        GE
+                        + Iinj
+                        - step_plan_pred.explicit_outward_current
+                        - step_plan_pred.correction_current
+                    )
+                )
+                Vm_new = jax.lax.linalg.tridiagonal_solve(
+                    dl_vstim,
+                    d_step,
+                    du_vstim,
+                    rhs[:, None],
+                )[:, 0]
+            else:
+                diffusion = apply_diffusion_operator(Vm, lower, diag, upper)
+                rhs = (
+                    Vm
+                    + dtype_local(0.5) * dt * diffusion
+                    + (dt / Cm)
+                    * (
+                        Iinj
+                        - step_plan_pred.total_outward_current
+                        - step_plan_pred.correction_current
+                    )
+                )
+                Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
 
             gates_new = membrane.final_gate_update(
                 gates_prev=gates,

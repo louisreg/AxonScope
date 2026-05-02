@@ -127,8 +127,12 @@ class SolverBenchmarkResult:
 
 def default_solver_factories() -> dict[str, SolverFactory]:
     from axonscope.solvers import CrankNicholson
+    from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 
-    return {"crank_nicholson": CrankNicholson}
+    return {
+        "crank_nicholson": CrankNicholson,
+        "crank_nicholson_vstim_forcing": CrankNicholsonVStimForcing,
+    }
 
 
 def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
@@ -144,6 +148,31 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
         )
         return axon
+
+    def hh_extracellular(nx: int):
+        length_um = 500.0
+        axon = HodgkinHuxley(L=length_um, d=0.5, Nx=nx, celsius=6.3)
+        electrode = PointSourceElectrode(
+            x0_m=(length_um / 2.0) * 1e-6,
+            y0_m=100e-6,
+            z0_m=0.0,
+            sigma_S_m=0.3,
+        )
+        stimulus = Stimulus.biphasic(
+            start=0.8,
+            cathodic_amplitude=20e-6,
+            cathodic_duration=0.08,
+            anodic_amplitude=5e-6,
+            interphase=0.04,
+        )
+        axon.add_extracellular_context(electrode, stimulus, replace=True)
+        return axon
+
+    def hh_extracellular_small():
+        return hh_extracellular(nx=41)
+
+    def hh_extracellular_medium():
+        return hh_extracellular(nx=201)
 
     def rattay_intracellular_small():
         length_um = 1000.0
@@ -189,6 +218,20 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             tsim_ms=3.0,
             dt_ms=0.02,
             metadata={"model": "HodgkinHuxley", "stimulation": "intracellular", "Nx": 41},
+        ),
+        "hh_extracellular_small": SolverBenchmarkCase(
+            name="hh_extracellular_small",
+            build_axon=hh_extracellular_small,
+            tsim_ms=2.0,
+            dt_ms=0.01,
+            metadata={"model": "HodgkinHuxley", "stimulation": "extracellular", "Nx": 41},
+        ),
+        "hh_extracellular_medium": SolverBenchmarkCase(
+            name="hh_extracellular_medium",
+            build_axon=hh_extracellular_medium,
+            tsim_ms=2.0,
+            dt_ms=0.01,
+            metadata={"model": "HodgkinHuxley", "stimulation": "extracellular", "Nx": 201},
         ),
         "rattay_intracellular_small": SolverBenchmarkCase(
             name="rattay_intracellular_small",

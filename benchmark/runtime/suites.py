@@ -41,4 +41,21 @@ RUNTIME_SUITES: dict[str, RuntimeSuite] = {
             "benchmark/results/jax_profiles",
         ),
     ),
+    "vstim_forcing": RuntimeSuite(
+        name="vstim_forcing",
+        description="HH imposed-Vstim single-cable prototype against the full extracellular solver.",
+        runner="benchmark_solver",
+        args=(
+            "--cases",
+            "hh_extracellular_small",
+            "hh_extracellular_medium",
+            "--solvers",
+            "crank_nicholson",
+            "crank_nicholson_vstim_forcing",
+            "--repeats",
+            "5",
+            "--warmups",
+            "1",
+        ),
+    ),
 }

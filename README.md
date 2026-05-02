@@ -224,6 +224,7 @@ For runtime-only solver work, use the runtime suites:
 python benchmark/runtime/run.py --list
 python benchmark/runtime/run.py --suite smoke
 python benchmark/runtime/run.py --suite full --prefix solver_runtime_current
+python benchmark/runtime/run.py --suite vstim_forcing --prefix hh_vstim_forcing_compare
 python benchmark/runtime/run.py \
   --suite profiled \
   --prefix solver_runtime_current \
@@ -269,6 +270,12 @@ rattay_intracellular_small       CrankNicholson build=0.0073s first=3.6078s comp
 schild97_intracellular_small     CrankNicholson build=0.0180s first=4.3731s compile_est=4.2839s mat=0.0001s total=4.3732s warm=0.0892s warm_total=0.0893s
 mrg_extracellular_small          CrankNicholson build=0.0154s first=4.3919s compile_est=4.3310s mat=0.0001s total=4.3920s warm=0.0617s warm_total=0.0618s
 ```
+
+The `vstim_forcing` suite compares the full extracellular solver against the
+experimental imposed-field single-cable path
+`CrankNicholsonVStimForcing`. On local HH extracellular runs, the prototype
+reduced warm runtime strongly at larger `Nx`, but it is intentionally not the
+default yet because it is not bit-identical to the dynamic double-cable path.
 
 Read the columns as:
 

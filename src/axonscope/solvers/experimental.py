@@ -20,7 +20,8 @@ from .common import (
     initial_voltage,
 )
 from .crank_nicholson import _maybe_solve_with_extracellular_generic
-from .runtime import prepare_membrane_runtime
+from .kernels import SingleCableKernel
+from .runtime import prepare_membrane_runtime, prepare_solver_runtime
 from .stimulus_runtime import build_intracellular_current_density_fn
 
 
@@ -85,6 +86,54 @@ def _linearized_cn_rhs(
         + 0.5 * Gtot * V
     )
     return LV, rhs
+
+
+class CrankNicholsonVStimForcing(Solver):
+    """Single-cable Crank-Nicolson with an imposed extracellular potential.
+
+    This prototype treats extracellular stimulation as a prescribed field
+    ``Vstim(t, x)`` rather than as a dynamic periaxonal state. The cable solve
+    remains scalar on Vm and adds the known forcing term ``L(Vstim)``.
+    """
+
+    def solve(
+        self,
+        axon: AxonBase,
+        tsim: float,
+        dt: float,
+        record_diagnostics: bool = False,
+        record_observables: bool = False,
+    ) -> SimResult:
+        if bool(getattr(axon, "has_heterogeneous_cable_properties", False)):
+            raise ValueError(
+                "CrankNicholsonVStimForcing is a single-cable solver; "
+                "use CrankNicholson for heterogeneous/double-cable axons."
+            )
+
+        runtime = prepare_solver_runtime(
+            axon,
+            tsim,
+            dt,
+            include_extracellular=False,
+            include_area=False,
+            precompute_intracellular=True,
+            precompute_extracellular=True,
+        )
+        kernel = SingleCableKernel(
+            runtime=runtime,
+            Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+        )
+        out = kernel.run(
+            record_diagnostics=record_diagnostics,
+            record_observables=record_observables,
+        )
+        return SimResult(
+            axon,
+            out.Vm,
+            out.t,
+            diagnostics=out.diagnostics,
+            recordings=out.recordings,
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -704,6 +753,7 @@ class CrankNicholsonQuasiNewtonFast(Solver):
 
 
 __all__ = [
+    "CrankNicholsonVStimForcing",
     "CrankNicholson_unoptimized",
     "CrankNicholsonSemiImplicit",
     "CrankNicholsonImplicit",
