@@ -12,6 +12,7 @@ from axonscope.stimulation import ExtracellularContext
 from axonscope.stimulus import Stimulus
 from axonscope.stimulus_eval import evaluate_stimulus_numpy
 
+from .batch_options import BatchOptions, BatchRecording
 from .common import Array, apply_diffusion_operator, solve_block_tridiagonal_2x2_scalar
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .runtime import SolverRuntime
@@ -738,8 +739,7 @@ class SingleCableVStimBatchKernel:
         *,
         extracellular_potential_mid_mV: Array | None = None,
         intracellular_current_density_mid: Array | None = None,
-        record_indices: Array | Sequence[int] | None = None,
-        time_chunk_steps: int | None = None,
+        options: BatchOptions | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
         if runtime.extracellular is not None:
@@ -788,11 +788,9 @@ class SingleCableVStimBatchKernel:
 
         dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
         lower, diag, upper = cable.lower, cable.diag, cable.upper
-        record_idx, record_full = _normalize_record_indices(
-            record_indices,
-            nx=membrane_runtime.Nx,
-        )
-        chunk_steps = _normalize_time_chunk_steps(time_chunk_steps, nt=grid.Nt)
+        options = _normalize_batch_options(options)
+        record_idx, record_full = _resolve_recording(options.recording, nx=membrane_runtime.Nx)
+        chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
         has_driven_extracellular = (
             runtime.stimulation.has_driven_extracellular
             if self.has_driven_extracellular is None
@@ -842,8 +840,7 @@ class SingleCableVStimBatchKernel:
         stimulus: Stimulus,
         footprint_V_per_A: Array,
         amplitude_scale: float | Array = 1.0,
-        record_indices: Array | Sequence[int] | None = None,
-        time_chunk_steps: int | None = None,
+        options: BatchOptions | None = None,
     ) -> BatchKernelResult:
         """Run a footprint-driven population without materializing full Vstim."""
 
@@ -869,8 +866,7 @@ class SingleCableVStimBatchKernel:
             stateless_vm_only=bool(
                 runtime.membrane.membrane.supports_stateless_vm_only_fast_path()
             ),
-            record_indices=record_indices,
-            time_chunk_steps=time_chunk_steps,
+            options=_normalize_batch_options(options),
         )
         return BatchKernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
@@ -894,8 +890,7 @@ class DoubleCableBatchKernel:
         extracellular_potential_mid_mV: Array | None = None,
         extracellular_potential_initial_previous_mV: Array | None = None,
         intracellular_current_density_mid: Array | None = None,
-        record_indices: Array | Sequence[int] | None = None,
-        time_chunk_steps: int | None = None,
+        options: BatchOptions | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
         extracellular = runtime.extracellular
@@ -964,8 +959,9 @@ class DoubleCableBatchKernel:
             batch_size=batch_size,
         )
 
-        record_idx, record_full = _normalize_record_indices(record_indices, nx=nx)
-        chunk_steps = _normalize_time_chunk_steps(time_chunk_steps, nt=grid.Nt)
+        options = _normalize_batch_options(options)
+        record_idx, record_full = _resolve_recording(options.recording, nx=nx)
+        chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
         has_driven_extracellular = (
             runtime.stimulation.has_driven_extracellular
             if self.has_driven_extracellular is None
@@ -1023,8 +1019,7 @@ class DoubleCableBatchKernel:
         stimulus: Stimulus,
         footprint_V_per_A: Array,
         amplitude_scale: float | Array = 1.0,
-        record_indices: Array | Sequence[int] | None = None,
-        time_chunk_steps: int | None = None,
+        options: BatchOptions | None = None,
     ) -> BatchKernelResult:
         """Run a footprint-driven double-cable population in time chunks."""
 
@@ -1050,8 +1045,7 @@ class DoubleCableBatchKernel:
             stateless_vm_only=bool(
                 runtime.membrane.membrane.supports_stateless_vm_only_fast_path()
             ),
-            record_indices=record_indices,
-            time_chunk_steps=time_chunk_steps,
+            options=_normalize_batch_options(options),
         )
         return BatchKernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
@@ -1114,8 +1108,7 @@ def _run_single_cable_footprint_chunks(
     amplitude_scale: float | Array,
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
-    record_indices: Array | Sequence[int] | None,
-    time_chunk_steps: int | None,
+    options: BatchOptions,
 ) -> Array:
     membrane_runtime = runtime.membrane
     grid = runtime.grid
@@ -1124,8 +1117,8 @@ def _run_single_cable_footprint_chunks(
     nx = membrane_runtime.Nx
     _validate_footprint_width(footprint_V_per_A, nx=nx)
     batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
-    record_idx, record_full = _normalize_record_indices(record_indices, nx=nx)
-    chunk_steps = _normalize_time_chunk_steps(time_chunk_steps, nt=grid.Nt)
+    record_idx, record_full = _resolve_recording(options.recording, nx=nx)
+    chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
     dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
     iinj_mid = runtime.stimulation.intracellular_current_density_mid
     if iinj_mid is None:
@@ -1242,8 +1235,7 @@ def _run_double_cable_footprint_chunks(
     amplitude_scale: float | Array,
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
-    record_indices: Array | Sequence[int] | None,
-    time_chunk_steps: int | None,
+    options: BatchOptions,
 ) -> Array:
     if runtime.extracellular is None:
         raise ValueError("Double-cable footprint chunks require extracellular runtime arrays.")
@@ -1253,8 +1245,8 @@ def _run_double_cable_footprint_chunks(
     nx = membrane_runtime.Nx
     _validate_footprint_width(footprint_V_per_A, nx=nx)
     batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
-    record_idx, record_full = _normalize_record_indices(record_indices, nx=nx)
-    chunk_steps = _normalize_time_chunk_steps(time_chunk_steps, nt=grid.Nt)
+    record_idx, record_full = _resolve_recording(options.recording, nx=nx)
+    chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
     iinj_mid = runtime.stimulation.intracellular_current_density_mid
     if iinj_mid is None:
         raise ValueError("precomputed intracellular current density is required.")
@@ -1352,18 +1344,14 @@ def _broadcast_batch_leading(values: Array, batch_size: int) -> Array:
     return jnp.broadcast_to(arr, (batch_size, *arr.shape))
 
 
-def _normalize_record_indices(
-    record_indices: Array | Sequence[int] | None,
-    *,
-    nx: int,
-) -> tuple[Array, bool]:
-    if record_indices is None:
+def _normalize_batch_options(options: BatchOptions | None) -> BatchOptions:
+    return BatchOptions.full() if options is None else options
+
+
+def _resolve_recording(recording: BatchRecording, *, nx: int) -> tuple[Array, bool]:
+    indices = recording.indices_for(nx)
+    if indices is None:
         return jnp.arange(nx, dtype=jnp.int32), True
-    indices = np.asarray(record_indices, dtype=np.int32)
-    if indices.ndim != 1 or indices.size == 0:
-        raise ValueError("record_indices must be a non-empty 1D sequence.")
-    if np.any(indices < 0) or np.any(indices >= nx):
-        raise ValueError(f"record_indices must be within [0, {nx}), got {indices}.")
     return jnp.asarray(indices, dtype=jnp.int32), False
 
 
@@ -1690,6 +1678,8 @@ def _shape_and_ndim(values: object) -> tuple[tuple[int, ...], int]:
 
 __all__ = [
     "BatchKernelResult",
+    "BatchOptions",
+    "BatchRecording",
     "build_footprint_vstim_batch",
     "build_footprint_vstim_initial_previous_batch",
     "build_footprint_vstim_midpoint_batch",

@@ -250,6 +250,8 @@ contexts that are summed, or `None` for a zero-field control row:
 
 ```python
 from axonscope.solvers import (
+    BatchOptions,
+    BatchRecording,
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
     build_footprint_vstim_initial_previous_batch,
@@ -353,15 +355,17 @@ For large populations, avoid materializing the full `Vstim[B, Nt, Nx]` and full
 chunks and recording only probes:
 
 ```python
-probe_indices = [0, axon.Nx // 2, axon.Nx - 1]
+options = BatchOptions(
+    recording=BatchRecording.indices([0, axon.Nx // 2, axon.Nx - 1]),
+    time_chunk_steps=50,
+)
 
 result = DoubleCableBatchKernel(runtime, Veinit_mV=axon.Veinit).run_footprint(
     stimulus=stimulus,
     footprint_V_per_A=footprint_V_per_A,
-    record_indices=probe_indices,
-    time_chunk_steps=50,
+    options=options,
 )
-# result.Vm has shape (B, Nt, len(probe_indices))
+# result.Vm has shape (B, Nt, 3)
 ```
 
 A complete population script is available for quick experiments:

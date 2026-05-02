@@ -26,6 +26,8 @@ from axonscope.axons import HodgkinHuxley
 from axonscope.benchmarking import jax_profile_trace, trace_annotation
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers import (
+    BatchOptions,
+    BatchRecording,
     DoubleCableBatchKernel,
     DoubleCableKernel,
     SingleCableKernel,
@@ -153,10 +155,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             radial_max_um=args.radial_max_um,
             x_spread_um=args.x_spread_um,
         )
-        record_indices = choose_record_indices(
-            args.record,
-            nx=population.axon.Nx,
-            probe_count=args.probe_count,
+        options = BatchOptions(
+            recording=BatchRecording.from_mode(
+                args.record,
+                probe_count=args.probe_count,
+            ),
+            time_chunk_steps=args.time_chunk_steps,
         )
         timings = [
             run_population_mode(
@@ -168,9 +172,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 warmups=args.warmups,
                 batch_only=bool(args.batch_only),
                 use_generic_vstim=bool(args.generic_vstim),
-                record_indices=record_indices,
-                recording=args.record,
-                time_chunk_steps=args.time_chunk_steps,
+                options=options,
             )
             for mode in modes
         ]
@@ -243,11 +245,11 @@ def run_population_mode(
     warmups: int,
     batch_only: bool = False,
     use_generic_vstim: bool = False,
-    record_indices: np.ndarray | None = None,
-    recording: str = "full",
-    time_chunk_steps: int | None = None,
+    options: BatchOptions | None = None,
 ) -> PopulationTiming:
     axon = population.axon
+    options = BatchOptions.full() if options is None else options
+    record_indices = options.recording.indices_for(axon.Nx)
     include_extracellular = mode == "double"
     runtime = prepare_solver_runtime(
         axon,
@@ -262,7 +264,7 @@ def run_population_mode(
     stream_footprint = (
         not use_generic_vstim
         and batch_only
-        and (record_indices is not None or time_chunk_steps is not None)
+        and (not options.recording.is_full or options.time_chunk_steps is not None)
     )
     vstim_mid = None
     vstim_previous = None
@@ -333,8 +335,7 @@ def run_population_mode(
                 runtime,
                 axon,
                 population,
-                record_indices=record_indices,
-                time_chunk_steps=time_chunk_steps,
+                options=options,
             )
             if stream_footprint
             else batch_fn(
@@ -342,8 +343,7 @@ def run_population_mode(
                 axon,
                 vstim_mid,
                 vstim_previous,
-                record_indices=record_indices,
-                time_chunk_steps=time_chunk_steps,
+                options=options,
             )
         ),
     )
@@ -361,8 +361,7 @@ def run_population_mode(
                     runtime,
                     axon,
                     population,
-                    record_indices=record_indices,
-                    time_chunk_steps=time_chunk_steps,
+                    options=options,
                 )
                 if stream_footprint
                 else batch_fn(
@@ -370,8 +369,7 @@ def run_population_mode(
                     axon,
                     vstim_mid,
                     vstim_previous,
-                    record_indices=record_indices,
-                    time_chunk_steps=time_chunk_steps,
+                    options=options,
                 )
             ),
         )
@@ -393,8 +391,7 @@ def run_population_mode(
                     runtime,
                     axon,
                     population,
-                    record_indices=record_indices,
-                    time_chunk_steps=time_chunk_steps,
+                    options=options,
                 )
                 if stream_footprint
                 else batch_fn(
@@ -402,8 +399,7 @@ def run_population_mode(
                     axon,
                     vstim_mid,
                     vstim_previous,
-                    record_indices=record_indices,
-                    time_chunk_steps=time_chunk_steps,
+                    options=options,
                 )
             ),
         )[0]
@@ -430,8 +426,8 @@ def run_population_mode(
         nx=int(runtime.membrane.Nx),
         nt=int(runtime.grid.Nt),
         vstim_builder=vstim_builder,
-        recording=recording,
-        time_chunk_steps=time_chunk_steps,
+        recording=options.recording.label,
+        time_chunk_steps=options.time_chunk_steps,
         vstim_build_s=None if vstim_build_s is None else float(vstim_build_s),
         scalar_warm_s=scalar_warm,
         batch_warm_s=batch_warm,
@@ -466,8 +462,7 @@ def _single_batch_run(
     vstim_mid,
     vstim_previous,
     *,
-    record_indices=None,
-    time_chunk_steps=None,
+    options: BatchOptions,
 ):
     del vstim_previous
     if vstim_mid is None:
@@ -477,8 +472,7 @@ def _single_batch_run(
         Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
     ).run(
         extracellular_potential_mid_mV=vstim_mid,
-        record_indices=record_indices,
-        time_chunk_steps=time_chunk_steps,
+        options=options,
     ).Vm
 
 
@@ -487,8 +481,7 @@ def _single_batch_footprint_run(
     axon,
     population: PopulationInputs,
     *,
-    record_indices=None,
-    time_chunk_steps=None,
+    options: BatchOptions,
 ):
     return SingleCableVStimBatchKernel(
         runtime=runtime,
@@ -496,8 +489,7 @@ def _single_batch_footprint_run(
     ).run_footprint(
         stimulus=population.stimulus,
         footprint_V_per_A=population.footprint_V_per_A,
-        record_indices=record_indices,
-        time_chunk_steps=time_chunk_steps,
+        options=options,
     ).Vm
 
 
@@ -527,8 +519,7 @@ def _double_batch_run(
     vstim_mid,
     vstim_previous,
     *,
-    record_indices=None,
-    time_chunk_steps=None,
+    options: BatchOptions,
 ):
     if vstim_mid is None:
         raise ValueError("vstim_mid is required for materialized batch runs.")
@@ -540,8 +531,7 @@ def _double_batch_run(
     ).run(
         extracellular_potential_mid_mV=vstim_mid,
         extracellular_potential_initial_previous_mV=vstim_previous,
-        record_indices=record_indices,
-        time_chunk_steps=time_chunk_steps,
+        options=options,
     ).Vm
 
 
@@ -550,8 +540,7 @@ def _double_batch_footprint_run(
     axon,
     population: PopulationInputs,
     *,
-    record_indices=None,
-    time_chunk_steps=None,
+    options: BatchOptions,
 ):
     return DoubleCableBatchKernel(
         runtime=runtime,
@@ -559,20 +548,8 @@ def _double_batch_footprint_run(
     ).run_footprint(
         stimulus=population.stimulus,
         footprint_V_per_A=population.footprint_V_per_A,
-        record_indices=record_indices,
-        time_chunk_steps=time_chunk_steps,
+        options=options,
     ).Vm
-
-
-def choose_record_indices(recording: str, *, nx: int, probe_count: int) -> np.ndarray | None:
-    if recording == "full":
-        return None
-    if recording == "center":
-        return np.asarray([nx // 2], dtype=np.int32)
-    if recording == "probes":
-        count = min(int(probe_count), nx)
-        return np.unique(np.linspace(0, nx - 1, count, dtype=np.int32))
-    raise ValueError(f"unknown recording mode: {recording}")
 
 
 def _timed_annotated(label: str, fn: Callable[[], object]) -> tuple[float, object]:

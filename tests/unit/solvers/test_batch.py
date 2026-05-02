@@ -9,6 +9,8 @@ import pytest
 from axonscope.axons import HodgkinHuxley
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers import (
+    BatchOptions,
+    BatchRecording,
     DoubleCableBatchKernel,
     DoubleCableKernel,
     SingleCableVStimBatchKernel,
@@ -39,6 +41,21 @@ def _hh_extracellular_axon() -> HodgkinHuxley:
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
     axon.add_extracellular_context(electrode, stim, replace=True)
     return axon
+
+
+def test_batch_recording_resolves_common_policies():
+    assert BatchRecording.full().indices_for(5) is None
+    np.testing.assert_array_equal(BatchRecording.center().indices_for(5), np.asarray([2]))
+    np.testing.assert_array_equal(
+        BatchRecording.probes(3).indices_for(5),
+        np.asarray([0, 2, 4], dtype=np.int32),
+    )
+    np.testing.assert_array_equal(
+        BatchRecording.indices([0, 4]).indices_for(5),
+        np.asarray([0, 4], dtype=np.int32),
+    )
+    with pytest.raises(ValueError, match="within"):
+        BatchRecording.indices([5]).indices_for(5)
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -117,8 +134,10 @@ def test_single_cable_vstim_batch_records_probes_in_time_chunks():
     probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
     probes = kernel.run(
         extracellular_potential_mid_mV=vext_batch,
-        record_indices=probe_indices,
-        time_chunk_steps=17,
+        options=BatchOptions(
+            recording=BatchRecording.indices(probe_indices.tolist()),
+            time_chunk_steps=17,
+        ),
     ).Vm
 
     assert probes.shape == (2, runtime.grid.Nt, 3)
@@ -364,15 +383,17 @@ def test_double_cable_footprint_chunks_match_full_batch():
         stimulus=base_context.stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=amplitude_scale,
-        time_chunk_steps=11,
+        options=BatchOptions(time_chunk_steps=11),
     ).Vm
     probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
     probe_chunks = kernel.run_footprint(
         stimulus=base_context.stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=amplitude_scale,
-        record_indices=probe_indices,
-        time_chunk_steps=11,
+        options=BatchOptions(
+            recording=BatchRecording.indices(probe_indices.tolist()),
+            time_chunk_steps=11,
+        ),
     ).Vm
 
     assert chunked.shape == full.shape

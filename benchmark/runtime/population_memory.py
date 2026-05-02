@@ -14,10 +14,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(repo_root / "src"))
     sys.path.insert(0, str(repo_root))
 
+from axonscope.solvers import BatchOptions, BatchRecording
 from benchmark.runtime.batch_utils import write_rows
 from examples.basic.population_batch_demo import (
     build_population_inputs,
-    choose_record_indices,
     run_population_mode,
 )
 
@@ -171,10 +171,9 @@ def run_scenario(
     warmups: int,
 ) -> PopulationMemoryRow:
     recording, time_chunk_steps = scenario_config(scenario, chunk_steps=chunk_steps)
-    record_indices = choose_record_indices(
-        recording,
-        nx=population.axon.Nx,
-        probe_count=probe_count,
+    options = BatchOptions(
+        recording=BatchRecording.from_mode(recording, probe_count=probe_count),
+        time_chunk_steps=time_chunk_steps,
     )
     timing = run_population_mode(
         population,
@@ -185,14 +184,12 @@ def run_scenario(
         warmups=warmups,
         batch_only=True,
         use_generic_vstim=False,
-        record_indices=record_indices,
-        recording=recording,
-        time_chunk_steps=time_chunk_steps,
+        options=options,
     )
 
     ion_channel = getattr(population.axon, "ion_channel", None)
     dtype_bytes = np.dtype(getattr(ion_channel, "dtype", np.float32)).itemsize
-    recorded_width = population.axon.Nx if record_indices is None else int(len(record_indices))
+    recorded_width = options.recording.width_for(population.axon.Nx)
     effective_chunk = timing.nt if time_chunk_steps is None else min(time_chunk_steps, timing.nt)
     vstim_peak_elements = timing.fibers * effective_chunk * timing.nx
     recorded_vm_elements = timing.fibers * timing.nt * recorded_width
