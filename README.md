@@ -107,6 +107,15 @@ Extracellular contexts are descriptive objects. Solver-specific JAX compilation
 lives in `axonscope.solvers.stimulus_runtime`; NumPy evaluation helpers live in
 `axonscope.stimulus_eval`.
 
+Default extracellular solver policy:
+
+- Single-cable axons use an imposed-field Vstim forcing solve. The solver
+  precomputes `Vstim(t, x)` and adds the scalar axial forcing term to the cable
+  solve. This keeps unmyelinated extracellular workloads close to the future
+  batch/GPU data layout.
+- Heterogeneous/double-cable axons such as MRG keep the dynamic Vi/Vperi
+  double-cable solve.
+
 ## Recording Observables
 
 Solvers can record gates, currents, conductances, and optional membrane state
@@ -271,11 +280,11 @@ schild97_intracellular_small     CrankNicholson build=0.0180s first=4.3731s comp
 mrg_extracellular_small          CrankNicholson build=0.0154s first=4.3919s compile_est=4.3310s mat=0.0001s total=4.3920s warm=0.0617s warm_total=0.0618s
 ```
 
-The `vstim_forcing` suite compares the full extracellular solver against the
-experimental imposed-field single-cable path
-`CrankNicholsonVStimForcing`. On local HH extracellular runs, the prototype
-reduced warm runtime strongly at larger `Nx`, but it is intentionally not the
-default yet because it is not bit-identical to the dynamic double-cable path.
+The `vstim_forcing` suite compares the dynamic double-cable extracellular solve
+against the imposed-field single-cable path used by default for non-heterogeneous
+extracellular axons. On local HH extracellular runs, the Vstim path reduced warm
+runtime strongly at larger `Nx` while staying within the NRV extracellular test
+tolerances.
 
 Read the columns as:
 
@@ -342,9 +351,10 @@ Generated logs and figures are ignored by git.
 - `prepare_solver_runtime` is the first data-oriented boundary between axon
   descriptions and solver kernels. It gathers initial states, cable arrays, and
   compiled stimulation without mutating the axon.
-- Extracellular Crank-Nicholson solvers precompute imposed `Vstim` samples on
-  the solver time grid, then index those arrays inside the time loop. This is
-  the first step toward batch-friendly `Vstim[B, Nt, Nx]` inputs.
+- Extracellular single-cable Crank-Nicholson solvers precompute imposed `Vstim`
+  samples on the solver time grid, then add `L(Vstim)` as a known axial forcing
+  term inside the time loop. This is the first step toward batch-friendly
+  `Vstim[B, Nt, Nx]` inputs.
 - The optimized Crank-Nicholson default path precomputes intracellular current
   density samples and calls explicit JIT-compiled VM-only single-cable or
   double-cable kernels. Recording observables still uses the more general path.

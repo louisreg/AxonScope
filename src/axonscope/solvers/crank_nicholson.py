@@ -387,7 +387,15 @@ class CrankNicholson(Solver):
         SimResult
             Contains V_all (Nt × Nx) and t_vec (Nt).
         """
-        if not bool(getattr(axon, "prefer_inline_extracellular_solver", False)):
+        use_extracellular = bool(getattr(axon, "use_extracellular", False))
+        use_vstim_forcing_default = use_extracellular and not bool(
+            getattr(axon, "has_heterogeneous_cable_properties", False)
+        )
+
+        if (
+            not use_vstim_forcing_default
+            and not bool(getattr(axon, "prefer_inline_extracellular_solver", False))
+        ):
             extracellular_res = _maybe_solve_with_extracellular_generic(
                 axon,
                 tsim,
@@ -398,16 +406,16 @@ class CrankNicholson(Solver):
             if extracellular_res is not None:
                 return extracellular_res
 
-        use_extracellular = bool(getattr(axon, "use_extracellular", False))
         runtime = prepare_solver_runtime(
             axon,
             tsim,
             dt,
-            include_extracellular=use_extracellular,
-            include_area=use_extracellular,
+            include_extracellular=use_extracellular and not use_vstim_forcing_default,
+            include_area=use_extracellular and not use_vstim_forcing_default,
             precompute_intracellular=True,
+            precompute_extracellular=use_extracellular,
         )
-        if use_extracellular:
+        if use_extracellular and not use_vstim_forcing_default:
             kernel = DoubleCableKernel(
                 runtime=runtime,
                 Veinit_mV=float(getattr(axon, "Veinit", 0.0)),

@@ -168,7 +168,7 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
     np.testing.assert_allclose(np.asarray(res.Vm), -70.0, rtol=0.0, atol=2e-3)
 
 
-def test_vstim_forcing_stays_close_to_double_cable_for_uniform_vstim():
+def test_public_solver_uses_vstim_forcing_for_single_cable_extracellular():
     def build_axon() -> HodgkinHuxley:
         ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
         ax.insert_I_Clamp(
@@ -186,10 +186,10 @@ def test_vstim_forcing_stays_close_to_double_cable_for_uniform_vstim():
     forced = CrankNicholsonVStimForcing().solve(build_axon(), tsim=1.0, dt=0.01)
     reference = CrankNicholson().solve(build_axon(), tsim=1.0, dt=0.01)
 
-    np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=2e-1, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=0.0, rtol=0.0)
 
 
-def test_vstim_forcing_is_close_to_double_cable_for_unmyelinated_nrv_defaults():
+def test_public_vstim_default_is_close_to_double_cable_for_unmyelinated_nrv_defaults():
     def build_axon() -> HodgkinHuxley:
         ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
         electrode = PointSourceElectrode(x0_m=200e-6, y0_m=100e-6, z0_m=100e-6, sigma_S_m=0.3)
@@ -201,10 +201,48 @@ def test_vstim_forcing_is_close_to_double_cable_for_unmyelinated_nrv_defaults():
         )
         return ax
 
-    reference = CrankNicholson().solve(build_axon(), tsim=1.2, dt=0.01)
-    forced = CrankNicholsonVStimForcing().solve(build_axon(), tsim=1.2, dt=0.01)
+    ax_ref = build_axon()
+    runtime = prepare_solver_runtime(
+        ax_ref,
+        tsim_ms=1.2,
+        dt_ms=0.01,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=True,
+    )
+    reference = DoubleCableKernel(runtime=runtime, Veinit_mV=float(ax_ref.Veinit)).run()
+    forced = CrankNicholson().solve(build_axon(), tsim=1.2, dt=0.01)
 
     np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=5e-1, rtol=0.0)
+
+
+def test_single_cable_vstim_default_bypasses_generic_extracellular_solver(monkeypatch):
+    cn_mod = importlib.import_module("axonscope.solvers.crank_nicholson")
+
+    def _fail_if_generic(*args, **kwargs):
+        raise AssertionError("Single-cable extracellular default should use Vstim forcing.")
+
+    monkeypatch.setattr(cn_mod, "_solve_with_extracellular_generic", _fail_if_generic)
+
+    ax = AxonBase(
+        PassiveICM(Rm=1e4, EL=-70.0),
+        d=1.0,
+        Nx=11,
+        L=100.0,
+        Ra=100.0,
+        Cm=1.0,
+        Vinit=-70.0,
+    )
+    ax.add_extracellular_context(
+        _UniformFieldElectrode(1000.0),
+        Stimulus.constant(20e-6, start=0.0),
+        replace=True,
+    )
+
+    res = CrankNicholson().solve(ax, tsim=0.1, dt=0.01)
+
+    assert res.Vm.shape == (10, ax.Nx)
+    assert np.isfinite(np.asarray(res.Vm)).all()
 
 
 def test_vstim_forcing_rejects_double_cable_axons():
