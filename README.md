@@ -171,35 +171,66 @@ pytest -q tests/nrv/numerics/test_mrg_compartment_geometry_vs_nrv.py
 
 ## Benchmarks
 
-Solver benchmarks start from the shared `Solver` API and write JSON/CSV results:
+Benchmarks are grouped by intent:
 
-```bash
-python benchmark/solver_runtime/benchmark_solver.py --list
-python benchmark/solver_runtime/benchmark_solver.py --cases hh_intracellular_small --repeats 3
-python benchmark/solver_runtime/benchmark_solver.py --cases all --repeats 3
+```text
+benchmark/
+  runtime/       official solver performance benchmarks
+  validation/    AxonScope-vs-NRV correctness and timing sweeps
+  experiments/   backend prototypes and exploratory scripts
+  results/       generated JSON/CSV/trace outputs, ignored by git
+  reports/       generated HTML/PNG/CSV reports, ignored by git
 ```
 
-For a typical solver refactor pass, run the full runtime suite with explicit
-warmups, capture a JAX profiler trace, then build a static HTML report:
+The NRV comparison workflow is the main validation entry point. Named suites are
+declared in `benchmark/validation/suites.py`:
 
 ```bash
-python benchmark/solver_runtime/benchmark_solver.py \
-  --cases all \
-  --repeats 3 \
-  --warmups 1 \
-  --prefix solver_runtime_current \
-  --jax-profile-dir benchmark/results/jax_profiles \
-  --jax-profile-name solver_runtime_current
+python benchmark/validation/run.py --list
+python benchmark/validation/run.py --suite nrv_smoke --dry-run
+python benchmark/validation/run.py --suite nrv_smoke
+python benchmark/validation/run.py --suite nrv_mrg_extracellular_gates
+```
 
-python benchmark/solver_runtime/visualize_results.py \
-  benchmark/results/solver_runtime/solver_runtime_current.json \
-  --out-dir benchmark/reports/solver_runtime \
+The validation runner forwards additional options to
+`benchmark/validation/nrv_axonscope_grid.py` after `--`, so focused NRV sweeps
+stay easy to launch:
+
+```bash
+python benchmark/validation/run.py \
+  --suite nrv_smoke \
+  --prefix hh_dt_probe \
+  -- \
+  --dt 0.005 0.01 \
+  --nx 21 51 \
+  --tsim 1.0
+```
+
+For runtime-only solver work, use the runtime suites:
+
+```bash
+python benchmark/runtime/run.py --list
+python benchmark/runtime/run.py --suite smoke
+python benchmark/runtime/run.py --suite full --prefix solver_runtime_current
+python benchmark/runtime/run.py \
+  --suite profiled \
+  --prefix solver_runtime_current \
+  -- \
+  --jax-profile-name solver_runtime_current
+```
+
+Then build a static HTML report and summarize the JAX trace:
+
+```bash
+python benchmark/runtime/visualize_results.py \
+  benchmark/results/runtime/solver_runtime_current.json \
+  --out-dir benchmark/reports/runtime \
   --prefix solver_runtime_current
 
-python benchmark/solver_runtime/summarize_trace.py \
+python benchmark/runtime/summarize_trace.py \
   benchmark/results/jax_profiles/solver_runtime_current \
   --timeline \
-  --csv-out benchmark/reports/solver_runtime/solver_runtime_current_trace.csv
+  --csv-out benchmark/reports/runtime/solver_runtime_current_trace.csv
 ```
 
 The profiler trace is written under:
@@ -237,34 +268,34 @@ Read the columns as:
 - `mat`: time to materialize and summarize the output arrays.
 - `warm_total`: warm solve plus materialization, closest to usable-output time.
 
-NRV/AxonScope validation sweeps over `dt`, `Nx`, and `Tsim` write JSON/CSV
-comparison tables:
+The lower-level NRV grid script remains available when you want to bypass named
+suites entirely:
 
 ```bash
-python benchmark/solver_validation/nrv_axonscope_grid.py --list
-python benchmark/solver_validation/nrv_axonscope_grid.py --profile full --dry-run
-python benchmark/solver_validation/nrv_axonscope_grid.py \
+python benchmark/validation/nrv_axonscope_grid.py --list
+python benchmark/validation/nrv_axonscope_grid.py --profile full --dry-run
+python benchmark/validation/nrv_axonscope_grid.py \
   --profile smoke
-python benchmark/solver_validation/nrv_axonscope_grid.py \
+python benchmark/validation/nrv_axonscope_grid.py \
   --model mrg_extracellular --dt 0.005 0.01 --nodes 5 9 --tsim 4 \
   --record-gates
 ```
 
-Compare two runs after a solver refactor:
+Compare two runtime runs after a solver refactor:
 
 ```bash
-python benchmark/solver_runtime/compare_results.py \
-  benchmark/results/solver_runtime/baseline.json \
-  benchmark/results/solver_runtime/current.json
+python benchmark/runtime/compare_results.py \
+  benchmark/results/runtime/baseline.json \
+  benchmark/results/runtime/current.json
 ```
 
 The visual report can also compare several JSON files in one page:
 
 ```bash
-python benchmark/solver_runtime/visualize_results.py \
-  benchmark/results/solver_runtime/baseline.json \
-  benchmark/results/solver_runtime/current.json \
-  --out-dir benchmark/reports/solver_runtime \
+python benchmark/runtime/visualize_results.py \
+  benchmark/results/runtime/baseline.json \
+  benchmark/results/runtime/current.json \
+  --out-dir benchmark/reports/runtime \
   --prefix baseline_vs_current
 ```
 
@@ -281,9 +312,10 @@ tracking signal rather than a standalone profiler.
 The first default workloads cover HH intracellular, Rattay-Aberham
 intracellular, Schild97 intracellular, and MRG extracellular stimulation.
 
-Reference and experimental backend comparisons remain under
-`benchmark/CrankNicholson_runtime/`; those scripts are being consolidated around
-the shared benchmark runner.
+Reference and experimental backend comparisons live under
+`benchmark/experiments/crank_nicholson_backends/`; those scripts are not stable
+public workflows. Legacy `benchmark/solver_*` entry points remain as compatibility
+wrappers while downstream scripts migrate to the new layout.
 
 Generated logs and figures are ignored by git.
 

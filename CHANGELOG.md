@@ -23,9 +23,9 @@ The format is inspired by Keep a Changelog.
   internodal membrane models.
 - Added `MembraneStateSpec` for model-owned membrane state variables.
 - Added MRG extracellular AxonScope-vs-NRV baseline export under
-  `benchmark/solver_baseline/`.
+  `benchmark/validation/baselines/`.
 - Added a shared `Solver` benchmark runner with JSON/CSV output under
-  `benchmark/solver_runtime/`.
+  `benchmark/runtime/`.
 - Added benchmark run metadata and JSON comparison tooling for performance
   regression checks.
 - Added solver runtime preparation dataclasses and helpers to separate axon
@@ -48,6 +48,9 @@ The format is inspired by Keep a Changelog.
   NRV/AxonScope validation sweep so runtime comparisons include usable traces.
 - Added solve, materialization, total usable-output, and compile-estimate
   timings to the shared solver benchmark runner.
+- Added named benchmark suite manifests and runners under `benchmark/runtime/`
+  and `benchmark/validation/`, with NRV-focused suites for smoke, full, MRG,
+  and MRG extracellular gate diagnostics.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -81,6 +84,9 @@ The format is inspired by Keep a Changelog.
 - Updated README and examples to the current package API.
 - Updated solver benchmark comparison output guards to tolerate tiny numerical
   output drift before reporting `changed_output`.
+- Reorganized benchmark scripts into `benchmark/runtime/`,
+  `benchmark/validation/`, and `benchmark/experiments/`, keeping legacy
+  `benchmark/solver_*` entry points as compatibility wrappers.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 
@@ -109,8 +115,8 @@ The format is inspired by Keep a Changelog.
 - The generic heterogeneous MRG membrane layout is cleaner than the former masked
   model but currently slower. Profiling and backend specialization are the next
   planned cleanup step.
-- The `playground/` and legacy `benchmark/CrankNicholson_runtime/` directories
-  contain active experiments and are not stable public API.
+- The `playground/` directory and `benchmark/experiments/` scripts contain
+  active experiments and are not stable public API.
 
 ## [0.2.0] - 2025-11-25
 

@@ -13,7 +13,7 @@ from axonscope.benchmarking import (
     run_solver_benchmark_case,
     write_benchmark_results,
 )
-from benchmark.solver_runtime.visualize_results import flatten_benchmark_files, write_benchmark_report
+from benchmark.runtime.visualize_results import flatten_benchmark_files, write_benchmark_report
 
 
 class DummySolver:

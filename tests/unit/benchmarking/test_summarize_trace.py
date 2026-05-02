@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from benchmark.solver_runtime.summarize_trace import (
+from benchmark.runtime.summarize_trace import (
     collect_trace_events,
     discover_trace_files,
     summarize_events,
