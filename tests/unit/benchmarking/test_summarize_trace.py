@@ -72,6 +72,26 @@ def test_summarize_trace_begin_end_events_and_exports(tmp_path: Path):
     assert math.isclose(payload["rows"][0]["total_ms"], 0.25)
 
 
+def test_summarize_trace_population_annotations(tmp_path: Path):
+    trace_path = tmp_path / "population.trace.json.gz"
+    _write_trace(
+        trace_path,
+        [
+            {"name": "population/double/build_vstim", "ph": "X", "ts": 0, "dur": 1200, "pid": 1, "tid": 1},
+            {"name": "population/double/batch_first", "ph": "X", "ts": 1200, "dur": 300, "pid": 1, "tid": 1},
+            {"name": "benchmark/hh/build_axon", "ph": "X", "ts": 1500, "dur": 700, "pid": 1, "tid": 1},
+        ],
+    )
+
+    rows = summarize_events(collect_trace_events([trace_path], pattern="population/"))
+    by_phase = {row.phase: row for row in rows}
+
+    assert set(by_phase) == {"build_vstim", "batch_first"}
+    assert by_phase["build_vstim"].case_name == "population"
+    assert by_phase["build_vstim"].solver_name == "double"
+    assert math.isclose(by_phase["build_vstim"].total_ms, 1.2)
+
+
 def _write_trace(path: Path, events):
     with gzip.open(path, "wt", encoding="utf-8") as f:
         json.dump({"traceEvents": events}, f)

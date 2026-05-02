@@ -57,10 +57,10 @@ class PopulationTiming:
     nx: int
     nt: int
     vstim_build_s: float
-    scalar_warm_s: float
+    scalar_warm_s: float | None
     batch_warm_s: float
-    speedup: float
-    max_abs_diff_mV: float
+    speedup: float | None
+    max_abs_diff_mV: float | None
     vm_peak_min_mV: float
     vm_peak_max_mV: float
 
@@ -78,6 +78,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--x-spread-um", type=float, default=200.0)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
+    parser.add_argument(
+        "--batch-only",
+        action="store_true",
+        help="Skip the scalar loop comparison. Useful for low-memory profiler runs.",
+    )
     parser.add_argument("--plot", action="store_true", help="Show a small peak-Vm population plot.")
     parser.add_argument(
         "--jax-profile-dir",
@@ -122,6 +127,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 dt_ms=args.dt,
                 repeats=args.repeats,
                 warmups=args.warmups,
+                batch_only=bool(args.batch_only),
             )
             for mode in modes
         ]
@@ -188,6 +194,7 @@ def run_population_mode(
     dt_ms: float,
     repeats: int,
     warmups: int,
+    batch_only: bool = False,
 ) -> PopulationTiming:
     axon = population.axon
     include_extracellular = mode == "double"
@@ -226,32 +233,37 @@ def run_population_mode(
     scalar_fn = _single_scalar_loop if mode == "single" else _double_scalar_loop
     batch_fn = _single_batch_run if mode == "single" else _double_batch_run
 
-    _, scalar_first = _timed_annotated(
-        f"population/{mode}/scalar_first",
-        lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
-    )
+    scalar_first = None
+    if not batch_only:
+        _, scalar_first = _timed_annotated(
+            f"population/{mode}/scalar_first",
+            lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
+        )
     _, batch_first = _timed_annotated(
         f"population/{mode}/batch_first",
         lambda: batch_fn(runtime, axon, vstim_mid, vstim_previous),
     )
 
     for _ in range(warmups):
-        _timed_annotated(
-            f"population/{mode}/scalar_warmup",
-            lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
-        )
+        if not batch_only:
+            _timed_annotated(
+                f"population/{mode}/scalar_warmup",
+                lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
+            )
         _timed_annotated(
             f"population/{mode}/batch_warmup",
             lambda: batch_fn(runtime, axon, vstim_mid, vstim_previous),
         )
 
-    scalar_samples = [
-        _timed_annotated(
-            f"population/{mode}/scalar_measured",
-            lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
-        )[0]
-        for _ in range(repeats)
-    ]
+    scalar_samples = []
+    if not batch_only:
+        scalar_samples = [
+            _timed_annotated(
+                f"population/{mode}/scalar_measured",
+                lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
+            )[0]
+            for _ in range(repeats)
+        ]
     batch_samples = [
         _timed_annotated(
             f"population/{mode}/batch_measured",
@@ -260,12 +272,17 @@ def run_population_mode(
         for _ in range(repeats)
     ]
 
-    scalar_np = np.asarray(scalar_first)
     batch_np = np.asarray(batch_first)
-    diff = batch_np - scalar_np
     fiber_peaks = np.max(batch_np, axis=(1, 2))
-    scalar_warm = float(np.mean(scalar_samples))
     batch_warm = float(np.mean(batch_samples))
+    scalar_warm = float(np.mean(scalar_samples)) if scalar_samples else None
+    max_abs_diff = None
+    speedup = None
+    if scalar_first is not None and scalar_warm is not None:
+        scalar_np = np.asarray(scalar_first)
+        diff = batch_np - scalar_np
+        max_abs_diff = float(np.max(np.abs(diff)))
+        speedup = float(scalar_warm / batch_warm)
 
     return PopulationTiming(
         mode=mode,
@@ -275,8 +292,8 @@ def run_population_mode(
         vstim_build_s=float(vstim_build_s),
         scalar_warm_s=scalar_warm,
         batch_warm_s=batch_warm,
-        speedup=float(scalar_warm / batch_warm),
-        max_abs_diff_mV=float(np.max(np.abs(diff))),
+        speedup=speedup,
+        max_abs_diff_mV=max_abs_diff,
         vm_peak_min_mV=float(np.min(fiber_peaks)),
         vm_peak_max_mV=float(np.max(fiber_peaks)),
     )
@@ -380,13 +397,16 @@ def print_summary(
         f"{population.longitudinal_offsets_um[-1]:.1f} um"
     )
     for timing in timings:
+        scalar = "n/a" if timing.scalar_warm_s is None else f"{timing.scalar_warm_s:.4f}s"
+        speedup = "n/a" if timing.speedup is None else f"{timing.speedup:.3f}"
+        diff = "n/a" if timing.max_abs_diff_mV is None else f"{timing.max_abs_diff_mV:.4g} mV"
         print(
             f"{timing.mode:6s} "
             f"Vstim_build={timing.vstim_build_s:.4f}s "
-            f"scalar={timing.scalar_warm_s:.4f}s "
+            f"scalar={scalar} "
             f"batch={timing.batch_warm_s:.4f}s "
-            f"speedup={timing.speedup:.3f} "
-            f"diff={timing.max_abs_diff_mV:.4g} mV "
+            f"speedup={speedup} "
+            f"diff={diff} "
             f"peak={timing.vm_peak_min_mV:.2f}/{timing.vm_peak_max_mV:.2f} mV"
         )
 
@@ -398,7 +418,7 @@ def plot_population(
     import matplotlib.pyplot as plt
 
     labels = [timing.mode for timing in timings]
-    speedups = [timing.speedup for timing in timings]
+    speedups = [0.0 if timing.speedup is None else timing.speedup for timing in timings]
     plt.figure(figsize=(6, 3))
     plt.bar(labels, speedups)
     plt.ylabel("Warm speedup vs scalar loop")

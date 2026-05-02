@@ -343,11 +343,15 @@ python examples/basic/population_batch_demo.py \
   --fibers 64 \
   --nx 201 \
   --tsim 2.0 \
+  --batch-only \
+  --repeats 1 \
+  --warmups 0 \
   --jax-profile-dir benchmark/results/jax_profiles \
   --jax-profile-name population_double_b64_nx201
 
 python benchmark/runtime/summarize_trace.py \
   benchmark/results/jax_profiles/population_double_b64_nx201 \
+  --pattern population/ \
   --timeline \
   --csv-out benchmark/reports/runtime/population_double_b64_nx201_trace.csv
 ```

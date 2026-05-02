@@ -289,19 +289,28 @@ def _trace_event_from_parts(
 
 def _parse_benchmark_name(name: str) -> tuple[str, str, str]:
     parts = name.split("/")
-    try:
+    if "benchmark" in parts:
         start = parts.index("benchmark")
+        payload = parts[start + 1 :]
+        if not payload:
+            return "", "", name
+        if len(payload) == 1:
+            return payload[0], "", ""
+        if len(payload) == 2:
+            return payload[0], "", payload[1]
+        return payload[0], payload[1], "/".join(payload[2:])
+
+    try:
+        start = parts.index("population")
     except ValueError:
         return "", "", name
 
     payload = parts[start + 1 :]
     if not payload:
-        return "", "", name
+        return "population", "", ""
     if len(payload) == 1:
-        return payload[0], "", ""
-    if len(payload) == 2:
-        return payload[0], "", payload[1]
-    return payload[0], payload[1], "/".join(payload[2:])
+        return "population", payload[0], ""
+    return "population", payload[0], "/".join(payload[1:])
 
 
 def _raw_trace_events(payload: Any) -> Iterable[Any]:
