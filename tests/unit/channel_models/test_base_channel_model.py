@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import pytest
 
 from axonscope.channel_models.passive import PassiveICM
-from axonscope.channel_models.base_channel_model import IonChannelModelBase, MembraneStateSpec
+from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase, MembraneStateSpec
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM 
 from axonscope.icm import Gating
 from axonscope.settings import dtype
@@ -25,6 +25,27 @@ def test_base_membrane_state_api_is_generic():
         "has_ko_dynamics",
     ):
         assert not hasattr(IonChannelModelBase, method_name)
+
+
+def test_channel_model_static_identity_is_structural():
+    passive_a = PassiveICM(Rm=1e4, EL=-70.0)
+    passive_b = PassiveICM(Rm=1e4, EL=-70.0)
+    passive_c = PassiveICM(Rm=1e4, EL=-65.0)
+    assert passive_a == passive_b
+    assert hash(passive_a) == hash(passive_b)
+    assert passive_a != passive_c
+
+    hh_a = HodgkinHuxleyICM(celsius=6.3)
+    hh_b = HodgkinHuxleyICM(celsius=6.3)
+    hh_hot = HodgkinHuxleyICM(celsius=20.0)
+    assert hh_a == hh_b
+    assert hash(hh_a) == hash(hh_b)
+    assert hh_a != hh_hot
+
+    comp_a = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e3, EL=-70.0)])
+    comp_b = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e3, EL=-70.0)])
+    assert comp_a == comp_b
+    assert hash(comp_a) == hash(comp_b)
 
 # ----------------- Tests Passive -----------------
 def test_passive_model():

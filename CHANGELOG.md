@@ -36,12 +36,18 @@ The format is inspired by Keep a Changelog.
   samples for future batch/chunk kernels.
 - Added explicit `SingleCableKernel` and `DoubleCableKernel` solver kernels
   for the optimized Crank-Nicholson path.
+- Added explicit JIT-compiled VM-only paths inside `SingleCableKernel` and
+  `DoubleCableKernel` for the default Crank-Nicholson solve.
 - Added an HH NRV/AxonScope validation sweep script over `dt`, `Nx`, and
   simulation duration.
 - Added NRV/AxonScope validation sweep profiles for HH and MRG intracellular
   and extracellular workloads with blocked AxonScope timings, spike metrics,
   velocity estimates, spatial alignment diagnostics, and optional `m` gate
   comparison metrics.
+- Added explicit NRV and AxonScope output materialization timings to the
+  NRV/AxonScope validation sweep so runtime comparisons include usable traces.
+- Added solve, materialization, total usable-output, and compile-estimate
+  timings to the shared solver benchmark runner.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
@@ -60,6 +66,8 @@ The format is inspired by Keep a Changelog.
   `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
 - Changed optimized Crank-Nicholson to dispatch to specialized single-cable and
   double-cable kernels instead of carrying both voltage layouts in one scan body.
+- Changed optimized Crank-Nicholson to precompute intracellular current-density
+  samples before entering the default VM-only JIT kernel.
 - Specialized the double-cable 2x2 block-tridiagonal solve to operate on scalar
   coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common

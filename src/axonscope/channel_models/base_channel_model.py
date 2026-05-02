@@ -1,8 +1,10 @@
 from __future__ import annotations
 import jax.numpy as jnp
+import numpy as np
 from abc import ABC, abstractmethod
 from axonscope.settings import dtype
-from typing import List, Callable, NamedTuple
+from dataclasses import fields, is_dataclass
+from typing import Any, List, Callable, NamedTuple
 
 Array1D = jnp.ndarray
 Array2D = jnp.ndarray
@@ -20,6 +22,44 @@ class MembraneStepPlan(NamedTuple):
 
 class MembraneStateSpec(NamedTuple):
     name: str
+
+
+def _static_value_signature(value: Any) -> Any:
+    """Return a hashable structural signature for model configuration values."""
+    if isinstance(value, IonChannelModelBase):
+        return value._static_signature()
+    if is_dataclass(value) and not isinstance(value, type):
+        return (
+            value.__class__.__module__,
+            value.__class__.__qualname__,
+            tuple(
+                (field.name, _static_value_signature(getattr(value, field.name)))
+                for field in fields(value)
+            ),
+        )
+    if isinstance(value, dict):
+        items = (
+            (_static_value_signature(key), _static_value_signature(val))
+            for key, val in value.items()
+        )
+        return tuple(sorted(items, key=repr))
+    if isinstance(value, (list, tuple)):
+        return tuple(_static_value_signature(item) for item in value)
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value)
+        return ("array", str(arr.dtype), arr.shape, arr.tobytes())
+    if hasattr(value, "shape") and hasattr(value, "dtype"):
+        arr = np.asarray(value)
+        if arr.shape == ():
+            return ("scalar", str(arr.dtype), arr.item())
+        return ("array", str(arr.dtype), arr.shape, arr.tobytes())
+    if isinstance(value, type):
+        return ("type", value.__module__, value.__qualname__)
+    try:
+        hash(value)
+    except TypeError:
+        return repr(value)
+    return value
 
 
 class IonChannelModelBase(ABC):
@@ -51,6 +91,36 @@ class IonChannelModelBase(ABC):
         """
         self.dtype = dtype
         self.q10: float = dtype(1.0)
+
+    def _static_signature(self) -> tuple[Any, ...]:
+        """Structural identity used when channel models are JAX static args."""
+        return (
+            self.__class__.__module__,
+            self.__class__.__qualname__,
+            tuple(
+                (name, _static_value_signature(value))
+                for name, value in sorted(self.__dict__.items())
+            ),
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if self.__class__ is not other.__class__:
+            return False
+        return self._static_signature() == other._static_signature()
+
+    def __hash__(self) -> int:
+        return hash(self._static_signature())
+
+    def supports_stateless_vm_only_fast_path(self) -> bool:
+        """Whether Vm-only solvers may skip post-solve membrane finalization."""
+        cls = self.__class__
+        base = IonChannelModelBase
+        return (
+            self.membrane_state_specs() == ()
+            and cls.final_gate_update is base.final_gate_update
+            and cls.prepare_membrane_step is base.prepare_membrane_step
+            and cls.finalize_membrane_step is base.finalize_membrane_step
+        )
 
     @abstractmethod
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:

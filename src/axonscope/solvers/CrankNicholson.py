@@ -623,6 +623,7 @@ class CrankNicholson(Solver):
             dt,
             include_extracellular=use_extracellular,
             include_area=use_extracellular,
+            precompute_intracellular=True,
         )
         if use_extracellular:
             kernel = DoubleCableKernel(

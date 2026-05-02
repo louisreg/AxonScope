@@ -13,7 +13,9 @@ def main() -> None:
     parser.add_argument("current", type=Path, help="Current benchmark JSON.")
     parser.add_argument("--build-threshold", type=float, default=0.15, help="Relative construction regression threshold.")
     parser.add_argument("--first-threshold", type=float, default=0.20, help="Relative first-solve regression threshold.")
+    parser.add_argument("--total-first-threshold", type=float, default=0.20, help="Relative first solve+materialize regression threshold.")
     parser.add_argument("--warm-threshold", type=float, default=0.10, help="Relative warm-solve regression threshold.")
+    parser.add_argument("--warm-total-threshold", type=float, default=0.10, help="Relative warm solve+materialize regression threshold.")
     parser.add_argument("--rss-threshold", type=float, default=0.15, help="Relative RSS-delta regression threshold.")
     parser.add_argument("--output-atol", type=float, default=5e-2, help="Absolute tolerance for output min/max/mean changes.")
     parser.add_argument("--output-rtol", type=float, default=1e-6, help="Relative tolerance for output min/max/mean changes.")
@@ -29,7 +31,9 @@ def main() -> None:
         thresholds={
             "construction.mean_s": args.build_threshold,
             "first_solve_s": args.first_threshold,
+            "total_first_s": args.total_first_threshold,
             "warm_solve.mean_s": args.warm_threshold,
+            "warm_total.mean_s": args.warm_total_threshold,
             "rss_first_solve_delta_mb": args.rss_threshold,
         },
         output_atol=args.output_atol,
@@ -82,19 +86,22 @@ def _print_metadata_delta(baseline_metadata: dict, current_metadata: dict) -> No
 
 
 def _print_table(rows) -> None:
-    headers = ("case", "solver", "build", "first", "warm", "rss", "status")
+    headers = ("case", "solver", "build", "first", "total", "warm", "warm_total", "rss", "status")
     print(
         f"{headers[0]:32s} {headers[1]:20s} "
-        f"{headers[2]:>9s} {headers[3]:>9s} {headers[4]:>9s} {headers[5]:>9s} {headers[6]:>16s}"
+        f"{headers[2]:>9s} {headers[3]:>9s} {headers[4]:>9s} "
+        f"{headers[5]:>9s} {headers[6]:>10s} {headers[7]:>9s} {headers[8]:>16s}"
     )
-    print("-" * 113)
+    print("-" * 137)
     for row in rows:
         metrics = {metric.metric: metric for metric in row.metrics}
         print(
             f"{row.case_name:32s} {row.solver_name:20s} "
             f"{_fmt_metric(metrics.get('construction.mean_s')):>9s} "
             f"{_fmt_metric(metrics.get('first_solve_s')):>9s} "
+            f"{_fmt_metric(metrics.get('total_first_s')):>9s} "
             f"{_fmt_metric(metrics.get('warm_solve.mean_s')):>9s} "
+            f"{_fmt_metric(metrics.get('warm_total.mean_s')):>10s} "
             f"{_fmt_metric(metrics.get('rss_first_solve_delta_mb')):>9s} "
             f"{row.status:>16s}"
         )

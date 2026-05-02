@@ -56,6 +56,10 @@ def test_run_solver_benchmark_case_with_dummy_solver():
     assert result.solver_name == "DummySolver"
     assert result.construction.repeats == 2
     assert result.warm_solve.repeats == 2
+    assert result.warm_materialize.repeats == 2
+    assert result.warm_total.repeats == 2
+    assert result.total_first_s >= result.first_solve_s
+    assert result.compile_s_estimate is not None
     assert result.output["vm_shape"] == (2, 3)
     assert result.output["vm_min_mV"] == -70.0
 

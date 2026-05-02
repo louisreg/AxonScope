@@ -86,6 +86,11 @@ class SolverBenchmarkResult:
     construction: TimingStats
     first_solve_s: float
     warm_solve: TimingStats
+    materialize_first_s: float
+    warm_materialize: TimingStats
+    total_first_s: float
+    warm_total: TimingStats
+    compile_s_estimate: float | None
     output: Mapping[str, Any]
     metadata: Mapping[str, Any] = field(default_factory=dict)
     rss_before_mb: float | None = None
@@ -106,6 +111,11 @@ class SolverBenchmarkResult:
             "construction": self.construction.__dict__,
             "first_solve_s": self.first_solve_s,
             "warm_solve": self.warm_solve.__dict__,
+            "materialize_first_s": self.materialize_first_s,
+            "warm_materialize": self.warm_materialize.__dict__,
+            "total_first_s": self.total_first_s,
+            "warm_total": self.warm_total.__dict__,
+            "compile_s_estimate": self.compile_s_estimate,
             "rss_before_mb": self.rss_before_mb,
             "rss_after_first_solve_mb": self.rss_after_first_solve_mb,
             "rss_first_solve_delta_mb": self.rss_first_solve_delta_mb,
@@ -231,31 +241,41 @@ def run_solver_benchmark_case(
         solve_kwargs=kwargs,
     )
     rss_after = _rss_mb()
-    output = summarize_sim_result(first_result)
+    materialize_first_s, output = _time_call(lambda: summarize_sim_result(first_result))
 
     for _ in range(warmups):
         warmup_axon = case.build_axon()
         warmup_solver = solver_factory()
-        _time_solve(
+        _, warmup_result = _time_solve(
             warmup_solver,
             warmup_axon,
             tsim_ms=case.tsim_ms,
             dt_ms=case.dt_ms,
             solve_kwargs=kwargs,
         )
+        _time_call(lambda result=warmup_result: summarize_sim_result(result))
 
     warm_solve_times = []
+    warm_materialize_times = []
+    warm_total_times = []
     for _ in range(repeats):
         measured_axon = case.build_axon()
         measured_solver = solver_factory()
-        elapsed_s, _ = _time_solve(
+        elapsed_s, repeat_result = _time_solve(
             measured_solver,
             measured_axon,
             tsim_ms=case.tsim_ms,
             dt_ms=case.dt_ms,
             solve_kwargs=kwargs,
         )
+        materialize_s, _ = _time_call(lambda result=repeat_result: summarize_sim_result(result))
         warm_solve_times.append(elapsed_s)
+        warm_materialize_times.append(materialize_s)
+        warm_total_times.append(elapsed_s + materialize_s)
+
+    compile_s_estimate = None
+    if warm_solve_times:
+        compile_s_estimate = max(0.0, float(first_solve_s) - min(warm_solve_times))
 
     return SolverBenchmarkResult(
         case_name=case.name,
@@ -265,6 +285,11 @@ def run_solver_benchmark_case(
         construction=TimingStats.from_samples(construction_times),
         first_solve_s=float(first_solve_s),
         warm_solve=TimingStats.from_samples(warm_solve_times),
+        materialize_first_s=float(materialize_first_s),
+        warm_materialize=TimingStats.from_samples(warm_materialize_times),
+        total_first_s=float(first_solve_s + materialize_first_s),
+        warm_total=TimingStats.from_samples(warm_total_times),
+        compile_s_estimate=compile_s_estimate,
         output=output,
         metadata=case.metadata,
         rss_before_mb=rss_before,
@@ -378,7 +403,9 @@ def compare_benchmark_results(
     thresholds_map = {
         "construction.mean_s": 0.15,
         "first_solve_s": 0.20,
+        "total_first_s": 0.20,
         "warm_solve.mean_s": 0.10,
+        "warm_total.mean_s": 0.10,
         "rss_first_solve_delta_mb": 0.15,
     }
     if thresholds is not None:
@@ -570,11 +597,21 @@ def _flatten_result(result: SolverBenchmarkResult) -> dict[str, Any]:
         "tsim_ms": payload["tsim_ms"],
         "dt_ms": payload["dt_ms"],
         "first_solve_s": payload["first_solve_s"],
+        "materialize_first_s": payload["materialize_first_s"],
+        "total_first_s": payload["total_first_s"],
+        "compile_s_estimate": payload["compile_s_estimate"],
         "rss_before_mb": payload["rss_before_mb"],
         "rss_after_first_solve_mb": payload["rss_after_first_solve_mb"],
         "rss_first_solve_delta_mb": payload["rss_first_solve_delta_mb"],
     }
-    for prefix in ("construction", "warm_solve", "output", "metadata"):
+    for prefix in (
+        "construction",
+        "warm_solve",
+        "warm_materialize",
+        "warm_total",
+        "output",
+        "metadata",
+    ):
         values = payload[prefix]
         if isinstance(values, Mapping):
             for key, value in values.items():

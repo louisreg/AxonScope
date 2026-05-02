@@ -66,6 +66,12 @@ class HeterogeneousMembraneModel(IonChannelModelBase):
     def build_icm_backend(self) -> ICMBackend:
         return self.backend
 
+    def supports_stateless_vm_only_fast_path(self) -> bool:
+        return all(
+            model.supports_stateless_vm_only_fast_path()
+            for model in self.models
+        )
+
     @property
     def g_bar(self) -> jnp.ndarray:
         return jnp.zeros((self.backend.n_channels_max,), dtype=self.dtype)

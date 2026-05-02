@@ -200,9 +200,15 @@ python benchmark/solver_runtime/compare_results.py \
   benchmark/results/solver_runtime/current.json
 ```
 
-The NRV/AxonScope grid reports blocked AxonScope timings, NRV simulation
-timings, Vm error metrics, spike timing metrics, velocity estimates, spatial
-alignment error, and optional `m` gate metrics for gate-level diagnostics.
+The NRV/AxonScope grid reports blocked AxonScope solve timings, explicit output
+materialization timings for both AxonScope and NRV, total usable-output timings,
+Vm error metrics, spike timing metrics, velocity estimates, spatial alignment
+error, and optional `m` gate metrics for gate-level diagnostics.
+
+The shared solver benchmark reports solve-only, materialization, total
+usable-output, and compile-estimate timings. The compile estimate is the first
+blocked solve minus the fastest warm blocked solve, so it should be read as a
+tracking signal rather than a standalone profiler.
 
 The first default workloads cover HH intracellular, Rattay-Aberham
 intracellular, Schild97 intracellular, and MRG extracellular stimulation.
@@ -225,6 +231,9 @@ Generated logs and figures are ignored by git.
 - Extracellular Crank-Nicholson solvers precompute imposed `Vstim` samples on
   the solver time grid, then index those arrays inside the time loop. This is
   the first step toward batch-friendly `Vstim[B, Nt, Nx]` inputs.
+- The optimized Crank-Nicholson default path precomputes intracellular current
+  density samples and calls explicit JIT-compiled VM-only single-cable or
+  double-cable kernels. Recording observables still uses the more general path.
 - The full double-cable reference path uses scalar coefficient arrays for its
   2x2 block solve, avoiding per-step materialization of `(Nx, 2, 2)` matrices.
 - `AxonBase` describes geometry and attached stimuli; solvers own runtime arrays.

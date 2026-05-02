@@ -77,11 +77,19 @@ def main() -> None:
             f"{result.case_name:32s} {result.solver_name:24s} "
             f"build={result.construction.mean_s:.4f}s "
             f"first={result.first_solve_s:.4f}s "
+            f"compile_est={_fmt_optional(result.compile_s_estimate)}s "
+            f"mat={result.materialize_first_s:.4f}s "
+            f"total={result.total_first_s:.4f}s "
             f"warm={result.warm_solve.mean_s:.4f}s "
+            f"warm_total={result.warm_total.mean_s:.4f}s "
             f"Vm={result.output['vm_min_mV']:.2f}/{result.output['vm_max_mV']:.2f} mV"
         )
     print(f"json: {json_path}")
     print(f"csv : {csv_path}")
+
+
+def _fmt_optional(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.4f}"
 
 
 if __name__ == "__main__":

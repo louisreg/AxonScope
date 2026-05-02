@@ -4,7 +4,7 @@ from typing import Protocol
 
 import jax
 import jax.numpy as jnp
-from typing import Tuple, Callable
+from typing import NamedTuple, Tuple, Callable
 
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 
@@ -289,11 +289,19 @@ class UniformICMBackend:
         return self.ion_channel.I_background(self.Nx)
 
 
+class HeterogeneousICMGroup(NamedTuple):
+    model: IonChannelModelBase
+    indices: tuple[int, ...]
+    gate_size: int
+    channel_size: int
+
+
 @dataclass(frozen=True)
 class HeterogeneousICMBackend:
     """Backend for one ion-channel model instance per compartment."""
 
     icm_vec: tuple[IonChannelModelBase, ...]
+    groups: tuple[HeterogeneousICMGroup, ...]
     gate_sizes: tuple[int, ...]
     channel_sizes: tuple[int, ...]
     n_gates_max: int
@@ -310,9 +318,27 @@ class HeterogeneousICMBackend:
         channel_sizes = tuple(int(m.g_bar.shape[0]) for m in frozen)
         n_gates_max = max(gate_sizes) if gate_sizes else 0
         n_channels_max = max(channel_sizes) if channel_sizes else 0
+        grouped: list[tuple[IonChannelModelBase, list[int], int, int]] = []
+        for i, model in enumerate(frozen):
+            for group_model, indices, _, _ in grouped:
+                if model == group_model:
+                    indices.append(i)
+                    break
+            else:
+                grouped.append((model, [i], gate_sizes[i], channel_sizes[i]))
+        groups = tuple(
+            HeterogeneousICMGroup(
+                model=model,
+                indices=tuple(indices),
+                gate_size=gate_size,
+                channel_size=channel_size,
+            )
+            for model, indices, gate_size, channel_size in grouped
+        )
 
         return cls(
             icm_vec=frozen,
+            groups=groups,
             gate_sizes=gate_sizes,
             channel_sizes=channel_sizes,
             n_gates_max=n_gates_max,
@@ -328,32 +354,38 @@ class HeterogeneousICMBackend:
         if V0_mV.shape[0] != self.Nx:
             raise ValueError(f"V0_mV must have shape ({self.Nx},), got {V0_mV.shape}.")
         out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
             if n_g == 0:
                 continue
-            gi = model.init_gates(V0_mV[i : i + 1])[0]
-            out = out.at[i, :n_g].set(gi)
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            gi = model.init_gates(V0_mV[idx])
+            out = out.at[idx, :n_g].set(gi)
         return out
 
     def alpha(self, V_mV: Array1D) -> Array2D:
         out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
             if n_g == 0:
                 continue
-            ai = model.alpha_funcs(V_mV[i : i + 1])[0]
-            out = out.at[i, :n_g].set(ai)
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            ai = model.alpha_funcs(V_mV[idx])
+            out = out.at[idx, :n_g].set(ai)
         return out
 
     def beta(self, V_mV: Array1D) -> Array2D:
         out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
             if n_g == 0:
                 continue
-            bi = model.beta_funcs(V_mV[i : i + 1])[0]
-            out = out.at[i, :n_g].set(bi)
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            bi = model.beta_funcs(V_mV[idx])
+            out = out.at[idx, :n_g].set(bi)
         return out
 
     def conductances(self, gates: Array2D) -> Array2D:
@@ -362,12 +394,14 @@ class HeterogeneousICMBackend:
                 f"gates must have shape ({self.Nx}, {self.n_gates_max}), got {gates.shape}."
             )
         out = jnp.zeros((self.Nx, self.n_channels_max), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
-            n_c = self.channel_sizes[i]
-            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
-            gvals = model.g_funcs(gi, model.g_bar)[0]
-            out = out.at[i, :n_c].set(gvals)
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
+            n_c = group.channel_size
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            gi = gates[idx, :n_g] if n_g > 0 else jnp.zeros((len(group.indices), 0), dtype=self.dtype)
+            gvals = model.g_funcs(gi, model.g_bar)
+            out = out.at[idx, :n_c].set(gvals)
         return out
 
     def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
@@ -376,35 +410,41 @@ class HeterogeneousICMBackend:
                 f"g_prev must have shape ({self.Nx}, {self.n_gates_max}), got {g_prev.shape}."
             )
         out = jnp.zeros_like(g_prev)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
             if n_g == 0:
                 continue
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
             g_new = model.cn_gate_update(
-                g_prev=g_prev[i : i + 1, :n_g],
-                V_mV=V_mV[i : i + 1],
+                g_prev=g_prev[idx, :n_g],
+                V_mV=V_mV[idx],
                 dt=dt,
-            )[0]
-            out = out.at[i, :n_g].set(g_new)
+            )
+            out = out.at[idx, :n_g].set(g_new)
         return out
 
     def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
         if V_mV.shape[0] != self.Nx:
             raise ValueError(f"V_mV must have shape ({self.Nx},), got {V_mV.shape}.")
         out = jnp.zeros((self.Nx,), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
-            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
-            Ii = model.currents(V_mV=V_mV[i : i + 1], gates=gi)[0]
-            out = out.at[i].set(Ii)
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            gi = gates[idx, :n_g] if n_g > 0 else jnp.zeros((len(group.indices), 0), dtype=self.dtype)
+            Ii = model.currents(V_mV=V_mV[idx], gates=gi)
+            out = out.at[idx].set(Ii)
         return out
 
     def total_conductance(self, gates: Array2D) -> Array1D:
         out = jnp.zeros((self.Nx,), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
-            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
-            out = out.at[i].set(model.total_conductance(gi)[0])
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            gi = gates[idx, :n_g] if n_g > 0 else jnp.zeros((len(group.indices), 0), dtype=self.dtype)
+            out = out.at[idx].set(model.total_conductance(gi))
         return out
 
     def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
@@ -414,16 +454,19 @@ class HeterogeneousICMBackend:
             )
         Gm = jnp.zeros((self.Nx,), dtype=self.dtype)
         GE = jnp.zeros((self.Nx,), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            n_g = self.gate_sizes[i]
-            gi = gates[i : i + 1, :n_g] if n_g > 0 else jnp.zeros((1, 0), dtype=self.dtype)
+        for group in self.groups:
+            model = group.model
+            n_g = group.gate_size
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            gi = gates[idx, :n_g] if n_g > 0 else jnp.zeros((len(group.indices), 0), dtype=self.dtype)
             gm_i, ge_i = model.membrane_conductance_terms(gi)
-            Gm = Gm.at[i].set(gm_i[0])
-            GE = GE.at[i].set(ge_i[0])
+            Gm = Gm.at[idx].set(gm_i)
+            GE = GE.at[idx].set(ge_i)
         return Gm, GE
 
     def background_current(self) -> Array1D:
         out = jnp.zeros((self.Nx,), dtype=self.dtype)
-        for i, model in enumerate(self.icm_vec):
-            out = out.at[i].set(model.I_background(1)[0])
+        for group in self.groups:
+            idx = jnp.asarray(group.indices, dtype=jnp.int32)
+            out = out.at[idx].set(group.model.I_background(len(group.indices)))
         return out

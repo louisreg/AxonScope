@@ -126,14 +126,14 @@ def main() -> None:
 
     print("=== NRV/AxonScope grid ===")
     for row in rows:
-        speedup = _fmt_optional(row.get("speedup_nrv_over_as_first"))
-        warm = _fmt_optional(row.get("as_warm_solve_median_s"))
+        speedup = _fmt_optional(row.get("speedup_nrv_over_as_total_first"))
+        warm = _fmt_optional(row.get("as_warm_total_median_s"))
         print(
             f"{row['model']:20s} dt={row['dt_ms']:g} ms "
             f"nx={row['axon_nx']:4d} tsim={row['tsim_ms']:g} ms "
             f"rmse={row['vm_rmse_mV']:.4f} mV max={row['vm_max_abs_mV']:.4f} mV "
-            f"AS_first={row['as_first_solve_s']:.3f}s AS_warm={warm}s "
-            f"NRV={row['nrv_simulate_s']:.3f}s speedup={speedup}"
+            f"AS_total={row['as_total_first_s']:.3f}s AS_warm={warm}s "
+            f"NRV_total={row['nrv_total_s']:.3f}s speedup={speedup}"
         )
     print(f"json: {json_path}")
     print(f"csv : {csv_path}")
@@ -157,41 +157,59 @@ def run_case(
     axon_as = as_build.value
     as_solve = _time_axonscope_solve(axon_as, case, record_gates=record_gates)
     result_as = as_solve.value
+    as_materialize = _time_call(lambda: _materialize_axonscope_result(result_as, record_gates=record_gates))
+    as_data = as_materialize.value
 
     for _ in range(warmups):
         axon_warm = _make_axonscope_case(case)
-        _time_axonscope_solve(axon_warm, case, record_gates=record_gates)
+        warm_solve = _time_axonscope_solve(axon_warm, case, record_gates=record_gates)
+        _time_call(lambda res=warm_solve.value: _materialize_axonscope_result(res, record_gates=record_gates))
 
     as_warm_samples = []
+    as_warm_materialize_samples = []
+    as_warm_total_samples = []
     for _ in range(max(0, repeats - 1)):
         axon_repeat = _make_axonscope_case(case)
-        as_warm_samples.append(
-            _time_axonscope_solve(axon_repeat, case, record_gates=record_gates).elapsed_s
+        repeat_solve = _time_axonscope_solve(axon_repeat, case, record_gates=record_gates)
+        repeat_materialize = _time_call(
+            lambda res=repeat_solve.value: _materialize_axonscope_result(res, record_gates=record_gates)
         )
+        as_warm_samples.append(repeat_solve.elapsed_s)
+        as_warm_materialize_samples.append(repeat_materialize.elapsed_s)
+        as_warm_total_samples.append(repeat_solve.elapsed_s + repeat_materialize.elapsed_s)
 
     nrv_build = _time_call(lambda: _make_nrv_case(case, axon_as))
     axon_nrv = nrv_build.value
     _enable_nrv_recordings(axon_nrv, record_gates=record_gates)
     nrv_sim = _time_call(lambda: axon_nrv.simulate(t_sim=case.tsim_ms))
     result_nrv = nrv_sim.value
+    nrv_materialize = _time_call(lambda: _materialize_nrv_result(result_nrv, record_gates=record_gates))
+    nrv_data = nrv_materialize.value
 
     for _ in range(warmups):
         axon_warm = _make_nrv_case(case, axon_as)
         _enable_nrv_recordings(axon_warm, record_gates=record_gates)
-        _time_call(lambda ax=axon_warm: ax.simulate(t_sim=case.tsim_ms))
+        warm_sim = _time_call(lambda ax=axon_warm: ax.simulate(t_sim=case.tsim_ms))
+        _time_call(lambda res=warm_sim.value: _materialize_nrv_result(res, record_gates=record_gates))
 
     nrv_repeat_samples = []
+    nrv_repeat_materialize_samples = []
+    nrv_repeat_total_samples = []
     for _ in range(max(0, repeats - 1)):
         axon_repeat = _make_nrv_case(case, axon_as)
         _enable_nrv_recordings(axon_repeat, record_gates=record_gates)
-        nrv_repeat_samples.append(
-            _time_call(lambda ax=axon_repeat: ax.simulate(t_sim=case.tsim_ms)).elapsed_s
+        repeat_sim = _time_call(lambda ax=axon_repeat: ax.simulate(t_sim=case.tsim_ms))
+        repeat_materialize = _time_call(
+            lambda res=repeat_sim.value: _materialize_nrv_result(res, record_gates=record_gates)
         )
+        nrv_repeat_samples.append(repeat_sim.elapsed_s)
+        nrv_repeat_materialize_samples.append(repeat_materialize.elapsed_s)
+        nrv_repeat_total_samples.append(repeat_sim.elapsed_s + repeat_materialize.elapsed_s)
 
-    vm_as = np.asarray(result_as.Vm, dtype=float).T
-    t_as = np.asarray(result_as.t, dtype=float).ravel()
+    vm_as = as_data["Vm"].T
+    t_as = as_data["t"]
     x_as = np.asarray(axon_as.x, dtype=float).ravel()
-    vm_nrv, x_nrv, t_nrv = _nrv_vm_matrix(result_nrv)
+    vm_nrv, x_nrv, t_nrv = _nrv_vm_matrix(nrv_data)
     x_target, vm_nrv_aligned, row_idx = _align_rows_to_target_x(x_nrv, vm_nrv, x_as)
     vm_nrv_interp = _interp_rows(vm_nrv_aligned, t_nrv, t_as)
 
@@ -231,18 +249,40 @@ def run_case(
         "threshold_mV": float(threshold_mV),
         "as_build_s": float(as_build.elapsed_s),
         "as_first_solve_s": float(as_solve.elapsed_s),
+        "as_materialize_first_s": float(as_materialize.elapsed_s),
+        "as_total_first_s": float(as_solve.elapsed_s + as_materialize.elapsed_s),
         "nrv_build_s": float(nrv_build.elapsed_s),
         "nrv_simulate_s": float(nrv_sim.elapsed_s),
+        "nrv_materialize_s": float(nrv_materialize.elapsed_s),
+        "nrv_total_s": float(nrv_sim.elapsed_s + nrv_materialize.elapsed_s),
         "as_warm_solve_repeats": int(len(as_warm_samples)),
         "nrv_repeat_repeats": int(len(nrv_repeat_samples)),
         "as_warm_solve_mean_s": _mean_or_none(as_warm_samples),
         "as_warm_solve_median_s": _median_or_none(as_warm_samples),
         "as_warm_solve_min_s": _min_or_none(as_warm_samples),
+        "as_warm_materialize_mean_s": _mean_or_none(as_warm_materialize_samples),
+        "as_warm_materialize_median_s": _median_or_none(as_warm_materialize_samples),
+        "as_warm_total_mean_s": _mean_or_none(as_warm_total_samples),
+        "as_warm_total_median_s": _median_or_none(as_warm_total_samples),
+        "as_warm_total_min_s": _min_or_none(as_warm_total_samples),
         "nrv_repeat_mean_s": _mean_or_none(nrv_repeat_samples),
         "nrv_repeat_median_s": _median_or_none(nrv_repeat_samples),
         "nrv_repeat_min_s": _min_or_none(nrv_repeat_samples),
+        "nrv_repeat_materialize_mean_s": _mean_or_none(nrv_repeat_materialize_samples),
+        "nrv_repeat_materialize_median_s": _median_or_none(nrv_repeat_materialize_samples),
+        "nrv_repeat_total_mean_s": _mean_or_none(nrv_repeat_total_samples),
+        "nrv_repeat_total_median_s": _median_or_none(nrv_repeat_total_samples),
+        "nrv_repeat_total_min_s": _min_or_none(nrv_repeat_total_samples),
         "speedup_nrv_over_as_first": _safe_ratio(nrv_sim.elapsed_s, as_solve.elapsed_s),
+        "speedup_nrv_over_as_total_first": _safe_ratio(
+            nrv_sim.elapsed_s + nrv_materialize.elapsed_s,
+            as_solve.elapsed_s + as_materialize.elapsed_s,
+        ),
         "speedup_nrv_over_as_warm": _safe_ratio(_median_or_none(nrv_repeat_samples), _median_or_none(as_warm_samples)),
+        "speedup_nrv_over_as_total_warm": _safe_ratio(
+            _median_or_none(nrv_repeat_total_samples),
+            _median_or_none(as_warm_total_samples),
+        ),
         "vm_rmse_mV": vm_rmse,
         "vm_max_abs_mV": vm_max_abs,
         "vm_q99_abs_mV": vm_q99_abs,
@@ -259,13 +299,13 @@ def run_case(
         "velocity_diff_m_s": None if np.isnan(velocity_as) or np.isnan(velocity_nrv) else float(velocity_as - velocity_nrv),
         "x_alignment_max_um": float(np.max(np.abs(x_alignment_error))) if x_alignment_error.size else None,
         "x_alignment_rmse_um": float(np.sqrt(np.mean(x_alignment_error**2))) if x_alignment_error.size else None,
-        "axonscope_shape": tuple(int(v) for v in np.asarray(result_as.Vm).shape),
+        "axonscope_shape": tuple(int(v) for v in as_data["Vm"].shape),
         "nrv_shape": tuple(int(v) for v in vm_nrv.shape),
     }
     row.update(
         _m_gate_metrics(
-            result_as=result_as,
-            result_nrv=result_nrv,
+            as_data=as_data,
+            nrv_data=nrv_data,
             t_as_ms=t_as,
             t_nrv_ms=t_nrv,
             x_nrv_um=x_nrv,
@@ -462,6 +502,29 @@ def _block_until_ready(result) -> None:
                 arr.block_until_ready()
 
 
+def _materialize_axonscope_result(result, *, record_gates: bool) -> dict[str, np.ndarray]:
+    data = {
+        "Vm": np.array(result.Vm, dtype=float, copy=True),
+        "t": np.array(result.t, dtype=float, copy=True).ravel(),
+    }
+    if record_gates:
+        recordings = getattr(result, "recordings", None)
+        if isinstance(recordings, dict) and "gates" in recordings and "m" in recordings["gates"]:
+            data["m"] = np.array(recordings["gates"]["m"], dtype=float, copy=True)
+    return data
+
+
+def _materialize_nrv_result(result_nrv, *, record_gates: bool) -> dict[str, np.ndarray]:
+    data = {
+        "t": np.array(result_nrv["t"], dtype=float, copy=True).ravel(),
+        "x_rec": np.array(result_nrv["x_rec"], dtype=float, copy=True),
+        "V_mem": np.array(result_nrv["V_mem"], dtype=float, copy=True),
+    }
+    if record_gates and "m" in result_nrv:
+        data["m"] = np.array(result_nrv["m"], dtype=float, copy=True)
+    return data
+
+
 def _enable_nrv_recordings(axon_nrv, *, record_gates: bool) -> None:
     axon_nrv.record_V_mem = True
     if not record_gates:
@@ -472,7 +535,7 @@ def _enable_nrv_recordings(axon_nrv, *, record_gates: bool) -> None:
         axon_nrv.record_particules = True
 
 
-def _nrv_vm_matrix(results_nrv) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _nrv_vm_matrix(results_nrv: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     t_nrv = np.asarray(results_nrv["t"], dtype=float).ravel()
     x_nrv = np.asarray(results_nrv["x_rec"], dtype=float)
     vm_nrv = _normalize_nrv_matrix(results_nrv["V_mem"], t_nrv, x_nrv)
@@ -481,8 +544,8 @@ def _nrv_vm_matrix(results_nrv) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def _m_gate_metrics(
     *,
-    result_as,
-    result_nrv,
+    as_data: dict[str, np.ndarray],
+    nrv_data: dict[str, np.ndarray],
     t_as_ms: np.ndarray,
     t_nrv_ms: np.ndarray,
     x_nrv_um: np.ndarray,
@@ -494,14 +557,11 @@ def _m_gate_metrics(
 ) -> dict[str, Any]:
     if not enabled:
         return {}
-    recordings = getattr(result_as, "recordings", None)
-    if not isinstance(recordings, dict) or "gates" not in recordings or "m" not in recordings["gates"]:
-        return {"m_gate_available": False}
-    if "m" not in result_nrv:
+    if "m" not in as_data or "m" not in nrv_data:
         return {"m_gate_available": False}
 
-    gate_as = np.asarray(recordings["gates"]["m"], dtype=float).T
-    gate_nrv = _normalize_nrv_matrix(np.asarray(result_nrv["m"], dtype=float), t_nrv_ms, x_nrv_um)
+    gate_as = np.asarray(as_data["m"], dtype=float).T
+    gate_nrv = _normalize_nrv_matrix(np.asarray(nrv_data["m"], dtype=float), t_nrv_ms, x_nrv_um)
     _, gate_nrv_aligned, _ = _align_rows_to_target_x(x_nrv_um, gate_nrv, x_as_um)
     gate_nrv_raw = _interp_rows(gate_nrv_aligned, t_nrv_ms, t_as_ms)
     gate_nrv_shifted = _shifted_interp_rows(gate_nrv_aligned, t_nrv_ms, t_as_ms, shift_steps=shift_steps)

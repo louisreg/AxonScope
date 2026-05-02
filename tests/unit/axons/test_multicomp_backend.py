@@ -80,6 +80,20 @@ def test_double_cable_backend_api_from_axon():
     assert np.isfinite(g).all()
 
 
+def test_double_cable_backend_static_identity_is_structural():
+    ax_a = MRG(d=10.0, nodes=5)
+    ax_b = MRG(d=10.0, nodes=5)
+    backend_a = ax_a.build_icm_backend()
+    backend_b = ax_b.build_icm_backend()
+
+    assert ax_a.ion_channel == ax_b.ion_channel
+    assert hash(ax_a.ion_channel) == hash(ax_b.ion_channel)
+    assert backend_a == backend_b
+    assert hash(backend_a) == hash(backend_b)
+    assert len(backend_a.groups) < backend_a.Nx
+    assert sum(len(group.indices) for group in backend_a.groups) == backend_a.Nx
+
+
 def test_multicomp_stimulus_api():
     ax = GenericMultiCompAxon(L=300.0, Nx=11)
     ax.insert_I_Clamp(position=150.0, t_start=0.2, duration=0.4, amplitude=1.0)

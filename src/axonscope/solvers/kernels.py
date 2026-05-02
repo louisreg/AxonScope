@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -41,6 +42,260 @@ def _intracellular_current_at(runtime: SolverRuntime, n: int, t_mid: Array) -> A
     if samples is not None:
         return samples[n]
     return runtime.stimulation.intracellular_current_density(t_mid)
+
+
+def _scalar_like(value: Array, scalar: float) -> Array:
+    return jnp.asarray(scalar, dtype=jnp.asarray(value).dtype)
+
+
+@partial(jax.jit, static_argnames=("backend", "membrane", "stateless_vm_only"))
+def _run_single_cable_vm_scan(
+    *,
+    backend,
+    membrane,
+    stateless_vm_only: bool,
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    dl: Array,
+    d: Array,
+    du: Array,
+    Cm_uF_cm2: Array,
+    I_background: Array,
+    Vm0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    intracellular_current_density_mid: Array,
+    step_indices: Array,
+    dt_ms: Array,
+) -> Array:
+    """Jitted Vm-only single-cable scan.
+
+    This is the performance path used by the public solver when no optional
+    diagnostics or observables are requested. It consumes only prepared solver
+    arrays plus static membrane/backend methods, which keeps the critical time
+    loop close to the future batch-kernel shape.
+    """
+
+    def step(carry, n: int):
+        Vm, gates, *extra = carry
+        extra = tuple(extra)
+
+        gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+        Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+        step_plan_pred = membrane.prepare_membrane_step(
+            V_mV=Vm,
+            gates_prev=gates,
+            gates_new=gates_pred,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_pred,
+            I_background=I_background,
+        )
+
+        diffusion = apply_diffusion_operator(Vm, lower, diag, upper)
+        rhs = Vm + _scalar_like(dt_ms, 0.5) * dt_ms * diffusion + (dt_ms / Cm_uF_cm2) * (
+            intracellular_current_density_mid[n]
+            - step_plan_pred.total_outward_current
+            - step_plan_pred.correction_current
+        )
+        Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+
+        if stateless_vm_only:
+            return (Vm_new, gates_pred, *extra), Vm_new
+
+        gates_new = membrane.final_gate_update(
+            gates_prev=gates,
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            dt=dt_ms,
+            gates_predictor=gates_pred,
+        )
+        Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+        step_plan = membrane.prepare_membrane_step(
+            V_mV=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_new,
+            I_background=I_background,
+        )
+        state_new = membrane.finalize_membrane_step(
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state_prev=extra,
+            step_plan=step_plan,
+            dt=dt_ms,
+        )
+        return (Vm_new, gates_new, *state_new), Vm_new
+
+    init_carry = (Vm0_mV, gates0, *state0)
+    _, Vm_trace = jax.lax.scan(step, init_carry, step_indices)
+    return Vm_trace
+
+
+@partial(
+    jax.jit,
+    static_argnames=("backend", "membrane", "has_driven_extracellular", "stateless_vm_only"),
+)
+def _run_double_cable_vm_scan(
+    *,
+    backend,
+    membrane,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    Vi0_mV: Array,
+    Ve0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
+    intracellular_current_density_mid: Array,
+    extracellular_potential_mid_mV: Array,
+    extracellular_potential_initial_previous_mV: Array,
+    step_indices: Array,
+    dt_ms: Array,
+) -> Array:
+    """Jitted Vm-only double-cable scan for the optimized extracellular path."""
+
+    def solve_vi_vperi(
+        Vi: Array,
+        Ve: Array,
+        gates_new: Array,
+        Iinj_den: Array,
+        I_outward_den: Array,
+        I_corr_den: Array,
+        Vext_mV: Array,
+        Vext_old_mV: Array,
+    ) -> tuple[Array, Array]:
+        Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
+        Gm_abs = Gm_den * area_cm2
+        GE_abs = GE_den * area_cm2
+
+        Iinj_abs = Iinj_den * area_cm2
+        I_outward_abs = I_outward_den * area_cm2
+        I_corr_abs = I_corr_den * area_cm2
+        Vm = Vi - Ve
+
+        a00 = Cm_abs / dt_ms + Gm_abs + left_i + right_i
+        a01 = -(Cm_abs / dt_ms + Gm_abs)
+        rhs0 = (
+            (Cm_abs / dt_ms) * Vm
+            + GE_abs
+            + Iinj_abs
+            - I_outward_abs
+            - I_corr_abs
+        )
+
+        a10 = a01
+        a11 = Cm_abs / dt_ms + Gm_abs + Cx_abs / dt_ms + Gx_abs + left_e + right_e
+        rhs1 = (
+            -(Cm_abs / dt_ms) * Vm
+            - GE_abs
+            + (Cx_abs / dt_ms) * Ve
+            - (Cx_abs / dt_ms) * Vext_old_mV
+            + (Cx_abs / dt_ms + Gx_abs) * Vext_mV
+            + I_outward_abs
+            + I_corr_abs
+        )
+
+        return solve_block_tridiagonal_2x2_scalar(
+            a00,
+            a01,
+            a10,
+            a11,
+            -Gax_i,
+            -Gax_e,
+            rhs0,
+            rhs1,
+        )
+
+    def extracellular_drive_at(n: int) -> tuple[Array, Array]:
+        return _precomputed_step_pair(
+            extracellular_potential_mid_mV,
+            extracellular_potential_initial_previous_mV,
+            n,
+        )
+
+    def step(carry, n: int):
+        Vi, Ve, gates, *extra = carry
+        extra = tuple(extra)
+        Vm = Vi - Ve
+
+        gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+        Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+        step_plan_pred = membrane.prepare_membrane_step(
+            V_mV=Vm,
+            gates_prev=gates,
+            gates_new=gates_pred,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_pred,
+            I_background=I_background,
+        )
+        linearization_gates = step_plan_pred.linearization_gates
+        if has_driven_extracellular:
+            linearization_gates = gates
+
+        Vext, Vext_old = extracellular_drive_at(n)
+        Vi_new, Ve_new = solve_vi_vperi(
+            Vi=Vi,
+            Ve=Ve,
+            gates_new=linearization_gates,
+            Iinj_den=intracellular_current_density_mid[n],
+            I_outward_den=step_plan_pred.explicit_outward_current,
+            I_corr_den=step_plan_pred.correction_current,
+            Vext_mV=Vext,
+            Vext_old_mV=Vext_old,
+        )
+        Vm_new = Vi_new - Ve_new
+
+        if stateless_vm_only:
+            return (Vi_new, Ve_new, gates_pred, *extra), Vm_new
+
+        gates_new = membrane.final_gate_update(
+            gates_prev=gates,
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            dt=dt_ms,
+            gates_predictor=gates_pred,
+        )
+        Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+        step_plan = membrane.prepare_membrane_step(
+            V_mV=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_new,
+            I_background=I_background,
+        )
+        state_new = membrane.finalize_membrane_step(
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state_prev=extra,
+            step_plan=step_plan,
+            dt=dt_ms,
+        )
+        return (Vi_new, Ve_new, gates_new, *state_new), Vm_new
+
+    init_carry = (Vi0_mV, Ve0_mV, gates0, *state0)
+    _, Vm_trace = jax.lax.scan(step, init_carry, step_indices)
+    return Vm_trace
 
 
 def _pack_scan_result(
@@ -122,6 +377,33 @@ class SingleCableKernel:
         Cm = jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local)
         I_bg = membrane_runtime.background_current
         state0 = membrane_runtime.state0
+        Iinj_mid = runtime.stimulation.intracellular_current_density_mid
+
+        if (
+            not record_observables
+            and not record_diagnostics
+            and Iinj_mid is not None
+        ):
+            out = _run_single_cable_vm_scan(
+                backend=backend,
+                membrane=membrane,
+                stateless_vm_only=bool(membrane.supports_stateless_vm_only_fast_path()),
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=dl,
+                d=d,
+                du=du,
+                Cm_uF_cm2=Cm,
+                I_background=I_bg,
+                Vm0_mV=membrane_runtime.Vm0_mV,
+                gates0=membrane_runtime.gates0,
+                state0=state0,
+                intracellular_current_density_mid=Iinj_mid,
+                step_indices=jnp.arange(grid.Nt, dtype=jnp.int32),
+                dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+            )
+            return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
         def step(carry, n: int):
             Vm, gates, *extra = carry
@@ -282,6 +564,42 @@ class DoubleCableKernel:
         vext_mid_all = stimulation.extracellular_potential_mid_mV
         vext_initial_previous = stimulation.extracellular_potential_initial_previous_mV
         has_driven_extracellular = stimulation.has_driven_extracellular
+        Iinj_mid = stimulation.intracellular_current_density_mid
+
+        if (
+            not record_observables
+            and not record_diagnostics
+            and Iinj_mid is not None
+            and vext_mid_all is not None
+            and vext_initial_previous is not None
+        ):
+            out = _run_double_cable_vm_scan(
+                backend=backend,
+                membrane=membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=bool(membrane.supports_stateless_vm_only_fast_path()),
+                Vi0_mV=Vi0,
+                Ve0_mV=Ve0,
+                gates0=gates0,
+                state0=state0,
+                area_cm2=area,
+                Cm_abs=Cm_abs,
+                Cx_abs=Cx_abs,
+                Gx_abs=Gx_abs,
+                Gax_e=Gax_e,
+                Gax_i=Gax_i,
+                left_i=left_i,
+                right_i=right_i,
+                left_e=left_e,
+                right_e=right_e,
+                I_background=I_bg,
+                intracellular_current_density_mid=Iinj_mid,
+                extracellular_potential_mid_mV=vext_mid_all,
+                extracellular_potential_initial_previous_mV=vext_initial_previous,
+                step_indices=jnp.arange(grid.Nt, dtype=jnp.int32),
+                dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+            )
+            return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
         def solve_vi_vperi(
             Vi: Array,
