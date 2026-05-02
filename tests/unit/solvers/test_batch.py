@@ -92,6 +92,44 @@ def test_single_cable_vstim_batch_validates_shapes():
         kernel.run(extracellular_potential_mid_mV=jnp.zeros((runtime.grid.Nt, axon.Nx + 1)))
 
 
+def test_single_cable_vstim_batch_records_probes_in_time_chunks():
+    axon = _hh_extracellular_axon()
+    tsim = 0.6
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=True,
+        precompute_extracellular=True,
+    )
+    assert runtime.stimulation.extracellular_potential_mid_mV is not None
+    vext_mid = runtime.stimulation.extracellular_potential_mid_mV
+    vext_batch = jnp.stack([vext_mid, 0.5 * vext_mid])
+    kernel = SingleCableVStimBatchKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+    )
+
+    full = kernel.run(extracellular_potential_mid_mV=vext_batch).Vm
+    probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
+    probes = kernel.run(
+        extracellular_potential_mid_mV=vext_batch,
+        record_indices=probe_indices,
+        time_chunk_steps=17,
+    ).Vm
+
+    assert probes.shape == (2, runtime.grid.Nt, 3)
+    np.testing.assert_allclose(
+        np.asarray(probes),
+        np.asarray(full[:, :, probe_indices]),
+        atol=1e-3,
+        rtol=0.0,
+    )
+
+
 def test_build_vstim_midpoint_batch_matches_runtime_and_scales_contexts():
     axon = _hh_extracellular_axon()
     tsim = 1.2
@@ -279,3 +317,70 @@ def test_double_cable_batch_requires_extracellular_runtime():
 
     with pytest.raises(ValueError, match="include_extracellular=True"):
         DoubleCableBatchKernel(runtime=runtime).run()
+
+
+def test_double_cable_footprint_chunks_match_full_batch():
+    axon = _hh_extracellular_axon()
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=True,
+        precompute_extracellular=False,
+    )
+    base_context = axon.extracellular_contexts[0]
+    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    footprint = np.stack(
+        [
+            base_context.electrode.footprint(base_x_m),
+            base_context.electrode.footprint(base_x_m),
+        ]
+    )
+    amplitude_scale = jnp.asarray([1.0, 0.5])
+    vext_mid = build_footprint_vstim_midpoint_batch(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=amplitude_scale,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    vext_previous = build_footprint_vstim_initial_previous_batch(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=amplitude_scale,
+        dt_ms=dt,
+    )
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    full = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+    ).Vm
+    chunked = kernel.run_footprint(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=amplitude_scale,
+        time_chunk_steps=11,
+    ).Vm
+    probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
+    probe_chunks = kernel.run_footprint(
+        stimulus=base_context.stimulus,
+        footprint_V_per_A=footprint,
+        amplitude_scale=amplitude_scale,
+        record_indices=probe_indices,
+        time_chunk_steps=11,
+    ).Vm
+
+    assert chunked.shape == full.shape
+    assert probe_chunks.shape == (2, runtime.grid.Nt, 3)
+    np.testing.assert_allclose(np.asarray(chunked), np.asarray(full), atol=1e-3, rtol=0.0)
+    np.testing.assert_allclose(
+        np.asarray(probe_chunks),
+        np.asarray(full[:, :, probe_indices]),
+        atol=1e-3,
+        rtol=0.0,
+    )

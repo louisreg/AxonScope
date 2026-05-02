@@ -61,7 +61,9 @@ class PopulationTiming:
     nx: int
     nt: int
     vstim_builder: str
-    vstim_build_s: float
+    recording: str
+    time_chunk_steps: int | None
+    vstim_build_s: float | None
     scalar_warm_s: float | None
     batch_warm_s: float
     speedup: float | None
@@ -93,6 +95,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Use the generic context-based Vstim builder instead of the footprint fast path.",
     )
+    parser.add_argument(
+        "--record",
+        choices=("full", "center", "probes"),
+        default="full",
+        help="Vm output to keep. Probes reduce memory for large population runs.",
+    )
+    parser.add_argument(
+        "--probe-count",
+        type=int,
+        default=8,
+        help="Number of evenly spaced probes when --record=probes.",
+    )
+    parser.add_argument(
+        "--time-chunk-steps",
+        type=int,
+        default=None,
+        help="Run the batch solver in time chunks. Best used with --batch-only and --record.",
+    )
     parser.add_argument("--plot", action="store_true", help="Show a small peak-Vm population plot.")
     parser.add_argument(
         "--jax-profile-dir",
@@ -112,6 +132,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--repeats must be >= 1.")
     if args.warmups < 0:
         raise ValueError("--warmups must be >= 0.")
+    if args.probe_count < 1:
+        raise ValueError("--probe-count must be >= 1.")
+    if args.time_chunk_steps is not None and args.time_chunk_steps < 1:
+        raise ValueError("--time-chunk-steps must be >= 1.")
 
     profile_context = (
         jax_profile_trace(args.jax_profile_dir / args.jax_profile_name)
@@ -129,6 +153,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             radial_max_um=args.radial_max_um,
             x_spread_um=args.x_spread_um,
         )
+        record_indices = choose_record_indices(
+            args.record,
+            nx=population.axon.Nx,
+            probe_count=args.probe_count,
+        )
         timings = [
             run_population_mode(
                 population,
@@ -139,6 +168,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 warmups=args.warmups,
                 batch_only=bool(args.batch_only),
                 use_generic_vstim=bool(args.generic_vstim),
+                record_indices=record_indices,
+                recording=args.record,
+                time_chunk_steps=args.time_chunk_steps,
             )
             for mode in modes
         ]
@@ -211,6 +243,9 @@ def run_population_mode(
     warmups: int,
     batch_only: bool = False,
     use_generic_vstim: bool = False,
+    record_indices: np.ndarray | None = None,
+    recording: str = "full",
+    time_chunk_steps: int | None = None,
 ) -> PopulationTiming:
     axon = population.axon
     include_extracellular = mode == "double"
@@ -224,6 +259,15 @@ def run_population_mode(
         precompute_extracellular=False,
     )
 
+    stream_footprint = (
+        not use_generic_vstim
+        and batch_only
+        and (record_indices is not None or time_chunk_steps is not None)
+    )
+    vstim_mid = None
+    vstim_previous = None
+    vstim_build_s = None
+
     with trace_annotation(f"population/{mode}/build_vstim"):
         if use_generic_vstim:
             vstim_builder = "generic-context"
@@ -236,6 +280,8 @@ def run_population_mode(
                     x_positions_m=population.x_positions_m,
                 )
             )
+        elif stream_footprint:
+            vstim_builder = "footprint-stream"
         else:
             vstim_builder = "footprint"
             vstim_build_s, vstim_mid = time_call(
@@ -246,8 +292,7 @@ def run_population_mode(
                     dt_ms=dt_ms,
                 )
             )
-        vstim_previous = None
-        if mode == "double":
+        if mode == "double" and not stream_footprint:
             if use_generic_vstim:
                 previous_s, vstim_previous = time_call(
                     lambda: build_vstim_initial_previous_batch(
@@ -269,16 +314,38 @@ def run_population_mode(
 
     scalar_fn = _single_scalar_loop if mode == "single" else _double_scalar_loop
     batch_fn = _single_batch_run if mode == "single" else _double_batch_run
+    footprint_batch_fn = (
+        _single_batch_footprint_run if mode == "single" else _double_batch_footprint_run
+    )
 
     scalar_first = None
     if not batch_only:
+        if vstim_mid is None:
+            raise ValueError("scalar comparison requires materialized Vstim.")
         _, scalar_first = _timed_annotated(
             f"population/{mode}/scalar_first",
             lambda: scalar_fn(runtime, axon, vstim_mid, vstim_previous),
         )
     _, batch_first = _timed_annotated(
         f"population/{mode}/batch_first",
-        lambda: batch_fn(runtime, axon, vstim_mid, vstim_previous),
+        lambda: (
+            footprint_batch_fn(
+                runtime,
+                axon,
+                population,
+                record_indices=record_indices,
+                time_chunk_steps=time_chunk_steps,
+            )
+            if stream_footprint
+            else batch_fn(
+                runtime,
+                axon,
+                vstim_mid,
+                vstim_previous,
+                record_indices=record_indices,
+                time_chunk_steps=time_chunk_steps,
+            )
+        ),
     )
 
     for _ in range(warmups):
@@ -289,7 +356,24 @@ def run_population_mode(
             )
         _timed_annotated(
             f"population/{mode}/batch_warmup",
-            lambda: batch_fn(runtime, axon, vstim_mid, vstim_previous),
+            lambda: (
+                footprint_batch_fn(
+                    runtime,
+                    axon,
+                    population,
+                    record_indices=record_indices,
+                    time_chunk_steps=time_chunk_steps,
+                )
+                if stream_footprint
+                else batch_fn(
+                    runtime,
+                    axon,
+                    vstim_mid,
+                    vstim_previous,
+                    record_indices=record_indices,
+                    time_chunk_steps=time_chunk_steps,
+                )
+            ),
         )
 
     scalar_samples = []
@@ -304,7 +388,24 @@ def run_population_mode(
     batch_samples = [
         _timed_annotated(
             f"population/{mode}/batch_measured",
-            lambda: batch_fn(runtime, axon, vstim_mid, vstim_previous),
+            lambda: (
+                footprint_batch_fn(
+                    runtime,
+                    axon,
+                    population,
+                    record_indices=record_indices,
+                    time_chunk_steps=time_chunk_steps,
+                )
+                if stream_footprint
+                else batch_fn(
+                    runtime,
+                    axon,
+                    vstim_mid,
+                    vstim_previous,
+                    record_indices=record_indices,
+                    time_chunk_steps=time_chunk_steps,
+                )
+            ),
         )[0]
         for _ in range(repeats)
     ]
@@ -317,17 +418,21 @@ def run_population_mode(
     speedup = None
     if scalar_first is not None and scalar_warm is not None:
         scalar_np = np.asarray(scalar_first)
+        if record_indices is not None:
+            scalar_np = scalar_np[:, :, record_indices]
         diff = batch_np - scalar_np
         max_abs_diff = float(np.max(np.abs(diff)))
         speedup = float(scalar_warm / batch_warm)
 
     return PopulationTiming(
         mode=mode,
-        fibers=int(vstim_mid.shape[0]),
+        fibers=int(population.footprint_V_per_A.shape[0]),
         nx=int(runtime.membrane.Nx),
         nt=int(runtime.grid.Nt),
         vstim_builder=vstim_builder,
-        vstim_build_s=float(vstim_build_s),
+        recording=recording,
+        time_chunk_steps=time_chunk_steps,
+        vstim_build_s=None if vstim_build_s is None else float(vstim_build_s),
         scalar_warm_s=scalar_warm,
         batch_warm_s=batch_warm,
         speedup=speedup,
@@ -355,12 +460,45 @@ def _single_scalar_loop(runtime, axon, vstim_mid, vstim_previous):
     return jnp.stack(rows)
 
 
-def _single_batch_run(runtime, axon, vstim_mid, vstim_previous):
+def _single_batch_run(
+    runtime,
+    axon,
+    vstim_mid,
+    vstim_previous,
+    *,
+    record_indices=None,
+    time_chunk_steps=None,
+):
     del vstim_previous
+    if vstim_mid is None:
+        raise ValueError("vstim_mid is required for materialized batch runs.")
     return SingleCableVStimBatchKernel(
         runtime=runtime,
         Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
-    ).run(extracellular_potential_mid_mV=vstim_mid).Vm
+    ).run(
+        extracellular_potential_mid_mV=vstim_mid,
+        record_indices=record_indices,
+        time_chunk_steps=time_chunk_steps,
+    ).Vm
+
+
+def _single_batch_footprint_run(
+    runtime,
+    axon,
+    population: PopulationInputs,
+    *,
+    record_indices=None,
+    time_chunk_steps=None,
+):
+    return SingleCableVStimBatchKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+    ).run_footprint(
+        stimulus=population.stimulus,
+        footprint_V_per_A=population.footprint_V_per_A,
+        record_indices=record_indices,
+        time_chunk_steps=time_chunk_steps,
+    ).Vm
 
 
 def _double_scalar_loop(runtime, axon, vstim_mid, vstim_previous):
@@ -383,7 +521,17 @@ def _double_scalar_loop(runtime, axon, vstim_mid, vstim_previous):
     return jnp.stack(rows)
 
 
-def _double_batch_run(runtime, axon, vstim_mid, vstim_previous):
+def _double_batch_run(
+    runtime,
+    axon,
+    vstim_mid,
+    vstim_previous,
+    *,
+    record_indices=None,
+    time_chunk_steps=None,
+):
+    if vstim_mid is None:
+        raise ValueError("vstim_mid is required for materialized batch runs.")
     if vstim_previous is None:
         raise ValueError("vstim_previous is required for double-cable batch run.")
     return DoubleCableBatchKernel(
@@ -392,7 +540,39 @@ def _double_batch_run(runtime, axon, vstim_mid, vstim_previous):
     ).run(
         extracellular_potential_mid_mV=vstim_mid,
         extracellular_potential_initial_previous_mV=vstim_previous,
+        record_indices=record_indices,
+        time_chunk_steps=time_chunk_steps,
     ).Vm
+
+
+def _double_batch_footprint_run(
+    runtime,
+    axon,
+    population: PopulationInputs,
+    *,
+    record_indices=None,
+    time_chunk_steps=None,
+):
+    return DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    ).run_footprint(
+        stimulus=population.stimulus,
+        footprint_V_per_A=population.footprint_V_per_A,
+        record_indices=record_indices,
+        time_chunk_steps=time_chunk_steps,
+    ).Vm
+
+
+def choose_record_indices(recording: str, *, nx: int, probe_count: int) -> np.ndarray | None:
+    if recording == "full":
+        return None
+    if recording == "center":
+        return np.asarray([nx // 2], dtype=np.int32)
+    if recording == "probes":
+        count = min(int(probe_count), nx)
+        return np.unique(np.linspace(0, nx - 1, count, dtype=np.int32))
+    raise ValueError(f"unknown recording mode: {recording}")
 
 
 def _timed_annotated(label: str, fn: Callable[[], object]) -> tuple[float, object]:
@@ -435,13 +615,17 @@ def print_summary(
         f"{population.longitudinal_offsets_um[-1]:.1f} um"
     )
     for timing in timings:
+        vstim = "streamed" if timing.vstim_build_s is None else f"{timing.vstim_build_s:.4f}s"
         scalar = "n/a" if timing.scalar_warm_s is None else f"{timing.scalar_warm_s:.4f}s"
         speedup = "n/a" if timing.speedup is None else f"{timing.speedup:.3f}"
         diff = "n/a" if timing.max_abs_diff_mV is None else f"{timing.max_abs_diff_mV:.4g} mV"
+        chunk = "n/a" if timing.time_chunk_steps is None else str(timing.time_chunk_steps)
         print(
             f"{timing.mode:6s} "
             f"builder={timing.vstim_builder} "
-            f"Vstim_build={timing.vstim_build_s:.4f}s "
+            f"record={timing.recording} "
+            f"chunk={chunk} "
+            f"Vstim_build={vstim} "
             f"scalar={scalar} "
             f"batch={timing.batch_warm_s:.4f}s "
             f"speedup={speedup} "

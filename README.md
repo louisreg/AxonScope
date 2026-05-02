@@ -348,6 +348,22 @@ result = DoubleCableBatchKernel(runtime, Veinit_mV=axon.Veinit).run(
 )
 ```
 
+For large populations, avoid materializing the full `Vstim[B, Nt, Nx]` and full
+`Vm[B, Nt, Nx]` tensors by streaming footprints through the solver in time
+chunks and recording only probes:
+
+```python
+probe_indices = [0, axon.Nx // 2, axon.Nx - 1]
+
+result = DoubleCableBatchKernel(runtime, Veinit_mV=axon.Veinit).run_footprint(
+    stimulus=stimulus,
+    footprint_V_per_A=footprint_V_per_A,
+    record_indices=probe_indices,
+    time_chunk_steps=50,
+)
+# result.Vm has shape (B, Nt, len(probe_indices))
+```
+
 A complete population script is available for quick experiments:
 
 ```bash
@@ -362,6 +378,9 @@ It builds a small population with per-fiber longitudinal offsets and radial
 distances, compares scalar-loop and batched execution, and prints warm speedups.
 The demo uses a point-source footprint only as a compact debug source; pass
 `--generic-vstim` to compare the slower context-based builder.
+For low-memory runs, combine `--batch-only`, `--record`, and
+`--time-chunk-steps`; in that mode the demo streams `Vstim` from the footprint
+rather than building the whole `B x Nt x Nx` array first.
 Capture a JAX profiler trace around the same workflow with:
 
 ```bash
@@ -371,6 +390,8 @@ python examples/basic/population_batch_demo.py \
   --nx 201 \
   --tsim 2.0 \
   --batch-only \
+  --record center \
+  --time-chunk-steps 50 \
   --repeats 1 \
   --warmups 0 \
   --jax-profile-dir benchmark/results/jax_profiles \
