@@ -26,6 +26,16 @@ def test_nrv_performance_suites_include_smoke_and_forward_args():
     assert argv[argv.index("--prefix") + 1] == "prefix"
 
 
+def test_nrv_mrg_extracellular_perf_suite_has_warm_repeats():
+    suite = NRV_PERFORMANCE_SUITES["mrg_extracellular_perf"]
+
+    assert suite.runner == "nrv_axonscope_grid"
+    assert suite.args[suite.args.index("--model") + 1] == "mrg_extracellular"
+    assert suite.args[suite.args.index("--repeats") + 1] == "4"
+    assert suite.args[suite.args.index("--warmups") + 1] == "1"
+    assert "--record-gates" not in suite.args
+
+
 def test_runtime_suites_forward_to_benchmark_solver():
     suite = RUNTIME_SUITES["smoke"]
 

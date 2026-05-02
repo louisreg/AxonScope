@@ -185,8 +185,13 @@ guard correctness. Named suites are declared in
 python benchmark/nrv_performance/run.py --list
 python benchmark/nrv_performance/run.py --suite smoke --dry-run
 python benchmark/nrv_performance/run.py --suite smoke
+python benchmark/nrv_performance/run.py --suite mrg_extracellular_perf
 python benchmark/nrv_performance/run.py --suite mrg_extracellular_gates
 ```
+
+Use `mrg_extracellular_perf` for warm runtime comparisons. Use
+`mrg_extracellular_gates` when you also want MRG `m`-gate diagnostics; that
+suite records more data and is less representative as a pure timing baseline.
 
 The NRV performance runner forwards additional options to
 `benchmark/nrv_performance/nrv_axonscope_grid.py` after `--`, so focused runtime
@@ -285,7 +290,7 @@ python benchmark/nrv_performance/nrv_axonscope_grid.py \
   --profile smoke
 python benchmark/nrv_performance/nrv_axonscope_grid.py \
   --model mrg_extracellular --dt 0.005 0.01 --nodes 5 9 --tsim 4 \
-  --record-gates
+  --repeats 4 --warmups 1
 ```
 
 Compare two runtime runs after a solver refactor:

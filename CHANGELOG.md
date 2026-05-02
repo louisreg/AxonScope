@@ -54,6 +54,8 @@ The format is inspired by Keep a Changelog.
 - Added named benchmark suite manifests and runners under `benchmark/runtime/`
   and `benchmark/nrv_performance/`, with NRV performance suites for smoke, full,
   MRG, and MRG extracellular gate diagnostics.
+- Added a dedicated `mrg_extracellular_perf` NRV performance suite for warm
+  runtime comparisons without gate diagnostics.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
