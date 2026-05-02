@@ -4,11 +4,17 @@ import argparse
 import csv
 import json
 import statistics
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
+
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root / "src"))
+    sys.path.insert(0, str(repo_root))
 
 import numpy as np
 

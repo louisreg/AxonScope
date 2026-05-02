@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Sequence
+
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root / "src"))
+    sys.path.insert(0, str(repo_root))
 
 from benchmark.runtime.suites import RUNTIME_SUITES, RuntimeSuite
 

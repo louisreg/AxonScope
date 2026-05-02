@@ -3,9 +3,15 @@ from __future__ import annotations
 import argparse
 import html
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root / "src"))
+    sys.path.insert(0, str(repo_root))
 
 os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "axonscope-mpl-cache"))
 os.environ.setdefault("XDG_CACHE_HOME", os.path.join(tempfile.gettempdir(), "axonscope-cache"))
