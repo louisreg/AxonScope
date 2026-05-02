@@ -233,6 +233,7 @@ For runtime-only solver work, use the runtime suites:
 python benchmark/runtime/run.py --list
 python benchmark/runtime/run.py --suite smoke
 python benchmark/runtime/run.py --suite full --prefix solver_runtime_current
+python benchmark/runtime/run.py --suite experimental_solvers --prefix cn_experimental_compare
 python benchmark/runtime/run.py --suite vstim_forcing --prefix hh_vstim_forcing_compare
 python benchmark/runtime/run.py \
   --suite profiled \

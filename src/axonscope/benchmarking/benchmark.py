@@ -127,11 +127,19 @@ class SolverBenchmarkResult:
 
 def default_solver_factories() -> dict[str, SolverFactory]:
     from axonscope.solvers import CrankNicholson
-    from axonscope.solvers.experimental import CrankNicholsonVStimForcing
+    from axonscope.solvers.experimental import (
+        CrankNicholsonImplicit,
+        CrankNicholsonSemiImplicit,
+        CrankNicholsonVStimForcing,
+        CrankNicholson_unoptimized,
+    )
 
     return {
         "crank_nicholson": CrankNicholson,
         "crank_nicholson_vstim_forcing": CrankNicholsonVStimForcing,
+        "crank_nicholson_dense_reference": CrankNicholson_unoptimized,
+        "crank_nicholson_semi_implicit": CrankNicholsonSemiImplicit,
+        "crank_nicholson_implicit": CrankNicholsonImplicit,
     }
 
 
