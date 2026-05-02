@@ -13,6 +13,7 @@ from axonscope.benchmarking import (
     run_solver_benchmark_case,
     write_benchmark_results,
 )
+from benchmark.solver_runtime.visualize_results import flatten_benchmark_files, write_benchmark_report
 
 
 class DummySolver:
@@ -101,6 +102,31 @@ def test_write_benchmark_results(tmp_path: Path):
     assert results[0]["case_name"] == "dummy"
     assert "python" in metadata
     assert "case_name" in csv_path.read_text(encoding="utf-8")
+
+
+def test_visualize_benchmark_results_report(tmp_path: Path):
+    case = SolverBenchmarkCase(
+        name="dummy",
+        build_axon=lambda: SimpleNamespace(Nx=2),
+        tsim_ms=0.2,
+        dt_ms=0.1,
+        metadata={"model": "dummy", "stimulation": "unit"},
+    )
+    result = run_solver_benchmark_case(case, DummySolver, repeats=1, warmups=0)
+    json_path, _ = write_benchmark_results([result], tmp_path, prefix="dummy_bench")
+
+    df = flatten_benchmark_files([json_path])
+    assert list(df["case_name"]) == ["dummy"]
+    assert list(df["solver_name"]) == ["DummySolver"]
+    assert list(df["model"]) == ["dummy"]
+
+    report_dir = tmp_path / "report"
+    report = write_benchmark_report([json_path], report_dir, prefix="dummy_report")
+
+    assert report["html"].exists()
+    assert report["summary_csv"].exists()
+    assert (report_dir / "dummy_report_warm_solve_s.png").exists()
+    assert "DummySolver" in report["html"].read_text(encoding="utf-8")
 
 
 def test_load_benchmark_results_supports_legacy_list_schema(tmp_path: Path):

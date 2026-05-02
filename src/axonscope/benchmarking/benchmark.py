@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable, Mapping
 import numpy as np
 
 from axonscope.simresult import SimResult
+from axonscope.benchmarking.profiling import trace_annotation
 
 
 AxonFactory = Callable[[], Any]
@@ -227,48 +228,75 @@ def run_solver_benchmark_case(
         raise ValueError(f"warmups must be >= 0, got {warmups}.")
 
     kwargs = dict(solve_kwargs or {})
-    construction_times = [_time_call(case.build_axon)[0] for _ in range(repeats)]
+    construction_times = [
+        _time_call_with_annotation(
+            case.build_axon,
+            f"benchmark/{case.name}/build_axon",
+        )[0]
+        for _ in range(repeats)
+    ]
 
-    axon = case.build_axon()
+    _, axon = _time_call_with_annotation(
+        case.build_axon,
+        f"benchmark/{case.name}/first_build_axon",
+    )
     solver = solver_factory()
     solver_name = solver.__class__.__name__
     rss_before = _rss_mb()
-    first_solve_s, first_result = _time_solve(
-        solver,
-        axon,
-        tsim_ms=case.tsim_ms,
-        dt_ms=case.dt_ms,
-        solve_kwargs=kwargs,
-    )
-    rss_after = _rss_mb()
-    materialize_first_s, output = _time_call(lambda: summarize_sim_result(first_result))
-
-    for _ in range(warmups):
-        warmup_axon = case.build_axon()
-        warmup_solver = solver_factory()
-        _, warmup_result = _time_solve(
-            warmup_solver,
-            warmup_axon,
+    with trace_annotation(f"benchmark/{case.name}/{solver_name}/first_solve"):
+        first_solve_s, first_result = _time_solve(
+            solver,
+            axon,
             tsim_ms=case.tsim_ms,
             dt_ms=case.dt_ms,
             solve_kwargs=kwargs,
         )
-        _time_call(lambda result=warmup_result: summarize_sim_result(result))
+    rss_after = _rss_mb()
+    materialize_first_s, output = _time_call_with_annotation(
+        lambda: summarize_sim_result(first_result),
+        f"benchmark/{case.name}/{solver_name}/first_materialize",
+    )
+
+    for _ in range(warmups):
+        _, warmup_axon = _time_call_with_annotation(
+            case.build_axon,
+            f"benchmark/{case.name}/warmup_build_axon",
+        )
+        warmup_solver = solver_factory()
+        with trace_annotation(f"benchmark/{case.name}/{solver_name}/warmup_solve"):
+            _, warmup_result = _time_solve(
+                warmup_solver,
+                warmup_axon,
+                tsim_ms=case.tsim_ms,
+                dt_ms=case.dt_ms,
+                solve_kwargs=kwargs,
+            )
+        _time_call_with_annotation(
+            lambda result=warmup_result: summarize_sim_result(result),
+            f"benchmark/{case.name}/{solver_name}/warmup_materialize",
+        )
 
     warm_solve_times = []
     warm_materialize_times = []
     warm_total_times = []
     for _ in range(repeats):
-        measured_axon = case.build_axon()
-        measured_solver = solver_factory()
-        elapsed_s, repeat_result = _time_solve(
-            measured_solver,
-            measured_axon,
-            tsim_ms=case.tsim_ms,
-            dt_ms=case.dt_ms,
-            solve_kwargs=kwargs,
+        _, measured_axon = _time_call_with_annotation(
+            case.build_axon,
+            f"benchmark/{case.name}/measured_build_axon",
         )
-        materialize_s, _ = _time_call(lambda result=repeat_result: summarize_sim_result(result))
+        measured_solver = solver_factory()
+        with trace_annotation(f"benchmark/{case.name}/{solver_name}/measured_solve"):
+            elapsed_s, repeat_result = _time_solve(
+                measured_solver,
+                measured_axon,
+                tsim_ms=case.tsim_ms,
+                dt_ms=case.dt_ms,
+                solve_kwargs=kwargs,
+            )
+        materialize_s, _ = _time_call_with_annotation(
+            lambda result=repeat_result: summarize_sim_result(result),
+            f"benchmark/{case.name}/{solver_name}/measured_materialize",
+        )
         warm_solve_times.append(elapsed_s)
         warm_materialize_times.append(materialize_s)
         warm_total_times.append(elapsed_s + materialize_s)
@@ -494,6 +522,11 @@ def _time_call(func: Callable[[], Any]) -> tuple[float, Any]:
     value = func()
     elapsed = time.perf_counter() - start
     return float(elapsed), value
+
+
+def _time_call_with_annotation(func: Callable[[], Any], annotation: str) -> tuple[float, Any]:
+    with trace_annotation(annotation):
+        return _time_call(func)
 
 
 def _time_solve(

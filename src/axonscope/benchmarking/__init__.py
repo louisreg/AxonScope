@@ -15,6 +15,7 @@ from axonscope.benchmarking.benchmark import (
     summarize_sim_result,
     write_benchmark_results,
 )
+from axonscope.benchmarking.profiling import jax_profile_trace, trace_annotation
 
 __all__ = [
     "BenchmarkComparisonMetric",
@@ -28,8 +29,10 @@ __all__ = [
     "default_solver_benchmark_cases",
     "default_solver_factories",
     "load_benchmark_results",
+    "jax_profile_trace",
     "run_solver_benchmark_case",
     "run_solver_benchmark_suite",
     "summarize_sim_result",
+    "trace_annotation",
     "write_benchmark_results",
 ]
