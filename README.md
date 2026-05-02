@@ -323,6 +323,35 @@ result = DoubleCableBatchKernel(runtime, Veinit_mV=axon.Veinit).run(
 )
 ```
 
+A complete population script is available for quick experiments:
+
+```bash
+python examples/basic/population_batch_demo.py \
+  --mode both \
+  --fibers 16 \
+  --nx 101 \
+  --tsim 1.2
+```
+
+It builds a small population with per-fiber longitudinal offsets and radial
+distances, compares scalar-loop and batched execution, and prints warm speedups.
+Capture a JAX profiler trace around the same workflow with:
+
+```bash
+python examples/basic/population_batch_demo.py \
+  --mode double \
+  --fibers 64 \
+  --nx 201 \
+  --tsim 2.0 \
+  --jax-profile-dir benchmark/results/jax_profiles \
+  --jax-profile-name population_double_b64_nx201
+
+python benchmark/runtime/summarize_trace.py \
+  benchmark/results/jax_profiles/population_double_b64_nx201 \
+  --timeline \
+  --csv-out benchmark/reports/runtime/population_double_b64_nx201_trace.csv
+```
+
 Then build a static HTML report and summarize the JAX trace:
 
 ```bash

@@ -18,5 +18,7 @@ def test_basic_point_source_example_runs(monkeypatch):
 def test_solver_examples_are_importable():
     intracellular = importlib.import_module("examples.basic.intracellular_solver_demo")
     extracellular = importlib.import_module("examples.basic.mrg_extracellular_demo")
+    population = importlib.import_module("examples.basic.population_batch_demo")
     assert callable(intracellular.main)
     assert callable(extracellular.main)
+    assert callable(population.main)
