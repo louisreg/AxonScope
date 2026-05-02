@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import jax
 import numpy as np
 import jax.numpy as jnp
 
@@ -87,3 +88,29 @@ def test_scalar_block_tridiagonal_solver_matches_generic_2x2_solver():
     scalar = jnp.stack([scalar0, scalar1], axis=1)
 
     np.testing.assert_allclose(np.asarray(scalar), np.asarray(generic), rtol=1e-6, atol=1e-6)
+
+
+def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():
+    solve = jax.jit(solve_block_tridiagonal_2x2_scalar)
+
+    scalar0, scalar1 = solve(
+        jnp.asarray([4.0], dtype=jnp.float32),
+        jnp.asarray([-1.0], dtype=jnp.float32),
+        jnp.asarray([-1.0], dtype=jnp.float32),
+        jnp.asarray([5.0], dtype=jnp.float32),
+        jnp.asarray([], dtype=jnp.float32),
+        jnp.asarray([], dtype=jnp.float32),
+        jnp.asarray([2.0], dtype=jnp.float32),
+        jnp.asarray([3.0], dtype=jnp.float32),
+    )
+
+    expected = np.linalg.solve(
+        np.asarray([[4.0, -1.0], [-1.0, 5.0]], dtype=np.float32),
+        np.asarray([2.0, 3.0], dtype=np.float32),
+    )
+    np.testing.assert_allclose(
+        np.asarray([scalar0[0], scalar1[0]]),
+        expected,
+        rtol=1e-6,
+        atol=1e-6,
+    )

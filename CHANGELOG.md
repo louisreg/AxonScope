@@ -78,6 +78,8 @@ The format is inspired by Keep a Changelog.
   samples before entering the default VM-only JIT kernel.
 - Specialized the double-cable 2x2 block-tridiagonal solve to operate on scalar
   coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
+- Reworked the scalar double-cable block-tridiagonal forward/backward sweep to
+  use `jax.lax.scan`, reducing indexed array updates inside the JIT time loop.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous

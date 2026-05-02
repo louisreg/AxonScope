@@ -218,7 +218,6 @@ def solve_block_tridiagonal_2x2_scalar(
     This matches the double-cable Vi/Ve system without materializing
     ``(Nx, 2, 2)`` block arrays inside the time loop.
     """
-    N = a00.shape[0]
     zero = jnp.zeros((), dtype=a00.dtype)
     upper0 = jnp.concatenate([off0, zero[None]])
     upper1 = jnp.concatenate([off1, zero[None]])
@@ -228,72 +227,94 @@ def solve_block_tridiagonal_2x2_scalar(
         return m11 / det, -m01 / det, -m10 / det, m00 / det
 
     inv00, inv01, inv10, inv11 = inv_components(a00[0], a01[0], a10[0], a11[0])
-    c00 = jnp.zeros_like(a00)
-    c01 = jnp.zeros_like(a00)
-    c10 = jnp.zeros_like(a00)
-    c11 = jnp.zeros_like(a00)
-    d0 = jnp.zeros_like(rhs0)
-    d1 = jnp.zeros_like(rhs1)
+    c00_0 = inv00 * upper0[0]
+    c01_0 = inv01 * upper1[0]
+    c10_0 = inv10 * upper0[0]
+    c11_0 = inv11 * upper1[0]
+    d0_0 = inv00 * rhs0[0] + inv01 * rhs1[0]
+    d1_0 = inv10 * rhs0[0] + inv11 * rhs1[0]
 
-    c00 = c00.at[0].set(inv00 * upper0[0])
-    c01 = c01.at[0].set(inv01 * upper1[0])
-    c10 = c10.at[0].set(inv10 * upper0[0])
-    c11 = c11.at[0].set(inv11 * upper1[0])
-    d0 = d0.at[0].set(inv00 * rhs0[0] + inv01 * rhs1[0])
-    d1 = d1.at[0].set(inv10 * rhs0[0] + inv11 * rhs1[0])
+    def fwd(carry, xs):
+        c00_prev, c01_prev, c10_prev, c11_prev, d0_prev, d1_prev = carry
+        (
+            a00_i,
+            a01_i,
+            a10_i,
+            a11_i,
+            lower0,
+            lower1,
+            upper0_i,
+            upper1_i,
+            rhs0_i,
+            rhs1_i,
+        ) = xs
 
-    def fwd(i, carry):
-        c00_local, c01_local, c10_local, c11_local, d0_local, d1_local = carry
-        lower0 = off0[i - 1]
-        lower1 = off1[i - 1]
-
-        m00 = a00[i] - lower0 * c00_local[i - 1]
-        m01 = a01[i] - lower0 * c01_local[i - 1]
-        m10 = a10[i] - lower1 * c10_local[i - 1]
-        m11 = a11[i] - lower1 * c11_local[i - 1]
+        m00 = a00_i - lower0 * c00_prev
+        m01 = a01_i - lower0 * c01_prev
+        m10 = a10_i - lower1 * c10_prev
+        m11 = a11_i - lower1 * c11_prev
         inv00_i, inv01_i, inv10_i, inv11_i = inv_components(m00, m01, m10, m11)
 
-        r0 = rhs0[i] - lower0 * d0_local[i - 1]
-        r1 = rhs1[i] - lower1 * d1_local[i - 1]
-        c00_i = inv00_i * upper0[i]
-        c01_i = inv01_i * upper1[i]
-        c10_i = inv10_i * upper0[i]
-        c11_i = inv11_i * upper1[i]
+        r0 = rhs0_i - lower0 * d0_prev
+        r1 = rhs1_i - lower1 * d1_prev
+        c00_i = inv00_i * upper0_i
+        c01_i = inv01_i * upper1_i
+        c10_i = inv10_i * upper0_i
+        c11_i = inv11_i * upper1_i
         d0_i = inv00_i * r0 + inv01_i * r1
         d1_i = inv10_i * r0 + inv11_i * r1
+        out = (c00_i, c01_i, c10_i, c11_i, d0_i, d1_i)
+        return out, out
 
-        c00_local = c00_local.at[i].set(c00_i)
-        c01_local = c01_local.at[i].set(c01_i)
-        c10_local = c10_local.at[i].set(c10_i)
-        c11_local = c11_local.at[i].set(c11_i)
-        d0_local = d0_local.at[i].set(d0_i)
-        d1_local = d1_local.at[i].set(d1_i)
-        return c00_local, c01_local, c10_local, c11_local, d0_local, d1_local
-
-    c00, c01, c10, c11, d0, d1 = jax.lax.fori_loop(
-        1,
-        N,
+    _, forward_tail = jax.lax.scan(
         fwd,
-        (c00, c01, c10, c11, d0, d1),
+        (c00_0, c01_0, c10_0, c11_0, d0_0, d1_0),
+        (
+            a00[1:],
+            a01[1:],
+            a10[1:],
+            a11[1:],
+            off0,
+            off1,
+            upper0[1:],
+            upper1[1:],
+            rhs0[1:],
+            rhs1[1:],
+        ),
     )
+    c00_tail, c01_tail, c10_tail, c11_tail, d0_tail, d1_tail = forward_tail
+    c00 = jnp.concatenate([c00_0[None], c00_tail])
+    c01 = jnp.concatenate([c01_0[None], c01_tail])
+    c10 = jnp.concatenate([c10_0[None], c10_tail])
+    c11 = jnp.concatenate([c11_0[None], c11_tail])
+    d0 = jnp.concatenate([d0_0[None], d0_tail])
+    d1 = jnp.concatenate([d1_0[None], d1_tail])
 
-    x0 = jnp.zeros_like(rhs0)
-    x1 = jnp.zeros_like(rhs1)
-    x0 = x0.at[N - 1].set(d0[N - 1])
-    x1 = x1.at[N - 1].set(d1[N - 1])
+    def bwd(carry, xs):
+        next0, next1 = carry
+        c00_i, c01_i, c10_i, c11_i, d0_i, d1_i = xs
+        x0_i = d0_i - c00_i * next0 - c01_i * next1
+        x1_i = d1_i - c10_i * next0 - c11_i * next1
+        return (x0_i, x1_i), (x0_i, x1_i)
 
-    def bwd(k, carry):
-        x0_local, x1_local = carry
-        i = N - 2 - k
-        next0 = x0_local[i + 1]
-        next1 = x1_local[i + 1]
-        x0_i = d0[i] - c00[i] * next0 - c01[i] * next1
-        x1_i = d1[i] - c10[i] * next0 - c11[i] * next1
-        x0_local = x0_local.at[i].set(x0_i)
-        x1_local = x1_local.at[i].set(x1_i)
-        return x0_local, x1_local
-
-    return jax.lax.fori_loop(0, N - 1, bwd, (x0, x1))
+    x0_last = d0[-1]
+    x1_last = d1[-1]
+    _, reverse_tail = jax.lax.scan(
+        bwd,
+        (x0_last, x1_last),
+        (
+            c00[:-1][::-1],
+            c01[:-1][::-1],
+            c10[:-1][::-1],
+            c11[:-1][::-1],
+            d0[:-1][::-1],
+            d1[:-1][::-1],
+        ),
+    )
+    x0_rev, x1_rev = reverse_tail
+    x0 = jnp.concatenate([x0_rev[::-1], x0_last[None]])
+    x1 = jnp.concatenate([x1_rev[::-1], x1_last[None]])
+    return x0, x1
 
 
 def apply_diffusion_operator(V: Array, lower: Array, diag: Array, upper: Array) -> Array:
