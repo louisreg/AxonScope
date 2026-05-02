@@ -410,8 +410,6 @@ def collect_benchmark_metadata() -> dict[str, Any]:
 
 def load_benchmark_results(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if isinstance(payload, list):
-        return payload, {}
     if isinstance(payload, dict) and isinstance(payload.get("results"), list):
         metadata = payload.get("metadata", {})
         if not isinstance(metadata, dict):

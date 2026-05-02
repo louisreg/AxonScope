@@ -13,7 +13,6 @@ if __package__ in (None, ""):
 from benchmark.nrv_performance.suites import (
     NRV_PERFORMANCE_SUITES,
     NrvPerformanceSuite,
-    resolve_suite,
     suite_choices,
 )
 
@@ -44,7 +43,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         print_suites()
         return
 
-    suite = resolve_suite(args.suite)
+    suite = NRV_PERFORMANCE_SUITES[args.suite]
     runner_argv = suite_argv(
         suite,
         out_dir=args.out_dir,
@@ -66,11 +65,6 @@ def print_suites() -> None:
     print("NRV performance suites:")
     for name, suite in NRV_PERFORMANCE_SUITES.items():
         print(f"  {name:28s} {suite.description}")
-    print("Aliases:")
-    print("  nrv_smoke -> smoke")
-    print("  nrv_full -> full")
-    print("  nrv_mrg_smoke -> mrg_smoke")
-    print("  nrv_mrg_extracellular_gates -> mrg_extracellular_gates")
 
 
 def suite_argv(

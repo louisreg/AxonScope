@@ -78,9 +78,6 @@ center = int(np.argmin(np.abs(np.asarray(axon.x) - 250.0)))
 print(res.t.shape, res.Vm[:, center].shape)
 ```
 
-`insert_I_Clamp` still accepts the legacy `t_start`, `duration`, `amplitude`
-arguments for compatibility, but new code should pass an explicit `Stimulus`.
-
 ## Quick Start: Extracellular MRG Stimulation
 
 ```python
@@ -143,9 +140,6 @@ python examples/basic/mrg_extracellular_demo.py
 python examples/basic/environment_info_demo.py
 ```
 
-The `playground/` directory contains exploratory diagnostics and comparison
-scripts. It is useful during development but is not treated as public API.
-
 ## Tests
 
 Fast unit suite:
@@ -178,7 +172,6 @@ benchmark/
   runtime/       official solver performance benchmarks
   nrv_performance/
                  AxonScope-vs-NRV compute performance comparisons
-  experiments/   backend prototypes and exploratory scripts
   results/       generated JSON/CSV/trace outputs, ignored by git
   reports/       generated HTML/PNG/CSV reports, ignored by git
 ```
@@ -314,12 +307,6 @@ tracking signal rather than a standalone profiler.
 
 The first default workloads cover HH intracellular, Rattay-Aberham
 intracellular, Schild97 intracellular, and MRG extracellular stimulation.
-
-Reference and experimental backend comparisons live under
-`benchmark/experiments/crank_nicholson_backends/`; those scripts are not stable
-public workflows. Legacy `benchmark/validation/` and `benchmark/solver_*` entry
-points remain as compatibility wrappers while downstream scripts migrate to the
-new layout.
 
 Generated logs and figures are ignored by git.
 

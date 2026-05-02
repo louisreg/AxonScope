@@ -41,10 +41,6 @@ target
 # AxonScope generated artifacts
 .axonscope_cache/
 .claude/
-benchmark/CrankNicholson_runtime/logs/
-benchmark/CrankNicholson_runtime/figures/
-benchmark/experiments/crank_nicholson_backends/logs/
-benchmark/experiments/crank_nicholson_backends/figures/
 benchmark/reports/
 benchmark/results/
 figures/nrv_tests/

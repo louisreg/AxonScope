@@ -129,16 +129,6 @@ def test_visualize_benchmark_results_report(tmp_path: Path):
     assert "DummySolver" in report["html"].read_text(encoding="utf-8")
 
 
-def test_load_benchmark_results_supports_legacy_list_schema(tmp_path: Path):
-    path = tmp_path / "legacy.json"
-    path.write_text('[{"case_name": "old", "solver_name": "DummySolver"}]\n', encoding="utf-8")
-
-    results, metadata = load_benchmark_results(path)
-
-    assert results == [{"case_name": "old", "solver_name": "DummySolver"}]
-    assert metadata == {}
-
-
 def test_compare_benchmark_results_flags_warm_solve_regression():
     baseline = [
         {

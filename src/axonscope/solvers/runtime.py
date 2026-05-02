@@ -62,9 +62,9 @@ class CableRuntime:
 class StimulationRuntime:
     """Compiled solver-side stimulation functions.
 
-    The current fields are callables for compatibility with the single-axon
-    solvers. The next batch-oriented step is to replace or supplement them with
-    precomputed tensors such as Vstim[Nt, Nx] or Vstim[B, Nt, Nx].
+    The current fields are callables consumed by the single-axon solvers. The
+    next batch-oriented step is to replace or supplement them with precomputed
+    tensors such as Vstim[Nt, Nx] or Vstim[B, Nt, Nx].
     """
 
     intracellular_current_density: Callable[[float], Array]

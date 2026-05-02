@@ -66,18 +66,5 @@ NRV_PERFORMANCE_SUITES: dict[str, NrvPerformanceSuite] = {
     ),
 }
 
-SUITE_ALIASES = {
-    "nrv_smoke": "smoke",
-    "nrv_full": "full",
-    "nrv_mrg_smoke": "mrg_smoke",
-    "nrv_mrg_extracellular_gates": "mrg_extracellular_gates",
-}
-
-
 def suite_choices() -> tuple[str, ...]:
-    return tuple(sorted((*NRV_PERFORMANCE_SUITES, *SUITE_ALIASES)))
-
-
-def resolve_suite(name: str) -> NrvPerformanceSuite:
-    canonical_name = SUITE_ALIASES.get(name, name)
-    return NRV_PERFORMANCE_SUITES[canonical_name]
+    return tuple(NRV_PERFORMANCE_SUITES)

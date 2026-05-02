@@ -84,10 +84,9 @@ The format is inspired by Keep a Changelog.
 - Updated README and examples to the current package API.
 - Updated solver benchmark comparison output guards to tolerate tiny numerical
   output drift before reporting `changed_output`.
-- Reorganized benchmark scripts into `benchmark/runtime/`,
-  `benchmark/nrv_performance/`, and `benchmark/experiments/`, keeping legacy
-  `benchmark/validation/` and `benchmark/solver_*` entry points as compatibility
-  wrappers.
+- Reorganized benchmark scripts into `benchmark/runtime/` and
+  `benchmark/nrv_performance/`, removing legacy wrappers and stale exploratory
+  entry points while the project is still pre-use.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 
@@ -100,8 +99,8 @@ The format is inspired by Keep a Changelog.
   against NRV.
 - Fixed examples that still called removed stimulus/context convenience methods.
 - Fixed stale internal imports that referenced the old flat module layout.
-- Fixed legacy Crank-Nicholson runtime benchmark imports to use public solver
-  common helpers instead of removed private aliases.
+- Removed stale playground diagnostics and Crank-Nicholson backend experiments
+  that referenced older runtime internals.
 
 ### Validation
 
@@ -116,9 +115,6 @@ The format is inspired by Keep a Changelog.
 - The generic heterogeneous MRG membrane layout is cleaner than the former masked
   model but currently slower. Profiling and backend specialization are the next
   planned cleanup step.
-- The `playground/` directory and `benchmark/experiments/` scripts contain
-  active experiments and are not stable public API.
-
 ## [0.2.0] - 2025-11-25
 
 ### Added

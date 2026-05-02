@@ -50,7 +50,7 @@ class AxonBase:
     L_cm : float
         Total axon length [cm].
     
-    # Uniform-mesh derived properties (kept for backward compatibility/simplicity)
+    # Uniform-mesh derived convenience properties
     ra : float
         Axial resistance per unit length [Ω/cm].
     cm : float
@@ -181,10 +181,10 @@ class AxonBase:
         position : float
             Injection position along the axon [µm]
         stimulus : Stimulus, optional
-            Temporal waveform in nA. Preferred API.
+            Temporal waveform in nA.
         t_start, duration, amplitude :
-            Backward-compatible pulse constructor arguments, used only when
-            `stimulus` is not provided.
+            Convenience pulse constructor arguments, used only when `stimulus`
+            is not provided.
         """
         if stimulus is None:
             if t_start is None or duration is None or amplitude is None:
@@ -194,7 +194,7 @@ class AxonBase:
             stimulus = Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude)
         elif t_start is not None or duration is not None or amplitude is not None:
             raise ValueError(
-                "Do not mix the new `stimulus=` API with legacy pulse constructor arguments."
+                "Do not mix `stimulus=` with pulse constructor arguments."
             )
 
         self.intracellular_clamps.append(
@@ -202,11 +202,7 @@ class AxonBase:
         )
 
     def Iinj_uAcm2(self, t: float) -> jnp.ndarray:
-        """
-        Compatibility wrapper returning the injected current density at time t.
-
-        New code should prefer compiling stimulation through the solver runtime.
-        """
+        """Evaluate injected current density at time t."""
         from axonscope.solvers.stimulus_runtime import build_intracellular_current_density_fn
 
         return build_intracellular_current_density_fn(self)(t)
