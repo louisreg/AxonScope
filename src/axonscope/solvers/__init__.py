@@ -1,5 +1,11 @@
 from axonscope.solvers.base import Solver
-from axonscope.solvers.batch import BatchKernelResult, SingleCableVStimBatchKernel
+from axonscope.solvers.batch import (
+    BatchKernelResult,
+    SingleCableVStimBatchKernel,
+    build_vstim_batch,
+    build_vstim_midpoint_batch,
+    scale_extracellular_contexts,
+)
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
@@ -23,6 +29,9 @@ __all__ = [
     "CrankNicholson",
     "BatchKernelResult",
     "SingleCableVStimBatchKernel",
+    "build_vstim_batch",
+    "build_vstim_midpoint_batch",
+    "scale_extracellular_contexts",
     "SingleCableKernel",
     "DoubleCableKernel",
     "KernelResult",

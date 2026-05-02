@@ -6,7 +6,12 @@ import pytest
 
 from axonscope.axons import HodgkinHuxley
 from axonscope.electrodes import PointSourceElectrode
-from axonscope.solvers import SingleCableVStimBatchKernel
+from axonscope.solvers import (
+    SingleCableVStimBatchKernel,
+    build_vstim_batch,
+    build_vstim_midpoint_batch,
+    scale_extracellular_contexts,
+)
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulus import Stimulus
@@ -78,3 +83,63 @@ def test_single_cable_vstim_batch_validates_shapes():
 
     with pytest.raises(ValueError, match="extracellular_potential_mid_mV"):
         kernel.run(extracellular_potential_mid_mV=jnp.zeros((runtime.grid.Nt, axon.Nx + 1)))
+
+
+def test_build_vstim_midpoint_batch_matches_runtime_and_scales_contexts():
+    axon = _hh_extracellular_axon()
+    tsim = 1.2
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=True,
+        precompute_extracellular=True,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+
+    vext_batch = build_vstim_midpoint_batch(
+        axon,
+        [
+            base_contexts[0],
+            scale_extracellular_contexts(base_contexts, 0.5),
+            None,
+        ],
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+
+    assert runtime.stimulation.extracellular_potential_mid_mV is not None
+    assert vext_batch.shape == (3, runtime.grid.Nt, axon.Nx)
+    np.testing.assert_allclose(
+        np.asarray(vext_batch[0]),
+        np.asarray(runtime.stimulation.extracellular_potential_mid_mV),
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(vext_batch[1]),
+        0.5 * np.asarray(vext_batch[0]),
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(np.asarray(vext_batch[2]), 0.0, atol=0.0, rtol=0.0)
+
+
+def test_build_vstim_batch_accepts_per_row_positions():
+    axon = _hh_extracellular_axon()
+    contexts = tuple(axon.extracellular_contexts)
+    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    shifted_x_m = base_x_m + 25e-6
+
+    vext_batch = build_vstim_batch(
+        axon,
+        [contexts, contexts],
+        t_ms=jnp.asarray([0.31]),
+        x_positions_m=np.stack([base_x_m, shifted_x_m]),
+    )
+
+    assert vext_batch.shape == (2, 1, axon.Nx)
+    assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0

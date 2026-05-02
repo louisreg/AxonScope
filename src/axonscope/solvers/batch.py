@@ -2,13 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
+from typing import Sequence
 
 import jax
 import jax.numpy as jnp
 
+from axonscope.stimulation import ExtracellularContext
+
 from .common import Array, apply_diffusion_operator
 from .kernels import _run_single_cable_vstim_vm_scan
 from .runtime import SolverRuntime
+from .stimulus_runtime import compile_extracellular_context
+
+
+ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
 
 
 @dataclass(frozen=True)
@@ -17,6 +24,101 @@ class BatchKernelResult:
 
     Vm: Array
     t: Array
+
+
+def build_vstim_midpoint_batch(
+    axon,
+    contexts_batch: Sequence[ContextBatchRow],
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    x_positions_m: Array | None = None,
+    dtype_local: jnp.dtype | None = None,
+) -> Array:
+    """Build imposed extracellular samples on solver midpoints.
+
+    Returns ``Vstim[B, Nt, Nx]`` in mV. Each batch row may contain one
+    ``ExtracellularContext``, multiple contexts that are summed, or ``None`` for
+    a zero imposed field.
+    """
+
+    dtype = _resolve_dtype(axon, dtype_local)
+    nt = int(jnp.ceil(tsim_ms / dt_ms))
+    t_mid_ms = (
+        jnp.arange(nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
+    ) * jnp.asarray(dt_ms, dtype=dtype)
+    return build_vstim_batch(
+        axon,
+        contexts_batch,
+        t_ms=t_mid_ms,
+        x_positions_m=x_positions_m,
+        dtype_local=dtype,
+    )
+
+
+def build_vstim_batch(
+    axon,
+    contexts_batch: Sequence[ContextBatchRow],
+    *,
+    t_ms: Array,
+    x_positions_m: Array | None = None,
+    dtype_local: jnp.dtype | None = None,
+) -> Array:
+    """Build imposed extracellular samples for a batch of context rows.
+
+    Parameters
+    ----------
+    axon
+        Axon providing the default compartment positions and dtype.
+    contexts_batch
+        Sequence of batch rows. A row can be one ``ExtracellularContext``, a
+        sequence of contexts to sum, or ``None``/empty for a zero field.
+    t_ms
+        Time samples in ms, usually solver midpoints, shape ``(Nt,)``.
+    x_positions_m
+        Optional spatial samples in meters. Shape ``(Nx,)`` shares positions
+        across the batch; shape ``(B, Nx)`` uses per-row positions.
+    dtype_local
+        Optional JAX dtype override.
+
+    Returns
+    -------
+    Array
+        ``Vstim`` in mV with shape ``(B, Nt, Nx)``.
+    """
+
+    rows = tuple(_normalize_context_row(row) for row in contexts_batch)
+    if not rows:
+        raise ValueError("contexts_batch must contain at least one row.")
+
+    dtype = _resolve_dtype(axon, dtype_local)
+    t = jnp.asarray(t_ms, dtype=dtype)
+    if t.ndim != 1:
+        raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
+
+    x_rows = _resolve_x_positions_m(
+        axon,
+        x_positions_m,
+        batch_size=len(rows),
+        dtype_local=dtype,
+    )
+    vstim_rows = [
+        _build_vstim_row(row, t, x_positions_row_m=x_rows[i], dtype_local=dtype)
+        for i, row in enumerate(rows)
+    ]
+    return jnp.stack(vstim_rows, axis=0)
+
+
+def scale_extracellular_contexts(
+    contexts: Sequence[ExtracellularContext],
+    scale: float,
+) -> tuple[ExtracellularContext, ...]:
+    """Return contexts with their stimulus amplitudes scaled by ``scale``."""
+
+    return tuple(
+        ExtracellularContext(electrode=ctx.electrode, stimulus=ctx.stimulus.scaled(scale))
+        for ctx in contexts
+    )
 
 
 @partial(
@@ -214,7 +316,71 @@ def _as_batched_time_space_array(
     raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
 
 
+def _build_vstim_row(
+    contexts: tuple[ExtracellularContext, ...],
+    t_ms: Array,
+    *,
+    x_positions_row_m: Array,
+    dtype_local: jnp.dtype,
+) -> Array:
+    nt = int(t_ms.shape[0])
+    nx = int(x_positions_row_m.shape[0])
+    vstim = jnp.zeros((nt, nx), dtype=dtype_local)
+    for ctx in contexts:
+        compiled = compile_extracellular_context(
+            ctx,
+            x_positions_row_m,
+            dtype_local=dtype_local,
+        )
+        current_A = jax.vmap(compiled.stimulus)(t_ms)
+        vstim = vstim + current_A[:, None] * compiled.footprint_V_per_A[None, :]
+    return vstim * jnp.asarray(1e3, dtype=dtype_local)
+
+
+def _normalize_context_row(row: ContextBatchRow) -> tuple[ExtracellularContext, ...]:
+    if row is None:
+        return ()
+    if isinstance(row, ExtracellularContext):
+        return (row,)
+    return tuple(row)
+
+
+def _resolve_dtype(axon, dtype_local: jnp.dtype | None) -> jnp.dtype:
+    if dtype_local is not None:
+        return dtype_local
+    ion_channel = getattr(axon, "ion_channel", None)
+    if ion_channel is not None and hasattr(ion_channel, "dtype"):
+        return ion_channel.dtype
+    return jnp.float32
+
+
+def _resolve_x_positions_m(
+    axon,
+    x_positions_m: Array | None,
+    *,
+    batch_size: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    if x_positions_m is None:
+        x = jnp.asarray(axon.x, dtype=dtype_local) * jnp.asarray(1e-6, dtype=dtype_local)
+    else:
+        x = jnp.asarray(x_positions_m, dtype=dtype_local)
+
+    if x.ndim == 1:
+        return jnp.broadcast_to(x[jnp.newaxis, :], (batch_size, x.shape[0]))
+    if x.ndim == 2:
+        if x.shape[0] != batch_size:
+            raise ValueError(
+                f"x_positions_m has batch size {x.shape[0]}, expected {batch_size}."
+            )
+        return x
+    raise ValueError(f"x_positions_m must have shape (Nx,) or (B, Nx), got {x.shape}.")
+
+
 __all__ = [
     "BatchKernelResult",
+    "build_vstim_batch",
+    "build_vstim_midpoint_batch",
+    "scale_extracellular_contexts",
     "SingleCableVStimBatchKernel",
 ]

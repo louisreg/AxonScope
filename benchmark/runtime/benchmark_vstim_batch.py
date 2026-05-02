@@ -22,7 +22,12 @@ import numpy as np
 from axonscope.axons import HodgkinHuxley
 from axonscope.benchmarking import collect_benchmark_metadata
 from axonscope.electrodes import PointSourceElectrode
-from axonscope.solvers import SingleCableKernel, SingleCableVStimBatchKernel
+from axonscope.solvers import (
+    SingleCableKernel,
+    SingleCableVStimBatchKernel,
+    build_vstim_midpoint_batch,
+    scale_extracellular_contexts,
+)
 from axonscope.solvers.runtime import SolverRuntime, prepare_solver_runtime
 from axonscope.stimulus import Stimulus
 
@@ -115,6 +120,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             batch_size=batch_size,
             repeats=args.repeats,
             warmups=args.warmups,
+            axon=axon,
         )
         for batch_size in args.batch_sizes
     ]
@@ -152,12 +158,15 @@ def benchmark_batch_size(
     runtime: SolverRuntime,
     cm_uF_cm2,
     *,
+    axon: HodgkinHuxley,
     batch_size: int,
     repeats: int,
     warmups: int,
 ) -> VStimBatchBenchmarkRow:
-    vext_batch = _make_scaled_vstim_batch(
-        runtime.stimulation.extracellular_potential_mid_mV,
+    vext_batch = _make_scaled_vstim_context_batch(
+        axon,
+        tsim_ms=runtime.grid.tsim_ms,
+        dt_ms=runtime.grid.dt_ms,
         batch_size=batch_size,
     )
     batch_kernel = SingleCableVStimBatchKernel(runtime=runtime, Cm_uF_cm2=cm_uF_cm2)
@@ -235,9 +244,25 @@ def _block_until_ready(value: object) -> None:
             _block_until_ready(item)
 
 
-def _make_scaled_vstim_batch(vext_mid, *, batch_size: int):
-    scales = jnp.linspace(0.5, 1.5, batch_size, dtype=vext_mid.dtype)
-    return scales[:, None, None] * vext_mid[None, :, :]
+def _make_scaled_vstim_context_batch(
+    axon: HodgkinHuxley,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_size: int,
+):
+    base_contexts = tuple(axon.extracellular_contexts)
+    scales = np.linspace(0.5, 1.5, batch_size)
+    context_batch = [
+        scale_extracellular_contexts(base_contexts, float(scale))
+        for scale in scales
+    ]
+    return build_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+    )
 
 
 def _build_hh_extracellular(nx: int) -> HodgkinHuxley:
