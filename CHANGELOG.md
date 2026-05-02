@@ -80,6 +80,8 @@ The format is inspired by Keep a Changelog.
   coefficient arrays instead of materialized `(Nx, 2, 2)` block matrices.
 - Reworked the scalar double-cable block-tridiagonal forward/backward sweep to
   use `jax.lax.scan`, reducing indexed array updates inside the JIT time loop.
+- Hoisted double-cable VM-only invariant terms and time-sampled drive inputs
+  outside the scan body to simplify the optimized Vi/Ve kernel.
 - Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
   clamp handling from `AxonBase`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous

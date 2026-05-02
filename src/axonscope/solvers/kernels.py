@@ -165,34 +165,47 @@ def _run_double_cable_vm_scan(
     intracellular_current_density_mid: Array,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
-    step_indices: Array,
     dt_ms: Array,
 ) -> Array:
     """Jitted Vm-only double-cable scan for the optimized extracellular path."""
+    cm_over_dt = Cm_abs / dt_ms
+    cx_over_dt = Cx_abs / dt_ms
+    vext_previous_mV = jnp.concatenate(
+        [
+            extracellular_potential_initial_previous_mV[None, :],
+            extracellular_potential_mid_mV[:-1],
+        ],
+        axis=0,
+    )
+    extracellular_rhs_drive = (
+        (cx_over_dt + Gx_abs)[None, :] * extracellular_potential_mid_mV
+        - cx_over_dt[None, :] * vext_previous_mV
+    )
+    intracellular_current_abs_mid = intracellular_current_density_mid * area_cm2[None, :]
+    off_i = -Gax_i
+    off_e = -Gax_e
 
     def solve_vi_vperi(
         Vi: Array,
         Ve: Array,
         gates_new: Array,
-        Iinj_den: Array,
+        Iinj_abs: Array,
         I_outward_den: Array,
         I_corr_den: Array,
-        extracellular_potential_mV: Array,
-        Vext_old_mV: Array,
+        extracellular_drive_abs: Array,
     ) -> tuple[Array, Array]:
         Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
         Gm_abs = Gm_den * area_cm2
         GE_abs = GE_den * area_cm2
 
-        Iinj_abs = Iinj_den * area_cm2
         I_outward_abs = I_outward_den * area_cm2
         I_corr_abs = I_corr_den * area_cm2
         Vm = Vi - Ve
 
-        a00 = Cm_abs / dt_ms + Gm_abs + left_i + right_i
-        a01 = -(Cm_abs / dt_ms + Gm_abs)
+        a00 = cm_over_dt + Gm_abs + left_i + right_i
+        a01 = -(cm_over_dt + Gm_abs)
         rhs0 = (
-            (Cm_abs / dt_ms) * Vm
+            cm_over_dt * Vm
             + GE_abs
             + Iinj_abs
             - I_outward_abs
@@ -200,13 +213,12 @@ def _run_double_cable_vm_scan(
         )
 
         a10 = a01
-        a11 = Cm_abs / dt_ms + Gm_abs + Cx_abs / dt_ms + Gx_abs + left_e + right_e
+        a11 = cm_over_dt + Gm_abs + cx_over_dt + Gx_abs + left_e + right_e
         rhs1 = (
-            -(Cm_abs / dt_ms) * Vm
+            -cm_over_dt * Vm
             - GE_abs
-            + (Cx_abs / dt_ms) * Ve
-            - (Cx_abs / dt_ms) * Vext_old_mV
-            + (Cx_abs / dt_ms + Gx_abs) * extracellular_potential_mV
+            + cx_over_dt * Ve
+            + extracellular_drive_abs
             + I_outward_abs
             + I_corr_abs
         )
@@ -216,20 +228,14 @@ def _run_double_cable_vm_scan(
             a01,
             a10,
             a11,
-            -Gax_i,
-            -Gax_e,
+            off_i,
+            off_e,
             rhs0,
             rhs1,
         )
 
-    def extracellular_drive_at(n: int) -> tuple[Array, Array]:
-        return _precomputed_step_pair(
-            extracellular_potential_mid_mV,
-            extracellular_potential_initial_previous_mV,
-            n,
-        )
-
-    def step(carry, n: int):
+    def step(carry, step_inputs):
+        Iinj_abs, extracellular_drive_abs = step_inputs
         Vi, Ve, gates, *extra = carry
         extra = tuple(extra)
         Vm = Vi - Ve
@@ -249,16 +255,14 @@ def _run_double_cable_vm_scan(
         if has_driven_extracellular:
             linearization_gates = gates
 
-        Vext, Vext_old = extracellular_drive_at(n)
         Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
-            Iinj_den=intracellular_current_density_mid[n],
+            Iinj_abs=Iinj_abs,
             I_outward_den=step_plan_pred.explicit_outward_current,
             I_corr_den=step_plan_pred.correction_current,
-            extracellular_potential_mV=Vext,
-            Vext_old_mV=Vext_old,
+            extracellular_drive_abs=extracellular_drive_abs,
         )
         Vm_new = Vi_new - Ve_new
 
@@ -294,7 +298,11 @@ def _run_double_cable_vm_scan(
         return (Vi_new, Ve_new, gates_new, *state_new), Vm_new
 
     init_carry = (Vi0_mV, Ve0_mV, gates0, *state0)
-    _, Vm_trace = jax.lax.scan(step, init_carry, step_indices)
+    _, Vm_trace = jax.lax.scan(
+        step,
+        init_carry,
+        (intracellular_current_abs_mid, extracellular_rhs_drive),
+    )
     return Vm_trace
 
 
@@ -596,7 +604,6 @@ class DoubleCableKernel:
                 intracellular_current_density_mid=Iinj_mid,
                 extracellular_potential_mid_mV=vext_mid_all,
                 extracellular_potential_initial_previous_mV=vext_initial_previous,
-                step_indices=jnp.arange(grid.Nt, dtype=jnp.int32),
                 dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
             )
             return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
