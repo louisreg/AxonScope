@@ -22,7 +22,8 @@ from axonscope.axons.unmyelinated import (
     Tigerholm,
 )
 from axonscope.simresult import SimResult
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulus import Stimulus
 from tests.nrv._helpers import (
     align_rows_to_target_x,
     crossing_times,
@@ -151,7 +152,7 @@ def _make_hh_axon(d: float):
         g_pas=0.001,
         e_pas=-70.0,
     )
-    ax.insert_I_Clamp(position=500.0, t_start=1.0, duration=0.5, amplitude=1.0)
+    ax.insert_I_Clamp(position=500.0, stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0))
     ax.comparison_sample_position_um = 500.0
     return ax
 
@@ -164,7 +165,7 @@ def _make_hh_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_rattay_axon(d: float):
     ax = RattayAberham(L=1000.0, d=d, Nx=101, celsius=37.0)
-    ax.insert_I_Clamp(position=500.0, t_start=1.0, duration=0.5, amplitude=1.0)
+    ax.insert_I_Clamp(position=500.0, stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0))
     ax.comparison_sample_position_um = 500.0
     return ax
 
@@ -177,7 +178,7 @@ def _make_rattay_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_sundt_axon(d: float):
     ax = Sundt(L=2000.0, d=d, Nx=101, celsius=37.0)
-    ax.insert_I_Clamp(position=1000.0, t_start=1.0, duration=0.5, amplitude=0.5)
+    ax.insert_I_Clamp(position=1000.0, stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=0.5))
     ax.comparison_sample_position_um = 1000.0
     return ax
 
@@ -190,7 +191,7 @@ def _make_sundt_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_tigerholm_axon(d: float):
     ax = Tigerholm(L=5000.0, d=d, Nx=101, celsius=37.0)
-    ax.insert_I_Clamp(position=2500.0, t_start=5.0, duration=1.0, amplitude=0.5)
+    ax.insert_I_Clamp(position=2500.0, stimulus=Stimulus.pulse(start=5.0, duration=1.0, amplitude=0.5))
     ax.comparison_sample_position_um = 2500.0
     return ax
 
@@ -203,7 +204,7 @@ def _make_tigerholm_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_schild94_axon(d: float):
     ax = Schild94(L=3000.0, d=d, Nx=51)
-    ax.insert_I_Clamp(position=1500.0, t_start=2.0, duration=1.0, amplitude=1.0)
+    ax.insert_I_Clamp(position=1500.0, stimulus=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
     ax.comparison_sample_position_um = 1500.0
     return ax
 
@@ -216,7 +217,7 @@ def _make_schild94_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_schild97_axon(d: float):
     ax = Schild97(L=3000.0, d=d, Nx=51)
-    ax.insert_I_Clamp(position=1500.0, t_start=2.0, duration=1.0, amplitude=1.0)
+    ax.insert_I_Clamp(position=1500.0, stimulus=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
     ax.comparison_sample_position_um = 1500.0
     return ax
 
@@ -230,7 +231,7 @@ def _make_schild97_nrv(d: float, _axon_as, dt_ms: float):
 def _make_mrg_axon(d: float):
     ax = MRG(d=d, nodes=11)
     stim_pos_um = _mrg_stim_position(ax)
-    ax.insert_I_Clamp(position=stim_pos_um, t_start=1.0, duration=0.1, amplitude=2.0)
+    ax.insert_I_Clamp(position=stim_pos_um, stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
     ax.comparison_sample_position_um = stim_pos_um
     return ax
 

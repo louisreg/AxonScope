@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 import pytest
 
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
+from axonscope.stimulus import Stimulus
 import nrv
 
 DIAMETERS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -29,7 +30,7 @@ def test_hh_velocity_vs_diameter(save_dir="figures/nrv_tests"):
     for d in DIAMETERS:
         axon = HodgkinHuxley(L=L, d=d, Nx=Nx, celsius=6.3, Vinit=-70.0,
                              include_passive_leak=True, g_pas=0.001, e_pas=-70.0)
-        axon.insert_I_Clamp(position=L/2, t_start=T_START, duration=DURATION, amplitude=AMP)
+        axon.insert_I_Clamp(position=L/2, stimulus=Stimulus.pulse(start=T_START, duration=DURATION, amplitude=AMP))
         res = Euler().solve(axon, tsim=TSIM, dt=DT)
 
         axon_nrv = nrv.unmyelinated(y=0, z=0, d=d, L=L, Nsec=Nx, dt=DT, v_init=-70, T=6.3, model="HH")

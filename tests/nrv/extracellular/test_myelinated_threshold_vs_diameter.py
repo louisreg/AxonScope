@@ -15,7 +15,7 @@ import pytest
 from axonscope.axons.myelinated import MRG
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.stimulus import Stimulus
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
 
 DIAMETERS_UM = [5.7, 7.3, 8.7, 10.0, 11.5, 14.0]
 ELECTRODE_Y_UM = 100.0
@@ -34,7 +34,7 @@ def _has_ap(ax: MRG, amp_uA: float) -> bool:
         x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0, sigma_S_m=SIGMA_S_M
     )
     stim = Stimulus.pulse(start=1.0, amplitude=amp_uA * 1e-6, duration=PULSE_DURATION_MS)
-    ax_copy.add_extracellular_ctx(electrode, stim, replace=True)
+    ax_copy.add_extracellular_context(electrode, stim, replace=True)
     res = CrankNicholson().solve(ax_copy, tsim=TSIM, dt=DT)
     tAP, _ = res.rasterize()
     return len(tAP) >= 3

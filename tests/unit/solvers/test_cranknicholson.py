@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import pytest
 
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.solvers.CrankNicholson import (
+from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
@@ -14,13 +14,17 @@ from axonscope.solvers.CrankNicholson import (
 )
 from axonscope.solvers.kernels import SingleCableKernel
 from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.stimulus import Stimulus
 
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
 
 
 def _hh_axon(Nx: int = 51) -> HodgkinHuxley:
     axon = HodgkinHuxley(L=1000.0, d=0.5, Nx=Nx, celsius=6.3)
-    axon.insert_I_Clamp(position=500.0, t_start=1.0, duration=1.0, amplitude=2.0)
+    axon.insert_I_Clamp(
+        position=500.0,
+        stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
+    )
     return axon
 
 
@@ -56,7 +60,10 @@ def test_cranknicholson_dense_and_tridiagonal_match():
     x_uniform = jnp.linspace(-1.0, 1.0, 31, dtype=jnp.float32)
     x_vec = (jnp.sinh(1.5 * x_uniform) / jnp.sinh(1.5) + 1.0) * 150.0
     axon = HodgkinHuxley(x_vec=x_vec, d=1.0, Nx=None)
-    axon.insert_I_Clamp(position=150.0, t_start=0.5, duration=0.5, amplitude=5.0)
+    axon.insert_I_Clamp(
+        position=150.0,
+        stimulus=Stimulus.pulse(start=0.5, duration=0.5, amplitude=5.0),
+    )
 
     dense = CrankNicholson_unoptimized().solve(axon, tsim=2.0, dt=0.01)
     optimized = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
@@ -162,7 +169,10 @@ def test_cranknicholson_aggregates_duplicate_current_and_conductance_names():
         g_pas=0.001,
         e_pas=-70.0,
     )
-    axon.insert_I_Clamp(position=500.0, t_start=1.0, duration=0.5, amplitude=2.0)
+    axon.insert_I_Clamp(
+        position=500.0,
+        stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
+    )
     res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01, record_observables=True)
 
     assert res.recordings is not None

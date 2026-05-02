@@ -12,8 +12,8 @@ from axonscope.channel_models.passive import PassiveICM
 from axonscope.electrodes import Electrode, PointSourceElectrode
 from axonscope.stimulus import Stimulus
 from axonscope.stimulus_eval import evaluate_stimulus_numpy
-from axonscope.solvers.Euler import Euler
-from axonscope.solvers.CrankNicholson import (
+from axonscope.solvers.euler import Euler
+from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
     CrankNicholson_unoptimized,
     CrankNicholsonSemiImplicit,
@@ -45,19 +45,19 @@ class _UniformFieldElectrode(Electrode):
         return np.full(np.asarray(x_positions_m, dtype=float).shape, self.footprint_v_per_a, dtype=float)
 
 
-def test_add_extracellular_ctx_with_electrode_and_stimulus():
+def test_add_extracellular_context_with_electrode_and_stimulus():
     ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
     electrode = PointSourceElectrode(x0_m=200e-6, y0_m=100e-6, z0_m=100e-6, sigma_S_m=0.3)
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
 
-    ax.add_extracellular_ctx(electrode, stim)
+    ax.add_extracellular_context(electrode, stim)
 
     assert ax.use_extracellular is True
-    vext = np.asarray(ax.Vext_mV(0.31))
+    vext = np.asarray(ax.extracellular_potential_mV(0.31))
     assert np.max(np.abs(vext)) > 0.0
 
 
-def test_add_extracellular_ctx_accumulates_multiple_contexts():
+def test_add_extracellular_context_accumulates_multiple_contexts():
     ax = HodgkinHuxley(L=400.0, d=0.5, Nx=41)
     x0_m = 200e-6
     y0_m = 100e-6
@@ -78,9 +78,9 @@ def test_add_extracellular_ctx_accumulates_multiple_contexts():
         + evaluate_stimulus_numpy(s2, [t_probe])[0]
     ) * fp * 1e3
 
-    ax.add_extracellular_ctx(e1, s1, replace=True)
-    ax.add_extracellular_ctx(e2, s2, replace=False)
-    got_mV = np.asarray(ax.Vext_mV(t_probe))
+    ax.add_extracellular_context(e1, s1, replace=True)
+    ax.add_extracellular_context(e2, s2, replace=False)
+    got_mV = np.asarray(ax.extracellular_potential_mV(t_probe))
 
     assert np.allclose(got_mV, expected_mV, rtol=1e-6, atol=1e-6)
 
@@ -97,12 +97,12 @@ def test_myelinated_vext_matches_analytic_point_source():
         z0_m=0.0,
         sigma_S_m=sigma,
     )
-    ax.attach_extracellular_stimulus(electrode.attach_stimulus(Stimulus.constant(amp_A, start=0.0)))
+    ax.add_extracellular_context(electrode, Stimulus.constant(amp_A, start=0.0), replace=True)
 
     x_m = np.asarray(ax.x, dtype=float) * 1e-6
     r = np.sqrt((x_m - x0_um * 1e-6) ** 2 + (100e-6) ** 2)
     expected_mV = amp_A / (4.0 * np.pi * sigma * np.maximum(r, 1e-12)) * 1e3
-    got_mV = np.asarray(ax.Vext_mV(0.5), dtype=float)
+    got_mV = np.asarray(ax.extracellular_potential_mV(0.5), dtype=float)
 
     assert np.allclose(got_mV, expected_mV, rtol=1e-6, atol=1e-6)
 
@@ -121,13 +121,13 @@ def test_myelinated_extracellular_stimulus_has_nonzero_effect():
         anodic_amplitude=20e-6,
         interphase=0.04,
     )
-    ax_on.attach_extracellular_stimulus(electrode.attach_stimulus(stim_on))
+    ax_on.add_extracellular_context(electrode, stim_on, replace=True)
 
     ax_off = MRG(d=10.0, nodes=7)
     x0_off_um = float(ax_off.L / 2.0)
     electrode_off = PointSourceElectrode(x0_m=x0_off_um * 1e-6, y0_m=100e-6, z0_m=0.0, sigma_S_m=0.2)
     stim_off = Stimulus.constant(0.0, start=0.0)
-    ax_off.attach_extracellular_stimulus(electrode_off.attach_stimulus(stim_off))
+    ax_off.add_extracellular_context(electrode_off, stim_off, replace=True)
 
     solver = CrankNicholson()
     vm_on = np.asarray(solver.solve(ax_on, tsim=tsim, dt=dt).Vm)
@@ -154,8 +154,10 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
         use_extracellular=True,
         Veinit=50.0,
     )
-    ax.attach_extracellular_stimulus(
-        _UniformFieldElectrode(1000.0).attach_stimulus(Stimulus.constant(50e-6, start=0.0))
+    ax.add_extracellular_context(
+        _UniformFieldElectrode(1000.0),
+        Stimulus.constant(50e-6, start=0.0),
+        replace=True,
     )
 
     res = CrankNicholson().solve(ax, tsim=0.5, dt=0.01)
@@ -164,7 +166,7 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
 
 
 def test_myelinated_prefers_inline_extracellular_solver(monkeypatch):
-    cn_mod = importlib.import_module("axonscope.solvers.CrankNicholson")
+    cn_mod = importlib.import_module("axonscope.solvers.crank_nicholson")
 
     def _fail_if_generic(*args, **kwargs):
         raise AssertionError("MRG should bypass the generic extracellular helper.")
@@ -174,7 +176,10 @@ def test_myelinated_prefers_inline_extracellular_solver(monkeypatch):
     ax = MRG(d=10.0, nodes=5)
     center_node = int(ax.node_indices.shape[0] // 2)
     pos_um = float(ax.x[int(ax.node_indices[center_node])])
-    ax.insert_I_Clamp(position=pos_um, t_start=0.5, duration=0.05, amplitude=1.0)
+    ax.insert_I_Clamp(
+        position=pos_um,
+        stimulus=Stimulus.pulse(start=0.5, duration=0.05, amplitude=1.0),
+    )
 
     res = CrankNicholson().solve(ax, tsim=1.0, dt=0.01)
 
@@ -186,7 +191,10 @@ def test_double_cable_kernel_matches_public_solver_path():
     ax = MRG(d=10.0, nodes=5)
     center_node = int(ax.node_indices.shape[0] // 2)
     pos_um = float(ax.x[int(ax.node_indices[center_node])])
-    ax.insert_I_Clamp(position=pos_um, t_start=0.5, duration=0.05, amplitude=1.0)
+    ax.insert_I_Clamp(
+        position=pos_um,
+        stimulus=Stimulus.pulse(start=0.5, duration=0.05, amplitude=1.0),
+    )
 
     runtime = prepare_solver_runtime(
         ax,
@@ -217,7 +225,10 @@ def test_all_solvers_run_myelinated_with_extracellular(solver):
     ax = MRG(d=10.0, nodes=5)
     center_node = int(ax.node_indices.shape[0] // 2)
     pos_um = float(ax.x[int(ax.node_indices[center_node])])
-    ax.insert_I_Clamp(position=pos_um, t_start=0.5, duration=0.05, amplitude=1.5)
+    ax.insert_I_Clamp(
+        position=pos_um,
+        stimulus=Stimulus.pulse(start=0.5, duration=0.05, amplitude=1.5),
+    )
 
     tsim = 4.0
     dt = 0.01
@@ -253,9 +264,12 @@ def test_all_solvers_run_unmyelinated_with_extracellular_and_vext(solver):
 
     electrode = PointSourceElectrode(x0_m=200e-6, y0_m=100e-6, z0_m=100e-6, sigma_S_m=0.3)
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
-    ax.attach_extracellular_stimulus(electrode.attach_stimulus(stim))
+    ax.add_extracellular_context(electrode, stim, replace=True)
 
-    ax.insert_I_Clamp(position=200.0, t_start=0.4, duration=0.05, amplitude=0.8)
+    ax.insert_I_Clamp(
+        position=200.0,
+        stimulus=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+    )
     res = solver.solve(ax, tsim=1.2, dt=0.01)
 
     assert res.Vm.shape[0] == int(np.ceil(1.2 / 0.01))

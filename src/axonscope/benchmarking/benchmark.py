@@ -179,7 +179,7 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             anodic_amplitude=20e-6,
             interphase=0.02,
         )
-        axon.add_extracellular_ctx(electrode, stimulus, replace=True)
+        axon.add_extracellular_context(electrode, stimulus, replace=True)
         return axon
 
     return {

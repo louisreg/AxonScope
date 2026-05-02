@@ -26,7 +26,7 @@ def main() -> None:
         cathodic_duration=0.05,
         interphase=0.02,
     )
-    axon.add_extracellular_ctx(electrode, stim)
+    axon.add_extracellular_context(electrode, stim)
 
     res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
 

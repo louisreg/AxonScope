@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 
 from axonscope.simresult import SimResult
 from axonscope.axons.unmyelinated import RattayAberham
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
+from axonscope.stimulus import Stimulus
 
 
 class _DummyAxon:
@@ -44,7 +45,10 @@ def test_rasterplot_uses_axons_x(fake_result):
 def test_compute_propagation_velocity():
     L, d, Nx = 1000, 0.5, 101
     axon = RattayAberham(L=L, d=d, Nx=Nx, celsius=37)
-    axon.insert_I_Clamp(position=L / 2, t_start=1.0, duration=1.0, amplitude=2)
+    axon.insert_I_Clamp(
+        position=L / 2,
+        stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2),
+    )
 
     simres = Euler().solve(axon, tsim=10.0, dt=0.001)
     velocity = simres.average_velocity()

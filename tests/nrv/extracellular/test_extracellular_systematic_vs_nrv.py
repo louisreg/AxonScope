@@ -22,7 +22,7 @@ from axonscope.axons.unmyelinated import (
     Tigerholm,
 )
 from axonscope.electrodes import PointSourceElectrode
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulus import Stimulus
 from tests.nrv._helpers import (
     AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE,
@@ -104,7 +104,7 @@ def _attach_point_source_extra_as(
         sigma_S_m=SIGMA_S_M,
     )
     stim = Stimulus.pulse(start=start_ms, amplitude=-amp_uA * 1e-6, duration=duration_ms)
-    axon.add_extracellular_ctx(electrode, stim, replace=True)
+    axon.add_extracellular_context(electrode, stim, replace=True)
 
 
 def _attach_point_source_extra_nrv(
@@ -234,7 +234,7 @@ def _make_mrg_extra_axon(d: float):
         anodic_amplitude=20.0 * 1e-6,
         interphase=0.04,
     )
-    ax.add_extracellular_ctx(electrode, stim, replace=True)
+    ax.add_extracellular_context(electrode, stim, replace=True)
     ax.comparison_sample_position_um = center_node_pos
     return ax
 
@@ -514,7 +514,7 @@ def _compare_vext_profiles(
 
     t_probe_ms = 0.5 * (t_edges_ms[:-1] + t_edges_ms[1:])
     vext_as_mV = np.stack(
-        [np.asarray(axon_as.Vext_mV(float(ti)), dtype=float) for ti in t_probe_ms],
+        [np.asarray(axon_as.extracellular_potential_mV(float(ti)), dtype=float) for ti in t_probe_ms],
         axis=1,
     )
     vext_nrv_mV = np.stack(

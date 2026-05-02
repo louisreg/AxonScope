@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import pytest
 from pathlib import Path
 from axonscope.axons.generic import Passive
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
+from axonscope.stimulus import Stimulus
 
 import sys
 sys.path.append("./external/")
@@ -33,7 +34,7 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     # ---- Python Axon ----
     
     axon_py = Passive(L=L, d=d, Nx=Nx, Cm=Cm, Rm=1/Gl, Ra=rho, EL=EL)
-    axon_py.insert_I_Clamp(position=0.5*L, t_start=t_start, duration=t_on, amplitude=I_inj_nA)
+    axon_py.insert_I_Clamp(position=0.5*L, stimulus=Stimulus.pulse(start=t_start, duration=t_on, amplitude=I_inj_nA))
     
     solver = Euler()
     res = solver.solve(axon_py, tsim=Tsim, dt=1e-3)

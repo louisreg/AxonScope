@@ -15,7 +15,7 @@ import pytest
 from axonscope.axons.unmyelinated import Tigerholm
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.stimulus import Stimulus
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
 
 DIAMETERS_UM = [0.3, 0.5, 0.7, 0.8, 1.0, 1.2]
 ELECTRODE_Y_UM = 100.0
@@ -36,7 +36,7 @@ def _has_ap(d: float, amp_uA: float) -> bool:
         x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0, sigma_S_m=SIGMA_S_M
     )
     stim = Stimulus.pulse(start=5.0, amplitude=amp_uA * 1e-6, duration=PULSE_DURATION_MS)
-    axon.add_extracellular_ctx(electrode, stim, replace=True)
+    axon.add_extracellular_context(electrode, stim, replace=True)
     res = CrankNicholson().solve(axon, tsim=TSIM, dt=DT)
     tAP, _ = res.rasterize()
     return len(tAP) >= 3

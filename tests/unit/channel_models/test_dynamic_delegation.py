@@ -7,7 +7,8 @@ from axonscope.channel_models.composite_models import (
     TigerholmCompositeICM,
     Schild97CompositeICM,
 )
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulus import Stimulus
 
 
 def test_tigerholm_membrane_dynamics_live_on_channel_and_axon_delegates():
@@ -57,7 +58,10 @@ def test_schild_membrane_dynamics_live_on_channel_and_axon_delegates():
 
 def test_schild_diagnostics_are_provided_by_membrane_not_solver():
     ax = Schild97(L=200.0, d=0.8, Nx=7)
-    ax.insert_I_Clamp(position=100.0, t_start=0.2, duration=0.2, amplitude=0.3)
+    ax.insert_I_Clamp(
+        position=100.0,
+        stimulus=Stimulus.pulse(start=0.2, duration=0.2, amplitude=0.3),
+    )
 
     res = CrankNicholson().solve(ax, tsim=0.8, dt=0.01, record_diagnostics=True)
 

@@ -45,7 +45,10 @@ The format is inspired by Keep a Changelog.
   spike metrics, velocity estimates, spatial alignment diagnostics, and optional
   `m` gate comparison metrics.
 - Added explicit NRV and AxonScope output materialization timings to the
-  NRV/AxonScope validation sweep so runtime comparisons include usable traces.
+  NRV/AxonScope performance comparison so runtime comparisons include usable
+  traces.
+- Added a small NRV performance plotting CLI for AxonScope-vs-NRV timing and
+  speedup sweeps.
 - Added solve, materialization, total usable-output, and compile-estimate
   timings to the shared solver benchmark runner.
 - Added named benchmark suite manifests and runners under `benchmark/runtime/`
@@ -87,6 +90,11 @@ The format is inspired by Keep a Changelog.
 - Reorganized benchmark scripts into `benchmark/runtime/` and
   `benchmark/nrv_performance/`, removing legacy wrappers and stale exploratory
   entry points while the project is still pre-use.
+- Simplified the axon stimulation API so intracellular clamps now receive an
+  explicit `Stimulus` object.
+- Renamed solver modules to lowercase `crank_nicholson.py` and `euler.py`.
+- Renamed extracellular context helpers to `add_extracellular_context`,
+  `clear_extracellular_contexts`, and `extracellular_potential_mV`.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 

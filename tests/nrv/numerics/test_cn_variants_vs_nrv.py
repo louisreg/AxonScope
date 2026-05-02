@@ -14,8 +14,9 @@ import pytest
 
 from axonscope.axons.unmyelinated import RattayAberham, HodgkinHuxley
 from axonscope.axons.generic import Passive
-from axonscope.solvers.CrankNicholson import CrankNicholson
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulus import Stimulus
+from axonscope.solvers.euler import Euler
 import nrv
 
 pytestmark = pytest.mark.nrv_numerics
@@ -34,7 +35,7 @@ def test_cn_solvers_vs_euler(save_dir="figures/nrv_tests"):
     x_positions = [L/4, L/3, L/2, 2*L/3, 3*L/4]
 
     for axon in axons.values():
-        axon.insert_I_Clamp(position=L/2, t_start=t_start, duration=duration, amplitude=amplitude)
+        axon.insert_I_Clamp(position=L/2, stimulus=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
 
     results = {}
     for name, axon in axons.items():
@@ -79,7 +80,7 @@ def test_cn_fine_mesh_vs_nrv(save_dir="figures/nrv_tests"):
     axon_hh = HodgkinHuxley(L=L, d=d, Nx=Nx, celsius=6.3, Vinit=-70.0,
                              include_passive_leak=True, g_pas=0.001, e_pas=-70.0)
     for ax in (axon_ra, axon_hh):
-        ax.insert_I_Clamp(position=L/2, t_start=t_start, duration=duration, amplitude=amplitude)
+        ax.insert_I_Clamp(position=L/2, stimulus=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
 
     res_ra = CrankNicholson().solve(axon_ra, tsim=tsim, dt=dt)
     res_hh = CrankNicholson().solve(axon_hh, tsim=tsim, dt=dt)

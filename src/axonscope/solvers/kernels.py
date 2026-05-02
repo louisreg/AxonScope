@@ -177,7 +177,7 @@ def _run_double_cable_vm_scan(
         Iinj_den: Array,
         I_outward_den: Array,
         I_corr_den: Array,
-        Vext_mV: Array,
+        extracellular_potential_mV: Array,
         Vext_old_mV: Array,
     ) -> tuple[Array, Array]:
         Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
@@ -206,7 +206,7 @@ def _run_double_cable_vm_scan(
             - GE_abs
             + (Cx_abs / dt_ms) * Ve
             - (Cx_abs / dt_ms) * Vext_old_mV
-            + (Cx_abs / dt_ms + Gx_abs) * Vext_mV
+            + (Cx_abs / dt_ms + Gx_abs) * extracellular_potential_mV
             + I_outward_abs
             + I_corr_abs
         )
@@ -257,7 +257,7 @@ def _run_double_cable_vm_scan(
             Iinj_den=intracellular_current_density_mid[n],
             I_outward_den=step_plan_pred.explicit_outward_current,
             I_corr_den=step_plan_pred.correction_current,
-            Vext_mV=Vext,
+            extracellular_potential_mV=Vext,
             Vext_old_mV=Vext_old,
         )
         Vm_new = Vi_new - Ve_new
@@ -608,7 +608,7 @@ class DoubleCableKernel:
             Iinj_den: Array,
             I_outward_den: Array,
             I_corr_den: Array,
-            Vext_mV: Array,
+            extracellular_potential_mV: Array,
             Vext_old_mV: Array,
         ) -> tuple[Array, Array]:
             Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
@@ -637,7 +637,7 @@ class DoubleCableKernel:
                 - GE_abs
                 + (Cx_abs / dt) * Ve
                 - (Cx_abs / dt) * Vext_old_mV
-                + (Cx_abs / dt + Gx_abs) * Vext_mV
+                + (Cx_abs / dt + Gx_abs) * extracellular_potential_mV
                 + I_outward_abs
                 + I_corr_abs
             )
@@ -688,7 +688,7 @@ class DoubleCableKernel:
                 Iinj_den=Iinj,
                 I_outward_den=step_plan_pred.explicit_outward_current,
                 I_corr_den=step_plan_pred.correction_current,
-                Vext_mV=Vext,
+                extracellular_potential_mV=Vext,
                 Vext_old_mV=Vext_old,
             )
             Vm_new = Vi_new - Ve_new

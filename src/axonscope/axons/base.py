@@ -9,7 +9,7 @@ from axonscope.icm import ICMBackend, UniformICMBackend
 from axonscope.stimulation import ExtracellularContext, IntracellularCurrentClamp
 from axonscope.stimulus import Stimulus
 
-# AxonBase remains unchanged, as it correctly handles L, Nx, and x_vec.
+
 class AxonBase:
     """
     Abstract base class for an axon with a given Ion Channel model.
@@ -167,11 +167,7 @@ class AxonBase:
     def insert_I_Clamp(
         self,
         position: float,
-        stimulus: Optional[Stimulus] = None,
-        *,
-        t_start: Optional[float] = None,
-        duration: Optional[float] = None,
-        amplitude: Optional[float] = None,
+        stimulus: Stimulus,
     ) -> None:
         """
         Attach a descriptive point current injection at a given axon position.
@@ -180,32 +176,15 @@ class AxonBase:
         ----------
         position : float
             Injection position along the axon [µm]
-        stimulus : Stimulus, optional
+        stimulus : Stimulus
             Temporal waveform in nA.
-        t_start, duration, amplitude :
-            Convenience pulse constructor arguments, used only when `stimulus`
-            is not provided.
         """
-        if stimulus is None:
-            if t_start is None or duration is None or amplitude is None:
-                raise ValueError(
-                    "Provide either a `stimulus`, or all of `t_start`, `duration`, and `amplitude`."
-                )
-            stimulus = Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude)
-        elif t_start is not None or duration is not None or amplitude is not None:
-            raise ValueError(
-                "Do not mix `stimulus=` with pulse constructor arguments."
-            )
+        if not isinstance(stimulus, Stimulus):
+            raise TypeError("stimulus must be an axonscope.stimulus.Stimulus instance.")
 
         self.intracellular_clamps.append(
             IntracellularCurrentClamp(position_um=float(position), stimulus=stimulus)
         )
-
-    def Iinj_uAcm2(self, t: float) -> jnp.ndarray:
-        """Evaluate injected current density at time t."""
-        from axonscope.solvers.stimulus_runtime import build_intracellular_current_density_fn
-
-        return build_intracellular_current_density_fn(self)(t)
 
     def set_extracellular_layer(
         self,
@@ -237,11 +216,7 @@ class AxonBase:
         if Veinit is not None:
             self.Veinit = float(Veinit)
 
-    def attach_extracellular_stimulus(self, stim: ExtracellularContext) -> None:
-        """Attach one electrode/stimulus pair, replacing any previously attached extracellular context."""
-        self.add_extracellular_ctx(stim, replace=True, enable=True)
-
-    def add_extracellular_ctx(
+    def add_extracellular_context(
         self,
         electrode_or_ctx: Union[Electrode, ExtracellularContext],
         stimulus: Optional[Stimulus] = None,
@@ -280,12 +255,12 @@ class AxonBase:
         if enable:
             self.use_extracellular = True
 
-    def clear_extracellular_ctx(self) -> None:
+    def clear_extracellular_contexts(self) -> None:
         """Remove all attached extracellular contexts from this axon."""
         self.extracellular_contexts = []
 
-    def Vext_mV(self, t_ms: float) -> jnp.ndarray:
-        """Compatibility wrapper returning imposed extracellular potential in mV."""
+    def extracellular_potential_mV(self, t_ms: float) -> jnp.ndarray:
+        """Return imposed extracellular potential in mV at time t_ms."""
         from axonscope.solvers.stimulus_runtime import build_extracellular_potential_fn
 
         return build_extracellular_potential_fn(self)(t_ms)

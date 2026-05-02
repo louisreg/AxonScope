@@ -25,13 +25,7 @@ from axonscope.stimulus import Stimulus
 
 
 ModelName = Literal["hh_intracellular", "mrg_intracellular", "mrg_extracellular"]
-
-MODEL_ALIASES = {
-    "hh": "hh_intracellular",
-    "hh_intracellular": "hh_intracellular",
-    "mrg_intracellular": "mrg_intracellular",
-    "mrg_extracellular": "mrg_extracellular",
-}
+MODEL_NAMES: tuple[ModelName, ...] = ("hh_intracellular", "mrg_intracellular", "mrg_extracellular")
 
 PROFILE_DEFAULTS = {
     "smoke": {
@@ -83,9 +77,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--model",
         nargs="+",
-        choices=tuple(MODEL_ALIASES),
+        choices=MODEL_NAMES,
         default=None,
-        help="Model(s) to run. 'hh' is kept as an alias for hh_intracellular.",
+        help="Model(s) to run.",
     )
     parser.add_argument("--dt", nargs="+", type=float, default=None)
     parser.add_argument("--nx", nargs="+", type=int, default=None, help="Unmyelinated compartment counts.")
@@ -329,7 +323,7 @@ def run_case(
 
 def _build_cases(args) -> list[GridCase]:
     defaults = PROFILE_DEFAULTS[args.profile]
-    models = tuple(MODEL_ALIASES[name] for name in (args.model or defaults["models"]))
+    models = tuple(args.model or defaults["models"])
     dt_values = tuple(args.dt or defaults["dt_ms"])
     tsim_values = tuple(args.tsim or defaults["tsim_ms"])
     nx_values = tuple(args.nx or defaults["nx"])
@@ -385,7 +379,10 @@ def _make_axonscope_case(case: GridCase):
             g_pas=0.001,
             e_pas=-70.0,
         )
-        axon.insert_I_Clamp(position=500.0, t_start=1.0, duration=1.0, amplitude=2.0)
+        axon.insert_I_Clamp(
+            position=500.0,
+            stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
+        )
         axon.comparison_sample_position_um = 500.0
         return axon
 
@@ -396,7 +393,10 @@ def _make_axonscope_case(case: GridCase):
     axon.comparison_sample_position_um = center_node_pos_um
 
     if case.model == "mrg_intracellular":
-        axon.insert_I_Clamp(position=center_node_pos_um, t_start=1.0, duration=0.1, amplitude=2.0)
+        axon.insert_I_Clamp(
+            position=center_node_pos_um,
+            stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0),
+        )
         return axon
 
     if case.model == "mrg_extracellular":
@@ -415,7 +415,7 @@ def _make_axonscope_case(case: GridCase):
             anodic_amplitude=20e-6,
             interphase=0.04,
         )
-        axon.add_extracellular_ctx(electrode, stim, replace=True)
+        axon.add_extracellular_context(electrode, stim, replace=True)
         return axon
 
     raise ValueError(f"Unsupported model: {case.model}")
@@ -793,7 +793,7 @@ def _fmt_optional(value) -> str:
 
 def _print_available() -> None:
     print("Models:")
-    for name in MODEL_ALIASES:
+    for name in MODEL_NAMES:
         print(f"  {name}")
     print("Profiles:")
     for name, defaults in PROFILE_DEFAULTS.items():

@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 import nrv
 
 from axonscope.axons.myelinated import MRG
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulus import Stimulus
 from tests.nrv._helpers import interp_rows, normalize_nrv_matrix, select_nearest_rows
 
 
@@ -77,7 +78,7 @@ def test_mrg_node_delay_vs_nrv(diameter_um: float, threshold_mV: float, rmse_tol
     node_ids = np.asarray(axon.node_indices, dtype=int)
     center_index = int(node_ids.shape[0] // 2)
     stim_pos_um = float(np.asarray(axon.x, dtype=float)[int(node_ids[center_index])])
-    axon.insert_I_Clamp(position=stim_pos_um, t_start=1.0, duration=0.1, amplitude=2.0)
+    axon.insert_I_Clamp(position=stim_pos_um, stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
 
     res = CrankNicholson().solve(axon, tsim=4.0, dt=0.005)
     t_as = np.asarray(res.t, dtype=float)

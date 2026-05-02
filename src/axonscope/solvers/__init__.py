@@ -1,5 +1,5 @@
 from axonscope.solvers.base import Solver
-from axonscope.solvers.CrankNicholson import (
+from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
     CrankNicholsonImplicit,
     CrankNicholsonImplicitFast,
@@ -8,7 +8,7 @@ from axonscope.solvers.CrankNicholson import (
     CrankNicholsonSemiImplicit,
     CrankNicholson_unoptimized,
 )
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
 from axonscope.solvers.kernels import DoubleCableKernel, KernelResult, SingleCableKernel
 from axonscope.solvers.runtime import (
     CableRuntime,

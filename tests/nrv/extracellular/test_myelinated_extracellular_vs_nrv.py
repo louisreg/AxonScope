@@ -10,7 +10,7 @@ import nrv
 from axonscope.axons.myelinated import MRG
 from axonscope.electrodes import PointSourceElectrode
 from axonscope.stimulus import Stimulus
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
 from tests.nrv._helpers import normalize_nrv_matrix
 
 pytestmark = pytest.mark.nrv_extracellular
@@ -38,7 +38,7 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
     elec_z_um = 0.0
     sigma_S_m = 0.2  # endoneurium_bhadra
 
-    # --- AxonScope (new API: add_extracellular_ctx) ---
+    # --- AxonScope (new API: add_extracellular_context) ---
     ax_as = MRG(d=diameter_um, nodes=nodes)
     x0_um = float(ax_as.L / 2.0)
     electrode_as = PointSourceElectrode(
@@ -54,13 +54,13 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
         anodic_amplitude=anodic_uA * 1e-6,
         interphase=interphase_ms,
     )
-    ax_as.add_extracellular_ctx(electrode_as, stim_as, replace=True)
+    ax_as.add_extracellular_context(electrode_as, stim_as, replace=True)
 
     res_as = CrankNicholson().solve(ax_as, tsim=tsim, dt=dt)
     t_as = np.asarray(res_as.t)
     x_all_as = np.asarray(ax_as.x, dtype=float)
     vm_all_as = np.asarray(res_as.Vm, dtype=float).T
-    vext_all_as = np.stack([np.asarray(ax_as.Vext_mV(float(t))) for t in t_as], axis=0).T
+    vext_all_as = np.stack([np.asarray(ax_as.extracellular_potential_mV(float(t))) for t in t_as], axis=0).T
     node_idx_as = np.asarray(ax_as.node_indices, dtype=int)
     x_nodes_as = x_all_as[node_idx_as]
 

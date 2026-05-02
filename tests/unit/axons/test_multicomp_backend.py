@@ -8,6 +8,8 @@ from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.channel_models.passive import PassiveICM
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from axonscope.icm import HeterogeneousICMBackend, UniformICMBackend
+from axonscope.solvers.stimulus_runtime import build_intracellular_current_density_fn
+from axonscope.stimulus import Stimulus
 
 
 def test_uniform_backend_api_from_axon():
@@ -96,10 +98,14 @@ def test_double_cable_backend_static_identity_is_structural():
 
 def test_multicomp_stimulus_api():
     ax = GenericMultiCompAxon(L=300.0, Nx=11)
-    ax.insert_I_Clamp(position=150.0, t_start=0.2, duration=0.4, amplitude=1.0)
+    ax.insert_I_Clamp(
+        position=150.0,
+        stimulus=Stimulus.pulse(start=0.2, duration=0.4, amplitude=1.0),
+    )
 
-    I_on = np.asarray(ax.Iinj_uAcm2(0.3))
-    I_off = np.asarray(ax.Iinj_uAcm2(1.0))
+    current_density = build_intracellular_current_density_fn(ax)
+    I_on = np.asarray(current_density(0.3))
+    I_off = np.asarray(current_density(1.0))
 
     assert I_on.shape == (ax.Nx,)
     assert I_off.shape == (ax.Nx,)

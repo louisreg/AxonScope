@@ -5,8 +5,9 @@ import numpy as np
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from tests.unit.channel_models.fixtures import HHLeakICM, HHKICM, HHNaICM
 from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.axons.generic import GenericAxon
+from axonscope.stimulus import Stimulus
 
 
 def _assert_same_icm(mono: IonChannelModelBase, comp: CompositeICM):
@@ -111,8 +112,9 @@ def test_axon_composite_vs_mono_hodgkin_huxley():
     ax_comp = GenericAxon(ion_channel=comp_icm, L=L, d=d, Nx=Nx, Temp=6.3)
 
     solver = CrankNicholson()
-    ax_mono.insert_I_Clamp(position=L/2, t_start=1.0, duration=1.0, amplitude=5)
-    ax_comp.insert_I_Clamp(position=L/2, t_start=1.0, duration=1.0, amplitude=5)
+    stim = Stimulus.pulse(start=1.0, duration=1.0, amplitude=5)
+    ax_mono.insert_I_Clamp(position=L/2, stimulus=stim)
+    ax_comp.insert_I_Clamp(position=L/2, stimulus=stim)
 
     res_mono = solver.solve(ax_mono, 10, 0.001)
     res_comp = solver.solve(ax_comp, 10, 0.001)

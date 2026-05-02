@@ -170,7 +170,7 @@ def _build_axonscope_case(
         anodic_amplitude=anodic_uA * 1e-6,
         interphase=interphase_ms,
     )
-    axon.add_extracellular_ctx(electrode, stim, replace=True)
+    axon.add_extracellular_context(electrode, stim, replace=True)
     result = CrankNicholson().solve(axon, tsim=tsim_ms, dt=dt_ms, record_observables=True)
     if result.recordings is None:
         raise RuntimeError("AxonScope result does not contain observable recordings.")
@@ -261,7 +261,7 @@ def _compare_vext_profiles(
         return None
     t_probe_ms = 0.5 * (t_edges_ms[:-1] + t_edges_ms[1:])
     vext_as_mV = np.stack(
-        [np.asarray(axon_as.Vext_mV(float(ti)), dtype=float) for ti in t_probe_ms],
+        [np.asarray(axon_as.extracellular_potential_mV(float(ti)), dtype=float) for ti in t_probe_ms],
         axis=1,
     )
     vext_nrv_mV = np.stack(

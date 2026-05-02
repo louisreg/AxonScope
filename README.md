@@ -99,7 +99,7 @@ stimulus = Stimulus.biphasic(
     interphase=0.02,
 )
 
-axon.add_extracellular_ctx(electrode, stimulus)
+axon.add_extracellular_context(electrode, stimulus)
 res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
 ```
 
@@ -200,6 +200,17 @@ python benchmark/nrv_performance/run.py \
   --dt 0.005 0.01 \
   --nx 21 51 \
   --tsim 1.0
+```
+
+Plot an AxonScope-vs-NRV sweep from the generated CSV:
+
+```bash
+python benchmark/nrv_performance/plot_results.py \
+  benchmark/results/nrv_performance/nrv_axonscope_grid/hh_dt_probe.csv \
+  --out-dir benchmark/reports/nrv_performance \
+  --prefix hh_dt_probe \
+  --metric warm_total \
+  --x axon_nx
 ```
 
 For runtime-only solver work, use the runtime suites:

@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import pytest
 import os 
 from axonscope.axons.unmyelinated import RattayAberham
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulus import Stimulus
 from axonscope.simresult import SimResult
 
 pytestmark = pytest.mark.nrv_numerics
@@ -30,7 +31,7 @@ VELOCITY_RTOL = 0.15                # Average propagation velocity tolerance
 
 
 def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SimResult:
-    axon.insert_I_Clamp(position=L / 2, t_start=T_START, duration=T_PULSE, amplitude=AMPLITUDE)
+    axon.insert_I_Clamp(position=L / 2, stimulus=Stimulus.pulse(start=T_START, duration=T_PULSE, amplitude=AMPLITUDE))
     solver = CrankNicholson()
     res = solver.solve(axon, tsim=tsim, dt=dt)
     return res

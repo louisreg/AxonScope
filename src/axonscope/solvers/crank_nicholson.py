@@ -1,6 +1,6 @@
 """
-CrankNicholson.py
-==========
+crank_nicholson.py
+==================
 
 Numerical solvers for the cable equation used by AxonScope.
 

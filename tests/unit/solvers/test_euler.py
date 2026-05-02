@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from axonscope.solvers.Euler import Euler
+from axonscope.solvers.euler import Euler
 from axonscope.axons.unmyelinated import AxonBase
 from axonscope.channel_models.passive import PassiveICM
 
