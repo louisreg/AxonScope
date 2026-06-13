@@ -10,13 +10,14 @@ The format is inspired by Keep a Changelog.
 
 - Added backend-independent `Stimulus`, `IntracellularCurrentClamp`, and
   `ExtracellularContext` descriptors.
-- Added NumPy evaluation helpers in `axonscope.stimulus_eval`.
+- Added NumPy evaluation helpers in `axonscope.stimulation.evaluation`.
 - Added JAX solver-runtime stimulus compilation in
   `axonscope.solvers.stimulus_runtime`.
 - Added `PointSourceElectrode` and extracellular context attachment helpers.
 - Added package-level exports for `axonscope.axons`, `axonscope.solvers`,
-  `axonscope.icm`, `axonscope.morphology`, and `axonscope.utils`.
-- Added MRG morphology helpers and NRV morphology/geometry comparison tests.
+  `axonscope.icm`, and `axonscope.utils`.
+- Added private MRG morphology helpers inside the MRG-like axon template and
+  NRV morphology/geometry comparison tests.
 - Added generic heterogeneous membrane layout support through
   `CompartmentMembraneLayout` and `HeterogeneousMembraneModel`.
 - Added MRG myelinated axon support with nodal `AxnodeICM` and passive
@@ -56,14 +57,23 @@ The format is inspired by Keep a Changelog.
   MRG, and MRG extracellular gate diagnostics.
 - Added a dedicated `mrg_extracellular_perf` NRV performance suite for warm
   runtime comparisons without gate diagnostics.
+- Added a GitHub Actions CI workflow for install, whitespace checking, and the
+  fast unit suite.
+- Added `docs/validation.md` to document fast CI and local NRV validation
+  commands.
+- Added an `examples/advanced/` area for population/dispatcher workflows.
+- Added Pint-oriented unit helpers for voltage and microampere plotting
+  conversions.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
+- Added `agent.md` to document project-specific development guidance and coding conventions.
+- Added `colab_benchmark_cpu_vs_gpu.ipynb` for AxonScope CPU vs GPU benchmarking with JAX, AxonScope simulation workloads, and performance visualization.
 
 ### Changed
 
 - Split the old flat modules into packages:
-  `axons/`, `solvers/`, `icm/`, `morphology/`, `benchmarking/`, and `utils/`.
+  `axons/`, `solvers/`, `icm/`, `benchmarking/`, and `utils/`.
 - Removed the old monolithic `axons.py`, `solvers.py`, `icm_compute.py`, and
   `math_functions.py` modules in favor of the package layout.
 - Moved NumPy stimulus evaluation out of the solver runtime.
@@ -85,12 +95,13 @@ The format is inspired by Keep a Changelog.
 - Skipped unused membrane-current planning work in the stateless double-cable
   VM-only path, keeping the optimized Vi/Ve loop focused on gate prediction and
   block solves.
-- Consolidated multicompartment axons so `AxonMultiCompBase` inherits common
-  clamp handling from `AxonBase`.
+- Consolidated multicompartment axons so section layouts share common clamp
+  handling from `Axon`.
 - Replaced the MRG-specific masked ICM layout with the generic heterogeneous
   membrane layout.
 - Moved MRG node-count/length construction helpers to the myelinated axon layer;
-  `morphology.mrg` now focuses on morphology tables and interpolation.
+  MRG morphology tables are now private implementation details of the MRG-like
+  double-cable template.
 - Simplified `IonChannelModelBase` so sodium, potassium, and calcium-specific
   dynamic helpers are no longer defined on every membrane model.
 - Updated README and examples to the current package API.
@@ -107,6 +118,13 @@ The format is inspired by Keep a Changelog.
   production solvers and runtime helpers.
 - Renamed extracellular context helpers to `add_extracellular_context`,
   `clear_extracellular_contexts`, and `extracellular_potential_mV`.
+- Interpreted `PointSourceElectrode` coordinates in the same global frame as
+  `axon.set_position(...)`; scalar, NumPy evaluation, and pool batch paths now
+  convert point-source y/z coordinates to each axon's local transverse offsets
+  internally.
+- Made fixed-step solver grids exact: `duration_ms` must be an integer multiple
+  of `dt_ms` instead of silently rounding up and simulating past the requested
+  final time.
 - Ignored generated benchmark logs, benchmark figures, NRV figures, caches, and
   local build artifacts.
 
@@ -121,8 +139,24 @@ The format is inspired by Keep a Changelog.
 - Fixed stale internal imports that referenced the old flat module layout.
 - Removed stale playground diagnostics and Crank-Nicholson backend experiments
   that referenced older runtime internals.
-- Removed skipped NRV threshold placeholder tests now covered by monotonicity
-  checks and existing systematic NRV validations.
+- Added explicit guardrails rejecting stateful membrane components in generic
+  `CompositeICM` and heterogeneous membrane layouts until those paths propagate
+  arbitrary membrane state variables.
+- Fixed the MRG point-source threshold validation so it preserves the nominal
+  MRG diameter and aligns the electrode to the central node of Ranvier before
+  checking diameter-dependent threshold monotonicity.
+- Reorganized examples so `examples/basic/` stays didactic, pool dispatch lives
+  under `examples/advanced/`, and timing/profiling demos live under
+  `benchmark/runtime/`.
+- Numbered the example scripts, added explicit units to example variables and
+  axes, and added a minimal no-NRV pool dispatch example before the advanced NRV
+  workflow.
+- Updated examples to construct parameters as Pint quantities through
+  `axonscope.units`, converting to plain arrays only at plotting boundaries.
+- Allowed direct solver time arguments and axon temperatures to accept
+  Pint-like quantities.
+- Removed skipped NRV threshold placeholder tests now covered by extracellular
+  threshold scans and existing systematic NRV validations.
 
 ### Validation
 
@@ -131,6 +165,10 @@ The format is inspired by Keep a Changelog.
   public package exports.
 - NRV comparison tests cover MRG morphology, compartment geometry, intracellular
   models, extracellular models, and velocity/numerical guardrails.
+- The `tests/nrv/extracellular` and `tests/nrv/numerics` subsets pass against
+  the current global point-source and exact fixed-step solver contracts.
+- The `tests/nrv/intracellular` and `tests/nrv/velocity_vs_diameter` subsets
+  also pass against the current solver/runtime organization.
 
 ### Known Notes
 
