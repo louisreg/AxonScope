@@ -4,9 +4,29 @@ from typing import Iterable, Literal
 
 import numpy as np
 
+from axonscope.axons.flattened import flatten_layout
+
 
 AXONSCOPE_TO_NRV_CURRENT_SCALE = 1e-3
 AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE = 1e-3
+
+
+def axonscope_x_um(axon) -> np.ndarray:
+    """Return AxonScope compartment-center positions from the descriptive layout."""
+
+    return np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float)
+
+
+def axonscope_compartment_lengths_um(axon) -> np.ndarray:
+    """Return AxonScope compartment control-volume lengths from the layout."""
+
+    return np.asarray(axon.layout.compartment_length_values(unit="micrometer"), dtype=float)
+
+
+def axonscope_section_names(axon) -> np.ndarray:
+    """Return one section label per AxonScope compartment."""
+
+    return np.asarray(flatten_layout(axon.layout).section_names, dtype=object)
 
 
 def enable_nrv_recordings(axon_nrv) -> None:

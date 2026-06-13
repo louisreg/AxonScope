@@ -1,21 +1,22 @@
 """
-Extracellular — Tigerholm C-fiber activation threshold vs diameter, compared to NRV.
+Extracellular — Tigerholm C-fiber activation threshold monotonicity.
 
 Protocol:
   - Point-source electrode, 100 µm above fiber center.
   - Cathodic monophasic pulse, 100 µs.
   - Binary search for threshold amplitude.
   - Diameters: [0.3, 0.5, 0.7, 0.8, 1.0, 1.2] µm.
-  - Tolerance: 10 % relative on threshold current.
 """
 
 import numpy as np
 import pytest
 
+from axonscope import AxonSimulation, degC, um
+from axonscope.results.analysis import rasterize
 from axonscope.axons.unmyelinated import Tigerholm
-from axonscope.electrodes import PointSourceElectrode
-from axonscope.stimulus import Stimulus
-from axonscope.solvers.CrankNicholson import CrankNicholson
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.stimulation import Stimulus
+from axonscope.solvers.crank_nicholson import CrankNicholson
 
 DIAMETERS_UM = [0.3, 0.5, 0.7, 0.8, 1.0, 1.2]
 ELECTRODE_Y_UM = 100.0
@@ -23,22 +24,26 @@ PULSE_DURATION_MS = 0.1
 SIGMA_S_M = 0.2
 L_UM = 5000.0
 NX = 101
-CELSIUS = 37.0
+CELSIUS = 37.0 * degC
 TSIM = 30.0
 DT = 0.025
-RTOL = 0.10
 
 
 def _has_ap(d: float, amp_uA: float) -> bool:
-    axon = Tigerholm(L=L_UM, d=d, Nx=NX, celsius=CELSIUS)
+    axon = Tigerholm(length=L_UM * um, diameter=d * um, compartments=NX, celsius=CELSIUS)
     x0_um = L_UM / 2.0
-    electrode = PointSourceElectrode(
-        x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0, sigma_S_m=SIGMA_S_M
-    )
+    electrode = PointSourceElectrode(x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0)
     stim = Stimulus.pulse(start=5.0, amplitude=amp_uA * 1e-6, duration=PULSE_DURATION_MS)
-    axon.add_extracellular_ctx(electrode, stim, replace=True)
-    res = CrankNicholson().solve(axon, tsim=TSIM, dt=DT)
-    tAP, _ = res.rasterize()
+    sim = AxonSimulation(axon)
+    sim.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode.with_stimulus(stim)],
+            sigma=SIGMA_S_M,
+        ),
+        replace=True,
+    )
+    res = CrankNicholson().solve(sim, tsim=TSIM, dt=DT)
+    tAP, _ = rasterize(res)
     return len(tAP) >= 3
 
 
@@ -52,11 +57,6 @@ def _binary_search_threshold(d: float, lo: float = 1.0, hi: float = 1000.0, tol:
         if (hi - lo) < tol:
             break
     return (lo + hi) / 2.0
-
-
-@pytest.mark.nrv_extracellular
-def test_unmyelinated_threshold_vs_diameter_nrv():
-    pytest.skip("TODO: run NRV binary-search threshold and compare")
 
 
 @pytest.mark.nrv_extracellular

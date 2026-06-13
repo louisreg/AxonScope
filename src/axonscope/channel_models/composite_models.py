@@ -5,7 +5,7 @@ from typing import Optional
 
 import jax.numpy as jnp
 
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import (
     CompositeICM,
     MembraneStateSpec,

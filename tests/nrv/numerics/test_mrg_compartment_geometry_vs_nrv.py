@@ -5,7 +5,14 @@ import pytest
 
 import nrv
 
+from axonscope import um
 from axonscope.axons.myelinated import MRG
+from axonscope.solvers.axon_runtime import build_solver_axon
+from tests.nrv._helpers import (
+    axonscope_compartment_lengths_um,
+    axonscope_section_names,
+    axonscope_x_um,
+)
 
 
 def _ordered_nrv_sections(axon_nrv) -> list[tuple[str, object]]:
@@ -22,15 +29,15 @@ def _ordered_nrv_sections(axon_nrv) -> list[tuple[str, object]]:
 
 
 def _trim_tiny_terminal_section(sections: list[tuple[str, object]]) -> list[tuple[str, object]]:
-    """NRV can emit a terminal node of ~1e-9 µm due to floating-point stop logic.
+    """NRV can emit a terminal section of ~1e-9 µm due to floating-point stop logic.
 
     This is not a physically meaningful extra compartment, so we trim it before
     strict geometry comparisons.
     """
     if not sections:
         return sections
-    kind, sec = sections[-1]
-    if kind == "node" and float(sec.L) <= 1e-6:
+    _, sec = sections[-1]
+    if float(sec.L) <= 1e-6:
         return sections[:-1]
     return sections
 
@@ -47,8 +54,9 @@ def _normalize_terminal_node_convention(
     keeps the intended full last node. For geometry auditing we strip that lone
     endpoint node so we compare the physically meaningful shared prefix.
     """
-    keep = np.arange(axon_as.Nx, dtype=int)
-    kinds = tuple(axon_as.section_kinds)
+    x_as = axonscope_x_um(axon_as)
+    keep = np.where(x_as <= float(axon_as.length) + 1e-6)[0].astype(int)
+    kinds = tuple(axonscope_section_names(axon_as)[keep])
     if (
         len(kinds) == len(nrv_sections) + 1
         and kinds[-1] == "node"
@@ -63,12 +71,13 @@ def _normalize_terminal_node_convention(
 @pytest.mark.parametrize("diameter_um", [5.7, 8.7, 10.0, 14.0])
 @pytest.mark.parametrize("nodes", [3, 5, 11])
 def test_mrg_compartment_geometry_matches_nrv(diameter_um: float, nodes: int) -> None:
-    axon_as = MRG(d=diameter_um, nodes=nodes)
+    axon_as = MRG(diameter=diameter_um * um, nodes=nodes)
+    solver_as = build_solver_axon(axon_as)
     axon_nrv = nrv.myelinated(
         0,
         0,
         diameter_um,
-        float(axon_as.L),
+        float(axon_as.length),
         model="MRG",
         dt=0.005,
         node_shift=0,
@@ -85,13 +94,13 @@ def test_mrg_compartment_geometry_matches_nrv(diameter_um: float, nodes: int) ->
     assert as_kinds == nrv_kinds
     assert keep_as.size == len(nrv_sections)
 
-    lengths_as = np.asarray(axon_as.compartment_lengths_um, dtype=float)[keep_as]
-    diam_as = np.asarray(axon_as.diam_vec, dtype=float)[keep_as]
-    ra_as = np.asarray(axon_as.Ra_vec, dtype=float)[keep_as]
-    cm_as = np.asarray(axon_as.Cm_vec, dtype=float)[keep_as]
-    xraxial_as = np.asarray(axon_as.xraxial_vec, dtype=float)[keep_as]
-    xg_as = np.asarray(axon_as.xg_vec, dtype=float)[keep_as]
-    xc_as = np.asarray(axon_as.xc_vec, dtype=float)[keep_as]
+    lengths_as = axonscope_compartment_lengths_um(axon_as)[keep_as]
+    diam_as = np.asarray(solver_as.diam_um, dtype=float)[keep_as]
+    ra_as = np.asarray(solver_as.Ra_ohm_cm, dtype=float)[keep_as]
+    cm_as = np.asarray(solver_as.Cm_uF_cm2, dtype=float)[keep_as]
+    xraxial_as = np.asarray(solver_as.xraxial_MOhm_per_cm, dtype=float)[keep_as]
+    xg_as = np.asarray(solver_as.xg_S_cm2, dtype=float)[keep_as]
+    xc_as = np.asarray(solver_as.xc_uF_cm2, dtype=float)[keep_as]
 
     lengths_nrv = np.asarray([float(sec.L) for _, sec in nrv_sections], dtype=float)
     diam_nrv = np.asarray([float(sec.diam) for _, sec in nrv_sections], dtype=float)
@@ -109,7 +118,7 @@ def test_mrg_compartment_geometry_matches_nrv(diameter_um: float, nodes: int) ->
     np.testing.assert_allclose(xg_as, xg_nrv, rtol=0.0, atol=1e-8)
     np.testing.assert_allclose(xc_as, xc_nrv, rtol=0.0, atol=1e-8)
 
-    x_as = np.asarray(axon_as.x, dtype=float)[keep_as]
+    x_as = axonscope_x_um(axon_as)[keep_as]
     x_nrv = np.cumsum(lengths_nrv) - 0.5 * lengths_nrv
     np.testing.assert_allclose(x_as, x_nrv, rtol=0.0, atol=2e-3)
 

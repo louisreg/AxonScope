@@ -1,16 +1,23 @@
-from axonscope.axons.base import AxonBase
-from axonscope.axons.generic import GenericAxon, Passive
-from axonscope.axons.multicomp import (
-    AxonMultiCompBase,
-    DoubleCableAxon,
-    GenericMultiCompAxon,
-    MultiCompGeometry,
-)
-from axonscope.axons.myelinated import (
-    MRG,
-    Myelinated,
-    mrg_length_from_nodes,
-    mrg_nodes_from_length,
+"""Descriptive axon, section layout, and template API."""
+
+from axonscope.axons.axon import Axon
+from axonscope.axons.flattened import FlattenedLayout, flatten_layout
+from axonscope.axons.formulation import Formulation, infer_formulation, resolve_formulation
+from axonscope.axons.layout import Layout, LayoutElement
+from axonscope.axons.myelinated import MRG, Myelinated
+from axonscope.axons.plotting import plot_layout
+from axonscope.axons.section import PeriaxonalLayer, Section
+from axonscope.axons.templates import (
+    MRGLikeDoubleCableGeometry,
+    MRGLikeDoubleCableTemplate,
+    SectionCompartments,
+    build_mrg_like_geometry,
+    default_mrg_like_membranes,
+    layout_from_mrg_like_geometry,
+    mrg_like_layout,
+    mrg_like_length_from_nodes,
+    mrg_like_nodes_from_length,
+    mrg_like_section_sequence,
 )
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
@@ -19,12 +26,22 @@ from axonscope.axons.unmyelinated import (
     Schild97,
     Sundt,
     Tigerholm,
+    Unmyelinated,
 )
 
 __all__ = [
-    "AxonBase",
-    "GenericAxon",
-    "Passive",
+    "Axon",
+    "Section",
+    "PeriaxonalLayer",
+    "Layout",
+    "LayoutElement",
+    "FlattenedLayout",
+    "flatten_layout",
+    "infer_formulation",
+    "resolve_formulation",
+    "plot_layout",
+    "Formulation",
+    "Unmyelinated",
     "HodgkinHuxley",
     "RattayAberham",
     "Sundt",
@@ -33,10 +50,14 @@ __all__ = [
     "Schild97",
     "Myelinated",
     "MRG",
-    "mrg_length_from_nodes",
-    "mrg_nodes_from_length",
-    "MultiCompGeometry",
-    "DoubleCableAxon",
-    "AxonMultiCompBase",
-    "GenericMultiCompAxon",
+    "MRGLikeDoubleCableGeometry",
+    "MRGLikeDoubleCableTemplate",
+    "SectionCompartments",
+    "build_mrg_like_geometry",
+    "default_mrg_like_membranes",
+    "layout_from_mrg_like_geometry",
+    "mrg_like_layout",
+    "mrg_like_length_from_nodes",
+    "mrg_like_nodes_from_length",
+    "mrg_like_section_sequence",
 ]

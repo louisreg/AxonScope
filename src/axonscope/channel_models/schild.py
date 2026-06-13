@@ -13,7 +13,7 @@ Catherall, D. (2016). NMODL implementations, Grill Lab, Duke University.
 
 from __future__ import annotations
 import jax.numpy as jnp
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 
 
@@ -44,6 +44,13 @@ def _alpha_beta_from_tau_inf(V, tau, xinf):
     return alpha, beta
 
 
+def _stack_rate_pairs(*rates):
+    """Pack interleaved alpha/beta vectors into two rate matrices."""
+    alpha = jnp.stack(rates[0::2], axis=-1)
+    beta = jnp.stack(rates[1::2], axis=-1)
+    return alpha, beta
+
+
 # ---------------------------------------------------------------------------
 # Schild 94 — Fast Na  (naf.mod)
 # ---------------------------------------------------------------------------
@@ -65,7 +72,7 @@ class NafSchildICM(IonChannelModelBase):
         self._q10m = dtype(2.30 ** ((celsius - 22.85) / 10.0))
         self._q10h = dtype(1.50 ** ((celsius - 22.85) / 10.0))
 
-    def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
+    def _rates(self, V: jnp.ndarray):
         shift = dtype(-17.5)
         tau_m = _gauss_tau(V, 0.75, 0.0635, 0.12, -40.35) / self._q10m
         minf = _boltz(V, -41.35, 4.75, shift)
@@ -79,32 +86,25 @@ class NafSchildICM(IonChannelModelBase):
         tau_j = dtype(25.0) / (dtype(1.0) + jnp.exp((V + dtype(-20.0)) / dtype(4.50))) + dtype(0.01)
         jinf = _boltz(V, -40.0, -1.50, 0.0)  # S0p5j=-1.5 → decreasing sigmoid
         aj, bj = _alpha_beta_from_tau_inf(V, tau_j, jinf)
-        del bm, bh, bj
-        return jnp.stack([am, ah, aj], axis=-1)
+        return am, bm, ah, bh, aj, bj
+
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
+    def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        shift = dtype(-17.5)
-        tau_m = _gauss_tau(V, 0.75, 0.0635, 0.12, -40.35) / self._q10m
-        minf = _boltz(V, -41.35, 4.75, shift)
-        am, bm = _alpha_beta_from_tau_inf(V, tau_m, minf)
-
-        tau_h = _gauss_tau(V, 6.5, 0.0295, 0.55, -75.0) / self._q10h
-        hinf = _boltz(V, -62.0, -4.50, shift)  # S0p5h=-4.5 → decreasing sigmoid
-        ah, bh = _alpha_beta_from_tau_inf(V, tau_h, hinf)
-
-        tau_j = dtype(25.0) / (dtype(1.0) + jnp.exp((V + dtype(-20.0)) / dtype(4.50))) + dtype(0.01)
-        jinf = _boltz(V, -40.0, -1.50, 0.0)  # S0p5j=-1.5 → decreasing sigmoid
-        aj, bj = _alpha_beta_from_tau_inf(V, tau_j, jinf)
-        del am, ah, aj
-        return jnp.stack([bm, bh, bj], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         m, h, j = gates[:, 0], gates[:, 1], gates[:, 2]
         return (g_bar[0] * m ** 3 * h * j)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -145,21 +145,23 @@ class NasSchildICM(IonChannelModelBase):
         ah, bh = _alpha_beta_from_tau_inf(V, tau_h, hinf)
         return am, bm, ah, bh
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        am, _, ah, _ = self._rates(V)
-        return jnp.stack([am, ah], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bm, _, bh = self._rates(V)
-        return jnp.stack([bm, bh], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         m, h = gates[:, 0], gates[:, 1]
         return (g_bar[0] * m ** 3 * h)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -196,21 +198,23 @@ class Naf97ICM(IonChannelModelBase):
         ah, bh = _alpha_beta_from_tau_inf(V, tau_h, hinf)
         return am, bm, ah, bh
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        am, _, ah, _ = self._rates(V)
-        return jnp.stack([am, ah], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bm, _, bh = self._rates(V)
-        return jnp.stack([bm, bh], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         m, h = gates[:, 0], gates[:, 1]
         return (g_bar[0] * m ** 3 * h)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -247,21 +251,23 @@ class Nas97ICM(IonChannelModelBase):
         ah, bh = _alpha_beta_from_tau_inf(V, tau_h, hinf)
         return am, bm, ah, bh
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        am, _, ah, _ = self._rates(V)
-        return jnp.stack([am, ah], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bm, _, bh = self._rates(V)
-        return jnp.stack([bm, bh], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         m, h = gates[:, 0], gates[:, 1]
         return (g_bar[0] * m ** 3 * h)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -305,21 +311,24 @@ class KdSchildICM(IonChannelModelBase):
         tau_n = tau_n_raw / self._q10
         return _alpha_beta_from_tau_inf(V, tau_n, ninf)
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        a, b = self._rates(V)
+        return a[:, None], b[:, None]
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        a, _ = self._rates(V)
-        return a[:, None]
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, b = self._rates(V)
-        return b[:, None]
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         n = gates[:, 0]
         return (g_bar[0] * n)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -356,21 +365,23 @@ class KaSchildICM(IonChannelModelBase):
         aq, bq = _alpha_beta_from_tau_inf(V, tau_q, qinf)
         return ap, bp, aq, bq
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        ap, _, aq, _ = self._rates(V)
-        return jnp.stack([ap, aq], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bp, _, bq = self._rates(V)
-        return jnp.stack([bp, bq], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         p, q = gates[:, 0], gates[:, 1]
         return (g_bar[0] * p ** 3 * q)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -408,21 +419,23 @@ class KdsSchildICM(IonChannelModelBase):
         ay, by = _alpha_beta_from_tau_inf(V, self._tau_y, yinf)
         return ax, bx, ay, by
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        ax, _, ay, _ = self._rates(V)
-        return jnp.stack([ax, ay], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bx, _, by = self._rates(V)
-        return jnp.stack([bx, by], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         x, y = gates[:, 0], gates[:, 1]
         return (g_bar[0] * x ** 3 * y)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -470,21 +483,23 @@ class CaNICM(IonChannelModelBase):
         af2, bf2 = _alpha_beta_from_tau_inf(V, tau_f2, f2inf)
         return ad, bd, af1, bf1, af2, bf2
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        ad, _, af1, _, af2, _ = self._rates(V)
-        return jnp.stack([ad, af1, af2], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bd, _, bf1, _, bf2 = self._rates(V)
-        return jnp.stack([bd, bf1, bf2], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         d, f1, f2 = gates[:, 0], gates[:, 1], gates[:, 2]
         return (g_bar[0] * d * (dtype(0.55) * f1 + dtype(0.45) * f2))[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -526,21 +541,23 @@ class CaTICM(IonChannelModelBase):
         af, bf = _alpha_beta_from_tau_inf(V, tau_f, finf)
         return ad, bd, af, bf
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        return _stack_rate_pairs(*self._rates(V))
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        ad, _, af, _ = self._rates(V)
-        return jnp.stack([ad, af], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
-        _, bd, _, bf = self._rates(V)
-        return jnp.stack([bd, bf], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         d, f = gates[:, 0], gates[:, 1]
         return (g_bar[0] * d * f)[:, None]
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        from axonscope.icm import Gating
-        g_inf, _ = Gating.rates(jnp.atleast_1d(V0_mV), self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(jnp.atleast_1d(V0_mV))
         return g_inf
 
     @property
@@ -581,6 +598,10 @@ class LeakSchildICM(IonChannelModelBase):
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros((V.shape[0], 0), dtype=dtype)
+
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        empty = jnp.zeros((V.shape[0], 0), dtype=dtype)
+        return empty, empty
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         N = gates.shape[0]

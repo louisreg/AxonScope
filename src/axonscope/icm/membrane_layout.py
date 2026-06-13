@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 from axonscope.icm.backends import HeterogeneousICMBackend, ICMBackend
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 
 
 def _unique_names(models: Sequence[IonChannelModelBase], method_name: str) -> tuple[str, ...]:
@@ -53,6 +53,17 @@ class HeterogeneousMembraneModel(IonChannelModelBase):
         super().__init__()
         self.layout = layout
         self.models = layout.models
+        stateful = [
+            model.__class__.__name__
+            for model in self.models
+            if model.membrane_state_specs()
+        ]
+        if stateful:
+            names = ", ".join(stateful)
+            raise NotImplementedError(
+                "HeterogeneousMembraneModel does not yet support stateful "
+                f"membrane components; got: {names}."
+            )
         self.backend = layout.build_backend()
         self.dtype = self.backend.dtype
         self.q10 = self.models[0].q10
@@ -65,6 +76,12 @@ class HeterogeneousMembraneModel(IonChannelModelBase):
 
     def build_icm_backend(self) -> ICMBackend:
         return self.backend
+
+    def supports_stateless_vm_only_fast_path(self) -> bool:
+        return all(
+            model.supports_stateless_vm_only_fast_path()
+            for model in self.models
+        )
 
     @property
     def g_bar(self) -> jnp.ndarray:

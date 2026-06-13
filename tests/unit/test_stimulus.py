@@ -1,11 +1,15 @@
-# tests/test_stimulus.py
-
 import numpy as np
 import pytest
 
-from axonscope.stimulus import Stimulus
-from axonscope.solvers.stimulus_runtime import compile_stimulus
-from axonscope.stimulus_eval import evaluate_stimulus_numpy
+import axonscope as axs
+from axonscope.stimulation import Stimulus
+from axonscope.stimulation import (
+    ExtracellularContext,
+    IntracellularContext,
+    IntracellularCurrentClamp,
+    PointSourceElectrode,
+)
+from axonscope.stimulation.runtime import compile_stimulus
 
 
 # ==========================================================
@@ -15,8 +19,8 @@ from axonscope.stimulus_eval import evaluate_stimulus_numpy
 def test_constant_stimulus():
     stim = Stimulus.constant(5.0)
 
-    assert np.isclose(evaluate_stimulus_numpy(stim, [0.0])[0], 5.0)
-    assert np.isclose(evaluate_stimulus_numpy(stim, [10.0])[0], 5.0)
+    assert np.isclose(stim.evaluate([0.0])[0], 5.0)
+    assert np.isclose(stim.evaluate([10.0])[0], 5.0)
 
 
 def test_pulse_stimulus():
@@ -27,7 +31,7 @@ def test_pulse_stimulus():
         baseline=0.0,
     )
 
-    vals = evaluate_stimulus_numpy(stim, [0.5, 1.5, 3.5])
+    vals = stim.evaluate([0.5, 1.5, 3.5])
 
     assert np.isclose(vals[0], 0.0)
     assert np.isclose(vals[1], 3.0)
@@ -42,7 +46,7 @@ def test_biphasic_stimulus():
         interphase=0.1,
     )
 
-    vals = evaluate_stimulus_numpy(stim, [1.05, 1.25, 1.35])
+    vals = stim.evaluate([1.05, 1.25, 1.35])
 
     # first phase cathodic
     assert vals[0] < 0.0
@@ -63,11 +67,50 @@ def test_ramp_linear():
         dt=0.1,
     )
 
-    vals = evaluate_stimulus_numpy(stim, [0.0, 0.5, 1.0])
+    vals = stim.evaluate([0.0, 0.5, 1.0])
 
     assert np.isclose(vals[0], 0.0)
     assert np.isclose(vals[1], 5.0, atol=1e-6)
     assert np.isclose(vals[2], 10.0)
+
+
+def test_evaluate_accepts_pint_time_and_output_unit():
+    stim = Stimulus.pulse(
+        start=1.0 * axs.ms,
+        duration=1.0 * axs.ms,
+        amplitude=2.0 * axs.nA,
+    )
+
+    vals_nA = stim.evaluate(np.asarray([0.5, 1.5, 2.5]) * axs.ms, unit=axs.nA)
+    vals_A = stim.evaluate(np.asarray([1.5]) * axs.ms, unit=axs.A)
+
+    assert stim.y_unit == "nanoampere"
+    assert np.allclose(vals_nA, [0.0, 2.0, 0.0])
+    assert np.allclose(vals_A, [2.0e-9])
+
+
+def test_plot_accepts_unit_aware_time_grid():
+    import matplotlib.pyplot as plt
+
+    stim = Stimulus.pulse(
+        start=1.0 * axs.ms,
+        duration=1.0 * axs.ms,
+        amplitude=2.0 * axs.nA,
+    )
+
+    fig, ax = plt.subplots()
+    try:
+        returned = stim.plot(
+            np.linspace(0.0, 3.0, 100) * axs.ms,
+            ax=ax,
+            amplitude_unit=axs.nA,
+        )
+        assert returned is ax
+        assert len(ax.lines) == 1
+        assert ax.get_xlabel() == "Time [ms]"
+        assert ax.get_ylabel() == "Amplitude [nA]"
+    finally:
+        plt.close(fig)
 
 
 # ==========================================================
@@ -90,7 +133,7 @@ def test_duplicate_times_keep_last_value():
         y=np.array([0.0, 5.0, 7.0, 0.0]),
     )
 
-    val = evaluate_stimulus_numpy(stim, [1.0])[0]
+    val = stim.evaluate([1.0])[0]
     assert np.isclose(val, 7.0)
 
 
@@ -102,14 +145,14 @@ def test_add_scalar():
     stim = Stimulus.constant(2.0)
     out = stim + 3.0
 
-    assert np.isclose(evaluate_stimulus_numpy(out, [0])[0], 5.0)
+    assert np.isclose(out.evaluate([0])[0], 5.0)
 
 
 def test_multiply_scalar():
     stim = Stimulus.constant(4.0)
     out = 0.5 * stim
 
-    assert np.isclose(evaluate_stimulus_numpy(out, [0])[0], 2.0)
+    assert np.isclose(out.evaluate([0])[0], 2.0)
 
 
 def test_add_two_stimuli():
@@ -118,7 +161,7 @@ def test_add_two_stimuli():
 
     c = a + b
 
-    vals = evaluate_stimulus_numpy(c, [0.0, 1.5, 3.0])
+    vals = c.evaluate([0.0, 1.5, 3.0])
 
     assert np.isclose(vals[0], 1.0)
     assert np.isclose(vals[1], 3.0)
@@ -131,7 +174,7 @@ def test_sub_two_stimuli():
 
     c = a - b
 
-    assert np.isclose(evaluate_stimulus_numpy(c, [0])[0], 3.0)
+    assert np.isclose(c.evaluate([0])[0], 3.0)
 
 
 # ==========================================================
@@ -142,7 +185,7 @@ def test_shift():
     stim = Stimulus.pulse(1.0, 3.0, 1.0)
     shifted = stim.shifted(2.0)
 
-    vals = evaluate_stimulus_numpy(shifted, [1.5, 3.5])
+    vals = shifted.evaluate([1.5, 3.5])
 
     assert np.isclose(vals[0], 0.0)
     assert np.isclose(vals[1], 3.0)
@@ -152,14 +195,14 @@ def test_scaled():
     stim = Stimulus.constant(2.0)
     out = stim.scaled(4.0)
 
-    assert np.isclose(evaluate_stimulus_numpy(out, [0])[0], 8.0)
+    assert np.isclose(out.evaluate([0])[0], 8.0)
 
 
 def test_offset():
     stim = Stimulus.constant(2.0)
     out = stim.offset(-1.0)
 
-    assert np.isclose(evaluate_stimulus_numpy(out, [0])[0], 1.0)
+    assert np.isclose(out.evaluate([0])[0], 1.0)
 
 
 # ==========================================================
@@ -186,6 +229,21 @@ def test_compile_stimulus_callable():
 
     val = float(jstim(1.5))
     assert np.isclose(val, 5.0)
+
+
+def test_physical_contexts_assign_canonical_current_units():
+    stim = Stimulus.pulse(1.0, 2.0, 1.0)
+
+    clamp = IntracellularCurrentClamp(position_um=100.0, current=stim)
+    assert isinstance(clamp, IntracellularContext)
+    assert clamp.position_um == 100.0
+    assert clamp.current.y_unit == "nanoampere"
+    assert np.allclose(clamp.current.y, stim.y)
+
+    electrode = PointSourceElectrode(x_um=0.0, stimulus=stim)
+    context = ExtracellularContext(electrodes=[electrode])
+    assert context.electrodes[0].stimulus.y_unit == "ampere"
+    assert np.allclose(context.electrodes[0].stimulus.y, stim.y)
 
 
 # ==========================================================

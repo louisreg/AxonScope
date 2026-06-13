@@ -2,11 +2,12 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+from axonscope.channel_models import RateTableConfig, enable_rate_tables
 from axonscope.channel_models.passive import PassiveICM
-from axonscope.channel_models.base_channel_model import IonChannelModelBase, MembraneStateSpec
+from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase, MembraneStateSpec
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM 
 from axonscope.icm import Gating
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 
 
 def test_base_membrane_state_api_is_generic():
@@ -25,6 +26,27 @@ def test_base_membrane_state_api_is_generic():
         "has_ko_dynamics",
     ):
         assert not hasattr(IonChannelModelBase, method_name)
+
+
+def test_channel_model_static_identity_is_structural():
+    passive_a = PassiveICM(Rm=1e4, EL=-70.0)
+    passive_b = PassiveICM(Rm=1e4, EL=-70.0)
+    passive_c = PassiveICM(Rm=1e4, EL=-65.0)
+    assert passive_a == passive_b
+    assert hash(passive_a) == hash(passive_b)
+    assert passive_a != passive_c
+
+    hh_a = HodgkinHuxleyICM(celsius=6.3)
+    hh_b = HodgkinHuxleyICM(celsius=6.3)
+    hh_hot = HodgkinHuxleyICM(celsius=20.0)
+    assert hh_a == hh_b
+    assert hash(hh_a) == hash(hh_b)
+    assert hh_a != hh_hot
+
+    comp_a = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e3, EL=-70.0)])
+    comp_b = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e3, EL=-70.0)])
+    assert comp_a == comp_b
+    assert hash(comp_a) == hash(comp_b)
 
 # ----------------- Tests Passive -----------------
 def test_passive_model():
@@ -105,6 +127,71 @@ def test_hh_model():
     assert Gm.shape == (2,)
     assert GE.shape == (2,)
     assert jnp.all(Gm >= 0.0)
+
+
+def test_rate_constants_api_matches_legacy_alpha_beta():
+    model = HodgkinHuxleyICM()
+    V0 = jnp.array([-65.0, -62.5, -60.0], dtype=dtype)
+
+    alpha, beta = model.rate_constants(V0)
+    assert jnp.allclose(alpha, model.alpha_funcs(V0))
+    assert jnp.allclose(beta, model.beta_funcs(V0))
+
+    g_inf, tau = model.gating_inf_tau(V0)
+    legacy_inf, legacy_tau = Gating.rates(V0, model.q10, model.alpha_funcs, model.beta_funcs)
+    assert jnp.allclose(g_inf, legacy_inf)
+    assert jnp.allclose(tau, legacy_tau)
+
+
+def test_rate_table_interpolates_rates_and_gate_update():
+    exact = HodgkinHuxleyICM()
+    tabulated = HodgkinHuxleyICM().enable_rate_table(
+        v_min_mV=-80.0,
+        v_max_mV=-40.0,
+        step_mV=0.05,
+    )
+    V0 = jnp.array([-65.03, -62.51, -59.97], dtype=dtype)
+    gates = exact.init_gates(V0)
+
+    alpha_exact, beta_exact = exact.rate_constants(V0)
+    alpha_lut, beta_lut = tabulated.rate_constants(V0)
+    assert jnp.allclose(alpha_lut, alpha_exact, rtol=2e-4, atol=2e-5)
+    assert jnp.allclose(beta_lut, beta_exact, rtol=2e-4, atol=2e-5)
+
+    exact_update = exact.cn_gate_update(g_prev=gates, V_mV=V0, dt=0.01)
+    lut_update = tabulated.cn_gate_update(g_prev=gates, V_mV=V0, dt=0.01)
+    assert jnp.allclose(lut_update, exact_update, rtol=2e-5, atol=2e-6)
+    assert tabulated.has_rate_table
+    assert tabulated.rate_table_config == RateTableConfig(
+        v_min_mV=-80.0,
+        v_max_mV=-40.0,
+        step_mV=0.05,
+        clamp=True,
+    )
+
+    tabulated.disable_rate_table()
+    assert not tabulated.has_rate_table
+
+
+def test_composite_rate_constants_pack_submodels_once():
+    model = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e4, EL=-70.0)])
+    V0 = jnp.array([-65.0, -60.0], dtype=dtype)
+    alpha, beta = model.rate_constants(V0)
+    assert alpha.shape == (2, 3)
+    assert beta.shape == (2, 3)
+
+    tabulated = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e4, EL=-70.0)])
+    tabulated.enable_rate_table(v_min_mV=-80.0, v_max_mV=-40.0, step_mV=0.05)
+    alpha_lut, beta_lut = tabulated.rate_constants(V0)
+    assert jnp.allclose(alpha_lut, alpha)
+    assert jnp.allclose(beta_lut, beta)
+
+
+def test_enable_rate_tables_helper_uses_aggregate_table_for_composites():
+    model = CompositeICM([HodgkinHuxleyICM(), PassiveICM(Rm=1e4, EL=-70.0)])
+    count = enable_rate_tables(model, v_min_mV=-80.0, v_max_mV=-40.0, step_mV=0.05)
+    assert count == 1
+    assert model.has_rate_table
 
 # ----------------- Tests JIT -----------------
 def test_jit_compatibility():

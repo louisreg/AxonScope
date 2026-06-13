@@ -1,7 +1,7 @@
 from __future__ import annotations
 import jax.numpy as jnp
 from axonscope.utils.math_functions import vtrap_jax as vtrap
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 from axonscope.icm import Gating
 
