@@ -18,10 +18,11 @@ if __package__ in (None, ""):
 
 import numpy as np
 
+from axonscope import AxonSimulation, degC, mV, um
 from axonscope.axons import HodgkinHuxley, MRG
-from axonscope.electrodes import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.solvers import CrankNicholson
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
 
 
 ModelName = Literal["hh_intracellular", "mrg_intracellular", "mrg_extracellular"]
@@ -210,7 +211,7 @@ def run_case(
 
     vm_as = as_data["Vm"].T
     t_as = as_data["t"]
-    x_as = np.asarray(axon_as.x, dtype=float).ravel()
+    x_as = np.asarray(axon_as.layout.position_values(unit="micrometer"), dtype=float).ravel()
     vm_nrv, x_nrv, t_nrv = _nrv_vm_matrix(nrv_data)
     x_target, vm_nrv_aligned, row_idx = _align_rows_to_target_x(x_nrv, vm_nrv, x_as)
     vm_nrv_interp = _interp_rows(vm_nrv_aligned, t_nrv, t_as)
@@ -370,43 +371,42 @@ def _make_axonscope_case(case: GridCase):
         if case.nx is None:
             raise ValueError("HH cases require nx.")
         axon = HodgkinHuxley(
-            L=1000.0,
-            d=case.diameter_um,
-            Nx=case.nx,
-            celsius=6.3,
-            Vinit=-70.0,
+            length=1000.0 * um,
+            diameter=case.diameter_um * um,
+            compartments=case.nx,
+            celsius=6.3 * degC,
+            v_init=-70.0 * mV,
             include_passive_leak=True,
             g_pas=0.001,
             e_pas=-70.0,
         )
-        axon.insert_I_Clamp(
-            position=500.0,
-            stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
+        simulation = AxonSimulation(axon)
+        simulation.add_current_clamp(position_um=500.0,
+            current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
         )
-        axon.comparison_sample_position_um = 500.0
-        return axon
+        simulation.comparison_sample_position_um = 500.0
+        return simulation
 
     if case.nodes is None:
         raise ValueError("MRG cases require nodes.")
-    axon = MRG(d=case.diameter_um, nodes=case.nodes)
+    axon = MRG(diameter=case.diameter_um * um, nodes=case.nodes)
     center_node_idx, center_node_pos_um = _mrg_center_node(axon)
-    axon.comparison_sample_position_um = center_node_pos_um
+    simulation = AxonSimulation(axon)
+    simulation.comparison_sample_position_um = center_node_pos_um
 
     if case.model == "mrg_intracellular":
-        axon.insert_I_Clamp(
-            position=center_node_pos_um,
-            stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0),
+        simulation.add_current_clamp(position_um=center_node_pos_um,
+            current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0),
         )
-        return axon
+        return simulation
 
     if case.model == "mrg_extracellular":
         _ = center_node_idx
-        x0_um = float(axon.L / 2.0)
+        x0_um = float(axon.length / 2.0)
         electrode = PointSourceElectrode(
             x0_m=x0_um * 1e-6,
             y0_m=100e-6,
             z0_m=0.0,
-            sigma_S_m=0.2,
         )
         stim = Stimulus.biphasic(
             start=1.0,
@@ -415,8 +415,14 @@ def _make_axonscope_case(case: GridCase):
             anodic_amplitude=20e-6,
             interphase=0.04,
         )
-        axon.add_extracellular_context(electrode, stim, replace=True)
-        return axon
+        simulation.add_extracellular_context(
+            context=AnalyticalExtracellularContext(
+                electrodes=[electrode.with_stimulus(stim)],
+                sigma=0.2,
+            ),
+            replace=True,
+        )
+        return simulation
 
     raise ValueError(f"Unsupported model: {case.model}")
 
@@ -446,7 +452,7 @@ def _make_nrv_case(case: GridCase, axon_as):
         0,
         0,
         case.diameter_um,
-        float(axon_as.L),
+        float(axon_as.length),
         model="MRG",
         dt=case.dt_ms,
         node_shift=0,
@@ -461,7 +467,7 @@ def _make_nrv_case(case: GridCase, axon_as):
         return axon
 
     if case.model == "mrg_extracellular":
-        x0_um = float(axon_as.L / 2.0)
+        x0_um = float(axon_as.length / 2.0)
         electrode = nrv.point_source_electrode(x0_um, 100.0, 0.0)
         stim = nrv.stimulus()
         stim.biphasic_pulse(1.0, 80.0, 0.08, 20.0, 0.04)
@@ -604,7 +610,7 @@ def _mrg_center_node(axon: MRG) -> tuple[int, float]:
     node_ids = np.asarray(axon.node_indices, dtype=int)
     node_pos = int(node_ids.shape[0] // 2)
     comp_idx = int(node_ids[node_pos])
-    return comp_idx, float(np.asarray(axon.x, dtype=float)[comp_idx])
+    return comp_idx, float(np.asarray(axon.layout.position_values(unit="micrometer"))[comp_idx])
 
 
 def _sample_index(axon_as, x_as_um: np.ndarray) -> int:

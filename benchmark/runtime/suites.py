@@ -104,10 +104,10 @@ RUNTIME_SUITES: dict[str, RuntimeSuite] = {
             "1",
         ),
     ),
-    "population_memory": RuntimeSuite(
-        name="population_memory",
-        description="Population batch memory/runtime scenarios with probes and time chunking.",
-        runner="population_memory",
+    "pool_memory": RuntimeSuite(
+        name="pool_memory",
+        description="Pool batch memory/runtime scenarios with probes and time chunking.",
+        runner="pool_memory",
         args=(
             "--mode",
             "double",

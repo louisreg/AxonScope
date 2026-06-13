@@ -12,7 +12,7 @@ import numpy as np
 
 from axonscope.benchmarking import collect_benchmark_metadata
 from axonscope.stimulation import ExtracellularContext
-from axonscope.solvers import scale_extracellular_contexts
+from axonscope.dispatcher.runtime_batches import scale_extracellular_contexts
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,7 @@ def row_to_dict(row: object) -> dict[str, object]:
 
 def flatten_row(row: dict[str, object]) -> dict[str, object]:
     flat = dict(row)
-    for key in ("scalar_warm", "batch_warm"):
+    for key in ("scalar_warm", "batch_warm", "warm"):
         if key not in flat:
             continue
         stats = flat.pop(key)

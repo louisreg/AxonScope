@@ -18,7 +18,8 @@ htmlcov/
 #Macos 
 .DS_Store
 
-#uv
+# Lock files are local for now: AxonScope is a library with ranged dependencies.
+# Commit one later only if the project switches to a fully pinned app/research env.
 uv.lock
 poetry.lock
 

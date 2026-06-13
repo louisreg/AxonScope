@@ -3,9 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytest
 from pathlib import Path
-from axonscope.axons.generic import Passive
-from axonscope.solvers.euler import Euler
-from axonscope.stimulus import Stimulus
+from axonscope import AxonSimulation
+from axonscope import membranes
+from axonscope.axons import Axon, Layout, Section
+from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.stimulation import Stimulus
+from axonscope.utils import units
 
 import sys
 sys.path.append("./external/")
@@ -33,11 +36,25 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
 
     # ---- Python Axon ----
     
-    axon_py = Passive(L=L, d=d, Nx=Nx, Cm=Cm, Rm=1/Gl, Ra=rho, EL=EL)
-    axon_py.insert_I_Clamp(position=0.5*L, stimulus=Stimulus.pulse(start=t_start, duration=t_on, amplitude=I_inj_nA))
+    axon_py = Axon(
+        layout=Layout.single_uniform(
+            Section(
+                "passive",
+                membrane=membranes.Passive(Rm=1 / Gl, EL=EL),
+                diameter=units.Q_(d, "micrometer"),
+                Ra=units.Q_(rho, "ohm * centimeter"),
+                Cm=units.Q_(Cm, "microfarad / centimeter ** 2"),
+            ),
+            length=units.Q_(L, "micrometer"),
+            compartments=Nx,
+        ),
+        v_init=units.Q_(EL, "millivolt"),
+    )
+    sim_py = AxonSimulation(axon_py)
+    sim_py.add_current_clamp(position_um=0.5*L, current=Stimulus.pulse(start=t_start, duration=t_on, amplitude=I_inj_nA))
     
-    solver = Euler()
-    res = solver.solve(axon_py, tsim=Tsim, dt=1e-3)
+    solver = CrankNicholson()
+    res = solver.solve(sim_py, tsim=Tsim, dt=1e-3)
     dt = (res.t[1]-res.t[0])
 
     
@@ -63,7 +80,8 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     """
     # ---- Choose positions along the axon ----
     x_positions = [0, L/3, L/2, 2*L/3, L]
-    indices = [np.argmin(np.abs(axon_py.x - xp)) for xp in x_positions]
+    x_um = axon_py.layout.position_values(unit="micrometer")
+    indices = [np.argmin(np.abs(x_um - xp)) for xp in x_positions]
     
     fig, ax_x = plt.subplots(figsize=(8,5))
     for idx, xp in zip(indices, x_positions):

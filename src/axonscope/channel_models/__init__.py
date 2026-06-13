@@ -5,6 +5,12 @@ from axonscope.channel_models.base_channel_model import (
     MembraneStateSpec,
     MembraneStepPlan,
 )
+from axonscope.channel_models.rate_tables import (
+    RateTable,
+    RateTableConfig,
+    disable_rate_tables,
+    enable_rate_tables,
+)
 from axonscope.channel_models.borg_kdr import BorgKDRICM
 from axonscope.channel_models.composite_models import (
     Schild94CompositeICM,
@@ -21,6 +27,10 @@ __all__ = [
     "CompositeICM",
     "MembraneStateSpec",
     "MembraneStepPlan",
+    "RateTable",
+    "RateTableConfig",
+    "enable_rate_tables",
+    "disable_rate_tables",
     "PassiveICM",
     "HodgkinHuxleyICM",
     "RattayAberhamICM",

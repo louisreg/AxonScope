@@ -1,9 +1,8 @@
 from __future__ import annotations
 import jax.numpy as jnp
 from axonscope.utils.math_functions import vtrap_jax as vtrap
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
-from axonscope.icm import Gating
 
 class HodgkinHuxleyICM(IonChannelModelBase):
     """
@@ -90,6 +89,40 @@ class HodgkinHuxleyICM(IonChannelModelBase):
         self.celsius: float = dtype(celsius)
         self.q10: float = dtype(3.0 ** ((celsius - 6.3) / 10.0))
 
+    def exact_rate_constants(self, V: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Compute alpha and beta rate constants for m, h, n gating variables.
+
+        Parameters
+        ----------
+        V : jnp.ndarray, shape (N,)
+            Membrane voltage in mV.
+
+        Returns
+        -------
+        alpha, beta : tuple[jnp.ndarray, jnp.ndarray]
+            Rate matrices for [m, h, n] gates (ms⁻¹), each with shape (N, 3).
+
+        Equations
+        ---------
+        α_m = 0.1 * (-(V+40)) / (exp(-(V+40)/10) - 1)
+        α_h = 0.07 * exp(-(V+65)/20)
+        α_n = 0.01 * (-(V+55)) / (exp(-(V+55)/10) - 1)
+        β_m = 4 * exp(-(V+65)/18)
+        β_h = 1 / (exp(-(V+35)/10) + 1)
+        β_n = 0.125 * exp(-(V+65)/80)
+        """
+        alpha_m = 0.1 * vtrap(-(V + 40.0), 10.0)
+        alpha_h = 0.07 * jnp.exp(-(V + 65.0)/20.0)
+        alpha_n = 0.01 * vtrap(-(V + 55.0), 10.0)
+        beta_m = 4.0 * jnp.exp(-(V + 65.0)/18.0)
+        beta_h = 1.0 / (jnp.exp(-(V + 35.0)/10.0) + 1.0)
+        beta_n = 0.125 * jnp.exp(-(V + 65.0)/80.0)
+        return (
+            jnp.stack([alpha_m, alpha_h, alpha_n], axis=-1),
+            jnp.stack([beta_m, beta_h, beta_n], axis=-1),
+        )
+
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
         """
         Compute alpha rate constants for m, h, n gating variables.
@@ -110,10 +143,8 @@ class HodgkinHuxleyICM(IonChannelModelBase):
         α_h = 0.07 * exp(-(V+65)/20)
         α_n = 0.01 * (-(V+55)) / (exp(-(V+55)/10) - 1)
         """
-        m = 0.1 * vtrap(-(V + 40.0), 10.0)
-        h = 0.07 * jnp.exp(-(V + 65.0)/20.0)
-        n = 0.01 * vtrap(-(V + 55.0), 10.0)
-        return jnp.stack([m, h, n], axis=-1)
+        alpha, _ = self.exact_rate_constants(V)
+        return alpha
 
     def beta_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
         """
@@ -135,10 +166,8 @@ class HodgkinHuxleyICM(IonChannelModelBase):
         β_h = 1 / (exp(-(V+35)/10) + 1)
         β_n = 0.125 * exp(-(V+65)/80)
         """
-        m = 4.0 * jnp.exp(-(V + 65.0)/18.0)
-        h = 1.0 / (jnp.exp(-(V + 35.0)/10.0) + 1.0)
-        n = 0.125 * jnp.exp(-(V + 65.0)/80.0)
-        return jnp.stack([m, h, n], axis=-1)
+        _, beta = self.exact_rate_constants(V)
+        return beta
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         """
@@ -186,7 +215,7 @@ class HodgkinHuxleyICM(IonChannelModelBase):
         Uses the `rates` helper function with Q10 scaling to compute
         steady-state gate values at the initial voltage.
         """
-        g_inf, _ = Gating.rates(V0_mV, self.q10, self.alpha_funcs, self.beta_funcs)
+        g_inf, _ = self.gating_inf_tau(V0_mV)
         return g_inf
 
     def gate_names(self) -> tuple[str, ...]:
@@ -221,4 +250,3 @@ class HodgkinHuxleyICM(IonChannelModelBase):
             [E_Na, E_K, E_L] in mV.
         """
         return jnp.array([self.ena, self.ek, self.el], dtype=dtype)
-

@@ -1,45 +1,65 @@
-"""Small MRG extracellular stimulation demo.
+"""Example 04: stimulate one MRG axon with Pint-aware extracellular units.
 
 Run:
-    python examples/basic/mrg_extracellular_demo.py
+    python examples/basic/example_04_extracellular_mrg.py
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+import axonscope as axs
 from axonscope.axons import MRG
-from axonscope.electrodes import PointSourceElectrode
 from axonscope.solvers import CrankNicholson
-from axonscope.stimulus import Stimulus
 
 
 def main() -> None:
-    axon = MRG(d=10.0, nodes=5)
-    electrode = PointSourceElectrode(
-        x0_m=float(np.asarray(axon.x)[axon.Nx // 2]) * 1e-6,
-        z0_m=500e-6,
-        sigma_S_m=0.3,
-    )
-    stim = Stimulus.biphasic(
-        start=0.5,
-        cathodic_amplitude=80e-6,
-        cathodic_duration=0.05,
-        interphase=0.02,
-    )
-    axon.add_extracellular_context(electrode, stim)
-
-    res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01)
-
+    axon = MRG(diameter=10.0 * axs.um, nodes=5)
     node_indices = np.asarray(axon.node_indices, dtype=int)
-    plt.figure(figsize=(7, 3))
+    node_positions = axon.node_position_values(unit=axs.um)
+    electrode_x = node_positions[len(node_positions) // 2] * axs.um
+    electrode_z = 500.0 * axs.um
+
+    electrode = axs.PointSourceElectrode(
+        x_um=electrode_x,
+        z_um=electrode_z,
+    )
+    stimulus = axs.Stimulus.biphasic(
+        start=0.5 * axs.ms,
+        cathodic_amplitude=150.0 * axs.uA,
+        cathodic_duration=0.05 * axs.ms,
+        interphase=0.02 * axs.ms,
+    )
+    sim = axs.AxonSimulation(axon)
+    sim.add_extracellular_context(
+        context=axs.AnalyticalExtracellularContext(
+            electrodes=[electrode.with_stimulus(stimulus)],
+            sigma=0.3 * axs.S_per_m,
+        )
+    )
+    result = CrankNicholson().solve(sim, tsim=2.0 * axs.ms, dt=0.01 * axs.ms)
+
+    t_ms = result.time_values(unit=axs.ms)
+    vm_mV = result.voltage_values(unit=axs.mV)
+    x_um = axon.layout.position_values(unit=axs.um)
+
+    fig, (ax_layout, ax_trace) = plt.subplots(2, 1, figsize=(9, 5.5), sharex=False)
+    axon.layout.plot(
+        ax=ax_layout,
+        position_unit=axs.um,
+        title="MRG layout",
+        compartment_labels="auto",
+    )
+    ax_layout.axvline(electrode.x_um, color="C2", linestyle="--", linewidth=1.5, label="electrode x")
+    ax_layout.legend(ncol=2, frameon=False)
+
     for idx in node_indices[:3]:
-        plt.plot(np.asarray(res.t), np.asarray(res.Vm)[:, idx], label=f"node {idx}")
-    plt.xlabel("Time [ms]")
-    plt.ylabel("Vm [mV]")
-    plt.title("MRG extracellular point-source stimulation")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
+        ax_trace.plot(t_ms, vm_mV[:, idx], label=f"node x={x_um[idx]:.0f} um")
+    ax_trace.set_xlabel("Time [ms]")
+    ax_trace.set_ylabel("Vm [mV]")
+    ax_trace.set_title("Nodal voltage traces")
+    ax_trace.grid(True, alpha=0.3)
+    ax_trace.legend()
+    fig.tight_layout()
     plt.show()
 
 

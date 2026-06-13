@@ -1,3 +1,5 @@
+"""Private MRG morphology table used by MRG-like axon layout templates."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,7 +27,7 @@ class MRGMorphology:
     nl: float
 
 
-_MRG_DATA = {
+_MRG_DATA: dict[str, NDArray[np.float64]] = {
     "fiberD": np.asarray([1, 2, 5.7, 7.3, 8.7, 10.0, 11.5, 12.8, 14.0, 15.0, 16.0], dtype=float),
     "g": np.asarray([0.565, 0.585, 0.605, 0.630, 0.661, 0.690, 0.700, 0.719, 0.739, 0.767, 0.791], dtype=float),
     "axonD": np.asarray([0.8, 1.6, 3.4, 4.6, 5.8, 6.9, 8.1, 9.2, 10.4, 11.5, 12.7], dtype=float),
@@ -59,6 +61,7 @@ def _mrg_polynomials() -> dict[str, np.poly1d]:
 
 def available_mrg_fiber_diameters() -> NDArray[np.float64]:
     """Return original MRG tabulated fiber diameters in µm."""
+
     return _MRG_DATA["fiberD"].copy()
 
 
@@ -141,5 +144,14 @@ def get_mrg_morphologies(
     fit_all: bool = True,
 ) -> list[MRGMorphology]:
     """Vector-friendly helper returning one morphology object per diameter."""
+
     d_arr = np.asarray(diameters, dtype=float)
     return [get_mrg_morphology(float(d), fit_all=fit_all) for d in d_arr]
+
+
+__all__ = [
+    "MRGMorphology",
+    "available_mrg_fiber_diameters",
+    "get_mrg_morphologies",
+    "get_mrg_morphology",
+]

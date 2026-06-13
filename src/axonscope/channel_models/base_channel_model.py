@@ -2,7 +2,12 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from abc import ABC, abstractmethod
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
+from axonscope.channel_models.rate_tables import (
+    RateTable,
+    RateTableConfig,
+    make_rate_table_config,
+)
 from dataclasses import fields, is_dataclass
 from typing import Any, List, Callable, NamedTuple
 
@@ -91,6 +96,7 @@ class IonChannelModelBase(ABC):
         """
         self.dtype = dtype
         self.q10: float = dtype(1.0)
+        self._rate_table: RateTable | None = None
 
     def _static_signature(self) -> tuple[Any, ...]:
         """Structural identity used when channel models are JAX static args."""
@@ -258,6 +264,70 @@ class IonChannelModelBase(ABC):
         """
         pass
 
+    def exact_rate_constants(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return exact alpha/beta rates.
+
+        Subclasses with shared intermediate computations should override this
+        method. The solver calls `rate_constants()` so exact and tabulated
+        paths share one internal contract.
+        """
+        return self.alpha_funcs(V_mV), self.beta_funcs(V_mV)
+
+    def rate_constants(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return alpha/beta rates, using a voltage lookup table when enabled."""
+        if self._rate_table is None:
+            return self.exact_rate_constants(V_mV)
+        return self._tabulated_rate_constants(V_mV)
+
+    def gating_inf_tau(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Return steady-state gates and time constants from alpha/beta rates."""
+        alpha, beta = self.rate_constants(V_mV)
+        sum_ab = jnp.maximum(alpha + beta, dtype(1e-12))
+        g_inf = alpha / sum_ab
+        tau = dtype(1.0) / (self.q10 * sum_ab)
+        return g_inf, tau
+
+    def enable_rate_table(
+        self,
+        *,
+        config: RateTableConfig | None = None,
+        v_min_mV: float = -120.0,
+        v_max_mV: float = 80.0,
+        step_mV: float = 0.05,
+        clamp: bool = True,
+    ) -> "IonChannelModelBase":
+        """Precompute a voltage lookup table for alpha/beta rate constants."""
+        resolved = make_rate_table_config(
+            config,
+            v_min_mV=v_min_mV,
+            v_max_mV=v_max_mV,
+            step_mV=step_mV,
+            clamp=clamp,
+        )
+        self._rate_table = RateTable.build(
+            resolved,
+            dtype_local=self.dtype,
+            exact_rate_constants=self.exact_rate_constants,
+        )
+        return self
+
+    def disable_rate_table(self) -> "IonChannelModelBase":
+        self._rate_table = None
+        return self
+
+    @property
+    def has_rate_table(self) -> bool:
+        return self._rate_table is not None
+
+    @property
+    def rate_table_config(self) -> RateTableConfig | None:
+        return None if self._rate_table is None else self._rate_table.config
+
+    def _tabulated_rate_constants(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        if self._rate_table is None:
+            return self.exact_rate_constants(V_mV)
+        return self._rate_table.interpolate(V_mV, dtype_local=self.dtype)
+
     def conductances(self, gates: jnp.ndarray) -> jnp.ndarray:
         """
         Compute per-channel open conductances from the current channel state.
@@ -328,8 +398,9 @@ class IonChannelModelBase(ABC):
             dg/dt = alpha(V) * (1 - g) - beta(V) * g
         with rates frozen over the timestep.
         """
-        alpha = self.q10 * self.alpha_funcs(V_mV)
-        beta = self.q10 * self.beta_funcs(V_mV)
+        alpha, beta = self.rate_constants(V_mV)
+        alpha = self.q10 * alpha
+        beta = self.q10 * beta
         sum_ab = jnp.maximum(alpha + beta, dtype(1e-12))
         g_inf = alpha / sum_ab
         tau = dtype(1.0) / sum_ab
@@ -472,6 +543,17 @@ class CompositeICM(IonChannelModelBase):
         self.models: List[IonChannelModelBase] = models  # must be static for JIT --> realy??
         if not models:
             raise ValueError("CompositeICM requires at least one submodel.")
+        stateful = [
+            model.__class__.__name__
+            for model in models
+            if model.membrane_state_specs()
+        ]
+        if stateful:
+            names = ", ".join(stateful)
+            raise NotImplementedError(
+                "CompositeICM does not yet support stateful membrane components; "
+                f"got: {names}."
+            )
 
         # sizes per submodel (Python ints)
         sizes = [int(m.init_gates(jnp.array([0.0])).shape[-1]) for m in models]
@@ -574,14 +656,8 @@ class CompositeICM(IonChannelModelBase):
         Return initial gating variables for each submodel concatenated.
         Output shape: (batch, total_gates)
         """
-        outs = []
-        for m in self.models:
-            g = m.init_gates(V0_mV)            # shape maybe (batch, n_i) or (n_i,)
-            g = jnp.atleast_2d(g)          # ensure (batch, n_i)
-            outs.append(g)
-        if len(outs) == 0:
-            return jnp.zeros((V0_mV.shape[0], 0))
-        return jnp.concatenate(outs, axis=-1)
+        g_inf, _ = self.gating_inf_tau(V0_mV)
+        return g_inf
 
 
     def alpha_funcs(self, V):
@@ -589,14 +665,8 @@ class CompositeICM(IonChannelModelBase):
         Concatenate alpha(V) from each submodel.
         Output shape: (batch, total_gates)
         """
-        outs = []
-        for m in self.models:
-            a = m.alpha_funcs(V)   # expected (batch, n_i) or (n_i,)
-            a = jnp.atleast_2d(a)
-            outs.append(a)
-        if len(outs) == 0:
-            return jnp.zeros((V.shape[0], 0))
-        return jnp.concatenate(outs, axis=-1)
+        alpha, _ = self.rate_constants(V)
+        return alpha
 
 
     def beta_funcs(self, V):
@@ -604,14 +674,20 @@ class CompositeICM(IonChannelModelBase):
         Concatenate beta(V) from each submodel.
         Output shape: (batch, total_gates)
         """
-        outs = []
+        _, beta = self.rate_constants(V)
+        return beta
+
+    def exact_rate_constants(self, V):
+        alpha_parts = []
+        beta_parts = []
         for m in self.models:
-            b = m.beta_funcs(V)
-            b = jnp.atleast_2d(b)
-            outs.append(b)
-        if len(outs) == 0:
-            return jnp.zeros((V.shape[0], 0))
-        return jnp.concatenate(outs, axis=-1)
+            alpha_i, beta_i = m.exact_rate_constants(V)
+            alpha_parts.append(jnp.atleast_2d(alpha_i))
+            beta_parts.append(jnp.atleast_2d(beta_i))
+        if not alpha_parts:
+            empty = jnp.zeros((V.shape[0], 0), dtype=dtype)
+            return empty, empty
+        return jnp.concatenate(alpha_parts, axis=-1), jnp.concatenate(beta_parts, axis=-1)
 
 
     def I_background(self, Nx: int) -> jnp.ndarray:

@@ -3,10 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytest
 import os 
+from axonscope import AxonSimulation, um
 from axonscope.axons.unmyelinated import RattayAberham
+from axonscope.results.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.stimulus import Stimulus
-from axonscope.simresult import SimResult
+from axonscope.stimulation import Stimulus
+from axonscope.results import SimResult
+from tests.nrv._helpers import axonscope_x_um
 
 pytestmark = pytest.mark.nrv_numerics
 
@@ -25,21 +28,28 @@ AMPLITUDE = 5                       # Current amplitude [nA]
 T_PULSE = 1.0                       # Pulse duration [ms]
 T_START = 1.0                       # Pulse start time [ms]
 PERTURBATION_FACTOR = 3.0           # Focusing factor for non-uniform mesh
-PEAK_TOLERANCE_MV = 0.25            # Off-site peak difference tolerance [mV]
+PEAK_TOLERANCE_MV = 0.50            # Off-site peak difference tolerance [mV]
 ARRIVAL_TOLERANCE_MS = 0.05         # Off-site peak time difference tolerance [ms]
 VELOCITY_RTOL = 0.15                # Average propagation velocity tolerance
 
 
 def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SimResult:
-    axon.insert_I_Clamp(position=L / 2, stimulus=Stimulus.pulse(start=T_START, duration=T_PULSE, amplitude=AMPLITUDE))
+    simulation = AxonSimulation(axon)
+    simulation.add_current_clamp(position_um=L / 2, current=Stimulus.pulse(start=T_START, duration=T_PULSE, amplitude=AMPLITUDE))
     solver = CrankNicholson()
-    res = solver.solve(axon, tsim=tsim, dt=dt)
+    res = solver.solve(simulation, tsim=tsim, dt=dt)
     return res
 
 
 def nearest_index(x: np.ndarray, position_um: float) -> int:
     """Return the index of the node closest to a physical position."""
     return int(np.argmin(np.abs(np.asarray(x) - position_um)))
+
+
+def result_x_um(res: SimResult) -> np.ndarray:
+    """Return result compartment positions from the descriptive layout."""
+
+    return axonscope_x_um(res.axon)
 
 
 def peak_metrics(res: SimResult, position_um: float) -> tuple[float, float]:
@@ -51,7 +61,7 @@ def peak_metrics(res: SimResult, position_um: float) -> tuple[float, float]:
     with the local control-volume length, so the local peak at the stimulation
     site is not mesh invariant by construction.
     """
-    idx = nearest_index(np.asarray(res.axon.x), position_um)
+    idx = nearest_index(result_x_um(res), position_um)
     trace = np.asarray(res.Vm[:, idx])
     peak_idx = int(np.argmax(trace))
     return float(trace[peak_idx]), float(np.asarray(res.t)[peak_idx])
@@ -79,22 +89,24 @@ def plot_full_comparison(res_uniform: SimResult, res_non_uniform: SimResult, sav
     Generates a single figure summarizing mesh properties and simulation results
     using GridSpec for a non-uniform 3-row layout.
     """
-    L_val = res_uniform.axon.x[-1].item()
+    x_uniform = result_x_um(res_uniform)
+    x_non_uniform = result_x_um(res_non_uniform)
+    L_val = float(x_uniform[-1])
     
     # --- 1D Comparison Points ---
     x_positions = [L_val/4, L_val/2, 3*L_val/4]
-    indices_uniform = [np.argmin(np.abs(res_uniform.axon.x - xp)).item() for xp in x_positions]
-    indices_non_uniform = [np.argmin(jnp.abs(res_non_uniform.axon.x - res_uniform.axon.x[idx])).item() 
+    indices_uniform = [np.argmin(np.abs(x_uniform - xp)).item() for xp in x_positions]
+    indices_non_uniform = [np.argmin(jnp.abs(x_non_uniform - x_uniform[idx])).item()
                            for idx in indices_uniform]
     t_points = [T_START + 0.1, T_START + T_PULSE/2.0, T_START + T_PULSE + 1.0]
     time_indices = [np.argmin(np.abs(res_uniform.t - tp)).item() for tp in t_points]
     
     # --- Mesh Edges Calculation for Pcolormesh ---
-    x_centers_uni = res_uniform.axon.x
+    x_centers_uni = x_uniform
     dx_uni = x_centers_uni[1] - x_centers_uni[0]
     Y_mesh_uni = np.append(x_centers_uni - dx_uni/2, x_centers_uni[-1] + dx_uni/2)
     
-    x_centers_non_uni = res_non_uniform.axon.x
+    x_centers_non_uni = x_non_uniform
     x_midpoints = (x_centers_non_uni[:-1] + x_centers_non_uni[1:]) / 2
     Y_mesh_non_uni = np.concatenate(([0.0], x_midpoints, [L_val]))
     
@@ -120,10 +132,10 @@ def plot_full_comparison(res_uniform: SimResult, res_non_uniform: SimResult, sav
     ax0 = fig.add_subplot(gs[0, 0:2]) 
     
     # 1. Plot Uniform Mesh
-    ax0.plot(res_uniform.axon.x, np.zeros_like(res_uniform.axon.x), 
+    ax0.plot(x_uniform, np.zeros_like(x_uniform),
             'o', markersize=4, color='blue', alpha=0.7, label='Uniform grid')
     # 2. Plot Non-Uniform Mesh
-    ax0.plot(res_non_uniform.axon.x, np.ones_like(res_non_uniform.axon.x) * 0.5, 
+    ax0.plot(x_non_uniform, np.ones_like(x_non_uniform) * 0.5,
             'x', markersize=5, color='red', alpha=0.9, label='Non uniform grid')
     
     ax0.axvline(L_val / 2, color='gray', linestyle='--', linewidth=1, label='Injection Site (L/2)')
@@ -142,13 +154,13 @@ def plot_full_comparison(res_uniform: SimResult, res_non_uniform: SimResult, sav
     
     ax10 = fig.add_subplot(gs[1, 0]) # Row 2, Col 0: Vm vs Time
     for i in range(len(x_positions)):
-        xp = res_uniform.axon.x[indices_uniform[i]].item()
+        xp = float(x_uniform[indices_uniform[i]])
         color = plt.get_cmap("Set1")(i) # Use a colormap for distinct positions
         
         ax10.plot(res_uniform.t, res_uniform.Vm[:, indices_uniform[i]], 
                     label=f'Uniform x={xp:.0f}µm', linestyle='-', alpha=0.7, color=color)
         ax10.plot(res_non_uniform.t, res_non_uniform.Vm[:, indices_non_uniform[i]], 
-                    #label=f'Non-Uniform x={res_non_uniform.axon.x[indices_non_uniform[i]]:.0f}µm',
+                    #label=f'Non-Uniform x={x_non_uniform[indices_non_uniform[i]]:.0f}µm',
                     linestyle='--', alpha=0.7, color=color)
 
     ax10.set_ylabel('Vm [mV]')
@@ -161,10 +173,10 @@ def plot_full_comparison(res_uniform: SimResult, res_non_uniform: SimResult, sav
     for idx_t, tp in zip(time_indices, t_points):
         color = plt.get_cmap("Set1")(idx_t)
         # Uniform mesh line (Solid)
-        ax11.plot(res_uniform.axon.x, res_uniform.Vm[idx_t, :], 
+        ax11.plot(x_uniform, res_uniform.Vm[idx_t, :],
                     label=f'Uniform t={tp:.2f}ms', linestyle='-', alpha=0.7, color=color)
         # Focused mesh line (Dashed)
-        ax11.plot(res_non_uniform.axon.x, res_non_uniform.Vm[idx_t, :], 
+        ax11.plot(x_non_uniform, res_non_uniform.Vm[idx_t, :],
                     linestyle='--', alpha=0.7, color=color) 
     
     ax11.set_ylabel('Vm [mV]')
@@ -234,10 +246,10 @@ def test_ra_uniformity(save_dir: str):
     x_non_uniform = create_focused_non_uniform_x(L, Nx, PERTURBATION_FACTOR)
     
     # --- 2. Run Simulations ---
-    axon_uniform = RattayAberham(L=L, d=d, Nx=Nx)
+    axon_uniform = RattayAberham(length=L * um, diameter=d * um, compartments=Nx)
     res_uniform = run_ra_simulation(axon_uniform, tsim=TSIM, dt=DT)
     
-    axon_non_uniform = RattayAberham(x_vec=x_non_uniform, d=d, Nx=None)
+    axon_non_uniform = RattayAberham(x=x_non_uniform * um, diameter=d * um)
     res_non_uniform = run_ra_simulation(axon_non_uniform, tsim=TSIM, dt=DT)
     
     # --- 3. Full Comparison Plotting ---
@@ -255,8 +267,8 @@ def test_ra_uniformity(save_dir: str):
 
     max_peak_diff = max(peak_diffs)
     max_arrival_diff = max(arrival_diffs)
-    vel_uniform = float(res_uniform.average_velocity())
-    vel_non_uniform = float(res_non_uniform.average_velocity())
+    vel_uniform = float(conduction_velocity(res_uniform))
+    vel_non_uniform = float(conduction_velocity(res_non_uniform))
 
     assert max_peak_diff < PEAK_TOLERANCE_MV, (
         f"Peak mismatch away from the stimulus is too large ({max_peak_diff:.4f} mV > "

@@ -13,10 +13,11 @@ if __package__ in (None, ""):
 
 import numpy as np
 
+from axonscope import AxonSimulation, um
 from axonscope.axons import MRG
-from axonscope.electrodes import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.solvers import CrankNicholson
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
 
 
 SIGMA_S_M = 0.2
@@ -141,7 +142,7 @@ def _center_node(axon: MRG) -> tuple[int, float]:
     node_ids = np.asarray(axon.node_indices, dtype=int)
     node_pos = int(node_ids.shape[0] // 2)
     comp_idx = int(node_ids[node_pos])
-    return comp_idx, float(np.asarray(axon.x, dtype=float)[comp_idx])
+    return comp_idx, float(np.asarray(axon.layout.position_values(unit="micrometer"))[comp_idx])
 
 
 def _build_axonscope_case(
@@ -154,14 +155,13 @@ def _build_axonscope_case(
     cathodic_duration_ms: float,
     anodic_uA: float,
     interphase_ms: float,
-) -> tuple[MRG, Any]:
-    axon = MRG(d=diameter_um, nodes=nodes)
-    x0_um = float(axon.L / 2.0)
+) -> tuple[AxonSimulation, Any]:
+    axon = MRG(diameter=diameter_um * um, nodes=nodes)
+    x0_um = float(axon.length / 2.0)
     electrode = PointSourceElectrode(
         x0_m=x0_um * 1e-6,
         y0_m=ELECTRODE_Y_UM * 1e-6,
         z0_m=ELECTRODE_Z_UM * 1e-6,
-        sigma_S_m=SIGMA_S_M,
     )
     stim = Stimulus.biphasic(
         start=1.0,
@@ -170,11 +170,18 @@ def _build_axonscope_case(
         anodic_amplitude=anodic_uA * 1e-6,
         interphase=interphase_ms,
     )
-    axon.add_extracellular_context(electrode, stim, replace=True)
-    result = CrankNicholson().solve(axon, tsim=tsim_ms, dt=dt_ms, record_observables=True)
+    simulation = AxonSimulation(axon)
+    simulation.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode.with_stimulus(stim)],
+            sigma=SIGMA_S_M,
+        ),
+        replace=True,
+    )
+    result = CrankNicholson().solve(simulation, tsim=tsim_ms, dt=dt_ms, record_observables=True)
     if result.recordings is None:
         raise RuntimeError("AxonScope result does not contain observable recordings.")
-    return axon, result
+    return simulation, result
 
 
 def _build_nrv_case(
@@ -194,7 +201,7 @@ def _build_nrv_case(
         0,
         0,
         diameter_um,
-        float(axon_as.L),
+        float(axon_as.length),
         model="MRG",
         dt=dt_ms,
         node_shift=0,
@@ -203,7 +210,7 @@ def _build_nrv_case(
         T=37.0,
         v_init=-80.0,
     )
-    x0_um = float(axon_as.L / 2.0)
+    x0_um = float(axon_as.length / 2.0)
     electrode = nrv.point_source_electrode(x0_um, ELECTRODE_Y_UM, ELECTRODE_Z_UM)
     stim = nrv.stimulus()
     stim.biphasic_pulse(1.0, cathodic_uA, cathodic_duration_ms, anodic_uA, interphase_ms)
@@ -344,7 +351,7 @@ def run_baseline(
 
     t_as_ms = np.asarray(result_as.t, dtype=float).ravel()
     t_nrv_ms = np.asarray(result_nrv["t"], dtype=float).ravel()
-    x_as_um = np.asarray(axon_as.x, dtype=float).ravel()
+    x_as_um = np.asarray(axon_as.layout.position_values(unit="micrometer"), dtype=float).ravel()
     x_nrv_um = np.asarray(result_nrv["x_rec"], dtype=float).ravel()
     sample_idx, sample_pos_um = _center_node(axon_as)
     node_mask = np.asarray(axon_as.node_mask, dtype=bool).ravel()

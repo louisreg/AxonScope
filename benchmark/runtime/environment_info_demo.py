@@ -1,10 +1,10 @@
-# examples/basic/environment_info_demo.py
+# benchmark/runtime/environment_info_demo.py
 
 """
 Example showing how to collect and save environment metadata.
 
 Run:
-    python examples/basic/environment_info_demo.py
+    python benchmark/runtime/environment_info_demo.py
 """
 
 from pathlib import Path

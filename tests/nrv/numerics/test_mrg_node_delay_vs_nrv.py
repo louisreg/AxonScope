@@ -10,10 +10,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
+from axonscope import AxonSimulation, um
 from axonscope.axons.myelinated import MRG
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.stimulus import Stimulus
-from tests.nrv._helpers import interp_rows, normalize_nrv_matrix, select_nearest_rows
+from axonscope.stimulation import Stimulus
+from tests.nrv._helpers import axonscope_x_um, interp_rows, normalize_nrv_matrix, select_nearest_rows
 
 
 FIG_DIR = Path("figures/nrv_tests/velocity_vs_diameter")
@@ -74,22 +75,24 @@ def _symmetric_delay_curve(
     ],
 )
 def test_mrg_node_delay_vs_nrv(diameter_um: float, threshold_mV: float, rmse_tol_ms: float) -> None:
-    axon = MRG(d=diameter_um, nodes=11)
+    axon = MRG(diameter=diameter_um * um, nodes=11)
     node_ids = np.asarray(axon.node_indices, dtype=int)
     center_index = int(node_ids.shape[0] // 2)
-    stim_pos_um = float(np.asarray(axon.x, dtype=float)[int(node_ids[center_index])])
-    axon.insert_I_Clamp(position=stim_pos_um, stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
+    x_um = axonscope_x_um(axon)
+    stim_pos_um = float(x_um[int(node_ids[center_index])])
+    sim = AxonSimulation(axon)
+    sim.add_current_clamp(position_um=stim_pos_um, current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
 
-    res = CrankNicholson().solve(axon, tsim=4.0, dt=0.005)
+    res = CrankNicholson().solve(sim, tsim=4.0, dt=0.005)
     t_as = np.asarray(res.t, dtype=float)
-    x_as = np.asarray(axon.x, dtype=float)[node_ids]
+    x_as = x_um[node_ids]
     vm_as = np.asarray(res.Vm, dtype=float)[:, node_ids].T
 
     axon_nrv = nrv.myelinated(
         0,
         0,
         diameter_um,
-        float(axon.L),
+        float(axon.length),
         model="MRG",
         dt=0.005,
         node_shift=0,

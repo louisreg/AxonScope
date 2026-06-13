@@ -6,14 +6,11 @@ import numpy as np
 import jax.numpy as jnp
 import pytest
 
+import axonscope as axs
+from axonscope import AxonSimulation
 from axonscope.axons import HodgkinHuxley
-from axonscope.electrodes import PointSourceElectrode
-from axonscope.solvers import (
-    BatchOptions,
-    BatchRecording,
-    DoubleCableBatchKernel,
-    DoubleCableKernel,
-    SingleCableVStimBatchKernel,
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.dispatcher.runtime_batches import (
     build_footprint_vstim_initial_previous_batch,
     build_footprint_vstim_midpoint_batch,
     build_vstim_batch,
@@ -21,25 +18,42 @@ from axonscope.solvers import (
     build_vstim_midpoint_batch,
     scale_extracellular_contexts,
 )
+from axonscope.solvers import (
+    BatchOptions,
+    BatchRecording,
+    DoubleCableBatchKernel,
+    DoubleCableKernel,
+    SingleCableVStimBatchKernel,
+)
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
 
 
-def _hh_extracellular_axon() -> HodgkinHuxley:
-    axon = HodgkinHuxley(L=400.0, d=0.5, Nx=41, celsius=6.3)
-    axon.insert_I_Clamp(
-        position=200.0,
-        stimulus=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3):
+    return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=sigma)
+
+
+def _hh_extracellular_axon() -> AxonSimulation:
+    axon = AxonSimulation(
+        HodgkinHuxley(
+            length=400.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=41,
+            celsius=6.3 * axs.degC,
+        )
+    )
+    axon.add_current_clamp(
+        position_um=200.0,
+        current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )
     electrode = PointSourceElectrode(
         x0_m=200e-6,
         y0_m=100e-6,
         z0_m=100e-6,
-        sigma_S_m=0.3,
     )
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
-    axon.add_extracellular_context(electrode, stim, replace=True)
+    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
     return axon
 
 
@@ -78,7 +92,7 @@ def test_single_cable_vstim_batch_matches_scalar_reference_row():
     vext_batch = jnp.stack([vext_mid, 0.5 * vext_mid])
     batch = SingleCableVStimBatchKernel(
         runtime=runtime,
-        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
     ).run(extracellular_potential_mid_mV=vext_batch)
     scalar = CrankNicholsonVStimForcing().solve(_hh_extracellular_axon(), tsim=tsim, dt=dt)
 
@@ -102,11 +116,11 @@ def test_single_cable_vstim_batch_validates_shapes():
     )
     kernel = SingleCableVStimBatchKernel(
         runtime=runtime,
-        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
     )
 
     with pytest.raises(ValueError, match="extracellular_potential_mid_mV"):
-        kernel.run(extracellular_potential_mid_mV=jnp.zeros((runtime.grid.Nt, axon.Nx + 1)))
+        kernel.run(extracellular_potential_mid_mV=jnp.zeros((runtime.grid.Nt, axon.n_compartments + 1)))
 
 
 def test_single_cable_vstim_batch_records_probes_in_time_chunks():
@@ -127,11 +141,11 @@ def test_single_cable_vstim_batch_records_probes_in_time_chunks():
     vext_batch = jnp.stack([vext_mid, 0.5 * vext_mid])
     kernel = SingleCableVStimBatchKernel(
         runtime=runtime,
-        Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
     )
 
     full = kernel.run(extracellular_potential_mid_mV=vext_batch).Vm
-    probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
+    probe_indices = jnp.asarray([0, axon.n_compartments // 2, axon.n_compartments - 1])
     probes = kernel.run(
         extracellular_potential_mid_mV=vext_batch,
         options=BatchOptions(
@@ -176,7 +190,7 @@ def test_build_vstim_midpoint_batch_matches_runtime_and_scales_contexts():
     )
 
     assert runtime.stimulation.extracellular_potential_mid_mV is not None
-    assert vext_batch.shape == (3, runtime.grid.Nt, axon.Nx)
+    assert vext_batch.shape == (3, runtime.grid.Nt, axon.n_compartments)
     np.testing.assert_allclose(
         np.asarray(vext_batch[0]),
         np.asarray(runtime.stimulation.extracellular_potential_mid_mV),
@@ -192,10 +206,17 @@ def test_build_vstim_midpoint_batch_matches_runtime_and_scales_contexts():
     np.testing.assert_allclose(np.asarray(vext_batch[2]), 0.0, atol=0.0, rtol=0.0)
 
 
+def test_build_vstim_midpoint_batch_rejects_partial_final_step():
+    axon = _hh_extracellular_axon()
+
+    with pytest.raises(ValueError, match="integer multiple"):
+        build_vstim_midpoint_batch(axon, [None], tsim_ms=1.0, dt_ms=0.3)
+
+
 def test_build_vstim_batch_accepts_per_row_positions():
     axon = _hh_extracellular_axon()
     contexts = tuple(axon.extracellular_contexts)
-    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     shifted_x_m = base_x_m + 25e-6
 
     vext_batch = build_vstim_batch(
@@ -205,7 +226,7 @@ def test_build_vstim_batch_accepts_per_row_positions():
         x_positions_m=np.stack([base_x_m, shifted_x_m]),
     )
 
-    assert vext_batch.shape == (2, 1, axon.Nx)
+    assert vext_batch.shape == (2, 1, axon.n_compartments)
     assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0
 
 
@@ -214,13 +235,13 @@ def test_build_footprint_vstim_batch_matches_generic_context_builder():
     base_context = axon.extracellular_contexts[0]
     tsim = 1.2
     dt = 0.01
-    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     shifted_x_m = base_x_m + 25e-6
     x_positions_m = np.stack([base_x_m, shifted_x_m])
     footprint = np.stack(
         [
-            base_context.electrode.footprint(base_x_m),
-            base_context.electrode.footprint(shifted_x_m),
+            base_context.footprint_for_electrode(base_context.electrodes[0], base_x_m),
+            base_context.footprint_for_electrode(base_context.electrodes[0], shifted_x_m),
         ]
     )
 
@@ -235,21 +256,21 @@ def test_build_footprint_vstim_batch_matches_generic_context_builder():
         x_positions_m=x_positions_m,
     )
     from_footprint = build_footprint_vstim_midpoint_batch(
-        stimulus=base_context.stimulus,
+        stimulus=base_context.electrodes[0].stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=jnp.asarray([1.0, 0.5]),
         tsim_ms=tsim,
         dt_ms=dt,
     )
     previous = build_footprint_vstim_initial_previous_batch(
-        stimulus=base_context.stimulus,
+        stimulus=base_context.electrodes[0].stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=jnp.asarray([1.0, 0.5]),
         dt_ms=dt,
     )
 
     assert from_footprint.shape == generic.shape
-    assert previous.shape == (2, axon.Nx)
+    assert previous.shape == (2, axon.n_compartments)
     np.testing.assert_allclose(
         np.asarray(from_footprint),
         np.asarray(generic),
@@ -338,7 +359,7 @@ def test_double_cable_batch_requires_extracellular_runtime():
         DoubleCableBatchKernel(runtime=runtime).run()
 
 
-def test_double_cable_footprint_chunks_match_full_batch():
+def test_double_cable_materialized_chunks_match_full_batch():
     axon = _hh_extracellular_axon()
     tsim = 0.4
     dt = 0.01
@@ -352,23 +373,23 @@ def test_double_cable_footprint_chunks_match_full_batch():
         precompute_extracellular=False,
     )
     base_context = axon.extracellular_contexts[0]
-    base_x_m = np.asarray(axon.x, dtype=float) * 1e-6
+    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     footprint = np.stack(
         [
-            base_context.electrode.footprint(base_x_m),
-            base_context.electrode.footprint(base_x_m),
+            base_context.footprint_for_electrode(base_context.electrodes[0], base_x_m),
+            base_context.footprint_for_electrode(base_context.electrodes[0], base_x_m),
         ]
     )
     amplitude_scale = jnp.asarray([1.0, 0.5])
     vext_mid = build_footprint_vstim_midpoint_batch(
-        stimulus=base_context.stimulus,
+        stimulus=base_context.electrodes[0].stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=amplitude_scale,
         tsim_ms=tsim,
         dt_ms=dt,
     )
     vext_previous = build_footprint_vstim_initial_previous_batch(
-        stimulus=base_context.stimulus,
+        stimulus=base_context.electrodes[0].stimulus,
         footprint_V_per_A=footprint,
         amplitude_scale=amplitude_scale,
         dt_ms=dt,
@@ -379,17 +400,15 @@ def test_double_cable_footprint_chunks_match_full_batch():
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
     ).Vm
-    chunked = kernel.run_footprint(
-        stimulus=base_context.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=amplitude_scale,
+    chunked = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
         options=BatchOptions(time_chunk_steps=11),
     ).Vm
-    probe_indices = jnp.asarray([0, axon.Nx // 2, axon.Nx - 1])
-    probe_chunks = kernel.run_footprint(
-        stimulus=base_context.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=amplitude_scale,
+    probe_indices = jnp.asarray([0, axon.n_compartments // 2, axon.n_compartments - 1])
+    probe_chunks = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
         options=BatchOptions(
             recording=BatchRecording.indices(probe_indices.tolist()),
             time_chunk_steps=11,

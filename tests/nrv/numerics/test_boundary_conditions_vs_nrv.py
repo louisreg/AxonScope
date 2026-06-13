@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from axonscope import AxonSimulation, degC, mV, um
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
 
 import nrv
 
@@ -40,17 +41,18 @@ def test_boundary_conditions_vs_nrv(save_dir: str = "figures/physics_tests"):
     amplitude = 2.0
 
     axon = HodgkinHuxley(
-        L=L,
-        d=d,
-        Nx=Nx,
-        celsius=6.3,
-        Vinit=-70.0,
+        length=L * um,
+        diameter=d * um,
+        compartments=Nx,
+        celsius=6.3 * degC,
+        v_init=-70.0 * mV,
         include_passive_leak=True,
         g_pas=0.001,
         e_pas=-70.0,
     )
-    axon.insert_I_Clamp(position=L / 2, stimulus=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
-    res_ax = CrankNicholson().solve(axon, tsim=tsim, dt=dt)
+    sim = AxonSimulation(axon)
+    sim.add_current_clamp(position_um=L / 2, current=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
+    res_ax = CrankNicholson().solve(sim, tsim=tsim, dt=dt)
 
     axon_nrv = nrv.unmyelinated(
         y=0,
@@ -60,8 +62,8 @@ def test_boundary_conditions_vs_nrv(save_dir: str = "figures/physics_tests"):
         dt=dt,
         Nsec=Nx,
         model="HH",
-        v_init=axon.Vinit,
-        T=axon.Temp,
+        v_init=axon.v_init,
+        T=axon.temperature,
     )
     axon_nrv.insert_I_Clamp(0.5, t_start, duration, amplitude)
     res_nrv = axon_nrv.simulate(t_sim=tsim)

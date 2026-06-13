@@ -301,16 +301,16 @@ def _parse_benchmark_name(name: str) -> tuple[str, str, str]:
         return payload[0], payload[1], "/".join(payload[2:])
 
     try:
-        start = parts.index("population")
+        start = parts.index("pool")
     except ValueError:
         return "", "", name
 
     payload = parts[start + 1 :]
     if not payload:
-        return "population", "", ""
+        return "pool", "", ""
     if len(payload) == 1:
-        return "population", payload[0], ""
-    return "population", payload[0], "/".join(payload[1:])
+        return "pool", payload[0], ""
+    return "pool", payload[0], "/".join(payload[1:])
 
 
 def _raw_trace_events(payload: Any) -> Iterable[Any]:

@@ -13,21 +13,22 @@ from axonscope.benchmarking import (
     run_solver_benchmark_case,
     write_benchmark_results,
 )
+from axonscope.solvers.common import simulation_step_count
 from benchmark.runtime.visualize_results import flatten_benchmark_files, write_benchmark_report
 
 
 class DummySolver:
     def solve(self, axon, tsim: float, dt: float, **_kwargs):
-        nt = int(np.ceil(tsim / dt))
-        vm = np.full((nt, axon.Nx), -70.0, dtype=float)
+        nt = simulation_step_count(tsim, dt)
+        vm = np.full((nt, axon.n_compartments), -70.0, dtype=float)
         t = (np.arange(nt, dtype=float) + 1.0) * dt
         return SimpleNamespace(Vm=vm, t=t)
 
 
 class StrictDummySolver:
     def solve(self, axon, tsim: float, dt: float):
-        nt = int(np.ceil(tsim / dt))
-        vm = np.full((nt, axon.Nx), -60.0, dtype=float)
+        nt = simulation_step_count(tsim, dt)
+        vm = np.full((nt, axon.n_compartments), -60.0, dtype=float)
         t = (np.arange(nt, dtype=float) + 1.0) * dt
         return SimpleNamespace(Vm=vm, t=t)
 
@@ -45,7 +46,7 @@ def test_timing_stats_from_samples():
 def test_run_solver_benchmark_case_with_dummy_solver():
     case = SolverBenchmarkCase(
         name="dummy",
-        build_axon=lambda: SimpleNamespace(Nx=3),
+        build_axon=lambda: SimpleNamespace(n_compartments=3),
         tsim_ms=0.2,
         dt_ms=0.1,
         metadata={"model": "dummy"},
@@ -68,7 +69,7 @@ def test_run_solver_benchmark_case_with_dummy_solver():
 def test_run_solver_benchmark_filters_unsupported_kwargs():
     case = SolverBenchmarkCase(
         name="strict",
-        build_axon=lambda: SimpleNamespace(Nx=2),
+        build_axon=lambda: SimpleNamespace(n_compartments=2),
         tsim_ms=0.2,
         dt_ms=0.1,
     )
@@ -88,7 +89,7 @@ def test_run_solver_benchmark_filters_unsupported_kwargs():
 def test_write_benchmark_results(tmp_path: Path):
     case = SolverBenchmarkCase(
         name="dummy",
-        build_axon=lambda: SimpleNamespace(Nx=2),
+        build_axon=lambda: SimpleNamespace(n_compartments=2),
         tsim_ms=0.2,
         dt_ms=0.1,
     )
@@ -107,7 +108,7 @@ def test_write_benchmark_results(tmp_path: Path):
 def test_visualize_benchmark_results_report(tmp_path: Path):
     case = SolverBenchmarkCase(
         name="dummy",
-        build_axon=lambda: SimpleNamespace(Nx=2),
+        build_axon=lambda: SimpleNamespace(n_compartments=2),
         tsim_ms=0.2,
         dt_ms=0.1,
         metadata={"model": "dummy", "stimulation": "unit"},

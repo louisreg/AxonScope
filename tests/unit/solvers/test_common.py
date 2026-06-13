@@ -12,6 +12,21 @@ from axonscope.solvers.common import (
 )
 
 
+def _uniform_cable_namespace(*, x_um, diffusion_coefficient: float) -> SimpleNamespace:
+    diameter_um = 1.0
+    Cm_uF_cm2 = 1.0
+    radius_cm = 0.5 * diameter_um * 1e-4
+    Ra_ohm_cm = radius_cm / (2.0 * diffusion_coefficient * Cm_uF_cm2 * 1e-6 * 1000.0)
+    return SimpleNamespace(
+        n_compartments=x_um.shape[0],
+        h_cm=jnp.diff(x_um) * 1e-4,
+        diam_um=jnp.full(x_um.shape, diameter_um, dtype=x_um.dtype),
+        Ra_ohm_cm=jnp.full(x_um.shape, Ra_ohm_cm, dtype=x_um.dtype),
+        Cm_uF_cm2=jnp.full(x_um.shape, Cm_uF_cm2, dtype=x_um.dtype),
+        has_heterogeneous_cable_properties=False,
+    )
+
+
 def test_non_uniform_diffusion_operator_matches_quadratic_second_derivative():
     """
     On V(x) = x^2, the discrete non-uniform operator should recover d2V/dx2 = 2.
@@ -20,12 +35,7 @@ def test_non_uniform_diffusion_operator_matches_quadratic_second_derivative():
     x_cm = x_um * 1e-4
     D = 0.3
 
-    axon = SimpleNamespace(
-        Nx=x_um.shape[0],
-        x=x_um,
-        h_cm=jnp.diff(x_um) * 1e-4,
-        D=D,
-    )
+    axon = _uniform_cable_namespace(x_um=x_um, diffusion_coefficient=D)
 
     lower, diag, upper = diffusion_operator_coeffs(axon, jnp.float32)
     V = x_cm ** 2
@@ -38,12 +48,7 @@ def test_sealed_end_diffusion_operator_keeps_constant_profile_constant():
     x_um = jnp.array([0.0, 20.0, 55.0, 90.0, 150.0], dtype=jnp.float32)
     V = jnp.full_like(x_um, -67.5)
 
-    axon = SimpleNamespace(
-        Nx=x_um.shape[0],
-        x=x_um,
-        h_cm=jnp.diff(x_um) * 1e-4,
-        D=0.3,
-    )
+    axon = _uniform_cable_namespace(x_um=x_um, diffusion_coefficient=0.3)
 
     lower, diag, upper = diffusion_operator_coeffs(axon, jnp.float32)
     diffusion = apply_diffusion_operator(V, lower, diag, upper)

@@ -7,15 +7,15 @@ Kept variants:
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import jax
 import jax.numpy as jnp
 
-from axonscope.axons.base import AxonBase
-from axonscope.simresult import SimResult
+from axonscope.axon_simulation import AxonSimulation, as_axon_simulation
+from axonscope.axons.axon import Axon
+from axonscope.results import SimResult
 
 from .base import Solver
+from .axon_runtime import build_solver_axon
 from .common import (
     Carry,
     apply_diffusion_operator,
@@ -23,11 +23,14 @@ from .common import (
     build_dense_from_tridiagonal,
     diffusion_operator_coeffs,
     initial_voltage,
+    resolve_time_args,
+    simulation_step_count,
 )
-from .crank_nicholson import _maybe_solve_with_extracellular_generic
+from .crank_nicholson import CrankNicholson
 from .kernels import SingleCableKernel
-from .runtime import prepare_solver_runtime
-from .stimulus_runtime import build_intracellular_current_density_fn
+from .options import SolverOptions
+from .runtime import prepare_membrane_runtime, prepare_solver_runtime
+from axonscope.stimulation.runtime import build_intracellular_current_density_fn
 
 
 class CrankNicholsonVStimForcing(Solver):
@@ -38,43 +41,62 @@ class CrankNicholsonVStimForcing(Solver):
     remains scalar on Vm and adds the known forcing term ``L(Vstim)``.
     """
 
+    def __init__(self, *, solver_options: SolverOptions | None = None) -> None:
+        self.solver_options = (
+            SolverOptions() if solver_options is None else solver_options
+        )
+
     def solve(
         self,
-        axon: AxonBase,
-        tsim: float,
-        dt: float,
+        axon: Axon | AxonSimulation,
+        tsim: float | None = None,
+        dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        *,
+        duration_ms: float | None = None,
+        dt_ms: float | None = None,
     ) -> SimResult:
-        if bool(getattr(axon, "has_heterogeneous_cable_properties", False)):
+        simulation = as_axon_simulation(axon)
+        duration, step = resolve_time_args(
+            tsim=tsim,
+            dt=dt,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+        )
+        solver_axon = build_solver_axon(simulation)
+        if solver_axon.formulation == "double-cable":
             raise ValueError(
                 "CrankNicholsonVStimForcing is a single-cable solver; "
-                "use CrankNicholson for heterogeneous/double-cable axons."
+                "use CrankNicholson for double-cable axons."
             )
 
         runtime = prepare_solver_runtime(
-            axon,
-            tsim,
-            dt,
+            simulation,
+            duration,
+            step,
+            solver_axon=solver_axon,
             include_extracellular=False,
             include_area=False,
             precompute_intracellular=True,
             precompute_extracellular=True,
+            solver_options=self.solver_options,
         )
         kernel = SingleCableKernel(
             runtime=runtime,
-            Cm_uF_cm2=jnp.asarray(axon.Cm, dtype=runtime.membrane.dtype),
+            Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
         )
         out = kernel.run(
             record_diagnostics=record_diagnostics,
             record_observables=record_observables,
         )
         return SimResult(
-            axon,
+            simulation.axon,
             out.Vm,
             out.t,
             diagnostics=out.diagnostics,
             recordings=out.recordings,
+            simulation=simulation,
         )
 
 
@@ -127,23 +149,28 @@ class CrankNicholson_unoptimized(Solver):
     """
 
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, *, solver_options: SolverOptions | None = None) -> None:
+        self.solver_options = (
+            SolverOptions() if solver_options is None else solver_options
+        )
 
     def solve(
         self,
-        axon: AxonBase,
-        tsim: float,
-        dt: float,
+        axon: Axon | AxonSimulation,
+        tsim: float | None = None,
+        dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        *,
+        duration_ms: float | None = None,
+        dt_ms: float | None = None,
     ) -> SimResult:
         """
         Run CN using dense linear algebra.
 
         Parameters
         ----------
-        axon : AxonBase
+        axon : Axon
             Axon model with ion channel dynamics and geometry.
         tsim : float
             Simulation duration (ms).
@@ -155,29 +182,52 @@ class CrankNicholson_unoptimized(Solver):
         SimResult
             Voltage traces V_all and time vector t_vec.
         """
-        extracellular_res = _maybe_solve_with_extracellular_generic(
-            axon, tsim, dt, record_diagnostics=record_diagnostics
+        simulation = as_axon_simulation(axon)
+        duration, step = resolve_time_args(
+            tsim=tsim,
+            dt=dt,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
         )
-        if extracellular_res is not None:
-            return extracellular_res
+        if bool(getattr(simulation, "use_extracellular", False)):
+            return CrankNicholson(solver_options=self.solver_options).solve(
+                simulation,
+                tsim=duration,
+                dt=step,
+                record_diagnostics=record_diagnostics,
+                record_observables=record_observables,
+            )
 
-        Nx: int = axon.Nx
-        Nt: int = int(jnp.ceil(tsim / dt))
+        solver_axon = build_solver_axon(simulation)
+        Nx: int = solver_axon.n_compartments
+        Nt: int = simulation_step_count(duration, step)
 
-        backend = axon.build_icm_backend()
-        dtype_local = backend.dtype
-        V0: jnp.ndarray = initial_voltage(axon, Nx, dtype_local)
-        gates0: jnp.ndarray = backend.init_gates(V0_mV=V0)
+        membrane_runtime = prepare_membrane_runtime(
+            simulation,
+            solver_axon=solver_axon,
+            solver_options=self.solver_options,
+        )
+        if membrane_runtime.state0:
+            raise NotImplementedError(
+                "CrankNicholson_unoptimized only supports stateless membrane models."
+            )
+        backend = membrane_runtime.backend
+        dtype_local = membrane_runtime.dtype
+        V0: jnp.ndarray = initial_voltage(simulation, Nx, dtype_local)
+        gates0: jnp.ndarray = membrane_runtime.gates0
 
-        t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * dt
+        t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * step
 
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
-        dl, d, du = build_cn_tridiagonal(lower, diag, upper, dt, dtype_local)
+        lower, diag, upper = diffusion_operator_coeffs(solver_axon, dtype_local)
+        dl, d, du = build_cn_tridiagonal(lower, diag, upper, step, dtype_local)
         A: jnp.ndarray = build_dense_from_tridiagonal(dl, d, du, dtype_local)
-        I_bg = backend.background_current()
-        inj_fun = build_intracellular_current_density_fn(axon)
+        I_bg = membrane_runtime.background_current
+        inj_fun = build_intracellular_current_density_fn(
+            simulation,
+            solver_axon=solver_axon,
+        )
 
-        def step(carry: Carry, n: int) -> Tuple[Carry, jnp.ndarray]:
+        def scan_step(carry: Carry, n: int) -> tuple[Carry, jnp.ndarray]:
             """
             One Crank–Nicolson step using dense solve.
 
@@ -194,11 +244,15 @@ class CrankNicholson_unoptimized(Solver):
                 Voltage after the direct CN solve.
             """
             V, gates = carry
-            t_mid: float = dtype_local(n) * dt + dt / 2.0
+            t_mid: float = dtype_local(n) * step + step / 2.0
 
             # NEURON channel mechanisms use cnexp; with V frozen over the step
             # this exponential update is exact for the linear gate ODE.
-            gates_new: jnp.ndarray = backend.cn_gate_update(g_prev=gates, V_mV=V, dt=dt)
+            gates_new: jnp.ndarray = backend.cn_gate_update(
+                g_prev=gates,
+                V_mV=V,
+                dt=step,
+            )
 
             # Ionic currents are evaluated using the updated gates and current V.
             Iion: jnp.ndarray = backend.currents(V_mV=V, gates=gates_new)
@@ -206,15 +260,20 @@ class CrankNicholson_unoptimized(Solver):
             Iinj: jnp.ndarray = inj_fun(t_mid)
 
             diffusion = apply_diffusion_operator(V, lower, diag, upper)
-            rhs: jnp.ndarray = V + 0.5 * dt * diffusion + (dt / axon.Cm) * (Iinj - Iion - I_bg)
+            rhs: jnp.ndarray = (
+                V
+                + 0.5 * step * diffusion
+                + (step / jnp.asarray(solver_axon.Cm_uF_cm2, dtype=dtype_local))
+                * (Iinj - Iion - I_bg)
+            )
 
             # Solve the Crank-Nicolson system directly for V_{n+1}.
             V_new: jnp.ndarray = jnp.linalg.solve(A, rhs)
 
             return (V_new, gates_new), V_new
 
-        (_, _), V_all = jax.lax.scan(step, (V0, gates0), jnp.arange(Nt))
-        return SimResult(axon, V_all, t_vec)
+        (_, _), V_all = jax.lax.scan(scan_step, (V0, gates0), jnp.arange(Nt))
+        return SimResult(simulation.axon, V_all, t_vec, simulation=simulation)
 
 
 __all__ = [

@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
 
-from axonscope.simresult import SimResult
+from axonscope.results import SimResult
 from axonscope.benchmarking.profiling import trace_annotation
 
 
@@ -140,27 +140,30 @@ def default_solver_factories() -> dict[str, SolverFactory]:
 
 
 def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
+    from axonscope import AxonSimulation, degC, um
     from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, Schild97
-    from axonscope.electrodes import PointSourceElectrode
-    from axonscope.stimulus import Stimulus
+    from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+    from axonscope.stimulation import Stimulus
 
     def hh_intracellular_small():
         length_um = 500.0
-        axon = HodgkinHuxley(L=length_um, d=0.5, Nx=41, celsius=6.3)
-        axon.insert_I_Clamp(
-            position=length_um / 2.0,
-            stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
+        axon = AxonSimulation(
+            HodgkinHuxley(length=length_um * um, diameter=0.5 * um, compartments=41, celsius=6.3 * degC)
+        )
+        axon.add_current_clamp(position_um=length_um / 2.0,
+            current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
         )
         return axon
 
     def hh_extracellular(nx: int):
         length_um = 500.0
-        axon = HodgkinHuxley(L=length_um, d=0.5, Nx=nx, celsius=6.3)
+        axon = AxonSimulation(
+            HodgkinHuxley(length=length_um * um, diameter=0.5 * um, compartments=nx, celsius=6.3 * degC)
+        )
         electrode = PointSourceElectrode(
             x0_m=(length_um / 2.0) * 1e-6,
             y0_m=100e-6,
             z0_m=0.0,
-            sigma_S_m=0.3,
         )
         stimulus = Stimulus.biphasic(
             start=0.8,
@@ -169,7 +172,13 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             anodic_amplitude=5e-6,
             interphase=0.04,
         )
-        axon.add_extracellular_context(electrode, stimulus, replace=True)
+        axon.add_extracellular_context(
+            context=AnalyticalExtracellularContext(
+                electrodes=[electrode.with_stimulus(stimulus)],
+                sigma=0.3,
+            ),
+            replace=True,
+        )
         return axon
 
     def hh_extracellular_small():
@@ -180,30 +189,31 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
 
     def rattay_intracellular_small():
         length_um = 1000.0
-        axon = RattayAberham(L=length_um, d=0.6, Nx=81, celsius=37.0)
-        axon.insert_I_Clamp(
-            position=length_um / 2.0,
-            stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0),
+        axon = AxonSimulation(
+            RattayAberham(length=length_um * um, diameter=0.6 * um, compartments=81, celsius=37.0 * degC)
+        )
+        axon.add_current_clamp(position_um=length_um / 2.0,
+            current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0),
         )
         return axon
 
     def schild97_intracellular_small():
         length_um = 1200.0
-        axon = Schild97(L=length_um, d=0.8, Nx=31)
-        axon.insert_I_Clamp(
-            position=length_um / 2.0,
-            stimulus=Stimulus.pulse(start=1.0, duration=0.5, amplitude=0.8),
+        axon = AxonSimulation(Schild97(length=length_um * um, diameter=0.8 * um, compartments=31))
+        axon.add_current_clamp(position_um=length_um / 2.0,
+            current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=0.8),
         )
         return axon
 
     def mrg_extracellular_small():
-        axon = MRG(d=10.0, nodes=5)
-        x0_m = float(np.asarray(axon.x)[axon.Nx // 2]) * 1e-6
+        axon = AxonSimulation(MRG(diameter=10.0 * um, nodes=5))
+        x0_m = float(
+            np.asarray(axon.layout.position_values(unit="micrometer"))[axon.n_compartments // 2]
+        ) * 1e-6
         electrode = PointSourceElectrode(
             x0_m=x0_m,
             y0_m=100e-6,
             z0_m=0.0,
-            sigma_S_m=0.2,
         )
         stimulus = Stimulus.biphasic(
             start=0.5,
@@ -212,7 +222,13 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             anodic_amplitude=20e-6,
             interphase=0.02,
         )
-        axon.add_extracellular_context(electrode, stimulus, replace=True)
+        axon.add_extracellular_context(
+            context=AnalyticalExtracellularContext(
+                electrodes=[electrode.with_stimulus(stimulus)],
+                sigma=0.2,
+            ),
+            replace=True,
+        )
         return axon
 
     return {

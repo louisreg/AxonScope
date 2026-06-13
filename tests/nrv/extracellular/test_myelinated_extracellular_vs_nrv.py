@@ -7,11 +7,12 @@ import pytest
 from scipy.signal import find_peaks
 import nrv
 
+from axonscope import AxonSimulation, um
 from axonscope.axons.myelinated import MRG
-from axonscope.electrodes import PointSourceElectrode
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from tests.nrv._helpers import normalize_nrv_matrix
+from tests.nrv._helpers import axonscope_x_um, normalize_nrv_matrix
 
 pytestmark = pytest.mark.nrv_extracellular
 
@@ -38,14 +39,14 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
     elec_z_um = 0.0
     sigma_S_m = 0.2  # endoneurium_bhadra
 
-    # --- AxonScope (new API: add_extracellular_context) ---
-    ax_as = MRG(d=diameter_um, nodes=nodes)
-    x0_um = float(ax_as.L / 2.0)
+    # --- AxonScope ---
+    ax_as = MRG(diameter=diameter_um * um, nodes=nodes)
+    sim_as = AxonSimulation(ax_as)
+    x0_um = float(ax_as.length / 2.0)
     electrode_as = PointSourceElectrode(
         x0_m=x0_um * 1e-6,
         y0_m=elec_y_um * 1e-6,
         z0_m=elec_z_um * 1e-6,
-        sigma_S_m=sigma_S_m,
     )
     stim_as = Stimulus.biphasic(
         start=stim_start_ms,
@@ -54,13 +55,22 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
         anodic_amplitude=anodic_uA * 1e-6,
         interphase=interphase_ms,
     )
-    ax_as.add_extracellular_context(electrode_as, stim_as, replace=True)
+    sim_as.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode_as.with_stimulus(stim_as)],
+            sigma=sigma_S_m,
+        ),
+        replace=True,
+    )
 
-    res_as = CrankNicholson().solve(ax_as, tsim=tsim, dt=dt)
+    res_as = CrankNicholson().solve(sim_as, tsim=tsim, dt=dt)
     t_as = np.asarray(res_as.t)
-    x_all_as = np.asarray(ax_as.x, dtype=float)
+    x_all_as = axonscope_x_um(ax_as)
     vm_all_as = np.asarray(res_as.Vm, dtype=float).T
-    vext_all_as = np.stack([np.asarray(ax_as.extracellular_potential_mV(float(t))) for t in t_as], axis=0).T
+    vext_all_as = np.stack(
+        [np.asarray(sim_as.extracellular_potential_mV(float(t))) for t in t_as],
+        axis=0,
+    ).T
     node_idx_as = np.asarray(ax_as.node_indices, dtype=int)
     x_nodes_as = x_all_as[node_idx_as]
 
@@ -69,7 +79,7 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
         0,
         0,
         diameter_um,
-        float(ax_as.L),
+        float(ax_as.length),
         model="MRG",
         dt=dt,
         node_shift=0,

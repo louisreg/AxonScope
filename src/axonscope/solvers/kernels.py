@@ -12,7 +12,7 @@ from .common import (
     build_cn_tridiagonal,
     solve_block_tridiagonal_2x2_scalar,
 )
-from .recording import observable_matrices, package_recordings
+from .observables import observable_matrices, package_recordings
 from .runtime import SolverRuntime
 
 

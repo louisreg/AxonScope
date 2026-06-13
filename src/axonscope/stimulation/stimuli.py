@@ -1,33 +1,80 @@
+"""Backend-independent temporal stimulation waveforms.
+
+This module only describes time courses. A `Stimulus` does not know whether it
+will become an intracellular clamp current or an electrode current until a
+physical object consumes it. Time values are stored in milliseconds; amplitude
+units are preserved when Pint quantities are provided and normalized later by
+the consuming clamp or electrode.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
+from axonscope.utils import units
 
-ArrayLike = np.ndarray | list[float] | tuple[float, ...]
+
+ArrayLike = Any
+UnitLike = Any
+
+
+def _coerce_amplitudes(values: Any, unit: UnitLike | None) -> tuple[np.ndarray, str | None]:
+    """Return numeric amplitudes and their optional canonical unit label.
+
+    If `unit` is provided, all values are converted to that unit. If no unit is
+    provided but `values` contains Pint-like quantities, the first quantity unit
+    is inferred and all quantity entries are converted to it.
+    """
+
+    unit_label = units.unit_label(unit)
+    if unit_label is not None:
+        return units.to_array(values, unit_label, dtype=float), unit_label
+    if units.is_quantity_like(values):
+        inferred = units.quantity_unit(values)
+        if inferred is None:
+            return np.asarray(values.magnitude, dtype=float), None
+        inferred = units.unit_label(inferred)
+        return units.to_array(values, inferred, dtype=float), inferred
+    if isinstance(values, np.ndarray) and values.dtype != object:
+        return np.asarray(values, dtype=float), None
+
+    arr = np.asarray(values, dtype=object)
+    flat = list(arr.reshape(-1))
+    quantity_units = [units.quantity_unit(value) for value in flat if units.is_quantity_like(value)]
+    if not quantity_units:
+        return np.asarray(values, dtype=float), None
+    inferred = units.unit_label(quantity_units[0])
+    converted = [
+        units.to_scalar(value, inferred) if units.is_quantity_like(value) else float(value)
+        for value in flat
+    ]
+    return np.asarray(converted, dtype=float).reshape(arr.shape), inferred
 
 
 @dataclass(frozen=True)
 class Stimulus:
-    """
-    Piecewise stimulus waveform.
+    """Piecewise temporal waveform.
 
-    Times are in ms.
-    Amplitudes are user-defined:
-      - nA for intracellular current clamp
-      - uA or mA depending on extracellular convention
-      - arbitrary scalar for normalized protocols
+    Times are stored in milliseconds. Amplitudes are scalar until a physical
+    object interprets them: intracellular clamps normalize to nA, while
+    extracellular electrodes normalize to A. Pint quantities can also be passed
+    directly as waveform amplitudes; the unit label is preserved and converted
+    by the consuming object.
     """
 
     t: np.ndarray
     y: np.ndarray
     mode: Literal["hold", "linear"] = "hold"
+    y_unit: str | None = None
 
     def __post_init__(self):
-        t = np.asarray(self.t, dtype=float)
-        y = np.asarray(self.y, dtype=float)
+        """Validate, sort, deduplicate, and normalize the sample arrays."""
+
+        t = units.to_ms_array(self.t, dtype=float)
+        y, y_unit = _coerce_amplitudes(self.y, self.y_unit)
 
         if t.ndim != 1 or y.ndim != 1:
             raise ValueError("Stimulus.t and Stimulus.y must be 1D arrays.")
@@ -54,47 +101,83 @@ class Stimulus:
 
         object.__setattr__(self, "t", t)
         object.__setattr__(self, "y", y)
+        object.__setattr__(self, "y_unit", y_unit)
 
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
 
     @classmethod
-    def constant(cls, value: float, start: float = 0.0) -> "Stimulus":
-        return cls(t=np.asarray([start]), y=np.asarray([value]))
+    def constant(cls, value: Any, start: Any = 0.0, *, unit: UnitLike | None = None) -> "Stimulus":
+        """Build a constant waveform.
+
+        Parameters
+        ----------
+        value:
+            Amplitude after `start`. Plain numbers are unitless until the
+            stimulus is attached to a physical object.
+        start:
+            Start time. Plain numbers are interpreted as milliseconds.
+        unit:
+            Optional amplitude unit for plain numeric values.
+        """
+
+        start = units.to_ms(start)
+        return cls(t=np.asarray([start]), y=np.asarray([value], dtype=object), y_unit=unit)
 
     @classmethod
     def pulse(
         cls,
-        start: float,
-        amplitude: float,
-        duration: float,
-        baseline: float = 0.0,
+        start: Any,
+        amplitude: Any,
+        duration: Any,
+        baseline: Any = 0.0,
+        unit: UnitLike | None = None,
     ) -> "Stimulus":
+        """Build a rectangular monophasic pulse waveform.
+
+        The waveform is baseline before `start`, equal to `amplitude` for
+        `duration`, then returns to baseline. Plain times are milliseconds.
+        """
+
+        start = units.to_ms(start)
+        duration = units.to_ms(duration)
         return cls(
             t=np.asarray([0.0, start, start + duration]),
-            y=np.asarray([baseline, amplitude, baseline]),
+            y=np.asarray([baseline, amplitude, baseline], dtype=object),
             mode="hold",
+            y_unit=unit,
         )
 
     @classmethod
     def biphasic(
         cls,
-        start: float,
-        cathodic_amplitude: float,
-        cathodic_duration: float,
-        anodic_amplitude: float | None = None,
-        interphase: float = 0.0,
+        start: Any,
+        cathodic_amplitude: Any,
+        cathodic_duration: Any,
+        anodic_amplitude: Any | None = None,
+        interphase: Any = 0.0,
         anodic_first: bool = False,
-        baseline: float = 0.0,
+        baseline: Any = 0.0,
+        unit: UnitLike | None = None,
     ) -> "Stimulus":
-        """
-        Charge-balanced biphasic pulse by default.
+        """Build a charge-balanced biphasic pulse by default.
 
-        Convention:
-        - cathodic phase is negative
-        - anodic phase is positive
+        The cathodic phase is stored as a negative amplitude and the anodic
+        phase as a positive amplitude. If `anodic_amplitude` is omitted, the
+        anodic phase uses the opposite amplitude and the same duration.
         """
+        start = units.to_ms(start)
+        cathodic_duration = units.to_ms(cathodic_duration)
+        interphase = units.to_ms(interphase)
+        amplitudes, inferred_unit = _coerce_amplitudes(
+            [cathodic_amplitude, anodic_amplitude if anodic_amplitude is not None else 0.0, baseline],
+            unit,
+        )
+        cathodic_amplitude = amplitudes[0]
+        if anodic_amplitude is not None:
+            anodic_amplitude = amplitudes[1]
+        baseline = amplitudes[2]
         cath = -abs(cathodic_amplitude)
 
         if anodic_amplitude is None:
@@ -119,42 +202,71 @@ class Stimulus:
             t=np.asarray([0.0, t0, t1, t2, t3]),
             y=np.asarray([baseline, a1, baseline, a2, baseline]),
             mode="hold",
+            y_unit=inferred_unit,
         )
 
     @classmethod
     def sinus(
         cls,
-        start: float,
-        duration: float,
-        amplitude: float,
-        frequency_khz: float,
-        offset: float = 0.0,
+        start: Any,
+        duration: Any,
+        amplitude: Any,
+        frequency_khz: Any,
+        offset: Any = 0.0,
         phase: float = 0.0,
-        dt: float | None = None,
+        dt: Any | None = None,
+        unit: UnitLike | None = None,
     ) -> "Stimulus":
+        """Build a sampled sinusoidal waveform.
+
+        `frequency_khz` accepts plain kilohertz values or Pint-like frequency
+        quantities. If `dt` is omitted, a conservative sampling step is chosen
+        from the frequency.
+        """
+
+        start = units.to_ms(start)
+        duration = units.to_ms(duration)
+        frequency_khz = units.to_scalar(frequency_khz, "kilohertz")
+        amplitudes, inferred_unit = _coerce_amplitudes([amplitude, offset], unit)
+        amplitude = amplitudes[0]
+        offset = amplitudes[1]
         if dt is None:
             dt = 1.0 / (100.0 * frequency_khz)
+        else:
+            dt = units.to_ms(dt)
 
         n = int(np.ceil(duration / dt)) + 1
         local_t = np.linspace(0.0, duration, n)
         y = offset + amplitude * np.sin(2.0 * np.pi * frequency_khz * local_t + phase)
 
         t = start + local_t
-        return cls(t=t, y=y, mode="linear")
+        return cls(t=t, y=y, mode="linear", y_unit=inferred_unit)
 
     @classmethod
     def ramp(
         cls,
-        start: float,
-        duration: float,
-        start_value: float,
-        stop_value: float,
-        dt: float,
+        start: Any,
+        duration: Any,
+        start_value: Any,
+        stop_value: Any,
+        dt: Any,
+        unit: UnitLike | None = None,
     ) -> "Stimulus":
+        """Build a sampled linear ramp waveform.
+
+        The returned stimulus uses linear interpolation between samples.
+        """
+
+        start = units.to_ms(start)
+        duration = units.to_ms(duration)
+        dt = units.to_ms(dt)
+        amplitudes, inferred_unit = _coerce_amplitudes([start_value, stop_value], unit)
+        start_value = amplitudes[0]
+        stop_value = amplitudes[1]
         n = int(np.ceil(duration / dt)) + 1
         local_t = np.linspace(0.0, duration, n)
         y = np.linspace(start_value, stop_value, n)
-        return cls(t=start + local_t, y=y, mode="linear")
+        return cls(t=start + local_t, y=y, mode="linear", y_unit=inferred_unit)
 
     @classmethod
     def from_samples(
@@ -162,55 +274,184 @@ class Stimulus:
         t: ArrayLike,
         y: ArrayLike,
         mode: Literal["hold", "linear"] = "hold",
+        unit: UnitLike | None = None,
     ) -> "Stimulus":
-        return cls(t=np.asarray(t), y=np.asarray(y), mode=mode)
+        """Build a waveform from explicit samples.
+
+        Parameters
+        ----------
+        t:
+            Sample times. Plain values are interpreted as milliseconds.
+        y:
+            Sample amplitudes. Pint-like values preserve their unit metadata.
+        mode:
+            Interpolation mode, either sample-and-hold (`"hold"`) or
+            piecewise-linear (`"linear"`).
+        unit:
+            Optional amplitude unit for plain numeric samples.
+        """
+
+        return cls(t=units.to_ms_array(t), y=np.asarray(y, dtype=object), mode=mode, y_unit=unit)
+
+    def as_unit(self, unit: UnitLike) -> "Stimulus":
+        """Return this waveform with amplitudes expressed in `unit`.
+
+        Plain unitless amplitudes are interpreted as already being in `unit`.
+        The original stimulus is not modified.
+        """
+
+        unit_label = units.unit_label(unit)
+        if unit_label is None:
+            return Stimulus(self.t, self.y, self.mode, y_unit=None)
+        if self.y_unit is None or self.y_unit == unit_label:
+            return Stimulus(self.t, self.y, self.mode, y_unit=unit_label)
+        y = units.to_array(units.Q_(self.y, self.y_unit), unit_label)
+        return Stimulus(self.t, y, self.mode, y_unit=unit_label)
+
+    def evaluate(self, t: ArrayLike, *, unit: UnitLike | None = None) -> np.ndarray | float:
+        """Evaluate the stimulus on a time grid.
+
+        Plain numeric times are interpreted as milliseconds. Pint-like times
+        are converted automatically. If `unit` is given, amplitudes are returned
+        as numeric values expressed in that unit.
+        """
+
+        t_query = units.to_ms_array(t, dtype=float)
+        scalar_input = np.asarray(t_query).ndim == 0
+        tq = np.atleast_1d(np.asarray(t_query, dtype=float))
+
+        if self.mode == "linear":
+            values = np.interp(tq, self.t, self.y, left=self.y[0], right=self.y[-1])
+        else:
+            idx = np.searchsorted(self.t, tq, side="right") - 1
+            idx = np.clip(idx, 0, len(self.y) - 1)
+            values = self.y[idx]
+
+        values = np.asarray(values, dtype=float)
+        unit_label = units.unit_label(unit)
+        if unit_label is not None and self.y_unit is not None and self.y_unit != unit_label:
+            values = units.to_array(units.Q_(values, self.y_unit), unit_label, dtype=float)
+
+        if scalar_input:
+            return float(np.asarray(values, dtype=float)[0])
+        return values
+
+    def plot(
+        self,
+        t: ArrayLike | None = None,
+        ax: Any | None = None,
+        *,
+        time_unit: UnitLike = "millisecond",
+        amplitude_unit: UnitLike | None = None,
+        label: str | None = None,
+        xlabel: str | None = None,
+        ylabel: str | None = None,
+        grid: bool = True,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Plot this stimulus on a Matplotlib axis.
+
+        If `t` is omitted, a dense grid spanning the stored samples is created.
+        The method returns the axis so callers can keep customizing the figure.
+        """
+
+        if ax is None:
+            import matplotlib.pyplot as plt
+
+            _, ax = plt.subplots()
+
+        if t is None:
+            t_min = float(self.t[0])
+            t_max = float(self.t[-1])
+            if t_max <= t_min:
+                t_max = t_min + 1.0
+            t = np.linspace(t_min, t_max, 1000)
+
+        time_unit_label = units.unit_label(time_unit) or "millisecond"
+        amplitude_unit_label = units.unit_label(amplitude_unit) or self.y_unit
+        t_ms = units.to_ms_array(t, dtype=float)
+        x = units.to_array(units.Q_(t_ms, "millisecond"), time_unit_label, dtype=float)
+        y = self.evaluate(t_ms, unit=amplitude_unit_label)
+
+        if label is not None:
+            plot_kwargs.setdefault("label", label)
+        plot_kwargs.setdefault("linewidth", 2.0)
+        ax.plot(x, y, **plot_kwargs)
+
+        time_display = units.short_unit_label(time_unit_label) or time_unit_label
+        ax.set_xlabel(xlabel or f"Time [{time_display}]")
+        if ylabel is not None:
+            ax.set_ylabel(ylabel)
+        elif amplitude_unit_label is not None:
+            amplitude_display = units.short_unit_label(amplitude_unit_label) or amplitude_unit_label
+            ax.set_ylabel(f"Amplitude [{amplitude_display}]")
+        else:
+            ax.set_ylabel("Amplitude")
+        if grid:
+            ax.grid(True, alpha=0.3)
+        return ax
 
     # ------------------------------------------------------------------
     # Composition
     # ------------------------------------------------------------------
 
-    def shifted(self, dt: float) -> "Stimulus":
-        return Stimulus(self.t + dt, self.y, self.mode)
+    def shifted(self, dt: Any) -> "Stimulus":
+        """Return a waveform shifted by `dt`.
+
+        Plain `dt` values are interpreted as milliseconds.
+        """
+
+        return Stimulus(self.t + units.to_ms(dt), self.y, self.mode, y_unit=self.y_unit)
 
     def scaled(self, factor: float) -> "Stimulus":
-        return Stimulus(self.t, factor * self.y, self.mode)
+        """Return a waveform with amplitudes multiplied by `factor`."""
+
+        return Stimulus(self.t, factor * self.y, self.mode, y_unit=self.y_unit)
 
     def offset(self, value: float) -> "Stimulus":
-        return Stimulus(self.t, self.y + value, self.mode)
+        """Return a waveform with an additive amplitude offset."""
+
+        return Stimulus(self.t, self.y + value, self.mode, y_unit=self.y_unit)
 
     def insert_samples(self, t_new: ArrayLike) -> "Stimulus":
-        """
-        Return a new stimulus evaluated on the union of old and new samples.
-        """
-        from axonscope.stimulus_eval import evaluate_stimulus_numpy
-
-        t_union = np.unique(np.concatenate([self.t, np.asarray(t_new, dtype=float)]))
-        y_union = evaluate_stimulus_numpy(self, t_union)
-        return Stimulus(t_union, y_union, self.mode)
+        """Return a stimulus evaluated on the union of old and new samples."""
+        t_union = np.unique(np.concatenate([self.t, units.to_ms_array(t_new, dtype=float)]))
+        y_union = self.evaluate(t_union)
+        return Stimulus(t_union, y_union, self.mode, y_unit=self.y_unit)
 
     def synchronize(self, other: "Stimulus") -> tuple["Stimulus", "Stimulus"]:
-        """
-        Return two stimuli evaluated on the same time grid.
-        """
+        """Return `self` and `other` evaluated on the same time grid."""
         t_union = np.unique(np.concatenate([self.t, other.t]))
         return self.insert_samples(t_union), other.insert_samples(t_union)
 
     def __add__(self, other: float | "Stimulus") -> "Stimulus":
+        """Return the pointwise sum with a scalar or another stimulus."""
+
         if isinstance(other, Stimulus):
             a, b = self.synchronize(other)
-            return Stimulus(a.t, a.y + b.y, self.mode)
-        return Stimulus(self.t, self.y + float(other), self.mode)
+            if a.y_unit is None and b.y_unit is not None:
+                a = a.as_unit(b.y_unit)
+            b = b.as_unit(a.y_unit) if a.y_unit is not None else b
+            return Stimulus(a.t, a.y + b.y, self.mode, y_unit=a.y_unit)
+        return Stimulus(self.t, self.y + float(other), self.mode, y_unit=self.y_unit)
 
     def __sub__(self, other: float | "Stimulus") -> "Stimulus":
+        """Return the pointwise difference with a scalar or another stimulus."""
+
         if isinstance(other, Stimulus):
             a, b = self.synchronize(other)
-            return Stimulus(a.t, a.y - b.y, self.mode)
-        return Stimulus(self.t, self.y - float(other), self.mode)
+            if a.y_unit is None and b.y_unit is not None:
+                a = a.as_unit(b.y_unit)
+            b = b.as_unit(a.y_unit) if a.y_unit is not None else b
+            return Stimulus(a.t, a.y - b.y, self.mode, y_unit=a.y_unit)
+        return Stimulus(self.t, self.y - float(other), self.mode, y_unit=self.y_unit)
 
     def __mul__(self, other: float | "Stimulus") -> "Stimulus":
+        """Return the pointwise product with a scalar or another stimulus."""
+
         if isinstance(other, Stimulus):
             a, b = self.synchronize(other)
             return Stimulus(a.t, a.y * b.y, self.mode)
-        return Stimulus(self.t, self.y * float(other), self.mode)
+        return Stimulus(self.t, self.y * float(other), self.mode, y_unit=self.y_unit)
 
     __rmul__ = __mul__

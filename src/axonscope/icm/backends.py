@@ -470,3 +470,172 @@ class HeterogeneousICMBackend:
             idx = jnp.asarray(group.indices, dtype=jnp.int32)
             out = out.at[idx].set(group.model.I_background(len(group.indices)))
         return out
+
+
+@dataclass(frozen=True)
+class PaddedICMBackend:
+    """Adapter exposing a shorter backend at a padded spatial width."""
+
+    backend: ICMBackend
+    nx: int
+    target_nx: int
+    n_gates_max: int
+    n_channels_max: int
+    dtype: jnp.dtype
+
+    @classmethod
+    def from_backend(
+        cls,
+        backend: ICMBackend,
+        *,
+        target_nx: int,
+        n_gates_max: int,
+        n_channels_max: int,
+    ) -> "PaddedICMBackend":
+        if backend.Nx > target_nx:
+            raise ValueError(
+                f"backend Nx={backend.Nx} cannot be padded to target_nx={target_nx}."
+            )
+        return cls(
+            backend=backend,
+            nx=int(backend.Nx),
+            target_nx=int(target_nx),
+            n_gates_max=int(n_gates_max),
+            n_channels_max=int(n_channels_max),
+            dtype=backend.dtype,
+        )
+
+    @property
+    def Nx(self) -> int:
+        return self.target_nx
+
+    def _pad_space(self, values: Array1D) -> Array1D:
+        out = jnp.zeros((self.target_nx,), dtype=self.dtype)
+        return out.at[: self.nx].set(values)
+
+    def _pad_gates(self, values: Array2D) -> Array2D:
+        out = jnp.zeros((self.target_nx, self.n_gates_max), dtype=self.dtype)
+        return out.at[: self.nx, : values.shape[1]].set(values)
+
+    def _pad_channels(self, values: Array2D) -> Array2D:
+        out = jnp.zeros((self.target_nx, self.n_channels_max), dtype=self.dtype)
+        return out.at[: self.nx, : values.shape[1]].set(values)
+
+    def _local_gates(self, gates: Array2D) -> Array2D:
+        return gates[: self.nx, : self.backend.n_gates_max]
+
+    def init_gates(self, V0_mV: Array1D) -> Array2D:
+        return self._pad_gates(self.backend.init_gates(V0_mV[: self.nx]))
+
+    def alpha(self, V_mV: Array1D) -> Array2D:
+        return self._pad_gates(self.backend.alpha(V_mV[: self.nx]))
+
+    def beta(self, V_mV: Array1D) -> Array2D:
+        return self._pad_gates(self.backend.beta(V_mV[: self.nx]))
+
+    def conductances(self, gates: Array2D) -> Array2D:
+        return self._pad_channels(self.backend.conductances(self._local_gates(gates)))
+
+    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
+        return self._pad_gates(
+            self.backend.cn_gate_update(
+                g_prev=self._local_gates(g_prev),
+                V_mV=V_mV[: self.nx],
+                dt=dt,
+            )
+        )
+
+    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+        return self._pad_space(
+            self.backend.currents(
+                V_mV=V_mV[: self.nx],
+                gates=self._local_gates(gates),
+            )
+        )
+
+    def total_conductance(self, gates: Array2D) -> Array1D:
+        return self._pad_space(self.backend.total_conductance(self._local_gates(gates)))
+
+    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
+        Gm, GE = self.backend.membrane_conductance_terms(self._local_gates(gates))
+        return self._pad_space(Gm), self._pad_space(GE)
+
+    def background_current(self) -> Array1D:
+        return self._pad_space(self.backend.background_current())
+
+
+@dataclass(frozen=True)
+class RowIndexedICMBackend:
+    """Static backend multiplexer for parameter-batched membrane rows."""
+
+    rows: tuple[PaddedICMBackend, ...]
+    n_gates_max: int
+    n_channels_max: int
+    dtype: jnp.dtype
+
+    @classmethod
+    def from_backends(
+        cls,
+        backends: tuple[ICMBackend, ...],
+        *,
+        target_nx: int,
+    ) -> "RowIndexedICMBackend":
+        if not backends:
+            raise ValueError("backends must contain at least one row.")
+        n_gates_max = max(int(backend.n_gates_max) for backend in backends)
+        n_channels_max = max(int(backend.n_channels_max) for backend in backends)
+        rows = tuple(
+            PaddedICMBackend.from_backend(
+                backend,
+                target_nx=target_nx,
+                n_gates_max=n_gates_max,
+                n_channels_max=n_channels_max,
+            )
+            for backend in backends
+        )
+        return cls(
+            rows=rows,
+            n_gates_max=n_gates_max,
+            n_channels_max=n_channels_max,
+            dtype=backends[0].dtype,
+        )
+
+    @property
+    def Nx(self) -> int:
+        return self.rows[0].Nx
+
+    def _switch(self, row_index, method_name: str, *args):
+        branches = [
+            (lambda *branch_args, row=row: getattr(row, method_name)(*branch_args))
+            for row in self.rows
+        ]
+        return jax.lax.switch(row_index, branches, *args)
+
+    def init_gates_for_row(self, row_index, V0_mV: Array1D) -> Array2D:
+        return self._switch(row_index, "init_gates", V0_mV)
+
+    def cn_gate_update_for_row(
+        self,
+        row_index,
+        *,
+        g_prev: Array2D,
+        V_mV: Array1D,
+        dt: float,
+    ) -> Array2D:
+        return self._switch(row_index, "cn_gate_update", g_prev, V_mV, dt)
+
+    def currents_for_row(
+        self,
+        row_index,
+        *,
+        V_mV: Array1D,
+        gates: Array2D,
+    ) -> Array1D:
+        return self._switch(row_index, "currents", V_mV, gates)
+
+    def membrane_conductance_terms_for_row(
+        self,
+        row_index,
+        gates: Array2D,
+    ) -> tuple[Array1D, Array1D]:
+        return self._switch(row_index, "membrane_conductance_terms", gates)

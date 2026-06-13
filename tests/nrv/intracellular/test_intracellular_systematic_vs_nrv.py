@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
+from axonscope import AxonSimulation, degC, mV, um
 from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
@@ -22,7 +23,8 @@ from axonscope.axons.unmyelinated import (
     Tigerholm,
 )
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
+from tests.nrv._helpers import axonscope_x_um
 
 pytestmark = pytest.mark.nrv_intracellular
 
@@ -99,9 +101,9 @@ def _align_rows_to_target_x(
 
 def _axonspace_vm_matrix(axon, res, matrix_mode: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     Vm = np.asarray(res.Vm, dtype=float)
-    x = np.asarray(axon.x, dtype=float)
+    x = axonscope_x_um(axon)
     if matrix_mode == "all":
-        indices = np.arange(axon.Nx, dtype=int)
+        indices = np.arange(axon.n_compartments, dtype=int)
         return Vm.T, x, indices
     if matrix_mode == "nodes":
         indices = np.asarray(axon.node_indices, dtype=int)
@@ -170,7 +172,7 @@ def _plot_intracellular_report(
 ) -> Path:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     t_as = np.asarray(res.t, dtype=float)
-    as_x = np.asarray(axon.x, dtype=float)
+    as_x = axonscope_x_um(axon)
     vm_local_as = np.asarray(res.Vm, dtype=float)[:, sample_as_idx]
 
     fig, axs = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
@@ -418,17 +420,18 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
 
 def _make_hh_axon():
     ax = HodgkinHuxley(
-        L=1000.0,
-        d=0.5,
-        Nx=101,
-        celsius=6.3,
-        Vinit=-70.0,
+        length=1000.0 * um,
+        diameter=0.5 * um,
+        compartments=101,
+        celsius=6.3 * degC,
+        v_init=-70.0 * mV,
         include_passive_leak=True,
         g_pas=0.001,
         e_pas=-70.0,
     )
-    ax.insert_I_Clamp(position=500.0, stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
-    return ax
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=500.0, current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
+    return sim
 
 
 def _make_hh_nrv(_, dt_ms: float):
@@ -449,9 +452,10 @@ def _make_hh_nrv(_, dt_ms: float):
 
 
 def _make_rattay_axon():
-    ax = RattayAberham(L=1000.0, d=0.8, Nx=51, celsius=37.0)
-    ax.insert_I_Clamp(position=500.0, stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
-    return ax
+    ax = RattayAberham(length=1000.0 * um, diameter=0.8 * um, compartments=51, celsius=37.0 * degC)
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=500.0, current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
+    return sim
 
 
 def _make_rattay_nrv(_, dt_ms: float):
@@ -472,9 +476,10 @@ def _make_rattay_nrv(_, dt_ms: float):
 
 
 def _make_sundt_axon():
-    ax = Sundt(L=1000.0, d=0.5, Nx=101, celsius=37.0)
-    ax.insert_I_Clamp(position=500.0, stimulus=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
-    return ax
+    ax = Sundt(length=1000.0 * um, diameter=0.5 * um, compartments=101, celsius=37.0 * degC)
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=500.0, current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0))
+    return sim
 
 
 def _make_sundt_nrv(_, dt_ms: float):
@@ -495,9 +500,10 @@ def _make_sundt_nrv(_, dt_ms: float):
 
 
 def _make_tigerholm_axon():
-    ax = Tigerholm(L=5000.0, d=1.0, Nx=101, celsius=37.0)
-    ax.insert_I_Clamp(position=2500.0, stimulus=Stimulus.pulse(start=5.0, duration=1.0, amplitude=2.0))
-    return ax
+    ax = Tigerholm(length=5000.0 * um, diameter=1.0 * um, compartments=101, celsius=37.0 * degC)
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=2500.0, current=Stimulus.pulse(start=5.0, duration=1.0, amplitude=2.0))
+    return sim
 
 
 def _make_tigerholm_nrv(_, dt_ms: float):
@@ -518,9 +524,10 @@ def _make_tigerholm_nrv(_, dt_ms: float):
 
 
 def _make_schild94_axon():
-    ax = Schild94(L=3000.0, d=0.8, Nx=51)
-    ax.insert_I_Clamp(position=1500.0, stimulus=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
-    return ax
+    ax = Schild94(length=3000.0 * um, diameter=0.8 * um, compartments=51)
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=1500.0, current=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
+    return sim
 
 
 def _make_schild94_nrv(_, dt_ms: float):
@@ -541,9 +548,10 @@ def _make_schild94_nrv(_, dt_ms: float):
 
 
 def _make_schild97_axon():
-    ax = Schild97(L=3000.0, d=0.8, Nx=51)
-    ax.insert_I_Clamp(position=1500.0, stimulus=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
-    return ax
+    ax = Schild97(length=3000.0 * um, diameter=0.8 * um, compartments=51)
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=1500.0, current=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
+    return sim
 
 
 def _make_schild97_nrv(_, _dt_ms: float):
@@ -564,12 +572,13 @@ def _make_schild97_nrv(_, _dt_ms: float):
 
 
 def _make_mrg_axon():
-    ax = MRG(d=10.0, nodes=7)
+    ax = MRG(diameter=10.0 * um, nodes=7)
     stim_node = int(ax.node_indices.shape[0] // 2)
-    stim_pos_um = float(ax.x[int(ax.node_indices[stim_node])])
-    ax.insert_I_Clamp(position=stim_pos_um, stimulus=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
-    ax.comparison_sample_position_um = stim_pos_um
-    return ax
+    stim_pos_um = float(axonscope_x_um(ax)[int(ax.node_indices[stim_node])])
+    sim = AxonSimulation(ax)
+    sim.add_current_clamp(position_um=stim_pos_um, current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
+    sim.comparison_sample_position_um = stim_pos_um
+    return sim
 
 
 def _make_mrg_nrv(axon_as, dt_ms: float):
@@ -578,7 +587,7 @@ def _make_mrg_nrv(axon_as, dt_ms: float):
         0,
         0,
         10.0,
-        float(axon_as.L),
+        float(axon_as.length),
         model="MRG",
         dt=dt_ms,
         node_shift=0,

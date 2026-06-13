@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 
 

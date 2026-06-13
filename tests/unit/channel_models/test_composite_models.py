@@ -2,12 +2,16 @@ import pytest
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope import AxonSimulation
+from axonscope import membranes
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from tests.unit.channel_models.fixtures import HHLeakICM, HHKICM, HHNaICM
 from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.axons.generic import GenericAxon
-from axonscope.stimulus import Stimulus
+from axonscope.solvers.runtime import compile_membrane_model
+from axonscope.axons import Axon, Layout, Section
+from axonscope.stimulation import Stimulus
+from axonscope.utils import units
 
 
 def _assert_same_icm(mono: IonChannelModelBase, comp: CompositeICM):
@@ -102,22 +106,60 @@ def test_composite_keeps_common_q10():
     assert np.isclose(float(comp.q10), float(k.q10))
 
 
+def test_composite_rejects_stateful_membrane_components():
+    membrane = membranes.Composite(
+        [
+            membranes.Schild97(diameter_um=0.8),
+            membranes.Passive(Rm=1e4, EL=-70.0),
+        ]
+    )
+
+    with pytest.raises(NotImplementedError, match="stateful membrane components"):
+        compile_membrane_model(membrane)
+
+
 def test_axon_composite_vs_mono_hodgkin_huxley():
     """End-to-end: CompositeICM(Na,K,Leak) vs HodgkinHuxleyICM — Vm must match within 0.1 mV."""
     mono_icm = HodgkinHuxleyICM()
     comp_icm = CompositeICM([HHNaICM(), HHKICM(), HHLeakICM()])
 
     L, d, Nx = 1_000, 0.5, 11
-    ax_mono = GenericAxon(ion_channel=mono_icm, L=L, d=d, Nx=Nx, Temp=6.3)
-    ax_comp = GenericAxon(ion_channel=comp_icm, L=L, d=d, Nx=Nx, Temp=6.3)
+    ax_mono = Axon(
+        layout=Layout.single_uniform(
+            Section(
+                "axon",
+                membrane=mono_icm,
+                diameter=units.Q_(d, "micrometer"),
+            ),
+            length=units.Q_(L, "micrometer"),
+            compartments=Nx,
+        ),
+        v_init=-70.0 * units.ureg.mV,
+        temperature=6.3 * units.ureg.degC,
+    )
+    ax_comp = Axon(
+        layout=Layout.single_uniform(
+            Section(
+                "axon",
+                membrane=comp_icm,
+                diameter=units.Q_(d, "micrometer"),
+            ),
+            length=units.Q_(L, "micrometer"),
+            compartments=Nx,
+        ),
+        v_init=-70.0 * units.ureg.mV,
+        temperature=6.3 * units.ureg.degC,
+    )
 
     solver = CrankNicholson()
     stim = Stimulus.pulse(start=1.0, duration=1.0, amplitude=5)
-    ax_mono.insert_I_Clamp(position=L/2, stimulus=stim)
-    ax_comp.insert_I_Clamp(position=L/2, stimulus=stim)
+    sim_mono = AxonSimulation(ax_mono)
+    sim_comp = AxonSimulation(ax_comp)
+    sim_mono.add_current_clamp(position_um=L/2, current=stim)
+    sim_comp.add_current_clamp(position_um=L/2, current=stim)
 
-    res_mono = solver.solve(ax_mono, 10, 0.001)
-    res_comp = solver.solve(ax_comp, 10, 0.001)
+    res_mono = solver.solve(sim_mono, 10, 0.001)
+    res_comp = solver.solve(sim_comp, 10, 0.001)
 
     Vm_mono = np.array(res_mono.Vm)
     Vm_comp = np.array(res_comp.Vm)

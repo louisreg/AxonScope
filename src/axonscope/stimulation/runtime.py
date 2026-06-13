@@ -1,32 +1,99 @@
+"""Runtime compilation of stimulation descriptions for JAX solvers.
+
+Public stimulation objects are descriptive and unit-aware. This module is the
+solver boundary: it converts stimuli, current clamps, and extracellular
+contexts into small JAX callables and precomputed arrays with explicit numeric
+units.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import jax.numpy as jnp
+import numpy as np
 
-from axonscope.stimulation import ExtracellularContext, IntracellularCurrentClamp
-from axonscope.stimulus import ArrayLike, Stimulus
+from axonscope.stimulation import (
+    ExtracellularContext,
+    IntracellularContext,
+    IntracellularCurrentClamp,
+)
+from axonscope.stimulation import ArrayLike, Stimulus
+
+if TYPE_CHECKING:
+    from axonscope.solvers.axon_runtime import SolverAxon
 
 
-def _axon_dtype(axon) -> jnp.dtype:
-    ion_channel = getattr(axon, "ion_channel", None)
-    if ion_channel is not None and hasattr(ion_channel, "dtype"):
-        return ion_channel.dtype
+def _resolve_solver_axon(axon, solver_axon: "SolverAxon | None") -> "SolverAxon":
+    """Return an existing solver axon or build one from a public axon object."""
+
+    if solver_axon is not None:
+        return solver_axon
+    from axonscope.solvers.axon_runtime import build_solver_axon
+
+    return build_solver_axon(axon)
+
+
+def _axon_dtype(axon, *, solver_axon: "SolverAxon | None" = None) -> jnp.dtype:
+    """Return the JAX scalar dtype associated with an axon-like object."""
+
+    if solver_axon is not None:
+        return _jax_scalar_dtype(solver_axon.dtype)
     if hasattr(axon, "dtype"):
-        return axon.dtype
+        return _jax_scalar_dtype(axon.dtype)
+    layout = getattr(axon, "layout", None)
+    if layout is not None:
+        return _jax_scalar_dtype(layout.sections[0].membrane.dtype)
     return jnp.float32
+
+
+def _jax_scalar_dtype(dtype_like) -> jnp.dtype:
+    """Normalize NumPy-like dtype inputs to the supported JAX float dtype."""
+
+    name = np.dtype(dtype_like).name
+    if name == "float64":
+        return jnp.float64
+    return jnp.float32
+
+
+def _intracellular_contexts_from_axon(axon) -> tuple[IntracellularContext, ...]:
+    """Return intracellular contexts from a simulation-like object."""
+
+    contexts = getattr(axon, "intracellular_contexts", None)
+    if contexts is None:
+        contexts = getattr(axon, "intracellular_clamps", ())
+    return tuple(contexts)
+
+
+def _extracellular_contexts_from_axon(axon) -> tuple[ExtracellularContext, ...]:
+    """Return extracellular contexts from a simulation-like object."""
+
+    return tuple(getattr(axon, "extracellular_contexts", ()))
+
+
+def _global_x_positions_m(axon, solver_axon: "SolverAxon", dtype_local: jnp.dtype) -> jnp.ndarray:
+    """Return compartment x positions in global meters for one axon."""
+
+    x_offset_um = dtype_local(getattr(axon, "x_offset_um", 0.0))
+    return (jnp.asarray(solver_axon.x_um, dtype=dtype_local) + x_offset_um) * dtype_local(1e-6)
 
 
 @dataclass(frozen=True)
 class JaxStimulus:
-    """JAX-ready stimulus representation used inside solver kernels."""
+    """JAX-ready stimulus representation used by runtime code.
+
+    `t` is stored in milliseconds and `y` is stored in the numeric unit already
+    required by the consuming solver term.
+    """
 
     t: jnp.ndarray
     y: jnp.ndarray
     mode: Literal["hold", "linear"] = "hold"
 
     def __call__(self, tq):
+        """Evaluate the stimulus at one scalar time in milliseconds."""
+
         if self.mode == "linear":
             return jnp.interp(tq, self.t, self.y, left=self.y[0], right=self.y[-1])
 
@@ -36,7 +103,11 @@ class JaxStimulus:
 
 
 def compile_stimulus(stimulus: Stimulus, dtype_local: jnp.dtype | None = None) -> JaxStimulus:
-    """Compile a descriptive stimulus to a JAX-ready callable."""
+    """Compile a descriptive stimulus to a JAX-ready callable.
+
+    The stimulus is assumed to already be expressed in the physical unit needed
+    by its consumer, such as nanoamperes for clamps or amperes for electrodes.
+    """
     if dtype_local is None:
         dtype_local = jnp.float32
     return JaxStimulus(
@@ -47,100 +118,260 @@ def compile_stimulus(stimulus: Stimulus, dtype_local: jnp.dtype | None = None) -
 
 
 @dataclass(frozen=True)
-class CompiledExtracellularContext:
-    """JAX-ready extracellular context used by extracellular solvers."""
+class CompiledElectrode:
+    """JAX-ready stimulated electrode with a precomputed spatial footprint."""
 
     footprint_V_per_A: jnp.ndarray
     stimulus: JaxStimulus
 
     def __call__(self, t_ms):
+        """Return this electrode's Vext contribution in volts at `t_ms`."""
+
         return self.stimulus(t_ms) * self.footprint_V_per_A
+
+
+@dataclass(frozen=True)
+class CompiledExtracellularContext:
+    """JAX-ready extracellular context with precomputed electrode footprints."""
+
+    electrodes: tuple[CompiledElectrode, ...]
+
+    def __call__(self, t_ms):
+        """Return summed extracellular potential in volts at `t_ms`."""
+
+        if not self.electrodes:
+            raise ValueError("CompiledExtracellularContext requires at least one electrode.")
+        total = jnp.zeros_like(self.electrodes[0].footprint_V_per_A)
+        for electrode in self.electrodes:
+            total = total + electrode(t_ms)
+        return total
+
+
+@dataclass(frozen=True)
+class CompiledExtracellularContexts:
+    """JAX-ready collection of extracellular contexts for one axon."""
+
+    n_compartments: int
+    dtype_local: Any
+    contexts: tuple[CompiledExtracellularContext, ...]
+
+    def __call__(self, t_ms):
+        """Return summed extracellular potential in millivolts at `t_ms`."""
+
+        vext = jnp.zeros((self.n_compartments,), dtype=self.dtype_local)
+        for ctx in self.contexts:
+            vext = vext + ctx(t_ms).astype(self.dtype_local) * self.dtype_local(1e3)
+        return vext
+
+
+@dataclass(frozen=True)
+class CompiledIntracellularContexts:
+    """JAX-ready intracellular current-density compiler output."""
+
+    n_compartments: int
+    dtype_local: Any
+    basis: jnp.ndarray
+    nA_to_mA_per_cm2: jnp.ndarray
+    stimuli: tuple[JaxStimulus, ...]
+
+    def __call__(self, t_ms):
+        """Return injected current density in mA/cm^2 at one time."""
+
+        if not self.stimuli:
+            return jnp.zeros((self.n_compartments,), dtype=self.dtype_local)
+        amps_nA = jnp.asarray([stim(t_ms) for stim in self.stimuli], dtype=self.dtype_local)
+        densities = amps_nA * self.nA_to_mA_per_cm2
+        return jnp.sum(densities[:, None] * self.basis, axis=0)
 
 
 def compile_extracellular_context(
     ctx: ExtracellularContext,
     x_positions_m: ArrayLike,
     dtype_local: jnp.dtype | None = None,
+    *,
+    axon_y_um: float = 0.0,
+    axon_z_um: float = 0.0,
 ) -> CompiledExtracellularContext:
-    """Precompute the spatial footprint for one extracellular context."""
+    """Precompute all electrode footprints for one axon.
+
+    Parameters
+    ----------
+    ctx:
+        Extracellular context containing stimulated electrodes.
+    x_positions_m:
+        Axial sample positions in meters, including the axon's x offset.
+    dtype_local:
+        JAX dtype used for compiled arrays.
+    axon_y_um, axon_z_um:
+        Axon's transverse global position in micrometers.
+    """
     if dtype_local is None:
         dtype_local = jnp.float32
-    fp = ctx.electrode.footprint(x_positions_m)
+    electrodes = []
+    for electrode in ctx.electrodes:
+        stimulus = getattr(electrode, "stimulus", None)
+        if stimulus is None:
+            raise ValueError("Each extracellular electrode must have an attached stimulus.")
+        fp = ctx.footprint_for_electrode(
+            electrode,
+            x_positions_m,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+        )
+        electrodes.append(
+            CompiledElectrode(
+                footprint_V_per_A=jnp.asarray(fp, dtype=dtype_local),
+                stimulus=compile_stimulus(stimulus, dtype_local=dtype_local),
+            )
+        )
     return CompiledExtracellularContext(
-        footprint_V_per_A=jnp.asarray(fp, dtype=dtype_local),
-        stimulus=compile_stimulus(ctx.stimulus, dtype_local=dtype_local),
+        electrodes=tuple(electrodes),
     )
 
 
-def compartment_surface_area_cm2(axon, dtype_local: jnp.dtype) -> jnp.ndarray:
+def compartment_surface_area_cm2(
+    axon,
+    dtype_local: jnp.dtype,
+    *,
+    solver_axon: "SolverAxon | None" = None,
+) -> jnp.ndarray:
     """Return per-compartment membrane surface area in cm^2."""
-    if hasattr(axon, "diam_vec"):
-        diam_um = jnp.asarray(axon.diam_vec, dtype=dtype_local)
-    else:
-        diam_um = jnp.full((axon.Nx,), dtype_local(axon.d), dtype=dtype_local)
-    if hasattr(axon, "compartment_lengths_um"):
-        length_cm = jnp.asarray(axon.compartment_lengths_um, dtype=dtype_local) * dtype_local(1e-4)
-    else:
-        length_cm = jnp.asarray(axon.dx_cm, dtype=dtype_local)
+    solver_data = _resolve_solver_axon(axon, solver_axon)
+    diam_um = jnp.asarray(solver_data.diam_um, dtype=dtype_local)
+    length_cm = jnp.asarray(solver_data.compartment_lengths_um, dtype=dtype_local) * dtype_local(1e-4)
     return jnp.pi * (diam_um * dtype_local(1e-4)) * length_cm
 
 
-def build_intracellular_current_density_fn(axon):
-    """Compile descriptive intracellular clamps into a JAX-ready density function."""
-    dtype_local = _axon_dtype(axon)
-    Nx = axon.Nx
-    clamps: tuple[IntracellularCurrentClamp, ...] = tuple(
-        getattr(axon, "intracellular_clamps", ())
-    )
+def compile_intracellular_contexts(
+    axon,
+    dtype_local: jnp.dtype | None = None,
+    *,
+    solver_axon: "SolverAxon | None" = None,
+) -> CompiledIntracellularContexts:
+    """Compile intracellular contexts to a current-density callable."""
 
-    if not clamps:
-        return lambda t_ms: jnp.zeros((Nx,), dtype=dtype_local)
-
-    x = jnp.asarray(axon.x, dtype=dtype_local)
-    area_cm2 = compartment_surface_area_cm2(axon, dtype_local)
-
-    idxs = []
-    amp_to_density = []
-    compiled_stimuli = []
-    for clamp in clamps:
-        idx = int(jnp.argmin(jnp.abs(x - dtype_local(clamp.position_um))))
-        idxs.append(idx)
-        amp_to_density.append(dtype_local(1e-3) / area_cm2[idx])
-        compiled_stimuli.append(compile_stimulus(clamp.stimulus, dtype_local=dtype_local))
-
-    basis = jnp.eye(Nx, dtype=dtype_local)[jnp.asarray(idxs, dtype=jnp.int32)]
-    amp_to_density = jnp.asarray(amp_to_density, dtype=dtype_local)
-    compiled_stimuli = tuple(compiled_stimuli)
-
-    def inj_fun(t_ms):
-        amps_nA = jnp.asarray([stim(t_ms) for stim in compiled_stimuli], dtype=dtype_local)
-        densities = amps_nA * amp_to_density
-        return jnp.sum(densities[:, None] * basis, axis=0)
-
-    return inj_fun
-
-
-def build_extracellular_potential_fn(axon):
-    """Compile descriptive extracellular contexts into a JAX-ready Vext function."""
-    dtype_local = _axon_dtype(axon)
-    Nx = axon.Nx
-    contexts: tuple[ExtracellularContext, ...] = tuple(
-        getattr(axon, "extracellular_contexts", ())
-    )
+    solver_data = _resolve_solver_axon(axon, solver_axon)
+    if dtype_local is None:
+        dtype_local = _axon_dtype(axon, solver_axon=solver_data)
+    contexts = _intracellular_contexts_from_axon(axon)
+    Nx = solver_data.n_compartments
 
     if not contexts:
-        return lambda t_ms: jnp.zeros((Nx,), dtype=dtype_local)
+        return CompiledIntracellularContexts(
+            n_compartments=Nx,
+            dtype_local=dtype_local,
+            basis=jnp.zeros((0, Nx), dtype=dtype_local),
+            nA_to_mA_per_cm2=jnp.zeros((0,), dtype=dtype_local),
+            stimuli=(),
+        )
 
-    x_positions_m = jnp.asarray(axon.x, dtype=dtype_local) * dtype_local(1e-6)
-    compiled_contexts = tuple(
-        compile_extracellular_context(ctx, x_positions_m, dtype_local=dtype_local)
-        for ctx in contexts
+    x = jnp.asarray(solver_data.x_um, dtype=dtype_local)
+    area_cm2 = compartment_surface_area_cm2(
+        axon,
+        dtype_local,
+        solver_axon=solver_data,
     )
 
-    def vext_fun(t_ms):
-        vext = jnp.zeros((Nx,), dtype=dtype_local)
-        for ctx in compiled_contexts:
-            vext = vext + ctx(t_ms).astype(dtype_local) * dtype_local(1e3)
-        return vext
+    idxs = []
+    nA_to_mA_per_cm2 = []
+    compiled_stimuli = []
+    for context in contexts:
+        if not isinstance(context, IntracellularCurrentClamp):
+            raise NotImplementedError(
+                "Only IntracellularCurrentClamp is currently supported by the "
+                "intracellular runtime compiler."
+            )
+        idx = int(jnp.argmin(jnp.abs(x - dtype_local(context.position_um))))
+        idxs.append(idx)
+        nA_to_mA_per_cm2.append(dtype_local(1e-3) / area_cm2[idx])
+        compiled_stimuli.append(compile_stimulus(context.current, dtype_local=dtype_local))
 
-    return vext_fun
+    return CompiledIntracellularContexts(
+        n_compartments=Nx,
+        dtype_local=dtype_local,
+        basis=jnp.eye(Nx, dtype=dtype_local)[jnp.asarray(idxs, dtype=jnp.int32)],
+        nA_to_mA_per_cm2=jnp.asarray(nA_to_mA_per_cm2, dtype=dtype_local),
+        stimuli=tuple(compiled_stimuli),
+    )
+
+
+def compile_extracellular_contexts(
+    axon,
+    dtype_local: jnp.dtype | None = None,
+    *,
+    solver_axon: "SolverAxon | None" = None,
+) -> CompiledExtracellularContexts:
+    """Compile all extracellular contexts attached to one axon."""
+
+    solver_data = _resolve_solver_axon(axon, solver_axon)
+    if dtype_local is None:
+        dtype_local = _axon_dtype(axon, solver_axon=solver_data)
+    contexts = _extracellular_contexts_from_axon(axon)
+    Nx = solver_data.n_compartments
+
+    if not contexts:
+        return CompiledExtracellularContexts(
+            n_compartments=Nx,
+            dtype_local=dtype_local,
+            contexts=(),
+        )
+
+    x_positions_m = _global_x_positions_m(axon, solver_data, dtype_local)
+    compiled_contexts = tuple(
+        compile_extracellular_context(
+            ctx,
+            x_positions_m,
+            dtype_local=dtype_local,
+            axon_y_um=float(getattr(axon, "y_um", 0.0)),
+            axon_z_um=float(getattr(axon, "z_um", 0.0)),
+        )
+        for ctx in contexts
+    )
+    return CompiledExtracellularContexts(
+        n_compartments=Nx,
+        dtype_local=dtype_local,
+        contexts=compiled_contexts,
+    )
+
+
+def build_intracellular_current_density_fn(
+    axon,
+    *,
+    solver_axon: "SolverAxon | None" = None,
+):
+    """Compile intracellular clamps into a current-density function.
+
+    The returned callable maps time in milliseconds to an array of injected
+    current density in mA/cm^2, one value per compartment.
+    """
+    return compile_intracellular_contexts(axon, solver_axon=solver_axon)
+
+
+def build_extracellular_potential_fn(
+    axon,
+    *,
+    solver_axon: "SolverAxon | None" = None,
+):
+    """Compile extracellular contexts into an imposed-potential function.
+
+    The returned callable maps time in milliseconds to Vext in millivolts, one
+    value per compartment. If no extracellular context is attached, the
+    callable returns zeros.
+    """
+    return compile_extracellular_contexts(axon, solver_axon=solver_axon)
+
+
+__all__ = [
+    "CompiledElectrode",
+    "CompiledExtracellularContexts",
+    "CompiledExtracellularContext",
+    "CompiledIntracellularContexts",
+    "JaxStimulus",
+    "build_extracellular_potential_fn",
+    "build_intracellular_current_density_fn",
+    "compile_extracellular_context",
+    "compile_extracellular_contexts",
+    "compile_intracellular_contexts",
+    "compile_stimulus",
+    "compartment_surface_area_cm2",
+]

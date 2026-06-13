@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from typing import Tuple, Callable
 
 # Assuming these imports are necessary for the environment
-from axonscope.settings import dtype
+from axonscope.utils.settings import dtype
 from axonscope.channel_models.base_channel_model import IonChannelModelBase
 from axonscope.icm import Gating
 

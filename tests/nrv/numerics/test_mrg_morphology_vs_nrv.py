@@ -5,11 +5,12 @@ import pytest
 
 import nrv
 
-from axonscope.morphology.mrg import (
+from axonscope import um
+from axonscope.axons.templates._mrg_morphology import (
     available_mrg_fiber_diameters,
     get_mrg_morphology,
 )
-from axonscope.axons.myelinated import mrg_length_from_nodes
+from axonscope.axons import mrg_like_length_from_nodes
 
 
 FIELDS = ("g", "axonD", "nodeD", "paraD1", "paraD2", "deltax", "paralength2", "nl")
@@ -36,8 +37,8 @@ def test_mrg_morphology_matches_nrv(diameter_um: float, fit_all: bool) -> None:
 
 @pytest.mark.parametrize("diameter_um", [1.0, 2.0, 3.0, 5.7, 6.0, 8.7, 10.0, 12.8, 14.0, 15.0, 16.0])
 @pytest.mark.parametrize("nodes", [2, 3, 7, 11])
-def test_mrg_length_from_nodes_matches_nrv(diameter_um: float, nodes: int) -> None:
-    assert mrg_length_from_nodes(diameter_um, nodes) == nrv.get_length_from_nodes(diameter_um, nodes)
+def test_mrg_like_length_from_nodes_matches_nrv(diameter_um: float, nodes: int) -> None:
+    assert mrg_like_length_from_nodes(diameter_um * um, nodes) == nrv.get_length_from_nodes(diameter_um, nodes)
 
 
 def test_available_mrg_fiber_diameters_matches_nrv_table() -> None:

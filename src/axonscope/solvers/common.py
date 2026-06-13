@@ -1,23 +1,92 @@
-from axonscope.axons.base import AxonBase
+from __future__ import annotations
 
-import jax.numpy as jnp
+import math
+from typing import Any, TypeAlias
+
 import jax
+import jax.numpy as jnp
 
-from typing import Tuple
+from axonscope.solvers.axon_runtime import SolverAxon
+from axonscope.utils import units
 
 # -----------------------------------------------------------------------------
 # Type aliases
 # -----------------------------------------------------------------------------
-Array = jnp.ndarray
-Carry = Tuple[Array, Array]  # generic (V, gates) carry used by scan
+Array: TypeAlias = jnp.ndarray
+Carry: TypeAlias = tuple[Array, Array]  # generic (V, gates) carry used by scan
 
 
-def initial_voltage(axon: AxonBase, Nx: int, dtype_local: jnp.dtype) -> Array:
+def simulation_step_count(duration_ms: float, dt_ms: float) -> int:
+    """Return the number of fixed time steps for an exact simulation grid.
+
+    Current solver kernels use one fixed ``dt`` for every integration step. If
+    ``duration_ms`` is not an integer multiple of ``dt_ms``, rounding up would
+    silently run past the requested final time. Refuse that case until kernels
+    grow an explicit partial-final-step policy.
+    """
+
+    duration = float(duration_ms)
+    step = float(dt_ms)
+    if duration <= 0.0:
+        raise ValueError("duration_ms must be > 0.")
+    if step <= 0.0:
+        raise ValueError("dt_ms must be > 0.")
+
+    ratio = duration / step
+    steps = int(round(ratio))
+    if steps < 1 or not math.isclose(ratio, steps, rel_tol=1e-9, abs_tol=1e-12):
+        raise ValueError(
+            "duration_ms must be an integer multiple of dt_ms for the current "
+            f"fixed-step solvers; got duration_ms={duration:g}, dt_ms={step:g}."
+        )
+    return steps
+
+
+def resolve_time_args(
+    *,
+    tsim: Any | None = None,
+    dt: Any | None = None,
+    duration_ms: Any | None = None,
+    dt_ms: Any | None = None,
+) -> tuple[float, float]:
+    """Resolve solver-level time aliases to ``(duration_ms, dt_ms)``.
+
+    Solvers operate in milliseconds. Plain numeric values are interpreted as
+    milliseconds; Pint-like quantities are converted at this boundary.
+    """
+
+    if duration_ms is not None:
+        if tsim is not None:
+            raise ValueError("Provide either tsim or duration_ms, not both.")
+        tsim = duration_ms
+    if dt_ms is not None:
+        if dt is not None:
+            raise ValueError("Provide either dt or dt_ms, not both.")
+        dt = dt_ms
+    if tsim is None:
+        raise ValueError("tsim or duration_ms is required.")
+    if dt is None:
+        raise ValueError("dt or dt_ms is required.")
+
+    duration = units.to_ms(tsim)
+    step = units.to_ms(dt)
+    if duration <= 0.0:
+        raise ValueError("tsim/duration_ms must be > 0.")
+    if step <= 0.0:
+        raise ValueError("dt/dt_ms must be > 0.")
+    simulation_step_count(duration, step)
+    return duration, step
+
+
+def initial_voltage(axon: object, Nx: int, dtype_local: jnp.dtype) -> Array:
     """Initial voltage state."""
-    return jnp.full((Nx,), axon.Vinit, dtype=dtype_local)
+    return jnp.full((Nx,), axon.v_init, dtype=dtype_local)
 
 
-def diffusion_operator_coeffs(axon: AxonBase, dtype_local: jnp.dtype) -> Tuple[Array, Array, Array]:
+def diffusion_operator_coeffs(
+    axon: SolverAxon,
+    dtype_local: jnp.dtype,
+) -> tuple[Array, Array, Array]:
     """
     Build the discrete diffusion operator coefficients on the current mesh.
 
@@ -37,7 +106,7 @@ def diffusion_operator_coeffs(axon: AxonBase, dtype_local: jnp.dtype) -> Tuple[A
     if bool(getattr(axon, "has_heterogeneous_cable_properties", False)):
         lengths_cm = compartment_length_cm(axon, dtype_local)
         diam_um = compartment_diam_um(axon, dtype_local)
-        ra_ohm_cm = jnp.asarray(getattr(axon, "Ra_vec"), dtype=dtype_local)
+        ra_ohm_cm = compartment_ra_ohm_cm(axon, dtype_local)
         cm_uF_cm2 = compartment_cm_uF_cm2(axon, dtype_local)
 
         area_cm2 = jnp.pi * (diam_um * dtype_local(1e-4)) * lengths_cm
@@ -52,7 +121,7 @@ def diffusion_operator_coeffs(axon: AxonBase, dtype_local: jnp.dtype) -> Tuple[A
         gax_i_mS = dtype_local(1e3) / jnp.maximum(edge_resistance_ohm, dtype_local(1e-18))
         cm_abs_uF = cm_uF_cm2 * area_cm2
 
-        Nx = axon.Nx
+        Nx = axon.n_compartments
         lower = jnp.zeros((Nx,), dtype=dtype_local)
         diag = jnp.zeros((Nx,), dtype=dtype_local)
         upper = jnp.zeros((Nx,), dtype=dtype_local)
@@ -61,20 +130,14 @@ def diffusion_operator_coeffs(axon: AxonBase, dtype_local: jnp.dtype) -> Tuple[A
         diag = -(lower + upper)
         return lower, diag, upper
 
-    Nx = axon.Nx
+    Nx = axon.n_compartments
     lower = jnp.zeros((Nx,), dtype=dtype_local)
     diag = jnp.zeros((Nx,), dtype=dtype_local)
     upper = jnp.zeros((Nx,), dtype=dtype_local)
 
-    if hasattr(axon, "h_cm"):
-        h = jnp.asarray(axon.h_cm, dtype=dtype_local)
-    elif hasattr(axon, "x"):
-        h = jnp.diff(jnp.asarray(axon.x, dtype=dtype_local)) * dtype_local(1e-4)
-    else:
-        dx_cm = jnp.asarray(axon.dx_cm, dtype=dtype_local)
-        h = jnp.full((Nx - 1,), dx_cm[0], dtype=dtype_local)
+    h = jnp.asarray(axon.h_cm, dtype=dtype_local)
 
-    D = dtype_local(axon.D)
+    D = uniform_diffusion_coefficient(axon, dtype_local)
 
     if Nx >= 2:
         left_coef = 2.0 * D / (h[0] ** 2)
@@ -101,55 +164,73 @@ def diffusion_operator_coeffs(axon: AxonBase, dtype_local: jnp.dtype) -> Tuple[A
     return lower, diag, upper
 
 
-def compartment_diam_um(axon: AxonBase, dtype_local: jnp.dtype) -> Array:
-    if hasattr(axon, "diam_vec"):
-        return jnp.asarray(axon.diam_vec, dtype=dtype_local)
-    return jnp.full((axon.Nx,), dtype_local(axon.d), dtype=dtype_local)
+def compartment_diam_um(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
+    return jnp.asarray(axon.diam_um, dtype=dtype_local)
 
 
-def compartment_cm_uF_cm2(axon: AxonBase, dtype_local: jnp.dtype) -> Array:
-    if hasattr(axon, "Cm_vec"):
-        return jnp.asarray(axon.Cm_vec, dtype=dtype_local)
-    return jnp.full((axon.Nx,), dtype_local(axon.Cm), dtype=dtype_local)
+def compartment_cm_uF_cm2(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
+    return jnp.asarray(axon.Cm_uF_cm2, dtype=dtype_local)
 
 
-def compartment_length_cm(axon: AxonBase, dtype_local: jnp.dtype) -> Array:
-    if hasattr(axon, "compartment_lengths_um"):
-        return jnp.asarray(axon.compartment_lengths_um, dtype=dtype_local) * dtype_local(1e-4)
-    return jnp.asarray(axon.dx_cm, dtype=dtype_local)
+def compartment_ra_ohm_cm(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
+    return jnp.asarray(axon.Ra_ohm_cm, dtype=dtype_local)
 
 
-def compartment_area_cm2(axon: AxonBase, dtype_local: jnp.dtype) -> Array:
+def uniform_diffusion_coefficient(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
+    """Return the scalar cable diffusion coefficient from compartment vectors."""
+
+    diam_um = jnp.mean(compartment_diam_um(axon, dtype_local))
+    ra_ohm_cm = jnp.mean(compartment_ra_ohm_cm(axon, dtype_local))
+    cm_uF_cm2 = jnp.mean(compartment_cm_uF_cm2(axon, dtype_local))
+    radius_cm = dtype_local(0.5) * diam_um * dtype_local(1e-4)
+    cm = dtype_local(2.0) * jnp.pi * radius_cm * cm_uF_cm2 * dtype_local(1e-6)
+    ra = ra_ohm_cm / (jnp.pi * radius_cm**2)
+    return dtype_local(1.0) / (ra * cm) / dtype_local(1000.0)
+
+
+def compartment_length_cm(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
+    return jnp.asarray(axon.compartment_lengths_um, dtype=dtype_local) * dtype_local(1e-4)
+
+
+def compartment_area_cm2(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
     diam = compartment_diam_um(axon, dtype_local)
     length_cm = compartment_length_cm(axon, dtype_local)
     return jnp.pi * (diam * dtype_local(1e-4)) * length_cm
 
 
 def extracellular_absolute_arrays(
-    axon: AxonBase, dtype_local: jnp.dtype
-) -> Tuple[Array, Array, Array, Array]:
+    axon: SolverAxon, dtype_local: jnp.dtype
+) -> tuple[Array, Array, Array, Array]:
     """Return (Cm_abs, Cx_abs, Gx_abs, Gax_e) in (uF, uF, mS, mS-edge)."""
     area = compartment_area_cm2(axon, dtype_local)
     cm_uF_cm2 = compartment_cm_uF_cm2(axon, dtype_local)
     Cm_abs = cm_uF_cm2 * area
 
-    xg = jnp.asarray(getattr(axon, "xg_vec"), dtype=dtype_local)
-    xc = jnp.asarray(getattr(axon, "xc_vec"), dtype=dtype_local)
-    xraxial = jnp.asarray(getattr(axon, "xraxial_vec"), dtype=dtype_local)
+    xg = jnp.asarray(axon.xg_S_cm2, dtype=dtype_local)
+    xc = jnp.asarray(axon.xc_uF_cm2, dtype=dtype_local)
+    xraxial = jnp.asarray(axon.xraxial_MOhm_per_cm, dtype=dtype_local)
     dx_cm = jnp.asarray(axon.dx_cm, dtype=dtype_local)
 
     Cx_abs = xc * area
     Gx_abs = (xg * dtype_local(1e3)) * area
 
-    if axon.Nx <= 1:
+    if axon.n_compartments <= 1:
         Gax_e = jnp.zeros((0,), dtype=dtype_local)
     else:
-        R_edge_MOhm = xraxial[:-1] * (dtype_local(0.5) * dx_cm[:-1]) + xraxial[1:] * (dtype_local(0.5) * dx_cm[1:])
+        R_edge_MOhm = (
+            xraxial[:-1] * (dtype_local(0.5) * dx_cm[:-1])
+            + xraxial[1:] * (dtype_local(0.5) * dx_cm[1:])
+        )
         Gax_e = dtype_local(1e-3) / jnp.maximum(R_edge_MOhm, dtype_local(1e-18))
     return Cm_abs, Cx_abs, Gx_abs, Gax_e
 
 
-def solve_block_tridiagonal_2x2(A_lower: Array, A_diag: Array, A_upper: Array, rhs: Array) -> Array:
+def solve_block_tridiagonal_2x2(
+    A_lower: Array,
+    A_diag: Array,
+    A_upper: Array,
+    rhs: Array,
+) -> Array:
     """Solve a block tridiagonal system with 2x2 blocks."""
     N = A_diag.shape[0]
 
@@ -173,7 +254,11 @@ def solve_block_tridiagonal_2x2(A_lower: Array, A_diag: Array, A_upper: Array, r
         C_local, d_local = carry
         Di = A_diag[i] - A_lower[i] @ C_local[i - 1]
         invDi = inv2(Di)
-        Ci = jnp.where(i < N - 1, invDi @ A_upper[i], jnp.zeros((2, 2), dtype=A_diag.dtype))
+        Ci = jnp.where(
+            i < N - 1,
+            invDi @ A_upper[i],
+            jnp.zeros((2, 2), dtype=A_diag.dtype),
+        )
         di = invDi @ (rhs[i] - A_lower[i] @ d_local[i - 1])
         C_local = C_local.at[i].set(Ci)
         d_local = d_local.at[i].set(di)
@@ -343,7 +428,7 @@ def build_cn_tridiagonal(
     upper: Array,
     dt: float,
     dtype_local: jnp.dtype,
-) -> Tuple[Array, Array, Array]:
+) -> tuple[Array, Array, Array]:
     """
     Build the tridiagonal matrix for the Crank-Nicolson solve.
 
@@ -359,7 +444,12 @@ def build_cn_tridiagonal(
     return dl, d, du
 
 
-def build_dense_from_tridiagonal(dl: Array, d: Array, du: Array, dtype_local: jnp.dtype) -> Array:
+def build_dense_from_tridiagonal(
+    dl: Array,
+    d: Array,
+    du: Array,
+    dtype_local: jnp.dtype,
+) -> Array:
     """
     Materialize a dense matrix from tridiagonal coefficients.
     """

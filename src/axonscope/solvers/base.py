@@ -1,48 +1,35 @@
-
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from axonscope.axons.base import AxonBase
-from axonscope.simresult import SimResult
+from typing import Any
 
-# -----------------------------------------------------------------------------
-# Abstract solver base class
-# -----------------------------------------------------------------------------
+from axonscope.axon_simulation import AxonSimulation
+from axonscope.axons.axon import Axon
+from axonscope.results import SimResult
+
+
 class Solver(ABC):
-    """
-    Abstract base class for temporal solvers of the cable equation.
+    """Abstract base class for temporal axon solvers.
 
-    Concrete solver classes must implement `solve(axon, tsim, dt)` and return a
-    :class:`SimResult` object containing the voltage traces and time vector.
-
-    The cable equation solved is (per compartment):
-        dV/dt = D * d^2V/dx^2 + (I_inj(t) - I_ion(V, gates)) / C_m
-
-    where:
-    - V is membrane voltage in mV
-    - C_m is membrane capacitance (µF/cm²)
-    - D = a / (2 * Ra * C_m) is the axial diffusion coefficient [cm²/ms]
-      stored on the axon description
-    - I_ion is ionic current density (µA/cm²)
-    - I_inj is external injected current density (µA/cm²)
+    Solver implementations consume ``AxonSimulation`` protocols, or pure
+    descriptive ``Axon`` objects that are wrapped as no-stimulation protocols.
+    Direct solver calls interpret plain time values as milliseconds and also
+    accept Pint-like time quantities. Public recording objects are handled by
+    the higher-level simulation facade.
     """
 
     @abstractmethod
-    def solve(self, axon: AxonBase, tsim: float, dt: float) -> SimResult:
-        """
-        Run simulation for a given axon.
+    def solve(
+        self,
+        axon: Axon | AxonSimulation,
+        tsim: Any | None = None,
+        dt: Any | None = None,
+        record_diagnostics: bool = False,
+        record_observables: bool = False,
+        *,
+        duration_ms: Any | None = None,
+        dt_ms: Any | None = None,
+    ) -> SimResult:
+        """Run a simulation and return voltage traces plus metadata."""
 
-        Parameters
-        ----------
-        axon : AxonBase
-            Axon object providing geometry, ion channel model and stimulus.
-        tsim : float
-            Total simulation time (ms).
-        dt : float
-            Time step (ms).
-
-        Returns
-        -------
-        SimResult
-            Simulation result containing V_all (Nt × Nx) and t_vec (Nt).
-        """
         raise NotImplementedError

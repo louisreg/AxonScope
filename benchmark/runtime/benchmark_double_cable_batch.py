@@ -15,16 +15,20 @@ if __package__ in (None, ""):
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope import degC, um
 from axonscope.axons import HodgkinHuxley
-from axonscope.electrodes import PointSourceElectrode
-from axonscope.solvers import (
-    DoubleCableBatchKernel,
-    DoubleCableKernel,
+from axonscope.axon_simulation import AxonSimulation
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.dispatcher.runtime_batches import (
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
+from axonscope.solvers import (
+    DoubleCableBatchKernel,
+    DoubleCableKernel,
+)
 from axonscope.solvers.runtime import SolverRuntime, prepare_solver_runtime
-from axonscope.stimulus import Stimulus
+from axonscope.stimulation import Stimulus
 from benchmark.runtime.batch_utils import (
     TimingStats,
     scaled_context_batch,
@@ -252,29 +256,39 @@ def _make_scaled_vstim_context_batch(
     return vext_mid, vext_previous
 
 
-def _build_hh_double_cable(nx: int) -> HodgkinHuxley:
+def _build_hh_double_cable(nx: int) -> AxonSimulation:
     length_um = 400.0
-    axon = HodgkinHuxley(L=length_um, d=0.5, Nx=nx, celsius=6.3)
-    axon.set_extracellular_layer(
-        xraxial_MOhm_per_cm=np.full((axon.Nx,), 1e8, dtype=float),
-        xg_S_per_cm2=np.full((axon.Nx,), 1e-3, dtype=float),
-        xc_uF_per_cm2=np.full((axon.Nx,), 0.01, dtype=float),
+    axon = HodgkinHuxley(
+        length=length_um * um,
+        diameter=0.5 * um,
+        compartments=nx,
+        celsius=6.3 * degC,
+    )
+    simulation = AxonSimulation(axon)
+    simulation.set_extracellular_layer(
+        xraxial_MOhm_per_cm=np.full((axon.n_compartments,), 1e8, dtype=float),
+        xg_S_per_cm2=np.full((axon.n_compartments,), 1e-3, dtype=float),
+        xc_uF_per_cm2=np.full((axon.n_compartments,), 0.01, dtype=float),
         use_extracellular=True,
         Veinit=0.0,
     )
-    axon.insert_I_Clamp(
-        position=length_um / 2.0,
-        stimulus=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+    simulation.add_current_clamp(position_um=length_um / 2.0,
+        current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )
     electrode = PointSourceElectrode(
         x0_m=(length_um / 2.0) * 1e-6,
         y0_m=100e-6,
         z0_m=100e-6,
-        sigma_S_m=0.3,
     )
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
-    axon.add_extracellular_context(electrode, stim, replace=True)
-    return axon
+    simulation.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode.with_stimulus(stim)],
+            sigma=0.3,
+        ),
+        replace=True,
+    )
+    return simulation
 
 
 if __name__ == "__main__":
