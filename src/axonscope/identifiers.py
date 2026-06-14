@@ -34,4 +34,9 @@ class DriveId(_Identifier):
     """Opaque identifier for one extracellular drive."""
 
 
-__all__ = ["AxonId", "DriveId"]
+@dataclass(frozen=True, repr=False)
+class SignalId(_Identifier):
+    """Opaque identifier for one recorded or observed signal."""
+
+
+__all__ = ["AxonId", "DriveId", "SignalId"]

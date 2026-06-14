@@ -26,6 +26,45 @@ truth.
 README and documentation prose must not override the behavior expressed by the
 code.
 
+## Current implementation status
+
+Snapshot updated on 2026-06-14.
+
+This document defines the target architecture. The codebase has implemented the
+roadmap through Phase 7. Phases 7.5-9 are still roadmap work.
+
+| Phase | Status | Implemented surface | Didactic example |
+| --- | --- | --- | --- |
+| Phase 0 — Guardrails and baselines | Done | Architecture guardrails, public API cleanup checks, import-boundary checks, non-NRV baseline. | None; this is test/build infrastructure. |
+| Phase 1 — Object model | Done | `AxonInstance`, root `AxonSimulation`, `AxonPopulation`, direct public diameter inspection. | `examples/advanced/example_08_root_axon_simulation.py`, `examples/advanced/example_09_axon_population.py` |
+| Phase 2 — Typed and extracellular contracts | Done | Typed recording signals, position selectors, cable formulation, opaque identifiers, `ExtracellularFootprint`, `ExtracellularDrive`, `ExtracellularStimulation`, analytical footprint builders. | `examples/advanced/example_10_typed_recording_signals.py`, `examples/advanced/example_11_typed_position_selectors.py`, `examples/advanced/example_12_cable_formulation.py`, `examples/advanced/example_13_extracellular_footprint_drive.py` |
+| Phase 2.5 — Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. | `examples/advanced/example_14_hotpath_benchmarking.py` |
+| Phase 3 — Planning and preparation | Done | Preparation signatures, internal prepared cohorts, lower planning/input overhead, footprint-oriented preparation path. | `examples/advanced/example_15_preparation_signatures.py` |
+| Phase 4 — JAX isolation | Done for the current boundary | JAX batch and scalar execution now enter through `axonscope.backends.jax`; public/descriptive layers are guarded against direct JAX imports. Low-level numerical kernels still live under `solvers/` until a later kernel ownership cleanup. | None; this is an internal backend boundary. |
+| Phase 5 — Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, extensible `Signal` descriptors, `SignalId`, `RecordingManifest`, `RecordedSignal`, no public `list[SimResult]` pool result. | `examples/advanced/example_16_canonical_pool_results.py` |
+| Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. Solver-side observer execution is planned for Phase 7.5. | `examples/advanced/example_17_analysis_layer.py` |
+| Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Current estimates explicitly surface dense `Vstim` memory risk; removing it is Phase 7.5. | `examples/advanced/example_14_hotpath_benchmarking.py` |
+| Phase 7.5 — Solver-side observers | Not started | Target: lower public observer specs into compact backend state, update observers at every solver `dt` inside the kernel/scan, and support observer-only runs without retaining full Vm traces. | To add if a public observer-only workflow lands. |
+| Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
+| Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
+
+Known implementation gaps against the final target:
+
+- Public scalar `simulate(...)` still returns `SimResult`; pool runs return
+  `AxonSimulationResult`. Decide before final docs/serialization whether scalar
+  public runs also become `AxonSimulationResult`.
+- `Recording.to_batch_options()` still lowers directly to solver batch options.
+  The final boundary should be `Recording -> RecordingPlan -> validation ->
+  backend lowering`.
+- `axs.analysis` is now a real package, not a forwarding compatibility alias.
+  Low-level post-hoc helpers live under `axs.analysis`, not under
+  `axs.results.analysis`.
+- Backend-neutral axon structure descriptors, cable capabilities, and richer
+  semantic signals remain future work.
+- Solver-side observer execution is a dedicated Phase 7.5 target: observers
+  should update inside the solver loop at each `dt` so compact outputs can avoid
+  full GPU trace retention and transfer.
+
 ---
 
 # 1. Development-stage breaking-change policy
@@ -1864,6 +1903,10 @@ Recording
 
 `Recording` must not import solver-specific option classes.
 
+Migration note: if the current implementation still lowers `Recording` directly
+to solver or batch options, that is a transitional convenience. The target
+boundary is `Recording -> RecordingPlan -> validation -> backend lowering`.
+
 ---
 
 # 24. Canonical numerical result
@@ -1882,6 +1925,11 @@ for:
 - mixed myelination;
 - mixed cable formulations;
 - multiple execution cohorts.
+
+Migration note: the implementation may temporarily keep a scalar `SimResult`
+while pool results move first. Before serialization or final docs, decide
+whether scalar public runs also return `AxonSimulationResult` or whether
+`SimResult` remains an explicitly scoped single-run convenience.
 
 ## 23.1 Logical schema
 
@@ -2019,6 +2067,10 @@ axs.analysis.SpikeCount(...)
 axs.analysis.PeakVoltage(...)
 axs.analysis.PeriaxonalDepolarization(...)
 ```
+
+Namespace note: `axs.analysis` is the real public analysis namespace. It must
+not be implemented as a forwarding compatibility alias to
+`axs.results.analysis`.
 
 ## 24.1 Requirements
 
@@ -2968,7 +3020,9 @@ multiple drives sum inside execution
 stimulus changes do not rebuild footprints
 full Vext tensor is not materialized on factorized paths
 analytical helpers output footprints only
-one and many axons use the same result model
+pool execution uses the canonical result model
+final scalar execution either uses the canonical result model or is documented
+as an explicit single-run convenience
 ```
 
 ---
@@ -2998,6 +3052,45 @@ advanced/
     callable recruitment sweep
 ```
 
+Current didactic advanced examples:
+
+```text
+example_01_pool_dispatch_nrv.py
+    heterogeneous pool dispatch inspection with optional NRV-generated fibers
+example_02_layout_options.py
+    advanced axon layout options
+example_03_custom_axon_from_scratch.py
+    custom axon construction
+example_04_stimulation_contexts.py
+    stimulation context variants
+example_05_recording_options.py
+    recording policy options
+example_06_activation_criterion.py
+    post-hoc activation criterion
+example_07_recruitment_curve.py
+    recruitment curve workflow
+example_08_root_axon_simulation.py
+    root executable AxonSimulation
+example_09_axon_population.py
+    AxonPopulation as first-class cohort
+example_10_typed_recording_signals.py
+    typed/extensible recording signal descriptors
+example_11_typed_position_selectors.py
+    typed position selectors
+example_12_cable_formulation.py
+    typed cable formulation selection
+example_13_extracellular_footprint_drive.py
+    extracellular footprints, drives, and stimulation
+example_14_hotpath_benchmarking.py
+    memory estimates plus opt-in hotpath benchmarking and traces
+example_15_preparation_signatures.py
+    deterministic preparation signatures
+example_16_canonical_pool_results.py
+    canonical pool results, per-axon views, and recording manifests
+example_17_analysis_layer.py
+    structured analyses, missing-input requirements, and online Vm observers
+```
+
 Examples must:
 
 - use the final API directly;
@@ -3020,12 +3113,16 @@ Examples must:
 
 ## Phase 0 — Guardrails and baselines
 
+Implementation status: done.
+
 - add architecture tests;
 - establish CPU/GPU baselines;
 - preserve scientific reference cases;
 - remove obsolete benchmark formats.
 
 ## Phase 1 — Object model
+
+Implementation status: done.
 
 - rename current `AxonSimulation` to `AxonInstance`;
 - remove world-position requirements;
@@ -3034,6 +3131,9 @@ Examples must:
 - rewrite examples and tests.
 
 ## Phase 2 — Typed and extracellular contracts
+
+Implementation status: done. Runtime/device/precision planning values were
+added in Phase 7; wiring them into execution remains future work.
 
 Typed public API:
 
@@ -3053,7 +3153,18 @@ Extracellular API:
 - rewrite analytical contexts as footprint builders;
 - delete core electrode/context coupling.
 
+## Phase 2.5 — Hotpath evidence
+
+Implementation status: done.
+
+- add opt-in benchmark spans;
+- catalog representative hotpath workloads;
+- add a manual Colab GPU workflow;
+- use CPU/GPU results to guide planning and backend-boundary work.
+
 ## Phase 3 — Planning and preparation
+
+Implementation status: done for the current JAX backend path.
 
 - make planning backend-neutral;
 - add drive and footprint signatures;
@@ -3063,22 +3174,35 @@ Extracellular API:
 
 ## Phase 4 — JAX isolation
 
+Implementation status: done for the current backend boundary. Low-level kernels
+can move later if that reduces real coupling.
+
 - move JAX membrane runtime;
 - move JAX solver runtime;
 - move extracellular drive lowering;
 - implement in-scan drive summation;
-- delete old solver and dispatcher modules.
+- delete old duplicate solver and dispatcher execution paths when empty.
 
 ## Phase 5 — Canonical results
+
+Implementation status: done for pool results and result manifests. Scalar
+`simulate(...)` still returns `SimResult`; decide before final docs whether to
+unify scalar public output as `AxonSimulationResult`.
 
 - add dense `CohortResult`;
 - add signal descriptors;
 - add recording manifests;
 - add `AxonSimulationResult`;
 - add `AxonResultView`;
-- delete eager lists of single results.
+- delete public eager `list[SimResult]` pool results.
 
 ## Phase 6 — Analyses
+
+Implementation status: done for the current public layer. The public
+`axs.analysis` namespace, definition objects, low-level post-hoc helpers,
+structured input requirements, requirement/capability metadata, statuses,
+population denominators, reports, online Vm observers, and the didactic example
+exist. Solver-side observer execution is planned as Phase 7.5.
 
 - move activation and velocity into `analysis/`;
 - add requirements and applicability;
@@ -3088,13 +3212,47 @@ Extracellular API:
 
 ## Phase 7 — Performance
 
-- verify no dense `Vext` materialization;
-- reuse footprints across stimulus sweeps;
-- specialize absent stimulation;
-- add memory estimates;
-- integrate observability.
+Implementation status: done for the current evidence layer.
+
+Phase 7 adds public simulation memory estimates, typed runtime/device/precision
+planning values, hotpath manifest memory metadata, and a footprint/stimulus-only
+reuse workload. It does not pretend that dense extracellular time-space arrays
+are gone: estimates explicitly surface current dense `Vstim[B,Nt,Nx]` memory
+risk and compare it with factorized footprint/stimulus sizes. Phase 7.5 owns
+the solver-side kernel changes that remove unnecessary trace/input retention.
+
+- verify whether dense `Vext`/`Vstim` is currently materialized;
+- keep hotpath traces as the CPU/GPU evidence loop;
+- add footprint/stimulus-only sweep diagnostics;
+- add memory estimates and warning thresholds;
+- add typed runtime/device/precision planning values;
+- integrate memory estimates with observability manifests.
+
+## Phase 7.5 — Solver-side observers
+
+Implementation status: not started.
+
+Purpose: connect the public observer/analysis specifications to backend
+execution so compact observer state is updated at every solver `dt` inside the
+kernel or scan loop. The memory goal is to avoid retaining full
+`Vm[time, position]` traces, and to avoid GPU-to-CPU transfer of those traces,
+when the user only needs compact outputs such as activation, latency, peak
+voltage, spike counts, or block summaries.
+
+- define a backend-neutral observer lowering contract;
+- lower public `axs.analysis` observer specs into compact backend observer
+  state;
+- call observer updates inside scalar and batch solver kernels at each `dt`;
+- keep observer state static-shaped and vectorized over batch rows;
+- support observer-only execution without full Vm recording where the requested
+  analyses allow it;
+- start with peak voltage, then activation, then latency/block-style observers;
+- cross-validate solver-side outputs against post-hoc and streamed Vm observers;
+- add memory/hotpath evidence showing reduced GPU allocation and transfer.
 
 ## Phase 8 — Studies
+
+Implementation status: not started.
 
 - add callable sweeps;
 - add threshold search;
@@ -3104,6 +3262,8 @@ Extracellular API:
 - add `AxonStudyResult`.
 
 ## Phase 9 — Serialization and reference backend
+
+Implementation status: not started.
 
 - serialize only final schemas;
 - add NumPy reference backend;
@@ -3130,9 +3290,12 @@ Extracellular API:
 15. Add canonical cohort-backed results.
 16. Add analysis requirements and statuses.
 17. Add online observers.
-18. Add callable studies.
-19. Add final serialization.
-20. Delete every superseded module and format.
+18. Add memory/performance estimates for recording and observer workloads.
+19. Wire solver-side observers into scalar and batch kernels as per-`dt`
+    compact reductions.
+20. Add callable studies.
+21. Add final serialization.
+22. Delete every superseded module and format.
 
 The development branch may break temporarily.
 

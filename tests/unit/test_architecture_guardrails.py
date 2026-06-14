@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+from enum import Enum
 from collections.abc import Iterable
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 import axonscope as axs
@@ -55,7 +57,6 @@ def test_guidelines_is_the_root_project_philosophy_reference():
 
 def test_public_facade_does_not_expose_removed_compatibility_aliases():
     removed_names = {
-        "analysis",
         "visualization",
         "run_batch",
     }
@@ -64,6 +65,15 @@ def test_public_facade_does_not_expose_removed_compatibility_aliases():
 
     assert exposed == set()
     assert removed_names.isdisjoint(set(axs.__all__))
+
+
+def test_analysis_namespace_is_real_package_not_results_alias():
+    assert hasattr(axs, "analysis")
+    assert not hasattr(axs.results, "analysis")
+    assert not hasattr(axs.results, "ActivationCriterion")
+    assert axs.analysis.Activation is axs.Activation
+    assert axs.analysis.ActivationCriterion is not None
+    assert "analysis" in axs.__all__
 
 
 def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
@@ -160,11 +170,11 @@ def test_recording_public_api_uses_typed_signals_not_raw_strings():
 
 
 def test_activation_criterion_uses_typed_position_targets():
-    assert "positions" not in _public_parameters(axs.results.ActivationCriterion)
-    assert "indices" not in _public_parameters(axs.results.ActivationCriterion)
-    assert "target" in _public_parameters(axs.results.ActivationCriterion)
+    assert "positions" not in _public_parameters(axs.analysis.ActivationCriterion)
+    assert "indices" not in _public_parameters(axs.analysis.ActivationCriterion)
+    assert "target" in _public_parameters(axs.analysis.ActivationCriterion)
 
-    criterion = axs.results.ActivationCriterion(target=axs.positions.DISTAL)
+    criterion = axs.analysis.ActivationCriterion(target=axs.positions.DISTAL)
     assert criterion.target is axs.positions.DISTAL
     assert axs.positions.DISTAL.index_values is None
 
@@ -196,6 +206,28 @@ def test_extracellular_public_contracts_are_exported():
     assert axs.ExtracellularDrive is axs.stimulation.ExtracellularDrive
     assert axs.ExtracellularStimulation is axs.stimulation.ExtracellularStimulation
     assert axs.ExtracellularPotential is axs.stimulation.ExtracellularPotential
+
+
+def test_pool_results_use_canonical_result_model_not_lists():
+    hints = get_type_hints(axs.simulate_pool)
+
+    assert hints["return"] is axs.AxonSimulationResult
+    assert "list[SimResult]" not in (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
+    assert "AxonSimulationResult" in axs.__all__
+    assert "AxonResultView" in axs.__all__
+    assert "CohortResult" in axs.__all__
+
+
+def test_signals_are_extensible_descriptors_not_closed_enums():
+    assert not issubclass(axs.Signal, Enum)
+    assert isinstance(axs.signals.MEMBRANE_VOLTAGE, axs.Signal)
+    assert isinstance(axs.signals.MEMBRANE_VOLTAGE.id, axs.SignalId)
+    assert axs.signals.Vm is axs.signals.MEMBRANE_VOLTAGE
+
+    removed_aliases = {"VM", "VOLTAGE", "STATES"}
+    assert removed_aliases.isdisjoint(set(axs.signals.__all__))
+    assert all(not hasattr(axs.signals, name) for name in removed_aliases)
+    assert all(not hasattr(axs.Signal, name) for name in removed_aliases)
 
 
 def test_internal_modules_do_not_import_the_public_axonscope_facade():

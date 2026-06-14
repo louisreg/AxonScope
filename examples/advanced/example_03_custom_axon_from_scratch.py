@@ -117,7 +117,7 @@ def main() -> None:
     )
 
     probe_positions = np.asarray([150.0, 350.0, 750.0]) * axs.um
-    peak_mV = axs.results.analysis.peak_voltage(result)
+    peak_mV = axs.analysis.peak_voltage(result)
     x_um = result.position_values(unit=axs.um)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True)

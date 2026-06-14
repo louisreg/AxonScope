@@ -28,9 +28,10 @@ def _time_vector_ms(result: SimResult) -> np.ndarray:
 def recorded_positions_um(result: SimResult) -> np.ndarray:
     """Return the axon positions represented by ``result.Vm`` columns.
 
-    Full recordings map directly to the axon layout positions. Filtered recordings must
-    carry ``record_indices`` so analysis code can map recorded columns back to
-    physical positions instead of assuming that ``Vm.shape[1] == axon.n_compartments``.
+    Full recordings map directly to the axon layout positions. Filtered
+    recordings must carry ``record_indices`` so analysis code can map recorded
+    columns back to physical positions instead of assuming that
+    ``Vm.shape[1] == axon.n_compartments``.
     """
 
     vm = _vm_matrix(result)
@@ -196,13 +197,7 @@ def conduction_velocity(
     min_width_ms: Any | None = 0.1,
     spatial_filter: str = "nodes_if_available",
 ) -> float:
-    """Estimate action-potential conduction velocity in meters/second.
-
-    The detector finds clean action-potential peaks, restricts myelinated
-    recordings to node compartments when available, then measures the distance
-    and delay between the first detected spike and the farthest propagated
-    spike.
-    """
+    """Estimate action-potential conduction velocity in meters/second."""
 
     if threshold_mV is not None and peak_height_mV == (-20.0, 70.0):
         peak_height_mV = None

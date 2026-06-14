@@ -64,6 +64,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--duration", type=float, default=0.30, help="Duration in ms.")
     parser.add_argument("--dt", type=float, default=0.05, help="Step size in ms.")
     parser.add_argument("--warmups", type=int, default=0)
+    parser.add_argument(
+        "--sweep-repeats",
+        type=int,
+        default=3,
+        help="Number of repeated simulations for the footprint_reuse_sweep workload.",
+    )
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--prefix", default=None, help="Optional run directory prefix.")
     parser.add_argument("--list", action="store_true", help="List workloads and exit.")
@@ -93,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--dt must be > 0.")
     if args.warmups < 0:
         raise ValueError("--warmups must be >= 0.")
+    if args.sweep_repeats < 1:
+        raise ValueError("--sweep-repeats must be >= 1.")
 
     runs = planned_runs(args.workload, resolve_sizes(args.preset, args.sizes))
     if args.dry_run:
@@ -110,16 +118,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
 
     for run in runs:
-        simulation = build_simulation(
+        simulations = build_simulations(
             run.workload,
             size=run.size,
             compartments=args.compartments,
             length_um=args.length_um,
             duration_ms=args.duration,
             dt_ms=args.dt,
+            sweep_repeats=args.sweep_repeats,
         )
+        estimate = simulations[0].estimate()
         for _ in range(args.warmups):
-            simulation.run()
+            for simulation in simulations:
+                simulation.run()
 
         output_dir = run_root / f"{run.workload}_n{run.size}"
         axs.enable_benchmark(
@@ -128,16 +139,18 @@ def main(argv: Sequence[str] | None = None) -> None:
             sync_device=bool(args.sync_device),
         )
         try:
-            results = simulation.run()
+            result_batches = tuple(simulation.run() for simulation in simulations)
         finally:
             report = axs.disable_benchmark(print_summary=bool(args.print_summary))
 
         run_record = {
             "workload": run.workload,
             "size": run.size,
+            "simulation_count": len(simulations),
             "output_dir": str(output_dir),
-            "result_count": len(results),
-            "vm_shapes": [list(np.asarray(result.Vm).shape) for result in results[:3]],
+            "result_count": sum(_result_count(results) for results in result_batches),
+            "vm_shapes": _sample_vm_shapes(result_batches),
+            "memory_estimate": estimate.to_dict(),
             "event_count": 0 if report is None else len(report.events),
             "summary": [] if report is None else [row.to_dict() for row in report.summary],
         }
@@ -199,6 +212,27 @@ def build_simulation(
     duration_ms: float,
     dt_ms: float,
 ) -> axs.AxonSimulation:
+    return build_simulations(
+        workload,
+        size=size,
+        compartments=compartments,
+        length_um=length_um,
+        duration_ms=duration_ms,
+        dt_ms=dt_ms,
+        sweep_repeats=1,
+    )[0]
+
+
+def build_simulations(
+    workload: str,
+    *,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+    sweep_repeats: int = 1,
+) -> tuple[axs.AxonSimulation, ...]:
     if workload == "intracellular_only":
         instances = build_intracellular_pool(
             size=size,
@@ -211,14 +245,33 @@ def build_simulation(
             compartments=compartments,
             length_um=length_um,
         )
+    elif workload == "footprint_reuse_sweep":
+        return tuple(
+            axs.AxonSimulation(
+                axs.AxonPopulation(
+                    build_point_source_pool(
+                        size=size,
+                        compartments=compartments,
+                        length_um=length_um,
+                        amplitude_uA=20.0 + 2.5 * repeat,
+                    )
+                ),
+                duration=duration_ms * axs.ms,
+                dt=dt_ms * axs.ms,
+                recording=axs.Recording.center(axs.signals.Vm),
+            )
+            for repeat in range(int(sweep_repeats))
+        )
     else:
         raise ValueError(f"Unknown hotpath workload: {workload!r}.")
 
-    return axs.AxonSimulation(
-        axs.AxonPopulation(instances),
-        duration=duration_ms * axs.ms,
-        dt=dt_ms * axs.ms,
-        recording=axs.Recording.center(axs.signals.Vm),
+    return (
+        axs.AxonSimulation(
+            axs.AxonPopulation(instances),
+            duration=duration_ms * axs.ms,
+            dt=dt_ms * axs.ms,
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
     )
 
 
@@ -254,6 +307,7 @@ def build_point_source_pool(
     size: int,
     compartments: int,
     length_um: float,
+    amplitude_uA: float = 25.0,
 ) -> list[axs.AxonInstance]:
     axon = axs.axons.HodgkinHuxley(
         length=length_um * axs.um,
@@ -264,7 +318,7 @@ def build_point_source_pool(
     stimulus = axs.Stimulus.pulse(
         start=0.10 * axs.ms,
         duration=0.10 * axs.ms,
-        amplitude=25.0 * axs.uA,
+        amplitude=float(amplitude_uA) * axs.uA,
     )
     electrode = axs.PointSourceElectrode(
         x=0.5 * length_um * axs.um,
@@ -283,6 +337,25 @@ def build_point_source_pool(
         instance.add_extracellular_context(context=context)
         instances.append(instance)
     return instances
+
+
+def _result_count(results: object) -> int:
+    if isinstance(results, axs.AxonSimulationResult):
+        return len(results)
+    return 1
+
+
+def _sample_vm_shapes(result_batches: Sequence[object]) -> list[list[int]]:
+    shapes: list[list[int]] = []
+    for results in result_batches:
+        if isinstance(results, axs.AxonSimulationResult):
+            for result in results[: max(0, 3 - len(shapes))]:
+                shapes.append(list(np.asarray(result.Vm).shape))
+        elif hasattr(results, "Vm"):
+            shapes.append(list(np.asarray(results.Vm).shape))
+        if len(shapes) >= 3:
+            break
+    return shapes
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Public simulation result containers and post-hoc analysis helpers."""
+"""Public simulation result containers and visualization helpers."""
 
 from axonscope.results.single import (
     ObservationDict,
@@ -7,19 +7,14 @@ from axonscope.results.single import (
     ResultArray,
     SimResult,
 )
-from axonscope.results import analysis, visualization
-from axonscope.results.analysis import (
-    average_velocity,
-    conduction_velocity,
-    peak_voltage,
-    rasterize,
-    recorded_positions_um,
+from axonscope.results.pool import (
+    CohortResult,
+    AxonResultView,
+    AxonSimulationResult,
+    RecordedSignal,
+    RecordingManifest,
 )
-from axonscope.results.activation import (
-    ActivationCriterion,
-    ActivationEvent,
-    detect_activation,
-)
+from axonscope.results import visualization
 from axonscope.results.visualization import plot_raster, rasterplot
 
 __all__ = [
@@ -28,16 +23,12 @@ __all__ = [
     "RecordingValue",
     "ResultArray",
     "SimResult",
-    "ActivationCriterion",
-    "ActivationEvent",
-    "analysis",
+    "CohortResult",
+    "AxonResultView",
+    "AxonSimulationResult",
+    "RecordedSignal",
+    "RecordingManifest",
     "visualization",
-    "average_velocity",
-    "conduction_velocity",
-    "detect_activation",
-    "peak_voltage",
-    "rasterize",
-    "recorded_positions_um",
     "plot_raster",
     "rasterplot",
 ]

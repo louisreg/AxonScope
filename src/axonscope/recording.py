@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Sequence, cast
 
-from axonscope.signals import Signal, SignalSelection
+from axonscope.signals import (
+    CONDUCTANCES,
+    CURRENTS,
+    GATES,
+    MEMBRANE_VOLTAGE,
+    STATE_VARIABLES,
+    Signal,
+    SignalSelection,
+)
 from axonscope.solvers import BatchOptions, BatchRecording
 from axonscope.utils import units
 
@@ -61,15 +69,15 @@ def _signals_from_flags(
 ) -> tuple[Signal, ...]:
     signals: list[Signal] = []
     if voltage:
-        signals.append(Signal.VM)
+        signals.append(MEMBRANE_VOLTAGE)
     if gates:
-        signals.append(Signal.GATES)
+        signals.append(GATES)
     if currents:
-        signals.append(Signal.CURRENTS)
+        signals.append(CURRENTS)
     if conductances:
-        signals.append(Signal.CONDUCTANCES)
+        signals.append(CONDUCTANCES)
     if state_variables:
-        signals.append(Signal.STATES)
+        signals.append(STATE_VARIABLES)
     return tuple(signals)
 
 
@@ -104,7 +112,7 @@ class Recording:
     currents: bool = False
     conductances: bool = False
     state_variables: bool = False
-    signals: tuple[Signal, ...] = (Signal.VM,)
+    signals: tuple[Signal, ...] = (MEMBRANE_VOLTAGE,)
     positions_um: tuple[float, ...] | None = None
     record_indices: tuple[int, ...] | None = None
     sample_dt_ms: float | None = None
@@ -152,11 +160,11 @@ class Recording:
 
         if normalized_signals is not None:
             selected = set(normalized_signals)
-            voltage = Signal.VM in selected
-            gates = Signal.GATES in selected
-            currents = Signal.CURRENTS in selected
-            conductances = Signal.CONDUCTANCES in selected
-            state_variables = Signal.STATES in selected
+            voltage = MEMBRANE_VOLTAGE in selected
+            gates = GATES in selected
+            currents = CURRENTS in selected
+            conductances = CONDUCTANCES in selected
+            state_variables = STATE_VARIABLES in selected
         else:
             normalized_signals = _signals_from_flags(
                 voltage=bool(voltage),
@@ -239,7 +247,7 @@ class Recording:
     @classmethod
     def center(
         cls,
-        signals: SignalSelection = Signal.VM,
+        signals: SignalSelection = MEMBRANE_VOLTAGE,
     ) -> "Recording":
         """Record the central compartment for pool Vm outputs."""
 
@@ -248,7 +256,7 @@ class Recording:
     @classmethod
     def probes(
         cls,
-        signals: SignalSelection = Signal.VM,
+        signals: SignalSelection = MEMBRANE_VOLTAGE,
         *,
         count: int = 8,
     ) -> "Recording":
@@ -260,7 +268,7 @@ class Recording:
     def indices(
         cls,
         values: Sequence[int],
-        signals: SignalSelection = Signal.VM,
+        signals: SignalSelection = MEMBRANE_VOLTAGE,
     ) -> "Recording":
         """Record explicit compartment indices for pool Vm outputs."""
 

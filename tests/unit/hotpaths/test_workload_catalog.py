@@ -7,6 +7,7 @@ from benchmark.hotpaths.run import build_simulation, main, planned_runs, resolve
 
 def test_hotpath_catalog_lists_phase25_workloads():
     assert set(HOTPATH_WORKLOADS) == {
+        "footprint_reuse_sweep",
         "intracellular_only",
         "point_source_extracellular",
     }
@@ -32,6 +33,19 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
         "intracellular_only size=3",
         "point_source_extracellular size=2",
         "point_source_extracellular size=3",
+        "footprint_reuse_sweep size=2",
+        "footprint_reuse_sweep size=3",
+    ]
+
+
+def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
+    main(["--workload", "all", "--sizes", "1", "--dry-run"])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == [
+        "intracellular_only size=1",
+        "point_source_extracellular size=1",
+        "footprint_reuse_sweep size=1",
     ]
 
 
@@ -46,6 +60,7 @@ def test_hotpath_size_and_run_resolution():
     assert [run.workload for run in planned_runs("all", (1,))] == [
         "intracellular_only",
         "point_source_extracellular",
+        "footprint_reuse_sweep",
     ]
 
 
@@ -63,3 +78,21 @@ def test_hotpath_build_simulation_uses_public_root_object():
     assert simulation.is_population
     assert len(simulation.axons) == 2
     assert all(instance.extracellular_context is not None for instance in simulation.axons)
+
+
+def test_hotpath_footprint_reuse_workload_builds_repeated_simulations():
+    from benchmark.hotpaths.run import build_simulations
+
+    simulations = build_simulations(
+        "footprint_reuse_sweep",
+        size=2,
+        compartments=5,
+        length_um=40.0,
+        duration_ms=0.1,
+        dt_ms=0.05,
+        sweep_repeats=3,
+    )
+
+    assert len(simulations) == 3
+    assert all(isinstance(simulation, axs.AxonSimulation) for simulation in simulations)
+    assert all(simulation.estimate().metadata["context_count"] == 2 for simulation in simulations)

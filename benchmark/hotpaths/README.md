@@ -1,7 +1,8 @@
 # Hotpath Diagnostic Workloads
 
-This folder catalogs the Phase 2.5 workloads used to investigate CPU/GPU
-bottlenecks before the larger planning/preparation refactor.
+This folder catalogs the Phase 2.5/7 workloads used to investigate CPU/GPU
+bottlenecks, memory pressure, and retained-output costs before larger runtime
+refactors.
 
 These scripts are not the final benchmark framework. They are focused probes
 for the new `axs.enable_benchmark(...)` instrumentation.
@@ -34,6 +35,12 @@ Run the scale diagnostic requested for CPU/GPU investigation:
 python benchmark/hotpaths/run.py --workload all --preset scale
 ```
 
+Run the Phase 7 footprint/stimulus-only reuse probe:
+
+```bash
+python benchmark/hotpaths/run.py --workload footprint_reuse_sweep --preset scale --sweep-repeats 3
+```
+
 Outputs are written under `benchmark/results/hotpaths/`, which is intentionally
 ignored by git.
 
@@ -61,6 +68,11 @@ Colab runner and protocol:
 | --- | --- |
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
 | `point_source_extracellular` | HH population driven by analytical point-source extracellular contexts. Stresses the current generic `Vstim` preprocessing path highlighted in `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`. |
+| `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
+
+Each run manifest records `simulation.estimate().to_dict()` so timing traces can
+be interpreted alongside estimated retained Vm, dense `Vstim`, and factorized
+footprint sizes.
 
 ## Adding A Workload
 

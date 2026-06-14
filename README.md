@@ -18,8 +18,8 @@ treated as supported compatibility.
   stimulation.
 - Executable `AxonSimulation` root object plus public `simulate(...)` and
   `simulate_pool(...)` wrappers.
-- Post-hoc analysis helpers for rasterization, conduction velocity, peak
-  voltage, and activation criteria.
+- Structured post-hoc analysis definitions with per-axon statuses, population
+  denominators, and legacy low-level rasterization helpers.
 - Automatic pool dispatch with scalar fallback, strict batches, parameter
   batches, and padded double-cable batches.
 - Fast unit tests and optional NRV validation tests.
@@ -50,7 +50,7 @@ AxonScope separates descriptive models from simulation protocols and numerical
 execution:
 
 ```text
-membranes/axons/stimulation -> AxonInstance/AxonPopulation -> AxonSimulation/run -> SimResult
+membranes/axons/stimulation -> AxonInstance/AxonPopulation -> AxonSimulation/run -> results
 ```
 
 Use short physical names with Pint quantities at public boundaries:
@@ -77,13 +77,15 @@ Primary namespaces:
 axs.axons          descriptive axon geometry and templates
 axs.membranes      runtime-independent membrane descriptions
 axs.stimulation    stimuli, electrodes, clamps, and contexts
-axs.results        SimResult, post-hoc analysis, visualization, activation
+axs.results        SimResult, AxonSimulationResult, visualization, legacy helpers
+axs.analysis       structured analysis definitions, statuses, reports
+axs.performance    simulation memory estimates and runtime/device policies
 axs.protocols      threshold, sweep, and recruitment workflows
 axs.dispatcher     pool dispatch inspection and advanced execution helpers
 axs.solvers        solver classes, options, kernels, and runtime builders
-axs.signals        typed recording signal selectors
+axs.signals        typed, extensible recording signal descriptors
 axs.positions      typed position selectors for analyses and criteria
-axs.identifiers    opaque identifiers such as AxonId and DriveId
+axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
 ```
 
 ## Quick Start
@@ -188,7 +190,8 @@ See `docs/stimulation.md` for the stimulation model and
 `AxonInstance` rows, preserves input order, and can contain one row when a
 workflow should still use population execution. `simulate_pool(...)` and the
 root `AxonSimulation` accept either an `AxonPopulation` or a sequence of `Axon`
-or `AxonInstance` objects and return one `SimResult` per population row.
+or `AxonInstance` objects. Pool runs return `AxonSimulationResult`, whose
+indexed rows are lightweight `AxonResultView` objects in population order.
 
 ```python
 population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
@@ -203,6 +206,10 @@ results = axs.simulate_pool(
 
 for result in results:
     print(result.diagnostics["dispatch_method"], result.record_indices)
+
+center_vm = results.signal(axs.signals.Vm)
+first_row = results.axon(0)
+vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
 ```
 
 Inspect grouping before a run with:
@@ -216,6 +223,8 @@ axs.dispatcher.plot_dispatch_plan(plan)
 `Recording` is the public storage policy. Current single-axon runs support Vm
 and selected observable groups; pool runs currently support Vm retention modes
 such as full, center, probes, and explicit indices.
+Signals are descriptors rather than a closed enum, so custom signal descriptors
+can be added later without changing the recording API.
 
 ```python
 full = axs.Recording.full()
@@ -229,18 +238,35 @@ full contracts.
 
 ## Analysis And Protocols
 
-Post-hoc analysis consumes `SimResult` objects:
+Structured post-hoc analysis definitions live under `axs.analysis` and consume
+`SimResult`, `AxonResultView`, or `AxonSimulationResult` objects:
 
 ```python
-velocity_m_s = axs.results.conduction_velocity(result)
-peaks_mV = axs.results.peak_voltage(result)
-spike_t_ms, spike_x_um = axs.results.rasterize(result, threshold_mV=-10.0)
+report = result.report(
+    axs.analysis.Activation(threshold=-20.0 * axs.mV, target=axs.positions.DISTAL),
+    axs.analysis.PeakVoltage(target=axs.positions.CENTER),
+)
 
-event = axs.results.ActivationCriterion(
-    threshold=-20.0 * axs.mV,
-    blanking=0.2 * axs.ms,
-    target=axs.positions.DISTAL,
-).evaluate(result)
+activation = report["activation"]
+print(activation.values, activation.statuses, activation.population.n_valid)
+```
+
+Low-level helpers live in the same `axs.analysis` namespace:
+
+```python
+velocity_m_s = axs.analysis.conduction_velocity(result)
+spike_t_ms, spike_x_um = axs.analysis.rasterize(result, threshold_mV=-10.0)
+```
+
+Activation and peak-voltage definitions can also create lightweight online Vm
+observers for chunked traces:
+
+```python
+observer = axs.analysis.Activation(threshold=-20.0 * axs.mV).online_observer(
+    positions=result.position_values(unit=axs.um) * axs.um,
+)
+observer.update(result.time_values(unit=axs.ms) * axs.ms, result.Vm * axs.mV)
+activation = observer.finalize()
 ```
 
 Repeated stimulation workflows live in `axs.protocols`:
@@ -251,7 +277,7 @@ threshold = axs.protocols.find_activation_threshold(
     bounds=(1.0 * axs.uA, 500.0 * axs.uA),
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
-    criterion=axs.results.ActivationCriterion(threshold=-20.0 * axs.mV),
+    criterion=axs.analysis.ActivationCriterion(threshold=-20.0 * axs.mV),
 )
 ```
 
@@ -267,8 +293,8 @@ simulation = axs.AxonSimulation(
 results = simulation.run()
 ```
 
-Solver-side observers are future work. Use recorded traces plus post-hoc
-analysis for current runnable workflows.
+Solver-side observer execution is future work. Use recorded traces, structured
+post-hoc analyses, or lightweight Vm observers for current runnable workflows.
 
 ## Examples
 
@@ -324,12 +350,17 @@ Benchmarks are for performance measurement, not correctness validation. Use
 python benchmark/runtime/run.py --list
 python benchmark/runtime/run.py --suite smoke
 python benchmark/runtime/environment_info_demo.py
+python benchmark/hotpaths/run.py --list
+python benchmark/hotpaths/run.py --workload all --preset smoke
 python benchmark/nrv_performance/run.py --list
 ```
 
+Use `simulation.estimate()` before large runs to inspect retained Vm, dense
+`Vstim`, factorized footprint, and stimulus-sample memory.
+
 Generated benchmark results live under ignored `benchmark/results/` and
-`benchmark/reports/` paths. See `benchmark/runtime/` and
-`benchmark/nrv_performance/` for detailed runners.
+`benchmark/reports/` paths. See `benchmark/runtime/`, `benchmark/hotpaths/`,
+and `benchmark/nrv_performance/` for detailed runners.
 
 ## Documentation
 

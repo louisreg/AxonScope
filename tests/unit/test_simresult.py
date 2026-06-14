@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 
 import axonscope as axs
 from axonscope.results import SimResult
-from axonscope.results.activation import ActivationCriterion, detect_activation
-from axonscope.results.analysis import conduction_velocity, rasterize, recorded_positions_um
+from axonscope.analysis import ActivationCriterion, detect_activation
+from axonscope.analysis import conduction_velocity, rasterize, recorded_positions_um
 from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus

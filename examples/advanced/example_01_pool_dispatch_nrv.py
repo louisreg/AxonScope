@@ -7,7 +7,7 @@ With NRV installed, NRV can be used only to generate the fiber table:
     python examples/advanced/example_01_pool_dispatch_nrv.py --source nrv --fibers 24
 
 The simulation stays on the public AxonScope API:
-`list[AxonInstance] -> dispatcher plan -> simulate_pool`.
+`AxonInstance rows -> dispatcher plan -> simulate_pool -> AxonSimulationResult`.
 """
 
 from __future__ import annotations

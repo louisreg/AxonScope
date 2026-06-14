@@ -1,10 +1,12 @@
 from .utils import units
 
 from . import (
+    analysis,
     axons,
     dispatcher,
     identifiers,
     membranes,
+    performance,
     preparation,
     positions,
     protocols,
@@ -12,6 +14,22 @@ from . import (
     signals,
     solvers,
     stimulation,
+)
+from axonscope.analysis import (
+    Activation,
+    ActivationObserver,
+    AnalysisInputRequirement,
+    AnalysisPopulation,
+    AnalysisReport,
+    AnalysisRequirements,
+    AnalysisResult,
+    AnalysisStatus,
+    ConductionBlock,
+    ConductionVelocity,
+    Latency,
+    PeakVoltage,
+    PeakVoltageObserver,
+    SpikeCount,
 )
 from axonscope.stimulation import AnalyticalElectrode, Electrode, PointSourceElectrode
 from axonscope.axon_instance import AxonInstance
@@ -24,9 +42,24 @@ from axonscope.benchmarking import (
     enable_benchmark,
     reset_benchmark,
 )
-from axonscope.identifiers import AxonId, DriveId
+from axonscope.identifiers import AxonId, DriveId, SignalId
+from axonscope.performance import (
+    Device,
+    MemoryEstimateItem,
+    PrecisionPolicy,
+    Runtime,
+    SimulationEstimate,
+    estimate_simulation,
+)
 from axonscope.population import AxonPopulation
-from axonscope.results import SimResult
+from axonscope.results import (
+    AxonResultView,
+    AxonSimulationResult,
+    CohortResult,
+    RecordedSignal,
+    RecordingManifest,
+    SimResult,
+)
 from axonscope.recording import Recording, RecordingSpatial
 from axonscope.signals import Signal
 from axonscope.simulation import AxonSimulation, simulate, simulate_pool
@@ -93,10 +126,12 @@ def __getattr__(name: str):
 
 __all__ = [
     "__version__",
+    "analysis",
     "axons",
     "dispatcher",
     "identifiers",
     "membranes",
+    "performance",
     "preparation",
     "positions",
     "protocols",
@@ -106,8 +141,29 @@ __all__ = [
     "stimulation",
     "units",
     "Stimulus",
+    "Activation",
+    "ActivationObserver",
+    "AnalysisInputRequirement",
+    "AnalysisPopulation",
+    "AnalysisReport",
+    "AnalysisRequirements",
+    "AnalysisResult",
+    "AnalysisStatus",
+    "ConductionBlock",
+    "ConductionVelocity",
+    "Latency",
+    "PeakVoltage",
+    "PeakVoltageObserver",
+    "SpikeCount",
     "AxonId",
     "DriveId",
+    "SignalId",
+    "Device",
+    "MemoryEstimateItem",
+    "PrecisionPolicy",
+    "Runtime",
+    "SimulationEstimate",
+    "estimate_simulation",
     "AxonInstance",
     "BenchmarkReport",
     "BenchmarkSession",
@@ -137,5 +193,10 @@ __all__ = [
     "ExtracellularStimulation",
     "NRVExtracellularContext",
     "SimResult",
+    "CohortResult",
+    "AxonResultView",
+    "AxonSimulationResult",
+    "RecordedSignal",
+    "RecordingManifest",
     *_UNIT_ALIASES,
 ]

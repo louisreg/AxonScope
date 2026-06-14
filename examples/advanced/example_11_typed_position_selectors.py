@@ -40,17 +40,17 @@ def main() -> None:
 
     # Step 3: evaluate the same threshold at different typed targets.
     criteria = {
-        "anywhere": axs.results.ActivationCriterion(
+        "anywhere": axs.analysis.ActivationCriterion(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.ALL,
         ),
-        "distal": axs.results.ActivationCriterion(
+        "distal": axs.analysis.ActivationCriterion(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.DISTAL,
         ),
-        "near clamp": axs.results.ActivationCriterion(
+        "near clamp": axs.analysis.ActivationCriterion(
             threshold=-20.0 * axs.mV,
             blanking=0.1 * axs.ms,
             target=axs.positions.At(60.0 * axs.um),

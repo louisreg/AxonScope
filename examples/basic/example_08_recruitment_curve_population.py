@@ -345,7 +345,7 @@ def plot_population_and_recruitment(
 
 def main() -> None:
     pool, families, diameters = make_population()
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=STIM_START,
         target=axs.positions.ALL,

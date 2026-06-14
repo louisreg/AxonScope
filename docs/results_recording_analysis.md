@@ -4,8 +4,12 @@ This layer has three separate responsibilities:
 
 - `Recording` describes what the solver should store.
 - `SimResult` stores what a simulation actually returned.
-- `axonscope.results.analysis` and `axonscope.results.visualization` interpret
-  those returned arrays.
+- `axonscope.analysis` turns returned arrays into scientific metrics with
+  statuses and population denominators.
+- `axonscope.analysis` also provides lower-level rasterization and velocity
+  helpers used by plotting and validation workflows.
+- `axonscope.results.visualization` provides plotting helpers for returned
+  arrays.
 
 Keeping these responsibilities separate matters because a result may not contain
 the full `Vm[Nt, Nx]` matrix. Pool runs can record only the center compartment
@@ -63,6 +67,10 @@ axs.Recording.probes(axs.signals.Vm, count=8)
 axs.Recording.indices([0, 5, 10], axs.signals.Vm)
 ```
 
+Signals are descriptors, not a closed enum. Built-in descriptors live under
+`axs.signals`, and custom descriptors can be built with `axs.Signal` and
+`axs.SignalId` for future workflows that produce new result channels.
+
 `Recording.only(axs.signals.GATES)` is a valid policy object, but current
 public solvers still require Vm storage. Include `axs.signals.Vm` when
 requesting observable groups.
@@ -79,9 +87,9 @@ recording = axs.Recording(
 )
 ```
 
-## SimResult
+## SimResult And Pool Results
 
-`SimResult` is intentionally small:
+`SimResult` is the scalar single-axon result and remains intentionally small:
 
 ```python
 result.t               # time samples in ms, shape (Nt,)
@@ -113,7 +121,8 @@ filtered recording, `result.record_indices` maps each `Vm` column back to the
 original axon position. Analysis functions must use that mapping instead of
 assuming that columns are contiguous compartments.
 
-Pool runs return plain result lists:
+Pool runs return `AxonSimulationResult`, a cohort-backed container. Indexing or
+iterating over it gives one `AxonResultView` per simulated row:
 
 ```python
 results = axs.simulate_pool(
@@ -126,32 +135,65 @@ results = axs.simulate_pool(
 for result in results:
     assert result.Vm.shape[1] == 1
     print(result.record_indices)
+
+dense_vm = results.signal(axs.signals.Vm)
+first = results.axon(0)
+vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
+standalone = first.to_sim_result()
 ```
+
+For homogeneous recordings, `results.signal(axs.signals.Vm)` returns a dense
+array indexed as `(axon, time, recorded_position)`. Heterogeneous pools remain
+accessible through per-axon views and through `results.cohorts`.
+`results.recording_manifest` records which signals were requested, which
+signals are actually available, and the dense shape/dtype for each cohort.
 
 The lower-level `run_pool` path returns private dispatch results. Those
 containers keep `index`, `group_id`, and `method` before the public wrapper
-converts each axon to `SimResult`.
+converts the pool into `AxonSimulationResult`.
 
 ## Analysis
 
-Post-hoc analysis lives under `axs.results.analysis`.
+Structured post-hoc analysis lives under `axs.analysis`.
 
 ```python
-spike_t_ms, spike_x_um = axs.results.analysis.rasterize(
+report = result.report(
+    axs.analysis.Activation(
+        threshold=-20 * axs.mV,
+        target=axs.positions.DISTAL,
+    ),
+    axs.analysis.PeakVoltage(target=axs.positions.CENTER),
+)
+
+activation = report["activation"]
+activation.values
+activation.statuses
+activation.population.n_valid
+```
+
+Each public analysis definition declares requirements such as required signals,
+positions, supported formulations, and algorithm version. Analysis results keep
+values and statuses side by side, so missing inputs or undetermined metrics are
+not hidden as anonymous NaNs.
+
+Low-level helpers live under the same `axs.analysis` namespace.
+
+```python
+spike_t_ms, spike_x_um = axs.analysis.rasterize(
     result,
     threshold_mV=-10.0,
     min_distance_ms=1.0,
 )
 
-velocity_m_s = axs.results.analysis.conduction_velocity(result)
-peaks_mV = axs.results.analysis.peak_voltage(result)
-positions_um = axs.results.analysis.recorded_positions_um(result)
+velocity_m_s = axs.analysis.conduction_velocity(result)
+peaks_mV = axs.analysis.peak_voltage(result)
+positions_um = axs.analysis.recorded_positions_um(result)
 ```
 
 Threshold and timing arguments also accept Pint quantities:
 
 ```python
-spike_t_ms, spike_x_um = axs.results.analysis.rasterize(
+spike_t_ms, spike_x_um = axs.analysis.rasterize(
     result,
     threshold_mV=-10 * axs.mV,
     min_distance_ms=1 * axs.ms,
@@ -163,10 +205,10 @@ positions represented by `Vm` columns. If a result is spatially filtered but doe
 not carry `record_indices`, it raises a `ValueError` rather than guessing.
 Rasterization also validates that the minimum spike distance is non-negative.
 
-Post-hoc activation criteria live under `axs.results`:
+The low-level post-hoc activation criterion also lives under `axs.analysis`:
 
 ```python
-event = axs.results.ActivationCriterion(
+event = axs.analysis.ActivationCriterion(
     threshold=-20 * axs.mV,
     blanking=0.2 * axs.ms,
     target=axs.positions.DISTAL,
@@ -177,7 +219,8 @@ event.first_time_ms
 event.first_position_um
 ```
 
-These criteria are CPU/post-hoc companions to the future solver-side observers.
+These criteria are CPU/post-hoc companions to the lightweight online Vm
+observers and future solver-side observers.
 
 ## Visualization
 
@@ -194,18 +237,43 @@ ax = axs.results.visualization.plot_raster(
 ```
 
 Future plotting helpers should follow the same rule: they can consume
-`SimResult`, lists of `SimResult`, axon models, or dispatcher, and should reuse
-the same position/recording guardrails.
+`SimResult`, `AxonResultView`, `AxonSimulationResult`, axon models, or
+dispatcher outputs, and should reuse the same position/recording guardrails.
 
-## Future Observers
+## Online Vm Observers
 
-Solver-side observers are not implemented yet. The current runnable path is to
-record traces with `Recording` and then use post-hoc analysis helpers such as
-`axs.results.analysis.rasterize(...)`, `axs.results.analysis.peak_voltage(...)`,
-and `axs.results.ActivationCriterion`.
+Activation and peak-voltage analyses can create lightweight online observers
+that consume membrane-voltage chunks and finalize to the same `AnalysisResult`
+shape as post-hoc definitions:
 
-The long-term solver-side mechanism should be observer-style. This is a future
-API sketch, not current runnable code:
+```python
+activation = axs.analysis.Activation(
+    threshold=-20 * axs.mV,
+    target=axs.positions.DISTAL,
+)
+
+observer = activation.online_observer(
+    positions=result.position_values(unit=axs.um) * axs.um,
+    original_indices=result.record_indices,
+)
+observer.update(
+    result.time_values(unit=axs.ms) * axs.ms,
+    result.voltage_values(unit=axs.mV) * axs.mV,
+)
+
+online_activation = observer.finalize()
+posthoc_activation = result.analyze(activation)
+```
+
+Solver-side observer execution is not implemented yet; it is planned as the
+Phase 7.5 memory-reduction pass. The current runnable paths are to record traces
+with `Recording`, use structured post-hoc definitions such as
+`axs.analysis.Activation(...)`, or feed Vm chunks to the lightweight observers.
+
+The long-term solver-side mechanism should be observer-style. Observer state
+should be updated at every solver `dt` inside the kernel/scan loop so compact
+outputs can avoid retaining full Vm traces on the GPU. This is a future API
+sketch, not current runnable code:
 
 ```python
 result = axs.simulate(
@@ -213,8 +281,8 @@ result = axs.simulate(
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
     observers=[
-        axs.results.RasterObserver(threshold_mV=-10.0),
-        axs.results.PeakVoltageObserver(),
+        axs.analysis.Activation(threshold=-20.0 * axs.mV),
+        axs.analysis.PeakVoltage(),
     ],
 )
 ```

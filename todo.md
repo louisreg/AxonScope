@@ -7,7 +7,48 @@ Use this file as the step-by-step source of truth. At the start of each cleanup
 session, read this file first. When a new mismatch is found, add it here. When a
 task is done, check it only after code/docs/tests have been verified.
 
-## First Task
+## Current Status Before Phase 7.5
+
+- [x] Phases 0-7 are complete in code/tests/docs notes for the current public layer.
+- [x] Latest full unit validation after Phase 6: unit suite `300 passed, 1 skipped` on 2026-06-14.
+- [x] Phase 6 completed with the real public `axs.analysis` package.
+- [x] Phase 6 namespace decision: use `axonscope.analysis` / `axs.analysis` as a real package, not a forwarding alias to `axs.results.analysis`.
+- [x] Phase 6 scalar-result decision for now: keep scalar `simulate(...) -> SimResult`; make the new analyses work on `SimResult`, `AxonResultView`, and `AxonSimulationResult`.
+- [x] Phase 6.3 moved old post-hoc algorithms out of `results/analysis.py` / `results/activation.py` into the new analysis layer without permanent forwarding aliases.
+- [x] Phase 6.4 added structured missing-input requirements with recording hints and required result fields.
+- [x] Phase 6.5 added online Vm observer definitions for activation and peak voltage, with online/post-hoc cross-validation tests.
+- [x] Phase 7 added simulation memory estimates, typed runtime/device/precision planning values, memory metadata in hotpath manifests, and the `footprint_reuse_sweep` workload.
+- [ ] Next implementation phase: Phase 7.5, solver-side observers wired into kernels as per-`dt` reductions to minimize GPU memory.
+- [ ] Keep current Phase 5-7 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
+
+## Remaining Guidelines Gaps To Resolve During Phases 7-9
+
+These came from `GUIDELINES.md` passes during Phases 5-6. They are not all
+blockers, but they must stay visible while the architecture converges.
+
+- [x] Decide the final public analysis namespace before adding the Phase 6 package.
+  - Previous guardrails rejected top-level `axs.analysis` while it only existed as an old forwarding alias.
+  - `GUIDELINES.md` targets `axs.analysis.*` as a real analysis namespace.
+  - Decision: introduce a real `axonscope.analysis` package and update guardrails so only the old forwarding-alias pattern stays forbidden.
+- [ ] Decide whether scalar public runs eventually return `AxonSimulationResult`.
+  - Current behavior: `simulate(...)` returns `SimResult`; `simulate_pool(...)` returns `AxonSimulationResult`.
+  - Guideline target: one public result type for one axon and populations.
+  - Phase 6.0-6.2 decision: defer the final result-unification decision, but require new analyses to accept both scalar and pool result surfaces.
+- [ ] Remove `Recording` -> solver option coupling from the descriptive layer.
+  - Current behavior: `Recording.to_batch_options()` imports and returns solver `BatchOptions`/`BatchRecording`.
+  - Guideline target: `Recording -> RecordingPlan -> validation -> backend lowering`.
+  - Best timing: during Phase 7/9 recording planning, backend lowering, and serialization cleanup.
+- [ ] Add backend-neutral axon structure descriptors and cable capability descriptors.
+  - Needed for analysis applicability, myelinated node-aware analyses, periaxonal signals, and semantic recording selectors.
+- [ ] Extend built-in semantic signals beyond Vm/gates/currents/conductances/states.
+  - Future target includes intracellular potential, periaxonal potential, ionic current, and cable/role-aware signal availability.
+- [ ] Preserve the product boundary around external geometry packages.
+  - AxonScope should consume footprints from geometry tools, not own CAD/electrode placement geometry.
+- [ ] Wire solver-side observers after Phase 7 memory evidence, before Phase 8 studies.
+  - Goal: observers update inside the solver loop at every `dt`, so observer-only runs can avoid storing or transferring full time-by-space traces.
+  - Keep the public observer/analysis specs in `axs.analysis`; lower them to backend-specific compact observer state during preparation/execution.
+
+## Documentation Audit Gate
 
 - [ ] Audit `/docs` against the current code before writing Sphinx docs.
 - [x] For each doc page, mark whether it is current, partially stale, proposal-only, or redundant.
@@ -23,15 +64,20 @@ object model changes.
 
 - [x] Register `GUIDELINES.md` as the master architecture/philosophy direction in `agent.md`.
 - [x] Convert the guideline roadmap into incremental implementation issues before starting the large object-model refactor.
-- [ ] Keep the current pre-release policy: no backward-compatibility aliases for prototype APIs unless they are strictly temporary inside the repo.
-- [ ] Do not run or require NRV validation for the next cleanup steps unless explicitly requested; keep using the fast unit suite for non-NRV work.
-- [ ] Treat Sphinx setup as paused until the current API and architecture direction are stable enough to document.
+
+Standing rules:
+
+- Keep the current pre-release policy: no backward-compatibility aliases for prototype APIs unless they are strictly temporary inside the repo.
+- Do not run or require NRV validation for cleanup steps unless explicitly requested; keep using the fast unit suite for non-NRV work.
+- Treat Sphinx setup as paused until the current API and architecture direction are stable enough to document.
+- Every advanced concept or non-trivial workflow needs a didactic `examples/advanced/` demo, written line-by-line with comments rather than hidden helper scaffolding.
+- Update affected examples and `CHANGELOG.md` when changing public API or workflows.
 
 ### Phase 0 Guardrails Before Big Changes
 
 - [x] Add architecture guardrail tests that prevent old and new public concepts from coexisting as permanent aliases.
   - [x] Guard root `GUIDELINES.md` as the project philosophy reference used by `agent.md` and `todo.md`.
-  - [x] Guard against reintroducing removed top-level aliases such as `axs.analysis`, `axs.visualization`, and `axs.run_batch`.
+  - [x] Guard against reintroducing removed top-level compatibility aliases such as `axs.visualization` and `axs.run_batch`; `axs.analysis` is allowed only as the real Phase 6 package.
   - [x] Guard against reintroducing removed public unit-suffix arguments on the stabilized public facade.
 - [x] Add public API guardrails for “no raw string” closed-domain APIs where replacements already exist.
   - Current status: the initially tracked string-based public domains in this group now have typed replacements.
@@ -67,7 +113,7 @@ object model changes.
   - [x] PR 1.3: keep dispatch planning behind the population/simulation API rather than exposing separate scalar and pool workflows.
 - [x] Rewrite affected examples and tests in the same change as the object-model rename.
 
-### Guideline Roadmap Issue Queue
+### Roadmap Implementation Log And Active Issues
 
 - [x] Phase 0 issue: add guardrails for guidelines reference, public compatibility aliases, public signatures, import boundaries, raw-string inventory, and non-NRV baseline.
 - [x] Phase 1 issue: direct `AxonSimulation` -> `AxonInstance` rename with no alias.
@@ -100,12 +146,12 @@ object model changes.
 - [x] Phase 2 issue: rewrite analytical point-source/context helpers as footprint builders.
   - [x] PR 2.5: add `AnalyticalExtracellularContext.build_footprint(...)` and `PointSourceElectrode.build_footprint(...)`.
   - [x] Keep the existing analytical context runtime path until Phase 3 planning/preparation moves solver lowering onto prepared footprints.
-- [ ] Phase 3 issue: split planning and preparation, add signatures and reusable prepared cohorts.
+- [x] Phase 3 issue: split planning and preparation, add signatures and reusable prepared cohorts.
   - [x] Phase 2.5 before the larger split: add opt-in hotpath instrumentation to measure where CPU/GPU time is really spent.
   - [x] Phase 2.5 should instrument stage boundaries only: `dispatch.build_plan`, `dispatch.group.total`, `runtime.prepare`, `inputs.positions`, `inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, `results.split_batch`, and `results.to_public`.
   - [x] Phase 2.5 should record shapes, dtypes, estimated bytes, backend/device metadata, group size, `Nt`, `Nx`, recording mode, and whether geometry is shared.
   - [x] Phase 2.5 should avoid the full benchmark-framework rewrite for now; use the first traces to decide which Phase 3 preparation boundaries matter most.
-  - [ ] After Phase 2.5, run diagnostic workloads for intracellular-only, point-source extracellular, and population sizes around 5/50/500 before committing to a GPU refactor direction.
+  - [x] After Phase 2.5, run diagnostic workloads for intracellular-only, point-source extracellular, and population sizes around 5/50/500 before committing to a GPU refactor direction.
     - [x] Add `benchmark/hotpaths/` as the cataloged location for Phase 2.5 workload scripts.
     - [x] Add `benchmark/hotpaths/README.md` and `benchmark/hotpaths/run.py --list` as the human/CLI registry for workload scripts.
     - [x] Add `intracellular_only` and `point_source_extracellular` workloads with `smoke` and `scale` size presets.
@@ -121,8 +167,12 @@ object model changes.
     - [x] Add the repeatable Colab publishing workflow before the next GPU trace.
       - Added `make bench-colab-push`, which pushes the current clean commit to the moving `bench-colab` branch without switching local branches.
       - Added `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` and updated `benchmark/hotpaths/COLAB.md` so Colab clones `bench-colab`, installs `.[examples,benchmark]`, verifies the JAX GPU backend, runs the warm scale probe, writes outputs under `benchmark/results/hotpaths/`, zips the run folder, and downloads it directly without Google Drive.
-    - [ ] Re-run a cleaner Colab GPU trace with warmup: `python benchmark/hotpaths/run.py --workload all --preset scale --warmups 1 --prefix colab_gpu_warm_YYYYMMDD --no-print-summary`.
-    - [ ] Keep or create a matching CPU reference prefix, then compare both result folders under `benchmark/results/hotpaths/`.
+    - [x] Re-run a cleaner Colab GPU trace with warmup: `python benchmark/hotpaths/run.py --workload all --preset scale --warmups 1 --prefix colab_gpu_warm_YYYYMMDD --no-print-summary`.
+      - Completed via Colab prefix `colab_gpu_20260614_190321`; Colab reported `jax` GPU backend on `cuda:0`.
+      - Warm scale `n=500` after Phase 3: `intracellular_only` total `145.2 ms`, `point_source_extracellular` total `117.4 ms`.
+    - [x] Keep or create a matching CPU reference prefix, then compare both result folders under `benchmark/results/hotpaths/`.
+      - Compared against local warm prefix `phase3_after_split_numpy`: local `n=500` totals were `117.0 ms` intracellular-only and `86.4 ms` point-source.
+      - Decision: Phase 3 is done because the seconds-scale host planning/input bottlenecks are gone; tiny current workloads are not yet GPU-favorable, and remaining public-result packaging belongs to Phase 5.
   - [x] Phase 3 PR 3.1: add deterministic preparation signatures for arrays, stimuli, extracellular footprints, drives, and stimulation collections.
   - [x] Phase 3 PR 3.1: add `examples/advanced/example_15_preparation_signatures.py` as the required didactic demo for preparation signatures.
   - Fresh unit run on 2026-06-14 after Phase 2.5 hotpath instrumentation, workload catalog, and Phase 3.1 preparation signatures: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`277 passed, 1 skipped`).
@@ -183,13 +233,88 @@ object model changes.
     - Removed direct JAX usage from `simulation.py` by using NumPy for scalar-fallback recording filters.
     - Added guardrails that keep direct JAX imports out of `simulation.py`, keep `dispatcher/runtime_batches.py` host-only, and prevent `CrankNicholson` from importing concrete runtime/kernel modules again.
     - Decision: keep low-level kernel/runtime modules under `solvers/` for this phase because they still own tested numerical kernels and are not duplicate execution paths; the public execution entry points now cross the JAX backend boundary first.
-- [ ] Phase 5 issue: replace list-based pool results with canonical cohort-backed results and per-axon views.
-- [ ] Phase 6 issue: move scientific analyses into a dedicated requirements/status/provenance layer.
-- [ ] Phase 7 issue: finalize benchmark/performance story, footprint reuse, and memory estimates.
+- [x] Phase 5 issue: replace list-based pool results with canonical cohort-backed results and per-axon views.
+  - [x] PR 5.1: add public `CohortResult`, `AxonSimulationResult`, and `AxonResultView`.
+  - [x] PR 5.1: make `simulate_pool(...)` return `AxonSimulationResult` instead of `list[SimResult]`.
+  - [x] PR 5.1: keep ergonomic per-axon access through `len(result)`, `result[index]`, iteration, `.axon(index)`, and `.single`.
+  - [x] PR 5.1: add `examples/advanced/example_16_canonical_pool_results.py` as the required didactic demo for canonical pool results.
+  - Fresh unit run on 2026-06-14 after Phase 5.1 canonical pool results: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`288 passed, 1 skipped`).
+  - [x] PR 5.2: add richer signal descriptors and recording manifests beyond Vm-only pool output.
+    - Replaced the closed `Signal` enum with extensible `Signal` descriptors plus typed `SignalId`.
+    - Added `RecordingManifest` and `RecordedSignal` on `AxonSimulationResult` so pool results expose requested signals, available signals, and per-cohort shape/dtype metadata.
+    - Updated `examples/advanced/example_16_canonical_pool_results.py` to show manifest inspection.
+    - Targeted validation on 2026-06-14: public API/facade/units/examples tests passed (`56 passed, 1 skipped`); targeted mypy on signal/recording/result files passed.
+    - Fresh unit run on 2026-06-14 after Phase 5.2 descriptors/manifests: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`289 passed, 1 skipped`).
+  - [x] PR 5.3: move remaining analysis/result-status assumptions into the Phase 6 provenance layer instead of expanding `SimResult` compatibility.
+    - Added guardrails that keep `simulate_pool(...)` typed as `AxonSimulationResult`, reject the old `list[SimResult]` return annotation, and keep public signals as extensible descriptors rather than a closed enum.
+    - Decision: do not expand `SimResult` compatibility or analysis status fields in Phase 5; Phase 6 owns analysis requirements, applicability, statuses, and provenance.
+    - Targeted guardrail validation on 2026-06-14: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit/test_architecture_guardrails.py --tb=short` (`18 passed`).
+  - Fresh final unit run on 2026-06-14 after completing Phase 5: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`291 passed, 1 skipped`).
+- [x] Phase 6 issue: move scientific analyses into a dedicated requirements/status/provenance layer.
+  - [x] PR 6.0: resolve the public analysis namespace decision (`axs.analysis` real package vs `axs.results.analysis`).
+  - [x] PR 6.1: add analysis definition objects for activation, conduction velocity, latency/block, spike count, and peak voltage.
+  - [x] PR 6.1: each analysis must declare required semantic signals, supported myelination/formulation, required compartment roles, positions, and algorithm version.
+  - [x] PR 6.2: add structured per-axon statuses: `VALID`, `NOT_APPLICABLE`, `MISSING_INPUT`, `NUMERICAL_FAILURE`, and `UNDETERMINED`.
+  - [x] PR 6.2: add analysis result containers with population denominators (`n_total`, `n_applicable`, `n_valid`, `n_failed`) and no silent NaN completion.
+    - Added `AnalysisRequirements`, `AnalysisStatus`, `AnalysisPopulation`, `AnalysisResult`, `AnalysisReport`, and `result.analyze(...)` / `result.report(...)`.
+    - Added `examples/advanced/example_17_analysis_layer.py` as the required didactic demo for the structured analysis layer.
+    - Fresh unit run on 2026-06-14 after Phase 6.0-6.2 structured analysis layer: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit --tb=short` (`298 passed, 1 skipped`).
+  - [x] PR 6.3: move current post-hoc activation and velocity algorithms out of `results/analysis.py` into the chosen analysis layer.
+  - [x] PR 6.3: keep compatibility only as internal imports during the same PR if needed; do not leave permanent forwarding aliases.
+    - Moved `rasterize`, `conduction_velocity`, `average_velocity`, `peak_voltage`, and `recorded_positions_um` to `axonscope.analysis.posthoc`.
+    - Moved `ActivationCriterion`, `ActivationEvent`, and `detect_activation` to `axonscope.analysis.activation`.
+    - Removed public `axs.results.analysis`, `axs.results.ActivationCriterion`, and the old `results/analysis.py` / `results/activation.py` modules.
+    - Fresh unit run on 2026-06-14 after Phase 6.3 post-hoc helper migration: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit --tb=short` (`298 passed, 1 skipped`).
+  - [x] PR 6.4: add missing-input errors that describe the required recording instead of rerunning simulations silently.
+    - Added `AnalysisInputRequirement` and per-row `AnalysisResult.input_requirements` / `.missing_input_requirements`.
+    - Analysis requirements now carry required result fields, capability tags, and recording hints.
+  - [x] PR 6.5: add online observer definitions only after post-hoc analysis objects and statuses are stable.
+    - Added `ActivationObserver` and `PeakVoltageObserver` for streamed Vm chunks.
+  - [x] PR 6.5: cross-validate online and post-hoc results on the same representative traces.
+    - Added unit cross-validation for activation and peak-voltage observers.
+  - [x] Add a didactic advanced example for the new analysis layer when the public concept lands.
+    - Updated `examples/advanced/example_17_analysis_layer.py` with online/post-hoc observer comparison.
+  - Fresh final unit run on 2026-06-14 after completing Phase 6: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit --tb=short` (`300 passed, 1 skipped`).
+- [x] Phase 7 issue: finalize benchmark/performance story, footprint reuse, and memory estimates.
+  - [x] Reconcile `benchmark/hotpaths/` with `ideas/AXONSCOPE_BENCHMARKING_AGENT_SPEC.md` before building a larger benchmark framework.
+    - Decision: keep `benchmark/hotpaths/` as the lightweight evidence loop, add memory estimates to manifests, and defer the larger benchmark-agent rewrite until after solver-side observers/studies clarify the steady API.
+  - [x] Keep hotpath traces as the evidence loop for CPU/GPU bottlenecks; do not overfit one Colab run.
+    - `benchmark/hotpaths/run.py` now records `simulation.estimate().to_dict()` in each run manifest.
+  - [x] Verify whether extracellular execution still materializes avoidable dense `Vext`/`Vstim`.
+    - Phase 7 estimate reports the current dense `Vstim[B,Nt,Nx]` materialization risk and compares it with factorized footprint/stimulus sizes; removing that memory pressure is Phase 7.5.
+  - [x] Add footprint reuse benchmarks for stimulus-only sweeps.
+    - Added `footprint_reuse_sweep` for repeated fixed-geometry point-source pool runs with changing stimulus amplitude.
+  - [x] Add memory estimates and warning thresholds for dense fallback paths.
+    - Added `axs.performance`, `SimulationEstimate`, `MemoryEstimateItem`, `axs.estimate_simulation(...)`, and `AxonSimulation.estimate()`.
+  - [x] Add typed runtime/device/precision policy objects or decide where they belong before serialization.
+    - Added public `Runtime`, `Device`, and `PrecisionPolicy` planning values. They are estimate/planning objects for now, not execution selectors yet.
+  - [x] Separate correctness validation, profiling, and product-level performance reports in docs/scripts.
+    - README and `benchmark/hotpaths/README.md` now distinguish tests/NRV validation, hotpath diagnostics, memory estimates, and future benchmark-framework work.
+  - Targeted validation on 2026-06-14: performance/hotpath/public API tests passed (`12 passed`); `mypy src/axonscope/performance.py benchmark/hotpaths/run.py` passed; `example_14_hotpath_benchmarking.py` ran; `footprint_reuse_sweep` smoke run wrote a manifest with memory estimates.
+- [ ] Phase 7.5 issue: wire observers directly into solver kernels to reduce GPU memory pressure.
+  - [ ] Define a backend-neutral observer lowering contract: public analysis/observer spec -> compact static observer state -> final observation output.
+  - [ ] Define the per-step kernel contract: every solver step calls observer `update(dt_index, t, Vm/current state, observer_state)` inside the scan/loop.
+  - [ ] Start with `PeakVoltageObserver`, because it is a simple max reduction and validates the state/update/finalize plumbing.
+  - [ ] Add `ActivationObserver` after peak voltage, preserving blanking, target positions, first-crossing time, and compact activation output.
+  - [ ] Support observer-only execution where possible: users can request compact observations without retaining full `Vm[t, x]`.
+  - [ ] Keep fixed-shape observer state vectorized over batch rows so JAX can compile it and GPU memory stays predictable.
+  - [ ] Add hotpath/memory traces proving observer-only runs avoid full Vm retention and device-to-host transfer.
+  - [ ] Cross-validate solver-side observer outputs against Phase 6 post-hoc/streamed Vm observers on scalar and pool traces.
+  - [ ] Add a didactic advanced example only if a public observer-only workflow lands.
 - [ ] Phase 8 issue: add callable studies, reuse policies, retention policies, and study results.
+  - [ ] Define the callable update contract for sweeps, thresholds, and recruitment.
+  - [ ] Add reuse policies for prepared cohorts, compiled kernels, footprints, and stimulus-only updates.
+  - [ ] Add retention policies so threshold/recruitment studies do not retain every trace by default.
+  - [ ] Add study result containers with compact per-row/per-amplitude outputs and optional retained traces.
+  - [ ] Document callable reproducibility limits; do not claim arbitrary lambdas are serializable.
 - [ ] Phase 9 issue: finalize serialization schemas and add NumPy reference backend validation.
+  - [ ] Define final schemas only after object/result/analysis/study models settle.
+  - [ ] Serialize typed values, identifiers, recording manifests, analysis definitions, backend/device/precision, and environment metadata.
+  - [ ] Do not add readers for prototype formats.
+  - [ ] Add NumPy reference backend validation for small deterministic cases before treating serialization as stable.
+  - [ ] Add final docs only after schemas and reference validation are stable.
 
-### Phase 2 Contract Preparation
+### Completed Contract Preparation Archive
 
 - [x] Design `ExtracellularFootprint` as a static spatial transfer object with intrinsic axon positions and units, not electrode CAD/world geometry.
 - [x] Design `ExtracellularDrive` as footprint plus temporal `Stimulus`.
@@ -197,14 +322,15 @@ object model changes.
 - [x] Plan migration of analytical point-source helpers into footprint builders outside the core solver dependency path.
 - [x] Sketch typed selectors/signals/enums before replacing remaining string-based public domains.
 
-### Later Target Architecture
+### Later Target Architecture Checklist
 
-- [ ] Split planning, preparation, execution, and backend lowering so JAX-specific code is isolated under backend runtime modules.
-- [ ] Replace eager `list[SimResult]` pool results with a canonical cohort-backed result model and per-axon views.
-- [ ] Move activation/velocity analysis into a dedicated analysis layer with applicability/status/provenance metadata.
+- [x] Split planning, preparation, execution, and backend lowering so JAX-specific code is isolated under backend runtime modules.
+- [x] Replace eager `list[SimResult]` pool results with a canonical cohort-backed result model and per-axon views.
+- [x] Move activation/velocity analysis into a dedicated analysis layer with applicability/status/provenance metadata.
+- [ ] Wire solver-side observers directly into scalar and batch kernels as per-`dt` compact reductions before callable studies.
 - [ ] Add callable studies, reuse policies, retention policies, and final serialization only after the object model/result model settle.
 
-## Initial Docs Audit Snapshot
+## Backlog: Documentation Audit Snapshot
 
 Started from `agent.md` and a code/docs grep on 2026-06-13. This is a first
 pass, not a completed audit.
@@ -216,12 +342,12 @@ pass, not a completed audit.
 | `docs/membranes.md` | mostly current | Built-in membrane namespace and unit normalization match `src/axonscope/membranes/`; still verify `Composite`, `SectionLayout`, and examples against tests. |
 | `docs/stimulation.md` | mostly current | Known `HodgkinHuxley(length_um=..., diameter_um=...)` snippet was updated to `length=...` and `diameter=...`; still do a final full-page pass before Sphinx. |
 | `docs/pool_dispatch.md` | mostly current | Public `simulate_pool`, dispatch diagnostics, and `build/print/plot_dispatch_plan` exist. Review for overlap with README and for any advanced batch API drift. |
-| `docs/results_recording_analysis.md` | mostly current | Good conceptual split for `Recording`, `SimResult`, analysis, visualization. Future observer section now states that solver-side observers are not implemented. |
-| `docs/recorders_observers_activation_strategy.md` | proposal | Implementation status refreshed on 2026-06-13: CPU/post-hoc activation and protocol sweeps exist; observer-only/GPU observer work remains future. |
+| `docs/results_recording_analysis.md` | mostly current | Good conceptual split for `Recording`, `SimResult`, analysis, visualization, and online Vm observers. Solver-side observer execution is now explicitly planned as Phase 7.5. |
+| `docs/recorders_observers_activation_strategy.md` | proposal | CPU/post-hoc activation, protocol sweeps, and lightweight Vm observers now exist; solver-side/GPU observer execution is now explicitly planned as Phase 7.5. |
 | `docs/api_public_draft.md` | proposal-only | Clear proposal/roadmap warning added at the top. Later split implemented API from proposal if this document remains user-facing. |
 | `docs/validation.md` | mostly current | Removed default GitHub Actions and stale NRV pass-count claims. No fresh NRV result is recorded yet. |
 
-## Confirmed Mismatches From First Sweep
+## Backlog: Completed Documentation Mismatches
 
 - [x] `README.md` lists `examples/basic/example_06_velocity_vs_diameter_batch.py`, but the current file is `examples/basic/example_06_velocity_vs_diameter.py`.
 - [x] `tests/unit/test_examples.py` imports `examples.basic.example_06_velocity_vs_diameter_batch`; update to `examples.basic.example_06_velocity_vs_diameter`.
@@ -229,28 +355,28 @@ pass, not a completed audit.
 - [x] `README.md` should list the new basic examples after the rename/additions: `example_06_velocity_vs_diameter.py`, `example_07_threshold_vs_diameter.py`, and `example_08_recruitment_curve_population.py` if they are intended to be part of the public learning path.
 - [x] `docs/stimulation.md` should replace `length_um`/`diameter_um` axon constructor snippets with `length`/`diameter` quantity-based calls.
 - [x] `docs/api_public_draft.md` still uses target snippets with `length_um`, `diameter_um`, `Recording.none()` as runnable behavior, and solver-side observers. Label these as proposal or move them to roadmap sections.
-- [x] `docs/recorders_observers_activation_strategy.md` mentions `ActivationObserver`, `PeakVoltageObserver`, observer-only runs, amplitude-batched GPU sweeps, and `thresholds_for_pool`; current code has post-hoc `ActivationCriterion`, `detect_activation`, `find_activation_threshold`, `find_activation_threshold_curve`, `pool_sweep`, and `recruitment_sweep`.
-- [x] `docs/results_recording_analysis.md` has future observer examples under `axs.results.analysis.*Observer`; keep clearly future or adjust to implemented post-hoc analysis only.
+- [x] `docs/recorders_observers_activation_strategy.md` mentions observer-only runs, amplitude-batched GPU sweeps, and `thresholds_for_pool`; current code has post-hoc `ActivationCriterion`, lightweight `ActivationObserver`/`PeakVoltageObserver`, `detect_activation`, `find_activation_threshold`, `find_activation_threshold_curve`, `pool_sweep`, and `recruitment_sweep`.
+- [x] `docs/results_recording_analysis.md` had future observer examples under the old results-analysis namespace; update to `axs.analysis` with current lightweight Vm observers and mark solver-side observer execution as Phase 7.5.
 - [x] `docs/validation.md` says the default GitHub Actions workflow runs checks, but this checkout has no `.github/` directory.
 - [x] `docs/validation.md` hard-codes `116 passed` for NRV validation; replace with a dated validation note only after rerunning in an NRV-ready environment.
 - [x] `CHANGELOG.md` references absent paths/features including `axonscope.stimulation.evaluation`, `axonscope.solvers.stimulus_runtime`, `euler.py`, and a GitHub Actions workflow.
 
-## Documentation Mismatches Already Found
+## Backlog: Documentation Cleanup
 
 - [x] Fix the example 06 rename everywhere: `README.md`, `examples/basic/example_06_velocity_vs_diameter.py`, and `tests/unit/test_examples.py`.
-- [x] Update the README package map to point to `results/analysis.py` and `results/visualization.py`, or explicitly explain the top-level compatibility aliases.
+- [x] Update the README package map so analysis helpers point to the real `axs.analysis` package and plotting remains under `axs.results.visualization`.
 - [x] Normalize constructor examples in docs to the implemented public names: `length`, `diameter`, `position`, `positions`, `sample_dt`, `duration`/`dt` for public wrappers, and `tsim`/`dt` for direct solver calls. Current docs are aligned outside the explicitly proposal-only `docs/api_public_draft.md`.
 - [x] Add a clear warning at the top of `docs/api_public_draft.md` so stale target snippets are not mistaken for current runnable API.
 - [ ] Later split `docs/api_public_draft.md` into implemented API versus proposal if it remains part of the user-facing docs.
-- [x] Refresh `docs/recorders_observers_activation_strategy.md` implementation status with the current protocol functions and keep observer-only/GPU observer work marked future.
+- [x] Refresh `docs/recorders_observers_activation_strategy.md` implementation status with the current protocol functions and mark observer-only/GPU observer work as Phase 7.5.
 - [x] Audit `CHANGELOG.md` against files that actually exist in this checkout; remove or reword absent module names and CI claims.
 - [x] Re-run `python -m pytest -q tests/unit` after doc/example/API cleanup fixes and record only fresh results. Fresh run on 2026-06-14 after typed recording signals: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit` (`254 passed, 1 skipped`).
 - [ ] Re-run NRV validation only in an NRV-ready environment; record dated validation notes after a fresh run.
 - [x] Remove duplicated narrative between README, `docs/pool_dispatch.md`, and `docs/results_recording_analysis.md` by making README a short entry point and keeping detailed contracts in `docs/`.
 
-## Units And Public API
+## Backlog: Public API And Units
 
-- [ ] Stabilize the public API before adding Sphinx or larger feature work.
+- [ ] Stabilize the public API before adding Sphinx.
 - [ ] Prefer clean user-facing interfaces over backward compatibility shims; AxonScope is pre-release and not deployed as a stable dependency yet.
 - [ ] Remove temporary compatibility aliases and old argument names once examples/tests/docs use the clean API.
 - [x] Audit current compatibility aliases and decide which to remove before release: top-level `analysis`/`visualization`, time aliases, old constructor names, and any legacy convenience wrappers.
@@ -278,7 +404,7 @@ become accidental public contracts.
 
 | Surface | Current State | Decision / Next Action | Affected Files |
 | --- | --- | --- | --- |
-| `axs.analysis` / `axs.visualization` | Top-level aliases duplicated `axs.results.analysis` and `axs.results.visualization`. | Done: remove top-level aliases and keep analysis/plotting under `axs.results.*`. | `src/axonscope/__init__.py`, `tests/unit/test_public_api.py` |
+| `axs.analysis` / `axs.visualization` | Top-level aliases duplicated `axs.results.analysis` and `axs.results.visualization`. | Updated: old forwarding aliases were removed; `axs.analysis` is now a real Phase 6 package, while `axs.visualization` remains absent and plotting stays under `axs.results.visualization`. | `src/axonscope/__init__.py`, `tests/unit/test_public_api.py`, `src/axonscope/analysis/` |
 | `axs.run_batch(...)` | Public wrapper around `simulate_pool(...)`; used by README, `example_06`, and public API tests. | Done: removed from the public facade. Use `simulate_pool(...)` as the only pool wrapper. | `src/axonscope/simulation.py`, `src/axonscope/__init__.py`, `README.md`, `examples/basic/example_06_velocity_vs_diameter.py`, `tests/unit/test_public_api*.py` |
 | Public wrapper time names | `simulate(...)` and `simulate_pool(...)` used to accept `duration_ms`/`dt_ms` aliases. | Done: public wrappers now use `duration`/`dt` with Pint quantities; internal names like `tsim_ms` stay below the public boundary. | `src/axonscope/simulation.py`, `README.md`, `docs/`, `examples/`, `tests/unit/test_public_api*.py`, `tests/unit/test_dispatcher.py` |
 | Direct solver time aliases | Solver helpers used to accept `tsim`/`dt` and compatibility `duration_ms`/`dt_ms`. | Done: direct solvers use solver-level `tsim`/`dt` only. | `src/axonscope/solvers/common.py`, solver tests, NRV tests |
@@ -295,31 +421,32 @@ become accidental public contracts.
 | `SimResult.Vm` | Convenience property/field used broadly in examples and tests. | Keep as a stable notebook-friendly convenience, not a temporary compatibility shim. Ensure errors stay clear when future observer-only runs do not carry Vm. | `src/axonscope/results/single.py`, recording/observer docs |
 | `clear_extracellular_contexts(...)` | Plural name while the current instance stores one extracellular context internally. | Done: renamed to singular `clear_extracellular_context(...)`. The runtime tuple property remains `extracellular_contexts` for lower-level batch helpers. | `src/axonscope/axon_instance.py`, `tests/unit/test_public_api_facade.py` |
 
-## Tutorials And Realistic Examples
+## Backlog: Tutorials And Examples
 
 - [ ] Write tutorials after the docs/code audit so they match the real API.
 - [ ] Add realistic examples with NRV context/validation where appropriate.
 - [ ] Keep basic examples didactic and compact.
 - [ ] Keep advanced examples realistic enough to show actual stimulation studies and pool workflows.
 
-## Results, Recording, And Observables
+## Backlog: Recording, Observables, And Analysis
 
-- [ ] Implement solver-side observables/observers, starting with peak voltage, then activation.
+- [ ] Implement solver-side observables/observers in Phase 7.5 after Phase 7 memory/performance evidence, before Phase 8 studies.
 - [x] Decide and document whether `Recording` options are handled directly by solvers, translated before solver entry, or both.
 - [ ] Verify single-axon and pool recording behavior for Vm, gates, currents, conductances, and state variables. Current docs state that pool observable groups are future work; keep this open until behavior and tests are complete across supported groups.
   - [x] Lock the current public `Recording` contract with tests: scalar runs require `Vm` and may include observable groups, pool runs support `Vm` spatial modes only, and unsupported position/temporal/pool-observable filters raise explicit errors.
 - [ ] Keep post-hoc `ActivationCriterion` semantics aligned with future solver-side observers.
+- [x] Move analysis applicability/status/provenance tasks from this backlog into Phase 6 PRs as they become concrete.
 
-## Pool And Batch UX
+## Backlog: Pool And Batch UX
 
 - [x] Document and surface existing dispatch inspection helpers: `axs.dispatcher.build_dispatch_plan`, `print_dispatch_plan`, and `plot_dispatch_plan`.
 - [ ] Add plotting helpers for batch groups and retained recording layouts.
-- [x] Make batch diagnostics discoverable from `SimResult.diagnostics`.
+- [x] Make batch diagnostics discoverable from per-axon public result views.
 
-## Benchmarks, CPU/GPU, And Bottlenecks
+## Backlog: Benchmarks, CPU/GPU, And Bottlenecks
 
 - [ ] Rework benchmark strategy; current benchmark story is not convincing enough --> see `ideas/AXONSCOPE_BENCHMARKING_AGENT_SPEC.md`.
-- [ ] Use a Phase 2.5 diagnostic pass before rebuilding the full benchmark suite: add opt-in hotpath spans, run a few representative traces, then use the evidence to steer Phase 3.
+- [x] Use a Phase 2.5 diagnostic pass before rebuilding the full benchmark suite: add opt-in hotpath spans, run a few representative traces, then use the evidence to steer Phase 3.
   - [x] Added `axs.enable_benchmark(...)`, `axs.disable_benchmark(...)`, `axs.benchmark_report(...)`, `axs.reset_benchmark()`, and `with axs.benchmark(...)`.
   - [x] Added raw `events.jsonl`, aggregate `summary.csv`, and `metadata.json` outputs for hotpath sessions.
   - [x] Added `examples/advanced/example_14_hotpath_benchmarking.py` as the didactic diagnostic demo.
@@ -329,20 +456,21 @@ become accidental public contracts.
 - [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits. --> see `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
   - [x] First hotpath traces confirm the analysis direction: the immediate bottlenecks are `dispatch.build_plan`, `inputs.intracellular`, and `inputs.extracellular`, not GPU `kernel.wait`.
   - [x] Decision on timing: attack these as Phase 3.2 planning/preparation fixes now; do not wait for Phase 7 or Phase 4 backend isolation.
-  - [ ] Keep using `benchmark/hotpaths/` as the evidence loop while PR 3.2 is in progress.
+  - [x] Phase 3.2 used `benchmark/hotpaths/` as the evidence loop and closed the host-side planning/input bottlenecks.
+  - [ ] Keep `benchmark/hotpaths/` as the Phase 7 evidence loop for memory estimates, footprint reuse, and CPU/GPU comparisons.
 - [ ] Separate correctness validation from performance benchmarking in docs and scripts.
 - [ ] Record environment/device metadata for benchmark runs.
 - [ ] Defer the larger benchmark agent/spec implementation until after planning/preparation/cohort boundaries are clearer.
 
-## Documentation Platform
+## Backlog: Documentation Platform
 
 - [x] Rewrite `README.md` from scratch as a short, current entry point.
-- [ ] Provide extensive doctrings everywhere
+- [ ] Provide extensive docstrings on public classes/functions before generating API docs.
 - [ ] Set up Sphinx documentation after the `/docs` audit.
 - [ ] Decide what belongs in Sphinx pages versus README versus examples.
 - [x] Keep proposal/roadmap docs clearly labeled so users do not run future API snippets as current API.
 
-## Cleanup
+## Backlog: Cleanup And Sync
 
 - [ ] Do a general cleanup pass after docs, examples, recordings, observers, and benchmarks are aligned.
 - [ ] Remove stale aliases, removed file references, duplicate docs, and dead benchmark/example paths.

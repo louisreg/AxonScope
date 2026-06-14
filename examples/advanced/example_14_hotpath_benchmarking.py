@@ -1,11 +1,12 @@
-"""Advanced example 14: opt-in hotpath benchmarking.
+"""Advanced example 14: opt-in hotpath benchmarking and memory estimates.
 
 Run:
     python examples/advanced/example_14_hotpath_benchmarking.py
 
-This diagnostic mode times the major execution stages without changing the
-simulation result. It is useful before deciding whether a refactor should
-target planning, preprocessing, kernel execution, synchronization, or packaging.
+This diagnostic mode estimates array memory before execution, then times the
+major execution stages without changing the simulation result. It is useful
+before deciding whether a refactor should target planning, preprocessing, kernel
+execution, synchronization, recording retention, or result packaging.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ def main() -> None:
     axon = axs.axons.HodgkinHuxley(
         length=80.0 * axs.um,
         diameter=1.0 * axs.um,
-        compartments=7,
+        compartments=51,
         celsius=6.3 * axs.degC,
     )
 
@@ -50,11 +51,19 @@ def main() -> None:
     simulation = axs.AxonSimulation(
         axs.AxonPopulation([axon_a, axon_b]),
         duration=0.30 * axs.ms,
-        dt=0.05 * axs.ms,
+        dt=0.01 * axs.ms,
         recording=axs.Recording.center(axs.signals.Vm),
     )
 
-    # Step 4: write diagnostic files into a temporary folder for inspection.
+    # Step 4: inspect the estimated array footprint before running anything.
+    estimate = simulation.estimate(
+        runtime=axs.Runtime.JAX,
+        device=axs.Device.auto(),
+        precision=axs.PrecisionPolicy.float32(),
+    )
+    print(estimate.format())
+
+    # Step 5: write diagnostic files into a temporary folder for inspection.
     output_dir = Path(tempfile.mkdtemp(prefix="axonscope-hotpaths-"))
 
     axs.enable_benchmark(output_dir, print_summary=False)
@@ -64,6 +73,7 @@ def main() -> None:
     print(f"results: {len(results)} axons")
     print(f"trace files: {output_dir}")
     print(f"events: {0 if report is None else len(report.events)}")
+    print(f"estimated retained Vm: {estimate.retained_mib:.3f} MiB")
 
 
 if __name__ == "__main__":

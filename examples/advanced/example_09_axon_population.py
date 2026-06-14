@@ -89,7 +89,7 @@ def main() -> None:
         recording=axs.Recording.center(axs.signals.Vm),
     )
 
-    # Step 6: running a population returns one SimResult per population row.
+    # Step 6: running a population returns a cohort-backed pool result.
     results = simulation.run()
 
     print("dispatch:")

@@ -5,7 +5,7 @@ import pytest
 import os 
 from axonscope import AxonInstance, ms, um
 from axonscope.axons.unmyelinated import RattayAberham
-from axonscope.results.analysis import conduction_velocity
+from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from axonscope.results import SimResult

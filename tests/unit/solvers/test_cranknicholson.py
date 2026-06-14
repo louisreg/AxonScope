@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
-from axonscope.results.analysis import conduction_velocity, rasterize
+from axonscope.analysis import conduction_velocity, rasterize
 from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import (

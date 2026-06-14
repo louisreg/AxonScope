@@ -86,7 +86,7 @@ def update_point_source_current(sim: axs.AxonInstance, electrode_current) -> Non
 
 
 def main() -> None:
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
         target=axs.positions.DISTAL,

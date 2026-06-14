@@ -4,7 +4,8 @@ Run:
     python examples/advanced/example_10_typed_recording_signals.py
 
 Phase 2 replaces raw recording strings such as ``"Vm"`` with typed public
-selectors from ``axs.signals``.
+signal descriptors from ``axs.signals``. Phase 5 keeps those descriptors
+extensible so future or user-defined signals are not locked into an enum.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def main() -> None:
         ),
     )
 
-    # Step 3: request signal groups with typed selectors, not strings.
+    # Step 3: request signal groups with typed descriptors, not strings.
     recording = axs.Recording(
         signals=[axs.signals.Vm, axs.signals.GATES],
     )
@@ -48,7 +49,7 @@ def main() -> None:
         recording=recording,
     ).run()
 
-    print(f"recording signals: {[signal.result_key for signal in recording.signals]}")
+    print(f"recording signals: {[signal.id.value for signal in recording.signals]}")
     print(f"result groups: {tuple(result.recordings or {})}")
 
     # Step 5: population retention uses the same typed Vm selector.

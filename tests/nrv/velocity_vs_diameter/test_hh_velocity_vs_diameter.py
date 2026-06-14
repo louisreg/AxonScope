@@ -13,7 +13,7 @@ import pytest
 
 from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.results.analysis import conduction_velocity
+from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 import nrv

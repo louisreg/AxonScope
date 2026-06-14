@@ -166,7 +166,7 @@ def plot_curves(results: dict[str, dict[float, axs.protocols.ThresholdCurve]]) -
 
 
 def main() -> None:
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=STIM_START,
         target=axs.positions.DISTAL,

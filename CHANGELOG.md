@@ -116,6 +116,13 @@ The format is inspired by Keep a Changelog.
 - Added `benchmark/hotpaths/` as the cataloged location for Phase 2.5 workload
   scripts, including `run.py --list`, a README registry, and smoke/scale size
   presets for hotpath traces.
+- Added `axs.performance`, `simulation.estimate()`, `axs.estimate_simulation(...)`,
+  `SimulationEstimate`, and memory-estimate rows for retained Vm, dense solver
+  inputs, sampled stimuli, and factorized extracellular footprints.
+- Added typed `Runtime`, `Device`, and `PrecisionPolicy` planning values for
+  performance estimates and future runtime lowering.
+- Added the `footprint_reuse_sweep` hotpath workload and memory-estimate output
+  in `benchmark/hotpaths/run.py` manifests.
 - Added `benchmark/hotpaths/COLAB.md` to document the manual Google Colab GPU
   trace protocol when local GPU execution is unavailable.
 - Added `make bench-colab-push`, `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`,
@@ -142,6 +149,35 @@ The format is inspired by Keep a Changelog.
 - Added Phase 4 architecture guardrails that keep direct JAX imports out of
   descriptive/public layers and keep concrete batch kernel imports out of the
   dispatcher orchestrator.
+- Added public cohort-backed pool result containers: `CohortResult`,
+  `AxonSimulationResult`, and `AxonResultView`.
+- Added `SignalId` and extensible public `Signal` descriptors for recorded
+  signals.
+- Added `RecordedSignal` and `RecordingManifest` so pool results expose
+  requested signals, available signals, and dense cohort shape/dtype metadata.
+- Added Phase 5 architecture guardrails that keep pool results canonical and
+  public signals extensible rather than enum-backed.
+- Added `examples/advanced/example_16_canonical_pool_results.py` as the
+  didactic demo for canonical pool results and per-axon views.
+- Added the real public `axs.analysis` package for Phase 6 scientific analysis
+  definitions, requirements, statuses, population denominators, and reports.
+- Added `Activation`, `Latency`, `ConductionBlock`, `PeakVoltage`,
+  `SpikeCount`, and `ConductionVelocity` analysis definitions.
+- Added `AnalysisRequirements`, `AnalysisStatus`, `AnalysisPopulation`,
+  `AnalysisResult`, and `AnalysisReport`, plus `result.analyze(...)` and
+  `result.report(...)` helpers for scalar and pool results.
+- Added `AnalysisInputRequirement` and per-row missing-input requirements on
+  analysis results so failed rows can describe required signals, result fields,
+  positions, and recording hints.
+- Added low-level post-hoc helpers under `axs.analysis`: `rasterize`,
+  `conduction_velocity`, `average_velocity`, `peak_voltage`,
+  `recorded_positions_um`, `ActivationCriterion`, `ActivationEvent`, and
+  `detect_activation`.
+- Added lightweight online Vm observers for activation and peak-voltage
+  analyses, including `ActivationObserver`, `PeakVoltageObserver`, and
+  `definition.online_observer(...)`.
+- Added `examples/advanced/example_17_analysis_layer.py` as the didactic demo
+  for structured scientific analyses and lightweight online Vm observers.
 
 ### Changed
 
@@ -184,6 +220,12 @@ The format is inspired by Keep a Changelog.
   execution to the JAX backend boundary before wrapping the backend output in
   `SimResult`.
 - Removed the direct JAX dependency from `simulation.py` recording filters.
+- Changed `simulate_pool(...)` to return an `AxonSimulationResult` instead of a
+  plain `list[SimResult]`, while keeping ergonomic indexing, iteration, and
+  per-axon result helpers through `AxonResultView`.
+- Changed public recording signals from a closed enum to descriptor objects
+  under `axs.signals`; `axs.signals.Vm` now points to
+  `axs.signals.MEMBRANE_VOLTAGE`.
 - Updated NRV validation tests to use unit-bearing `Stimulus` time arguments
   with the stabilized public API.
 - Renamed the current executable per-axon protocol object from
@@ -192,8 +234,12 @@ The format is inspired by Keep a Changelog.
   compatibility alias is kept for the old prototype name.
 - Replaced internal imports that went through the public `axonscope` facade with
   package-internal imports.
-- Removed package-level `axs.analysis` and `axs.visualization` aliases; use
-  `axs.results.analysis` and `axs.results.visualization` instead.
+- Removed the old package-level `axs.analysis` forwarding alias; `axs.analysis`
+  is now a real Phase 6 package. `axs.visualization` remains absent; use
+  `axs.results.visualization`.
+- Moved post-hoc helpers out of `axs.results.analysis` and
+  `axs.results.ActivationCriterion`; use `axs.analysis.*` for analysis helpers
+  and criteria.
 - Removed old `threshold` and `min_distance` aliases from post-hoc result
   analysis helpers; use `threshold_mV` and `min_distance_ms`.
 - Removed the `AxonInstance.intracellular_clamps` alias; use

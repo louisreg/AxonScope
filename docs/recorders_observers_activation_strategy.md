@@ -1,7 +1,8 @@
 # Recorders, Observers, Thresholds, and Recruitment
 
-This document is a design proposal. Some CPU/post-hoc pieces are implemented;
-solver-side observers and observer-only runs remain future work.
+This document is a design proposal. CPU/post-hoc analyses, threshold protocols,
+and lightweight Vm observers are implemented; solver-side observer execution
+and observer-only runs are planned as AxonScope Phase 7.5.
 
 The goal is to make AxonScope useful for stimulation studies such as activation
 thresholds and recruitment curves while keeping the GPU path sane. The central
@@ -15,17 +16,27 @@ but often only needs one boolean per fiber per amplitude.
 
 ## Implementation Status
 
-Current status on 2026-06-13:
+Current status on 2026-06-14:
 
 - Phase 1 is partially implemented:
   - `SimResult.recordings["Vm"]` is the conceptual home of membrane voltage.
   - `result.Vm` remains a convenience alias for existing examples and tests.
   - `SimResult.observations` exists as the target container for future observers.
 - Phase 2 is implemented in CPU/post-hoc mode:
-  - `axs.results.ActivationCriterion` evaluates activation from recorded Vm
+  - `axs.analysis.ActivationCriterion` evaluates activation from recorded Vm
     traces.
-  - `axs.results.ActivationEvent` stores the compact activation summary.
-  - `axs.results.detect_activation(...)` is a convenience wrapper.
+  - `axs.analysis.ActivationEvent` stores the compact activation summary.
+  - `axs.analysis.detect_activation(...)` is a convenience wrapper.
+- Phase 6 is implemented for the current public analysis layer:
+  - `axs.analysis.Activation(...)` and `axs.analysis.PeakVoltage(...)` expose
+    structured analysis definitions with statuses and missing-input metadata.
+  - `axs.analysis.ActivationObserver` and
+    `axs.analysis.PeakVoltageObserver` consume streamed Vm chunks and are
+    cross-validated against post-hoc results.
+- Phase 7.5 is the planned solver-side observer pass:
+  - public `axs.analysis` observer specs should lower to compact backend state;
+  - solver kernels should call observer updates at every `dt`;
+  - observer-only runs should avoid retaining or transferring full Vm traces.
 - Phase 4/5 protocol helpers are implemented in CPU/post-hoc mode:
   - `axs.protocols.find_activation_threshold(...)` runs a binary search over
     stimulus amplitude.
@@ -131,7 +142,7 @@ An analysis criterion is the NumPy/post-hoc version of an observer. It consumes 
 Example:
 
 ```python
-criterion = axs.results.ActivationCriterion(
+criterion = axs.analysis.ActivationCriterion(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
     target=axs.positions.DISTAL,
@@ -143,7 +154,7 @@ event = criterion.evaluate(result)
 The corresponding observer should use the same public options:
 
 ```python
-observer = axs.results.ActivationObserver(
+observer = axs.analysis.ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
     target=axs.positions.DISTAL,
@@ -208,7 +219,7 @@ axs.simulate_pool(
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.none(),
-    observers=[axs.results.ActivationObserver(...)]
+    observers=[axs.analysis.ActivationObserver(...)]
 )
 ```
 
@@ -258,14 +269,14 @@ it.
 Example:
 
 ```python
-activation = axs.results.ActivationObserver(
+activation = axs.analysis.ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
     target=axs.positions.DISTAL,
     require_propagation=True,
 )
 
-peak = axs.results.PeakVoltageObserver(
+peak = axs.analysis.PeakVoltageObserver(
     target=axs.positions.ALL,
     blanking=0.0 * axs.ms,
 )
@@ -508,7 +519,7 @@ activation to validate the observer infrastructure.
 Public:
 
 ```python
-axs.results.PeakVoltageObserver(
+axs.analysis.PeakVoltageObserver(
     target=axs.positions.ALL,
     blanking=0.0 * axs.ms,
 )
@@ -553,7 +564,7 @@ threshold = axs.protocols.find_activation_threshold(
     bounds=(1.0 * axs.uA, 500.0 * axs.uA),
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
-    criterion=axs.results.ActivationCriterion(
+    criterion=axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
         target=axs.positions.DISTAL,
@@ -619,7 +630,7 @@ curve = axs.protocols.recruitment_sweep(
     amplitudes=np.linspace(0.0, 500.0, 21) * axs.uA,
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
-    criterion=axs.results.ActivationCriterion(
+    criterion=axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
         target=axs.positions.DISTAL,
@@ -667,7 +678,7 @@ thresholds = axs.protocols.thresholds_for_pool(
     bounds=(1.0 * axs.uA, 500.0 * axs.uA),
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
-    criterion=axs.results.ActivationCriterion(
+    criterion=axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
         target=axs.positions.DISTAL,
@@ -785,11 +796,12 @@ src/axonscope/protocols/
   activation.py      threshold search and recruitment protocols
 ```
 
-Alternative:
+Current boundary:
 
-Keep public observers in `results/activation.py` and solver-compiled observers
-in `solvers/observers.py`. This keeps user-facing concepts close to results,
-while solver-specific JAX details stay out of `results`.
+Keep public observer and analysis specifications in `axonscope.analysis`.
+Lower them into backend-specific compiled observer state during Phase 7.5.
+This keeps user-facing concepts separate from numerical results while keeping
+JAX-specific observer details out of the public analysis layer.
 
 ## Implementation Plan
 
@@ -830,15 +842,17 @@ Validation:
 - no-activation cases;
 - wrong-shape/error cases.
 
-### Phase 3: Observer Infrastructure
+### Solver-Side Observer Infrastructure
 
 - Add `observations` to `SimResult`.
-- Add public observer specs.
-- Add solver-side compiled observer interface.
-- Implement `PeakVoltageObserver` first.
-- Implement `ActivationObserver` second.
+- Add public observer specs. Current status: lightweight public
+  `ActivationObserver` and `PeakVoltageObserver` specs exist for streamed Vm
+  chunks.
+- Add solver-side compiled observer interface as AxonScope Phase 7.5.
 - Wire observers through scalar solver kernels.
 - Wire observers through batch kernels.
+- Call observer updates at every solver `dt` inside the kernel/scan loop.
+- Support observer-only runs without retaining full Vm traces where possible.
 
 Validation:
 

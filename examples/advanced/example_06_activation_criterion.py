@@ -45,17 +45,17 @@ def main() -> None:
     )
 
     criteria = {
-        "any compartment": axs.results.ActivationCriterion(
+        "any compartment": axs.analysis.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
             target=axs.positions.ALL,
         ),
-        "distal end": axs.results.ActivationCriterion(
+        "distal end": axs.analysis.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
             target=axs.positions.DISTAL,
         ),
-        "clamp center": axs.results.ActivationCriterion(
+        "clamp center": axs.analysis.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
             target=axs.positions.At(clamp_x),

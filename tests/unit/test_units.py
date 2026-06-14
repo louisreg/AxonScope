@@ -163,7 +163,7 @@ def test_analysis_accepts_quantity_like_thresholds():
     vm[:, 1] += np.exp(-0.5 * ((t - 5.0) / 0.1) ** 2) * 100.0
     result = SimResult(axon=DummyAxon(), Vm=vm, t=t)
 
-    spike_t_ms, spike_x_um = axs.results.analysis.rasterize(
+    spike_t_ms, spike_x_um = axs.analysis.rasterize(
         result,
         threshold_mV=FakeQuantity(0.0, "millivolt"),
         min_distance_ms=FakeQuantity(0.001, "second"),

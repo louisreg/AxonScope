@@ -51,6 +51,7 @@ python benchmark/hotpaths/run.py \
   --workload all \
   --preset scale \
   --warmups 1 \
+  --sweep-repeats 3 \
   --prefix colab_gpu_YYYYMMDD_HHMMSS \
   --out-dir benchmark/results/hotpaths \
   --no-print-summary
@@ -88,6 +89,10 @@ The output folder will contain:
 - each workload's `summary.csv`
 - each workload's `metadata.json`
 
+The top-level `manifest.json` also includes each workload's
+`simulation.estimate().to_dict()` output, including dense `Vstim`, retained Vm,
+factorized footprint, and sampled-stimulus estimates.
+
 ## 4. Run A Matching Local CPU Reference
 
 Run a local CPU reference with the same hotpath preset and warmup count:
@@ -97,6 +102,7 @@ python benchmark/hotpaths/run.py \
   --workload all \
   --preset scale \
   --warmups 1 \
+  --sweep-repeats 3 \
   --prefix cpu_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
@@ -113,8 +119,9 @@ Compare these stages first:
 - `results.split_batch`
 - `results.to_public`
 
-If CPU and GPU stay close while `inputs.extracellular` or `runtime.prepare`
-dominates, prioritize Phase 3 preparation/cohort reuse before touching kernels.
+If CPU and GPU stay close while `inputs.extracellular`, `runtime.prepare`, or
+the manifest's dense `Vstim` estimate dominates, prioritize Phase 7.5
+solver-side observer/drive reductions before adding higher-level study APIs.
 
 If `kernel.wait` dominates and separates clearly by device, prioritize backend
 kernel/runtime isolation.

@@ -39,6 +39,10 @@ def test_solver_examples_are_importable():
     footprint_drive = importlib.import_module("examples.advanced.example_13_extracellular_footprint_drive")
     hotpath_benchmarking = importlib.import_module("examples.advanced.example_14_hotpath_benchmarking")
     preparation_signatures = importlib.import_module("examples.advanced.example_15_preparation_signatures")
+    canonical_pool_results = importlib.import_module(
+        "examples.advanced.example_16_canonical_pool_results"
+    )
+    analysis_layer = importlib.import_module("examples.advanced.example_17_analysis_layer")
     pool_benchmark = importlib.import_module("benchmark.runtime.pool_batch_demo")
     assert callable(intracellular.main)
     assert callable(extracellular.main)
@@ -61,4 +65,6 @@ def test_solver_examples_are_importable():
     assert callable(footprint_drive.main)
     assert callable(hotpath_benchmarking.main)
     assert callable(preparation_signatures.main)
+    assert callable(canonical_pool_results.main)
+    assert callable(analysis_layer.main)
     assert callable(pool_benchmark.main)

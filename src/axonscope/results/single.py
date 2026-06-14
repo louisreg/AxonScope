@@ -125,7 +125,7 @@ class SimResult:
     def position_values(self, *, unit: Any = "micrometer") -> np.ndarray:
         """Return recorded axon positions as plain values in `unit`."""
 
-        from axonscope.results.analysis import recorded_positions_um
+        from axonscope.analysis.posthoc import recorded_positions_um
 
         unit_label = units.unit_label(unit) or "micrometer"
         positions_um = recorded_positions_um(self)
@@ -147,6 +147,28 @@ class SimResult:
                 f"result.Vm must be 2D (time, position), got shape {vm.shape}."
             )
         return np.max(vm, axis=0)
+
+    def analyze(self, *definitions: Any) -> Any:
+        """Evaluate public analysis definitions on this result."""
+
+        from axonscope.analysis import analyze
+
+        return analyze(self, *definitions)
+
+    def report(self, *definitions: Any) -> Any:
+        """Return an analysis report for one or more definitions."""
+
+        from axonscope.analysis import analyze
+
+        analyzed = analyze(self, *definitions)
+        if hasattr(analyzed, "analyses"):
+            return analyzed
+        from axonscope.analysis import AnalysisReport
+
+        return AnalysisReport(
+            simulation_result=self,
+            analyses=(analyzed,),
+        )
 
     def nearest_position_index(self, position: Any) -> int:
         """Return the recorded column nearest to `position`."""

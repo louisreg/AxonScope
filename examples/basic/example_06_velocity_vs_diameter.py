@@ -90,8 +90,8 @@ def main() -> None:
         progress=True,
     )
 
-    hh_speeds = [axs.results.conduction_velocity(result) for result in hh_results]
-    mrg_speeds = [axs.results.conduction_velocity(result) for result in mrg_results]
+    hh_speeds = [axs.analysis.conduction_velocity(result) for result in hh_results]
+    mrg_speeds = [axs.analysis.conduction_velocity(result) for result in mrg_results]
 
     print_curve("HH unmyelinated", HH_DIAMETERS, hh_speeds)
     print_curve("MRG myelinated", MRG_DIAMETERS, mrg_speeds)

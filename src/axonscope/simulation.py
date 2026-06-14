@@ -13,7 +13,7 @@ from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording, RecordingSpatial
-from axonscope.results import SimResult
+from axonscope.results import AxonSimulationResult, SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, Solver, SolverOptions
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 AxonInput: TypeAlias = Axon | AxonInstance
 AxonPoolInput: TypeAlias = AxonPopulation | Sequence[Axon | AxonInstance]
-AxonSimulationResult: TypeAlias = SimResult | list[SimResult]
+SimulationRunResult: TypeAlias = SimResult | AxonSimulationResult
 
 _RECORDING_GROUPS = (
     ("gates", "gates"),
@@ -93,7 +93,7 @@ class AxonSimulation:
 
         return self._population_lifecycle
 
-    def run(self) -> AxonSimulationResult:
+    def run(self) -> SimulationRunResult:
         """Execute this simulation definition and return public results."""
 
         if self.is_single:
@@ -126,6 +126,22 @@ class AxonSimulation:
             batch_options=self.batch_options,
             recording=self.recording,
             progress=self.progress,
+        )
+
+    def estimate(self, **kwargs: Any):
+        """Estimate memory pressure for this simulation without running it."""
+
+        from axonscope.performance import estimate_simulation
+
+        return estimate_simulation(
+            self.population,
+            duration=self.duration,
+            dt=self.dt,
+            recording=self.recording,
+            batch_options=self.batch_options,
+            observers=self.observers,
+            population_lifecycle=self.is_population,
+            **kwargs,
         )
 
 
@@ -240,31 +256,6 @@ def _pool_batch_options_for_recording(
     return replace(batch_options, recording=recording_options.recording)
 
 
-def _dispatch_result_to_sim_result(
-    result: DispatchResult,
-    recording: Recording | None,
-) -> SimResult:
-    """Convert the lower-level pool dispatch result to public ``SimResult``."""
-
-    return SimResult(
-        axon=result.axon,
-        Vm=result.Vm,
-        t=result.t,
-        diagnostics={
-            "pool_index": result.index,
-            "dispatch_group_id": result.group_id,
-            "dispatch_method": result.method,
-            "dispatch_group_size": result.group_size,
-            "dispatch_batch_kind": result.batch_kind,
-            "dispatch_geometry_shared": result.geometry_shared,
-            "dispatch_has_padding": result.has_padding,
-        },
-        recording=recording,
-        record_indices=result.record_indices,
-        simulation=result.simulation,
-    )
-
-
 def simulate(
     axon: Axon | AxonInstance,
     *,
@@ -314,11 +305,12 @@ def simulate_pool(
     batch_options: BatchOptions | None = None,
     recording: Recording | None = None,
     progress: ProgressOption = False,
-) -> list[SimResult]:
-    """Run a pool and return one ``SimResult`` per simulation.
+) -> AxonSimulationResult:
+    """Run a pool and return a cohort-backed ``AxonSimulationResult``.
 
-    Results are returned in pool order. The lower-level dispatch metadata
-    is kept in each result's ``diagnostics`` dictionary.
+    Per-axon views are exposed in pool order through indexing and iteration.
+    The lower-level dispatch metadata is kept in each view's ``diagnostics``
+    dictionary.
     ``recording`` controls the public output contract. ``solver_options`` are
     forwarded unchanged to solver runtime preparation; ``batch_options`` only
     affects batch-kernel execution details such as chunking. Set ``progress``
@@ -342,7 +334,10 @@ def simulate_pool(
     with benchmark_span("results.to_public", pool_size=len(population.instances)):
         if recording is not None:
             results = _filter_pool_recording(results, recording)
-        return [_dispatch_result_to_sim_result(result, recording) for result in results]
+        return AxonSimulationResult.from_dispatch_results(
+            results,
+            recording=recording,
+        )
 
 
 __all__ = ["AxonSimulation", "simulate", "simulate_pool"]

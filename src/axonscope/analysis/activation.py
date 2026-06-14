@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 
 from axonscope.positions import ALL, PositionSelector
 from axonscope.results.single import SimResult
 from axonscope.utils import units
+
+
+class _PeakEvent(TypedDict):
+    peak_mV: float | None
+    peak_time_ms: float | None
+    peak_index: int | None
 
 
 @dataclass(frozen=True)
@@ -29,21 +35,8 @@ class ActivationEvent:
 class ActivationCriterion:
     """Detect whether a voltage trace satisfies an activation criterion.
 
-    Parameters
-    ----------
-    threshold
-        Membrane voltage threshold. Plain numbers are interpreted as millivolts.
-    blanking
-        Initial time interval ignored by the detector. Plain numbers are
-        interpreted as milliseconds.
-    target
-        Typed recorded-position selector from `axs.positions`, such as
-        `axs.positions.ALL`, `axs.positions.DISTAL`,
-        `axs.positions.At(...)`, or `axs.positions.Indices(...)`.
-    require_propagation
-        Reserved semantic flag for the future observer implementation. In this
-        post-hoc implementation, pass distal positions or indices explicitly to
-        enforce a propagation-like check.
+    This is the low-level event detector used by protocol search helpers and by
+    the higher-level `axs.analysis.Activation` definition.
     """
 
     threshold: Any = -20.0
@@ -129,7 +122,7 @@ class ActivationCriterion:
         time_ms: np.ndarray,
         original_indices: np.ndarray,
         positions_um: np.ndarray,
-    ) -> dict[str, float | int | None]:
+    ) -> _PeakEvent:
         if vm.size == 0:
             return {
                 "peak_mV": None,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from axonscope.results.analysis import rasterize
+from axonscope.analysis.posthoc import rasterize
 from axonscope.results.single import SimResult
 from axonscope.utils import units
 

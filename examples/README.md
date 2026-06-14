@@ -60,6 +60,15 @@ low-level dispatcher internals.
   custom axon layouts instead of raw formulation strings.
 - `example_13_extracellular_footprint_drive.py`: separate static
   extracellular footprints from temporal drives and summed stimulation.
+- `example_14_hotpath_benchmarking.py`: estimate simulation memory and collect
+  opt-in hotpath timing spans around planning, input materialization, kernel
+  execution, and result packing.
+- `example_15_preparation_signatures.py`: inspect deterministic signatures for
+  reusable preparation inputs.
+- `example_16_canonical_pool_results.py`: work with canonical cohort-backed
+  pool results and per-axon result views.
+- `example_17_analysis_layer.py`: evaluate structured scientific analyses,
+  missing-input/status metadata, and lightweight online Vm observers.
 
 Advanced examples may include optional NRV input helpers, but should still favor
 readability over measurement.

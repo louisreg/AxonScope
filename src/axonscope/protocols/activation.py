@@ -17,7 +17,8 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.recording import Recording
-from axonscope.results import ActivationCriterion, ActivationEvent, SimResult
+from axonscope.analysis import ActivationCriterion, ActivationEvent
+from axonscope.results import SimResult
 from axonscope.simulation import simulate, simulate_pool
 from axonscope.utils import units
 
@@ -861,15 +862,14 @@ def _evaluate_activation_updated_pool(
     if all(isinstance(item, SimResult) for item in updated_pool):
         results = tuple(updated_pool)  # type: ignore[assignment]
     else:
-        results = tuple(
-            simulate_pool(
-                updated_pool,  # type: ignore[arg-type]
-                duration=duration,
-                dt=dt,
-                recording=recording or Recording.voltage(),
-                progress=progress,
-            )
+        pool_result = simulate_pool(
+            updated_pool,  # type: ignore[arg-type]
+            duration=duration,
+            dt=dt,
+            recording=recording or Recording.voltage(),
+            progress=progress,
         )
+        results = tuple(view.to_sim_result() for view in pool_result)
     return np.asarray(
         [criterion.evaluate(result).activated for result in results],
         dtype=bool,
@@ -896,15 +896,14 @@ def _run_updated_pool(
     )
     if all(isinstance(item, SimResult) for item in updated_pool):
         return tuple(updated_pool)  # type: ignore[return-value]
-    return tuple(
-        simulate_pool(
-            updated_pool,  # type: ignore[arg-type]
-            duration=duration,
-            dt=dt,
-            recording=recording or Recording.voltage(),
-            progress=progress,
-        )
+    pool_result = simulate_pool(
+        updated_pool,  # type: ignore[arg-type]
+        duration=duration,
+        dt=dt,
+        recording=recording or Recording.voltage(),
+        progress=progress,
     )
+    return tuple(view.to_sim_result() for view in pool_result)
 
 
 def _apply_threshold_update(

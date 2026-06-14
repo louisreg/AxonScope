@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from axonscope import AxonInstance, S_per_m, ms, um
-from axonscope.results.analysis import rasterize
+from axonscope.analysis import rasterize
 from axonscope.axons.myelinated import MRG
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.stimulation import Stimulus

@@ -146,6 +146,22 @@ def test_public_recording_signals_filter_single_result():
     assert set(result.recordings) == {"Vm", "gates"}
 
 
+def test_public_signal_descriptors_are_extensible():
+    custom = axs.Signal(
+        id=axs.SignalId("teaching_custom_signal"),
+        result_key="teaching_custom_signal",
+        unit="arbitrary",
+        description="User-defined teaching signal.",
+        quantity_type=float,
+    )
+
+    recording = axs.Recording(signals=[custom])
+
+    assert recording.signals == (custom,)
+    assert recording.voltage is False
+    assert custom.id == axs.SignalId("teaching_custom_signal")
+
+
 def test_public_single_recording_requires_voltage_with_observables():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
@@ -255,6 +271,102 @@ def test_public_simulate_pool_accepts_unit_duration_and_dt():
 
     assert len(result) == 1
     assert result[0].Vm.shape == (2, 11)
+
+
+def test_public_simulate_pool_returns_canonical_cohort_result():
+    axon_model = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_a = axs.AxonInstance(axon_model, y=-20.0 * axs.um)
+    axon_b = axs.AxonInstance(axon_model, y=20.0 * axs.um)
+    recording = axs.Recording.center(axs.signals.Vm)
+
+    result = axs.simulate_pool(
+        [axon_a, axon_b],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=recording,
+    )
+
+    assert isinstance(result, axs.AxonSimulationResult)
+    assert not isinstance(result, list)
+    assert len(result) == 2
+    assert len(result.cohorts) == 1
+    assert result.cohorts[0].Vm.shape == (2, 2, 1)
+    assert result.axons == (axon_model, axon_model)
+    assert result.simulations == (axon_a, axon_b)
+    assert result.diagnostics[0]["pool_index"] == 0
+
+    manifest = result.recording_manifest
+    assert isinstance(manifest, axs.RecordingManifest)
+    assert manifest.policy is recording
+    assert manifest.requested_signals == (axs.signals.Vm,)
+    assert manifest.available_signals == (axs.signals.MEMBRANE_VOLTAGE,)
+    vm_manifest = manifest.signal(axs.signals.Vm)
+    assert isinstance(vm_manifest, axs.RecordedSignal)
+    assert vm_manifest.result_key == "Vm"
+    assert vm_manifest.unit == "millivolt"
+    assert vm_manifest.cohort_indices == (0,)
+    assert vm_manifest.cohort_shapes == ((2, 2, 1),)
+    assert vm_manifest.cohort_count == 1
+    assert result[0].recording_manifest is manifest
+    with pytest.raises(TypeError, match="signals values"):
+        manifest.signal("Vm")
+
+    first = result.axon(0)
+    assert isinstance(first, axs.AxonResultView)
+    assert first.index == 0
+    assert first.simulation is axon_a
+    assert first.record_indices == (5,)
+    assert first.trace_values(index=0)[0].shape == (2,)
+
+    dense_vm = result.signal(axs.signals.Vm)
+    assert dense_vm.shape == (2, 2, 1)
+    np.testing.assert_allclose(np.asarray(first.Vm), dense_vm[0])
+    assert result.views[1].simulation is axon_b
+    assert result[1].to_sim_result().simulation is axon_b
+
+    with pytest.raises(TypeError, match="signals values"):
+        result.signal("Vm")
+
+    with pytest.raises(ValueError, match="exactly one"):
+        _ = result.single
+
+
+def test_public_simulate_pool_single_view_and_heterogeneous_cohorts():
+    short_axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    long_axon = axs.axons.HodgkinHuxley(
+        length=120.0 * axs.um,
+        diameter=0.6 * axs.um,
+        compartments=13,
+        celsius=6.3 * axs.degC,
+    )
+
+    one = axs.simulate_pool(
+        [short_axon],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+    )
+    assert one.single.axon is short_axon
+    assert one.single.Vm.shape == (2, 11)
+
+    mixed = axs.simulate_pool(
+        [short_axon, long_axon],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+    )
+    assert [view.Vm.shape for view in mixed] == [(2, 11), (2, 13)]
+    assert len(mixed.cohorts) == 2
+    with pytest.raises(ValueError, match="heterogeneous cohorts"):
+        mixed.signal(axs.signals.Vm)
 
 
 def test_public_axon_population_normalizes_instances_and_axons():

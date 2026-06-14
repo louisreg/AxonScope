@@ -28,6 +28,13 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "contexts; useful to expose generic Vstim preprocessing cost."
         ),
     ),
+    "footprint_reuse_sweep": HotpathWorkload(
+        name="footprint_reuse_sweep",
+        description=(
+            "Repeated point-source pool runs with fixed geometry and changing "
+            "stimulus amplitude; useful to measure missing footprint/stimulus-only reuse."
+        ),
+    ),
 }
 
 

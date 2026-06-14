@@ -24,7 +24,7 @@ def _result_for_current(electrode_current, *, threshold_nA=1.0):
 
 
 def test_find_activation_threshold_accepts_result_factory():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -49,7 +49,7 @@ def test_find_activation_threshold_accepts_result_factory():
 
 
 def test_find_activation_threshold_requires_current_units():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -77,7 +77,7 @@ def test_find_activation_threshold_requires_current_units():
 
 
 def test_recruitment_sweep_accepts_pool_update():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -110,7 +110,7 @@ def test_recruitment_sweep_accepts_pool_update():
 
 
 def test_recruitment_sweep_requires_current_units():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -156,7 +156,7 @@ def test_pool_sweep_accepts_generic_observer():
 
 
 def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -193,7 +193,7 @@ def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update():
 
 
 def test_find_activation_threshold_curve_requires_current_units():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
@@ -212,7 +212,7 @@ def test_find_activation_threshold_curve_requires_current_units():
 
 
 def test_find_activation_threshold_curve_accepts_callable_bounds_and_relative_tolerance():
-    criterion = axs.results.ActivationCriterion(
+    criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,

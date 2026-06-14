@@ -46,14 +46,17 @@ AxonSimulation or AxonPopulation
   -> dispatch groups
   -> runtime-batch builders when a batch path is available
   -> scalar/batch solver path
-  -> list[SimResult]
+  -> AxonSimulationResult with dense cohorts and per-axon views
 ```
 
-`simulate_pool` returns one `SimResult` per input item, in the same order:
+`simulate_pool` returns an `AxonSimulationResult`. Indexing or iterating over it
+returns one `AxonResultView` per input item, in the same order:
 
 ```python
 for result in results:
     print(result.diagnostics["pool_index"], result.diagnostics["dispatch_method"])
+
+center_vm = results.signal(axs.signals.Vm)
 ```
 
 Dispatch metadata stays diagnostic:
@@ -67,8 +70,10 @@ result.diagnostics["dispatch_geometry_shared"]
 result.diagnostics["dispatch_has_padding"]
 ```
 
-`SimResult.axon` is the pure descriptive axon. `SimResult.simulation` is the
-protocol object that was simulated. Results remain one item per population row.
+`AxonResultView.axon` is the pure descriptive axon. `AxonResultView.simulation`
+is the protocol object that was simulated. Results remain one view per
+population row; call `view.to_sim_result()` only when a standalone `SimResult`
+object is required.
 
 ## Spatial Position
 
@@ -113,7 +118,7 @@ the transverse offset seen by each axon before building batched `Vstim` arrays.
 
 `run_pool` is the lower-level dispatch entry point. It also accepts an
 `AxonPopulation` or sequence of `Axon`/`AxonInstance` objects, but returns
-private dispatch results instead of public `SimResult` objects:
+private dispatch results instead of public result containers:
 
 ```python
 from axonscope.dispatcher import run_pool
@@ -167,8 +172,8 @@ compiled membrane/runtime shape remains compatible, the method is reported as
 `parameter-batch-single-cable` or `parameter-batch-double-cable`.
 
 For double-cable groups, the dispatcher may also pad shorter rows to the
-largest `Nx` in the group. Padding is solver-internal: public `SimResult.Vm`
-is sliced back to the original axon width, and center/probe recordings are
+largest `Nx` in the group. Padding is solver-internal: public view `Vm` arrays
+are sliced back to the original axon width, and center/probe recordings are
 resolved against each original axon.
 
 The intended per-row differences in a batch are cable geometry, attached

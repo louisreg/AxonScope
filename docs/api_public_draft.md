@@ -445,10 +445,10 @@ result = axs.simulate_pool(
 )
 ```
 
-`simulate_pool` should return a plain `list[SimResult]`, one result per
-axon in input order. Dispatch metadata can live in `result.diagnostics`, while
-the selected `Recording` policy lives directly on
-each `SimResult`.
+`simulate_pool` should return an `AxonSimulationResult`, with dense cohorts
+internally and one `AxonResultView` per axon in input order. Dispatch metadata
+can live in each view's `diagnostics`, while the selected `Recording` policy
+lives on the pool result and views.
 
 For now, each axon should carry its own intracellular and extracellular
 contexts through its axon object. Pool-level drive helpers should stay out
@@ -474,7 +474,7 @@ Proposed public namespaces:
 
 ```text
 axs.results.visualization
-axs.results.analysis
+axs.analysis
 ```
 
 ### Result Visualization
@@ -506,7 +506,7 @@ axs.results.visualization.plot_pool_raster(pool_result)
 ```
 
 `SimResult` should stay a data container. Plotting and post-processing should
-live under `axs.results.visualization` and `axs.results.analysis` so analysis code can explicitly
+live under `axs.results.visualization` and `axs.analysis` so analysis code can explicitly
 check whether `Vm` is full, center-only, probe-only, or otherwise filtered.
 
 ### Geometry Visualization
@@ -540,9 +540,9 @@ eventually, inside the solver loop.
 Initial post-hoc API:
 
 ```python
-spikes = axs.results.analysis.rasterize(result, threshold_mV=-10.0)
-velocity = axs.results.analysis.conduction_velocity(result)
-peaks = axs.results.analysis.peak_voltage(result)
+spikes = axs.analysis.rasterize(result, threshold_mV=-10.0)
+velocity = axs.analysis.conduction_velocity(result)
+peaks = axs.analysis.peak_voltage(result)
 ```
 
 Long-term solver-side API:
@@ -553,8 +553,8 @@ result = axs.simulate(
     duration_ms=5.0,
     dt_ms=0.01,
     observers=[
-        axs.results.analysis.RasterObserver(threshold_mV=-10.0),
-        axs.results.analysis.PeakVoltageObserver(),
+        axs.analysis.RasterObserver(threshold_mV=-10.0),
+        axs.analysis.PeakVoltageObserver(),
     ],
 )
 ```
