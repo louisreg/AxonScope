@@ -5,6 +5,7 @@ from . import (
     dispatcher,
     identifiers,
     membranes,
+    preparation,
     positions,
     protocols,
     results,
@@ -14,6 +15,15 @@ from . import (
 )
 from axonscope.stimulation import AnalyticalElectrode, Electrode, PointSourceElectrode
 from axonscope.axon_instance import AxonInstance
+from axonscope.benchmarking import (
+    BenchmarkReport,
+    BenchmarkSession,
+    benchmark,
+    benchmark_report,
+    disable_benchmark,
+    enable_benchmark,
+    reset_benchmark,
+)
 from axonscope.identifiers import AxonId, DriveId
 from axonscope.population import AxonPopulation
 from axonscope.results import SimResult
@@ -87,6 +97,7 @@ __all__ = [
     "dispatcher",
     "identifiers",
     "membranes",
+    "preparation",
     "positions",
     "protocols",
     "results",
@@ -98,8 +109,15 @@ __all__ = [
     "AxonId",
     "DriveId",
     "AxonInstance",
+    "BenchmarkReport",
+    "BenchmarkSession",
     "AxonPopulation",
     "AxonSimulation",
+    "benchmark",
+    "benchmark_report",
+    "disable_benchmark",
+    "enable_benchmark",
+    "reset_benchmark",
     "AnalyticalElectrode",
     "AnalyticalExtracellularContext",
     "Electrode",

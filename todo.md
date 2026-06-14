@@ -101,6 +101,24 @@ object model changes.
   - [x] PR 2.5: add `AnalyticalExtracellularContext.build_footprint(...)` and `PointSourceElectrode.build_footprint(...)`.
   - [x] Keep the existing analytical context runtime path until Phase 3 planning/preparation moves solver lowering onto prepared footprints.
 - [ ] Phase 3 issue: split planning and preparation, add signatures and reusable prepared cohorts.
+  - [x] Phase 2.5 before the larger split: add opt-in hotpath instrumentation to measure where CPU/GPU time is really spent.
+  - [x] Phase 2.5 should instrument stage boundaries only: `dispatch.build_plan`, `dispatch.group.total`, `runtime.prepare`, `inputs.positions`, `inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, `results.split_batch`, and `results.to_public`.
+  - [x] Phase 2.5 should record shapes, dtypes, estimated bytes, backend/device metadata, group size, `Nt`, `Nx`, recording mode, and whether geometry is shared.
+  - [x] Phase 2.5 should avoid the full benchmark-framework rewrite for now; use the first traces to decide which Phase 3 preparation boundaries matter most.
+  - [ ] After Phase 2.5, run diagnostic workloads for intracellular-only, point-source extracellular, and population sizes around 5/50/500 before committing to a GPU refactor direction.
+    - [x] Add `benchmark/hotpaths/` as the cataloged location for Phase 2.5 workload scripts.
+    - [x] Add `benchmark/hotpaths/README.md` and `benchmark/hotpaths/run.py --list` as the human/CLI registry for workload scripts.
+    - [x] Add `intracellular_only` and `point_source_extracellular` workloads with `smoke` and `scale` size presets.
+    - [x] Smoke-run both hotpath workloads with size 2 on 2026-06-14: `python benchmark/hotpaths/run.py --workload all --sizes 2 --duration 0.10 --dt 0.05 --compartments 5 --prefix smoke_test --no-print-summary`.
+    - [x] Probe-run the scale preset on the current environment on 2026-06-14: `python benchmark/hotpaths/run.py --workload all --preset scale --prefix scale_probe --no-print-summary`.
+    - [x] Document the manual Google Colab GPU protocol in `benchmark/hotpaths/COLAB.md`; local GPU execution is not assumed.
+    - [ ] Manually re-run the scale preset on Google Colab GPU: `python benchmark/hotpaths/run.py --workload all --preset scale --prefix colab_gpu_YYYYMMDD --no-print-summary`.
+    - [ ] Keep or create a matching CPU reference prefix, then bring both result folders back under `benchmark/results/hotpaths/` for comparison.
+    - [ ] Compare `runtime.prepare`, `inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, and `results.split_batch` across CPU/GPU traces before deciding the next optimization.
+  - [x] Phase 3 PR 3.1: add deterministic preparation signatures for arrays, stimuli, extracellular footprints, drives, and stimulation collections.
+  - [x] Phase 3 PR 3.1: add `examples/advanced/example_15_preparation_signatures.py` as the required didactic demo for preparation signatures.
+  - Fresh unit run on 2026-06-14 after Phase 2.5 hotpath instrumentation, workload catalog, and Phase 3.1 preparation signatures: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`277 passed, 1 skipped`).
+  - [ ] Phase 3 next: introduce a prepared-cohort object that consumes these signatures before moving solver lowering out of the dispatcher.
 - [ ] Phase 4 issue: isolate JAX runtime under backend modules and delete old dispatcher/solver paths once empty.
 - [ ] Phase 5 issue: replace list-based pool results with canonical cohort-backed results and per-axon views.
 - [ ] Phase 6 issue: move scientific analyses into a dedicated requirements/status/provenance layer.
@@ -237,11 +255,18 @@ become accidental public contracts.
 
 ## Benchmarks, CPU/GPU, And Bottlenecks
 
-- [ ] Rework benchmark strategy; current benchmark story is not convincing enough --> see AXONSCOPE_BENCHMARKING_AGENT_SPEC.md
+- [ ] Rework benchmark strategy; current benchmark story is not convincing enough --> see `ideas/AXONSCOPE_BENCHMARKING_AGENT_SPEC.md`.
+- [ ] Use a Phase 2.5 diagnostic pass before rebuilding the full benchmark suite: add opt-in hotpath spans, run a few representative traces, then use the evidence to steer Phase 3.
+  - [x] Added `axs.enable_benchmark(...)`, `axs.disable_benchmark(...)`, `axs.benchmark_report(...)`, `axs.reset_benchmark()`, and `with axs.benchmark(...)`.
+  - [x] Added raw `events.jsonl`, aggregate `summary.csv`, and `metadata.json` outputs for hotpath sessions.
+  - [x] Added `examples/advanced/example_14_hotpath_benchmarking.py` as the didactic diagnostic demo.
+  - [x] Added `benchmark/hotpaths/` as the registered location for Phase 2.5 workload scripts.
+  - [x] Added `benchmark/hotpaths/run.py --list` and `benchmark/hotpaths/README.md` to catalog available hotpath workloads.
 - [ ] Find a robust way to benchmark CPU versus GPU for representative workloads.
-- [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits. --> see AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md
+- [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits. --> see `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
 - [ ] Separate correctness validation from performance benchmarking in docs and scripts.
 - [ ] Record environment/device metadata for benchmark runs.
+- [ ] Defer the larger benchmark agent/spec implementation until after planning/preparation/cohort boundaries are clearer.
 
 ## Documentation Platform
 

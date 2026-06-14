@@ -3,12 +3,20 @@ from axonscope import (
     AxonInstance,
     AxonPopulation,
     AxonSimulation,
+    BenchmarkReport,
+    BenchmarkSession,
     IntracellularContext,
     IntracellularCurrentClamp,
     PointSourceElectrode,
     RecordingSpatial,
     Signal,
     Stimulus,
+    benchmark,
+    benchmark_report,
+    disable_benchmark,
+    enable_benchmark,
+    preparation,
+    reset_benchmark,
     simulate_pool,
     um,
 )
@@ -42,6 +50,14 @@ def test_public_package_imports_are_available():
     assert AxonInstance is not None
     assert AxonPopulation is not None
     assert AxonSimulation is not AxonInstance
+    assert BenchmarkReport is not None
+    assert BenchmarkSession is not None
+    assert benchmark is not None
+    assert benchmark_report is not None
+    assert disable_benchmark is not None
+    assert enable_benchmark is not None
+    assert reset_benchmark is not None
+    assert preparation.extracellular_stimulation_signature is not None
     assert HodgkinHuxley is not None
     assert RattayAberham is not None
     assert MRG is not None

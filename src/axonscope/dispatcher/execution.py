@@ -7,6 +7,12 @@ import jax.numpy as jnp
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
+from axonscope.benchmarking.hotpaths import (
+    benchmark_array_metadata,
+    benchmark_span,
+    benchmark_wait,
+    record_benchmark_metadata,
+)
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
 from axonscope.dispatcher.runtime_batches import (
@@ -85,35 +91,69 @@ def run_pool(
     if dt_ms <= 0.0:
         raise ValueError("dt_ms must be > 0.")
 
-    resolved_batch_options = (
-        BatchOptions.full() if batch_options is None else batch_options
-    )
+    with benchmark_span(
+        "simulation.pool.total",
+        pool_size=len(axons),
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+    ):
+        return _run_pool_checked(
+            axons,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            solver_options=solver_options,
+            batch_options=batch_options,
+            progress=progress,
+        )
+
+
+def _run_pool_checked(
+    axons: Sequence[Axon | AxonInstance],
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    solver_options: SolverOptions | None,
+    batch_options: BatchOptions | None,
+    progress: ProgressOption,
+) -> tuple[DispatchResult, ...]:
+    resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
     plan = build_dispatch_plan(axons)
+    record_benchmark_metadata(dispatch_group_count=len(plan.groups))
 
     results: list[DispatchResult | None] = [None] * len(plan.items)
     with DispatchProgress(progress, plan) as progress_reporter:
         for group in plan.groups:
-            progress_reporter.start_group(group)
-            if _can_run_batch_group(group):
-                group_results = _run_batch_group(
-                    group,
-                    tsim_ms=tsim_ms,
-                    dt_ms=dt_ms,
-                    batch_options=resolved_batch_options,
-                    solver_options=solver_options,
-                    progress_callback=progress_reporter.kernel_callback(group),
-                )
-            else:
-                group_results = _run_scalar_group(
-                    group,
-                    tsim_ms=tsim_ms,
-                    dt_ms=dt_ms,
-                    solver_options=solver_options,
-                )
-                callback = progress_reporter.kernel_callback(group)
-                if callback is not None:
-                    callback(1, 1)
-            progress_reporter.finish_group(group)
+            with benchmark_span(
+                "dispatch.group.total",
+                group_id=group.group_id,
+                group_size=group.size,
+                mode=group.mode,
+                batch_kind=group.batch_kind,
+                nx=group.nx,
+                geometry_shared=group.geometry_shared,
+                has_padding=group.has_padding,
+            ):
+                progress_reporter.start_group(group)
+                if _can_run_batch_group(group):
+                    group_results = _run_batch_group(
+                        group,
+                        tsim_ms=tsim_ms,
+                        dt_ms=dt_ms,
+                        batch_options=resolved_batch_options,
+                        solver_options=solver_options,
+                        progress_callback=progress_reporter.kernel_callback(group),
+                    )
+                else:
+                    group_results = _run_scalar_group(
+                        group,
+                        tsim_ms=tsim_ms,
+                        dt_ms=dt_ms,
+                        solver_options=solver_options,
+                    )
+                    callback = progress_reporter.kernel_callback(group)
+                    if callback is not None:
+                        callback(1, 1)
+                progress_reporter.finish_group(group)
             for result in group_results:
                 results[result.index] = result
 
@@ -223,53 +263,123 @@ def _run_single_cable_batch_group(
     """Run a homogeneous single-cable group through imposed-field batching."""
 
     representative = _representative_item(group).simulation
-    runtime = prepare_solver_runtime(
-        representative,
+    with benchmark_span(
+        "runtime.prepare",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
-        include_extracellular=False,
-        include_area=False,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
-        solver_options=solver_options,
-    )
-    if not group.geometry_shared:
-        runtime = _with_batched_single_cable_runtime(runtime, group)
+    ):
+        runtime = prepare_solver_runtime(
+            representative,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            include_extracellular=False,
+            include_area=False,
+            precompute_intracellular=False,
+            precompute_extracellular=False,
+            solver_options=solver_options,
+        )
+        if not group.geometry_shared:
+            runtime = _with_batched_single_cable_runtime(runtime, group)
+        record_benchmark_metadata(
+            nt=runtime.grid.Nt,
+            nx=runtime.membrane.Nx,
+            dtype=str(runtime.membrane.dtype),
+        )
     axons = tuple(item.simulation for item in group.items)
-    iinj_mid = build_intracellular_current_density_batch(
-        axons,
-        runtime,
-        solver_axons=tuple(item.solver_axon for item in group.items),
-        target_nx=group.nx,
-    )
-    vstim_mid = build_vstim_midpoint_batch(
-        representative,
-        extracellular_context_rows(axons),
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        x_positions_m=x_positions_batch_m(axons, target_nx=group.nx),
-        axon_y_um=axon_transverse_positions_um(axons)[0],
-        axon_z_um=axon_transverse_positions_um(axons)[1],
-        dtype_local=runtime.membrane.dtype,
-    )
+    with benchmark_span(
+        "inputs.intracellular",
+        group_id=group.group_id,
+        group_size=group.size,
+        nt=runtime.grid.Nt,
+        nx=group.nx,
+    ):
+        iinj_mid = build_intracellular_current_density_batch(
+            axons,
+            runtime,
+            solver_axons=tuple(item.solver_axon for item in group.items),
+            target_nx=group.nx,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
+        )
+    with benchmark_span(
+        "inputs.positions",
+        group_id=group.group_id,
+        group_size=group.size,
+        nx=group.nx,
+    ):
+        contexts = extracellular_context_rows(axons)
+        x_positions = x_positions_batch_m(axons, target_nx=group.nx)
+        axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
+        record_benchmark_metadata(
+            **benchmark_array_metadata("x_positions_m", x_positions, role="positions"),
+            context_count=sum(len(row) for row in contexts),
+        )
+    with benchmark_span(
+        "inputs.extracellular",
+        group_id=group.group_id,
+        group_size=group.size,
+        nt=runtime.grid.Nt,
+        nx=group.nx,
+    ):
+        vstim_mid = build_vstim_midpoint_batch(
+            representative,
+            contexts,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            x_positions_m=x_positions,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            dtype_local=runtime.membrane.dtype,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
+        )
     kernel_options = _kernel_batch_options(group, batch_options)
-    out = SingleCableVStimBatchKernel(
-        runtime=runtime,
-        Cm_uF_cm2=_group_cm_uF_cm2(group, runtime),
-    ).run(
-        intracellular_current_density_mid=iinj_mid,
-        extracellular_potential_mid_mV=vstim_mid,
-        options=kernel_options,
-        progress_callback=progress_callback,
-    )
-    return _dispatch_results_from_batch(
-        group,
-        Vm=out.Vm,
-        t=out.t,
-        method=_dispatch_method(group),
-        batch_options=batch_options,
-        kernel_batch_options=kernel_options,
-    )
+    with benchmark_span(
+        "kernel.enqueue",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        out = SingleCableVStimBatchKernel(
+            runtime=runtime,
+            Cm_uF_cm2=_group_cm_uF_cm2(group, runtime),
+        ).run(
+            intracellular_current_density_mid=iinj_mid,
+            extracellular_potential_mid_mV=vstim_mid,
+            options=kernel_options,
+            progress_callback=progress_callback,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+        )
+    with benchmark_span(
+        "kernel.wait",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+    ):
+        benchmark_wait(out.Vm)
+    with benchmark_span(
+        "results.split_batch",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        return _dispatch_results_from_batch(
+            group,
+            Vm=out.Vm,
+            t=out.t,
+            method=_dispatch_method(group),
+            batch_options=batch_options,
+            kernel_batch_options=kernel_options,
+        )
 
 
 def _run_double_cable_batch_group(
@@ -284,70 +394,142 @@ def _run_double_cable_batch_group(
     """Run a homogeneous double-cable group through full double-cable batching."""
 
     representative = _representative_item(group).simulation
-    runtime = prepare_solver_runtime(
-        representative,
+    with benchmark_span(
+        "runtime.prepare",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
-        include_extracellular=True,
-        include_area=True,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
-        solver_options=solver_options,
-    )
-    if not group.geometry_shared:
-        runtime = _with_batched_double_cable_runtime(
-            runtime,
-            group,
+    ):
+        runtime = prepare_solver_runtime(
+            representative,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            include_extracellular=True,
+            include_area=True,
+            precompute_intracellular=False,
+            precompute_extracellular=False,
             solver_options=solver_options,
         )
+        if not group.geometry_shared:
+            runtime = _with_batched_double_cable_runtime(
+                runtime,
+                group,
+                solver_options=solver_options,
+            )
+        record_benchmark_metadata(
+            nt=runtime.grid.Nt,
+            nx=runtime.membrane.Nx,
+            dtype=str(runtime.membrane.dtype),
+        )
     axons = tuple(item.simulation for item in group.items)
-    iinj_mid = build_intracellular_current_density_batch(
-        axons,
-        runtime,
-        solver_axons=tuple(item.solver_axon for item in group.items),
-        target_nx=group.nx,
-    )
-    contexts = extracellular_context_rows(axons)
-    x_positions = x_positions_batch_m(axons, target_nx=group.nx)
-    axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
-    vstim_mid = build_vstim_midpoint_batch(
-        representative,
-        contexts,
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        x_positions_m=x_positions,
-        axon_y_um=axon_y_um,
-        axon_z_um=axon_z_um,
-        dtype_local=runtime.membrane.dtype,
-    )
-    vstim_previous = build_vstim_initial_previous_batch(
-        representative,
-        contexts,
-        dt_ms=dt_ms,
-        x_positions_m=x_positions,
-        axon_y_um=axon_y_um,
-        axon_z_um=axon_z_um,
-        dtype_local=runtime.membrane.dtype,
-    )
+    with benchmark_span(
+        "inputs.intracellular",
+        group_id=group.group_id,
+        group_size=group.size,
+        nt=runtime.grid.Nt,
+        nx=group.nx,
+    ):
+        iinj_mid = build_intracellular_current_density_batch(
+            axons,
+            runtime,
+            solver_axons=tuple(item.solver_axon for item in group.items),
+            target_nx=group.nx,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
+        )
+    with benchmark_span(
+        "inputs.positions",
+        group_id=group.group_id,
+        group_size=group.size,
+        nx=group.nx,
+    ):
+        contexts = extracellular_context_rows(axons)
+        x_positions = x_positions_batch_m(axons, target_nx=group.nx)
+        axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
+        record_benchmark_metadata(
+            **benchmark_array_metadata("x_positions_m", x_positions, role="positions"),
+            context_count=sum(len(row) for row in contexts),
+        )
+    with benchmark_span(
+        "inputs.extracellular",
+        group_id=group.group_id,
+        group_size=group.size,
+        nt=runtime.grid.Nt,
+        nx=group.nx,
+    ):
+        vstim_mid = build_vstim_midpoint_batch(
+            representative,
+            contexts,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            x_positions_m=x_positions,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            dtype_local=runtime.membrane.dtype,
+        )
+        vstim_previous = build_vstim_initial_previous_batch(
+            representative,
+            contexts,
+            dt_ms=dt_ms,
+            x_positions_m=x_positions,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            dtype_local=runtime.membrane.dtype,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input"),
+            **benchmark_array_metadata(
+                "vstim_previous",
+                vstim_previous,
+                role="kernel_input",
+            ),
+        )
     kernel_options = _kernel_batch_options(group, batch_options)
-    out = DoubleCableBatchKernel(
-        runtime=runtime,
-        Veinit_mV=float(getattr(representative, "Veinit", 0.0)),
-    ).run(
-        intracellular_current_density_mid=iinj_mid,
-        extracellular_potential_mid_mV=vstim_mid,
-        extracellular_potential_initial_previous_mV=vstim_previous,
-        options=kernel_options,
-        progress_callback=progress_callback,
-    )
-    return _dispatch_results_from_batch(
-        group,
-        Vm=out.Vm,
-        t=out.t,
-        method=_dispatch_method(group),
-        batch_options=batch_options,
-        kernel_batch_options=kernel_options,
-    )
+    with benchmark_span(
+        "kernel.enqueue",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        out = DoubleCableBatchKernel(
+            runtime=runtime,
+            Veinit_mV=float(getattr(representative, "Veinit", 0.0)),
+        ).run(
+            intracellular_current_density_mid=iinj_mid,
+            extracellular_potential_mid_mV=vstim_mid,
+            extracellular_potential_initial_previous_mV=vstim_previous,
+            options=kernel_options,
+            progress_callback=progress_callback,
+        )
+        record_benchmark_metadata(
+            **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+        )
+    with benchmark_span(
+        "kernel.wait",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+    ):
+        benchmark_wait(out.Vm)
+    with benchmark_span(
+        "results.split_batch",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        return _dispatch_results_from_batch(
+            group,
+            Vm=out.Vm,
+            t=out.t,
+            method=_dispatch_method(group),
+            batch_options=batch_options,
+            kernel_batch_options=kernel_options,
+        )
 
 
 def _with_batched_single_cable_runtime(

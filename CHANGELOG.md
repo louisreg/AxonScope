@@ -105,6 +105,23 @@ The format is inspired by Keep a Changelog.
   `PointSourceElectrode`.
 - Added `examples/advanced/example_13_extracellular_footprint_drive.py` as the
   didactic demo for factorized extracellular footprints and drives.
+- Added opt-in hotpath benchmarking through `axs.enable_benchmark(...)`,
+  `axs.disable_benchmark(...)`, `axs.benchmark_report(...)`,
+  `axs.reset_benchmark()`, and `with axs.benchmark(...)`.
+- Added hotpath benchmark JSONL, CSV, and metadata outputs with stage timings,
+  array shape/dtype/byte metadata, backend/device metadata, and explicit JAX
+  device synchronization at the kernel boundary.
+- Added `examples/advanced/example_14_hotpath_benchmarking.py` as the didactic
+  demo for Phase 2.5 diagnostic traces.
+- Added `benchmark/hotpaths/` as the cataloged location for Phase 2.5 workload
+  scripts, including `run.py --list`, a README registry, and smoke/scale size
+  presets for hotpath traces.
+- Added `benchmark/hotpaths/COLAB.md` to document the manual Google Colab GPU
+  trace protocol when local GPU execution is unavailable.
+- Added Phase 3 preparation signatures for arrays, stimuli, extracellular
+  footprints, drives, and stimulation collections under `axs.preparation`.
+- Added `examples/advanced/example_15_preparation_signatures.py` as the
+  didactic demo for reusable-preparation signatures.
 
 ### Changed
 
@@ -129,6 +146,9 @@ The format is inspired by Keep a Changelog.
   `axs.axons.CableFormulation` values.
 - Replaced the new extracellular drive identifier surface with typed
   `axs.DriveId(...)` values instead of raw strings before release.
+- Instrumented the pool dispatcher around planning, group execution, runtime
+  preparation, input materialization, kernel enqueue/wait, batch splitting, and
+  public-result packaging when hotpath benchmarking is active.
 - Updated NRV validation tests to use unit-bearing `Stimulus` time arguments
   with the stabilized public API.
 - Renamed the current executable per-axon protocol object from

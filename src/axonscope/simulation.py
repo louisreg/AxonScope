@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 import jax.numpy as jnp
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
+from axonscope.benchmarking.hotpaths import benchmark_span
 from axonscope.utils import units
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher import run_pool
@@ -288,13 +289,20 @@ def simulate(
     active_solver = _resolve_solver(solver, solver_options)
     rec = _resolve_recording(recording)
     _validate_single_recording(rec)
-    result = active_solver.solve(
-        simulation,
-        tsim=duration_ms,
-        dt=step_ms,
-        record_observables=rec.wants_observables,
-    )
-    return _finalize_single_result(result, rec)
+    with benchmark_span(
+        "simulation.total",
+        pool_size=1,
+        tsim_ms=duration_ms,
+        dt_ms=step_ms,
+    ):
+        result = active_solver.solve(
+            simulation,
+            tsim=duration_ms,
+            dt=step_ms,
+            record_observables=rec.wants_observables,
+        )
+        with benchmark_span("results.to_public", pool_size=1):
+            return _finalize_single_result(result, rec)
 
 
 def simulate_pool(
@@ -331,9 +339,10 @@ def simulate_pool(
         batch_options=resolved_batch_options,
         progress=progress,
     )
-    if recording is not None:
-        results = _filter_pool_recording(results, recording)
-    return [_dispatch_result_to_sim_result(result, recording) for result in results]
+    with benchmark_span("results.to_public", pool_size=len(population.instances)):
+        if recording is not None:
+            results = _filter_pool_recording(results, recording)
+        return [_dispatch_result_to_sim_result(result, recording) for result in results]
 
 
 __all__ = ["AxonSimulation", "simulate", "simulate_pool"]

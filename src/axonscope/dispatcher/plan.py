@@ -8,6 +8,7 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
+from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.solvers.axon_runtime import SolverAxon, build_solver_axon
 
 
@@ -76,34 +77,42 @@ class DispatchPlan:
 def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
     """Normalize and group axon simulations before execution."""
 
-    items = _normalize_dispatch_items(axons)
-    groups_by_signature: dict[tuple[Any, ...], list[list[DispatchItem]]] = {}
-    for item in items:
-        signature = _dispatch_signature(item)
-        compatible_groups = groups_by_signature.setdefault(signature, [])
-        for group_items in compatible_groups:
-            candidate = [*group_items, item]
-            if _items_can_share_batch_runtime(candidate):
-                group_items.append(item)
-                break
-        else:
-            compatible_groups.append([item])
+    with benchmark_span("dispatch.build_plan", pool_size=len(axons)):
+        items = _normalize_dispatch_items(axons)
+        groups_by_signature: dict[tuple[Any, ...], list[list[DispatchItem]]] = {}
+        for item in items:
+            signature = _dispatch_signature(item)
+            compatible_groups = groups_by_signature.setdefault(signature, [])
+            for group_items in compatible_groups:
+                candidate = [*group_items, item]
+                if _items_can_share_batch_runtime(candidate):
+                    group_items.append(item)
+                    break
+            else:
+                compatible_groups.append([item])
 
-    groups_list: list[DispatchGroup] = []
-    for signature, signature_groups in groups_by_signature.items():
-        for group_items in signature_groups:
-            groups_list.append(
-                DispatchGroup(
-                    group_id=len(groups_list),
-                    items=tuple(group_items),
-                    signature=signature,
-                    mode=_resolve_mode(group_items[0].solver_axon),
-                    nx=max(int(item.solver_axon.n_compartments) for item in group_items),
-                    geometry_shared=_group_has_shared_geometry(group_items),
+        groups_list: list[DispatchGroup] = []
+        for signature, signature_groups in groups_by_signature.items():
+            for group_items in signature_groups:
+                groups_list.append(
+                    DispatchGroup(
+                        group_id=len(groups_list),
+                        items=tuple(group_items),
+                        signature=signature,
+                        mode=_resolve_mode(group_items[0].solver_axon),
+                        nx=max(int(item.solver_axon.n_compartments) for item in group_items),
+                        geometry_shared=_group_has_shared_geometry(group_items),
+                    )
                 )
-            )
-    groups = tuple(groups_list)
-    return DispatchPlan(items=items, groups=groups)
+        groups = tuple(groups_list)
+        record_benchmark_metadata(
+            item_count=len(items),
+            group_count=len(groups),
+            group_sizes=[group.size for group in groups],
+            group_modes=[group.mode for group in groups],
+            group_nx=[group.nx for group in groups],
+        )
+        return DispatchPlan(items=items, groups=groups)
 
 
 def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[DispatchItem, ...]:
