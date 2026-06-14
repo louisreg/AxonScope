@@ -40,8 +40,15 @@ ignored by git.
 ## GPU Runs
 
 Local GPU execution is not assumed. For now, run GPU traces manually in Google
-Colab and bring back the generated `benchmark/results/hotpaths/<prefix>/`
-folder.
+Colab. Publish the committed local revision with:
+
+```bash
+make bench-colab-push
+```
+
+Then use the Colab cell in the protocol below. The generated results are
+written to Google Drive and can be copied or synced back under
+`benchmark/results/hotpaths/<prefix>/` when needed.
 
 Manual protocol:
 

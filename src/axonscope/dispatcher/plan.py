@@ -22,6 +22,11 @@ class DispatchItem:
     index: int
     simulation: AxonInstance
     solver_axon: SolverAxon
+    signature: tuple[Any, ...]
+    mode: _CableMode
+    membrane_signature: tuple[Any, ...]
+    membrane_family_sequence: tuple[Any, ...]
+    cable_signature: tuple[Any, ...]
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,17 @@ class DispatchPlan:
     groups: tuple[DispatchGroup, ...]
 
 
+@dataclass(frozen=True)
+class _SolverDispatchMetadata:
+    mode: _CableMode
+    dtype_str: str
+    nx_signature: int | None
+    membrane_signature: tuple[Any, ...]
+    membrane_group_signature: tuple[Any, ...]
+    membrane_family_sequence: tuple[Any, ...]
+    cable_signature: tuple[Any, ...]
+
+
 def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
     """Normalize and group axon simulations before execution."""
 
@@ -81,15 +97,21 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
         items = _normalize_dispatch_items(axons)
         groups_by_signature: dict[tuple[Any, ...], list[list[DispatchItem]]] = {}
         for item in items:
-            signature = _dispatch_signature(item)
+            signature = item.signature
             compatible_groups = groups_by_signature.setdefault(signature, [])
-            for group_items in compatible_groups:
-                candidate = [*group_items, item]
-                if _items_can_share_batch_runtime(candidate):
-                    group_items.append(item)
-                    break
+            target_group: list[DispatchItem] | None = None
+            if item.mode == "single":
+                target_group = compatible_groups[0] if compatible_groups else None
             else:
-                compatible_groups.append([item])
+                for group_items in compatible_groups:
+                    candidate = [*group_items, item]
+                    if _items_can_share_batch_runtime(candidate):
+                        target_group = group_items
+                        break
+            if target_group is None:
+                target_group = []
+                compatible_groups.append(target_group)
+            target_group.append(item)
 
         groups_list: list[DispatchGroup] = []
         for signature, signature_groups in groups_by_signature.items():
@@ -99,7 +121,7 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
                         group_id=len(groups_list),
                         items=tuple(group_items),
                         signature=signature,
-                        mode=_resolve_mode(group_items[0].solver_axon),
+                        mode=group_items[0].mode,
                         nx=max(int(item.solver_axon.n_compartments) for item in group_items),
                         geometry_shared=_group_has_shared_geometry(group_items),
                     )
@@ -118,17 +140,96 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
 def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[DispatchItem, ...]:
     """Validate public pool items and preserve input order."""
 
-    items = []
+    items: list[DispatchItem] = []
+    solver_cache: dict[tuple[Any, ...], SolverAxon] = {}
+    metadata_cache: dict[tuple[Any, ...], _SolverDispatchMetadata] = {}
     for index, axon in enumerate(axons):
         simulation = as_axon_instance(axon)
+        cache_key = _solver_axon_cache_key(simulation)
+        solver_axon = solver_cache.get(cache_key)
+        if solver_axon is None:
+            solver_axon = build_solver_axon(simulation)
+            solver_cache[cache_key] = solver_axon
+        metadata = metadata_cache.get(cache_key)
+        if metadata is None:
+            metadata = _solver_dispatch_metadata(solver_axon)
+            metadata_cache[cache_key] = metadata
         items.append(
-            DispatchItem(
+            _make_dispatch_item(
                 index=index,
                 simulation=simulation,
-                solver_axon=build_solver_axon(simulation),
+                solver_axon=solver_axon,
+                metadata=metadata,
             )
         )
     return tuple(items)
+
+
+def _solver_axon_cache_key(simulation: AxonInstance) -> tuple[Any, ...]:
+    """Return the part of an instance that changes its flattened cable arrays."""
+
+    return (
+        id(simulation.axon),
+        _optional_array_signature(getattr(simulation, "_xraxial_override", None)),
+        _optional_array_signature(getattr(simulation, "_xg_override", None)),
+        _optional_array_signature(getattr(simulation, "_xc_override", None)),
+    )
+
+
+def _optional_array_signature(values: Any | None) -> tuple[tuple[int, ...], str, str] | None:
+    if values is None:
+        return None
+    return _array_signature(values)
+
+
+def _solver_dispatch_metadata(solver_axon: SolverAxon) -> _SolverDispatchMetadata:
+    mode = _resolve_mode(solver_axon)
+    membrane_signature = _axon_membrane_signature(solver_axon)
+    membrane_family_sequence = _axon_membrane_family_sequence(solver_axon)
+    cable_signature = _axon_cable_signature(solver_axon)
+    membrane_group_signature = (
+        _unique_membrane_families(membrane_family_sequence)
+        if mode == "double"
+        else membrane_signature
+    )
+    nx_signature = None if mode == "double" else int(solver_axon.n_compartments)
+    return _SolverDispatchMetadata(
+        mode=mode,
+        dtype_str=solver_axon.dtype.str,
+        nx_signature=nx_signature,
+        membrane_signature=membrane_signature,
+        membrane_group_signature=membrane_group_signature,
+        membrane_family_sequence=membrane_family_sequence,
+        cable_signature=cable_signature,
+    )
+
+
+def _make_dispatch_item(
+    index: int,
+    simulation: AxonInstance,
+    solver_axon: SolverAxon,
+    *,
+    metadata: _SolverDispatchMetadata,
+) -> DispatchItem:
+    signature = (
+        metadata.mode,
+        metadata.dtype_str,
+        metadata.membrane_group_signature,
+        metadata.nx_signature,
+        float(getattr(simulation, "v_init", 0.0)),
+        float(getattr(simulation, "Veinit", 0.0)),
+        float(getattr(simulation, "temperature", 0.0)),
+    )
+    return DispatchItem(
+        index=index,
+        simulation=simulation,
+        solver_axon=solver_axon,
+        signature=signature,
+        mode=metadata.mode,
+        membrane_signature=metadata.membrane_signature,
+        membrane_family_sequence=metadata.membrane_family_sequence,
+        cable_signature=metadata.cable_signature,
+    )
 
 
 def _resolve_mode(axon: SolverAxon) -> _CableMode:
@@ -142,24 +243,7 @@ def _resolve_mode(axon: SolverAxon) -> _CableMode:
 def _dispatch_signature(item: DispatchItem) -> tuple[Any, ...]:
     """Return the compatibility signature used for grouping."""
 
-    simulation = item.simulation
-    solver_axon = item.solver_axon
-    mode = _resolve_mode(solver_axon)
-    membrane_signature = (
-        _double_cable_membrane_family_signature(solver_axon)
-        if mode == "double"
-        else _axon_membrane_signature(solver_axon)
-    )
-    nx_signature = None if mode == "double" else int(solver_axon.n_compartments)
-    return (
-        mode,
-        solver_axon.dtype.str,
-        membrane_signature,
-        nx_signature,
-        float(getattr(simulation, "v_init", 0.0)),
-        float(getattr(simulation, "Veinit", 0.0)),
-        float(getattr(simulation, "temperature", 0.0)),
-    )
+    return item.signature
 
 
 def _items_can_share_batch_runtime(items: Sequence[DispatchItem]) -> bool:
@@ -167,25 +251,22 @@ def _items_can_share_batch_runtime(items: Sequence[DispatchItem]) -> bool:
 
     if not items:
         return False
-    mode = _resolve_mode(items[0].solver_axon)
+    mode = items[0].mode
+    if any(item.mode != mode for item in items):
+        return False
     if mode == "single":
-        nx_values = {int(item.solver_axon.n_compartments) for item in items}
-        membrane_signatures = {
-            _axon_membrane_signature(item.solver_axon)
-            for item in items
-        }
-        return len(nx_values) == 1 and len(membrane_signatures) == 1
+        return all(item.signature == items[0].signature for item in items)
     return _double_cable_membranes_are_padding_compatible(
-        item.solver_axon for item in items
+        item.membrane_family_sequence for item in items
     )
 
 
 def _double_cable_membranes_are_padding_compatible(
-    axons: Iterable[SolverAxon],
+    signatures: Iterable[tuple[Any, ...]],
 ) -> bool:
     """Return whether shorter double-cable rows match a longer membrane prefix."""
 
-    signatures = tuple(_axon_membrane_family_sequence(axon) for axon in axons)
+    signatures = tuple(signatures)
     if not signatures:
         return False
     longest = max(signatures, key=len)
@@ -195,8 +276,12 @@ def _double_cable_membranes_are_padding_compatible(
 def _double_cable_membrane_family_signature(axon: SolverAxon) -> Any:
     """Return a coarse membrane signature used before padding compatibility."""
 
+    return _unique_membrane_families(_axon_membrane_family_sequence(axon))
+
+
+def _unique_membrane_families(signatures: Iterable[Any]) -> tuple[Any, ...]:
     unique: list[Any] = []
-    for signature in _axon_membrane_family_sequence(axon):
+    for signature in signatures:
         if signature not in unique:
             unique.append(signature)
     return tuple(unique)
@@ -227,7 +312,7 @@ def _axon_membrane_family_sequence(axon: SolverAxon) -> Any:
 def _group_has_shared_geometry(items: Sequence[DispatchItem]) -> bool:
     """Return whether all rows share exact cable/periaxonal arrays."""
 
-    signatures = {_axon_cable_signature(item.solver_axon) for item in items}
+    signatures = {item.cable_signature for item in items}
     return len(signatures) == 1
 
 

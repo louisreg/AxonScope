@@ -118,10 +118,18 @@ The format is inspired by Keep a Changelog.
   presets for hotpath traces.
 - Added `benchmark/hotpaths/COLAB.md` to document the manual Google Colab GPU
   trace protocol when local GPU execution is unavailable.
+- Added `make bench-colab-push` and an updated Colab hotpath protocol so GPU
+  benchmark runs can clone the moving `bench-colab` branch and write warm
+  traces directly to Google Drive.
 - Added Phase 3 preparation signatures for arrays, stimuli, extracellular
   footprints, drives, and stimulation collections under `axs.preparation`.
 - Added `examples/advanced/example_15_preparation_signatures.py` as the
   didactic demo for reusable-preparation signatures.
+- Added an internal `PreparedCohort` preparation object to centralize
+  dispatch-group axons, solver rows, context rows, positions, and placement
+  metadata before batch execution.
+- Added the Phase 4 backend-boundary inventory under
+  `ideas/AXONSCOPE_PHASE4_BACKEND_BOUNDARY.md` to guide JAX runtime isolation.
 
 ### Changed
 
@@ -149,6 +157,11 @@ The format is inspired by Keep a Changelog.
 - Instrumented the pool dispatcher around planning, group execution, runtime
   preparation, input materialization, kernel enqueue/wait, batch splitting, and
   public-result packaging when hotpath benchmarking is active.
+- Reduced Phase 3 batch hotpath overhead by caching per-model `SolverAxon`
+  rows and dispatch signatures, using NumPy preparation for current-clamp and
+  analytical-footprint inputs, fast-pathing zero extracellular batches, and
+  materializing batched public results once instead of slicing JAX rows in a
+  Python loop.
 - Updated NRV validation tests to use unit-bearing `Stimulus` time arguments
   with the stabilized public API.
 - Renamed the current executable per-axon protocol object from

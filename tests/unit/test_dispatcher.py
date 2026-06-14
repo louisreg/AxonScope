@@ -5,10 +5,13 @@ from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceEle
 from axonscope.dispatcher import build_dispatch_plan, run_pool
 from axonscope.dispatcher import describe_dispatch_plan
 from axonscope.dispatcher.runtime_batches import (
+    build_intracellular_current_density_batch,
     build_vstim_midpoint_batch,
     extracellular_context_rows,
     x_positions_batch_m,
 )
+from axonscope.solvers.axon_runtime import build_solver_axon
+from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
@@ -302,6 +305,23 @@ def test_dispatch_plan_preserves_pool_indices():
     assert tuple(index for group in plan.groups for index in group.pool_indices) == (0, 1)
 
 
+def test_dispatch_plan_reuses_solver_axon_for_shared_model_instances():
+    model = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_a = axs.AxonInstance(model, y=0.0 * axs.um)
+    axon_b = axs.AxonInstance(model, y=50.0 * axs.um)
+
+    plan = build_dispatch_plan([axon_a, axon_b])
+
+    assert plan.items[0].solver_axon is plan.items[1].solver_axon
+    assert len(plan.groups) == 1
+    assert plan.groups[0].size == 2
+
+
 def test_dispatch_plan_parameter_batches_equal_nx_different_geometry():
     axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
     axon_b_model = axs.axons.HodgkinHuxley(
@@ -425,5 +445,82 @@ def test_pool_vstim_batch_uses_global_yz_positions_for_point_sources():
 
     center = near.n_compartments // 2
     assert float(vstim[0, 0, center]) > float(vstim[1, 0, center])
-    assert np.allclose(np.asarray(vstim[0, 0]), np.asarray(near.extracellular_potential_mV(0.025)))
-    assert np.allclose(np.asarray(vstim[1, 0]), np.asarray(far.extracellular_potential_mV(0.025)))
+    assert np.allclose(
+        np.asarray(vstim[0, 0]),
+        np.asarray(near.extracellular_potential_mV(0.025)),
+    )
+    assert np.allclose(
+        np.asarray(vstim[1, 0]),
+        np.asarray(far.extracellular_potential_mV(0.025)),
+    )
+
+
+def test_pool_vstim_batch_empty_context_rows_returns_zero_without_yz():
+    axon_model = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_a = axs.AxonInstance(axon_model)
+    axon_b = axs.AxonInstance(axon_model)
+
+    vstim = build_vstim_midpoint_batch(
+        axon_a,
+        [None, None],
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        x_positions_m=x_positions_batch_m([axon_a, axon_b]),
+    )
+
+    assert np.asarray(vstim).shape == (2, 2, 11)
+    np.testing.assert_allclose(np.asarray(vstim), 0.0)
+
+
+def test_intracellular_current_density_batch_uses_current_clamps():
+    model = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_a = axs.AxonInstance(model)
+    axon_b = axs.AxonInstance(model)
+    axon_a.add_current_clamp(
+        position=50.0 * axs.um,
+        current=Stimulus.constant(2.0 * axs.nA, start=0.0 * axs.ms),
+    )
+    axon_b.add_current_clamp(
+        position=50.0 * axs.um,
+        current=Stimulus.constant(-1.0 * axs.nA, start=0.0 * axs.ms),
+    )
+    solver_axon = build_solver_axon(axon_a)
+    runtime = prepare_solver_runtime(
+        axon_a,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        solver_axon=solver_axon,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+
+    batch = build_intracellular_current_density_batch(
+        [axon_a, axon_b],
+        runtime,
+        solver_axons=[solver_axon, solver_axon],
+    )
+
+    expected = np.zeros((2, 2, 11), dtype=np.float32)
+    idx = int(np.argmin(np.abs(np.asarray(solver_axon.x_um) - 50.0)))
+    area_cm2 = (
+        np.pi
+        * np.asarray(solver_axon.diam_um)
+        * 1e-4
+        * np.asarray(solver_axon.compartment_lengths_um)
+        * 1e-4
+    )
+    expected[0, :, idx] = 2.0e-3 / area_cm2[idx]
+    expected[1, :, idx] = -1.0e-3 / area_cm2[idx]
+    np.testing.assert_allclose(np.asarray(batch), expected)

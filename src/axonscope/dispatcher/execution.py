@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Sequence
 
 import jax.numpy as jnp
+import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
@@ -16,13 +17,11 @@ from axonscope.benchmarking.hotpaths import (
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
 from axonscope.dispatcher.runtime_batches import (
-    axon_transverse_positions_um,
     build_intracellular_current_density_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
-    extracellular_context_rows,
-    x_positions_batch_m,
 )
+from axonscope.preparation.cohort import PreparedCohort
 from axonscope.results import SimResult
 from axonscope.solvers import (
     BatchOptions,
@@ -53,8 +52,8 @@ class DispatchResult:
     index: int
     axon: Axon
     simulation: AxonInstance
-    Vm: jnp.ndarray
-    t: jnp.ndarray
+    Vm: Any
+    t: Any
     group_id: int
     method: str
     record_indices: tuple[int, ...] | None = None
@@ -289,7 +288,21 @@ def _run_single_cable_batch_group(
             nx=runtime.membrane.Nx,
             dtype=str(runtime.membrane.dtype),
         )
-    axons = tuple(item.simulation for item in group.items)
+    with benchmark_span(
+        "inputs.positions",
+        group_id=group.group_id,
+        group_size=group.size,
+        nx=group.nx,
+    ):
+        cohort = PreparedCohort.from_dispatch_group(group)
+        record_benchmark_metadata(
+            **benchmark_array_metadata(
+                "x_positions_m",
+                cohort.x_positions_m,
+                role="positions",
+            ),
+            context_count=cohort.context_count,
+        )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -298,26 +311,13 @@ def _run_single_cable_batch_group(
         nx=group.nx,
     ):
         iinj_mid = build_intracellular_current_density_batch(
-            axons,
+            cohort.axons,
             runtime,
-            solver_axons=tuple(item.solver_axon for item in group.items),
-            target_nx=group.nx,
+            solver_axons=cohort.solver_axons,
+            target_nx=cohort.nx,
         )
         record_benchmark_metadata(
             **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
-        )
-    with benchmark_span(
-        "inputs.positions",
-        group_id=group.group_id,
-        group_size=group.size,
-        nx=group.nx,
-    ):
-        contexts = extracellular_context_rows(axons)
-        x_positions = x_positions_batch_m(axons, target_nx=group.nx)
-        axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
-        record_benchmark_metadata(
-            **benchmark_array_metadata("x_positions_m", x_positions, role="positions"),
-            context_count=sum(len(row) for row in contexts),
         )
     with benchmark_span(
         "inputs.extracellular",
@@ -327,13 +327,13 @@ def _run_single_cable_batch_group(
         nx=group.nx,
     ):
         vstim_mid = build_vstim_midpoint_batch(
-            representative,
-            contexts,
+            cohort.representative,
+            cohort.contexts,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
-            x_positions_m=x_positions,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
+            x_positions_m=cohort.x_positions_m,
+            axon_y_um=cohort.axon_y_um,
+            axon_z_um=cohort.axon_z_um,
             dtype_local=runtime.membrane.dtype,
         )
         record_benchmark_metadata(
@@ -424,7 +424,21 @@ def _run_double_cable_batch_group(
             nx=runtime.membrane.Nx,
             dtype=str(runtime.membrane.dtype),
         )
-    axons = tuple(item.simulation for item in group.items)
+    with benchmark_span(
+        "inputs.positions",
+        group_id=group.group_id,
+        group_size=group.size,
+        nx=group.nx,
+    ):
+        cohort = PreparedCohort.from_dispatch_group(group)
+        record_benchmark_metadata(
+            **benchmark_array_metadata(
+                "x_positions_m",
+                cohort.x_positions_m,
+                role="positions",
+            ),
+            context_count=cohort.context_count,
+        )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -433,26 +447,13 @@ def _run_double_cable_batch_group(
         nx=group.nx,
     ):
         iinj_mid = build_intracellular_current_density_batch(
-            axons,
+            cohort.axons,
             runtime,
-            solver_axons=tuple(item.solver_axon for item in group.items),
-            target_nx=group.nx,
+            solver_axons=cohort.solver_axons,
+            target_nx=cohort.nx,
         )
         record_benchmark_metadata(
             **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
-        )
-    with benchmark_span(
-        "inputs.positions",
-        group_id=group.group_id,
-        group_size=group.size,
-        nx=group.nx,
-    ):
-        contexts = extracellular_context_rows(axons)
-        x_positions = x_positions_batch_m(axons, target_nx=group.nx)
-        axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
-        record_benchmark_metadata(
-            **benchmark_array_metadata("x_positions_m", x_positions, role="positions"),
-            context_count=sum(len(row) for row in contexts),
         )
     with benchmark_span(
         "inputs.extracellular",
@@ -462,22 +463,22 @@ def _run_double_cable_batch_group(
         nx=group.nx,
     ):
         vstim_mid = build_vstim_midpoint_batch(
-            representative,
-            contexts,
+            cohort.representative,
+            cohort.contexts,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
-            x_positions_m=x_positions,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
+            x_positions_m=cohort.x_positions_m,
+            axon_y_um=cohort.axon_y_um,
+            axon_z_um=cohort.axon_z_um,
             dtype_local=runtime.membrane.dtype,
         )
         vstim_previous = build_vstim_initial_previous_batch(
-            representative,
-            contexts,
+            cohort.representative,
+            cohort.contexts,
             dt_ms=dt_ms,
-            x_positions_m=x_positions,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
+            x_positions_m=cohort.x_positions_m,
+            axon_y_um=cohort.axon_y_um,
+            axon_z_um=cohort.axon_z_um,
             dtype_local=runtime.membrane.dtype,
         )
         record_benchmark_metadata(
@@ -824,6 +825,7 @@ def _dispatch_results_from_batch(
 ) -> tuple[DispatchResult, ...]:
     """Split a batched solver output into per-axon dispatch results."""
 
+    vm_values = np.asarray(Vm)
     kernel_indices = kernel_batch_options.recording.indices_for(group.nx)
     kernel_record_indices = (
         None if kernel_indices is None else tuple(int(value) for value in kernel_indices)
@@ -831,14 +833,14 @@ def _dispatch_results_from_batch(
     results = []
     for row_index, item in enumerate(group.items):
         original_nx = int(item.solver_axon.n_compartments)
-        row_vm = Vm[row_index]
+        row_vm = vm_values[row_index]
         record_indices = kernel_record_indices
 
         if kernel_indices is None:
             row_vm = row_vm[:, :original_nx]
             requested_indices = batch_options.recording.indices_for(original_nx)
             if requested_indices is not None:
-                row_vm = jnp.take(row_vm, jnp.asarray(requested_indices), axis=1)
+                row_vm = np.take(row_vm, np.asarray(requested_indices), axis=1)
                 record_indices = tuple(int(value) for value in requested_indices)
             else:
                 record_indices = None

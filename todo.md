@@ -112,14 +112,62 @@ object model changes.
     - [x] Smoke-run both hotpath workloads with size 2 on 2026-06-14: `python benchmark/hotpaths/run.py --workload all --sizes 2 --duration 0.10 --dt 0.05 --compartments 5 --prefix smoke_test --no-print-summary`.
     - [x] Probe-run the scale preset on the current environment on 2026-06-14: `python benchmark/hotpaths/run.py --workload all --preset scale --prefix scale_probe --no-print-summary`.
     - [x] Document the manual Google Colab GPU protocol in `benchmark/hotpaths/COLAB.md`; local GPU execution is not assumed.
-    - [ ] Manually re-run the scale preset on Google Colab GPU: `python benchmark/hotpaths/run.py --workload all --preset scale --prefix colab_gpu_YYYYMMDD --no-print-summary`.
-    - [ ] Keep or create a matching CPU reference prefix, then bring both result folders back under `benchmark/results/hotpaths/` for comparison.
-    - [ ] Compare `runtime.prepare`, `inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, and `results.split_batch` across CPU/GPU traces before deciding the next optimization.
+    - [x] Manually run the first Google Colab GPU trace and bring it back under `benchmark/results/hotpaths/colab_gpu_YYYYMMDD/`.
+    - [x] Compare the first CPU/GPU traces against `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
+      - Evidence from `n=500`: GPU `kernel.wait` is negligible (`0.13 ms` intracellular-only, `0.116 ms` point-source), so the first bottleneck is not device execution wait.
+      - Evidence from `n=500`: `dispatch.build_plan` is a major host-side cost (`~7.0-7.5 s` on Colab GPU, `~10.7-16.9 s` on the local CPU run).
+      - Evidence from `n=500`: input materialization dominates after planning (`inputs.intracellular` up to `9.5 s`, `inputs.extracellular` up to `6.76 s` on Colab GPU).
+      - The `n=5` traces are first-call/compilation polluted; use `n=50` and `n=500`, preferably with `--warmups 1`, for decisions.
+    - [x] Add the repeatable Colab publishing workflow before the next GPU trace.
+      - Added `make bench-colab-push`, which pushes the current clean commit to the moving `bench-colab` branch without switching local branches.
+      - Updated `benchmark/hotpaths/COLAB.md` with a copy-paste Colab cell that clones `bench-colab`, installs `.[examples,benchmark]`, verifies the JAX GPU backend, runs the warm scale probe, and writes outputs to Google Drive.
+    - [ ] Re-run a cleaner Colab GPU trace with warmup: `python benchmark/hotpaths/run.py --workload all --preset scale --warmups 1 --prefix colab_gpu_warm_YYYYMMDD --no-print-summary`.
+    - [ ] Keep or create a matching CPU reference prefix, then compare both result folders under `benchmark/results/hotpaths/`.
   - [x] Phase 3 PR 3.1: add deterministic preparation signatures for arrays, stimuli, extracellular footprints, drives, and stimulation collections.
   - [x] Phase 3 PR 3.1: add `examples/advanced/example_15_preparation_signatures.py` as the required didactic demo for preparation signatures.
   - Fresh unit run on 2026-06-14 after Phase 2.5 hotpath instrumentation, workload catalog, and Phase 3.1 preparation signatures: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`277 passed, 1 skipped`).
-  - [ ] Phase 3 next: introduce a prepared-cohort object that consumes these signatures before moving solver lowering out of the dispatcher.
+  - [x] Phase 3.2 bottleneck attack plan: attack now, but treat it as planning/preparation stabilization rather than GPU/kernel optimization.
+    - Decision: do this before Phase 4 backend isolation and before the full Phase 7 benchmark rewrite, because the measured bottlenecks are host-side planning and input materialization.
+    - [x] PR 3.2A: reduce `dispatch.build_plan` cost before touching kernels.
+      - Compute each dispatch signature once per item and reuse it through grouping.
+      - Avoid repeated O(N^2)-style compatibility/signature recomputation for homogeneous pools.
+      - Cache or share `SolverAxon`/layout signatures when many `AxonInstance` rows wrap the same descriptive `Axon`.
+      - Acceptance gate: `dispatch.build_plan` should drop by at least one order of magnitude on `*_n500`, and should no longer dominate simple homogeneous pools.
+    - [x] PR 3.2B: add a zero-extracellular fast path for batches with no contexts.
+      - If every context row is empty, build `Vstim[B, Nt, Nx]` directly as zeros instead of looping over rows.
+      - Acceptance gate: `intracellular_only_n500` should not spend material time in `inputs.extracellular`.
+    - [x] PR 3.2C: introduce `PreparedCohort` as the first reusable preparation object.
+      - Hold grouped axons, solver rows, positions, context rows, and prepared input metadata.
+      - Keep deterministic signature computation in the dispatch/preparation boundary until the public backend split is clearer.
+      - Keep public behavior unchanged; route current dispatcher through the prepared object internally.
+      - Add `examples/advanced/` didactic demo only if a public concept is exposed.
+    - [x] PR 3.2D: lower analytical point-source stimulation through footprints/prepared drives.
+      - Use `ExtracellularFootprint`/`ExtracellularDrive` as the intended prepared representation.
+      - Avoid per-row analytical context compilation when a static footprint can be reused or vectorized.
+      - Acceptance gate: `point_source_extracellular_n500` should show a clear drop in `inputs.extracellular`.
+    - [x] PR 3.2E: reduce `results.split_batch` overhead only after planning/input preparation are no longer dominant.
+      - Keep this secondary; current traces show it matters, but not enough to lead the refactor.
+    - [x] Re-run `benchmark/hotpaths/run.py --workload all --preset scale --warmups 1` after each PR 3.2 step and record the before/after in this TODO.
+      - Local final warm run on 2026-06-14: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python benchmark/hotpaths/run.py --workload all --preset scale --warmups 1 --prefix phase3_after_split_numpy --no-print-summary`.
+      - Local `intracellular_only_n500` final warm trace: total `117.0 ms`, `dispatch.build_plan 4.25 ms`, `inputs.positions 1.59 ms`, `inputs.intracellular 39.6 ms`, `inputs.extracellular 0.67 ms`, `kernel.enqueue 2.95 ms`, `kernel.wait 5.16 ms`, `results.split_batch 48.0 ms`.
+      - Local `point_source_extracellular_n500` final warm trace: total `86.4 ms`, `dispatch.build_plan 3.89 ms`, `inputs.positions 1.25 ms`, `inputs.intracellular 0.98 ms`, `inputs.extracellular 12.1 ms`, `kernel.enqueue 3.03 ms`, `kernel.wait 4.48 ms`, `results.split_batch 46.9 ms`.
+      - Compared with the pre-Phase-3 local `scale_probe` no-warmup `n=500`, `dispatch.build_plan` dropped from seconds to milliseconds, point-source `inputs.extracellular` dropped from seconds to tens of milliseconds/no-warmup and ~12 ms warm, and zero-context `inputs.extracellular` is no longer material.
+      - Residual: `results.split_batch` still costs ~47-48 ms at `n=500` due per-row public result objects; keep the canonical cohort-backed result model in Phase 5 rather than overfitting Phase 3.
+      - Fresh unit run on 2026-06-14 after Phase 3.2 local stabilization: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m pytest -q tests/unit --tb=short` (`281 passed, 1 skipped`).
+  - [x] Phase 3 next after PR 3.2: move solver lowering behind reusable prepared cohorts without changing the public API.
+    - Added internal `PreparedCohort` and routed current batch input preparation through it.
+    - Kept `PreparedCohort` out of the public `axs.preparation` facade, so no new advanced didactic example is required yet.
 - [ ] Phase 4 issue: isolate JAX runtime under backend modules and delete old dispatcher/solver paths once empty.
+  - [x] PR 4.1: inventory current JAX-owned files/functions and define the smallest backend boundary.
+    - Keep public API unchanged.
+    - Keep `PreparedCohort` as the input boundary from dispatcher/preparation into backend lowering.
+    - Start with file/module moves and explicit interfaces, not kernel rewrites.
+    - Added `ideas/AXONSCOPE_PHASE4_BACKEND_BOUNDARY.md` with the current JAX-owned surface, smallest useful boundary, PR sequence, guardrails, non-goals, and acceptance criteria.
+  - [ ] PR 4.2: add a `jax` backend package for solver lowering and kernel invocation.
+    - Move JAX-specific batch input arrays, runtime preparation calls, and kernel calls behind backend-owned helpers.
+    - Keep descriptive axon, stimulation, recording, and result objects backend-agnostic.
+  - [ ] PR 4.3: add guardrails preventing new backend-specific imports from leaking into public/descriptive layers.
+  - [ ] PR 4.4: delete or flatten old dispatcher/solver paths only after their responsibilities have moved and tests prove no duplicate path remains.
 - [ ] Phase 5 issue: replace list-based pool results with canonical cohort-backed results and per-axon views.
 - [ ] Phase 6 issue: move scientific analyses into a dedicated requirements/status/provenance layer.
 - [ ] Phase 7 issue: finalize benchmark/performance story, footprint reuse, and memory estimates.
@@ -264,6 +312,9 @@ become accidental public contracts.
   - [x] Added `benchmark/hotpaths/run.py --list` and `benchmark/hotpaths/README.md` to catalog available hotpath workloads.
 - [ ] Find a robust way to benchmark CPU versus GPU for representative workloads.
 - [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits. --> see `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
+  - [x] First hotpath traces confirm the analysis direction: the immediate bottlenecks are `dispatch.build_plan`, `inputs.intracellular`, and `inputs.extracellular`, not GPU `kernel.wait`.
+  - [x] Decision on timing: attack these as Phase 3.2 planning/preparation fixes now; do not wait for Phase 7 or Phase 4 backend isolation.
+  - [ ] Keep using `benchmark/hotpaths/` as the evidence loop while PR 3.2 is in progress.
 - [ ] Separate correctness validation from performance benchmarking in docs and scripts.
 - [ ] Record environment/device metadata for benchmark runs.
 - [ ] Defer the larger benchmark agent/spec implementation until after planning/preparation/cohort boundaries are clearer.

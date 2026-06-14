@@ -15,7 +15,11 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.stimulation import ExtracellularContext, Stimulus
+from axonscope.stimulation import (
+    ExtracellularContext,
+    IntracellularCurrentClamp,
+    Stimulus,
+)
 from axonscope.stimulation.runtime import (
     compile_extracellular_context,
     compile_intracellular_contexts,
@@ -105,9 +109,22 @@ def build_intracellular_current_density_batch(
     if solver_axons is not None and len(solver_axons) != len(axons):
         raise ValueError("solver_axons must contain one row per axon.")
     dtype = runtime.membrane.dtype
+    target_width = runtime.membrane.Nx if target_nx is None else int(target_nx)
     t_mid = (
         jnp.arange(runtime.grid.Nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
     ) * jnp.asarray(runtime.grid.dt_ms, dtype=dtype)
+    resolved_solver_axons = tuple(
+        runtime.axon if solver_axons is None else solver_axons[index]
+        for index in range(len(axons))
+    )
+    if _can_build_intracellular_rows_from_clamps(axons):
+        return _build_intracellular_current_density_batch_from_clamps(
+            axons,
+            resolved_solver_axons,
+            t_mid,
+            target_nx=target_width,
+            dtype_local=dtype,
+        )
     return jnp.stack(
         [
             _pad_time_space_array(
@@ -115,17 +132,69 @@ def build_intracellular_current_density_batch(
                     axon,
                     t_mid,
                     runtime=runtime,
-                    solver_axon=(
-                        runtime.axon if solver_axons is None else solver_axons[index]
-                    ),
+                    solver_axon=resolved_solver_axons[index],
                     dtype_local=dtype,
                 ),
-                target_nx=runtime.membrane.Nx if target_nx is None else target_nx,
+                target_nx=target_width,
             )
             for index, axon in enumerate(axons)
         ],
         axis=0,
     )
+
+
+def _can_build_intracellular_rows_from_clamps(axons: Sequence[AxonLike]) -> bool:
+    for axon in axons:
+        for context in getattr(axon, "intracellular_contexts", ()):
+            if not isinstance(context, IntracellularCurrentClamp):
+                return False
+    return True
+
+
+def _build_intracellular_current_density_batch_from_clamps(
+    axons: Sequence[AxonLike],
+    solver_axons: Sequence[SolverAxon],
+    t_ms: Array,
+    *,
+    target_nx: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    np_dtype = np.dtype(dtype_local)
+    t = np.asarray(t_ms, dtype=np_dtype)
+    values = np.zeros((len(axons), int(t.shape[0]), int(target_nx)), dtype=np_dtype)
+    current_cache: dict[int, np.ndarray] = {}
+
+    for row_index, (axon, solver_axon) in enumerate(zip(axons, solver_axons, strict=True)):
+        if int(solver_axon.n_compartments) > int(target_nx):
+            raise ValueError(
+                f"target_nx must be >= array width, got target_nx={target_nx}, "
+                f"width={solver_axon.n_compartments}."
+            )
+        contexts = tuple(getattr(axon, "intracellular_contexts", ()))
+        if not contexts:
+            continue
+        x_um = np.asarray(solver_axon.x_um, dtype=float)
+        area_cm2 = _compartment_surface_area_cm2_numpy(solver_axon)
+        for context in contexts:
+            idx = int(np.argmin(np.abs(x_um - float(context.position_um))))
+            cache_key = id(context.current)
+            current_nA = current_cache.get(cache_key)
+            if current_nA is None:
+                current_nA = np.asarray(
+                    context.current.evaluate(t, unit="nanoampere"),
+                    dtype=np_dtype,
+                )
+                current_cache[cache_key] = current_nA
+            values[row_index, :, idx] += current_nA * (
+                np.asarray(1e-3, dtype=np_dtype) / area_cm2[idx]
+            )
+    return jnp.asarray(values, dtype=dtype_local)
+
+
+def _compartment_surface_area_cm2_numpy(solver_axon: SolverAxon) -> np.ndarray:
+    diam_cm = np.asarray(solver_axon.diam_um, dtype=float) * 1e-4
+    length_cm = np.asarray(solver_axon.compartment_lengths_um, dtype=float) * 1e-4
+    return np.pi * diam_cm * length_cm
 
 
 def _build_intracellular_current_density_row(
@@ -324,6 +393,34 @@ def build_vstim_batch(
     if t.ndim != 1:
         raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
 
+    if not any(rows):
+        nx = _resolve_x_positions_width(axon, x_positions_m, batch_size=len(rows))
+        return jnp.zeros(
+            (len(rows), int(t.shape[0]), nx),
+            dtype=dtype,
+        )
+
+    if _can_build_context_rows_from_footprints(rows):
+        x_rows_np = _resolve_x_positions_m_numpy(
+            axon,
+            x_positions_m,
+            batch_size=len(rows),
+        )
+        y_rows_np, z_rows_np = _resolve_axon_transverse_um_numpy(
+            axon,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            batch_size=len(rows),
+        )
+        return _build_vstim_batch_from_footprints(
+            rows,
+            t,
+            x_rows=x_rows_np,
+            axon_y_um=y_rows_np,
+            axon_z_um=z_rows_np,
+            dtype_local=dtype,
+        )
+
     x_rows = _resolve_x_positions_m(
         axon,
         x_positions_m,
@@ -349,6 +446,66 @@ def build_vstim_batch(
         for i, row in enumerate(rows)
     ]
     return jnp.stack(vstim_rows, axis=0)
+
+
+def _can_build_context_rows_from_footprints(
+    rows: Sequence[tuple[ExtracellularContext, ...]],
+) -> bool:
+    for row in rows:
+        for ctx in row:
+            if not hasattr(ctx, "footprint_for_electrode"):
+                return False
+            for electrode in ctx.electrodes:
+                if getattr(electrode, "stimulus", None) is None:
+                    return False
+    return True
+
+
+def _build_vstim_batch_from_footprints(
+    rows: Sequence[tuple[ExtracellularContext, ...]],
+    t_ms: Array,
+    *,
+    x_rows: Array,
+    axon_y_um: Array,
+    axon_z_um: Array,
+    dtype_local: jnp.dtype,
+) -> Array:
+    np_dtype = np.dtype(dtype_local)
+    t = np.asarray(t_ms, dtype=np_dtype)
+    x = np.asarray(x_rows, dtype=float)
+    y = np.asarray(axon_y_um, dtype=float)
+    z = np.asarray(axon_z_um, dtype=float)
+    values = np.zeros((len(rows), int(t.shape[0]), int(x.shape[1])), dtype=np_dtype)
+    current_cache: dict[int, np.ndarray] = {}
+    mV_per_V = np.asarray(1e3, dtype=np_dtype)
+
+    for row_index, row in enumerate(rows):
+        for ctx in row:
+            for electrode in ctx.electrodes:
+                stimulus = getattr(electrode, "stimulus", None)
+                if stimulus is None:
+                    raise ValueError(
+                        "Each extracellular electrode must have an attached stimulus."
+                    )
+                cache_key = id(stimulus)
+                current_A = current_cache.get(cache_key)
+                if current_A is None:
+                    current_A = np.asarray(
+                        stimulus.evaluate(t, unit="ampere"),
+                        dtype=np_dtype,
+                    )
+                    current_cache[cache_key] = current_A
+                footprint = np.asarray(
+                    ctx.footprint_for_electrode(
+                        electrode,
+                        x[row_index],
+                        axon_y_um=float(y[row_index]),
+                        axon_z_um=float(z[row_index]),
+                    ),
+                    dtype=np_dtype,
+                )
+                values[row_index] += current_A[:, None] * footprint[None, :] * mV_per_V
+    return jnp.asarray(values, dtype=dtype_local)
 
 
 def scale_extracellular_contexts(
@@ -473,6 +630,55 @@ def _resolve_x_positions_m(
     raise ValueError(f"x_positions_m must have shape (Nx,) or (B, Nx), got {x.shape}.")
 
 
+def _resolve_x_positions_width(
+    axon: object,
+    x_positions_m: Array | None,
+    *,
+    batch_size: int,
+) -> int:
+    if x_positions_m is None:
+        layout = getattr(axon, "layout", None)
+        if layout is None:
+            raise AttributeError("axon must expose a layout for spatial sampling.")
+        return int(np.asarray(layout.position_values(unit="micrometer")).shape[0])
+    shape, ndim = _shape_and_ndim(x_positions_m)
+    if ndim == 1:
+        return int(shape[0])
+    if ndim == 2:
+        if int(shape[0]) != batch_size:
+            raise ValueError(
+                f"x_positions_m has batch size {shape[0]}, expected {batch_size}."
+            )
+        return int(shape[1])
+    raise ValueError(f"x_positions_m must have shape (Nx,) or (B, Nx), got {shape}.")
+
+
+def _resolve_x_positions_m_numpy(
+    axon: object,
+    x_positions_m: Array | None,
+    *,
+    batch_size: int,
+) -> np.ndarray:
+    if x_positions_m is None:
+        layout = getattr(axon, "layout", None)
+        if layout is None:
+            raise AttributeError("axon must expose a layout for spatial sampling.")
+        x_um = layout.position_values(unit="micrometer")
+        x = np.asarray(x_um, dtype=float) * 1e-6
+    else:
+        x = np.asarray(x_positions_m, dtype=float)
+
+    if x.ndim == 1:
+        return np.broadcast_to(x[None, :], (batch_size, x.shape[0]))
+    if x.ndim == 2:
+        if x.shape[0] != batch_size:
+            raise ValueError(
+                f"x_positions_m has batch size {x.shape[0]}, expected {batch_size}."
+            )
+        return x
+    raise ValueError(f"x_positions_m must have shape (Nx,) or (B, Nx), got {x.shape}.")
+
+
 def _resolve_axon_transverse_um(
     axon: object,
     *,
@@ -492,6 +698,28 @@ def _resolve_axon_transverse_um(
         float(getattr(axon, "z_um", 0.0)) if axon_z_um is None else axon_z_um,
         batch_size=batch_size,
         dtype_local=dtype_local,
+    )
+    return y, z
+
+
+def _resolve_axon_transverse_um_numpy(
+    axon: object,
+    *,
+    axon_y_um: Array | None,
+    axon_z_um: Array | None,
+    batch_size: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    y = _as_batch_vector_numpy(
+        "axon_y_um",
+        float(getattr(axon, "y_um", 0.0)) if axon_y_um is None else axon_y_um,
+        batch_size=batch_size,
+        dtype_local=np.dtype(float),
+    )
+    z = _as_batch_vector_numpy(
+        "axon_z_um",
+        float(getattr(axon, "z_um", 0.0)) if axon_z_um is None else axon_z_um,
+        batch_size=batch_size,
+        dtype_local=np.dtype(float),
     )
     return y, z
 
