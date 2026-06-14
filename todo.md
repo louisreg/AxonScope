@@ -120,7 +120,7 @@ object model changes.
       - The `n=5` traces are first-call/compilation polluted; use `n=50` and `n=500`, preferably with `--warmups 1`, for decisions.
     - [x] Add the repeatable Colab publishing workflow before the next GPU trace.
       - Added `make bench-colab-push`, which pushes the current clean commit to the moving `bench-colab` branch without switching local branches.
-      - Updated `benchmark/hotpaths/COLAB.md` with a copy-paste Colab cell that clones `bench-colab`, installs `.[examples,benchmark]`, verifies the JAX GPU backend, runs the warm scale probe, and writes outputs to Google Drive.
+      - Added `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` and updated `benchmark/hotpaths/COLAB.md` so Colab clones `bench-colab`, installs `.[examples,benchmark]`, verifies the JAX GPU backend, runs the warm scale probe, writes outputs under `benchmark/results/hotpaths/`, zips the run folder, and downloads it directly without Google Drive.
     - [ ] Re-run a cleaner Colab GPU trace with warmup: `python benchmark/hotpaths/run.py --workload all --preset scale --warmups 1 --prefix colab_gpu_warm_YYYYMMDD --no-print-summary`.
     - [ ] Keep or create a matching CPU reference prefix, then compare both result folders under `benchmark/results/hotpaths/`.
   - [x] Phase 3 PR 3.1: add deterministic preparation signatures for arrays, stimuli, extracellular footprints, drives, and stimulation collections.

@@ -46,12 +46,13 @@ Colab. Publish the committed local revision with:
 make bench-colab-push
 ```
 
-Then use the Colab cell in the protocol below. The generated results are
-written to Google Drive and can be copied or synced back under
-`benchmark/results/hotpaths/<prefix>/` when needed.
+Then open the Colab notebook below. The generated results are written under
+`benchmark/results/hotpaths/<prefix>/` in the Colab checkout, zipped, and
+downloaded directly through the browser.
 
-Manual protocol:
+Colab runner and protocol:
 
+- `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`
 - `benchmark/hotpaths/COLAB.md`
 
 ## Current Workloads

@@ -4,6 +4,10 @@ Use this when local GPU execution is not available. The local machine publishes
 one committed AxonScope revision to the moving `bench-colab` branch, and Colab
 always clones that branch before running the hotpath workloads.
 
+The ready-to-run notebook lives at:
+
+- `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`
+
 ## 1. Start A GPU Runtime
 
 In Google Colab:
@@ -34,63 +38,37 @@ Override the remote or branch only if needed:
 make bench-colab-push GIT_REMOTE=origin BENCH_COLAB_BRANCH=bench-colab
 ```
 
-## 3. Clone, Install, And Run In Colab
+## 3. Run The Notebook
 
-Paste this cell into Colab. Replace `REPO_URL` once, then keep using the same
-cell for later benchmark runs.
+Open `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` in Colab, replace
+`REPO_URL` once, then run the notebook cell.
 
-```python
-from google.colab import drive
+The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
+that JAX uses a GPU backend, and runs:
 
-drive.mount("/content/drive")
+```bash
+python benchmark/hotpaths/run.py \
+  --workload all \
+  --preset scale \
+  --warmups 1 \
+  --prefix colab_gpu_YYYYMMDD_HHMMSS \
+  --out-dir benchmark/results/hotpaths \
+  --no-print-summary
 ```
 
-```python
-import datetime
-import pathlib
-import subprocess
+The output folder is created inside the Colab checkout:
 
-REPO_URL = "https://github.com/YOUR_USER/YOUR_REPO.git"
-BRANCH = "bench-colab"
-PKG_DIR = pathlib.Path("/content/AxonScope")
-DRIVE_ROOT = pathlib.Path("/content/drive/MyDrive/AxonScope/hotpaths")
+```text
+/content/AxonScope/benchmark/results/hotpaths/<run_id>/
+```
 
-def sh(command, cwd=None):
-    print(f"\n$ {command}")
-    subprocess.run(command, shell=True, cwd=cwd, check=True)
+Then the notebook zips `<run_id>/` and downloads it directly through the
+browser with `google.colab.files.download(...)`. No Google Drive mount is used.
 
-run_id = datetime.datetime.now().strftime("colab_gpu_%Y%m%d_%H%M%S")
-out_dir = DRIVE_ROOT / run_id
-out_dir.mkdir(parents=True, exist_ok=True)
+After download, unzip the archive into your local:
 
-sh(f"rm -rf {PKG_DIR}")
-sh(f"git clone --depth 1 --branch {BRANCH} {REPO_URL} {PKG_DIR}")
-sh("git rev-parse --short HEAD", cwd=PKG_DIR)
-sh("python -m pip install -U pip", cwd=PKG_DIR)
-sh('python -m pip install -e ".[examples,benchmark]"', cwd=PKG_DIR)
-sh("nvidia-smi || true", cwd=PKG_DIR)
-sh(
-    "python - <<'PY'\n"
-    "import jax\n"
-    "print('jax backend:', jax.default_backend())\n"
-    "print('jax devices:', jax.devices())\n"
-    "if jax.default_backend() != 'gpu':\n"
-    "    raise SystemExit('Colab runtime is not using a GPU backend.')\n"
-    "PY",
-    cwd=PKG_DIR,
-)
-sh(
-    "python benchmark/hotpaths/run.py "
-    "--workload all "
-    "--preset scale "
-    "--warmups 1 "
-    f"--prefix {run_id} "
-    f"--out-dir {out_dir.parent} "
-    "--no-print-summary",
-    cwd=PKG_DIR,
-)
-
-print(f"\nBenchmark results written to: {out_dir}")
+```text
+benchmark/results/hotpaths/
 ```
 
 The output folder will contain:
@@ -112,9 +90,6 @@ python benchmark/hotpaths/run.py \
   --prefix cpu_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
-
-If Google Drive Desktop is enabled locally, the Colab results can sync back
-automatically from `MyDrive/AxonScope/hotpaths/<run_id>/`.
 
 ## 5. Compare Before Refactoring
 

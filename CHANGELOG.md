@@ -118,9 +118,10 @@ The format is inspired by Keep a Changelog.
   presets for hotpath traces.
 - Added `benchmark/hotpaths/COLAB.md` to document the manual Google Colab GPU
   trace protocol when local GPU execution is unavailable.
-- Added `make bench-colab-push` and an updated Colab hotpath protocol so GPU
-  benchmark runs can clone the moving `bench-colab` branch and write warm
-  traces directly to Google Drive.
+- Added `make bench-colab-push`, `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`,
+  and an updated Colab hotpath protocol so GPU benchmark runs can clone the
+  moving `bench-colab` branch, write warm traces under
+  `benchmark/results/hotpaths/`, zip the run folder, and download it directly.
 - Added Phase 3 preparation signatures for arrays, stimuli, extracellular
   footprints, drives, and stimulation collections under `axs.preparation`.
 - Added `examples/advanced/example_15_preparation_signatures.py` as the
