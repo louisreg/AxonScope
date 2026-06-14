@@ -157,17 +157,32 @@ object model changes.
   - [x] Phase 3 next after PR 3.2: move solver lowering behind reusable prepared cohorts without changing the public API.
     - Added internal `PreparedCohort` and routed current batch input preparation through it.
     - Kept `PreparedCohort` out of the public `axs.preparation` facade, so no new advanced didactic example is required yet.
-- [ ] Phase 4 issue: isolate JAX runtime under backend modules and delete old dispatcher/solver paths once empty.
+- [x] Phase 4 issue: isolate JAX runtime under backend modules and delete old dispatcher/solver paths once empty.
   - [x] PR 4.1: inventory current JAX-owned files/functions and define the smallest backend boundary.
     - Keep public API unchanged.
     - Keep `PreparedCohort` as the input boundary from dispatcher/preparation into backend lowering.
     - Start with file/module moves and explicit interfaces, not kernel rewrites.
     - Added `ideas/AXONSCOPE_PHASE4_BACKEND_BOUNDARY.md` with the current JAX-owned surface, smallest useful boundary, PR sequence, guardrails, non-goals, and acceptance criteria.
-  - [ ] PR 4.2: add a `jax` backend package for solver lowering and kernel invocation.
-    - Move JAX-specific batch input arrays, runtime preparation calls, and kernel calls behind backend-owned helpers.
-    - Keep descriptive axon, stimulation, recording, and result objects backend-agnostic.
-  - [ ] PR 4.3: add guardrails preventing new backend-specific imports from leaking into public/descriptive layers.
-  - [ ] PR 4.4: delete or flatten old dispatcher/solver paths only after their responsibilities have moved and tests prove no duplicate path remains.
+  - [x] PR 4.2: add a `jax` backend package for solver lowering and kernel invocation.
+    - Added `src/axonscope/backends/jax/group_runner.py` as the first real backend-owned execution boundary.
+    - Moved JAX-specific batch runtime preparation, runtime stacking/padding helpers, batch input materialization, kernel invocation, synchronization, and batch result splitting out of `dispatcher/execution.py`.
+    - Moved `DispatchResult` into `dispatcher/results.py` so dispatcher orchestration and backend execution share a small neutral result contract without import cycles.
+    - Kept descriptive axon, stimulation, recording, and public result objects unchanged.
+  - [x] PR 4.3: add guardrails preventing new backend-specific imports from leaking into public/descriptive layers.
+    - Added architecture tests that reject direct JAX imports from `axons/`, `membranes/`, `recording.py`, `population.py`, `results/`, and `preparation/signatures.py`.
+    - Added a guardrail that keeps concrete batch kernel/runtime imports out of `dispatcher/execution.py`; dispatcher may call the backend runner but must not own the JAX kernels again.
+  - [x] PR 4.4: split JAX input lowering out of `dispatcher/runtime_batches.py`.
+    - Moved JAX batch input builders into `src/axonscope/backends/jax/input_batches.py`.
+    - Reduced `dispatcher/runtime_batches.py` to host-side row helpers used by preparation and benchmark utilities.
+    - Updated dispatcher backend execution, tests, and runtime benchmark scripts to import JAX tensor builders from the backend module.
+    - Added a guardrail that keeps `dispatcher/runtime_batches.py` host-side only.
+  - Fresh validation on 2026-06-14 after completing Phase 4: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/bin/mamba run -n Axonscope-env python -m compileall -q src tests/unit benchmark/runtime` passed; targeted guardrail/solver/dispatcher/batch run passed (`70 passed`); full unit run passed (`286 passed, 1 skipped`); full NRV run passed (`116 passed, 516 warnings`); hotpath smoke passed with prefix `benchmark/results/hotpaths/phase4_final_smoke/`.
+  - [x] PR 4.5: move scalar Crank-Nicholson execution behind the JAX backend boundary.
+    - Added `src/axonscope/backends/jax/scalar_runner.py` for scalar runtime preparation, kernel selection, kernel invocation, and scalar backend output collection.
+    - Reduced `src/axonscope/solvers/crank_nicholson.py` to a public solver facade that resolves inputs, delegates to the backend, and wraps the backend output in `SimResult`.
+    - Removed direct JAX usage from `simulation.py` by using NumPy for scalar-fallback recording filters.
+    - Added guardrails that keep direct JAX imports out of `simulation.py`, keep `dispatcher/runtime_batches.py` host-only, and prevent `CrankNicholson` from importing concrete runtime/kernel modules again.
+    - Decision: keep low-level kernel/runtime modules under `solvers/` for this phase because they still own tested numerical kernels and are not duplicate execution paths; the public execution entry points now cross the JAX backend boundary first.
 - [ ] Phase 5 issue: replace list-based pool results with canonical cohort-backed results and per-axon views.
 - [ ] Phase 6 issue: move scientific analyses into a dedicated requirements/status/provenance layer.
 - [ ] Phase 7 issue: finalize benchmark/performance story, footprint reuse, and memory estimates.

@@ -2,6 +2,12 @@
 
 Status: working inventory for Phase 4. This is not user documentation.
 
+Update on 2026-06-14: PR 4.2 through PR 4.5 have moved batch group
+execution, JAX batch input materialization, and scalar Crank-Nicholson
+execution under `axonscope.backends.jax`. Low-level kernel/runtime modules
+remain under `solvers/` for now because they still own tested numerical kernels
+and are not duplicate public execution paths.
+
 ## Goal
 
 Phase 4 isolates JAX runtime/lowering behind backend modules without changing
@@ -89,6 +95,8 @@ Deliverables:
 
 ### PR 4.2: JAX Group Runner Wrapper
 
+Status: implemented.
+
 Create the first real backend package only when moving execution code:
 
 ```text
@@ -110,6 +118,9 @@ runner and places returned `DispatchResult` rows.
 
 ### PR 4.3: JAX Input Lowering Split
 
+Status: implemented as `axonscope.backends.jax.input_batches`, with
+`dispatcher/runtime_batches.py` reduced to host-side row helpers.
+
 Split `dispatcher/runtime_batches.py`:
 
 - host/NumPy preparation stays in `preparation/`;
@@ -119,6 +130,8 @@ The fast paths added during Phase 3 should remain available through the JAX
 backend runner.
 
 ### PR 4.4: Guardrails
+
+Status: implemented for the current boundary.
 
 Add tests that prevent new JAX imports from entering descriptive/public layers:
 
@@ -143,6 +156,8 @@ Allowed JAX zones during the transition:
 The allowed list should shrink as code moves.
 
 ### PR 4.5: Scalar Solver Boundary
+
+Status: implemented as `axonscope.backends.jax.scalar_runner`.
 
 After batch group execution is isolated, move scalar Crank-Nicholson execution
 behind the same JAX backend family. This keeps scalar and batch execution from

@@ -9,15 +9,17 @@ import pytest
 import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
-from axonscope.dispatcher.runtime_batches import (
+from axonscope.backends.jax.input_batches import (
     build_footprint_vstim_initial_previous_batch,
     build_footprint_vstim_midpoint_batch,
     build_vstim_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
+)
+from axonscope.dispatcher.runtime_batches import (
     scale_extracellular_contexts,
 )
+from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,

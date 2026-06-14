@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 
-import jax.numpy as jnp
+import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.benchmarking.hotpaths import benchmark_span
@@ -17,7 +17,7 @@ from axonscope.results import SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, Solver, SolverOptions
 
 if TYPE_CHECKING:
-    from axonscope.dispatcher.execution import DispatchResult
+    from axonscope.dispatcher.results import DispatchResult
 
 
 AxonInput: TypeAlias = Axon | AxonInstance
@@ -218,7 +218,7 @@ def _filter_pool_recording(
         filtered.append(
             replace(
                 axon_result,
-                Vm=jnp.take(axon_result.Vm, jnp.asarray(indices), axis=1),
+                Vm=np.take(np.asarray(axon_result.Vm), np.asarray(indices), axis=1),
                 record_indices=index_tuple,
             )
         )

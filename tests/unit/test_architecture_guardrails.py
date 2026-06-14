@@ -29,6 +29,21 @@ def _public_parameters(obj: object) -> set[str]:
     return set(inspect.signature(obj).parameters)
 
 
+def _jax_import_locations(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "jax" or alias.name.startswith("jax."):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level == 0 and (module == "jax" or module.startswith("jax.")):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    return offenders
+
+
 def test_guidelines_is_the_root_project_philosophy_reference():
     assert (REPO_ROOT / "GUIDELINES.md").is_file()
 
@@ -222,5 +237,85 @@ def test_non_visualization_modules_do_not_import_visualization_helpers():
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
                 elif node.level > 0 and module == "visualization":
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_descriptive_layers_do_not_import_jax_backend_directly():
+    guarded_paths = {
+        SRC_ROOT / "recording.py",
+        SRC_ROOT / "population.py",
+        SRC_ROOT / "preparation" / "signatures.py",
+    }
+    guarded_dirs = {
+        SRC_ROOT / "axons",
+        SRC_ROOT / "membranes",
+        SRC_ROOT / "results",
+    }
+    offenders: list[str] = []
+
+    for path in _python_sources(SRC_ROOT):
+        if path in guarded_paths or any(directory in path.parents for directory in guarded_dirs):
+            offenders.extend(_jax_import_locations(path))
+
+    assert offenders == []
+
+
+def test_dispatcher_execution_does_not_import_concrete_jax_batch_kernels():
+    path = SRC_ROOT / "dispatcher" / "execution.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    forbidden_modules = {
+        "axonscope.solvers.batch_kernels",
+        "axonscope.solvers.runtime",
+        "axonscope.icm.backends",
+    }
+    offenders = _jax_import_locations(path)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in forbidden_modules:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level == 0 and module in forbidden_modules:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_dispatcher_runtime_batches_remains_host_side_only():
+    path = SRC_ROOT / "dispatcher" / "runtime_batches.py"
+
+    assert _jax_import_locations(path) == []
+
+
+def test_public_simulation_orchestrator_does_not_import_jax_directly():
+    path = SRC_ROOT / "simulation.py"
+
+    assert _jax_import_locations(path) == []
+
+
+def test_crank_nicholson_facade_delegates_to_backend_boundary():
+    path = SRC_ROOT / "solvers" / "crank_nicholson.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    forbidden_modules = {
+        "axonscope.solvers.axon_runtime",
+        "axonscope.solvers.kernels",
+        "axonscope.solvers.runtime",
+    }
+    offenders = _jax_import_locations(path)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in forbidden_modules:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level == 0 and module in forbidden_modules:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif node.level > 0 and module in {"axon_runtime", "kernels", "runtime"}:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
     assert offenders == []

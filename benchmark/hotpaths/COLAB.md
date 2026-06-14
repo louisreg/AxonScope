@@ -65,6 +65,16 @@ The output folder is created inside the Colab checkout:
 Then the notebook zips `<run_id>/` and downloads it directly through the
 browser with `google.colab.files.download(...)`. No Google Drive mount is used.
 
+Important: `google.colab.files.download(...)` works from a Colab notebook cell,
+not from the Colab terminal or a plain `python` REPL. If you ran the script in
+the terminal, keep the printed archive path and run this in a notebook cell:
+
+```python
+from google.colab import files
+
+files.download("/content/AxonScope/benchmark/results/hotpaths/<run_id>.zip")
+```
+
 After download, unzip the archive into your local:
 
 ```text
@@ -135,3 +145,15 @@ The usual causes are:
 
 The provided cell removes `/content/AxonScope` before cloning. If needed, also
 restart the runtime.
+
+### `files.download(...)` Fails With `NoneType` Or `kernel`
+
+The benchmark was run from the Colab terminal instead of a notebook cell. The
+run is still valid if the archive was created. Copy the printed archive path and
+download it from a notebook cell:
+
+```python
+from google.colab import files
+
+files.download("/content/AxonScope/benchmark/results/hotpaths/<run_id>.zip")
+```

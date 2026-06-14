@@ -131,6 +131,17 @@ The format is inspired by Keep a Changelog.
   metadata before batch execution.
 - Added the Phase 4 backend-boundary inventory under
   `ideas/AXONSCOPE_PHASE4_BACKEND_BOUNDARY.md` to guide JAX runtime isolation.
+- Added the internal `axonscope.backends.jax.group_runner` execution boundary
+  for JAX batch runtime preparation, input lowering, kernel invocation,
+  synchronization, and batch result splitting.
+- Added the internal `axonscope.backends.jax.input_batches` module for JAX
+  materialization of batched intracellular and extracellular solver inputs.
+- Added the internal `axonscope.backends.jax.scalar_runner` boundary for scalar
+  Crank-Nicholson runtime preparation, kernel selection, kernel invocation, and
+  backend output collection.
+- Added Phase 4 architecture guardrails that keep direct JAX imports out of
+  descriptive/public layers and keep concrete batch kernel imports out of the
+  dispatcher orchestrator.
 
 ### Changed
 
@@ -163,6 +174,16 @@ The format is inspired by Keep a Changelog.
   analytical-footprint inputs, fast-pathing zero extracellular batches, and
   materializing batched public results once instead of slicing JAX rows in a
   Python loop.
+- Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
+  now orchestrates groups and delegates compatible batch groups to the JAX
+  backend runner through a neutral `DispatchResult` record.
+- Reduced `dispatcher/runtime_batches.py` to host-side row helpers; JAX tensor
+  builders now live under the JAX backend module and are imported there by
+  execution, tests, and runtime benchmark scripts.
+- Reduced `CrankNicholson` to a public solver facade that delegates scalar
+  execution to the JAX backend boundary before wrapping the backend output in
+  `SimResult`.
+- Removed the direct JAX dependency from `simulation.py` recording filters.
 - Updated NRV validation tests to use unit-bearing `Stimulus` time arguments
   with the stabilized public API.
 - Renamed the current executable per-axon protocol object from

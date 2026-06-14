@@ -2,11 +2,13 @@ import numpy as np
 
 import axonscope as axs
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.backends.jax.input_batches import (
+    build_intracellular_current_density_batch,
+    build_vstim_midpoint_batch,
+)
 from axonscope.dispatcher import build_dispatch_plan, run_pool
 from axonscope.dispatcher import describe_dispatch_plan
 from axonscope.dispatcher.runtime_batches import (
-    build_intracellular_current_density_batch,
-    build_vstim_midpoint_batch,
     extracellular_context_rows,
     x_positions_batch_m,
 )
