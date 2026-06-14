@@ -60,10 +60,7 @@ def _jax_scalar_dtype(dtype_like) -> jnp.dtype:
 def _intracellular_contexts_from_axon(axon) -> tuple[IntracellularContext, ...]:
     """Return intracellular contexts from a simulation-like object."""
 
-    contexts = getattr(axon, "intracellular_contexts", None)
-    if contexts is None:
-        contexts = getattr(axon, "intracellular_clamps", ())
-    return tuple(contexts)
+    return tuple(getattr(axon, "intracellular_contexts", ()))
 
 
 def _extracellular_contexts_from_axon(axon) -> tuple[ExtracellularContext, ...]:

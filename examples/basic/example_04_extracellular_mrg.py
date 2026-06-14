@@ -20,8 +20,8 @@ def main() -> None:
     electrode_z = 500.0 * axs.um
 
     electrode = axs.PointSourceElectrode(
-        x_um=electrode_x,
-        z_um=electrode_z,
+        x=electrode_x,
+        z=electrode_z,
     )
     stimulus = axs.Stimulus.biphasic(
         start=0.5 * axs.ms,
@@ -29,7 +29,7 @@ def main() -> None:
         cathodic_duration=0.05 * axs.ms,
         interphase=0.02 * axs.ms,
     )
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     sim.add_extracellular_context(
         context=axs.AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stimulus)],

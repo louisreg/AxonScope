@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.dispatcher.runtime_batches import (
@@ -30,12 +30,12 @@ from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
-def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3):
+def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3 * axs.S_per_m):
     return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=sigma)
 
 
-def _hh_extracellular_axon() -> AxonSimulation:
-    axon = AxonSimulation(
+def _hh_extracellular_axon() -> AxonInstance:
+    axon = AxonInstance(
         HodgkinHuxley(
             length=400.0 * axs.um,
             diameter=0.5 * axs.um,
@@ -44,15 +44,15 @@ def _hh_extracellular_axon() -> AxonSimulation:
         )
     )
     axon.add_current_clamp(
-        position_um=200.0,
-        current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
+        position=200.0 * axs.um,
+        current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
     )
     electrode = PointSourceElectrode(
-        x0_m=200e-6,
-        y0_m=100e-6,
-        z0_m=100e-6,
+        x=200e-6 * axs.m,
+        y=100e-6 * axs.m,
+        z=100e-6 * axs.m,
     )
-    stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
+    stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
     axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
     return axon
 

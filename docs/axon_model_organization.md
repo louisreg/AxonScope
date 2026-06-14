@@ -4,7 +4,7 @@ AxonScope models an axon as a descriptive object first. Solver arrays are
 derived only when a solver asks for them.
 
 ```text
-MembraneModel -> Section -> Layout -> Axon -> AxonSimulation -> solver runtime
+MembraneModel -> Section -> Layout -> Axon -> AxonInstance/AxonPopulation -> AxonSimulation -> solver runtime
 ```
 
 The important split is:
@@ -123,19 +123,33 @@ separate from solver-facing arrays.
 
 The descriptive model object. It owns the layout, cable formulation, initial
 state, and descriptive aggregate properties such as `length` and
-`n_compartments`. Per-compartment values are accessed from `axon.layout` or
-derived at the solver boundary. `Axon` does not own stimulation protocols or
-solver runtime arrays.
+`diameter`. Per-compartment diameter values are available through
+`axon.diameter_values(unit=...)` when a custom layout is heterogeneous. Solver
+arrays are still derived at the solver boundary. `Axon` does not own
+stimulation protocols or solver runtime arrays.
 
-`AxonSimulation`
+`AxonInstance`
 
 The simulation protocol wrapped around one descriptive `Axon`. It owns global
 position, intracellular clamps, and extracellular stimulation contexts.
 
+`AxonPopulation`
+
+The ordered cohort object. It stores `AxonInstance` rows, preserves input
+order, and can contain one row when a workflow should still use population
+execution.
+
+`AxonSimulation`
+
+The executable root object. It binds one `Axon`/`AxonInstance` or an
+`AxonPopulation` to duration, time step, recording policy, and execution
+options. Its current `.run()` implementation delegates to the public scalar and
+pool execution paths.
+
 `SolverAxon`
 
 The NumPy-only solver-side representation built from an `Axon` or
-`AxonSimulation` in `axonscope.solvers.axon_runtime`. It combines the flattened
+`AxonInstance` in `axonscope.solvers.axon_runtime`. It combines the flattened
 layout with formulation and simulation-level periaxonal overrides.
 
 ## Module Responsibilities
@@ -167,11 +181,25 @@ Defines:
 
 - `Axon`
 
-`src/axonscope/axon_simulation.py`
+`src/axonscope/axon_instance.py`
+
+Defines:
+
+- `AxonInstance`
+
+`src/axonscope/population.py`
+
+Defines:
+
+- `AxonPopulation`
+
+`src/axonscope/simulation.py`
 
 Defines:
 
 - `AxonSimulation`
+- `simulate`
+- `simulate_pool`
 
 `src/axonscope/solvers/axon_runtime.py`
 
@@ -213,7 +241,7 @@ section = axs.axons.Section(
 
 axon = axs.axons.Axon(
     layout=axs.axons.Layout.single_uniform(section, length=1.0 * axs.mm, compartments=101),
-    formulation="single-cable",
+    formulation=axs.axons.CableFormulation.SINGLE_CABLE,
     Vinit=-67.5 * axs.mV,
     Temp=6.3 * axs.degC,
 )

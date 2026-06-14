@@ -8,7 +8,7 @@ import pytest
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope import AxonSimulation, degC, um
+from axonscope import AxonInstance, degC, ms, um
 from axonscope.axons.unmyelinated import HodgkinHuxley, RattayAberham
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
@@ -17,11 +17,11 @@ from axonscope.stimulation import Stimulus
 @pytest.fixture(scope="session")
 def small_hh_axon():
     """Minimal HH axon with a central I-clamp."""
-    axon = AxonSimulation(
+    axon = AxonInstance(
         HodgkinHuxley(length=500.0 * um, diameter=0.5 * um, compartments=21, celsius=6.3 * degC)
     )
-    axon.add_current_clamp(position_um=250.0,
-        current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
+    axon.add_current_clamp(position=250.0 * um,
+        current=Stimulus.pulse(start=1.0 * ms, duration=1.0 * ms, amplitude=2.0),
     )
     return axon
 

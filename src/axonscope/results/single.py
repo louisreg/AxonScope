@@ -11,7 +11,7 @@ from axonscope.axons.axon import Axon
 from axonscope.utils import units
 
 if TYPE_CHECKING:
-    from axonscope.axon_simulation import AxonSimulation
+    from axonscope.axon_instance import AxonInstance
     from axonscope.recording import Recording
 
 
@@ -67,7 +67,7 @@ class SimResult:
     observations: ObservationDict | None = None
     recording: Recording | None = None
     record_indices: tuple[int, ...] | None = None
-    simulation: AxonSimulation | None = None
+    simulation: AxonInstance | None = None
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class SimResult:
         observations: ObservationDict | None = None,
         recording: Recording | None = None,
         record_indices: tuple[int, ...] | None = None,
-        simulation: AxonSimulation | None = None,
+        simulation: AxonInstance | None = None,
     ) -> None:
         if t is None:
             raise TypeError("SimResult requires a time vector `t`.")

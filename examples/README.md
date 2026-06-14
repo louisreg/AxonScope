@@ -19,9 +19,12 @@ arrays only at solver/plotting boundaries.
   context.
 - `example_05_pool_dispatch_basic.py`: a tiny pool dispatch workflow without
   NRV.
-- `example_06_velocity_vs_diameter_batch.py`: conduction velocity trends across
-  diameters for Rattay-Aberham, Hodgkin-Huxley, Sundt, and MRG using
-  `simulate_pool` batch dispatch.
+- `example_06_velocity_vs_diameter.py`: conduction velocity trends across
+  diameters with automatic batch dispatch.
+- `example_07_threshold_vs_diameter.py`: extracellular activation thresholds
+  versus diameter with point-source stimulation and batched binary search.
+- `example_08_recruitment_curve_population.py`: recruitment curve for a mixed
+  unmyelinated/myelinated population around a point-source electrode.
 
 These examples should stay compact and avoid benchmarking or profiling. Pool
 examples should focus on the public `simulate_pool` workflow rather than
@@ -45,6 +48,18 @@ low-level dispatcher internals.
   from recorded Vm traces.
 - `example_07_recruitment_curve.py`: estimate one activation threshold and a
   small recruitment curve with the protocol API.
+- `example_08_root_axon_simulation.py`: use the executable `AxonSimulation`
+  root object for one axon and a small population.
+- `example_09_axon_population.py`: build an explicit `AxonPopulation` cohort
+  and run it through the root simulation object.
+- `example_10_typed_recording_signals.py`: request recording outputs with
+  typed `axs.signals` selectors instead of raw strings.
+- `example_11_typed_position_selectors.py`: evaluate activation criteria with
+  typed `axs.positions` selectors instead of raw position strings.
+- `example_12_cable_formulation.py`: use `axs.axons.CableFormulation` for
+  custom axon layouts instead of raw formulation strings.
+- `example_13_extracellular_footprint_drive.py`: separate static
+  extracellular footprints from temporal drives and summed stimulation.
 
 Advanced examples may include optional NRV input helpers, but should still favor
 readability over measurement.

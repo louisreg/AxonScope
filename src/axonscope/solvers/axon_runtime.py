@@ -12,7 +12,7 @@ from axonscope.axons.formulation import Formulation, infer_formulation, resolve_
 from axonscope.membranes import MembraneModel
 
 if TYPE_CHECKING:
-    from axonscope.axon_simulation import AxonSimulation
+    from axonscope.axon_instance import AxonInstance
     from axonscope.axons.axon import Axon
 
 
@@ -72,7 +72,7 @@ class SolverAxon:
         return self.formulation == "double-cable"
 
 
-def _overrides_complete(axon: "Axon | AxonSimulation") -> bool:
+def _overrides_complete(axon: "Axon | AxonInstance") -> bool:
     return (
         getattr(axon, "_xraxial_override", None) is not None
         and getattr(axon, "_xg_override", None) is not None
@@ -81,7 +81,7 @@ def _overrides_complete(axon: "Axon | AxonSimulation") -> bool:
 
 
 def _periaxonal_arrays(
-    axon: "Axon | AxonSimulation",
+    axon: "Axon | AxonInstance",
     flat: FlattenedLayout,
     formulation: Formulation,
     *,
@@ -146,7 +146,7 @@ def _periaxonal_arrays(
     return xraxial, xg, xc
 
 
-def build_solver_axon(axon: "Axon | AxonSimulation") -> SolverAxon:
+def build_solver_axon(axon: "Axon | AxonInstance") -> SolverAxon:
     """Build solver-side arrays from an axon or axon simulation."""
 
     flat = flatten_layout(axon.layout)

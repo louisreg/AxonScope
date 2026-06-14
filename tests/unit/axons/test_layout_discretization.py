@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 import axonscope as axs
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import RattayAberham 
 from axonscope.results.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
@@ -53,9 +53,13 @@ def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SimResult:
     Sets up the stimulus and executes the simulation using the CrankNicholson solver.
     """
     # Inject a current clamp in the middle of the axon
-    simulation = AxonSimulation(axon)
-    simulation.add_current_clamp(position_um=L / 2,
-        current=Stimulus.pulse(start=T_START, duration=T_PULSE, amplitude=AMPLITUDE),
+    simulation = AxonInstance(axon)
+    simulation.add_current_clamp(position=(L / 2) * axs.um,
+        current=Stimulus.pulse(
+            start=T_START * axs.ms,
+            duration=T_PULSE * axs.ms,
+            amplitude=AMPLITUDE,
+        ),
     )
     solver = CrankNicholson() 
     res = solver.solve(simulation, tsim=tsim, dt=dt)

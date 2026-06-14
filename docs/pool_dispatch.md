@@ -1,31 +1,47 @@
 # Pool Dispatch
 
-Pool simulation is intentionally list-based for now:
+Pool simulation can be run directly with `simulate_pool(...)` or through the
+executable `AxonSimulation` root object. `AxonPopulation` is the explicit
+public container for cohorts:
 
 ```python
 import axonscope as axs
 
-sim_a = axs.AxonSimulation(axon_a, y_um=20.0 * axs.um, z_um=30.0 * axs.um)
-sim_b = axs.AxonSimulation(axon_b, y_um=-40.0 * axs.um, z_um=10.0 * axs.um)
+sim_a = axs.AxonInstance(axon_a, y=20.0 * axs.um, z=30.0 * axs.um)
+sim_b = axs.AxonInstance(axon_b, y=-40.0 * axs.um, z=10.0 * axs.um)
+population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
 
 results = axs.simulate_pool(
-    [sim_a, sim_b],
-    duration_ms=5.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
-    recording=axs.Recording.center("Vm"),
+    population,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.center(axs.signals.Vm),
     progress=True,
 )
 ```
 
-There is no public pool container and no public `Fiber` wrapper. `Axon`
-objects carry descriptive geometry/membrane information; `AxonSimulation`
-objects carry per-fiber positions and stimulation protocols. The public pool
-input is simply `Sequence[Axon | AxonSimulation]`.
+The equivalent root-object form is:
+
+```python
+simulation = axs.AxonSimulation(
+    population,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.center(axs.signals.Vm),
+    progress=True,
+)
+results = simulation.run()
+```
+
+There is no public `Fiber` wrapper. `Axon` objects carry descriptive
+geometry/membrane information; `AxonInstance` objects carry per-row positions
+and stimulation protocols; `AxonPopulation` preserves the ordered cohort that
+is sent to dispatch.
 
 ## Public Flow
 
 ```text
-list[Axon | AxonSimulation]
+AxonSimulation or AxonPopulation
   -> internal dispatch items
   -> dispatch groups
   -> runtime-batch builders when a batch path is available
@@ -37,7 +53,7 @@ list[Axon | AxonSimulation]
 
 ```python
 for result in results:
-    print(result.diagnostics["pool_index"], result.simulation.y_um, result.simulation.z_um)
+    print(result.diagnostics["pool_index"], result.diagnostics["dispatch_method"])
 ```
 
 Dispatch metadata stays diagnostic:
@@ -52,20 +68,19 @@ result.diagnostics["dispatch_has_padding"]
 ```
 
 `SimResult.axon` is the pure descriptive axon. `SimResult.simulation` is the
-protocol object that was simulated. There is no separate pool container in the
-public result.
+protocol object that was simulated. Results remain one item per population row.
 
 ## Spatial Position
 
 Set pool placement on each simulation protocol:
 
 ```python
-sim = axs.AxonSimulation(axon)
-sim.set_position(y_um=20.0 * axs.um, z_um=30.0 * axs.um, x_offset_um=0.0 * axs.um)
+sim = axs.AxonInstance(axon)
+sim.set_position(y=20.0 * axs.um, z=30.0 * axs.um, x_offset=0.0 * axs.um)
 ```
 
-Plain numeric positions are interpreted as micrometers. Pint quantities are
-converted at the simulation boundary.
+Positions must carry length units when provided. They are converted to internal
+micrometers at the simulation boundary.
 
 ## Stimulation Contexts
 
@@ -75,7 +90,7 @@ contexts:
 ```python
 sim.add_intracellular_context(
     context=axs.IntracellularCurrentClamp(
-        position_um=250.0 * axs.um,
+        position=250.0 * axs.um,
         current=stimulus,
     )
 )
@@ -96,15 +111,15 @@ the transverse offset seen by each axon before building batched `Vstim` arrays.
 
 ## Advanced Dispatch
 
-`run_pool` is the lower-level dispatch entry point. It also accepts
-`Sequence[Axon | AxonSimulation]`, but returns private dispatch results instead
-of public `SimResult` objects:
+`run_pool` is the lower-level dispatch entry point. It also accepts an
+`AxonPopulation` or sequence of `Axon`/`AxonInstance` objects, but returns
+private dispatch results instead of public `SimResult` objects:
 
 ```python
 from axonscope.dispatcher import run_pool
 
 dispatch_results = run_pool(
-    [sim_a, sim_b],
+    population,
     tsim_ms=5.0,
     dt_ms=0.01,
 )
@@ -178,8 +193,8 @@ from inside one compiled scan; for finer solver progress, run chunked batches:
 ```python
 results = axs.simulate_pool(
     simulations,
-    duration_ms=10.0 * axs.ms,
-    dt_ms=0.005 * axs.ms,
+    duration=10.0 * axs.ms,
+    dt=0.005 * axs.ms,
     batch_options=axs.solvers.BatchOptions.full(time_chunk_steps=200),
     recording=axs.Recording.voltage(),
     progress=True,

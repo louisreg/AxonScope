@@ -17,8 +17,8 @@ def main() -> None:
     electrode_z = 100.0 * axs.um
 
     electrode = axs.PointSourceElectrode(
-        x_um=electrode_x,
-        z_um=electrode_z,
+        x=electrode_x,
+        z=electrode_z,
     )
     stimulus = axs.Stimulus.biphasic(
         start=1.0 * axs.ms,

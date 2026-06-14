@@ -10,9 +10,10 @@ The format is inspired by Keep a Changelog.
 
 - Added backend-independent `Stimulus`, `IntracellularCurrentClamp`, and
   `ExtracellularContext` descriptors.
-- Added NumPy evaluation helpers in `axonscope.stimulation.evaluation`.
-- Added JAX solver-runtime stimulus compilation in
-  `axonscope.solvers.stimulus_runtime`.
+- Added NumPy evaluation helpers on stimulation contexts.
+- Added JAX-compatible stimulation runtime helpers in
+  `axonscope.stimulation.runtime` and solver-runtime compilation in
+  `axonscope.solvers.runtime`.
 - Added `PointSourceElectrode` and extracellular context attachment helpers.
 - Added package-level exports for `axonscope.axons`, `axonscope.solvers`,
   `axonscope.icm`, and `axonscope.utils`.
@@ -57,8 +58,6 @@ The format is inspired by Keep a Changelog.
   MRG, and MRG extracellular gate diagnostics.
 - Added a dedicated `mrg_extracellular_perf` NRV performance suite for warm
   runtime comparisons without gate diagnostics.
-- Added a GitHub Actions CI workflow for install, whitespace checking, and the
-  fast unit suite.
 - Added `docs/validation.md` to document fast CI and local NRV validation
   commands.
 - Added an `examples/advanced/` area for population/dispatcher workflows.
@@ -69,17 +68,123 @@ The format is inspired by Keep a Changelog.
 - Added runnable examples under `examples/basic/`.
 - Added `agent.md` to document project-specific development guidance and coding conventions.
 - Added `colab_benchmark_cpu_vs_gpu.ipynb` for AxonScope CPU vs GPU benchmarking with JAX, AxonScope simulation workloads, and performance visualization.
+- Added Phase 0 architecture guardrail tests for the root guidelines reference,
+  removed compatibility aliases/signatures, remaining raw-string public-domain
+  inventory, and internal import boundaries.
+- Added the new executable `AxonSimulation` root object with `.run()` support
+  for one axon or a small population through the existing scalar/pool execution
+  paths.
+- Added `examples/advanced/example_08_root_axon_simulation.py` as the didactic
+  demo for the executable simulation root concept.
+- Added public `AxonPopulation` as the typed cohort container for ordered
+  `AxonInstance` rows, including one-row population execution through
+  `AxonSimulation`.
+- Added `examples/advanced/example_09_axon_population.py` as the didactic demo
+  for explicit population construction.
+- Added public `Axon.diameter` and `Axon.diameter_values(...)` inspection
+  helpers so constructor geometry stays easy to read without reaching through
+  `axon.layout`.
+- Added typed recording signal selectors under `axs.signals` and the public
+  `Signal`/`RecordingSpatial` types.
+- Added `examples/advanced/example_10_typed_recording_signals.py` as the
+  didactic demo for typed recording selectors.
+- Added typed activation position selectors under `axs.positions`, including
+  `ALL`, `CENTER`, `DISTAL`, `At(...)`, and `Indices(...)`.
+- Added `examples/advanced/example_11_typed_position_selectors.py` as the
+  didactic demo for typed activation-position targets.
+- Added public `axs.axons.CableFormulation` for typed cable formulation
+  selection.
+- Added `examples/advanced/example_12_cable_formulation.py` as the didactic
+  demo for typed cable formulation selectors.
+- Added opaque public `AxonId` and `DriveId` identifiers for typed Phase 2
+  API contracts.
+- Added `ExtracellularFootprint`, `ExtracellularDrive`,
+  `ExtracellularStimulation`, and explicit dense `ExtracellularPotential`
+  objects for factorized extracellular stimulation.
+- Added analytical footprint builders on `AnalyticalExtracellularContext` and
+  `PointSourceElectrode`.
+- Added `examples/advanced/example_13_extracellular_footprint_drive.py` as the
+  didactic demo for factorized extracellular footprints and drives.
 
 ### Changed
 
+- Rewrote `README.md` as a short current API entry point and moved detailed
+  batch, recording, validation, and benchmark contracts to dedicated docs.
+- Updated `agent.md` to require example updates for public API/workflow changes
+  and to prefer clean pre-release user interfaces over compatibility shims.
+- Registered root `GUIDELINES.md` as the project philosophy and master
+  product/solver architecture direction in `agent.md` and `todo.md`.
+- Expanded `todo.md` with the guideline-derived implementation queue through
+  the object-model, typed API, extracellular footprint, planning, backend,
+  result, analysis, performance, study, and serialization phases.
+- Clarified in `GUIDELINES.md` and `agent.md` that each new advanced concept
+  or non-trivial workflow needs a runnable didactic demo in `examples/advanced/`.
+- Clarified in `agent.md` that examples should favor a line-by-line tutorial
+  flow with short comments over extra helper-function scaffolding.
+- Replaced public `Recording(variables=...)` and `spatial_mode=...` string
+  selectors with typed `signals=...` and `spatial=...` inputs.
+- Replaced public `ActivationCriterion(positions=..., indices=...)` selectors
+  with typed `target=axs.positions.*` selectors.
+- Replaced public raw formulation strings on axon constructors with
+  `axs.axons.CableFormulation` values.
+- Replaced the new extracellular drive identifier surface with typed
+  `axs.DriveId(...)` values instead of raw strings before release.
+- Updated NRV validation tests to use unit-bearing `Stimulus` time arguments
+  with the stabilized public API.
+- Renamed the current executable per-axon protocol object from
+  `AxonSimulation` to `AxonInstance`, including the source module
+  `axon_instance.py`, public exports, examples, docs, and tests; no
+  compatibility alias is kept for the old prototype name.
+- Replaced internal imports that went through the public `axonscope` facade with
+  package-internal imports.
+- Removed package-level `axs.analysis` and `axs.visualization` aliases; use
+  `axs.results.analysis` and `axs.results.visualization` instead.
+- Removed old `threshold` and `min_distance` aliases from post-hoc result
+  analysis helpers; use `threshold_mV` and `min_distance_ms`.
+- Removed the `AxonInstance.intracellular_clamps` alias; use
+  `intracellular_contexts`.
+- Removed `axs.run_batch`; use `axs.simulate_pool` as the single public pool
+  simulation wrapper.
+- Changed public simulation wrappers to `duration`/`dt` keyword arguments and
+  removed `duration_ms`/`dt_ms`/`tsim` compatibility names from that facade.
+- Removed `duration_ms`/`dt_ms` aliases from direct solver calls; use
+  solver-level `tsim`/`dt`.
+- Renamed public membrane template geometry arguments from `diameter_um` to
+  `diameter` for `Tigerholm`, `Schild94`, and `Schild97`; these now require
+  unit-bearing lengths while retaining internal `diameter_um` parameters.
+- Renamed the public recording temporal filter input from `sample_dt_ms` to
+  `sample_dt`; explicit sampling intervals now require time units while the
+  internal canonical field remains `sample_dt_ms`.
+- Renamed public recording spatial filter input from `positions_um` to
+  `positions`; explicit recording positions now require length units while the
+  internal canonical field remains `positions_um`.
+- Renamed public intracellular clamp placement inputs from `position_um` to
+  `position`; explicit clamp positions now require length units while runtime
+  clamp state remains `position_um`.
+- Changed explicit analytical extracellular medium conductivity to require
+  units through `AnalyticalExtracellularContext(sigma=...)`; omitting `sigma`
+  still uses the default `0.3 S/m` medium.
+- Replaced `PointSourceElectrode` constructor coordinate aliases with
+  quantity-oriented `x`, `y`, `z`, and `min_distance` inputs; internal
+  canonical coordinate fields remain in micrometers with read-only meter
+  properties.
+- Renamed public simulation placement inputs from `x_offset_um`/`y_um`/`z_um`
+  to `x_offset`/`y`/`z`; explicit positions now require length units while
+  internal runtime/result fields remain in micrometers.
+- Changed activation threshold and recruitment protocol current inputs to
+  require units for bounds, tolerances, callable/vector bounds, and recruitment
+  amplitudes instead of interpreting plain numbers as microamperes.
+- Changed public `Stimulus` constructors to require unit-bearing time inputs
+  for explicit starts, durations, sample grids, and shifts, while keeping
+  generic waveform amplitudes normalized by their consuming clamp or electrode.
 - Split the old flat modules into packages:
   `axons/`, `solvers/`, `icm/`, `benchmarking/`, and `utils/`.
 - Removed the old monolithic `axons.py`, `solvers.py`, `icm_compute.py`, and
   `math_functions.py` modules in favor of the package layout.
 - Moved NumPy stimulus evaluation out of the solver runtime.
 - Kept solver/backend-specific JAX compilation in the solver runtime.
-- Moved shared solver recording helpers out of `CrankNicholson` so `Euler`
-  no longer depends on Crank-Nicholson private internals.
+- Moved shared solver recording helpers out of `CrankNicholson` so reference
+  and prototype solvers do not depend on Crank-Nicholson private internals.
 - Changed extracellular Crank-Nicholson stepping to index precomputed imposed
   `Vstim` samples instead of re-evaluating electrode contexts inside the time loop.
 - Changed optimized Crank-Nicholson to dispatch to specialized single-cable and
@@ -112,12 +217,12 @@ The format is inspired by Keep a Changelog.
   entry points while the project is still pre-use.
 - Simplified the axon stimulation API so intracellular clamps now receive an
   explicit `Stimulus` object.
-- Renamed solver modules to lowercase `crank_nicholson.py` and `euler.py`.
+- Renamed the production solver module to lowercase `crank_nicholson.py`.
 - Moved Crank-Nicholson reference and prototype variants to
   `axonscope.solvers.experimental`, leaving `axonscope.solvers` focused on
   production solvers and runtime helpers.
 - Renamed extracellular context helpers to `add_extracellular_context`,
-  `clear_extracellular_contexts`, and `extracellular_potential_mV`.
+  `clear_extracellular_context`, and `extracellular_potential_mV`.
 - Interpreted `PointSourceElectrode` coordinates in the same global frame as
   `axon.set_position(...)`; scalar, NumPy evaluation, and pool batch paths now
   convert point-source y/z coordinates to each axon's local transverse offsets

@@ -13,7 +13,7 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from axonscope import AxonSimulation, um
+from axonscope import AxonInstance, um
 from axonscope.axons import MRG
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.solvers import CrankNicholson
@@ -155,7 +155,7 @@ def _build_axonscope_case(
     cathodic_duration_ms: float,
     anodic_uA: float,
     interphase_ms: float,
-) -> tuple[AxonSimulation, Any]:
+) -> tuple[AxonInstance, Any]:
     axon = MRG(diameter=diameter_um * um, nodes=nodes)
     x0_um = float(axon.length / 2.0)
     electrode = PointSourceElectrode(
@@ -170,7 +170,7 @@ def _build_axonscope_case(
         anodic_amplitude=anodic_uA * 1e-6,
         interphase=interphase_ms,
     )
-    simulation = AxonSimulation(axon)
+    simulation = AxonInstance(axon)
     simulation.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stim)],

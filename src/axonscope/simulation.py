@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 
 import jax.numpy as jnp
 
-from axonscope.axon_simulation import AxonSimulation, as_axon_simulation
+from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.utils import units
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
-from axonscope.recording import Recording
+from axonscope.population import AxonPopulation
+from axonscope.recording import Recording, RecordingSpatial
 from axonscope.results import SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, Solver, SolverOptions
 
@@ -18,7 +19,9 @@ if TYPE_CHECKING:
     from axonscope.dispatcher.execution import DispatchResult
 
 
-AxonPoolInput: TypeAlias = Sequence[Axon | AxonSimulation]
+AxonInput: TypeAlias = Axon | AxonInstance
+AxonPoolInput: TypeAlias = AxonPopulation | Sequence[Axon | AxonInstance]
+AxonSimulationResult: TypeAlias = SimResult | list[SimResult]
 
 _RECORDING_GROUPS = (
     ("gates", "gates"),
@@ -28,35 +31,120 @@ _RECORDING_GROUPS = (
 )
 
 
+def _normalize_axon_inputs(axons: AxonInput | Sequence[AxonInput] | AxonPopulation) -> AxonPopulation:
+    """Normalize one or many public axon inputs for executable simulations."""
+
+    if isinstance(axons, AxonPopulation):
+        return axons
+    try:
+        return AxonPopulation(axons)
+    except (TypeError, ValueError) as exc:
+        message = str(exc).replace("AxonPopulation", "AxonSimulation")
+        raise type(exc)(message) from exc
+
+
+class AxonSimulation:
+    """Executable simulation definition for one or more axon instances.
+
+    `AxonInstance` describes one concrete axon occurrence and its local
+    stimulation. `AxonSimulation` collects one or more axons/instances with
+    execution parameters such as duration, step size, recording policy, and
+    solver options. The current implementation delegates to the existing
+    single-axon and pool wrappers; later architecture phases can replace that
+    lowering behind this stable root object.
+    """
+
+    def __init__(
+        self,
+        axons: AxonInput | Sequence[AxonInput] | AxonPopulation,
+        *,
+        duration: Any,
+        dt: Any,
+        recording: Recording | None = None,
+        solver: Solver | None = None,
+        solver_options: SolverOptions | None = None,
+        batch_options: BatchOptions | None = None,
+        observers: Sequence[Any] | None = None,
+        progress: ProgressOption = False,
+    ) -> None:
+        population_lifecycle = not isinstance(axons, (Axon, AxonInstance))
+        self.population = _normalize_axon_inputs(axons)
+        self.axons = self.population.instances
+        self._population_lifecycle = population_lifecycle
+        self.duration = duration
+        self.dt = dt
+        self.recording = recording
+        self.solver = solver
+        self.solver_options = solver_options
+        self.batch_options = batch_options
+        self.observers = tuple(observers) if observers is not None else None
+        self.progress = progress
+
+    @property
+    def is_single(self) -> bool:
+        """Return whether this executable definition uses scalar execution."""
+
+        return not self._population_lifecycle
+
+    @property
+    def is_population(self) -> bool:
+        """Return whether this executable definition uses population execution."""
+
+        return self._population_lifecycle
+
+    def run(self) -> AxonSimulationResult:
+        """Execute this simulation definition and return public results."""
+
+        if self.is_single:
+            if self.batch_options is not None:
+                raise ValueError("batch_options are only valid for multi-axon simulations.")
+            if self.progress is not False:
+                raise ValueError("progress is only valid for multi-axon simulations.")
+            return simulate(
+                self.axons[0],
+                duration=self.duration,
+                dt=self.dt,
+                solver=self.solver,
+                solver_options=self.solver_options,
+                recording=self.recording,
+                observers=self.observers,
+            )
+
+        if self.solver is not None:
+            raise NotImplementedError(
+                "explicit solver objects are currently supported only for single-axon "
+                "AxonSimulation runs; use solver_options for pools."
+            )
+        if self.observers:
+            raise NotImplementedError("solver-side observers are not wired for pool runs yet.")
+        return simulate_pool(
+            self.axons,
+            duration=self.duration,
+            dt=self.dt,
+            solver_options=self.solver_options,
+            batch_options=self.batch_options,
+            recording=self.recording,
+            progress=self.progress,
+        )
+
+
 def _resolve_time(
     *,
-    duration_ms: Any | None,
-    dt_ms: Any | None,
-    duration_alias: Any | None,
-    duration_alias_name: str,
+    duration: Any | None,
     dt: Any | None,
 ) -> tuple[float, float]:
-    """Resolve public time aliases to canonical milliseconds."""
+    """Resolve public time values to canonical milliseconds."""
 
-    if duration_ms is not None and duration_alias is not None:
-        raise ValueError(
-            f"Provide either duration_ms or {duration_alias_name}, not both."
-        )
-    if dt_ms is not None and dt is not None:
-        raise ValueError("Provide either dt_ms or dt, not both.")
-
-    duration = duration_ms if duration_ms is not None else duration_alias
-    step = dt_ms if dt_ms is not None else dt
     if duration is None:
-        raise ValueError(f"duration_ms or {duration_alias_name} is required.")
-    if step is None:
-        raise ValueError("dt_ms or dt is required.")
+        raise ValueError("duration is required.")
+    if dt is None:
+        raise ValueError("dt is required.")
     resolved_duration = units.to_ms(duration)
-    resolved_step = units.to_ms(step)
+    resolved_step = units.to_ms(dt)
     if resolved_duration <= 0.0:
-        raise ValueError("duration_ms must be > 0.")
+        raise ValueError("duration must be > 0.")
     if resolved_step <= 0.0:
-        raise ValueError("dt_ms must be > 0.")
+        raise ValueError("dt must be > 0.")
     return resolved_duration, resolved_step
 
 
@@ -74,7 +162,7 @@ def _resolve_solver(
 def _resolve_recording(recording: Recording | None) -> Recording:
     """Return the explicit recording policy or the public default."""
 
-    return Recording.voltage() if recording is None else recording
+    return Recording() if recording is None else recording
 
 
 def _validate_single_recording(recording: Recording) -> None:
@@ -82,7 +170,7 @@ def _validate_single_recording(recording: Recording) -> None:
 
     if not recording.voltage:
         raise NotImplementedError("single-axon simulation currently always returns Vm.")
-    if recording.positions_um is not None or recording.spatial_mode != "full":
+    if recording.positions_um is not None or recording.spatial is not RecordingSpatial.FULL:
         raise NotImplementedError("spatial single-axon recording filters are not wired yet.")
     if recording.sample_dt_ms is not None or recording.every_n_steps is not None:
         raise NotImplementedError("temporal single-axon recording filters are not wired yet.")
@@ -177,12 +265,10 @@ def _dispatch_result_to_sim_result(
 
 
 def simulate(
-    axon: Axon | AxonSimulation,
+    axon: Axon | AxonInstance,
     *,
-    duration_ms: Any | None = None,
-    dt_ms: Any | None = None,
-    tsim: Any | None = None,
-    dt: Any | None = None,
+    duration: Any,
+    dt: Any,
     solver: Solver | None = None,
     solver_options: SolverOptions | None = None,
     recording: Recording | None = None,
@@ -197,21 +283,15 @@ def simulate(
 
     if observers:
         raise NotImplementedError("solver-side observers are not wired yet.")
-    simulation = as_axon_simulation(axon)
-    duration, step = _resolve_time(
-        duration_ms=duration_ms,
-        dt_ms=dt_ms,
-        duration_alias=tsim,
-        duration_alias_name="tsim",
-        dt=dt,
-    )
+    simulation = as_axon_instance(axon)
+    duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
     active_solver = _resolve_solver(solver, solver_options)
     rec = _resolve_recording(recording)
     _validate_single_recording(rec)
     result = active_solver.solve(
         simulation,
-        tsim=duration,
-        dt=step,
+        tsim=duration_ms,
+        dt=step_ms,
         record_observables=rec.wants_observables,
     )
     return _finalize_single_result(result, rec)
@@ -220,10 +300,8 @@ def simulate(
 def simulate_pool(
     pool: AxonPoolInput,
     *,
-    duration_ms: Any | None = None,
-    dt_ms: Any | None = None,
-    tsim_ms: Any | None = None,
-    dt: Any | None = None,
+    duration: Any,
+    dt: Any,
     solver_options: SolverOptions | None = None,
     batch_options: BatchOptions | None = None,
     recording: Recording | None = None,
@@ -239,21 +317,16 @@ def simulate_pool(
     to True, ``"rich"``, or ``"plain"`` to display dispatch/solver progress.
     """
 
-    duration, step = _resolve_time(
-        duration_ms=duration_ms,
-        dt_ms=dt_ms,
-        duration_alias=tsim_ms,
-        duration_alias_name="tsim_ms",
-        dt=dt,
-    )
+    population = pool if isinstance(pool, AxonPopulation) else AxonPopulation(pool)
+    duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
     resolved_batch_options = _pool_batch_options_for_recording(
         recording=recording,
         batch_options=batch_options,
     )
     results = run_pool(
-        pool,
-        tsim_ms=duration,
-        dt_ms=step,
+        population,
+        tsim_ms=duration_ms,
+        dt_ms=step_ms,
         solver_options=solver_options,
         batch_options=resolved_batch_options,
         progress=progress,
@@ -263,4 +336,4 @@ def simulate_pool(
     return [_dispatch_result_to_sim_result(result, recording) for result in results]
 
 
-__all__ = ["simulate", "simulate_pool"]
+__all__ = ["AxonSimulation", "simulate", "simulate_pool"]

@@ -15,7 +15,7 @@ rather than on electrode/node phase differences.
 import numpy as np
 import pytest
 
-from axonscope import AxonSimulation, um
+from axonscope import AxonInstance, S_per_m, ms, um
 from axonscope.results.analysis import rasterize
 from axonscope.axons.myelinated import MRG
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
@@ -41,13 +41,17 @@ def _central_node_x_um(ax: MRG) -> float:
 def _has_ap(diameter_um: float, amp_uA: float) -> bool:
     ax_copy = MRG(diameter=diameter_um * um, nodes=NODES)
     x0_um = _central_node_x_um(ax_copy)
-    electrode = PointSourceElectrode(x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0)
-    stim = Stimulus.pulse(start=1.0, amplitude=amp_uA * 1e-6, duration=PULSE_DURATION_MS)
-    sim = AxonSimulation(ax_copy)
+    electrode = PointSourceElectrode(x=x0_um * um, y=ELECTRODE_Y_UM * um, z=0.0 * um)
+    stim = Stimulus.pulse(
+        start=1.0 * ms,
+        amplitude=amp_uA * 1e-6,
+        duration=PULSE_DURATION_MS * ms,
+    )
+    sim = AxonInstance(ax_copy)
     sim.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stim)],
-            sigma=SIGMA_S_M,
+            sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
     )

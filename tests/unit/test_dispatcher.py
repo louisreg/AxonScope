@@ -13,7 +13,10 @@ from axonscope.stimulation import Stimulus
 
 
 def _context(electrode: PointSourceElectrode, stimulus: Stimulus):
-    return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=0.3)
+    return AnalyticalExtracellularContext(
+        electrodes=[electrode.with_stimulus(stimulus)],
+        sigma=0.3 * axs.S_per_m,
+    )
 
 
 def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
@@ -24,21 +27,21 @@ def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
         compartments=nx,
         celsius=6.3 * axs.degC,
     )
-    axon = axs.AxonSimulation(axon_model)
-    axon.set_position(y_um=y_um, z_um=z_um)
+    axon = axs.AxonInstance(axon_model)
+    axon.set_position(y=y_um * axs.um, z=z_um * axs.um)
     axon.add_current_clamp(
-        position_um=length_um / 2.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=amp_nA),
+        position=(length_um / 2.0) * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=amp_nA),
     )
     electrode = PointSourceElectrode(
-        x_um=50.0,
-        y_um=0.0,
-        z_um=0.0,
+        x=50.0 * axs.um,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
     )
     axon.add_extracellular_context(
         context=_context(
             electrode,
-            Stimulus.pulse(start=0.0, duration=0.05, amplitude=10e-6)
+            Stimulus.pulse(start=0.0 * axs.ms, duration=0.05 * axs.ms, amplitude=10e-6)
         ),
     )
     return axon
@@ -65,13 +68,13 @@ def _passive_double_cable_axon(
             length=length_um * axs.um,
             compartments=compartments,
         ),
-        formulation="double-cable",
+        formulation=axs.axons.CableFormulation.DOUBLE_CABLE,
         v_init=-70.0 * axs.mV,
     )
-    axon = axs.AxonSimulation(axon_model)
+    axon = axs.AxonInstance(axon_model)
     axon.add_current_clamp(
-        position_um=50.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=amp_nA),
+        position=50.0 * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=amp_nA),
     )
     return axon
 
@@ -87,10 +90,10 @@ def _mrg_axon(
         nodes=nodes,
         compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
     )
-    axon = axs.AxonSimulation(axon_model)
+    axon = axs.AxonInstance(axon_model)
     axon.add_current_clamp(
-        position_um=float(axon_model.layout.position_values(unit=axs.um)[0]) * axs.um,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=amp_nA),
+        position=float(axon_model.layout.position_values(unit=axs.um)[0]) * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=amp_nA),
     )
     return axon
 
@@ -101,9 +104,9 @@ def test_pool_public_api_uses_axon_positions_and_contexts():
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert len(result) == 2
@@ -120,9 +123,9 @@ def test_pool_dispatch_batches_compatible_axons_with_recording_filter():
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert len(result) == 2
@@ -143,17 +146,17 @@ def test_pool_dispatch_batches_context_and_no_context_rows():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_b = axs.AxonSimulation(axon_b_model)
+    axon_b = axs.AxonInstance(axon_b_model)
     axon_b.add_current_clamp(
-        position_um=length_um / 2.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=0.2),
+        position=(length_um / 2.0) * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.2),
     )
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert {axon_result.diagnostics["dispatch_method"] for axon_result in result} == {
@@ -168,9 +171,9 @@ def test_pool_dispatch_keeps_incompatible_axons_scalar():
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert [axon_result.diagnostics["dispatch_method"] for axon_result in result] == [
@@ -186,9 +189,9 @@ def test_pool_dispatch_batches_compatible_double_cable_axons():
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert {axon_result.diagnostics["dispatch_method"] for axon_result in result} == {
@@ -208,8 +211,8 @@ def test_pool_dispatch_pads_compatible_double_cable_axons():
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
         recording=axs.Recording.voltage(),
     )
 
@@ -246,15 +249,15 @@ def test_pool_dispatch_parameter_batched_mrg_matches_scalar_rows():
 
     batched = axs.simulate_pool(
         axons,
-        duration_ms=0.05,
-        dt_ms=0.01,
+        duration=0.05 * axs.ms,
+        dt=0.01 * axs.ms,
         recording=axs.Recording.voltage(),
     )
     scalar = [
         axs.simulate_pool(
             [axon],
-            duration_ms=0.05,
-            dt_ms=0.01,
+            duration=0.05 * axs.ms,
+            dt=0.01 * axs.ms,
             recording=axs.Recording.voltage(),
         )[0]
         for axon in axons
@@ -307,10 +310,10 @@ def test_dispatch_plan_parameter_batches_equal_nx_different_geometry():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_b = axs.AxonSimulation(axon_b_model)
+    axon_b = axs.AxonInstance(axon_b_model)
     axon_b.add_current_clamp(
-        position_um=75.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=0.1),
+        position=75.0 * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
     )
 
     plan = build_dispatch_plan([axon_a, axon_b])
@@ -328,17 +331,17 @@ def test_pool_dispatch_parameter_batches_equal_nx_different_geometry():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_b = axs.AxonSimulation(axon_b_model)
+    axon_b = axs.AxonInstance(axon_b_model)
     axon_b.add_current_clamp(
-        position_um=75.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=0.1),
+        position=75.0 * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
     )
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     assert {axon_result.diagnostics["dispatch_method"] for axon_result in result} == {
@@ -356,9 +359,9 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
 
     result = axs.simulate_pool(
         [axon_a, axon_b],
-        duration_ms=0.1,
-        dt_ms=0.05,
-        recording=axs.Recording.center(["Vm"]),
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
         progress="plain",
     )
 
@@ -376,10 +379,10 @@ def test_dispatch_plan_description_mentions_parameter_batch():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_b = axs.AxonSimulation(axon_b_model)
+    axon_b = axs.AxonInstance(axon_b_model)
     axon_b.add_current_clamp(
-        position_um=75.0,
-        current=Stimulus.pulse(start=0.02, duration=0.04, amplitude=0.1),
+        position=75.0 * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
     )
 
     text = describe_dispatch_plan([axon_a, axon_b])
@@ -396,15 +399,15 @@ def test_pool_vstim_batch_uses_global_yz_positions_for_point_sources():
             compartments=11,
             celsius=6.3 * axs.degC,
         )
-        axon = axs.AxonSimulation(axon_model)
-        axon.set_position(y_um=y_um, z_um=0.0)
+        axon = axs.AxonInstance(axon_model)
+        axon.set_position(y=y_um * axs.um, z=0.0 * axs.um)
         electrode = PointSourceElectrode(
-            x_um=50.0,
-            y_um=0.0,
-            z_um=0.0,
+            x=50.0 * axs.um,
+            y=0.0 * axs.um,
+            z=0.0 * axs.um,
         )
         axon.add_extracellular_context(
-            context=_context(electrode, Stimulus.constant(10e-6, start=0.0)),
+            context=_context(electrode, Stimulus.constant(10e-6, start=0.0 * axs.ms)),
         )
         return axon
 

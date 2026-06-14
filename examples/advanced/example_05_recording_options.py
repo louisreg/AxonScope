@@ -17,7 +17,7 @@ import numpy as np
 import axonscope as axs
 
 
-def make_hh_simulation(*, y_um=0.0 * axs.um) -> axs.AxonSimulation:
+def make_hh_simulation(*, y=0.0 * axs.um) -> axs.AxonInstance:
     """Create a small Hodgkin-Huxley simulation with one current clamp."""
 
     axon = axs.axons.HodgkinHuxley(
@@ -26,9 +26,9 @@ def make_hh_simulation(*, y_um=0.0 * axs.um) -> axs.AxonSimulation:
         compartments=21,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon, y_um=y_um)
+    sim = axs.AxonInstance(axon, y=y)
     sim.add_current_clamp(
-        position_um=50.0 * axs.um,
+        position=50.0 * axs.um,
         current=axs.Stimulus.pulse(
             start=0.20 * axs.ms,
             duration=0.15 * axs.ms,
@@ -41,33 +41,33 @@ def make_hh_simulation(*, y_um=0.0 * axs.um) -> axs.AxonSimulation:
 def main() -> None:
     single_result = axs.simulate(
         make_hh_simulation(),
-        duration_ms=2.0 * axs.ms,
-        dt_ms=0.02 * axs.ms,
+        duration=2.0 * axs.ms,
+        dt=0.02 * axs.ms,
         recording=axs.Recording.full(),
     )
     gates_only = axs.simulate(
         make_hh_simulation(),
-        duration_ms=0.2 * axs.ms,
-        dt_ms=0.05 * axs.ms,
-        recording=axs.Recording.only("Vm", "gates"),
+        duration=0.2 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.only(axs.signals.Vm, axs.signals.GATES),
     )
 
     pool = [
-        make_hh_simulation(y_um=0.0 * axs.um),
-        make_hh_simulation(y_um=25.0 * axs.um),
-        make_hh_simulation(y_um=50.0 * axs.um),
+        make_hh_simulation(y=0.0 * axs.um),
+        make_hh_simulation(y=25.0 * axs.um),
+        make_hh_simulation(y=50.0 * axs.um),
     ]
     recording_modes = {
         "full": axs.Recording.voltage(),
-        "center": axs.Recording.center("Vm"),
-        "probes": axs.Recording.probes("Vm", count=5),
-        "indices": axs.Recording.indices([0, 10, 20], "Vm"),
+        "center": axs.Recording.center(axs.signals.Vm),
+        "probes": axs.Recording.probes(axs.signals.Vm, count=5),
+        "indices": axs.Recording.indices([0, 10, 20], axs.signals.Vm),
     }
     pool_results = {
         label: axs.simulate_pool(
             pool,
-            duration_ms=0.2 * axs.ms,
-            dt_ms=0.05 * axs.ms,
+            duration=0.2 * axs.ms,
+            dt=0.05 * axs.ms,
             recording=recording,
         )
         for label, recording in recording_modes.items()
@@ -89,7 +89,7 @@ def print_recording_summary(
     gate_groups = summarize_recordings(gates_only)
     print("=== Single-axon observable groups ===")
     print(f"Recording.full(): {full_groups}")
-    print(f"Recording.only('Vm', 'gates'): {gate_groups}")
+    print(f"Recording.only(axs.signals.Vm, axs.signals.GATES): {gate_groups}")
 
     print("=== Pool Vm recording widths ===")
     for label, results in pool_results.items():

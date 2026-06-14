@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 
+from axonscope.identifiers import AxonId
 from axonscope.stimulation.stimuli import ArrayLike, Stimulus
 from axonscope.utils import units
 
@@ -38,6 +39,17 @@ class Electrode(ABC):
 
     stimulus: Stimulus | None = field(default=None, init=False, compare=False)
     """Attached current waveform normalized to amperes, or `None`."""
+
+    def set_stimulus(self, stimulus: Stimulus) -> None:
+        """Attach `stimulus` to this electrode in place.
+
+        Use this when a simulation keeps the same electrode geometry and only
+        changes the driven current between runs, for example during threshold
+        searches. Plain stimulus amplitudes are interpreted as amperes for
+        extracellular stimulation.
+        """
+
+        object.__setattr__(self, "stimulus", _normalize_stimulus(stimulus))
 
     def with_stimulus(self, stimulus: Stimulus) -> "Electrode":
         """Return a copy of this electrode with `stimulus` attached.
@@ -113,57 +125,39 @@ class PointSourceElectrode(AnalyticalElectrode):
     def __init__(
         self,
         *,
-        x_um: Any | None = None,
-        y_um: Any = 0.0,
-        z_um: Any | None = None,
-        min_distance_um: Any | None = None,
+        x: Any,
+        z: Any,
+        y: Any | None = None,
+        min_distance: Any | None = None,
         stimulus: Stimulus | None = None,
-        x0_m: Any | None = None,
-        y0_m: Any | None = None,
-        z0_m: Any | None = None,
-        min_distance_m: Any | None = None,
     ) -> None:
         """Create a point-source electrode.
 
         Parameters
         ----------
-        x_um, y_um, z_um:
-            Global electrode coordinates. Plain numbers are interpreted as
-            micrometers. `x_um` is required unless `x0_m` is provided.
-        min_distance_um:
+        x, y, z:
+            Global electrode coordinates. Values must carry length units. `y`
+            defaults to 0 um when omitted.
+        min_distance:
             Lower bound on source distance to avoid singular footprints.
         stimulus:
             Optional temporal current waveform attached at construction.
-        x0_m, y0_m, z0_m, min_distance_m:
-            SI aliases for diagnostics and low-level tests. Do not combine
-            them with the corresponding micrometer arguments.
         """
 
-        if x_um is not None and x0_m is not None:
-            raise ValueError("Provide either x_um or x0_m, not both.")
-        if z_um is not None and z0_m is not None:
-            raise ValueError("Provide either z_um or z0_m, not both.")
-        if y0_m is not None:
-            if y_um != 0.0:
-                raise ValueError("Provide either y_um or y0_m, not both.")
-            y_um = units.to_m(y0_m) * 1e6
-        if x_um is None:
-            if x0_m is None:
-                raise ValueError("x_um is required.")
-            x_um = units.to_m(x0_m) * 1e6
-        if z_um is None:
-            z_um = units.to_m(z0_m) * 1e6 if z0_m is not None else 1000.0
-        if min_distance_um is not None and min_distance_m is not None:
-            raise ValueError("Provide either min_distance_um or min_distance_m, not both.")
-        if min_distance_um is None:
-            min_distance_um = (
-                units.to_m(min_distance_m) * 1e6 if min_distance_m is not None else 1e-3
-            )
-
-        object.__setattr__(self, "x_um", units.to_um(x_um))
-        object.__setattr__(self, "y_um", units.to_um(y_um))
-        object.__setattr__(self, "z_um", units.to_um(z_um))
-        object.__setattr__(self, "min_distance_um", units.to_um(min_distance_um))
+        object.__setattr__(self, "x_um", units.require_length_um(x, name="x"))
+        object.__setattr__(
+            self,
+            "y_um",
+            0.0 if y is None else units.require_length_um(y, name="y"),
+        )
+        object.__setattr__(self, "z_um", units.require_length_um(z, name="z"))
+        object.__setattr__(
+            self,
+            "min_distance_um",
+            1e-3
+            if min_distance is None
+            else units.require_length_um(min_distance, name="min_distance"),
+        )
         if stimulus is not None:
             stimulus = _normalize_stimulus(stimulus)
         object.__setattr__(self, "stimulus", stimulus)
@@ -226,3 +220,47 @@ class PointSourceElectrode(AnalyticalElectrode):
         r = np.sqrt((x - self.x0_m) ** 2 + y_rel_m**2 + z_rel_m**2)
         r = np.maximum(r, self.min_distance_m)
         return 1.0 / (4.0 * np.pi * float(sigma_S_m) * r)
+
+    def build_footprint(
+        self,
+        positions: ArrayLike,
+        *,
+        sigma: Any,
+        axon_y: Any | None = None,
+        axon_z: Any | None = None,
+        source_id: str | None = None,
+        axon_id: AxonId | None = None,
+    ):
+        """Build a static `ExtracellularFootprint` from this point source."""
+
+        from axonscope.stimulation.extracellular import ExtracellularFootprint
+
+        positions_um = units.require_length_array_um(
+            positions,
+            name="positions",
+            dtype=float,
+        )
+        x_m = positions_um * 1e-6
+        sigma_S_m = units.require_conductivity_S_per_m(sigma, name="sigma")
+        values = self.footprint_for_axon(
+            x_m,
+            sigma_S_m=sigma_S_m,
+            axon_y_um=0.0 if axon_y is None else axon_y,
+            axon_z_um=0.0 if axon_z is None else axon_z,
+        )
+        if axon_id is not None and not isinstance(axon_id, AxonId):
+            raise TypeError("axon_id must be an AxonId.")
+        axon_ids = None if axon_id is None else (axon_id,)
+        return ExtracellularFootprint(
+            values=values,
+            positions=units.Q_(positions_um, "micrometer"),
+            axon_ids=axon_ids,
+            source_id=source_id,
+            metadata={
+                "builder": "PointSourceElectrode.build_footprint",
+                "electrode_x_um": self.x_um,
+                "electrode_y_um": self.y_um,
+                "electrode_z_um": self.z_um,
+                "sigma_S_m": sigma_S_m,
+            },
+        )

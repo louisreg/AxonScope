@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 import axonscope as axs
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import Tigerholm, Schild97
 from axonscope.channel_models.composite_models import (
     TigerholmCompositeICM,
@@ -62,9 +62,9 @@ def test_schild_membrane_dynamics_live_on_channel_and_axon_delegates():
 
 
 def test_schild_diagnostics_are_provided_by_membrane_not_solver():
-    ax = AxonSimulation(Schild97(length=200.0 * axs.um, diameter=0.8 * axs.um, compartments=7))
-    ax.add_current_clamp(position_um=100.0,
-        current=Stimulus.pulse(start=0.2, duration=0.2, amplitude=0.3),
+    ax = AxonInstance(Schild97(length=200.0 * axs.um, diameter=0.8 * axs.um, compartments=7))
+    ax.add_current_clamp(position=100.0 * axs.um,
+        current=Stimulus.pulse(start=0.2 * axs.ms, duration=0.2 * axs.ms, amplitude=0.3),
     )
 
     res = CrankNicholson().solve(ax, tsim=0.8, dt=0.01, record_diagnostics=True)

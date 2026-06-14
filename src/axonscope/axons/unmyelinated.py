@@ -7,9 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from axonscope import membranes
 from axonscope.axons.axon import Axon
-from axonscope.axons.formulation import Formulation
+from axonscope.axons.formulation import CableFormulation
 from axonscope.axons.layout import Layout
 from axonscope.axons.section import Section
 from axonscope.utils import units
@@ -21,6 +20,7 @@ from axonscope.utils.units import (
     voltage_t,
 )
 from axonscope.utils.validation import normalize_positive_int
+from .. import membranes
 
 
 _DEFAULT_Ra = units.Q_(100.0, "ohm * centimeter")
@@ -127,7 +127,7 @@ class Unmyelinated(Axon):
         *,
         layout: Layout | None = None,
         membrane: membranes.MembraneModel | None = None,
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
         length: length_t | None = None,
         diameter: length_t | None = None,
         compartments: int | None = None,
@@ -167,6 +167,7 @@ class Unmyelinated(Axon):
             Model temperature in degrees Celsius.
         """
 
+        nominal_diameter = None
         if layout is None:
             if membrane is None:
                 raise ValueError("Provide either layout or membrane with geometry.")
@@ -178,6 +179,7 @@ class Unmyelinated(Axon):
                 compartments=compartments,
                 x=x,
             )
+            nominal_diameter = geometry.diameter
             layout = _single_section_model(
                 membrane=membrane,
                 length=geometry.length,
@@ -197,6 +199,7 @@ class Unmyelinated(Axon):
         super().__init__(
             layout=layout,
             formulation=formulation,
+            diameter=nominal_diameter,
             v_init=v_init,
             temperature=temperature,
         )
@@ -225,7 +228,7 @@ class HodgkinHuxley(Unmyelinated):
         include_passive_leak: bool = False,
         g_pas: Any = 0.001,
         e_pas: Any = -70.0,
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Hodgkin-Huxley unmyelinated axon.
 
@@ -312,7 +315,7 @@ class RattayAberham(Unmyelinated):
         include_passive_leak: bool = True,
         g_pas: Any = 0.001,
         e_pas: Any = -70.0,
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Rattay-Aberham unmyelinated axon.
 
@@ -389,7 +392,7 @@ class Sundt(Unmyelinated):
         ek: Any = -90.0,
         Rm: Any = 10000.0,
         El: Any = -70.0,
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Sundt unmyelinated axon.
 
@@ -465,7 +468,7 @@ class Tigerholm(Unmyelinated):
         nai_fixed: Any = 11.4,
         pump_smalla: Any = -0.0047891,
         pump_ko: Any = 5.6,
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Tigerholm et al. C-fiber axon.
 
@@ -494,10 +497,9 @@ class Tigerholm(Unmyelinated):
         """
 
         celsius = _quantity_degC(celsius, name="celsius")
-        diameter_um = units.require_length_um(diameter, name="diameter")
         super().__init__(
             membrane=membranes.Tigerholm(
-                diameter_um=diameter_um,
+                diameter=diameter,
                 celsius=celsius,
                 ena=ena,
                 ek=ek,
@@ -539,7 +541,7 @@ class Schild94(Unmyelinated):
         Cm: capacitance_density_t = _DEFAULT_SCHILD_Cm,
         v_init: voltage_t = units.Q_(-48.0, "millivolt"),
         temperature: temperature_t = units.Q_(37.0, "degree_Celsius"),
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Schild et al. 1994 DRG C-fiber axon.
 
@@ -561,10 +563,9 @@ class Schild94(Unmyelinated):
 
         temperature = _quantity_degC(temperature, name="temperature")
         v_init = _quantity_mV(v_init, name="v_init")
-        diameter_um = units.require_length_um(diameter, name="diameter")
         super().__init__(
             membrane=membranes.Schild94(
-                diameter_um=diameter_um,
+                diameter=diameter,
                 temp_c=temperature,
                 vinit_mV=v_init,
             ),
@@ -594,7 +595,7 @@ class Schild97(Unmyelinated):
         Cm: capacitance_density_t = _DEFAULT_SCHILD_Cm,
         v_init: voltage_t = units.Q_(-48.0, "millivolt"),
         temperature: temperature_t = units.Q_(37.0, "degree_Celsius"),
-        formulation: Formulation | None = "single-cable",
+        formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Schild and Bhatt 1997 DRG C-fiber axon.
 
@@ -616,10 +617,9 @@ class Schild97(Unmyelinated):
 
         temperature = _quantity_degC(temperature, name="temperature")
         v_init = _quantity_mV(v_init, name="v_init")
-        diameter_um = units.require_length_um(diameter, name="diameter")
         super().__init__(
             membrane=membranes.Schild97(
-                diameter_um=diameter_um,
+                diameter=diameter,
                 temp_c=temperature,
                 vinit_mV=v_init,
             ),

@@ -68,7 +68,7 @@ def test_units_convert_quantity_like_values():
     )
 
 
-def test_direct_solver_time_aliases_accept_quantity_like_values():
+def test_direct_solver_time_values_accept_quantity_like_values():
     from axonscope.solvers.common import resolve_time_args
 
     assert resolve_time_args(
@@ -79,20 +79,30 @@ def test_direct_solver_time_aliases_accept_quantity_like_values():
 
 def test_recording_normalizes_quantity_like_filters():
     recording = axs.Recording(
-        variables="Vm",
-        positions_um=[FakeQuantity(1.5, "millimeter")],
-        sample_dt_ms=FakeQuantity(0.002, "second"),
+        signals=axs.signals.Vm,
+        positions=[FakeQuantity(1.5, "millimeter")],
+        sample_dt=FakeQuantity(0.002, "second"),
     )
 
-    assert recording.variables == ("Vm",)
+    assert recording.signals == (axs.signals.Vm,)
     assert recording.positions_um == (1500.0,)
     assert recording.sample_dt_ms == 2.0
 
 
-def test_recording_normalizes_explicit_indices():
-    recording = axs.Recording.indices([0, 4], "Vm")
+def test_recording_sample_dt_requires_units():
+    with pytest.raises(TypeError, match="sample_dt must include units compatible with time"):
+        axs.Recording(signals=axs.signals.Vm, sample_dt=0.1)
 
-    assert recording.spatial_mode == "indices"
+
+def test_recording_positions_require_units():
+    with pytest.raises(TypeError, match="positions must include units compatible with length"):
+        axs.Recording(signals=axs.signals.Vm, positions=[100.0])
+
+
+def test_recording_normalizes_explicit_indices():
+    recording = axs.Recording.indices([0, 4], axs.signals.Vm)
+
+    assert recording.spatial is axs.RecordingSpatial.INDICES
     assert recording.record_indices == (0, 4)
 
 
@@ -103,9 +113,9 @@ def test_simulation_protocol_accepts_unit_quantities():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon, y_um=0.02 * axs.mm, z_um=10.0 * axs.um)
+    sim = axs.AxonInstance(axon, y=0.02 * axs.mm, z=10.0 * axs.um)
     sim.add_current_clamp(
-        position_um=0.05 * axs.mm,
+        position=0.05 * axs.mm,
         current=axs.Stimulus.pulse(
             start=20.0 * axs.us,
             duration=20.0 * axs.us,
@@ -115,8 +125,28 @@ def test_simulation_protocol_accepts_unit_quantities():
 
     assert sim.y_um == pytest.approx(20.0)
     assert sim.z_um == pytest.approx(10.0)
-    assert sim.intracellular_clamps[0].position_um == pytest.approx(50.0)
-    np.testing.assert_allclose(sim.intracellular_clamps[0].current.t, [0.0, 0.02, 0.04])
+    assert sim.intracellular_contexts[0].position_um == pytest.approx(50.0)
+    np.testing.assert_allclose(sim.intracellular_contexts[0].current.t, [0.0, 0.02, 0.04])
+
+
+def test_current_clamp_position_requires_units():
+    with pytest.raises(TypeError, match="position must include units compatible with length"):
+        axs.IntracellularCurrentClamp(position=50.0, current=axs.Stimulus.constant(0.0))
+
+
+def test_simulation_protocol_position_requires_units():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+
+    with pytest.raises(TypeError, match="y must include units compatible with length"):
+        axs.AxonInstance(axon, y=20.0)
+    sim = axs.AxonInstance(axon)
+    with pytest.raises(TypeError, match="x_offset must include units compatible with length"):
+        sim.set_position(x_offset=0.0, y=20.0 * axs.um, z=0.0 * axs.um)
 
 
 def test_analysis_accepts_quantity_like_thresholds():
@@ -279,7 +309,7 @@ def test_membrane_templates_normalize_quantity_like_parameters():
     assert passive.params["EL"] == -70.0
 
     tigerholm = axs.membranes.Tigerholm(
-        diameter_um=FakeQuantity(1.2, "millimeter"),
+        diameter=FakeQuantity(1.2, "millimeter"),
         gbar_nav17=FakeQuantity(106.64, "millisiemens / centimeter ** 2"),
         pump_smalla=FakeQuantity(-0.0047891, "milliampere / centimeter ** 2"),
         pump_ko=FakeQuantity(5.6, "millimolar"),
@@ -287,6 +317,15 @@ def test_membrane_templates_normalize_quantity_like_parameters():
     assert tigerholm.params["diameter_um"] == 1200.0
     assert tigerholm.params["gbar_nav17"] == pytest.approx(0.10664)
     assert tigerholm.params["pump_ko"] == 5.6
+
+
+def test_membrane_templates_require_unit_aware_diameter():
+    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
+        axs.membranes.Tigerholm(diameter=1.2)
+    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
+        axs.membranes.Schild94(diameter=0.8)
+    with pytest.raises(TypeError, match="diameter must include units compatible with length"):
+        axs.membranes.Schild97(diameter=0.8)
 
 
 def test_pint_constructor_reports_missing_dependency_when_absent():

@@ -23,9 +23,9 @@ def main() -> None:
         compartments=41,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     clamp = axs.IntracellularCurrentClamp(
-        position_um=clamp_x,
+        position=clamp_x,
         current=axs.Stimulus.pulse(
             start=1.0 * axs.ms,
             duration=0.5 * axs.ms,

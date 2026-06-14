@@ -120,7 +120,7 @@ def Sundt(
 
 def Tigerholm(
     *,
-    diameter_um: Any,
+    diameter: Any,
     celsius: Any = 37.0,
     ena: Any = 71.5,
     ek: Any = -87.0,
@@ -141,7 +141,7 @@ def Tigerholm(
     return MembraneModel(
         "tigerholm",
         {
-            "diameter_um": units.to_um(diameter_um),
+            "diameter_um": units.require_length_um(diameter, name="diameter"),
             "celsius": _temperature(celsius),
             "ena": _voltage(ena),
             "ek": _voltage(ek),
@@ -162,7 +162,7 @@ def Tigerholm(
 
 def Schild94(
     *,
-    diameter_um: Any,
+    diameter: Any,
     temp_c: Any = 37.0,
     vinit_mV: Any = -48.0,
 ) -> MembraneModel:
@@ -171,7 +171,7 @@ def Schild94(
     return MembraneModel(
         "schild94",
         {
-            "diameter_um": units.to_um(diameter_um),
+            "diameter_um": units.require_length_um(diameter, name="diameter"),
             "temp_c": _temperature(temp_c),
             "vinit_mV": _voltage(vinit_mV),
         },
@@ -180,7 +180,7 @@ def Schild94(
 
 def Schild97(
     *,
-    diameter_um: Any,
+    diameter: Any,
     temp_c: Any = 37.0,
     vinit_mV: Any = -48.0,
 ) -> MembraneModel:
@@ -189,7 +189,7 @@ def Schild97(
     return MembraneModel(
         "schild97",
         {
-            "diameter_um": units.to_um(diameter_um),
+            "diameter_um": units.require_length_um(diameter, name="diameter"),
             "temp_c": _temperature(temp_c),
             "vinit_mV": _voltage(vinit_mV),
         },

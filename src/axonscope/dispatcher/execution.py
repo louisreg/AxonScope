@@ -5,7 +5,7 @@ from typing import Any, Sequence
 
 import jax.numpy as jnp
 
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
@@ -46,7 +46,7 @@ class DispatchResult:
 
     index: int
     axon: Axon
-    simulation: AxonSimulation
+    simulation: AxonInstance
     Vm: jnp.ndarray
     t: jnp.ndarray
     group_id: int
@@ -59,7 +59,7 @@ class DispatchResult:
 
 
 def run_pool(
-    axons: Sequence[Axon | AxonSimulation],
+    axons: Sequence[Axon | AxonInstance],
     *,
     tsim_ms: Any,
     dt_ms: Any,

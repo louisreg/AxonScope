@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Sequence, TypeAlias
+from typing import Any
 
 import numpy as np
 
+from axonscope.positions import ALL, PositionSelector
 from axonscope.results.single import SimResult
 from axonscope.utils import units
-
-
-ActivationPositions: TypeAlias = Literal["all", "center", "distal"] | Sequence[Any]
 
 
 @dataclass(frozen=True)
@@ -38,13 +36,10 @@ class ActivationCriterion:
     blanking
         Initial time interval ignored by the detector. Plain numbers are
         interpreted as milliseconds.
-    positions
-        Recorded positions to inspect. Use ``"all"``, ``"center"``,
-        ``"distal"``, or a sequence of physical positions.
-    indices
-        Original axon compartment indices to inspect. If the result was
-        spatially filtered, these indices are mapped through
-        ``result.record_indices``.
+    target
+        Typed recorded-position selector from `axs.positions`, such as
+        `axs.positions.ALL`, `axs.positions.DISTAL`,
+        `axs.positions.At(...)`, or `axs.positions.Indices(...)`.
     require_propagation
         Reserved semantic flag for the future observer implementation. In this
         post-hoc implementation, pass distal positions or indices explicitly to
@@ -53,8 +48,7 @@ class ActivationCriterion:
 
     threshold: Any = -20.0
     blanking: Any = 0.0
-    positions: ActivationPositions = "all"
-    indices: Sequence[int] | None = None
+    target: PositionSelector = ALL
     require_propagation: bool = False
 
     def evaluate(self, result: SimResult) -> ActivationEvent:
@@ -116,62 +110,17 @@ class ActivationCriterion:
         else:
             original_indices = np.asarray(result.record_indices, dtype=int)
 
-        if self.indices is not None:
-            if not isinstance(self.positions, str) or self.positions != "all":
-                raise ValueError("Provide either positions or indices, not both.")
-            requested = tuple(int(index) for index in self.indices)
-            if not requested:
-                raise ValueError("indices must contain at least one entry.")
-            if any(index < 0 for index in requested):
-                raise ValueError("indices must be non-negative.")
-            columns = [
-                int(np.flatnonzero(original_indices == index)[0])
-                for index in requested
-                if np.any(original_indices == index)
-            ]
-            if len(columns) != len(requested):
-                missing = sorted(set(requested).difference(set(original_indices)))
-                raise ValueError(f"indices are not present in this result: {missing}.")
-            selected_columns = np.asarray(columns, dtype=int)
-            return (
-                selected_columns,
-                original_indices[selected_columns],
-                positions_um[selected_columns],
-            )
-
-        if isinstance(self.positions, str):
-            selected_columns = self._columns_from_position_mode(
-                self.positions,
-                positions_um,
-            )
-        else:
-            target_um = units.to_um_array(self.positions)
-            selected_columns = np.asarray(
-                [int(np.argmin(np.abs(positions_um - target))) for target in target_um],
-                dtype=int,
-            )
-            selected_columns = np.unique(selected_columns)
+        if not isinstance(self.target, PositionSelector):
+            raise TypeError("target must be an axonscope.positions.PositionSelector.")
+        selected_columns = self.target.columns(
+            positions_um=positions_um,
+            original_indices=original_indices,
+        )
 
         return (
             selected_columns,
             original_indices[selected_columns],
             positions_um[selected_columns],
-        )
-
-    def _columns_from_position_mode(
-        self,
-        mode: str,
-        positions_um: np.ndarray,
-    ) -> np.ndarray:
-        if mode == "all":
-            return np.arange(positions_um.shape[0], dtype=int)
-        if mode == "center":
-            center_um = 0.5 * (float(np.min(positions_um)) + float(np.max(positions_um)))
-            return np.asarray([int(np.argmin(np.abs(positions_um - center_um)))], dtype=int)
-        if mode == "distal":
-            return np.asarray([int(np.argmax(positions_um))], dtype=int)
-        raise ValueError(
-            "positions must be 'all', 'center', 'distal', or a sequence of positions."
         )
 
     @staticmethod
@@ -204,6 +153,5 @@ def detect_activation(result: SimResult, **kwargs: Any) -> ActivationEvent:
 __all__ = [
     "ActivationCriterion",
     "ActivationEvent",
-    "ActivationPositions",
     "detect_activation",
 ]

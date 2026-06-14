@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from axonscope import AxonSimulation, degC, mV, um
+from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
@@ -50,8 +50,8 @@ def test_boundary_conditions_vs_nrv(save_dir: str = "figures/physics_tests"):
         g_pas=0.001,
         e_pas=-70.0,
     )
-    sim = AxonSimulation(axon)
-    sim.add_current_clamp(position_um=L / 2, current=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
+    sim = AxonInstance(axon)
+    sim.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=t_start * ms, duration=duration * ms, amplitude=amplitude))
     res_ax = CrankNicholson().solve(sim, tsim=tsim, dt=dt)
 
     axon_nrv = nrv.unmyelinated(

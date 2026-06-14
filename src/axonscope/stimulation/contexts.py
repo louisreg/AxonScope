@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
+from axonscope.identifiers import AxonId
 from axonscope.stimulation.stimuli import ArrayLike, Stimulus
 from axonscope.utils import units
 
@@ -54,12 +55,13 @@ class IntracellularContext(ABC):
     """
 
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True, init=False)
 class IntracellularCurrentClamp(IntracellularContext):
     """Descriptive intracellular current clamp attached to an axon position.
 
-    Plain waveform amplitudes are interpreted as nanoamperes. Pint quantities
-    are converted to nanoamperes at construction time.
+    `position` must carry length units and is stored internally as
+    `position_um`. Plain waveform amplitudes are interpreted as nanoamperes.
+    Pint quantities are converted to nanoamperes at construction time.
     """
 
     position_um: Any
@@ -68,12 +70,23 @@ class IntracellularCurrentClamp(IntracellularContext):
     current: Stimulus
     """Current waveform normalized to nanoamperes."""
 
+    def __init__(self, *, position: Any, current: Stimulus) -> None:
+        """Create an intracellular current clamp at axial `position`."""
+
+        object.__setattr__(self, "position_um", position)
+        object.__setattr__(self, "current", current)
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         """Validate the current waveform and normalize public units."""
 
         if not isinstance(self.current, Stimulus):
             raise TypeError("current must be an axonscope.stimulation.Stimulus.")
-        object.__setattr__(self, "position_um", units.to_um(self.position_um))
+        object.__setattr__(
+            self,
+            "position_um",
+            units.require_length_um(self.position_um, name="position"),
+        )
         object.__setattr__(self, "current", self.current.as_unit("nanoampere"))
 
 
@@ -198,8 +211,8 @@ class AnalyticalExtracellularContext(ExtracellularContext):
     electrodes in the context.
     """
 
-    sigma: Any = 0.3
-    """Homogeneous medium conductivity. Plain numbers are interpreted as S/m."""
+    sigma: Any | None = None
+    """Homogeneous medium conductivity. If omitted, defaults to 0.3 S/m."""
 
     def __post_init__(self) -> None:
         """Validate analytical electrodes and normalize conductivity."""
@@ -212,7 +225,12 @@ class AnalyticalExtracellularContext(ExtracellularContext):
                 raise TypeError(
                     "AnalyticalExtracellularContext requires analytical electrodes."
                 )
-        object.__setattr__(self, "sigma", units.to_S_per_m(self.sigma))
+        sigma = (
+            0.3
+            if self.sigma is None
+            else units.require_conductivity_S_per_m(self.sigma, name="sigma")
+        )
+        object.__setattr__(self, "sigma", sigma)
 
     @property
     def sigma_S_m(self) -> float:
@@ -223,7 +241,8 @@ class AnalyticalExtracellularContext(ExtracellularContext):
     def with_electrodes(self, electrodes: Sequence["Electrode"]) -> "AnalyticalExtracellularContext":
         """Return an analytical context with the same conductivity."""
 
-        return AnalyticalExtracellularContext(electrodes=electrodes, sigma=self.sigma)
+        sigma = units.Q_(self.sigma, "siemens / meter")
+        return AnalyticalExtracellularContext(electrodes=electrodes, sigma=sigma)
 
     def footprint_for_electrode(
         self,
@@ -277,6 +296,45 @@ class AnalyticalExtracellularContext(ExtracellularContext):
             footprint,
             f"{voltage_unit_label} / {current_unit_label}",
             dtype=float,
+        )
+
+    def build_footprint(
+        self,
+        electrode: "AnalyticalElectrode",
+        positions: ArrayLike,
+        *,
+        axon_y: Any | None = None,
+        axon_z: Any | None = None,
+        source_id: str | None = None,
+        axon_id: AxonId | None = None,
+    ):
+        """Build a static `ExtracellularFootprint` for one analytical electrode."""
+
+        from axonscope.stimulation.extracellular import ExtracellularFootprint
+
+        positions_um = units.require_length_array_um(
+            positions,
+            name="positions",
+            dtype=float,
+        )
+        values = self.footprint_for_electrode(
+            electrode,
+            positions_um * 1e-6,
+            axon_y_um=0.0 if axon_y is None else axon_y,
+            axon_z_um=0.0 if axon_z is None else axon_z,
+        )
+        if axon_id is not None and not isinstance(axon_id, AxonId):
+            raise TypeError("axon_id must be an AxonId.")
+        axon_ids = None if axon_id is None else (axon_id,)
+        return ExtracellularFootprint(
+            values=values,
+            positions=units.Q_(positions_um, "micrometer"),
+            axon_ids=axon_ids,
+            source_id=source_id,
+            metadata={
+                "builder": "AnalyticalExtracellularContext.build_footprint",
+                "sigma_S_m": self.sigma_S_m,
+            },
         )
 
     def activation_function(

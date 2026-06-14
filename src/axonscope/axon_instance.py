@@ -1,4 +1,4 @@
-"""Simulation protocol attached to a descriptive axon."""
+"""Concrete axon instance used by simulation execution."""
 
 from __future__ import annotations
 
@@ -16,39 +16,44 @@ from axonscope.stimulation import (
 from axonscope.utils import units
 
 
-class AxonSimulation:
-    """An axon plus the protocol needed to simulate it.
+class AxonInstance:
+    """One concrete occurrence of a descriptive axon.
 
     `Axon` objects remain purely descriptive: geometry, layout, cable
-    formulation, and membrane models. `AxonSimulation` is the user-facing
-    object that adds spatial placement and stimulation contexts.
+    formulation, and membrane models. `AxonInstance` is the current
+    user-facing object that adds transitional spatial placement and stimulation
+    contexts. The future root `AxonSimulation` will own executable run
+    definitions across one or more instances.
 
     Parameters
     ----------
     axon:
         Descriptive axon model.
-    x_offset_um, y_um, z_um:
-        Axon origin in the global simulation frame. Plain numbers are
-        interpreted as micrometers; Pint quantities are converted.
+    x_offset, y, z:
+        Axon origin in the global simulation frame. Values must carry length
+        units when provided; omitted coordinates default to 0 um.
     """
 
     def __init__(
         self,
         axon: Axon,
         *,
-        x_offset_um: Any = 0.0,
-        y_um: Any = 0.0,
-        z_um: Any = 0.0,
+        x_offset: Any | None = None,
+        y: Any | None = None,
+        z: Any | None = None,
     ) -> None:
         if not isinstance(axon, Axon):
             raise TypeError("axon must be an axonscope.axons.Axon instance.")
         self.axon = axon
         self.intracellular_contexts: list[IntracellularContext] = []
-        self.intracellular_clamps = self.intracellular_contexts
         self.extracellular_context: ExtracellularContext | None = None
-        self.x_offset_um = units.to_um(x_offset_um)
-        self.y_um = units.to_um(y_um)
-        self.z_um = units.to_um(z_um)
+        self.x_offset_um = (
+            0.0
+            if x_offset is None
+            else units.require_length_um(x_offset, name="x_offset")
+        )
+        self.y_um = 0.0 if y is None else units.require_length_um(y, name="y")
+        self.z_um = 0.0 if z is None else units.require_length_um(z, name="z")
         self.Veinit = units.to_mV(0.0)
         self._use_extracellular_override: bool | None = None
         self._xraxial_override: np.ndarray | None = None
@@ -83,22 +88,26 @@ class AxonSimulation:
     def set_position(
         self,
         *,
-        x_offset_um: Any = 0.0,
-        y_um: Any = 0.0,
-        z_um: Any = 0.0,
+        x_offset: Any | None = None,
+        y: Any | None = None,
+        z: Any | None = None,
     ) -> None:
         """Set the axon's spatial offset in the global simulation frame.
 
         Parameters
         ----------
-        x_offset_um, y_um, z_um:
-            Axon origin in micrometers. Plain numbers are interpreted as
-            micrometers; Pint quantities are converted.
+        x_offset, y, z:
+            Axon origin in the global simulation frame. Values must carry
+            length units when provided; omitted coordinates reset to 0 um.
         """
 
-        self.x_offset_um = units.to_um(x_offset_um)
-        self.y_um = units.to_um(y_um)
-        self.z_um = units.to_um(z_um)
+        self.x_offset_um = (
+            0.0
+            if x_offset is None
+            else units.require_length_um(x_offset, name="x_offset")
+        )
+        self.y_um = 0.0 if y is None else units.require_length_um(y, name="y")
+        self.z_um = 0.0 if z is None else units.require_length_um(z, name="z")
 
     def add_intracellular_context(
         self,
@@ -123,17 +132,17 @@ class AxonSimulation:
     def add_current_clamp(
         self,
         *,
-        position_um: Any,
+        position: Any,
         current: Stimulus,
     ) -> None:
         """Convenience wrapper for adding an `IntracellularCurrentClamp`.
 
-        Plain numeric positions are interpreted as micrometers, and plain
-        stimulus amplitudes are interpreted as nanoamperes.
+        `position` must carry length units. Plain stimulus amplitudes are
+        interpreted as nanoamperes.
         """
 
         self.add_intracellular_context(
-            context=IntracellularCurrentClamp(position_um=position_um, current=current)
+            context=IntracellularCurrentClamp(position=position, current=current)
         )
 
     def clear_intracellular_contexts(self) -> None:
@@ -167,7 +176,7 @@ class AxonSimulation:
 
         if self.extracellular_context is not None and not replace:
             raise ValueError(
-                "AxonSimulation accepts one extracellular context. "
+                "AxonInstance accepts one extracellular context. "
                 "Use ExtracellularContext(electrodes=[...]) for multiple electrodes, "
                 "or pass replace=True."
             )
@@ -183,7 +192,7 @@ class AxonSimulation:
             return ()
         return (self.extracellular_context,)
 
-    def clear_extracellular_contexts(self) -> None:
+    def clear_extracellular_context(self) -> None:
         """Remove the extracellular stimulation context."""
 
         self.extracellular_context = None
@@ -274,19 +283,19 @@ class AxonSimulation:
         return vext
 
 
-def as_axon_simulation(value: Axon | AxonSimulation) -> AxonSimulation:
-    """Return `value` as an `AxonSimulation`.
+def as_axon_instance(value: Axon | AxonInstance) -> AxonInstance:
+    """Return `value` as an `AxonInstance`.
 
-    Passing a pure `Axon` creates a no-stimulation protocol around it. This
+    Passing a pure `Axon` creates a no-stimulation instance around it. This
     keeps low-level solver calls convenient while preserving `Axon` as a pure
     descriptive object.
     """
 
-    if isinstance(value, AxonSimulation):
+    if isinstance(value, AxonInstance):
         return value
     if isinstance(value, Axon):
-        return AxonSimulation(value)
-    raise TypeError(f"expected Axon or AxonSimulation, got {type(value)!r}.")
+        return AxonInstance(value)
+    raise TypeError(f"expected Axon or AxonInstance, got {type(value)!r}.")
 
 
-__all__ = ["AxonSimulation", "as_axon_simulation"]
+__all__ = ["AxonInstance", "as_axon_instance"]

@@ -11,7 +11,7 @@ Protocol:
 import numpy as np
 import pytest
 
-from axonscope import AxonSimulation, degC, um
+from axonscope import AxonInstance, S_per_m, degC, ms, um
 from axonscope.results.analysis import rasterize
 from axonscope.axons.unmyelinated import Tigerholm
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
@@ -32,13 +32,17 @@ DT = 0.025
 def _has_ap(d: float, amp_uA: float) -> bool:
     axon = Tigerholm(length=L_UM * um, diameter=d * um, compartments=NX, celsius=CELSIUS)
     x0_um = L_UM / 2.0
-    electrode = PointSourceElectrode(x0_m=x0_um * 1e-6, y0_m=ELECTRODE_Y_UM * 1e-6, z0_m=0.0)
-    stim = Stimulus.pulse(start=5.0, amplitude=amp_uA * 1e-6, duration=PULSE_DURATION_MS)
-    sim = AxonSimulation(axon)
+    electrode = PointSourceElectrode(x=x0_um * um, y=ELECTRODE_Y_UM * um, z=0.0 * um)
+    stim = Stimulus.pulse(
+        start=5.0 * ms,
+        amplitude=amp_uA * 1e-6,
+        duration=PULSE_DURATION_MS * ms,
+    )
+    sim = AxonInstance(axon)
     sim.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stim)],
-            sigma=SIGMA_S_M,
+            sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
     )

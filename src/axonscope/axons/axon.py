@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import numpy as np
+
 from axonscope.utils import units
 from axonscope.axons.formulation import (
+    CableFormulation,
     Formulation,
     normalize_formulation,
     resolve_layout_formulation,
@@ -31,7 +36,8 @@ class Axon:
         self,
         *,
         layout: Layout,
-        formulation: Formulation | None = None,
+        formulation: CableFormulation | None = None,
+        diameter: Any | None = None,
         v_init: units.voltage_t = _DEFAULT_V_INIT,
         temperature: units.temperature_t = _DEFAULT_TEMPERATURE,
     ) -> None:
@@ -44,6 +50,10 @@ class Axon:
         formulation:
             Optional cable formulation. When omitted, AxonScope infers it from
             the presence or absence of periaxonal layers.
+        diameter:
+            Optional nominal axon diameter, with units. Templates pass the
+            constructor diameter here so it remains easy to inspect even when
+            their internal layout has section-specific diameters.
         v_init:
             Initial membrane potential, with units convertible to millivolts.
         temperature:
@@ -54,7 +64,13 @@ class Axon:
             raise TypeError("layout must be an axonscope.axons.Layout.")
         self._layout: Layout
         self.layout = layout
-        self.formulation = normalize_formulation(formulation)
+        normalize_formulation(formulation)
+        self.formulation = formulation
+        self._diameter_um = (
+            None
+            if diameter is None
+            else units.require_length_um(diameter, name="diameter")
+        )
         self.v_init = units.require_voltage_mV(v_init, name="v_init")
         self.temperature = units.require_temperature_degC(temperature, name="temperature")
 
@@ -89,6 +105,32 @@ class Axon:
         """Total axon length in micrometers."""
 
         return self.layout.length_um
+
+    @property
+    def diameter(self) -> float:
+        """Nominal axon diameter in micrometers.
+
+        Template axons return the diameter passed to their constructor. Custom
+        layouts without an explicit nominal diameter return the shared diameter
+        when all compartments are uniform. For genuinely heterogeneous layouts,
+        use `diameter_values(...)` to inspect per-compartment values.
+        """
+
+        if self._diameter_um is not None:
+            return float(self._diameter_um)
+        diameters_um = self.diameter_values(unit="micrometer")
+        reference = float(diameters_um[0])
+        if np.allclose(diameters_um, reference, rtol=1e-9, atol=1e-12):
+            return reference
+        raise ValueError(
+            "axon has non-uniform diameters; use axon.diameter_values(unit=...) "
+            "for per-compartment values."
+        )
+
+    def diameter_values(self, *, unit: Any = "micrometer") -> np.ndarray:
+        """Return compartment diameters as plain values in `unit`."""
+
+        return self.layout.diameter_values(unit=unit)
 
 
 __all__ = ["Axon"]

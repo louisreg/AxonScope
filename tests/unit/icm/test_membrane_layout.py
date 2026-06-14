@@ -6,6 +6,7 @@ from axonscope.channel_models.axnode import AxnodeICM
 from axonscope.channel_models.passive import PassiveICM
 from axonscope.icm import CompartmentMembraneLayout, HeterogeneousICMBackend
 from axonscope.solvers.runtime import compile_membrane_model
+from axonscope.utils import units
 
 
 def test_compartment_membrane_layout_builds_heterogeneous_backend():
@@ -44,7 +45,7 @@ def test_compartment_membrane_layout_builds_heterogeneous_backend():
 
 def test_heterogeneous_membrane_layout_rejects_stateful_components():
     stateful = compile_membrane_model(
-        membranes.Tigerholm(diameter_um=1.0),
+        membranes.Tigerholm(diameter=1.0 * units.ureg.um),
     )
     layout = CompartmentMembraneLayout(
         [

@@ -4,7 +4,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.results.analysis import conduction_velocity, rasterize
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
@@ -18,8 +18,8 @@ from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
-def _hh_axon(Nx: int = 51) -> AxonSimulation:
-    axon = AxonSimulation(
+def _hh_axon(Nx: int = 51) -> AxonInstance:
+    axon = AxonInstance(
         HodgkinHuxley(
             length=1000.0 * axs.um,
             diameter=0.5 * axs.um,
@@ -27,8 +27,8 @@ def _hh_axon(Nx: int = 51) -> AxonSimulation:
             celsius=6.3 * axs.degC,
         )
     )
-    axon.add_current_clamp(position_um=500.0,
-        current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
+    axon.add_current_clamp(position=500.0 * axs.um,
+        current=Stimulus.pulse(start=1.0 * axs.ms, duration=1.0 * axs.ms, amplitude=2.0),
     )
     return axon
 
@@ -48,9 +48,9 @@ CN_FAMILY = [
 def test_cranknicholson_dense_and_tridiagonal_match():
     x_uniform = jnp.linspace(-1.0, 1.0, 31, dtype=jnp.float32)
     x_vec = (jnp.sinh(1.5 * x_uniform) / jnp.sinh(1.5) + 1.0) * 150.0
-    axon = AxonSimulation(HodgkinHuxley(x=x_vec * axs.um, diameter=1.0 * axs.um))
-    axon.add_current_clamp(position_um=150.0,
-        current=Stimulus.pulse(start=0.5, duration=0.5, amplitude=5.0),
+    axon = AxonInstance(HodgkinHuxley(x=x_vec * axs.um, diameter=1.0 * axs.um))
+    axon.add_current_clamp(position=150.0 * axs.um,
+        current=Stimulus.pulse(start=0.5 * axs.ms, duration=0.5 * axs.ms, amplitude=5.0),
     )
 
     dense = CrankNicholson_unoptimized().solve(axon, tsim=2.0, dt=0.01)
@@ -135,7 +135,7 @@ def test_cranknicholson_can_record_generic_membrane_observables():
 
 
 def test_cranknicholson_aggregates_duplicate_current_and_conductance_names():
-    axon = AxonSimulation(
+    axon = AxonInstance(
         HodgkinHuxley(
             length=1000.0 * axs.um,
             diameter=0.5 * axs.um,
@@ -146,8 +146,8 @@ def test_cranknicholson_aggregates_duplicate_current_and_conductance_names():
             e_pas=-70.0,
         )
     )
-    axon.add_current_clamp(position_um=500.0,
-        current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=2.0),
+    axon.add_current_clamp(position=500.0 * axs.um,
+        current=Stimulus.pulse(start=1.0 * axs.ms, duration=0.5 * axs.ms, amplitude=2.0),
     )
     res = CrankNicholson().solve(axon, tsim=2.0, dt=0.01, record_observables=True)
 

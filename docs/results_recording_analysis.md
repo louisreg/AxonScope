@@ -19,14 +19,13 @@ outputs without materializing the whole voltage movie.
 
 ```python
 recording = axs.Recording(
-    variables=["Vm", "gates", "currents"],
-    spatial_mode="full",
+    signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
 )
 
 result = axs.simulate(
     sim,
-    duration_ms=5.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=recording,
 )
 ```
@@ -34,31 +33,49 @@ result = axs.simulate(
 Current support:
 
 - single-axon runs always return `Vm`;
-- single-axon runs can filter observable groups such as `gates` and `currents`;
+- single-axon runs can include observable groups such as `gates`, `currents`,
+  and `conductances` alongside `Vm`;
 - pool runs currently support `Vm` recording with `full`, `center`, `probes`,
   or explicit compartment `indices` spatial modes;
 - single-axon spatial filters, position-based recording, temporal subsampling,
   and pool observable groups are explicit future work.
+
+Current solver handling:
+
+- `axs.simulate(...)` validates the public `Recording`, forwards
+  `record_observables=True` to the scalar solver when observable groups are
+  requested, then filters `SimResult.recordings` to the requested groups.
+- `axs.simulate_pool(...)` translates public pool Vm recording policies to
+  solver-level `BatchRecording` through `Recording.to_batch_options()`. Scalar
+  fallback rows are filtered after the solve so public `record_indices` match
+  the requested center/probe/index columns.
+- Low-level solvers and batch kernels still receive numerical flags/options;
+  they do not own the user-facing `Recording` contract.
 
 Convenience constructors:
 
 ```python
 axs.Recording.voltage()
 axs.Recording.full()
-axs.Recording.center(["Vm"])
-axs.Recording.probes(["Vm"], count=8)
-axs.Recording.indices([0, 5, 10], ["Vm"])
+axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES])
+axs.Recording.center(axs.signals.Vm)
+axs.Recording.probes(axs.signals.Vm, count=8)
+axs.Recording.indices([0, 5, 10], axs.signals.Vm)
 ```
 
-Plain numbers use AxonScope's canonical public units. `positions_um` is stored in
-micrometers and `sample_dt_ms` is stored in milliseconds. Pint quantities are
-accepted and normalized at construction time:
+`Recording.only(axs.signals.GATES)` is a valid policy object, but current
+public solvers still require Vm storage. Include `axs.signals.Vm` when
+requesting observable groups.
+
+`positions` must carry length units and is stored internally as `positions_um`.
+`sample_dt` must carry time units and is stored internally as `sample_dt_ms`.
+Pint quantities are accepted and normalized at construction time:
 
 ```python
 recording = axs.Recording(
-    variables="Vm",
-    positions_um=[0.25 * axs.mm],
-    sample_dt_ms=10 * axs.us,
+    signals=axs.signals.Vm,
+    positions=[0.25 * axs.mm],
+    sample_dt=10 * axs.us,
 )
 ```
 
@@ -101,9 +118,9 @@ Pool runs return plain result lists:
 ```python
 results = axs.simulate_pool(
     pool,
-    duration_ms=5.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
-    recording=axs.Recording.center(["Vm"]),
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.center(axs.signals.Vm),
 )
 
 for result in results:
@@ -152,7 +169,7 @@ Post-hoc activation criteria live under `axs.results`:
 event = axs.results.ActivationCriterion(
     threshold=-20 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="distal",
+    target=axs.positions.DISTAL,
 ).evaluate(result)
 
 event.activated
@@ -182,16 +199,22 @@ the same position/recording guardrails.
 
 ## Future Observers
 
-The long-term solver-side mechanism should be observer-style:
+Solver-side observers are not implemented yet. The current runnable path is to
+record traces with `Recording` and then use post-hoc analysis helpers such as
+`axs.results.analysis.rasterize(...)`, `axs.results.analysis.peak_voltage(...)`,
+and `axs.results.ActivationCriterion`.
+
+The long-term solver-side mechanism should be observer-style. This is a future
+API sketch, not current runnable code:
 
 ```python
 result = axs.simulate(
     sim,
-    duration_ms=5.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
     observers=[
-        axs.results.analysis.RasterObserver(threshold_mV=-10.0),
-        axs.results.analysis.PeakVoltageObserver(),
+        axs.results.RasterObserver(threshold_mV=-10.0),
+        axs.results.PeakVoltageObserver(),
     ],
 )
 ```

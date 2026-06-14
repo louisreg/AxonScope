@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonSimulation, degC, mV, um
+from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
@@ -167,8 +167,8 @@ def _make_hh_axon(d: float):
         g_pas=0.001,
         e_pas=-70.0,
     )
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=500.0, current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=500.0 * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.5 * ms, amplitude=1.0))
     sim.comparison_sample_position_um = 500.0
     return sim
 
@@ -181,8 +181,8 @@ def _make_hh_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_rattay_axon(d: float):
     ax = RattayAberham(length=1000.0 * um, diameter=d * um, compartments=101, celsius=37.0 * degC)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=500.0, current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=1.0))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=500.0 * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.5 * ms, amplitude=1.0))
     sim.comparison_sample_position_um = 500.0
     return sim
 
@@ -195,8 +195,8 @@ def _make_rattay_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_sundt_axon(d: float):
     ax = Sundt(length=2000.0 * um, diameter=d * um, compartments=101, celsius=37.0 * degC)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=1000.0, current=Stimulus.pulse(start=1.0, duration=0.5, amplitude=0.5))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=1000.0 * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.5 * ms, amplitude=0.5))
     sim.comparison_sample_position_um = 1000.0
     return sim
 
@@ -209,8 +209,8 @@ def _make_sundt_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_tigerholm_axon(d: float):
     ax = Tigerholm(length=5000.0 * um, diameter=d * um, compartments=101, celsius=37.0 * degC)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=2500.0, current=Stimulus.pulse(start=5.0, duration=1.0, amplitude=0.5))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=2500.0 * um, current=Stimulus.pulse(start=5.0 * ms, duration=1.0 * ms, amplitude=0.5))
     sim.comparison_sample_position_um = 2500.0
     return sim
 
@@ -223,8 +223,8 @@ def _make_tigerholm_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_schild94_axon(d: float):
     ax = Schild94(length=3000.0 * um, diameter=d * um, compartments=51)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=1500.0, current=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=1500.0 * um, current=Stimulus.pulse(start=2.0 * ms, duration=1.0 * ms, amplitude=1.0))
     sim.comparison_sample_position_um = 1500.0
     return sim
 
@@ -237,8 +237,8 @@ def _make_schild94_nrv(d: float, _axon_as, dt_ms: float):
 
 def _make_schild97_axon(d: float):
     ax = Schild97(length=3000.0 * um, diameter=d * um, compartments=51)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=1500.0, current=Stimulus.pulse(start=2.0, duration=1.0, amplitude=1.0))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=1500.0 * um, current=Stimulus.pulse(start=2.0 * ms, duration=1.0 * ms, amplitude=1.0))
     sim.comparison_sample_position_um = 1500.0
     return sim
 
@@ -252,8 +252,8 @@ def _make_schild97_nrv(d: float, _axon_as, dt_ms: float):
 def _make_mrg_axon(d: float):
     ax = MRG(diameter=d * um, nodes=11)
     stim_pos_um = _mrg_stim_position(ax)
-    sim = AxonSimulation(ax)
-    sim.add_current_clamp(position_um=stim_pos_um, current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(position=stim_pos_um * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=2.0))
     sim.comparison_sample_position_um = stim_pos_um
     return sim
 

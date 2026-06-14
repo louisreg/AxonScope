@@ -7,7 +7,7 @@ With NRV installed, NRV can be used only to generate the fiber table:
     python examples/advanced/example_01_pool_dispatch_nrv.py --source nrv --fibers 24
 
 The simulation stays on the public AxonScope API:
-`list[AxonSimulation] -> dispatcher plan -> simulate_pool`.
+`list[AxonInstance] -> dispatcher plan -> simulate_pool`.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ FiberKind = Literal["hh", "rattay", "mrg"]
 
 @dataclass(frozen=True)
 class FiberRow:
-    """One positioned fiber before it is turned into an `AxonSimulation`."""
+    """One positioned fiber before it is turned into an `AxonInstance`."""
 
     kind: FiberKind
     diameter_um: float
@@ -65,14 +65,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     results = axs.simulate_pool(
         simulations,
-        duration_ms=args.duration_ms * axs.ms,
-        dt_ms=args.dt_ms * axs.ms,
+        duration=args.duration_ms * axs.ms,
+        dt=args.dt_ms * axs.ms,
         batch_options=(
             None
             if args.time_chunk_steps is None
             else axs.solvers.BatchOptions.full(time_chunk_steps=args.time_chunk_steps)
         ),
-        recording=axs.Recording.center("Vm"),
+        recording=axs.Recording.center(axs.signals.Vm),
         progress=args.progress,
     )
     print_summary(rows, results)
@@ -102,9 +102,9 @@ def make_extracellular_context(*, length: Any) -> axs.AnalyticalExtracellularCon
     """Create one analytical extracellular context shared by every fiber."""
 
     electrode = axs.PointSourceElectrode(
-        x_um=length / 2.0,
-        y_um=0.0 * axs.um,
-        z_um=0.0 * axs.um,
+        x=length / 2.0,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
     )
     stimulus = axs.Stimulus.pulse(
         start=0.10 * axs.ms,
@@ -223,19 +223,19 @@ def build_simulation(
     mrg_nodes: int,
     extracellular: axs.ExtracellularContext,
     index: int,
-) -> axs.AxonSimulation:
+) -> axs.AxonInstance:
     """Create one positioned axon simulation from a pool row."""
 
     axon = build_axon(row, length=length, mrg_nodes=mrg_nodes)
-    sim = axs.AxonSimulation(
+    sim = axs.AxonInstance(
         axon,
-        y_um=row.y_um * axs.um,
-        z_um=row.z_um * axs.um,
-        x_offset_um=row.x_offset_um * axs.um,
+        y=row.y_um * axs.um,
+        z=row.z_um * axs.um,
+        x_offset=row.x_offset_um * axs.um,
     )
     sim.add_extracellular_context(context=extracellular)
     sim.add_current_clamp(
-        position_um=stimulation_position(axon, length=length),
+        position=stimulation_position(axon, length=length),
         current=axs.Stimulus.pulse(
             start=(0.05 + 0.005 * (index % 3)) * axs.ms,
             duration=0.04 * axs.ms,

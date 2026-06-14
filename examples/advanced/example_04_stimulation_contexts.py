@@ -21,7 +21,7 @@ from axonscope.solvers import CrankNicholson
 
 
 def _solve(axon: axs.axons.Axon, context: axs.ExtracellularContext):
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     sim.add_extracellular_context(context=context)
     return CrankNicholson().solve(sim, tsim=1.6 * axs.ms, dt=0.02 * axs.ms)
 
@@ -33,8 +33,8 @@ def main() -> None:
     t = np.linspace(0.0, 1.6, 161) * axs.ms
 
     base_electrode = axs.PointSourceElectrode(
-        x_um=center_x,
-        z_um=100.0 * axs.um,
+        x=center_x,
+        z=100.0 * axs.um,
     )
     cathodic = axs.Stimulus.pulse(
         start=0.45 * axs.ms,
@@ -57,12 +57,12 @@ def main() -> None:
     )
 
     left_electrode = axs.PointSourceElectrode(
-        x_um=center_x - 250.0 * axs.um,
-        z_um=500.0 * axs.um,
+        x=center_x - 250.0 * axs.um,
+        z=500.0 * axs.um,
     )
     right_electrode = axs.PointSourceElectrode(
-        x_um=center_x + 250.0 * axs.um,
-        z_um=500.0 * axs.um,
+        x=center_x + 250.0 * axs.um,
+        z=500.0 * axs.um,
     )
     bipolar_context = axs.AnalyticalExtracellularContext(
         electrodes=[

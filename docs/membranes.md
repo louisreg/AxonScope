@@ -45,9 +45,10 @@ src/axonscope/membranes/
 
 ## Units
 
-Plain numbers are interpreted in AxonScope's canonical membrane units. Pint
-quantities are accepted and converted at construction time. After construction,
-`MembraneModel.params` stores plain floats.
+Most scalar membrane parameters may be passed as plain numbers in AxonScope's
+canonical membrane units. Pint quantities are accepted and converted at
+construction time. Geometry-like public parameters such as `diameter` must carry
+length units. After construction, `MembraneModel.params` stores plain floats.
 
 Canonical units:
 
@@ -61,8 +62,9 @@ Canonical units:
 | Tigerholm concentrations | `millimolar` |
 | Tigerholm pump current density | `milliampere / centimeter ** 2` |
 
-The explicit suffix parameters keep their suffix unit, for example
-`ena_mV`, `diameter_um`, and `gnabar_S_cm2`.
+Internal parameter keys may keep canonical suffixes, for example `ena_mV`,
+`diameter_um`, and `gnabar_S_cm2`; public constructor arguments should prefer
+quantity-oriented names such as `diameter`.
 
 ```python
 import axonscope as axs
@@ -76,6 +78,11 @@ hh = axs.membranes.HodgkinHuxley(
 passive = axs.membranes.Passive(
     Rm=10_000.0 * axs.ohm * axs.cm**2,
     EL=-70.0 * axs.mV,
+)
+
+tigerholm = axs.membranes.Tigerholm(
+    diameter=1.0 * axs.um,
+    celsius=37.0 * axs.degC,
 )
 ```
 

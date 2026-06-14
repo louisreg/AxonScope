@@ -261,6 +261,12 @@ def require_time_ms(value: time_t, *, name: str) -> float:
     return require_quantity(value, TIME, name=name)
 
 
+def require_time_array_ms(value: time_t, *, name: str, dtype: Any = float) -> np.ndarray:
+    """Return a unit-bearing time array as milliseconds."""
+
+    return require_quantity_array(value, TIME, name=name, dtype=dtype)
+
+
 def require_voltage_mV(value: voltage_t, *, name: str) -> float:
     """Return a unit-bearing voltage as millivolts."""
 
@@ -271,6 +277,18 @@ def require_current_A(value: current_t, *, name: str) -> float:
     """Return a unit-bearing current as amperes."""
 
     return require_quantity(value, CURRENT, name=name)
+
+
+def require_current_uA(value: current_t, *, name: str) -> float:
+    """Return a unit-bearing current as microamperes."""
+
+    return require_current_A(value, name=name) * 1e6
+
+
+def require_current_array_uA(value: current_t, *, name: str, dtype: Any = float) -> np.ndarray:
+    """Return a unit-bearing current array as microamperes."""
+
+    return require_quantity_array(value, CURRENT, name=name, dtype=dtype) * 1e6
 
 
 def require_temperature_degC(value: temperature_t, *, name: str) -> float:
@@ -571,11 +589,14 @@ __all__ = [
     "require_capacitance_density_uF_per_cm2",
     "require_conductance_density_S_per_cm2",
     "require_current_A",
+    "require_current_array_uA",
+    "require_current_uA",
     "require_length_array_um",
     "require_length_um",
     "require_periaxonal_resistance_MOhm_per_cm",
     "require_scalar_quantity",
     "require_temperature_degC",
+    "require_time_array_ms",
     "require_time_ms",
     "require_voltage_mV",
     "short_unit_label",

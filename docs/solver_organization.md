@@ -42,9 +42,11 @@ arrays are integrated*. In particular:
 ## Time Grid
 
 Current kernels use a fixed time step for every integration step. Therefore
-`duration_ms` must be an integer multiple of `dt_ms`; otherwise the runtime
-raises `ValueError` instead of silently rounding up and simulating past the
-requested final time.
+the internal millisecond duration must be an integer multiple of the internal
+millisecond step; otherwise the runtime raises `ValueError` instead of silently
+rounding up and simulating past the requested final time. Public wrappers use
+`duration` and `dt`, then convert them to internal `duration_ms`/`dt_ms` values
+at the solver boundary.
 
 The recorded time vector contains post-step samples:
 

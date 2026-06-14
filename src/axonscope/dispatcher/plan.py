@@ -6,7 +6,7 @@ from typing import Any, Iterable, Literal, Sequence
 
 import numpy as np
 
-from axonscope.axon_simulation import AxonSimulation, as_axon_simulation
+from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.solvers.axon_runtime import SolverAxon, build_solver_axon
 
@@ -19,7 +19,7 @@ class DispatchItem:
     """Normalized internal row for one input axon simulation."""
 
     index: int
-    simulation: AxonSimulation
+    simulation: AxonInstance
     solver_axon: SolverAxon
 
 
@@ -73,7 +73,7 @@ class DispatchPlan:
     groups: tuple[DispatchGroup, ...]
 
 
-def build_dispatch_plan(axons: Sequence[Axon | AxonSimulation]) -> DispatchPlan:
+def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
     """Normalize and group axon simulations before execution."""
 
     items = _normalize_dispatch_items(axons)
@@ -106,12 +106,12 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonSimulation]) -> DispatchPlan:
     return DispatchPlan(items=items, groups=groups)
 
 
-def _normalize_dispatch_items(axons: Sequence[Axon | AxonSimulation]) -> tuple[DispatchItem, ...]:
+def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[DispatchItem, ...]:
     """Validate public pool items and preserve input order."""
 
     items = []
     for index, axon in enumerate(axons):
-        simulation = as_axon_simulation(axon)
+        simulation = as_axon_instance(axon)
         items.append(
             DispatchItem(
                 index=index,

@@ -18,7 +18,7 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from axonscope import AxonSimulation, degC, mV, um
+from axonscope import AxonInstance, degC, mV, um
 from axonscope.axons import HodgkinHuxley, MRG
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.solvers import CrankNicholson
@@ -380,7 +380,7 @@ def _make_axonscope_case(case: GridCase):
             g_pas=0.001,
             e_pas=-70.0,
         )
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         simulation.add_current_clamp(position_um=500.0,
             current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
         )
@@ -391,7 +391,7 @@ def _make_axonscope_case(case: GridCase):
         raise ValueError("MRG cases require nodes.")
     axon = MRG(diameter=case.diameter_um * um, nodes=case.nodes)
     center_node_idx, center_node_pos_um = _mrg_center_node(axon)
-    simulation = AxonSimulation(axon)
+    simulation = AxonInstance(axon)
     simulation.comparison_sample_position_um = center_node_pos_um
 
     if case.model == "mrg_intracellular":

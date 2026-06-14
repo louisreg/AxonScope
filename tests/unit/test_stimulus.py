@@ -25,9 +25,9 @@ def test_constant_stimulus():
 
 def test_pulse_stimulus():
     stim = Stimulus.pulse(
-        start=1.0,
+        start=1.0 * axs.ms,
         amplitude=3.0,
-        duration=2.0,
+        duration=2.0 * axs.ms,
         baseline=0.0,
     )
 
@@ -40,10 +40,10 @@ def test_pulse_stimulus():
 
 def test_biphasic_stimulus():
     stim = Stimulus.biphasic(
-        start=1.0,
+        start=1.0 * axs.ms,
         cathodic_amplitude=10.0,
-        cathodic_duration=0.2,
-        interphase=0.1,
+        cathodic_duration=0.2 * axs.ms,
+        interphase=0.1 * axs.ms,
     )
 
     vals = stim.evaluate([1.05, 1.25, 1.35])
@@ -60,11 +60,11 @@ def test_biphasic_stimulus():
 
 def test_ramp_linear():
     stim = Stimulus.ramp(
-        start=0.0,
-        duration=1.0,
+        start=0.0 * axs.ms,
+        duration=1.0 * axs.ms,
         start_value=0.0,
         stop_value=10.0,
-        dt=0.1,
+        dt=0.1 * axs.ms,
     )
 
     vals = stim.evaluate([0.0, 0.5, 1.0])
@@ -156,7 +156,7 @@ def test_multiply_scalar():
 
 
 def test_add_two_stimuli():
-    a = Stimulus.pulse(1.0, 2.0, 1.0)
+    a = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
     b = Stimulus.constant(1.0)
 
     c = a + b
@@ -182,8 +182,8 @@ def test_sub_two_stimuli():
 # ==========================================================
 
 def test_shift():
-    stim = Stimulus.pulse(1.0, 3.0, 1.0)
-    shifted = stim.shifted(2.0)
+    stim = Stimulus.pulse(1.0 * axs.ms, 3.0, 1.0 * axs.ms)
+    shifted = stim.shifted(2.0 * axs.ms)
 
     vals = shifted.evaluate([1.5, 3.5])
 
@@ -210,8 +210,8 @@ def test_offset():
 # ==========================================================
 
 def test_synchronize():
-    a = Stimulus.pulse(1.0, 2.0, 1.0)
-    b = Stimulus.pulse(2.0, 3.0, 1.0)
+    a = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
+    b = Stimulus.pulse(2.0 * axs.ms, 3.0, 1.0 * axs.ms)
 
     sa, sb = a.synchronize(b)
 
@@ -224,7 +224,7 @@ def test_synchronize():
 # ==========================================================
 
 def test_compile_stimulus_callable():
-    stim = Stimulus.pulse(1.0, 5.0, 1.0)
+    stim = Stimulus.pulse(1.0 * axs.ms, 5.0, 1.0 * axs.ms)
     jstim = compile_stimulus(stim)
 
     val = float(jstim(1.5))
@@ -232,15 +232,15 @@ def test_compile_stimulus_callable():
 
 
 def test_physical_contexts_assign_canonical_current_units():
-    stim = Stimulus.pulse(1.0, 2.0, 1.0)
+    stim = Stimulus.pulse(1.0 * axs.ms, 2.0, 1.0 * axs.ms)
 
-    clamp = IntracellularCurrentClamp(position_um=100.0, current=stim)
+    clamp = IntracellularCurrentClamp(position=100.0 * axs.um, current=stim)
     assert isinstance(clamp, IntracellularContext)
     assert clamp.position_um == 100.0
     assert clamp.current.y_unit == "nanoampere"
     assert np.allclose(clamp.current.y, stim.y)
 
-    electrode = PointSourceElectrode(x_um=0.0, stimulus=stim)
+    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um, stimulus=stim)
     context = ExtracellularContext(electrodes=[electrode])
     assert context.electrodes[0].stimulus.y_unit == "ampere"
     assert np.allclose(context.electrodes[0].stimulus.y, stim.y)
@@ -263,3 +263,18 @@ def test_shape_mismatch_raises():
 def test_non_1d_raises():
     with pytest.raises(ValueError):
         Stimulus(np.zeros((2, 2)), np.zeros((2, 2)))
+
+
+def test_stimulus_constructors_require_time_units():
+    with pytest.raises(TypeError, match="start must include units compatible with time"):
+        Stimulus.pulse(start=1.0, amplitude=1.0, duration=1.0 * axs.ms)
+
+    with pytest.raises(TypeError, match="duration must include units compatible with time"):
+        Stimulus.pulse(start=1.0 * axs.ms, amplitude=1.0, duration=1.0)
+
+    with pytest.raises(TypeError, match="t must include units compatible with time"):
+        Stimulus.from_samples([0.0, 1.0], [0.0, 1.0])
+
+    stim = Stimulus.constant(1.0)
+    with pytest.raises(TypeError, match="dt must include units compatible with time"):
+        stim.shifted(1.0)

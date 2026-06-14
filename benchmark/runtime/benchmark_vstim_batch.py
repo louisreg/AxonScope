@@ -17,7 +17,7 @@ import numpy as np
 
 from axonscope import degC, um
 from axonscope.axons import HodgkinHuxley
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.dispatcher.runtime_batches import build_vstim_midpoint_batch
 from axonscope.solvers import (
@@ -224,7 +224,7 @@ def _make_scaled_vstim_context_batch(
     )
 
 
-def _build_hh_extracellular(nx: int) -> AxonSimulation:
+def _build_hh_extracellular(nx: int) -> AxonInstance:
     length_um = 400.0
     axon = HodgkinHuxley(
         length=length_um * um,
@@ -232,7 +232,7 @@ def _build_hh_extracellular(nx: int) -> AxonSimulation:
         compartments=nx,
         celsius=6.3 * degC,
     )
-    simulation = AxonSimulation(axon)
+    simulation = AxonInstance(axon)
     simulation.add_current_clamp(position_um=length_um / 2.0,
         current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )

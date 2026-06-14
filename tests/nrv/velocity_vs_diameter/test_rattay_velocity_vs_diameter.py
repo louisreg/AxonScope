@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pytest
 
-from axonscope import AxonSimulation, degC, um
+from axonscope import AxonInstance, degC, ms, um
 from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.results.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
@@ -31,8 +31,8 @@ def test_rattay_velocity_vs_diameter(save_dir="figures/nrv_tests"):
 
     for d in DIAMETERS:
         axon = RattayAberham(length=L * um, diameter=d * um, compartments=Nx, celsius=37.0 * degC)
-        sim = AxonSimulation(axon)
-        sim.add_current_clamp(position_um=L/2, current=Stimulus.pulse(start=T_START, duration=DURATION, amplitude=AMP))
+        sim = AxonInstance(axon)
+        sim.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=T_START * ms, duration=DURATION * ms, amplitude=AMP))
         res = CrankNicholson().solve(sim, tsim=TSIM, dt=DT)
 
         axon_nrv = nrv.unmyelinated(y=0, z=0, d=d, L=L, Nsec=Nx, dt=DT, v_init=-70)

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher.plan import DispatchGroup, DispatchPlan, build_dispatch_plan
 
 
-PoolLike = DispatchPlan | Sequence[Axon | AxonSimulation]
+PoolLike = DispatchPlan | Sequence[Axon | AxonInstance]
 
 
 def dispatch_method_for_group(group: DispatchGroup) -> str:

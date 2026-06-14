@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import ExtracellularContext, Stimulus
 from axonscope.stimulation.runtime import (
@@ -26,7 +26,7 @@ from axonscope.solvers.axon_runtime import SolverAxon
 from axonscope.solvers.common import simulation_step_count
 
 Array = Any
-AxonLike = Axon | AxonSimulation
+AxonLike = Axon | AxonInstance
 ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
 FootprintEngine = Literal["numpy", "jax"]
 

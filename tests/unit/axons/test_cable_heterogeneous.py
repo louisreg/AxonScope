@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 import axonscope as axs
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope.axons.myelinated import MRG
 from axonscope.axons import Axon, Layout, LayoutElement, Section
 from axonscope.axons.unmyelinated import HodgkinHuxley
@@ -36,7 +36,7 @@ def _heterogeneous_single_cable_axon(*, L: float, Nx: int, membranes=None, v_ini
                 for i in range(Nx)
             ]
         ),
-        formulation="single-cable",
+        formulation=axs.axons.CableFormulation.SINGLE_CABLE,
         v_init=v_init,
     )
 
@@ -135,9 +135,9 @@ def test_double_cable_backend_static_identity_is_structural():
 
 
 def test_heterogeneous_single_cable_stimulus_api():
-    ax = AxonSimulation(_heterogeneous_single_cable_axon(L=300.0, Nx=11))
-    ax.add_current_clamp(position_um=150.0,
-        current=Stimulus.pulse(start=0.2, duration=0.4, amplitude=1.0),
+    ax = AxonInstance(_heterogeneous_single_cable_axon(L=300.0, Nx=11))
+    ax.add_current_clamp(position=150.0 * axs.um,
+        current=Stimulus.pulse(start=0.2 * axs.ms, duration=0.4 * axs.ms, amplitude=1.0),
     )
 
     current_density = build_intracellular_current_density_fn(ax)

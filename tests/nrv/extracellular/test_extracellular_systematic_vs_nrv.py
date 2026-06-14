@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonSimulation, degC, mV, um
+from axonscope import AxonInstance, S_per_m, degC, mV, ms, um
 from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
@@ -97,19 +97,23 @@ def _attach_point_source_extra_as(
     amp_uA: float,
     start_ms: float,
     duration_ms: float,
-) -> AxonSimulation:
+) -> AxonInstance:
     x0_um = float(axon.length / 2.0)
     electrode = PointSourceElectrode(
-        x0_m=x0_um * 1e-6,
-        y0_m=ELECTRODE_Y_UM * 1e-6,
-        z0_m=ELECTRODE_Z_UM * 1e-6,
+        x=x0_um * um,
+        y=ELECTRODE_Y_UM * um,
+        z=ELECTRODE_Z_UM * um,
     )
-    stim = Stimulus.pulse(start=start_ms, amplitude=-amp_uA * 1e-6, duration=duration_ms)
-    sim = AxonSimulation(axon)
+    stim = Stimulus.pulse(
+        start=start_ms * ms,
+        amplitude=-amp_uA * 1e-6,
+        duration=duration_ms * ms,
+    )
+    sim = AxonInstance(axon)
     sim.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stim)],
-            sigma=SIGMA_S_M,
+            sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
     )
@@ -231,22 +235,22 @@ def _make_mrg_extra_axon(d: float):
     _, center_node_pos = _mrg_center_node_pos_um(ax)
     x0_um = float(ax.length / 2.0)
     electrode = PointSourceElectrode(
-        x0_m=x0_um * 1e-6,
-        y0_m=ELECTRODE_Y_UM * 1e-6,
-        z0_m=ELECTRODE_Z_UM * 1e-6,
+        x=x0_um * um,
+        y=ELECTRODE_Y_UM * um,
+        z=ELECTRODE_Z_UM * um,
     )
     stim = Stimulus.biphasic(
-        start=1.0,
+        start=1.0 * ms,
         cathodic_amplitude=80.0 * 1e-6,
-        cathodic_duration=0.08,
+        cathodic_duration=0.08 * ms,
         anodic_amplitude=20.0 * 1e-6,
-        interphase=0.04,
+        interphase=0.04 * ms,
     )
-    sim = AxonSimulation(ax)
+    sim = AxonInstance(ax)
     sim.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stim)],
-            sigma=SIGMA_S_M,
+            sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
     )

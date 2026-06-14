@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeAlias, cast
+from enum import Enum
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
-Formulation: TypeAlias = Literal["single-cable", "double-cable"]
+FormulationValue: TypeAlias = Literal["single-cable", "double-cable"]
+Formulation: TypeAlias = FormulationValue
 _FORMULATIONS: frozenset[str] = frozenset({"single-cable", "double-cable"})
 
 if TYPE_CHECKING:
@@ -12,16 +14,21 @@ if TYPE_CHECKING:
     from axonscope.axons.layout import Layout
 
 
-def normalize_formulation(value: Formulation | str | None) -> Formulation | None:
-    """Validate and normalize a cable formulation name."""
+class CableFormulation(Enum):
+    """Public cable formulation selector."""
+
+    SINGLE_CABLE = "single-cable"
+    DOUBLE_CABLE = "double-cable"
+
+
+def normalize_formulation(value: CableFormulation | None) -> Formulation | None:
+    """Validate and normalize a public cable formulation selector."""
 
     if value is None:
         return None
-    text = str(value)
-    if text not in _FORMULATIONS:
-        choices = ", ".join(sorted(_FORMULATIONS))
-        raise ValueError(f"Unknown axon formulation {value!r}; expected one of: {choices}.")
-    return cast(Formulation, text)
+    if not isinstance(value, CableFormulation):
+        raise TypeError("formulation must be a CableFormulation value.")
+    return value.value
 
 
 def infer_layout_formulation(layout: "Layout") -> Formulation:
@@ -47,7 +54,7 @@ def _validate_layout_formulation(layout: "Layout", formulation: Formulation) -> 
 
 def resolve_layout_formulation(
     layout: "Layout",
-    formulation: Formulation | str | None,
+    formulation: CableFormulation | None,
 ) -> Formulation:
     """Return explicit or inferred cable formulation for a descriptive layout."""
 
@@ -79,7 +86,7 @@ def _validate_formulation(flat: "FlattenedLayout", formulation: Formulation) -> 
 
 def resolve_formulation(
     flat: "FlattenedLayout",
-    formulation: Formulation | str | None,
+    formulation: CableFormulation | None,
 ) -> Formulation:
     """Return explicit or inferred cable formulation for a flattened layout."""
 
@@ -91,7 +98,9 @@ def resolve_formulation(
 
 
 __all__ = [
+    "CableFormulation",
     "Formulation",
+    "FormulationValue",
     "infer_formulation",
     "infer_layout_formulation",
     "normalize_formulation",

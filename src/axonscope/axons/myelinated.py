@@ -21,7 +21,7 @@ from axonscope.utils.units import (
     voltage_t,
 )
 from axonscope.axons.axon import Axon
-from axonscope.axons.formulation import Formulation
+from axonscope.axons.formulation import CableFormulation
 from axonscope.axons.layout import Layout
 from axonscope.axons.templates.mrg_like_double_cable import (
     MRGLikeDoubleCableTemplate,
@@ -59,7 +59,8 @@ class Myelinated(Axon):
         self,
         *,
         layout: Layout,
-        formulation: Formulation | None = "double-cable",
+        formulation: CableFormulation | None = CableFormulation.DOUBLE_CABLE,
+        diameter: length_t | None = None,
         v_init: voltage_t = _DEFAULT_V_INIT,
         temperature: temperature_t = _DEFAULT_TEMPERATURE,
     ) -> None:
@@ -71,6 +72,8 @@ class Myelinated(Axon):
             Section layout, usually with periaxonal data on every section.
         formulation:
             Cable formulation, normally `"double-cable"`.
+        diameter:
+            Optional nominal fiber diameter, with units.
         v_init:
             Initial membrane potential in millivolts.
         temperature:
@@ -80,6 +83,7 @@ class Myelinated(Axon):
         super().__init__(
             layout=layout,
             formulation=formulation,
+            diameter=diameter,
             v_init=v_init,
             temperature=temperature,
         )
@@ -142,7 +146,7 @@ class MRG(Myelinated):
         length: length_t | None = None,
         compartments: SectionCompartments = 1,
         membranes: SectionLayout | None = None,
-        formulation: Formulation | None = "double-cable",
+        formulation: CableFormulation | None = CableFormulation.DOUBLE_CABLE,
         v_init: voltage_t = _DEFAULT_V_INIT,
         temperature: temperature_t = _DEFAULT_TEMPERATURE,
         fit_all: bool = False,
@@ -223,6 +227,7 @@ class MRG(Myelinated):
         super().__init__(
             layout=layout,
             formulation=formulation,
+            diameter=diameter,
             v_init=v_init,
             temperature=temperature,
         )

@@ -11,7 +11,7 @@ The benchmark compares:
 Simulation construction and plotting are excluded from the timings.
 
 Run:
-    python examples/basic/example_05_pool_dispatch_timing.py
+    python examples/benchmarks/benchmark_001_simple_batching.py
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ def make_extracellular_context(length):
     """Return one analytical context shared by every axon in a pool."""
 
     electrode = axs.PointSourceElectrode(
-        x_um=length / 2.0,
-        y_um=0.0 * axs.um,
-        z_um=0.0 * axs.um,
+        x=length / 2.0,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
     )
     current = axs.Stimulus.pulse(
         start=0.10 * axs.ms,
@@ -61,10 +61,10 @@ def make_simulations(y_positions, *, length, extracellular_context):
             compartments=51,
             celsius=37.0 * axs.degC,
         )
-        simulation = axs.AxonSimulation(
+        simulation = axs.AxonInstance(
             axon,
-            y_um=y_position,
-            z_um=0.0 * axs.um,
+            y=y_position,
+            z=0.0 * axs.um,
         )
         simulation.add_extracellular_context(
             context=extracellular_context,
@@ -75,7 +75,7 @@ def make_simulations(y_positions, *, length, extracellular_context):
     return tuple(simulations)
 
 
-def run_batch(
+def run_single_pool_batch(
     simulations,
     *,
     duration,
@@ -87,8 +87,8 @@ def run_batch(
     return tuple(
         axs.simulate_pool(
             simulations,
-            duration_ms=duration,
-            dt_ms=dt,
+            duration=duration,
+            dt=dt,
             recording=recording,
         )
     )
@@ -106,8 +106,8 @@ def run_sim_by_sim(
     return tuple(
         axs.simulate_pool(
             (simulation,),
-            duration_ms=duration,
-            dt_ms=dt,
+            duration=duration,
+            dt=dt,
             recording=recording,
         )[0]
         for simulation in simulations
@@ -125,7 +125,7 @@ def benchmark_modes(
     """Benchmark both dispatch modes using fresh simulations each time."""
 
     runners = {
-        "batch": run_batch,
+        "batch": run_single_pool_batch,
         "sim_by_sim": run_sim_by_sim,
     }
     timings_s = {
@@ -136,7 +136,7 @@ def benchmark_modes(
 
     # Warm up any lazy initialization or compilation shared by both modes.
     warmup_simulations = simulation_factory()
-    run_batch(
+    run_single_pool_batch(
         warmup_simulations[:1],
         duration=duration,
         dt=dt,

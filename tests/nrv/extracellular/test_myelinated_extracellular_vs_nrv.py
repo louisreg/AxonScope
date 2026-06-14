@@ -7,7 +7,7 @@ import pytest
 from scipy.signal import find_peaks
 import nrv
 
-from axonscope import AxonSimulation, um
+from axonscope import AxonInstance, S_per_m, ms, um
 from axonscope.axons.myelinated import MRG
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.stimulation import Stimulus
@@ -41,24 +41,24 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
 
     # --- AxonScope ---
     ax_as = MRG(diameter=diameter_um * um, nodes=nodes)
-    sim_as = AxonSimulation(ax_as)
+    sim_as = AxonInstance(ax_as)
     x0_um = float(ax_as.length / 2.0)
     electrode_as = PointSourceElectrode(
-        x0_m=x0_um * 1e-6,
-        y0_m=elec_y_um * 1e-6,
-        z0_m=elec_z_um * 1e-6,
+        x=x0_um * um,
+        y=elec_y_um * um,
+        z=elec_z_um * um,
     )
     stim_as = Stimulus.biphasic(
-        start=stim_start_ms,
+        start=stim_start_ms * ms,
         cathodic_amplitude=cathodic_uA * 1e-6,
-        cathodic_duration=cathodic_duration_ms,
+        cathodic_duration=cathodic_duration_ms * ms,
         anodic_amplitude=anodic_uA * 1e-6,
-        interphase=interphase_ms,
+        interphase=interphase_ms * ms,
     )
     sim_as.add_extracellular_context(
         context=AnalyticalExtracellularContext(
             electrodes=[electrode_as.with_stimulus(stim_as)],
-            sigma=sigma_S_m,
+            sigma=sigma_S_m * S_per_m,
         ),
         replace=True,
     )

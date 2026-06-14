@@ -2,7 +2,7 @@ import pytest
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope import AxonSimulation
+from axonscope import AxonInstance
 from axonscope import membranes
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from tests.unit.channel_models.fixtures import HHLeakICM, HHKICM, HHNaICM
@@ -109,7 +109,7 @@ def test_composite_keeps_common_q10():
 def test_composite_rejects_stateful_membrane_components():
     membrane = membranes.Composite(
         [
-            membranes.Schild97(diameter_um=0.8),
+            membranes.Schild97(diameter=0.8 * units.ureg.um),
             membranes.Passive(Rm=1e4, EL=-70.0),
         ]
     )
@@ -152,11 +152,15 @@ def test_axon_composite_vs_mono_hodgkin_huxley():
     )
 
     solver = CrankNicholson()
-    stim = Stimulus.pulse(start=1.0, duration=1.0, amplitude=5)
-    sim_mono = AxonSimulation(ax_mono)
-    sim_comp = AxonSimulation(ax_comp)
-    sim_mono.add_current_clamp(position_um=L/2, current=stim)
-    sim_comp.add_current_clamp(position_um=L/2, current=stim)
+    stim = Stimulus.pulse(
+        start=units.Q_(1.0, "millisecond"),
+        duration=units.Q_(1.0, "millisecond"),
+        amplitude=5,
+    )
+    sim_mono = AxonInstance(ax_mono)
+    sim_comp = AxonInstance(ax_comp)
+    sim_mono.add_current_clamp(position=units.Q_(L / 2, "micrometer"), current=stim)
+    sim_comp.add_current_clamp(position=units.Q_(L / 2, "micrometer"), current=stim)
 
     res_mono = solver.solve(sim_mono, 10, 0.001)
     res_comp = solver.solve(sim_comp, 10, 0.001)

@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nrv
 
-from axonscope import AxonSimulation, um
+from axonscope import AxonInstance, ms, um
 from axonscope.axons.myelinated import MRG
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
@@ -80,8 +80,8 @@ def test_mrg_node_delay_vs_nrv(diameter_um: float, threshold_mV: float, rmse_tol
     center_index = int(node_ids.shape[0] // 2)
     x_um = axonscope_x_um(axon)
     stim_pos_um = float(x_um[int(node_ids[center_index])])
-    sim = AxonSimulation(axon)
-    sim.add_current_clamp(position_um=stim_pos_um, current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0))
+    sim = AxonInstance(axon)
+    sim.add_current_clamp(position=stim_pos_um * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=2.0))
 
     res = CrankNicholson().solve(sim, tsim=4.0, dt=0.005)
     t_as = np.asarray(res.t, dtype=float)

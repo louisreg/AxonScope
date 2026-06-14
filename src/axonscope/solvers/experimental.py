@@ -10,7 +10,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from axonscope.axon_simulation import AxonSimulation, as_axon_simulation
+from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.results import SimResult
 
@@ -48,22 +48,14 @@ class CrankNicholsonVStimForcing(Solver):
 
     def solve(
         self,
-        axon: Axon | AxonSimulation,
+        axon: Axon | AxonInstance,
         tsim: float | None = None,
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-        *,
-        duration_ms: float | None = None,
-        dt_ms: float | None = None,
     ) -> SimResult:
-        simulation = as_axon_simulation(axon)
-        duration, step = resolve_time_args(
-            tsim=tsim,
-            dt=dt,
-            duration_ms=duration_ms,
-            dt_ms=dt_ms,
-        )
+        simulation = as_axon_instance(axon)
+        duration, step = resolve_time_args(tsim=tsim, dt=dt)
         solver_axon = build_solver_axon(simulation)
         if solver_axon.formulation == "double-cable":
             raise ValueError(
@@ -156,14 +148,11 @@ class CrankNicholson_unoptimized(Solver):
 
     def solve(
         self,
-        axon: Axon | AxonSimulation,
+        axon: Axon | AxonInstance,
         tsim: float | None = None,
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-        *,
-        duration_ms: float | None = None,
-        dt_ms: float | None = None,
     ) -> SimResult:
         """
         Run CN using dense linear algebra.
@@ -182,13 +171,8 @@ class CrankNicholson_unoptimized(Solver):
         SimResult
             Voltage traces V_all and time vector t_vec.
         """
-        simulation = as_axon_simulation(axon)
-        duration, step = resolve_time_args(
-            tsim=tsim,
-            dt=dt,
-            duration_ms=duration_ms,
-            dt_ms=dt_ms,
-        )
+        simulation = as_axon_instance(axon)
+        duration, step = resolve_time_args(tsim=tsim, dt=dt)
         if bool(getattr(simulation, "use_extracellular", False)):
             return CrankNicholson(solver_options=self.solver_options).solve(
                 simulation,

@@ -25,10 +25,10 @@ def main() -> None:
         compartments=41,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     sim.add_intracellular_context(
         context=axs.IntracellularCurrentClamp(
-            position_um=clamp_x,
+            position=clamp_x,
             current=axs.Stimulus.pulse(
                 start=1.0 * axs.ms,
                 duration=0.5 * axs.ms,
@@ -39,8 +39,8 @@ def main() -> None:
 
     result = axs.simulate(
         sim,
-        duration_ms=5.0 * axs.ms,
-        dt_ms=0.01 * axs.ms,
+        duration=5.0 * axs.ms,
+        dt=0.01 * axs.ms,
         recording=axs.Recording.voltage(),
     )
 
@@ -48,17 +48,17 @@ def main() -> None:
         "any compartment": axs.results.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
-            positions="all",
+            target=axs.positions.ALL,
         ),
         "distal end": axs.results.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
-            positions="distal",
+            target=axs.positions.DISTAL,
         ),
         "clamp center": axs.results.ActivationCriterion(
             threshold=0.0 * axs.mV,
             blanking=0.5 * axs.ms,
-            positions=[clamp_x],
+            target=axs.positions.At(clamp_x),
         ),
     }
     events = {label: criterion.evaluate(result) for label, criterion in criteria.items()}

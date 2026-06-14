@@ -1,5 +1,15 @@
 # Public API Draft
 
+Status on 2026-06-13: this is a proposal/roadmap document, not a current API
+reference. Snippets that use `length_um`, `diameter_um`,
+`axs.simulate(..., duration_ms=...)`, `PointSourceElectrode(x_um=...)`,
+`AxonInstance(..., y_um=...)`, `IntracellularCurrentClamp(position_um=...)`,
+`Recording(..., positions_um=...)`, `Recording.none()` as runnable behavior,
+observer classes, or other target names should be read as older roadmap
+sketches unless the surrounding text explicitly says they are implemented
+today. For current runnable examples, prefer `README.md`, `examples/basic/`,
+`examples/advanced/`, and the non-draft pages under `docs/`.
+
 This document is a working proposal for the public AxonScope API before adding
 new features. The goal is to make the package didactic and modular while keeping
 the current solver/runtime internals free to evolve.
@@ -19,7 +29,7 @@ The public API should make it natural to:
 - choose a family whose cable formulation is explicit in its type;
 - distinguish unmyelinated and myelinated axons at the modeling level;
 - attach intracellular and extracellular stimulation contexts through an
-  `AxonSimulation` after axon construction;
+  `AxonInstance` after axon construction;
 - run either one axon or a pool/batch of related simulation conditions;
 - keep low-level JAX runtimes and kernels available for advanced users without
   making them the first user experience.
@@ -108,8 +118,8 @@ internal organization:
 ```text
 axs.axons.Axon + one Section
 axs.axons.Axon + multi-section Layout
-axs.axons.Axon(formulation="single-cable")
-axs.axons.Axon(formulation="double-cable")
+axs.axons.Axon(formulation=axs.axons.CableFormulation.SINGLE_CABLE)
+axs.axons.Axon(formulation=axs.axons.CableFormulation.DOUBLE_CABLE)
 ```
 
 Geometry should not be a major public namespace for now. Length, diameter,
@@ -130,7 +140,12 @@ Candidate public hooks:
 
 ```python
 axon.shift_nodes(delta_um=25.0)
-sim = axs.AxonSimulation(axon, x_offset_um=0.0, y_um=20.0, z_um=30.0)
+sim = axs.AxonInstance(
+    axon,
+    x_offset=0.0 * axs.um,
+    y=20.0 * axs.um,
+    z=30.0 * axs.um,
+)
 ```
 
 ### Granular Construction
@@ -211,7 +226,7 @@ MRG -> Myelinated(...) with the default MRG membrane layout
 
 ## Stimulation
 
-Stimuli and stimulation contexts should be attached to an `AxonSimulation`
+Stimuli and stimulation contexts should be attached to an `AxonInstance`
 after axon construction. The public API should read as a protocol attached to a
 descriptive axon.
 
@@ -222,16 +237,16 @@ current = axs.stimulation.Stimulus.pulse(
     amplitude=2.0,
 )
 
-sim = axs.AxonSimulation(axon)
+sim = axs.AxonInstance(axon)
 sim.add_intracellular_context(
     context=axs.stimulation.IntracellularCurrentClamp(
-        position_um=250.0,
+        position=250.0 * axs.um,
         current=current,
     )
 )
 ```
 
-Public Python docs should prefer `AxonSimulation.add_intracellular_context`.
+Public Python docs should prefer `AxonInstance.add_intracellular_context`.
 `add_current_clamp(...)` remains a compact wrapper for scripts.
 
 Extracellular:
@@ -245,20 +260,20 @@ current = axs.stimulation.Stimulus.biphasic(
 )
 
 electrode = axs.stimulation.PointSourceElectrode(
-    x_um=250.0,
-    y_um=0.0,
-    z_um=500.0,
+    x=250.0 * axs.um,
+    y=0.0 * axs.um,
+    z=500.0 * axs.um,
 )
 
 sim.add_extracellular_context(
     context=axs.stimulation.AnalyticalExtracellularContext(
         electrodes=[electrode.with_stimulus(current)],
-        sigma=0.3,
+        sigma=0.3 * axs.S_per_m,
     ),
 )
 ```
 
-`AxonSimulation.add_extracellular_context` stays as the canonical explicit
+`AxonInstance.add_extracellular_context` stays as the canonical explicit
 extracellular attachment method.
 
 ## Simulation
@@ -325,20 +340,20 @@ Convenience constructors:
 axs.Recording.voltage()
 axs.Recording.full()
 axs.Recording.none()
-axs.Recording.only("Vm", "gates.m", "currents.I_Na")
+axs.Recording.only(axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS)
 ```
 
 Spatial/time filtering should be supported by the same policy:
 
 ```python
 recording = axs.Recording(
-    variables=["Vm", "gates", "currents"],
-    positions_um=[0.0, 250.0, 500.0],
-    sample_dt_ms=0.1,
+    signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
+    positions=[0.0 * axs.um, 250.0 * axs.um, 500.0 * axs.um],
+    sample_dt=0.1 * axs.ms,
 )
 ```
 
-`sample_dt_ms` and `every_n_steps` should be mutually exclusive. `sample_dt_ms`
+`sample_dt` and `every_n_steps` should be mutually exclusive. `sample_dt`
 is friendlier for users; `every_n_steps` is useful when exact solver-step
 alignment matters.
 
@@ -346,7 +361,7 @@ Equivalent step-based form:
 
 ```python
 recording = axs.Recording(
-    variables=["Vm"],
+    signals=axs.signals.Vm,
     every_n_steps=10,
 )
 ```
@@ -359,7 +374,7 @@ result = axs.simulate_pool(
     pool,
     duration_ms=5.0,
     dt_ms=0.01,
-    recording=axs.Recording.center(["Vm"]),
+    recording=axs.Recording.center(axs.signals.Vm),
 )
 ```
 
@@ -395,31 +410,31 @@ Pools should cover two use cases:
 Proposed public shape:
 
 ```python
-sim_a = axs.AxonSimulation(axon_a)
+sim_a = axs.AxonInstance(axon_a)
 sim_a.add_intracellular_context(
     context=axs.stimulation.IntracellularCurrentClamp(
-        position_um=250.0,
+        position=250.0 * axs.um,
         current=stimulus_a,
     )
 )
 sim_a.add_extracellular_context(
     context=axs.stimulation.AnalyticalExtracellularContext(
         electrodes=[electrode_a.with_stimulus(extra_a)],
-        sigma=0.3,
+        sigma=0.3 * axs.S_per_m,
     )
 )
 
-sim_b = axs.AxonSimulation(axon_b)
+sim_b = axs.AxonInstance(axon_b)
 sim_b.add_intracellular_context(
     context=axs.stimulation.IntracellularCurrentClamp(
-        position_um=250.0,
+        position=250.0 * axs.um,
         current=stimulus_b,
     )
 )
 sim_b.add_extracellular_context(
     context=axs.stimulation.AnalyticalExtracellularContext(
         electrodes=[electrode_b.with_stimulus(extra_b)],
-        sigma=0.3,
+        sigma=0.3 * axs.S_per_m,
     )
 )
 
@@ -474,7 +489,7 @@ result = axs.simulate(sim, duration_ms=5.0, dt_ms=0.01)
 
 axs.results.visualization.plot_voltage_trace(
     result,
-    position_um=250.0,
+    position=250.0 * axs.um,
 )
 
 axs.results.visualization.plot_voltage_map(result)
@@ -564,8 +579,11 @@ Design constraints for solver-side observers:
 
 Current convention:
 
-- public geometry/time names should be explicit: `length_um`, `diameter_um`,
-  `duration_ms`, `dt_ms`, `position_um`;
+- public axon geometry and simulation time names should be physical nouns with
+  Pint quantities: `length`, `diameter`, `duration`, `dt`;
+- stimulation and point-source coordinates use quantity-oriented names such as
+  `position`, `x`, `y`, `z`, and `min_distance`; canonical internal fields can
+  still use suffixes such as `position_um` or `x_um`;
 - Pint quantities are supported at public boundaries;
 - quantities are normalized once during construction/runtime preparation;
 - keep solvers operating on plain numeric arrays with canonical internal units.
@@ -576,12 +594,12 @@ Current target usage:
 import axonscope as axs
 
 axon = axs.axons.HodgkinHuxley(
-    length_um=500 * axs.um,
-    diameter_um=0.5 * axs.um,
+    length=500 * axs.um,
+    diameter=0.5 * axs.um,
     compartments=41,
 )
 
-result = axs.simulate(sim, duration_ms=5 * axs.ms, dt_ms=0.01 * axs.ms)
+result = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
 ```
 
 ## Migration Strategy
@@ -597,8 +615,8 @@ Phase 1: public wrappers and aliases.
 - Add `simulate` and `simulate_pool`.
 - Add a public `Recording` object that wraps current `record_observables` and
   batch recording options.
-- Prefer unit-explicit public names such as `diameter_um`, `duration_ms`, and
-  `AxonSimulation.add_intracellular_context`.
+- Prefer clean quantity-oriented public names such as `diameter`, `duration`,
+  and `AxonInstance.add_intracellular_context`.
 
 Phase 2: examples.
 

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import pytest
 
-from axonscope import AxonSimulation, degC, mV, um
+from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope import membranes
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons.unmyelinated import RattayAberham, HodgkinHuxley
@@ -48,8 +48,8 @@ def test_cn_solver_smoke_traces(save_dir="figures/nrv_tests"):
 
     simulations = {}
     for name, axon in axons.items():
-        simulation = AxonSimulation(axon)
-        simulation.add_current_clamp(position_um=L/2, current=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
+        simulation = AxonInstance(axon)
+        simulation.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=t_start * ms, duration=duration * ms, amplitude=amplitude))
         simulations[name] = simulation
 
     results = {}
@@ -89,10 +89,10 @@ def test_cn_fine_mesh_vs_nrv(save_dir="figures/nrv_tests"):
     axon_ra = RattayAberham(length=L * um, diameter=d * um, compartments=Nx, celsius=37.0 * degC)
     axon_hh = HodgkinHuxley(length=L * um, diameter=d * um, compartments=Nx, celsius=6.3 * degC, v_init=-70.0 * mV,
                              include_passive_leak=True, g_pas=0.001, e_pas=-70.0)
-    sim_ra = AxonSimulation(axon_ra)
-    sim_hh = AxonSimulation(axon_hh)
+    sim_ra = AxonInstance(axon_ra)
+    sim_hh = AxonInstance(axon_hh)
     for sim in (sim_ra, sim_hh):
-        sim.add_current_clamp(position_um=L/2, current=Stimulus.pulse(start=t_start, duration=duration, amplitude=amplitude))
+        sim.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=t_start * ms, duration=duration * ms, amplitude=amplitude))
 
     res_ra = CrankNicholson().solve(sim_ra, tsim=tsim, dt=dt)
     res_hh = CrankNicholson().solve(sim_hh, tsim=tsim, dt=dt)

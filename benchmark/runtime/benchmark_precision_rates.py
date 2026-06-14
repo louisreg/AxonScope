@@ -333,7 +333,7 @@ def _solve_case_once(
 
 
 def _build_case(case_name: str):
-    from axonscope import AxonSimulation, degC, um
+    from axonscope import AxonInstance, degC, um
     from axonscope.axons import HodgkinHuxley, MRG, Schild97, Tigerholm
     from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
     from axonscope.stimulation import Stimulus
@@ -341,7 +341,7 @@ def _build_case(case_name: str):
     if case_name == "hh_intracellular":
         length_um = 500.0
         axon = HodgkinHuxley(length=length_um * um, diameter=0.5 * um, compartments=41, celsius=6.3 * degC)
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         simulation.add_current_clamp(position_um=length_um / 2.0,
             current=Stimulus.pulse(start=0.5, duration=0.4, amplitude=2.0),
         )
@@ -350,7 +350,7 @@ def _build_case(case_name: str):
     if case_name == "hh_extracellular":
         length_um = 500.0
         axon = HodgkinHuxley(length=length_um * um, diameter=0.5 * um, compartments=81, celsius=6.3 * degC)
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         electrode = PointSourceElectrode(
             x0_m=(length_um / 2.0) * 1e-6,
             y0_m=100e-6,
@@ -374,7 +374,7 @@ def _build_case(case_name: str):
 
     if case_name == "double_cable_extracellular":
         axon = MRG(diameter=10.0 * um, nodes=5)
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         x0_m = float(
             np.asarray(axon.layout.position_values(unit="micrometer"))[axon.n_compartments // 2]
         ) * 1e-6
@@ -402,7 +402,7 @@ def _build_case(case_name: str):
     if case_name == "schild_intracellular":
         length_um = 1200.0
         axon = Schild97(length=length_um * um, diameter=0.8 * um, compartments=31)
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         simulation.add_current_clamp(position_um=length_um / 2.0,
             current=Stimulus.pulse(start=0.5, duration=0.5, amplitude=0.8),
         )
@@ -411,7 +411,7 @@ def _build_case(case_name: str):
     if case_name == "tigerholm_intracellular":
         length_um = 1200.0
         axon = Tigerholm(length=length_um * um, diameter=0.8 * um, compartments=31)
-        simulation = AxonSimulation(axon)
+        simulation = AxonInstance(axon)
         simulation.add_current_clamp(position_um=length_um / 2.0,
             current=Stimulus.pulse(start=0.3, duration=0.4, amplitude=0.7),
         )

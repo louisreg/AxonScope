@@ -24,7 +24,7 @@ import numpy as np
 
 from axonscope import degC, um
 from axonscope.axons import HodgkinHuxley
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.benchmarking import jax_profile_trace, trace_annotation
 from axonscope.channel_models import enable_rate_tables
 from axonscope.dispatcher.runtime_batches import (
@@ -51,7 +51,7 @@ Mode = Literal["single", "double"]
 
 @dataclass(frozen=True)
 class BatchInputs:
-    axon: AxonSimulation
+    axon: AxonInstance
     context_batch: list[tuple[ExtracellularContext, ...]]
     stimulus: Stimulus
     footprint_V_per_A: np.ndarray
@@ -225,7 +225,7 @@ def build_pool_inputs(
         compartments=nx,
         celsius=6.3 * degC,
     )
-    axon = AxonSimulation(axon_model)
+    axon = AxonInstance(axon_model)
     axon.add_current_clamp(position_um=length_um / 2.0,
         current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )

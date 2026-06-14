@@ -46,34 +46,24 @@ def resolve_time_args(
     *,
     tsim: Any | None = None,
     dt: Any | None = None,
-    duration_ms: Any | None = None,
-    dt_ms: Any | None = None,
 ) -> tuple[float, float]:
-    """Resolve solver-level time aliases to ``(duration_ms, dt_ms)``.
+    """Resolve solver-level time values to ``(duration_ms, dt_ms)``.
 
     Solvers operate in milliseconds. Plain numeric values are interpreted as
     milliseconds; Pint-like quantities are converted at this boundary.
     """
 
-    if duration_ms is not None:
-        if tsim is not None:
-            raise ValueError("Provide either tsim or duration_ms, not both.")
-        tsim = duration_ms
-    if dt_ms is not None:
-        if dt is not None:
-            raise ValueError("Provide either dt or dt_ms, not both.")
-        dt = dt_ms
     if tsim is None:
-        raise ValueError("tsim or duration_ms is required.")
+        raise ValueError("tsim is required.")
     if dt is None:
-        raise ValueError("dt or dt_ms is required.")
+        raise ValueError("dt is required.")
 
     duration = units.to_ms(tsim)
     step = units.to_ms(dt)
     if duration <= 0.0:
-        raise ValueError("tsim/duration_ms must be > 0.")
+        raise ValueError("tsim must be > 0.")
     if step <= 0.0:
-        raise ValueError("dt/dt_ms must be > 0.")
+        raise ValueError("dt must be > 0.")
     simulation_step_count(duration, step)
     return duration, step
 

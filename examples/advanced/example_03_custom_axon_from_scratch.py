@@ -85,7 +85,7 @@ class CustomHeterogeneousAxon(axs.axons.Axon):
 
         super().__init__(
             layout=layout,
-            formulation="single-cable",
+            formulation=axs.axons.CableFormulation.SINGLE_CABLE,
             v_init=v_init,
             temperature=temperature,
         )
@@ -99,9 +99,9 @@ class CustomHeterogeneousAxon(axs.axons.Axon):
 
 def main() -> None:
     axon = CustomHeterogeneousAxon()
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     clamp = axs.IntracellularCurrentClamp(
-        position_um=axon.hotspot_center,
+        position=axon.hotspot_center,
         current=axs.Stimulus.pulse(
             start=1.0 * axs.ms,
             duration=0.5 * axs.ms,

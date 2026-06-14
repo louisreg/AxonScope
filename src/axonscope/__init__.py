@@ -1,34 +1,38 @@
-import sys as _sys
-
 from .utils import units
 
 from . import (
     axons,
     dispatcher,
+    identifiers,
     membranes,
+    positions,
     protocols,
     results,
+    signals,
     solvers,
     stimulation,
 )
-from axonscope.results import analysis, visualization
 from axonscope.stimulation import AnalyticalElectrode, Electrode, PointSourceElectrode
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
+from axonscope.identifiers import AxonId, DriveId
+from axonscope.population import AxonPopulation
 from axonscope.results import SimResult
-from axonscope.recording import Recording
-from axonscope.simulation import simulate, simulate_pool
+from axonscope.recording import Recording, RecordingSpatial
+from axonscope.signals import Signal
+from axonscope.simulation import AxonSimulation, simulate, simulate_pool
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import (
     AnalyticalExtracellularContext,
     ExtracellularContext,
+    ExtracellularDrive,
+    ExtracellularFootprint,
+    ExtracellularPotential,
+    ExtracellularStimulation,
     IntracellularContext,
     IntracellularCurrentClamp,
     NRVExtracellularContext,
 )
 from axonscope.stimulation import Stimulus
-
-_sys.modules[__name__ + ".analysis"] = analysis
-_sys.modules[__name__ + ".visualization"] = visualization
 
 __version__ = "0.1.0"
 
@@ -80,16 +84,21 @@ def __getattr__(name: str):
 __all__ = [
     "__version__",
     "axons",
-    "analysis",
     "dispatcher",
+    "identifiers",
     "membranes",
+    "positions",
     "protocols",
     "results",
+    "signals",
     "solvers",
     "stimulation",
-    "visualization",
     "units",
     "Stimulus",
+    "AxonId",
+    "DriveId",
+    "AxonInstance",
+    "AxonPopulation",
     "AxonSimulation",
     "AnalyticalElectrode",
     "AnalyticalExtracellularContext",
@@ -99,9 +108,15 @@ __all__ = [
     "simulate",
     "simulate_pool",
     "Recording",
+    "RecordingSpatial",
+    "Signal",
     "IntracellularContext",
     "IntracellularCurrentClamp",
     "ExtracellularContext",
+    "ExtracellularDrive",
+    "ExtracellularFootprint",
+    "ExtracellularPotential",
+    "ExtracellularStimulation",
     "NRVExtracellularContext",
     "SimResult",
     *_UNIT_ALIASES,

@@ -110,13 +110,29 @@ def test_activation_criterion_respects_blanking_and_indices(fake_result):
     event = ActivationCriterion(
         threshold=1.0 * axs.mV,
         blanking=20.0 * axs.ms,
-        indices=[1],
+        target=axs.positions.Indices([1]),
     ).evaluate(fake_result)
 
     assert event.activated
     assert event.first_index == 1
     assert event.first_position_um == pytest.approx(500.0)
     assert 29.0 < event.first_time_ms < 30.0
+
+
+def test_activation_criterion_accepts_typed_position_targets(fake_result):
+    center = ActivationCriterion(
+        threshold=1.0 * axs.mV,
+        target=axs.positions.CENTER,
+    ).evaluate(fake_result)
+    by_position = ActivationCriterion(
+        threshold=1.0 * axs.mV,
+        target=axs.positions.At(0.5 * axs.mm),
+    ).evaluate(fake_result)
+
+    assert center.activated
+    assert center.first_index == 1
+    assert by_position.activated
+    assert by_position.first_index == 1
 
 
 def test_activation_criterion_handles_filtered_results(fake_result):
@@ -127,7 +143,10 @@ def test_activation_criterion_handles_filtered_results(fake_result):
         record_indices=(1,),
     )
 
-    event = ActivationCriterion(threshold=1.0 * axs.mV, indices=[1]).evaluate(filtered)
+    event = ActivationCriterion(
+        threshold=1.0 * axs.mV,
+        target=axs.positions.Indices([1]),
+    ).evaluate(filtered)
 
     assert event.activated
     assert event.first_index == 1
@@ -170,11 +189,11 @@ def test_rasterize_rejects_negative_min_distance(fake_result):
 
 def test_compute_propagation_velocity():
     L, d, Nx = 1000, 0.5, 101
-    axon = axs.AxonSimulation(
+    axon = axs.AxonInstance(
         RattayAberham(length=L * axs.um, diameter=d * axs.um, compartments=Nx, celsius=37 * axs.degC)
     )
-    axon.add_current_clamp(position_um=L / 2,
-        current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2),
+    axon.add_current_clamp(position=(L / 2) * axs.um,
+        current=Stimulus.pulse(start=1.0 * axs.ms, duration=1.0 * axs.ms, amplitude=2),
     )
 
     simres = CrankNicholson().solve(axon, tsim=10.0, dt=0.01)

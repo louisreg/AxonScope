@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytest
 import os 
-from axonscope import AxonSimulation, um
+from axonscope import AxonInstance, ms, um
 from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.results.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
@@ -34,8 +34,8 @@ VELOCITY_RTOL = 0.15                # Average propagation velocity tolerance
 
 
 def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SimResult:
-    simulation = AxonSimulation(axon)
-    simulation.add_current_clamp(position_um=L / 2, current=Stimulus.pulse(start=T_START, duration=T_PULSE, amplitude=AMPLITUDE))
+    simulation = AxonInstance(axon)
+    simulation.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=T_START * ms, duration=T_PULSE * ms, amplitude=AMPLITUDE))
     solver = CrankNicholson()
     res = solver.solve(simulation, tsim=tsim, dt=dt)
     return res

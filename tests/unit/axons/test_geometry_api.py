@@ -17,6 +17,7 @@ def test_unmyelinated_template_accepts_public_unit_names():
     )
 
     assert axon.length == pytest.approx(1000.0)
+    assert axon.diameter == pytest.approx(0.5)
     flat = axs.axons.flatten_layout(axon.layout)
     np.testing.assert_allclose(flat.diam_um, np.full(5, 0.5))
     np.testing.assert_allclose(flat.Ra_ohm_cm, np.full(5, 200.0))
@@ -27,12 +28,60 @@ def test_unmyelinated_template_accepts_public_unit_names():
         [0.1, 0.3, 0.5, 0.7, 0.9],
     )
     np.testing.assert_allclose(axon.layout.diameter_values(unit=axs.um), np.full(5, 0.5))
+    np.testing.assert_allclose(axon.diameter_values(unit=axs.um), np.full(5, 0.5))
 
 
 def test_unmyelinated_templates_do_not_expose_legacy_geometry_aliases():
     with pytest.raises(TypeError):
         axs.axons.HodgkinHuxley(L=1000.0, d=0.5, Nx=11)
     assert not hasattr(axs.axons.Unmyelinated, "HH")
+
+
+def test_public_axon_diameter_is_easy_for_uniform_and_template_models():
+    section = axs.axons.Section(
+        "axon",
+        membrane=axs.membranes.Passive(),
+        diameter=1.2 * axs.um,
+    )
+    axon = axs.axons.Axon(
+        layout=axs.axons.Layout.single_uniform(
+            section,
+            length=100.0 * axs.um,
+            compartments=3,
+        )
+    )
+
+    assert axon.diameter == pytest.approx(1.2)
+    np.testing.assert_allclose(axon.diameter_values(unit=axs.um), [1.2, 1.2, 1.2])
+
+    mrg = axs.axons.MRG(diameter=10.0 * axs.um, nodes=3)
+
+    assert mrg.diameter == pytest.approx(10.0)
+
+
+def test_public_axon_diameter_points_to_values_for_non_uniform_layouts():
+    narrow = axs.axons.Section(
+        "narrow",
+        membrane=axs.membranes.Passive(),
+        diameter=0.5 * axs.um,
+    )
+    wide = axs.axons.Section(
+        "wide",
+        membrane=axs.membranes.Passive(),
+        diameter=1.0 * axs.um,
+    )
+    axon = axs.axons.Axon(
+        layout=axs.axons.Layout.sequence(
+            [narrow, wide],
+            section_lengths=[50.0, 50.0] * axs.um,
+            compartments=[1, 1],
+            lengths=100.0 * axs.um,
+        )
+    )
+
+    np.testing.assert_allclose(axon.diameter_values(unit=axs.um), [0.5, 1.0])
+    with pytest.raises(ValueError, match="non-uniform diameters"):
+        _ = axon.diameter
 
 
 def test_public_axon_does_not_expose_solver_view_or_solver_vectors():
@@ -42,7 +91,7 @@ def test_public_axon_does_not_expose_solver_view_or_solver_vectors():
         compartments=5,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
 
     for obj in (axon, sim):
         assert not hasattr(obj, "view")
@@ -176,5 +225,5 @@ def test_axon_rejects_unknown_formulation():
     )
     layout = axs.axons.Layout.single_uniform(section, length=100.0 * axs.um, compartments=3)
 
-    with pytest.raises(ValueError, match="Unknown axon formulation"):
+    with pytest.raises(TypeError, match="CableFormulation"):
         axs.axons.Axon(layout=layout, formulation="triple-cable")

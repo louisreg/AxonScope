@@ -1,11 +1,10 @@
 # Validation
 
-AxonScope separates fast CI checks from local scientific validation.
+AxonScope separates fast checks from local scientific validation.
 
-## Fast CI
+## Fast Checks
 
-The default GitHub Actions workflow runs only tests that do not require a local
-NRV checkout:
+The fast default check set does not require a local NRV checkout:
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -13,26 +12,22 @@ git diff --check
 MPLBACKEND=Agg python -m pytest -q tests/unit --tb=short
 ```
 
-These checks should run on every pull request and push to the main development
-branches.
+These checks should run locally before documentation/API cleanup is marked
+complete. If this repository adds a CI workflow, that workflow should run this
+same fast set on pull requests and pushes to the main development branches.
 
 ## Local NRV Validation
 
-NRV validation requires an environment where `nrv` imports successfully. In this
-workspace, the full NRV suite currently passes:
+NRV validation requires an environment where `nrv` imports successfully. Run the
+full suite with:
 
 ```bash
 MPLBACKEND=Agg python -m pytest -q tests/nrv --tb=short
 ```
 
-Current reference result:
-
-```text
-116 passed
-```
-
-The warnings emitted by this run currently come from NRV/NumPy array-to-scalar
-deprecations, not from failing AxonScope assertions.
+Record only fresh, dated results here or in release notes after rerunning the
+suite in an NRV-ready environment. Do not carry forward historical pass counts
+without the run date, environment, and command.
 
 Useful targeted subsets:
 

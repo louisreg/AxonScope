@@ -4,8 +4,9 @@ Run:
     python examples/advanced/example_07_recruitment_curve.py
 
 This example uses one point-source electrode and a monophasic extracellular
-pulse family. The protocol only chooses tested current values; user lambdas
-build the simulation or pool for each value.
+pulse family. The threshold search builds one simulation per tested current.
+The recruitment sweep keeps a stable pool and changes only the electrode
+stimulus between sampled currents.
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ import axonscope as axs
 
 LENGTH = 500.0 * axs.um
 ELECTRODE = axs.PointSourceElectrode(
-    x_um=LENGTH / 2.0,
-    y_um=0.0 * axs.um,
-    z_um=0.0 * axs.um,
+    x=LENGTH / 2.0,
+    y=0.0 * axs.um,
+    z=0.0 * axs.um,
 )
 
 
@@ -42,7 +43,7 @@ def make_simulation(
     *,
     electrode_current,
     y_position=40.0 * axs.um,
-) -> axs.AxonSimulation:
+) -> axs.AxonInstance:
     """Create one extracellularly stimulated unmyelinated axon."""
 
     axon = axs.axons.RattayAberham(
@@ -51,14 +52,14 @@ def make_simulation(
         compartments=51,
         celsius=37.0 * axs.degC,
     )
-    sim = axs.AxonSimulation(axon, y_um=y_position, z_um=0.0 * axs.um)
+    sim = axs.AxonInstance(axon, y=y_position, z=0.0 * axs.um)
     sim.add_extracellular_context(
         context=make_extracellular_context(electrode_current)
     )
     return sim
 
 
-def make_pool(electrode_current) -> tuple[axs.AxonSimulation, ...]:
+def make_pool(electrode_current) -> tuple[axs.AxonInstance, ...]:
     """Create a tiny pool at different electrode distances."""
 
     y_positions = np.asarray([10.0, 20.0, 40.0, 80.0]) * axs.um
@@ -68,11 +69,27 @@ def make_pool(electrode_current) -> tuple[axs.AxonSimulation, ...]:
     )
 
 
+def update_point_source_current(sim: axs.AxonInstance, electrode_current) -> None:
+    """Change only the point-source stimulus attached to one simulation."""
+
+    context = sim.extracellular_context
+    if context is None:
+        raise ValueError("simulation has no extracellular context to update.")
+    electrode = context.electrodes[0]
+    electrode.set_stimulus(
+        axs.Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.3 * axs.ms,
+            amplitude=electrode_current,
+        )
+    )
+
+
 def main() -> None:
     criterion = axs.results.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
-        positions="distal",
+        target=axs.positions.DISTAL,
     )
     duration = 4.0 * axs.ms
     dt = 0.02 * axs.ms
@@ -87,8 +104,10 @@ def main() -> None:
         max_iterations=8,
     )
 
+    pool = make_pool(electrode_current=0.0 * axs.uA)
     curve = axs.protocols.recruitment_sweep(
-        lambda tested_current: make_pool(electrode_current=tested_current),
+        pool,
+        update=update_point_source_current,
         amplitudes=np.asarray([1.0, 5.0, 10.0, 20.0, 40.0, 80.0]) * axs.uA,
         duration=duration,
         dt=dt,

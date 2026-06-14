@@ -26,7 +26,6 @@ from axonscope.utils.validation import (
     require_non_negative,
     require_positive,
 )
-from axonscope import membranes as membrane_specs
 from axonscope.axons.layout import Layout, LayoutElement
 from axonscope.axons.section import PeriaxonalLayer, Section
 from axonscope.axons.templates._mrg_morphology import (
@@ -35,6 +34,7 @@ from axonscope.axons.templates._mrg_morphology import (
     get_mrg_morphology,
 )
 from axonscope.membranes import SectionLayout
+from ... import membranes as membrane_specs
 
 
 _GEOMETRY_STOP_ATOL_UM = 1e-9

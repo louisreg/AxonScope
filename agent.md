@@ -6,13 +6,37 @@ instructions: |
   
   ## Core Domain Knowledge
   - **Domain**: Computational neuroscience, peripheral nerve modeling, biomedical engineering
-  - **Purpose**: Validated nerve simulations with extensible solvers (JAX-based, GPU-ready)
+  - **Purpose**: Validated nerve simulations with extensible solvers (JAX-based, GPU-oriented)
   - **Architecture**: Layered design (Descriptive → Protocol → Execution → Results)
   - **Current Status**: v0.1.0, active refactor, API still evolving
+
+  ## Master Product Direction
+  `GUIDELINES.md` is the project philosophy and target product/solver
+  architecture reference. It defines the direction for `todo.md` and for large
+  refactors, while `src/`, `tests/`, and runnable examples remain the
+  implementation truth for current behavior. Update `GUIDELINES.md` when the
+  project philosophy, product boundary, or target architecture changes.
+
+  Key product boundaries from that document:
+  - AxonScope owns 1D axon models, membrane dynamics, stimulation along axons,
+    simulation execution, recording, analyses, thresholds, recruitment, sweeps,
+    validation, and performance.
+  - AxonScope should not own nerve/fascicle geometry, tissue segmentation, 3D
+    axon trajectories, anatomical frames, electrode CAD, surgical placement, or
+    FEM field solving.
+  - External packages should provide extracellular spatial footprints. AxonScope
+    should combine those footprints with temporal stimuli and run the cable and
+    membrane dynamics.
+  - Intrinsic axon coordinates belong in AxonScope. World coordinates,
+    orientation, trajectories, and field-generation geometry are transitional in
+    the current prototype and should move out of the core architecture.
+  - The desired target is one concept, one public name, one execution path, and
+    one canonical result model. Do not keep old and new architectures in
+    parallel for compatibility.
   
   ## Architectural Layers
   1. **Descriptive Layer** (solver-agnostic): Axons, Membranes, Stimulation
-  2. **Protocol Layer**: AxonSimulation, Recording, Protocols
+  2. **Protocol Layer**: AxonInstance, AxonPopulation, AxonSimulation, Recording, Protocols
   3. **Execution Layer**: Solvers, Dispatcher, ICM, Channel Models
   4. **Result Layer**: Analysis, Visualization, Data Management
   
@@ -20,8 +44,8 @@ instructions: |
   - **JAX** ≥0.4.38: JIT compilation, GPU acceleration, batch execution
   - **Pint**: Explicit unit management at public API boundaries
   - **SciPy/NumPy**: Numerical foundations
-  - **Poetry**: Build and dependency management
-  - **Rust** (optional): Reference solver implementation
+  - **pyproject.toml / poetry-core**: Packaging metadata; day-to-day docs use editable `pip install -e ...`
+  - **Reference/prototype solvers**: Python variants live in `axonscope.solvers.experimental`
   
   ## Code Organization & Conventions
   
@@ -39,7 +63,7 @@ instructions: |
   - **Type Aliases**: Semantic type definitions for clarity
   
   ### Type Hints & Safety
-  - Full mypy coverage required; use type hints consistently
+  - Use type hints consistently; run mypy on touched public or solver-facing modules when practical
   - Frozen dataclasses enforce immutability at design level
   - Units enforce correctness at public boundaries
   - Internal canonicalization prevents conversion errors
@@ -55,9 +79,9 @@ instructions: |
   | `dispatcher/` | Pool planning, automatic batching logic |
   | `icm/` | Intracellular membrane backends |
   | `channel_models/` | JAX-compiled channel implementations |
-  | `results/` | SimResult, analysis, visualization |
+  | `results/` | SimResult, activation criteria, analysis, visualization |
   | `recording/` | Configurable output policies |
-  | `protocols/` | High-level workflows (ThresholdSearch, RecruitmentCurve) |
+  | `protocols/` | High-level workflows (`find_activation_threshold`, threshold curves, sweeps, recruitment) |
   
   ## Performance & Scalability
   
@@ -75,28 +99,31 @@ instructions: |
   
   ### When Optimizing
   1. Profile first with benchmark suite in `benchmark/runtime/`
-  2. Maintain validation against NRV comparison tests (116 passing)
+  2. Maintain validation against NRV comparison tests; verify the current count locally instead of relying on stale numbers
   3. Document performance implications in code comments
   4. Add regression detection to benchmark suite
   
   ## Testing Strategy
   
   ### Unit Tests (`tests/unit/`)
-  - Fast CI suite, no external dependencies
-  - 37 modules covering APIs, solvers, batching, channels
+  - Fast local/CI-oriented suite, no external NRV dependency
+  - Fast suite covering APIs, solvers, batching, channels, examples, units, and guardrails
   - Run with: `pytest -q tests/unit`
   
   ### Validation Tests (`tests/nrv/`)
   - Scientific validation vs NRV reference implementation
-  - 116 tests, all passing, requires local NRV checkout
+  - Requires local NRV checkout/environment
   - Run with: `pytest -q tests/nrv`
   - Markers: `nrv`, `nrv_intracellular`, `nrv_velocity`, `nrv_extracellular`, `nrv_numerics`
   
   ### Best Practices
   - Always add unit tests for new public APIs
+  - When running tests or mypy through `mamba run`, request the already-approved
+    outside-sandbox execution up front if the sandbox cannot access the mamba
+    lockfile/cache. Avoid the fail-then-retry loop for known mamba commands.
   - Compare output shapes and scalar metrics for regressions
   - Use frozen dataclasses to detect unintended mutations
-  - Include diagnostic metadata in SimResult for reproducibility
+  - Include `SimResult.diagnostics` or benchmark metadata for reproducibility
   
   ## Development Workflow
   
@@ -116,18 +143,69 @@ instructions: |
   ```
   
   ### Debugging
-  - Use `result.metadata` for solver diagnostics
-  - Check `SimResult.output_guard` for shape validation
+  - Use `result.diagnostics` for solver/dispatcher diagnostics
+  - Check `result.record_indices` before assuming recorded Vm columns map to contiguous compartments
   - Enable JAX debug output for numerical issues
   - Profile with benchmark suite for performance analysis
   
   ## Documentation Requirements
-  
+
   - **Code**: Docstrings for public APIs, explain non-obvious internal logic
   - **Comments**: Clarify design decisions, numerical considerations, unit conversions
-  - **Examples**: Add to `examples/` if introducing new functionality
+  - **Examples**: Add a clear didactic example in `examples/advanced/` for every new feature or advanced concept; keep it runnable, focused on one user workflow, and aligned with the implemented API
+  - **Example Style**: Prefer a line-by-line didactic flow over extra helper functions. Keep advanced examples readable as a tutorial script, with short comments where they clarify why each step exists.
+  - **Example Updates**: When changing a public API, workflow, argument name, result shape, or user-facing behavior, update the affected examples in the same change so examples remain executable documentation
   - **Docs**: Update markdown files in `docs/` for architectural changes
-  - **Changelog**: Record all significant changes (v0.1.0+ tracking)
+  - **Changelog**: Update `CHANGELOG.md` for every new feature or significant behavior change; if no entry is needed, keep that decision explicit in the PR notes
+
+  ## API Stabilization Policy
+
+  AxonScope is pre-release and not deployed as a stable downstream dependency.
+  Prefer a clean, didactic, unit-safe user interface over preserving temporary
+  compatibility aliases or old argument names. When an existing interface is
+  confusing, replace it with the cleaner public API and update tests, docs,
+  examples, and changelog together. Keep compatibility only when it protects a
+  genuinely useful transition inside the current repository, and remove it once
+  examples/tests no longer need it.
+
+  For large architecture changes, follow the clean-breaking policy from
+  `GUIDELINES.md`: rename concepts directly, rewrite examples/tests, delete
+  superseded modules and schemas, avoid deprecated aliases, and prefer the
+  final user-facing design over temporary retrocompatibility.
+
+  ## Documentation Audit Notes
+
+  The markdown docs are useful but currently uneven. Before treating a claim as
+  canonical, compare it against `src/axonscope/`, `tests/unit/`, and the active
+  examples. Keep the checklist below alive: fill it in, split items when they
+  grow, and mark each item complete only after the docs and code have both been
+  checked.
+
+  The canonical living TODO for this audit is `todo.md`. Read it at the start
+  of documentation/API cleanup work, add newly discovered mismatches there, and
+  update checkboxes as tasks are completed. The first task is to audit `/docs`
+  against the current code before building the Sphinx documentation.
+
+  ### Current High-Signal Mismatches
+
+  - `docs/api_public_draft.md` is proposal-only and now has a clear top warning; later split implemented API from proposal if it remains user-facing.
+  - `docs/recorders_observers_activation_strategy.md` is a proposal with refreshed status: CPU/post-hoc activation and protocol sweeps exist, while `ActivationObserver`, `PeakVoltageObserver`, observer-only runs, amplitude-batched sweeps, and `thresholds_for_pool` remain future.
+  - No fresh NRV pass count is recorded in docs; rerun the NRV suite in an NRV-ready environment before adding dated validation notes.
+
+  ### Incremental Documentation TODO
+
+  - [x] Fix the example 06 rename everywhere: README commands, example docstring, and `tests/unit/test_examples.py`.
+  - [x] Update the README package map to point to `results/analysis.py` and `results/visualization.py`, or explicitly explain the top-level compatibility aliases.
+  - [x] Normalize constructor examples in docs to the implemented public names: `length`, `diameter`, `position`, `positions`, `sample_dt`, `duration`/`dt` for public wrappers, and `tsim`/`dt` for direct solver calls. Current docs are aligned outside the explicitly proposal-only `docs/api_public_draft.md`.
+  - [x] Add a clear warning at the top of `docs/api_public_draft.md` so stale target snippets are not mistaken for current runnable API.
+  - [ ] Later split `docs/api_public_draft.md` into implemented API versus proposal if it remains part of the user-facing docs.
+  - [x] Refresh `docs/recorders_observers_activation_strategy.md` implementation status with the current protocol functions and keep observer-only/GPU observer work marked future.
+  - [x] Audit `CHANGELOG.md` against files that actually exist in this checkout; remove or reword absent module names and CI claims.
+  - [x] Re-run `python -m pytest -q tests/unit` after doc/example/API cleanup fixes and record only fresh results. Fresh run on 2026-06-14 after typed recording signals: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit` (`254 passed, 1 skipped`).
+  - [ ] Re-run NRV validation only in an NRV-ready environment; record dated validation notes after a fresh run.
+  - [x] Remove duplicated narrative between README, `docs/pool_dispatch.md`, and `docs/results_recording_analysis.md` by making README a short entry point and keeping detailed contracts in `docs/`.
+  - [ ] After each doc cleanup, update this checklist so future agents can continue from the latest verified state.
+  - [ ] Keep `todo.md` in sync with this section and use it as the source of truth for the step-by-step cleanup.
   
   ## Common Pitfalls to Avoid
   
@@ -145,9 +223,13 @@ instructions: |
   - [ ] Validation against NRV reference if numerical changes
   - [ ] Performance impact assessed (if optimization claims)
   - [ ] Documentation updated (docstrings + markdown if architecture affected)
+  - [ ] Clear didactic `examples/advanced/` example added or updated for each new feature or advanced concept
+  - [ ] New or updated examples favor a line-by-line tutorial flow, avoiding helper-function overload unless it clearly improves readability
+  - [ ] Affected examples updated when public API, workflow, argument names, or result behavior changed
+  - [ ] Temporary compatibility aliases avoided unless they clearly simplify the current refactor
   - [ ] Naming conventions followed (canonical internal names)
   - [ ] No frozen dataclass mutations
-  - [ ] CHANGELOG updated with significant changes
+  - [ ] `CHANGELOG.md` updated for every new feature or significant behavior change, or PR notes explain why no entry is needed
   
   ## Examples of Good Patterns
   
@@ -186,8 +268,8 @@ instructions: |
   
   ## Future Development Roadmap
   
-  - Large GPU batch execution via pre-designed batch kernels
-  - Heterogeneous membrane layouts (infrastructure ready)
+  - Larger GPU-oriented batch execution via existing batch kernels and runtime-batch builders
+  - Heterogeneous membrane layouts and padded/parameter batch dispatch
   - Performance benchmarking for scalability assessment
   - Extended membrane model library
   - Advanced stimulation patterns
@@ -198,7 +280,7 @@ instructions: |
   - **Examples**: Start with `examples/basic/` for learning
   - **Benchmarks**: Run `benchmark/runtime/run.py` for performance metrics
   - **Validation**: Full NRV comparison in `tests/nrv/`
-  - **Current Branch**: `solver-benchmark-profiling` (default: `main`)
+  - **Current Branch**: check with `git branch --show-current`; do not trust stale branch notes
 
 keywords:
   - nerve simulation
@@ -234,15 +316,26 @@ rules:
     description: Non-obvious design choices should be documented in markdown files under docs/
     
   - name: Update CHANGELOG for significant changes
-    description: Version tracking is important; significant changes should appear in CHANGELOG.md
+    description: Every new feature or significant behavior change should update CHANGELOG.md, unless PR notes explicitly justify no entry
     
   - name: Follow example organization
-    description: New examples should fit into either examples/basic/ (didactic) or examples/advanced/ (workflows)
+    description: Every new feature or advanced concept should include a clear didactic example in examples/advanced/ that demonstrates the real user workflow with a line-by-line tutorial flow where practical; examples/basic/ remains for compact introductory concepts
+
+  - name: Keep examples current with API changes
+    description: Public API, workflow, argument-name, and result-shape changes must update affected examples in the same change
+
+  - name: Prefer clean pre-release APIs over compatibility shims
+    description: AxonScope is not deployed yet; replace confusing temporary APIs with clean user-facing interfaces instead of preserving backwards compatibility by default
+
+  - name: Follow master product guidelines
+    description: Use GUIDELINES.md as the project philosophy and target architecture direction for major refactors, especially the product boundary, object model, extracellular footprint contract, and no-legacy policy
     
   - name: Profile before optimizing
     description: Performance claims should be backed by benchmark runs from benchmark/runtime/
 
 helpfulLinks:
+  - path: GUIDELINES.md
+    description: Project philosophy and master product/solver architecture direction; update when the target direction changes
   - path: docs/axon_model_organization.md
     description: Architecture and design rationale for the descriptive layer
   - path: docs/solver_organization.md
@@ -251,6 +344,8 @@ helpfulLinks:
     description: Pool planning and automatic batching strategy
   - path: docs/validation.md
     description: Testing policy and NRV validation approach
+  - path: todo.md
+    description: Living project TODO; first task is auditing docs against current code before Sphinx docs
   - path: examples/basic
     description: Didactic examples covering core concepts
   - path: examples/advanced
@@ -258,29 +353,30 @@ helpfulLinks:
   - path: benchmark/runtime
     description: Performance benchmarking and profiling tools
   - path: tests/nrv
-    description: Scientific validation tests (116 passing)
+    description: Scientific validation tests; requires local NRV environment and fresh pass count
 ---
 
 # AxonScope Development Agent
 
-This agent is configured to assist with development in the **AxonScope** project - a Python framework for validated peripheral nerve axon simulations with JAX-based, GPU-ready solvers.
+This agent is configured to assist with development in the **AxonScope** project - a Python framework for validated peripheral nerve axon simulations with JAX-based, GPU-oriented solvers.
 
 ## Quick Facts
 
 - **Current Version**: v0.1.0 (pre-release, API evolving)
-- **Current Branch**: `solver-benchmark-profiling` (main: `main`)
+- **Current Branch**: verify with `git branch --show-current`
 - **Python Version**: 3.11+
-- **Build System**: Poetry
+- **Build System**: `pyproject.toml` with `poetry-core`; editable installs are documented with `pip`
 - **Architecture**: 4-layer design (Descriptive → Protocol → Execution → Results)
-- **Test Coverage**: 37 unit modules + 116 NRV validation tests (all passing)
+- **Test Coverage**: fast unit suite plus optional NRV validation; use fresh local runs for counts/status
 
 ## Getting Started with This Agent
 
 ### For New Developers
 1. Read [docs/axon_model_organization.md](docs/axon_model_organization.md) for descriptive layer concepts
 2. Review [examples/basic/](examples/basic/) for didactic workflows
-3. Run unit tests: `pytest -q tests/unit`
-4. Check out [docs/validation.md](docs/validation.md) for testing strategy
+3. Read [todo.md](todo.md) before documentation/API cleanup work
+4. Run unit tests: `pytest -q tests/unit`
+5. Check out [docs/validation.md](docs/validation.md) for testing strategy
 
 ### For Contributing Code
 1. Follow the [review checklist](#review-checklist-for-prs) above
@@ -302,7 +398,8 @@ This agent is configured to assist with development in the **AxonScope** project
 - **Examples**: `examples/basic/` and `examples/advanced/`
 - **Benchmarks**: `benchmark/runtime/`
 - **Architecture Docs**: `docs/*.md`
+- **Living TODO**: `todo.md`
 
 ---
 
-*This agent was generated from a comprehensive code audit. Last updated: 2026-06-13*
+*This agent was generated from a comprehensive code audit. Last updated: 2026-06-14*

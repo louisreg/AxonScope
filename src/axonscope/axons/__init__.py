@@ -2,7 +2,12 @@
 
 from axonscope.axons.axon import Axon
 from axonscope.axons.flattened import FlattenedLayout, flatten_layout
-from axonscope.axons.formulation import Formulation, infer_formulation, resolve_formulation
+from axonscope.axons.formulation import (
+    CableFormulation,
+    Formulation,
+    infer_formulation,
+    resolve_formulation,
+)
 from axonscope.axons.layout import Layout, LayoutElement
 from axonscope.axons.myelinated import MRG, Myelinated
 from axonscope.axons.plotting import plot_layout
@@ -40,6 +45,7 @@ __all__ = [
     "infer_formulation",
     "resolve_formulation",
     "plot_layout",
+    "CableFormulation",
     "Formulation",
     "Unmyelinated",
     "HodgkinHuxley",

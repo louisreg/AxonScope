@@ -1,6 +1,7 @@
 # Recorders, Observers, Thresholds, and Recruitment
 
-This document is a design proposal. It should be validated before implementation.
+This document is a design proposal. Some CPU/post-hoc pieces are implemented;
+solver-side observers and observer-only runs remain future work.
 
 The goal is to make AxonScope useful for stimulation studies such as activation
 thresholds and recruitment curves while keeping the GPU path sane. The central
@@ -14,34 +15,41 @@ but often only needs one boolean per fiber per amplitude.
 
 ## Implementation Status
 
-Current status:
+Current status on 2026-06-13:
 
-- Phase 0 is drafted in this document.
-- Phase 1 is in progress:
-  - `SimResult.recordings["Vm"]` is now the conceptual home of membrane voltage.
+- Phase 1 is partially implemented:
+  - `SimResult.recordings["Vm"]` is the conceptual home of membrane voltage.
   - `result.Vm` remains a convenience alias for existing examples and tests.
   - `SimResult.observations` exists as the target container for future observers.
-- Phase 2 has started:
-  - `axs.results.ActivationCriterion` evaluates activation post-hoc from
-    recorded Vm traces.
+- Phase 2 is implemented in CPU/post-hoc mode:
+  - `axs.results.ActivationCriterion` evaluates activation from recorded Vm
+    traces.
   - `axs.results.ActivationEvent` stores the compact activation summary.
   - `axs.results.detect_activation(...)` is a convenience wrapper.
-- Phase 4 has started in CPU/post-hoc mode:
+- Phase 4/5 protocol helpers are implemented in CPU/post-hoc mode:
   - `axs.protocols.find_activation_threshold(...)` runs a binary search over
     stimulus amplitude.
-- Phase 5 has started in CPU/post-hoc mode:
+  - `axs.protocols.find_activation_threshold_curve(...)` evaluates thresholds
+    over a sequence of pool items.
+  - `axs.protocols.pool_sweep(...)` runs generic repeated pool observations.
   - `axs.protocols.recruitment_sweep(...)` evaluates activation over sampled
     amplitudes and returns a `RecruitmentCurve`.
-- The first user-facing example for this layer is
-  `examples/advanced/example_06_activation_criterion.py`.
-  `examples/advanced/example_07_recruitment_curve.py` shows the first
-  extracellular threshold and recruitment protocol workflow.
+- User-facing examples:
+  - `examples/advanced/example_06_activation_criterion.py` demonstrates
+    post-hoc activation criteria.
+  - `examples/advanced/example_07_recruitment_curve.py` demonstrates an
+    extracellular threshold and recruitment protocol workflow.
+  - `examples/basic/example_07_threshold_vs_diameter.py` and
+    `examples/basic/example_08_recruitment_curve_population.py` provide compact
+    didactic workflows for threshold curves and mixed-population recruitment.
 
 Not implemented yet:
 
 - JAX on-the-fly observers.
 - Observer-only runs with `Recording.none()`.
 - Amplitude-batched GPU sweeps.
+- Public `ActivationObserver` and `PeakVoltageObserver` classes.
+- A dedicated `thresholds_for_pool(...)` convenience wrapper.
 
 ## Target Use Cases
 
@@ -126,7 +134,7 @@ Example:
 criterion = axs.results.ActivationCriterion(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="distal",
+    target=axs.positions.DISTAL,
 )
 
 event = criterion.evaluate(result)
@@ -138,7 +146,7 @@ The corresponding observer should use the same public options:
 observer = axs.results.ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="distal",
+    target=axs.positions.DISTAL,
 )
 ```
 
@@ -197,8 +205,8 @@ This enables:
 ```python
 axs.simulate_pool(
     pool,
-    duration_ms=2.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
+    duration=2.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=axs.Recording.none(),
     observers=[axs.results.ActivationObserver(...)]
 )
@@ -213,7 +221,7 @@ Possible future shape:
 
 ```python
 recording = axs.Recording(
-    variables=["Vm", "gates.m", "currents.I_na"],
+    signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
     spatial=axs.RecordingSpatial.indices([0, 50, 100]),
     temporal=axs.RecordingTemporal.every(10),
 )
@@ -224,10 +232,10 @@ For now, the simpler API can remain:
 ```python
 axs.Recording.voltage()
 axs.Recording.full()
-axs.Recording.only("Vm", "gates")
-axs.Recording.center("Vm")
-axs.Recording.probes("Vm", count=8)
-axs.Recording.indices([0, 10, 20], "Vm")
+axs.Recording.only(axs.signals.Vm, axs.signals.GATES)
+axs.Recording.center(axs.signals.Vm)
+axs.Recording.probes(axs.signals.Vm, count=8)
+axs.Recording.indices([0, 10, 20], axs.signals.Vm)
 axs.Recording.none()
 ```
 
@@ -253,19 +261,19 @@ Example:
 activation = axs.results.ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="distal",
+    target=axs.positions.DISTAL,
     require_propagation=True,
 )
 
 peak = axs.results.PeakVoltageObserver(
-    positions="all",
+    target=axs.positions.ALL,
     blanking=0.0 * axs.ms,
 )
 
 results = axs.simulate_pool(
     pool,
-    duration_ms=2.0 * axs.ms,
-    dt_ms=0.01 * axs.ms,
+    duration=2.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=axs.Recording.none(),
     observers=[activation, peak],
 )
@@ -376,26 +384,25 @@ Observers need to know which compartments to inspect.
 Public options could be:
 
 ```python
-positions="all"
-positions="center"
-positions="distal"
-positions="nodes"
-positions=[100.0 * axs.um, 500.0 * axs.um]
-indices=[0, 10, 20]
+target=axs.positions.ALL
+target=axs.positions.CENTER
+target=axs.positions.DISTAL
+target=axs.positions.At([100.0 * axs.um, 500.0 * axs.um])
+target=axs.positions.Indices([0, 10, 20])
 ```
 
 Implementation should compile these to integer indices before the solver loop.
 
 Suggested first implementation:
 
-- `indices=[...]`
-- `positions="all"`
-- `positions="center"`
-- `positions="distal"`
+- `target=axs.positions.Indices(...)`
+- `target=axs.positions.ALL`
+- `target=axs.positions.CENTER`
+- `target=axs.positions.DISTAL`
 
 Later:
 
-- `positions="nodes"` for myelinated axons;
+- a future node selector for myelinated axons;
 - physical position arrays resolved through layout;
 - named section/tag selectors.
 
@@ -423,7 +430,7 @@ Triggered when selected `Vm` crosses a threshold after a blanking period:
 ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="all",
+    target=axs.positions.ALL,
 )
 ```
 
@@ -446,7 +453,7 @@ zone:
 ActivationObserver(
     threshold=-20.0 * axs.mV,
     blanking=0.2 * axs.ms,
-    positions="distal",
+    target=axs.positions.DISTAL,
     require_propagation=True,
 )
 ```
@@ -502,7 +509,7 @@ Public:
 
 ```python
 axs.results.PeakVoltageObserver(
-    positions="all",
+    target=axs.positions.ALL,
     blanking=0.0 * axs.ms,
 )
 ```
@@ -549,7 +556,7 @@ threshold = axs.protocols.find_activation_threshold(
     criterion=axs.results.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
-        positions="distal",
+        target=axs.positions.DISTAL,
     ),
     tolerance=1.0 * axs.uA,
     max_iterations=20,
@@ -615,7 +622,7 @@ curve = axs.protocols.recruitment_sweep(
     criterion=axs.results.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
-        positions="distal",
+        target=axs.positions.DISTAL,
     ),
 )
 ```
@@ -663,7 +670,7 @@ thresholds = axs.protocols.thresholds_for_pool(
     criterion=axs.results.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.2 * axs.ms,
-        positions="distal",
+        target=axs.positions.DISTAL,
     ),
 )
 
@@ -734,7 +741,7 @@ def make_simulation(electrode_current):
         electrodes=[base_electrode.with_stimulus(stimulus)],
         sigma=0.3 * axs.S_per_m,
     )
-    sim = axs.AxonSimulation(axon)
+    sim = axs.AxonInstance(axon)
     sim.add_extracellular_context(context=context)
     return sim
 ```

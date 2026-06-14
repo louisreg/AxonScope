@@ -2,9 +2,9 @@
 
 This module only describes time courses. A `Stimulus` does not know whether it
 will become an intracellular clamp current or an electrode current until a
-physical object consumes it. Time values are stored in milliseconds; amplitude
-units are preserved when Pint quantities are provided and normalized later by
-the consuming clamp or electrode.
+physical object consumes it. Public constructor times must carry units and are
+stored in milliseconds; amplitude units are preserved when Pint quantities are
+provided and normalized later by the consuming clamp or electrode.
 """
 
 from __future__ import annotations
@@ -108,7 +108,13 @@ class Stimulus:
     # ------------------------------------------------------------------
 
     @classmethod
-    def constant(cls, value: Any, start: Any = 0.0, *, unit: UnitLike | None = None) -> "Stimulus":
+    def constant(
+        cls,
+        value: Any,
+        start: Any | None = None,
+        *,
+        unit: UnitLike | None = None,
+    ) -> "Stimulus":
         """Build a constant waveform.
 
         Parameters
@@ -117,12 +123,12 @@ class Stimulus:
             Amplitude after `start`. Plain numbers are unitless until the
             stimulus is attached to a physical object.
         start:
-            Start time. Plain numbers are interpreted as milliseconds.
+            Start time, with units. When omitted, the waveform starts at 0 ms.
         unit:
             Optional amplitude unit for plain numeric values.
         """
 
-        start = units.to_ms(start)
+        start = 0.0 if start is None else units.require_time_ms(start, name="start")
         return cls(t=np.asarray([start]), y=np.asarray([value], dtype=object), y_unit=unit)
 
     @classmethod
@@ -137,11 +143,11 @@ class Stimulus:
         """Build a rectangular monophasic pulse waveform.
 
         The waveform is baseline before `start`, equal to `amplitude` for
-        `duration`, then returns to baseline. Plain times are milliseconds.
+        `duration`, then returns to baseline. Times must carry units.
         """
 
-        start = units.to_ms(start)
-        duration = units.to_ms(duration)
+        start = units.require_time_ms(start, name="start")
+        duration = units.require_time_ms(duration, name="duration")
         return cls(
             t=np.asarray([0.0, start, start + duration]),
             y=np.asarray([baseline, amplitude, baseline], dtype=object),
@@ -156,7 +162,7 @@ class Stimulus:
         cathodic_amplitude: Any,
         cathodic_duration: Any,
         anodic_amplitude: Any | None = None,
-        interphase: Any = 0.0,
+        interphase: Any | None = None,
         anodic_first: bool = False,
         baseline: Any = 0.0,
         unit: UnitLike | None = None,
@@ -167,9 +173,13 @@ class Stimulus:
         phase as a positive amplitude. If `anodic_amplitude` is omitted, the
         anodic phase uses the opposite amplitude and the same duration.
         """
-        start = units.to_ms(start)
-        cathodic_duration = units.to_ms(cathodic_duration)
-        interphase = units.to_ms(interphase)
+        start = units.require_time_ms(start, name="start")
+        cathodic_duration = units.require_time_ms(cathodic_duration, name="cathodic_duration")
+        interphase = (
+            0.0
+            if interphase is None
+            else units.require_time_ms(interphase, name="interphase")
+        )
         amplitudes, inferred_unit = _coerce_amplitudes(
             [cathodic_amplitude, anodic_amplitude if anodic_amplitude is not None else 0.0, baseline],
             unit,
@@ -224,8 +234,8 @@ class Stimulus:
         from the frequency.
         """
 
-        start = units.to_ms(start)
-        duration = units.to_ms(duration)
+        start = units.require_time_ms(start, name="start")
+        duration = units.require_time_ms(duration, name="duration")
         frequency_khz = units.to_scalar(frequency_khz, "kilohertz")
         amplitudes, inferred_unit = _coerce_amplitudes([amplitude, offset], unit)
         amplitude = amplitudes[0]
@@ -233,7 +243,7 @@ class Stimulus:
         if dt is None:
             dt = 1.0 / (100.0 * frequency_khz)
         else:
-            dt = units.to_ms(dt)
+            dt = units.require_time_ms(dt, name="dt")
 
         n = int(np.ceil(duration / dt)) + 1
         local_t = np.linspace(0.0, duration, n)
@@ -257,9 +267,9 @@ class Stimulus:
         The returned stimulus uses linear interpolation between samples.
         """
 
-        start = units.to_ms(start)
-        duration = units.to_ms(duration)
-        dt = units.to_ms(dt)
+        start = units.require_time_ms(start, name="start")
+        duration = units.require_time_ms(duration, name="duration")
+        dt = units.require_time_ms(dt, name="dt")
         amplitudes, inferred_unit = _coerce_amplitudes([start_value, stop_value], unit)
         start_value = amplitudes[0]
         stop_value = amplitudes[1]
@@ -281,7 +291,7 @@ class Stimulus:
         Parameters
         ----------
         t:
-            Sample times. Plain values are interpreted as milliseconds.
+            Sample times, with units.
         y:
             Sample amplitudes. Pint-like values preserve their unit metadata.
         mode:
@@ -291,7 +301,12 @@ class Stimulus:
             Optional amplitude unit for plain numeric samples.
         """
 
-        return cls(t=units.to_ms_array(t), y=np.asarray(y, dtype=object), mode=mode, y_unit=unit)
+        return cls(
+            t=units.require_time_array_ms(t, name="t"),
+            y=np.asarray(y, dtype=object),
+            mode=mode,
+            y_unit=unit,
+        )
 
     def as_unit(self, unit: UnitLike) -> "Stimulus":
         """Return this waveform with amplitudes expressed in `unit`.
@@ -398,10 +413,15 @@ class Stimulus:
     def shifted(self, dt: Any) -> "Stimulus":
         """Return a waveform shifted by `dt`.
 
-        Plain `dt` values are interpreted as milliseconds.
+        `dt` must carry time units.
         """
 
-        return Stimulus(self.t + units.to_ms(dt), self.y, self.mode, y_unit=self.y_unit)
+        return Stimulus(
+            self.t + units.require_time_ms(dt, name="dt"),
+            self.y,
+            self.mode,
+            y_unit=self.y_unit,
+        )
 
     def scaled(self, factor: float) -> "Stimulus":
         """Return a waveform with amplitudes multiplied by `factor`."""
@@ -415,14 +435,21 @@ class Stimulus:
 
     def insert_samples(self, t_new: ArrayLike) -> "Stimulus":
         """Return a stimulus evaluated on the union of old and new samples."""
-        t_union = np.unique(np.concatenate([self.t, units.to_ms_array(t_new, dtype=float)]))
+        return self._insert_samples_ms(
+            units.require_time_array_ms(t_new, name="t_new", dtype=float)
+        )
+
+    def _insert_samples_ms(self, t_new_ms: ArrayLike) -> "Stimulus":
+        """Return a stimulus evaluated on canonical millisecond samples."""
+
+        t_union = np.unique(np.concatenate([self.t, np.asarray(t_new_ms, dtype=float)]))
         y_union = self.evaluate(t_union)
         return Stimulus(t_union, y_union, self.mode, y_unit=self.y_unit)
 
     def synchronize(self, other: "Stimulus") -> tuple["Stimulus", "Stimulus"]:
         """Return `self` and `other` evaluated on the same time grid."""
         t_union = np.unique(np.concatenate([self.t, other.t]))
-        return self.insert_samples(t_union), other.insert_samples(t_union)
+        return self._insert_samples_ms(t_union), other._insert_samples_ms(t_union)
 
     def __add__(self, other: float | "Stimulus") -> "Stimulus":
         """Return the pointwise sum with a scalar or another stimulus."""

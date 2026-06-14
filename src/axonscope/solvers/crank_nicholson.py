@@ -6,7 +6,7 @@ from typing import Any
 
 import jax.numpy as jnp
 
-from axonscope.axon_simulation import AxonSimulation, as_axon_simulation
+from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.results import SimResult
 
@@ -28,24 +28,16 @@ class CrankNicholson(Solver):
 
     def solve(
         self,
-        axon: Axon | AxonSimulation,
+        axon: Axon | AxonInstance,
         tsim: Any | None = None,
         dt: Any | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-        *,
-        duration_ms: Any | None = None,
-        dt_ms: Any | None = None,
     ) -> SimResult:
         """Execute a Crank-Nicholson simulation."""
 
-        simulation = as_axon_simulation(axon)
-        duration, step = resolve_time_args(
-            tsim=tsim,
-            dt=dt,
-            duration_ms=duration_ms,
-            dt_ms=dt_ms,
-        )
+        simulation = as_axon_instance(axon)
+        duration, step = resolve_time_args(tsim=tsim, dt=dt)
 
         use_extracellular = bool(getattr(simulation, "use_extracellular", False))
         solver_axon = build_solver_axon(simulation)

@@ -14,9 +14,9 @@ def make_extracellular_context(length):
     """Return one analytical context shared by every axon in the pool."""
 
     electrode = axs.PointSourceElectrode(
-        x_um=length / 2.0,
-        y_um=0.0 * axs.um,
-        z_um=0.0 * axs.um,
+        x=length / 2.0,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
     )
     current = axs.Stimulus.pulse(
         start=0.10 * axs.ms,
@@ -41,10 +41,10 @@ def make_simulations(y_positions, *, length, extracellular_context):
             compartments=51,
             celsius=37.0 * axs.degC,
         )
-        sim = axs.AxonSimulation(
+        sim = axs.AxonInstance(
             axon,
-            y_um=y_position,
-            z_um=0.0 * axs.um,
+            y=y_position,
+            z=0.0 * axs.um,
         )
         sim.add_extracellular_context(context=extracellular_context)
         sim.label = f"fiber {index}"
@@ -67,9 +67,9 @@ def main() -> None:
 
     results = axs.simulate_pool(
         simulations,
-        duration_ms=duration,
-        dt_ms=dt,
-        recording=axs.Recording.center("Vm"),
+        duration=duration,
+        dt=dt,
+        recording=axs.Recording.center(axs.signals.Vm),
     )
 
     y_positions_um = np.asarray([sim.y_um for sim in simulations], dtype=float)

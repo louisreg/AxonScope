@@ -17,7 +17,7 @@ import numpy as np
 
 from axonscope import degC, um
 from axonscope.axons import HodgkinHuxley
-from axonscope.axon_simulation import AxonSimulation
+from axonscope.axon_instance import AxonInstance
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.dispatcher.runtime_batches import (
     build_vstim_initial_previous_batch,
@@ -256,7 +256,7 @@ def _make_scaled_vstim_context_batch(
     return vext_mid, vext_previous
 
 
-def _build_hh_double_cable(nx: int) -> AxonSimulation:
+def _build_hh_double_cable(nx: int) -> AxonInstance:
     length_um = 400.0
     axon = HodgkinHuxley(
         length=length_um * um,
@@ -264,7 +264,7 @@ def _build_hh_double_cable(nx: int) -> AxonSimulation:
         compartments=nx,
         celsius=6.3 * degC,
     )
-    simulation = AxonSimulation(axon)
+    simulation = AxonInstance(axon)
     simulation.set_extracellular_layer(
         xraxial_MOhm_per_cm=np.full((axon.n_compartments,), 1e8, dtype=float),
         xg_S_per_cm2=np.full((axon.n_compartments,), 1e-3, dtype=float),
