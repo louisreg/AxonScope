@@ -173,11 +173,21 @@ JAX compile/enqueue overhead onto every workload.
   comparison: current evidence points to `Nt` scan plus per-step forward/reverse
   `Nx` scans inside `solve_block_tridiagonal_2x2_scalar`, so the GPU only gets
   batch-axis parallelism and does not saturate well at `B <= 600`.
-- [ ] Re-run Colab `kernel_double_cable_extracellular_long` after the
-  double-cable zero-Iinj kernel-input specialization to measure whether removing
-  the device-side dense zero `Iinj[B,Nt,Nx]` input improves GPU throughput.
+- [x] Re-run Colab `kernel_double_cable_extracellular_long` after the
+  double-cable zero-Iinj and shared-coefficient kernel-input specializations to
+  measure whether removing dense zero `Iinj[B,Nt,Nx]` and avoiding repeated
+  `(B,Nx)` coefficient broadcasts improves GPU throughput. Result: zero-Iinj
+  helped `n=600` GPU modestly; shared coefficients helped CPU strongly and
+  GPU at `n=300`, but did not fix the GPU scaling ceiling.
 - [ ] Decide whether runtime/device/precision planning values remain estimates
   only or start selecting execution backends.
+- [x] Prototype an
+  algorithmic GPU solver change rather than more input cleanup: e.g. a batched
+  or parallel block-tridiagonal solve for the per-step `2x2` system, then
+  compare against the current `solve_block_tridiagonal_2x2_scalar` scan.
+- [ ] Re-run Colab `kernel_double_cable_extracellular_pcr_long` to compare the
+  experimental PCR block solver against Thomas on GPU and CPU at
+  `n=100/300/600`.
 - [x] Add solver-only/precomputed-input benchmarks for intra and extra paths so
   solver throughput is separated from preprocessing and result packaging.
 
@@ -426,6 +436,10 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_175837` | Double-cable extracellular long run: GPU loses at `n=100` (`824.9 ms` vs CPU `465.1 ms`), crosses over at `n=300` (`954.8 ms` vs `1165.8 ms`), and wins `2.32x` at `n=600` (`1070.1 ms` vs `2485.8 ms`). Runtime now skips dense zero `Iinj` (`108 MB` skipped at `n=600`); static memory estimates were aligned afterward. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_single_cable_extracellular_long_20260615_181029` | Matching single-cable extracellular long run scales much better on GPU: `5.43x`, `6.81x`, and `9.78x` CPU/GPU at `n=100/300/600`; double-cable slowdown is kernel-specific, not generic extracellular preprocessing. |
 | 2026-06-15 | `phase7_6_double_cable_zero_iinj_kernel_smoke` | Local smoke passed after keeping absent double-cable intracellular input as `None` through the kernel path instead of passing a dense device zero `Iinj[B,Nt,Nx]`; Colab double-cable rerun needed for GPU impact. |
+| 2026-06-15 | `phase7_6_double_cable_shared_constants_smoke` | Local smoke passed after keeping shared double-cable coefficients unbatched through the stateful `vmap` path instead of broadcasting every cable/extracellular coefficient to `(B,Nx)` or `(B,Nx-1)`. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_181846` | Zero-Iinj kernel-input specialization: GPU total improved at `n=100` (`809.7 ms`, `-1.8%`) and `n=600` (`984.9 ms`, `-8.0%`) vs baseline, but regressed at `n=300` (`990.9 ms`, `+3.8%`); CPU improved `8-12%`. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_182156` | Shared-coefficient specialization: GPU improved at `n=300` (`859.4 ms`, `-10.0%`) and slightly at `n=600` (`1031.8 ms`, `-3.6%`) vs baseline, but regressed at `n=100` (`851.9 ms`, `+3.3%`); CPU improved most (`-30.7%` at `n=600`). |
+| 2026-06-15 | `phase7_6_double_cable_pcr_batch_smoke` | Experimental PCR block solver landed behind `BatchOptions(double_cable_block_solver="pcr")` / `--double-cable-block-solver pcr`; local batch smoke passed at `n=2`, and numerical tests match Thomas. |
 
 ## Completed Roadmap Archive
 

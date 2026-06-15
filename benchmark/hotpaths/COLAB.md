@@ -68,6 +68,9 @@ Available notebook cases:
   `double_cable_extracellular` trace with MRG double-cable rows, analytical
   point-source extracellular stimulation, sizes `100/300/600`,
   `duration=10 ms`, `dt=0.01 ms`, and a target of `51` compartments.
+- `kernel_double_cable_extracellular_pcr_long`: same long double-cable trace,
+  but passes `--double-cable-block-solver pcr` to test the experimental
+  parallel cyclic-reduction block solver against the default Thomas scan.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 only the enabled backend(s), and runs the selected case for the enabled labels.

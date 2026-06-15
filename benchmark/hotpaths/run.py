@@ -91,6 +91,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Optional batch-kernel time chunk size for long-run probes.",
     )
     parser.add_argument(
+        "--double-cable-block-solver",
+        choices=("thomas", "pcr"),
+        default="thomas",
+        help="Double-cable batch block solver: serial Thomas scan or experimental PCR.",
+    )
+    parser.add_argument(
         "--sweep-repeats",
         type=int,
         default=3,
@@ -158,6 +164,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "warmups": int(args.warmups),
             "timing_mode": timing_mode,
             "time_chunk_steps": args.time_chunk_steps,
+            "double_cable_block_solver": args.double_cable_block_solver,
             "sweep_repeats": int(args.sweep_repeats),
             "sync_device": bool(args.sync_device),
             "jax_log_compiles": bool(args.jax_log_compiles),
@@ -199,7 +206,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             dt_ms=args.dt,
             sweep_repeats=args.sweep_repeats,
         )
-        simulations = _with_time_chunk_steps(simulations, args.time_chunk_steps)
+        simulations = _with_batch_options(
+            simulations,
+            time_chunk_steps=args.time_chunk_steps,
+            double_cable_block_solver=args.double_cable_block_solver,
+        )
         estimates = [simulation.estimate().to_dict() for simulation in simulations]
         simulation_labels = _simulation_labels(run.workload, len(simulations))
         for _ in range(args.warmups):
@@ -221,6 +232,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "warmup_count": int(args.warmups),
                 "timing_mode": timing_mode,
                 "time_chunk_steps": args.time_chunk_steps,
+                "double_cable_block_solver": args.double_cable_block_solver,
                 "jax_log_compiles": bool(args.jax_log_compiles),
             }
         )
@@ -612,17 +624,28 @@ def _single_cable_runtime(
     )
 
 
-def _with_time_chunk_steps(
+def _with_batch_options(
     simulations: Sequence[axs.AxonSimulation],
+    *,
     time_chunk_steps: int | None,
+    double_cable_block_solver: str,
 ) -> tuple[axs.AxonSimulation, ...]:
-    """Return simulations with an optional batch time-chunk policy applied."""
+    """Return simulations with benchmark batch-kernel options applied."""
 
-    if time_chunk_steps is None:
+    if time_chunk_steps is None and double_cable_block_solver == "thomas":
         return tuple(simulations)
     updated = []
     for simulation in simulations:
         batch_options = simulation.batch_options or BatchOptions()
+        updated_options = replace(
+            batch_options,
+            double_cable_block_solver=double_cable_block_solver,
+        )
+        if time_chunk_steps is not None:
+            updated_options = replace(
+                updated_options,
+                time_chunk_steps=int(time_chunk_steps),
+            )
         updated.append(
             axs.AxonSimulation(
                 simulation.population,
@@ -631,10 +654,7 @@ def _with_time_chunk_steps(
                 recording=simulation.recording,
                 solver=simulation.solver,
                 solver_options=simulation.solver_options,
-                batch_options=replace(
-                    batch_options,
-                    time_chunk_steps=int(time_chunk_steps),
-                ),
+                batch_options=updated_options,
                 observers=simulation.observers,
                 progress=simulation.progress,
             )

@@ -392,6 +392,96 @@ def solve_block_tridiagonal_2x2_scalar(
     return x0, x1
 
 
+def solve_block_tridiagonal_2x2_pcr(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+) -> tuple[Array, Array]:
+    """Solve the 2x2 block system with parallel cyclic reduction.
+
+    This is a GPU-oriented alternative to
+    :func:`solve_block_tridiagonal_2x2_scalar`. It keeps every compartment row
+    active at each reduction stage, eliminates neighbors at strides
+    ``1, 2, 4, ...``, and finishes with independent 2x2 solves. The algorithm
+    does more local arithmetic and materializes full 2x2 off-diagonal blocks,
+    but exposes spatial parallelism that the Thomas forward/backward scan does
+    not.
+    """
+
+    n = int(a00.shape[0])
+    dtype = a00.dtype
+    idx = jnp.arange(n)
+    zero = jnp.zeros((), dtype=dtype)
+
+    lower = jnp.zeros((n, 2, 2), dtype=dtype)
+    upper = jnp.zeros((n, 2, 2), dtype=dtype)
+    diag = jnp.zeros((n, 2, 2), dtype=dtype)
+    rhs = jnp.stack([rhs0, rhs1], axis=1)
+
+    diag = diag.at[:, 0, 0].set(a00)
+    diag = diag.at[:, 0, 1].set(a01)
+    diag = diag.at[:, 1, 0].set(a10)
+    diag = diag.at[:, 1, 1].set(a11)
+    lower = lower.at[1:, 0, 0].set(off0)
+    lower = lower.at[1:, 1, 1].set(off1)
+    upper = upper.at[:-1, 0, 0].set(off0)
+    upper = upper.at[:-1, 1, 1].set(off1)
+
+    def inv2_blocks(blocks: Array) -> Array:
+        m00 = blocks[:, 0, 0]
+        m01 = blocks[:, 0, 1]
+        m10 = blocks[:, 1, 0]
+        m11 = blocks[:, 1, 1]
+        det = m00 * m11 - m01 * m10
+        out = jnp.zeros_like(blocks)
+        out = out.at[:, 0, 0].set(m11 / det)
+        out = out.at[:, 0, 1].set(-m01 / det)
+        out = out.at[:, 1, 0].set(-m10 / det)
+        out = out.at[:, 1, 1].set(m00 / det)
+        return out
+
+    stride = 1
+    while stride < n:
+        left_idx = jnp.maximum(idx - stride, 0)
+        right_idx = jnp.minimum(idx + stride, n - 1)
+        has_left = idx >= stride
+        has_right = idx + stride < n
+
+        left_inv = inv2_blocks(diag[left_idx])
+        right_inv = inv2_blocks(diag[right_idx])
+        left_factor = lower @ left_inv
+        right_factor = upper @ right_inv
+        left_factor = jnp.where(has_left[:, None, None], left_factor, zero)
+        right_factor = jnp.where(has_right[:, None, None], right_factor, zero)
+
+        next_lower = -left_factor @ lower[left_idx]
+        next_upper = -right_factor @ upper[right_idx]
+        next_diag = (
+            diag
+            - left_factor @ upper[left_idx]
+            - right_factor @ lower[right_idx]
+        )
+        next_rhs = (
+            rhs
+            - (left_factor @ rhs[left_idx, :, None])[:, :, 0]
+            - (right_factor @ rhs[right_idx, :, None])[:, :, 0]
+        )
+
+        lower = jnp.where(has_left[:, None, None], next_lower, zero)
+        upper = jnp.where(has_right[:, None, None], next_upper, zero)
+        diag = next_diag
+        rhs = next_rhs
+        stride *= 2
+
+    solution = (inv2_blocks(diag) @ rhs[:, :, None])[:, :, 0]
+    return solution[:, 0], solution[:, 1]
+
+
 def apply_diffusion_operator(V: Array, lower: Array, diag: Array, upper: Array) -> Array:
     """
     Apply the discrete diffusion operator represented by the tridiagonal rows.

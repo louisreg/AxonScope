@@ -11,7 +11,12 @@ from .batch_inputs import (
     SparseIntracellularCurrentDensityBatch,
     materialize_sparse_intracellular_current_density_batch,
 )
-from .common import Array, apply_diffusion_operator, solve_block_tridiagonal_2x2_scalar
+from .common import (
+    Array,
+    apply_diffusion_operator,
+    solve_block_tridiagonal_2x2_pcr,
+    solve_block_tridiagonal_2x2_scalar,
+)
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .observer_runtime import (
     ObserverState,
@@ -959,6 +964,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "double_cable_block_solver",
     ),
 )
 def _run_double_cable_batch_stateful_scan(
@@ -968,6 +974,7 @@ def _run_double_cable_batch_stateful_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    double_cable_block_solver: str,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
@@ -1082,7 +1089,12 @@ def _run_double_cable_batch_stateful_scan(
                 + I_corr_abs
             )
 
-            return solve_block_tridiagonal_2x2_scalar(
+            solve_block = (
+                solve_block_tridiagonal_2x2_pcr
+                if double_cable_block_solver == "pcr"
+                else solve_block_tridiagonal_2x2_scalar
+            )
+            return solve_block(
                 a00,
                 a01,
                 a10,
@@ -1419,7 +1431,11 @@ class SingleCableVStimBatchKernel:
             iinj_batch = materialize_sparse_intracellular_current_density_batch(sparse_iinj)
         if vext_batch is None:
             raise ValueError("extracellular_potential_mid_mV is required when recording Vm.")
-        if record_full and chunk_steps is None and shared_cable:
+        if (
+            record_full
+            and chunk_steps is None
+            and shared_cable
+        ):
             out = _run_single_cable_vstim_batch_vm_scan(
                 backend=membrane_runtime.backend,
                 membrane=membrane_runtime.membrane,
@@ -1562,7 +1578,12 @@ class DoubleCableBatchKernel:
             and jnp.asarray(extracellular.Gax_i).ndim == 1
             and jnp.asarray(extracellular.Gax_e).ndim == 1
         )
-        if record_full and chunk_steps is None and shared_cable:
+        if (
+            record_full
+            and chunk_steps is None
+            and shared_cable
+            and options.double_cable_block_solver == "thomas"
+        ):
             Ve0 = jnp.full(
                 (nx,),
                 jnp.asarray(self.Veinit_mV, dtype=dtype_local),
@@ -1602,6 +1623,7 @@ class DoubleCableBatchKernel:
                 Veinit_mV=float(self.Veinit_mV),
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
+                double_cable_block_solver=options.double_cable_block_solver,
                 intracellular_current_density_mid=iinj_batch,
                 extracellular_potential_mid_mV=vext_batch,
                 extracellular_potential_initial_previous_mV=vext_previous_batch,
@@ -1941,6 +1963,7 @@ def _run_double_cable_batch_array_chunks(
     Veinit_mV: float,
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
+    double_cable_block_solver: str,
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
@@ -2077,6 +2100,7 @@ def _run_double_cable_batch_array_chunks(
             has_driven_extracellular=has_driven_extracellular,
             stateless_vm_only=stateless_vm_only,
             record_full=record_full,
+            double_cable_block_solver=double_cable_block_solver,
             Vi0_mV=Vi,
             Ve0_mV=Ve,
             gates0=gates,

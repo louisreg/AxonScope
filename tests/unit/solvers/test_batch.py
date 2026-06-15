@@ -74,6 +74,9 @@ def test_batch_recording_resolves_common_policies():
     )
     with pytest.raises(ValueError, match="within"):
         BatchRecording.indices([5]).indices_for(5)
+    assert BatchOptions.center(double_cable_block_solver="pcr").double_cable_block_solver == "pcr"
+    with pytest.raises(ValueError, match="double_cable_block_solver"):
+        BatchOptions(double_cable_block_solver="dense")
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -467,6 +470,55 @@ def test_double_cable_batch_absent_intracellular_matches_explicit_zero_input():
     np.testing.assert_allclose(
         np.asarray(implicit_zero),
         np.asarray(explicit_zero),
+        atol=1e-3,
+        rtol=0.0,
+    )
+
+
+def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [
+        base_contexts,
+        scale_extracellular_contexts(base_contexts, 0.5),
+    ]
+    vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
+    vext_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    kernel = DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    )
+
+    thomas = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.center(),
+    ).Vm
+    pcr = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.center(double_cable_block_solver="pcr"),
+    ).Vm
+
+    assert pcr.shape == thomas.shape
+    np.testing.assert_allclose(
+        np.asarray(pcr),
+        np.asarray(thomas),
         atol=1e-3,
         rtol=0.0,
     )

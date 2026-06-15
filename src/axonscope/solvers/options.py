@@ -8,6 +8,7 @@ import numpy as np
 from axonscope.channel_models import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
+DoubleCableBlockSolver = Literal["thomas", "pcr"]
 
 
 @dataclass(frozen=True)
@@ -134,23 +135,36 @@ class BatchOptions:
 
     recording: BatchRecording = field(default_factory=BatchRecording.full)
     time_chunk_steps: int | None = None
+    double_cable_block_solver: DoubleCableBlockSolver = "thomas"
 
     @classmethod
-    def full(cls, *, time_chunk_steps: int | None = None) -> "BatchOptions":
+    def full(
+        cls,
+        *,
+        time_chunk_steps: int | None = None,
+        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+    ) -> "BatchOptions":
         """Record full Vm, optionally chunking the time loop."""
 
         return cls(
             recording=BatchRecording.full(),
             time_chunk_steps=time_chunk_steps,
+            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
-    def center(cls, *, time_chunk_steps: int | None = None) -> "BatchOptions":
+    def center(
+        cls,
+        *,
+        time_chunk_steps: int | None = None,
+        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+    ) -> "BatchOptions":
         """Record the center compartment only."""
 
         return cls(
             recording=BatchRecording.center(),
             time_chunk_steps=time_chunk_steps,
+            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
@@ -159,21 +173,29 @@ class BatchOptions:
         count: int = 8,
         *,
         time_chunk_steps: int | None = None,
+        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
     ) -> "BatchOptions":
         """Record evenly spaced compartment probes."""
 
         return cls(
             recording=BatchRecording.probes(count),
             time_chunk_steps=time_chunk_steps,
+            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
-    def none(cls, *, time_chunk_steps: int | None = None) -> "BatchOptions":
+    def none(
+        cls,
+        *,
+        time_chunk_steps: int | None = None,
+        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+    ) -> "BatchOptions":
         """Record no Vm trace, typically for solver-side observer runs."""
 
         return cls(
             recording=BatchRecording.none(),
             time_chunk_steps=time_chunk_steps,
+            double_cable_block_solver=double_cable_block_solver,
         )
 
     def __post_init__(self) -> None:
@@ -181,11 +203,16 @@ class BatchOptions:
             raise TypeError("recording must be a BatchRecording.")
         if self.time_chunk_steps is not None and int(self.time_chunk_steps) < 1:
             raise ValueError("time_chunk_steps must be >= 1.")
+        if self.double_cable_block_solver not in {"thomas", "pcr"}:
+            raise ValueError(
+                "double_cable_block_solver must be either 'thomas' or 'pcr'."
+            )
 
 
 __all__ = [
     "BatchOptions",
     "BatchRecording",
     "BatchRecordingMode",
+    "DoubleCableBlockSolver",
     "SolverOptions",
 ]
