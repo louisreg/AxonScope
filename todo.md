@@ -131,6 +131,26 @@ realistic populations, not just clean homogeneous smoke workloads.
     `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`.
   - Then run `CASE = "kernel_realistic_long"` if the observer-only trace looks
     healthy.
+  - `kernel_realistic_long` run analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_realistic_long_20260615_103306/`.
+  - This is the first trace where GPU wins on the realistic mixed workload:
+    `744.6 ms` GPU versus `1253.8 ms` CPU (`1.68x` total speedup).
+  - The useful compute gap is much larger than the total speedup suggests:
+    GPU `kernel.wait 33.0 ms` versus CPU `955.2 ms` (`29x`), while GPU still
+    pays larger fixed/setup costs: `runtime.prepare 237.1 ms`,
+    `kernel.enqueue 330.9 ms`, `inputs.intracellular 64.3 ms`, and
+    `inputs.extracellular 38.2 ms`.
+  - The dense input estimate is now significant: about `52.5 MiB` for
+    `Iinj[B,Nt,Nx]` and `52.5 MiB` for `Vstim[B,Nt,Nx]` at `n=500`,
+    `Nt=500`, and `Nx<=55`; drive materialization is now a real Phase 8/7.6
+    design pressure, not just a theoretical memory note.
+  - Investigated collapsing the six single-cable `Nx=51/53/55` groups into
+    two padded model groups. Do not implement this shortcut yet: current
+    padded kernels need row-specific recording selectors and observer masks to
+    avoid forcing `Recording.full()` or selecting the wrong row center/probes.
+  - Next required trace is still `kernel_observer_long`, because
+    `Recording.none()`/observers should isolate solver-side observer scaling
+    from dense retained-output behavior.
   - If `runtime.prepare` still dominates, investigate deeper structural
     dispatcher caches and JAX transfer/compile boundaries.
   - If `kernel.enqueue`, input materialization, or result packaging dominates,

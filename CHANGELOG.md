@@ -206,6 +206,10 @@ The format is inspired by Keep a Changelog.
 - Added selectable Colab CPU/GPU benchmark cases for short setup traces and
   longer kernel-weighted traces (`setup_scale`, `kernel_observer_long`, and
   `kernel_realistic_long`).
+- Added Phase 7.6 long realistic Colab evidence from
+  `colab_cpu_gpu_kernel_realistic_long_20260615_103306`, showing a GPU total
+  speedup on the mixed-population workload while dense input materialization
+  and launch/setup costs still dominate wall time.
 
 ### Changed
 
