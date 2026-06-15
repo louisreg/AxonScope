@@ -70,8 +70,12 @@ Available notebook cases:
   `duration=10 ms`, `dt=0.01 ms`, and a target of `51` compartments.
 - `kernel_double_cable_extracellular_auto_long`: same long double-cable trace,
   but passes `--double-cable-block-solver auto` so GPU runs resolve to PCR and
-  CPU runs resolve to Thomas. Use this for CPU/GPU comparison after the PCR
-  result.
+  CPU runs resolve to Thomas. It includes sizes `100/300/600/2000` for the
+  longer CPU/GPU comparison after the PCR result.
+- `kernel_double_cable_observer_auto_long`: same MRG double-cable extracellular
+  trace, but uses `Recording.none()` plus solver-side `PeakVoltage` and
+  `Activation` observers at sizes `100/300/600/2000`. Use this to compare
+  retained center traces against compact observer-only output on GPU.
 - `kernel_double_cable_extracellular_pcr_long`: same long double-cable trace,
   but passes `--double-cable-block-solver pcr` to test the experimental
   parallel cyclic-reduction block solver against the default Thomas scan. Use

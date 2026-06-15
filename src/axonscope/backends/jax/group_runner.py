@@ -426,6 +426,12 @@ def _run_double_cable_batch_group(
             ),
             context_count=cohort.context_count,
         )
+    kernel_options = _kernel_batch_options(group, batch_options)
+    observer_plan = _observer_plan_for_cohort(
+        observers,
+        cohort=cohort,
+        dtype=runtime.membrane.dtype,
+    )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -472,7 +478,6 @@ def _run_double_cable_batch_group(
                 role="kernel_input",
             ),
         )
-    kernel_options = _kernel_batch_options(group, batch_options)
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,
@@ -489,6 +494,7 @@ def _run_double_cable_batch_group(
             extracellular_potential_mid_mV=vstim_mid,
             extracellular_potential_initial_previous_mV=vstim_previous,
             options=kernel_options,
+            observers=observer_plan,
             progress_callback=progress_callback,
         )
         if out.Vm is not None:

@@ -19,6 +19,7 @@ def test_hotpath_catalog_lists_phase25_workloads():
         "footprint_reuse_sweep",
         "intracellular_only",
         "double_cable_extracellular",
+        "double_cable_observer",
         "hotpath_matrix",
         "observer_only",
         "path_comparison_matrix",
@@ -52,6 +53,8 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
         "point_source_extracellular size=3",
         "double_cable_extracellular size=2",
         "double_cable_extracellular size=3",
+        "double_cable_observer size=2",
+        "double_cable_observer size=3",
         "footprint_reuse_sweep size=2",
         "footprint_reuse_sweep size=3",
         "solver_only_precomputed size=2",
@@ -77,6 +80,7 @@ def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
         "intracellular_only size=1",
         "point_source_extracellular size=1",
         "double_cable_extracellular size=1",
+        "double_cable_observer size=1",
         "footprint_reuse_sweep size=1",
         "solver_only_precomputed size=1",
         "typed_footprint_drive_matrix size=1",
@@ -205,6 +209,28 @@ def test_hotpath_double_cable_extracellular_uses_mrg_double_cable_rows():
     assert isinstance(simulation, axs.AxonSimulation)
     assert simulation.is_population
     assert len(simulation.axons) == 2
+    assert {type(instance.axon).__name__ for instance in simulation.axons} == {"MRG"}
+    assert {
+        instance.axon.resolved_formulation for instance in simulation.axons
+    } == {"double-cable"}
+    assert all(instance.extracellular_context is not None for instance in simulation.axons)
+
+
+def test_hotpath_double_cable_observer_uses_mrg_observer_only_rows():
+    simulation = build_simulation(
+        "double_cable_observer",
+        size=2,
+        compartments=51,
+        length_um=40.0,
+        duration_ms=0.1,
+        dt_ms=0.05,
+    )
+
+    assert isinstance(simulation, axs.AxonSimulation)
+    assert simulation.is_population
+    assert len(simulation.axons) == 2
+    assert not simulation.recording.voltage
+    assert simulation.observers is not None
     assert {type(instance.axon).__name__ for instance in simulation.axons} == {"MRG"}
     assert {
         instance.axon.resolved_formulation for instance in simulation.axons

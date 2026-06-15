@@ -987,6 +987,25 @@ def build_simulations(
             size=size,
             compartments=compartments,
         )
+    elif workload == "double_cable_observer":
+        instances = build_double_cable_extracellular_pool(
+            size=size,
+            compartments=compartments,
+        )
+        peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+        activation = axs.analysis.Activation(
+            threshold=-80.0 * axs.mV,
+            target=axs.positions.CENTER,
+        )
+        return (
+            axs.AxonSimulation(
+                axs.AxonPopulation(instances),
+                duration=duration_ms * axs.ms,
+                dt=dt_ms * axs.ms,
+                recording=axs.Recording.none(),
+                observers=[peak_voltage, activation],
+            ),
+        )
     elif workload == "footprint_reuse_sweep":
         return tuple(
             axs.AxonSimulation(

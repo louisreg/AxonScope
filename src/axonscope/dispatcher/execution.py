@@ -172,8 +172,6 @@ def _can_run_batch_group(
         return False
     if observers and group.has_padding:
         return False
-    if observers and group.mode == "double":
-        return False
     return group.mode in {"single", "double"}
 
 

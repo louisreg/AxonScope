@@ -36,6 +36,13 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "extracellular hotpath."
         ),
     ),
+    "double_cable_observer": HotpathWorkload(
+        name="double_cable_observer",
+        description=(
+            "Homogeneous MRG double-cable extracellular pool with solver-side "
+            "PeakVoltage/Activation observers and no retained Vm trace."
+        ),
+    ),
     "footprint_reuse_sweep": HotpathWorkload(
         name="footprint_reuse_sweep",
         description=(

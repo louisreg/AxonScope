@@ -111,7 +111,7 @@ Run the double-cable long probe with automatic block-solver selection:
 ```bash
 python benchmark/hotpaths/run.py \
   --workload double_cable_extracellular \
-  --sizes 100 300 600 \
+  --sizes 100 300 600 2000 \
   --duration 10.0 \
   --dt 0.01 \
   --compartments 51 \
@@ -121,6 +121,22 @@ python benchmark/hotpaths/run.py \
 
 The automatic policy resolves to PCR on GPU and Thomas elsewhere, and the
 manifest records both the requested and resolved solver choices.
+
+Run the same double-cable probe with compact solver-side observers:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload double_cable_observer \
+  --sizes 100 300 600 2000 \
+  --duration 10.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1 \
+  --double-cable-block-solver auto
+```
+
+This keeps the same MRG extracellular setup but uses `Recording.none()` with
+PeakVoltage and Activation observers instead of retaining a center Vm trace.
 
 Force the experimental double-cable PCR block solver:
 
@@ -192,6 +208,7 @@ packaging regressions, then `kernel_observer_long` and
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
 | `point_source_extracellular` | HH population driven by analytical point-source extracellular contexts. Stresses the current generic `Vstim` preprocessing path tracked in the benchmark/CPU-GPU section of `todo.md`. |
 | `double_cable_extracellular` | MRG double-cable population driven by analytical point-source extracellular contexts. Stresses the priority myelinated extracellular path before Phase 8 study/reuse APIs. |
+| `double_cable_observer` | Same MRG double-cable extracellular population with solver-side peak-voltage and activation observers, `Recording.none()`, and compact observations. Compares retained center traces against observer-only output. |
 | `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
 | `solver_only_precomputed` | Direct backend workload with runtime and inputs prepared before timing. Separates kernel throughput from dispatch planning and input materialization for single-cable intra/extra rows. |
 | `typed_footprint_drive_matrix` | Direct backend workload comparing analytical-context lowering against typed `ExtracellularFootprint`/`ExtracellularDrive` lowering, then executing the typed-drive dense `Vstim` path. |
