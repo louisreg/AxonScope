@@ -8,7 +8,7 @@ from axonscope.backends.jax.group_runner import run_jax_batch_group
 from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
-from axonscope.dispatcher.results import DispatchResult
+from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
 from axonscope.results import SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, SolverOptions
 from axonscope.utils import units
@@ -23,14 +23,16 @@ def run_pool(
     batch_options: BatchOptions | None = None,
     observers: Sequence[Any] | None = None,
     progress: ProgressOption = False,
-) -> tuple[DispatchResult, ...]:
-    """Run an axon pool and return one raw dispatch result per input simulation.
+) -> tuple[DispatchRecord, ...]:
+    """Run an axon pool and return raw dispatch records.
 
     Public code should generally call ``axonscope.simulate_pool`` so these raw
-    dispatch results are converted to ``SimResult`` objects. Plain numeric times
-    are interpreted as milliseconds; Pint-like quantities are converted at this
-    boundary. ``progress`` enables optional Rich/plain progress reporting at the
-    dispatch-group level and, for chunked batch runs, at the kernel-chunk level.
+    dispatch records are converted to public cohort results. Batched observer-
+    only groups may remain a single compact record instead of one record per
+    input axon. Plain numeric times are interpreted as milliseconds; Pint-like
+    quantities are converted at this boundary. ``progress`` enables optional
+    Rich/plain progress reporting at the dispatch-group level and, for chunked
+    batch runs, at the kernel-chunk level.
     """
 
     if not axons:
@@ -68,12 +70,13 @@ def _run_pool_checked(
     batch_options: BatchOptions | None,
     observers: tuple[Any, ...] | None,
     progress: ProgressOption,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
     plan = build_dispatch_plan(axons)
     record_benchmark_metadata(dispatch_group_count=len(plan.groups))
 
-    results: list[DispatchResult | None] = [None] * len(plan.items)
+    results: list[DispatchRecord] = []
+    seen_indices: set[int] = set()
     with DispatchProgress(progress, plan) as progress_reporter:
         for group in plan.groups:
             with benchmark_span(
@@ -111,11 +114,23 @@ def _run_pool_checked(
                         callback(1, 1)
                 progress_reporter.finish_group(group)
             for result in group_results:
-                results[result.index] = result
+                indices = (
+                    result.indices
+                    if isinstance(result, DispatchCohortResult)
+                    else (result.index,)
+                )
+                for index in indices:
+                    if index in seen_indices:
+                        raise RuntimeError(f"duplicate dispatch result for pool index {index}.")
+                    seen_indices.add(index)
+                results.append(result)
 
-    if any(result is None for result in results):
+    if len(seen_indices) != len(plan.items):
+        missing = sorted(set(range(len(plan.items))) - seen_indices)
+        raise RuntimeError(f"pool dispatch did not produce all axon results: {missing}.")
+    if any(index < 0 or index >= len(plan.items) for index in seen_indices):
         raise RuntimeError("pool dispatch did not produce all axon results.")
-    return tuple(result for result in results if result is not None)
+    return tuple(results)
 
 
 def _run_scalar_group(
@@ -171,7 +186,7 @@ def _run_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     """Execute one compatible group through the JAX batch backend."""
 
     return run_jax_batch_group(
@@ -211,6 +226,8 @@ def _dispatch_result_from_sim(
 
 
 __all__ = [
+    "DispatchCohortResult",
+    "DispatchRecord",
     "DispatchResult",
     "run_pool",
 ]

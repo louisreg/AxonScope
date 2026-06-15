@@ -220,6 +220,13 @@ The format is inspired by Keep a Changelog.
   current-clamp lowering reduces observer-only GPU wall time and exposes
   observer result splitting plus zero-field `Vstim` materialization as the next
   bottlenecks.
+- Added Phase 7.6 zero-field observer-only Colab evidence from
+  `colab_cpu_gpu_kernel_observer_long_20260615_120457`, confirming that
+  `zero_no_context` skips dense zero `Vstim` materialization and leaves
+  `results.split_batch` as the dominant GPU-side observer-only cost.
+- Added an internal compact dispatch cohort record so observer-only batch runs
+  can keep one batched observations payload between the JAX backend and public
+  pool results.
 
 ### Changed
 
@@ -277,9 +284,12 @@ The format is inspired by Keep a Changelog.
   `Vstim[B,Nt,Nx]` materialization when homogeneous single-cable batch runs have
   no extracellular contexts; hotpath metadata now reports
   `input_format="zero_no_context"` for that path.
+- Reduced observer-only `results.split_batch` overhead further by returning one
+  compact dispatch cohort for batched solver-side observations instead of
+  materializing one internal `DispatchResult` per axon row.
 - Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
   now orchestrates groups and delegates compatible batch groups to the JAX
-  backend runner through a neutral `DispatchResult` record.
+  backend runner through neutral dispatch result records.
 - Reduced `dispatcher/runtime_batches.py` to host-side row helpers; JAX tensor
   builders now live under the JAX backend module and are imported there by
   execution, tests, and runtime benchmark scripts.

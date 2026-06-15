@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Iterator, Sequence, overload
+from typing import TYPE_CHECKING, Any, Iterator, Sequence, cast, overload
 
 import numpy as np
 
@@ -14,7 +14,7 @@ from axonscope.results.single import ObservationDict, RecordingDict, ResultArray
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 
 if TYPE_CHECKING:
-    from axonscope.dispatcher.results import DispatchResult
+    from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
     from axonscope.recording import Recording
 
 
@@ -30,6 +30,23 @@ def _dispatch_diagnostics(result: DispatchResult) -> dict[str, Any]:
         "dispatch_geometry_shared": result.geometry_shared,
         "dispatch_has_padding": result.has_padding,
     }
+
+
+def _dispatch_cohort_diagnostics(result: DispatchCohortResult) -> tuple[dict[str, Any], ...]:
+    """Return public diagnostics carried by one compact dispatched cohort."""
+
+    return tuple(
+        {
+            "pool_index": int(index),
+            "dispatch_group_id": result.group_id,
+            "dispatch_method": result.method,
+            "dispatch_group_size": result.group_size,
+            "dispatch_batch_kind": result.batch_kind,
+            "dispatch_geometry_shared": result.geometry_shared,
+            "dispatch_has_padding": result.has_padding,
+        }
+        for index in result.indices
+    )
 
 
 def _require_signal(signal: Any) -> Signal[Any]:
@@ -145,6 +162,28 @@ class CohortResult:
         return len(self.input_indices)
 
 
+def _cohort_from_dispatch_cohort(
+    result: DispatchCohortResult,
+    *,
+    recording: Recording | None,
+) -> CohortResult:
+    """Convert one compact dispatch cohort to a public result cohort."""
+
+    if len(result.record_indices) != len(result.indices):
+        raise ValueError("cohort record_indices must align with cohort input indices.")
+    return CohortResult(
+        input_indices=tuple(int(index) for index in result.indices),
+        axons=tuple(result.axons),
+        simulations=tuple(result.simulations),
+        Vm=None if result.Vm is None else np.asarray(result.Vm),
+        t=np.asarray(result.t),
+        diagnostics=_dispatch_cohort_diagnostics(result),
+        record_indices=tuple(result.record_indices),
+        recording=recording,
+        observations=result.observations,
+    )
+
+
 @dataclass(frozen=True)
 class RecordingManifest:
     """Structured description of requested and available result signals."""
@@ -166,7 +205,7 @@ class RecordingManifest:
         vm_cohort_indices = tuple(
             index for index, cohort in enumerate(cohorts) if cohort.Vm is not None
         )
-        available = ()
+        available: tuple[RecordedSignal, ...] = ()
         if vm_cohort_indices:
             available = (
                 RecordedSignal(
@@ -354,18 +393,28 @@ class AxonSimulationResult(Sequence[AxonResultView]):
     @classmethod
     def from_dispatch_results(
         cls,
-        results: Sequence[DispatchResult],
+        results: Sequence[DispatchRecord],
         *,
         recording: Recording | None = None,
     ) -> AxonSimulationResult:
-        """Build a cohort-backed public result from dispatcher rows."""
+        """Build a cohort-backed public result from dispatcher records."""
 
-        rows = tuple(results)
-        if not rows:
+        records = tuple(results)
+        if not records:
             raise ValueError("AxonSimulationResult requires at least one dispatch result.")
 
+        cohorts = []
         groups: dict[tuple[Any, ...], list[DispatchResult]] = {}
-        for row in rows:
+        size = 0
+        for record in records:
+            if hasattr(record, "indices"):
+                cohort_record = cast("DispatchCohortResult", record)
+                cohorts.append(
+                    _cohort_from_dispatch_cohort(cohort_record, recording=recording)
+                )
+                size += len(cohort_record.indices)
+                continue
+            row = cast("DispatchResult", record)
             vm = None if row.Vm is None else np.asarray(row.Vm)
             t = np.asarray(row.t)
             record_indices = None if row.record_indices is None else tuple(row.record_indices)
@@ -379,8 +428,8 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                 id(row.observations) if row.observations_are_batched else None,
             )
             groups.setdefault(key, []).append(row)
+            size += 1
 
-        cohorts = []
         for grouped_rows in groups.values():
             dense_vm = (
                 None
@@ -402,7 +451,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                 )
             )
 
-        return cls(cohorts, size=len(rows), recording=recording)
+        return cls(cohorts, size=size, recording=recording)
 
     def _build_lookup(self) -> tuple[tuple[int, int], ...]:
         lookup: list[tuple[int, int] | None] = [None] * self.size

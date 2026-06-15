@@ -9,6 +9,7 @@ from axonscope.backends.jax.input_batches import (
 )
 from axonscope.dispatcher import build_dispatch_plan, run_pool
 from axonscope.dispatcher import describe_dispatch_plan
+from axonscope.dispatcher.results import DispatchCohortResult
 from axonscope.dispatcher.runtime_batches import (
     extracellular_context_rows,
     x_positions_batch_m,
@@ -299,6 +300,29 @@ def test_run_pool_returns_internal_dispatch_results():
     assert result[0].simulation is axon
     assert result[0].axon is axon.axon
     assert np.asarray(result[0].Vm).shape == (2, 11)
+
+
+def test_run_pool_observer_only_keeps_one_compact_cohort_record():
+    axons = [
+        _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0),
+        _hh_axon(nx=11, amp_nA=0.5, y_um=12.0, z_um=34.0),
+    ]
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+
+    result = run_pool(
+        axons,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=axs.Recording.none().to_batch_options(),
+        observers=(peak,),
+    )
+
+    assert len(result) == 1
+    assert isinstance(result[0], DispatchCohortResult)
+    assert result[0].indices == (0, 1)
+    assert result[0].Vm is None
+    assert result[0].observations is not None
+    assert result[0].observations["peak_voltage"].values.shape == (2,)
 
 
 def test_dispatch_plan_preserves_pool_indices():

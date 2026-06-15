@@ -22,9 +22,14 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
 - [x] Phase 7.6 evidence gate is complete: realistic mixed-population, hotpath-matrix, and long observer-only CPU/GPU traces have been run and analyzed.
-- [ ] Next priority before broad Phase 8 APIs: re-run the observer-only Colab
-  case after the `zero_no_context` patch, then finish the targeted hotpath
-  cleanup by re-checking double-cable/MRG-like runs and realistic
+- [x] First observer-only `results.split_batch` cleanup is implemented locally:
+  batched solver-side observations now stay in one compact dispatch cohort
+  instead of materializing one internal dispatch result per axon row.
+- [x] Latest full unit validation after the compact dispatch cohort cleanup:
+  unit suite `314 passed, 1 skipped` on 2026-06-15.
+- [ ] Next priority before broad Phase 8 APIs: quantify the compact dispatch
+  cohort change on Colab with `kernel_observer_long`, then finish the targeted
+  hotpath cleanup by re-checking double-cable/MRG-like runs and realistic
   extracellular-drive runs.
 - [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
@@ -185,6 +190,21 @@ realistic populations, not just clean homogeneous smoke workloads.
       `context_count=0`, the runner still materialized dense zero
       `Vstim[B,Nt,Nx]` (`204 MB` at `n=1000`). This is now a targeted cleanup
       item, distinct from real extracellular-drive compression.
+  - Zero-field sparse rerun analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_120457/`.
+    - The `zero_no_context` patch is confirmed on both GPU and forced CPU:
+      `inputs.extracellular` is `0.028 ms` on GPU and `0.039 ms` on CPU at
+      `n=1000`, with no `vstim_mid` metadata and skipped dense shape
+      `[1000, 1000, 51]` (`204 MB`).
+    - Relative to the sparse-but-still-zero-`Vstim` run, GPU total is essentially
+      unchanged (`378.0 ms` -> `373.8 ms` at `n=1000`) because the dense
+      zero-field build was mainly a memory problem on GPU.
+    - CPU total improves more clearly (`3140.4 ms` -> `2630.4 ms` at `n=1000`).
+    - End-to-end improvement versus the original dense observer run is now
+      `673.4 ms` -> `373.8 ms` on GPU and `3884.2 ms` -> `2630.4 ms` on CPU
+      at `n=1000`.
+    - New dominant GPU costs at `n=1000`: `results.split_batch 140.6 ms`,
+      `kernel.enqueue 101.9 ms`, `inputs.intracellular 80.9 ms`.
 
 - [ ] Phase 7.6 targeted cleanup before broad Phase 8 APIs.
   - [x] Add a compact/factorized intracellular-drive path for simple current clamps
@@ -219,14 +239,29 @@ realistic populations, not just clean homogeneous smoke workloads.
     - Targeted validation on 2026-06-15: mypy passed for `batch_kernels.py`,
       `group_runner.py`, and `performance.py`; targeted unit tests passed
       (`13 passed`).
-  - [x] Reduce the first layer of `results.split_batch` cost for observer-only runs by avoiding
-    expensive per-row public packaging where a compact population observation
-    can be carried until the user indexes/reports rows.
-    - Done for the first layer: solver-side observations now stay attached as
-      batched cohort observations instead of being eagerly sliced/re-merged
-      into one `AnalysisResult` per axon row.
-    - Remaining cost: dispatch still materializes one `DispatchResult` per row;
-      deeper savings require a group/cohort-level dispatch result path.
+    - Colab validation on 2026-06-15:
+      `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_120457/`
+      confirmed `input_format="zero_no_context"` and eliminated dense
+      zero-field `vstim_mid` materialization.
+  - [x] Reduce observer-only `results.split_batch` cost by keeping compact
+    population observations batched from the solver backend to the public
+    result layer.
+    - First layer: solver-side observations stay attached as batched cohort
+      observations instead of being eagerly sliced/re-merged into one
+      `AnalysisResult` per axon row.
+    - Second layer: homogeneous batch observer-only runs now return one compact
+      internal dispatch cohort instead of one `DispatchResult` per axon row.
+    - Local smoke benchmark on 2026-06-15:
+      `benchmark/results/hotpaths/local_observer_cohort_dispatch/`.
+      `observer_only_n5` reports `results.split_batch 0.096 ms` and
+      `results.to_public 0.094 ms`.
+    - Targeted validation on 2026-06-15: compileall passed for `src/axonscope`
+      plus the touched tests; mypy passed for the modified dispatcher/backend/
+      result/simulation modules; targeted observer-only tests passed (`3
+      passed`), related dispatcher/public API tests passed (`52 passed`), and
+      hotpath catalog/performance tests passed (`14 passed`).
+    - Remaining evidence gate: rerun Colab `kernel_observer_long` after this
+      change is pushed to quantify the n=500/n=1000 GPU impact.
   - Before declaring this cleanup done, re-check the same bottleneck map on
     double-cable/MRG-like runs; this is a long-term priority path, not an
     optional edge case.

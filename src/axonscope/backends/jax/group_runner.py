@@ -15,7 +15,7 @@ from axonscope.benchmarking.hotpaths import (
     record_benchmark_metadata,
 )
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
-from axonscope.dispatcher.results import DispatchResult
+from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
@@ -52,7 +52,7 @@ def run_jax_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None = None,
     progress_callback: Any = None,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     """Execute one compatible group through the JAX batch backend."""
 
     if group.mode == "double":
@@ -162,7 +162,7 @@ def _run_single_cable_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
     representative = _representative_item(group).simulation
@@ -348,7 +348,7 @@ def _run_double_cable_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
 
     representative = _representative_item(group).simulation
@@ -939,14 +939,34 @@ def _dispatch_results_from_batch(
     method: str,
     batch_options: BatchOptions,
     kernel_batch_options: BatchOptions,
-) -> tuple[DispatchResult, ...]:
-    """Split a batched solver output into per-axon dispatch results."""
+) -> tuple[DispatchRecord, ...]:
+    """Convert a batched solver output to compact dispatch records."""
 
     vm_values = None if Vm is None else np.asarray(Vm)
     kernel_indices = kernel_batch_options.recording.indices_for(group.nx)
     kernel_record_indices = (
         None if kernel_indices is None else tuple(int(value) for value in kernel_indices)
     )
+
+    if vm_values is None and observations is not None:
+        return (
+            DispatchCohortResult(
+                indices=tuple(item.index for item in group.items),
+                axons=tuple(item.simulation.axon for item in group.items),
+                simulations=tuple(item.simulation for item in group.items),
+                Vm=None,
+                t=t,
+                group_id=group.group_id,
+                method=method,
+                record_indices=tuple(None for _ in group.items),
+                observations=observations,
+                group_size=group.size,
+                batch_kind=group.batch_kind,
+                geometry_shared=group.geometry_shared,
+                has_padding=group.has_padding,
+            ),
+        )
+
     results = []
     for row_index, item in enumerate(group.items):
         original_nx = int(item.solver_axon.n_compartments)

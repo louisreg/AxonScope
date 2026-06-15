@@ -17,7 +17,7 @@ from axonscope.results import AxonSimulationResult, SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, Solver, SolverOptions
 
 if TYPE_CHECKING:
-    from axonscope.dispatcher.results import DispatchResult
+    from axonscope.dispatcher.results import DispatchRecord
 
 
 AxonInput: TypeAlias = Axon | AxonInstance
@@ -223,9 +223,9 @@ def _finalize_single_result(result: SimResult, recording: Recording) -> SimResul
 
 
 def _filter_pool_recording(
-    results: Sequence[DispatchResult],
+    results: Sequence[DispatchRecord],
     recording: Recording,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRecord, ...]:
     """Apply spatial Vm filtering when a scalar fallback returned full traces."""
 
     if not recording.voltage:
@@ -233,6 +233,9 @@ def _filter_pool_recording(
     batch_options = recording.to_batch_options()
     filtered = []
     for axon_result in results:
+        if hasattr(axon_result, "indices"):
+            filtered.append(axon_result)
+            continue
         if axon_result.record_indices is not None:
             filtered.append(axon_result)
             continue
