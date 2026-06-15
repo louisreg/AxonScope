@@ -138,6 +138,25 @@ python benchmark/hotpaths/run.py \
 This keeps the same MRG extracellular setup but uses `Recording.none()` with
 PeakVoltage and Activation observers instead of retaining a center Vm trace.
 
+Capture a JAX profiler timeline for the same GPU-oriented path:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload double_cable_observer \
+  --sizes 600 2000 \
+  --duration 10.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1 \
+  --double-cable-block-solver auto \
+  --jax-trace \
+  --jax-trace-create-perfetto
+```
+
+Profiler output is written under
+`benchmark/results/hotpaths/<run>/jax_traces/<workload>_n<size>/` and linked
+from each manifest run entry as `jax_trace.trace_dir`.
+
 Force the experimental double-cable PCR block solver:
 
 ```bash

@@ -325,6 +325,30 @@ def test_run_pool_observer_only_keeps_one_compact_cohort_record():
     assert result[0].observations["peak_voltage"].values.shape == (2,)
 
 
+def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record():
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1),
+        _passive_double_cable_axon(amp_nA=0.2),
+    ]
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+
+    result = run_pool(
+        axons,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=axs.Recording.none().to_batch_options(),
+        observers=(peak,),
+    )
+
+    assert len(result) == 1
+    assert isinstance(result[0], DispatchCohortResult)
+    assert result[0].method == "batch-double-cable"
+    assert result[0].indices == (0, 1)
+    assert result[0].Vm is None
+    assert result[0].observations is not None
+    assert result[0].observations["peak_voltage"].values.shape == (2,)
+
+
 def test_dispatch_plan_preserves_pool_indices():
     axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
     axon_b = _hh_axon(nx=11, amp_nA=0.2, y_um=56.0, z_um=78.0)

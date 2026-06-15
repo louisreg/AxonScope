@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -132,6 +133,27 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=False,
         help="Enable JAX compile logging for cold-start diagnostic runs.",
     )
+    parser.add_argument(
+        "--jax-trace",
+        action="store_true",
+        help="Capture JAX profiler traces for measured hotpath runs.",
+    )
+    parser.add_argument(
+        "--jax-trace-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Root directory for JAX profiler traces. Passing this also enables "
+            "trace capture. Defaults to <run-root>/jax_traces when --jax-trace "
+            "is set."
+        ),
+    )
+    parser.add_argument(
+        "--jax-trace-create-perfetto",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Ask JAX to also write a Perfetto trace artifact when supported.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -164,6 +186,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         platform=jax_backend,
     )
     run_root = make_run_root(args.out_dir, prefix=args.prefix)
+    jax_trace_enabled = bool(args.jax_trace or args.jax_trace_dir is not None)
+    jax_trace_root = _resolve_jax_trace_root(
+        run_root=run_root,
+        requested_dir=args.jax_trace_dir,
+        enabled=jax_trace_enabled,
+    )
     manifest = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
@@ -183,6 +211,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             "sweep_repeats": int(args.sweep_repeats),
             "sync_device": bool(args.sync_device),
             "jax_log_compiles": bool(args.jax_log_compiles),
+            "jax_trace": jax_trace_enabled,
+            "jax_trace_dir": None if jax_trace_root is None else str(jax_trace_root),
+            "jax_trace_create_perfetto": bool(args.jax_trace_create_perfetto),
         },
         "jax_compile_logging": jax_compile_logging,
         "runs": [],
@@ -204,12 +235,21 @@ def main(argv: Sequence[str] | None = None) -> None:
                 output_dir=run_root / f"{run.workload}_n{run.size}",
                 jax_log_compiles=bool(args.jax_log_compiles),
                 time_chunk_steps=args.time_chunk_steps,
+                jax_trace=_jax_trace_record(
+                    jax_trace_root,
+                    workload=run.workload,
+                    size=run.size,
+                    create_perfetto_trace=bool(args.jax_trace_create_perfetto),
+                ),
             )
             manifest["runs"].append(run_record)
             print(
                 f"{run.workload} size={run.size}: "
                 f"{run_record['event_count']} events -> {run_record['output_dir']}"
             )
+            jax_trace = run_record.get("jax_trace", {})
+            if isinstance(jax_trace, dict) and jax_trace.get("enabled"):
+                print(f"  jax trace: {jax_trace['trace_dir']}")
             continue
 
         simulations = build_simulations(
@@ -253,8 +293,20 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "jax_log_compiles": bool(args.jax_log_compiles),
             }
         )
+        jax_trace = _jax_trace_record(
+            jax_trace_root,
+            workload=run.workload,
+            size=run.size,
+            create_perfetto_trace=bool(args.jax_trace_create_perfetto),
+        )
+        session.metadata["jax_trace"] = jax_trace
         try:
-            result_batches = tuple(simulation.run() for simulation in simulations)
+            with _jax_profiler_trace(
+                jax_trace,
+                workload=run.workload,
+                size=run.size,
+            ):
+                result_batches = tuple(simulation.run() for simulation in simulations)
         finally:
             report = axs.disable_benchmark(print_summary=bool(args.print_summary))
 
@@ -272,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "memory_estimate": estimates[0],
             "memory_estimates": estimates,
             "workload_metadata": _describe_simulations(simulation_labels, simulations),
+            "jax_trace": jax_trace,
             "event_count": 0 if report is None else len(report.events),
             "summary": [] if report is None else [row.to_dict() for row in report.summary],
         }
@@ -280,6 +333,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"{run.workload} size={run.size}: "
             f"{run_record['event_count']} events -> {output_dir}"
         )
+        if jax_trace["enabled"]:
+            print(f"  jax trace: {jax_trace['trace_dir']}")
 
     manifest_path = run_root / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
@@ -301,6 +356,7 @@ def run_direct_workload(
     output_dir: Path,
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
+    jax_trace: dict[str, object],
 ) -> dict[str, object]:
     """Run a backend-level hotpath workload that bypasses public dispatch."""
 
@@ -319,6 +375,7 @@ def run_direct_workload(
             output_dir=output_dir,
             jax_log_compiles=jax_log_compiles,
             time_chunk_steps=time_chunk_steps,
+            jax_trace=jax_trace,
         )
     if workload == "typed_footprint_drive_matrix":
         return _run_typed_footprint_drive_matrix(
@@ -335,6 +392,7 @@ def run_direct_workload(
             output_dir=output_dir,
             jax_log_compiles=jax_log_compiles,
             time_chunk_steps=time_chunk_steps,
+            jax_trace=jax_trace,
         )
     raise ValueError(f"Unknown direct hotpath workload: {workload!r}.")
 
@@ -354,6 +412,7 @@ def _run_solver_only_precomputed(
     output_dir: Path,
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
+    jax_trace: dict[str, object],
 ) -> dict[str, object]:
     """Run kernels with runtime and inputs prepared before benchmarking."""
 
@@ -430,10 +489,12 @@ def _run_solver_only_precomputed(
             "direct_backend_workload": True,
             "precomputed_inputs": True,
             "time_chunk_steps": time_chunk_steps,
+            "jax_trace": jax_trace,
         }
     )
     try:
-        outputs = tuple(_run_precomputed_single_cable_case(case) for case in cases)
+        with _jax_profiler_trace(jax_trace, workload=workload, size=size):
+            outputs = tuple(_run_precomputed_single_cable_case(case) for case in cases)
     finally:
         report = axs.disable_benchmark(print_summary=bool(print_summary))
 
@@ -455,6 +516,7 @@ def _run_solver_only_precomputed(
             )
             for case in cases
         ],
+        jax_trace=jax_trace,
     )
 
 
@@ -473,6 +535,7 @@ def _run_typed_footprint_drive_matrix(
     output_dir: Path,
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
+    jax_trace: dict[str, object],
 ) -> dict[str, object]:
     """Compare analytical-context lowering against typed drive lowering."""
 
@@ -527,60 +590,62 @@ def _run_typed_footprint_drive_matrix(
             "direct_backend_workload": True,
             "typed_footprint_drive": True,
             "time_chunk_steps": time_chunk_steps,
+            "jax_trace": jax_trace,
         }
     )
     try:
-        with benchmark_span(
-            "inputs.extracellular.context",
-            workload=workload,
-            simulation_label=label,
-            input_format="analytical_context_dense_vstim",
-        ):
-            context_vstim = _context_vstim_for_instances(
-                axons,
-                runtime,
-                duration_ms=duration_ms,
-                dt_ms=dt_ms,
-            )
-            record_benchmark_metadata(
-                **benchmark_array_metadata(
-                    "vstim_mid_context",
-                    context_vstim,
-                    role="kernel_input",
+        with _jax_profiler_trace(jax_trace, workload=workload, size=size):
+            with benchmark_span(
+                "inputs.extracellular.context",
+                workload=workload,
+                simulation_label=label,
+                input_format="analytical_context_dense_vstim",
+            ):
+                context_vstim = _context_vstim_for_instances(
+                    axons,
+                    runtime,
+                    duration_ms=duration_ms,
+                    dt_ms=dt_ms,
                 )
-            )
-        with benchmark_span(
-            "inputs.extracellular.typed_drive",
-            workload=workload,
-            simulation_label=label,
-            input_format="typed_footprint_drive_dense_vstim",
-        ):
-            typed_vstim = _typed_drive_vstim_for_instances(
-                axons,
-                runtime,
-                duration_ms=duration_ms,
-                dt_ms=dt_ms,
-            )
-            record_benchmark_metadata(
-                **benchmark_array_metadata(
-                    "vstim_mid_typed_drive",
-                    typed_vstim,
-                    role="kernel_input",
+                record_benchmark_metadata(
+                    **benchmark_array_metadata(
+                        "vstim_mid_context",
+                        context_vstim,
+                        role="kernel_input",
+                    )
                 )
+            with benchmark_span(
+                "inputs.extracellular.typed_drive",
+                workload=workload,
+                simulation_label=label,
+                input_format="typed_footprint_drive_dense_vstim",
+            ):
+                typed_vstim = _typed_drive_vstim_for_instances(
+                    axons,
+                    runtime,
+                    duration_ms=duration_ms,
+                    dt_ms=dt_ms,
+                )
+                record_benchmark_metadata(
+                    **benchmark_array_metadata(
+                        "vstim_mid_typed_drive",
+                        typed_vstim,
+                        role="kernel_input",
+                    )
+                )
+            with benchmark_span("inputs.extracellular.compare", workload=workload):
+                delta = np.asarray(context_vstim) - np.asarray(typed_vstim)
+                record_benchmark_metadata(max_abs_delta_mV=float(np.max(np.abs(delta))))
+            output = _run_precomputed_single_cable_case(
+                {
+                    "label": label,
+                    "runtime": runtime,
+                    "iinj": None,
+                    "vstim": typed_vstim,
+                    "has_driven_extracellular": True,
+                    "time_chunk_steps": time_chunk_steps,
+                }
             )
-        with benchmark_span("inputs.extracellular.compare", workload=workload):
-            delta = np.asarray(context_vstim) - np.asarray(typed_vstim)
-            record_benchmark_metadata(max_abs_delta_mV=float(np.max(np.abs(delta))))
-        output = _run_precomputed_single_cable_case(
-            {
-                "label": label,
-                "runtime": runtime,
-                "iinj": None,
-                "vstim": typed_vstim,
-                "has_driven_extracellular": True,
-                "time_chunk_steps": time_chunk_steps,
-            }
-        )
     finally:
         report = axs.disable_benchmark(print_summary=bool(print_summary))
 
@@ -610,6 +675,7 @@ def _run_typed_footprint_drive_matrix(
                 },
             }
         ],
+        jax_trace=jax_trace,
     )
 
 
@@ -867,6 +933,7 @@ def _direct_run_record(
     outputs: Sequence[object],
     report: axs.BenchmarkReport | None,
     metadata: Sequence[dict[str, object]],
+    jax_trace: dict[str, object],
 ) -> dict[str, object]:
     return {
         "workload": workload,
@@ -886,6 +953,7 @@ def _direct_run_record(
         "memory_estimate": estimates[0].to_dict(),
         "memory_estimates": [estimate.to_dict() for estimate in estimates],
         "workload_metadata": list(metadata),
+        "jax_trace": jax_trace,
         "event_count": 0 if report is None else len(report.events),
         "summary": [] if report is None else [row.to_dict() for row in report.summary],
     }
@@ -938,6 +1006,69 @@ def configure_jax_compile_logging(enabled: bool) -> dict[str, object]:
         "enabled": True,
         "mechanism": "jax.config.update('jax_log_compiles', True)",
     }
+
+
+def _resolve_jax_trace_root(
+    *,
+    run_root: Path,
+    requested_dir: Path | None,
+    enabled: bool,
+) -> Path | None:
+    if not enabled:
+        return None
+    return requested_dir if requested_dir is not None else run_root / "jax_traces"
+
+
+def _jax_trace_record(
+    root: Path | None,
+    *,
+    workload: str,
+    size: int,
+    create_perfetto_trace: bool,
+) -> dict[str, object]:
+    if root is None:
+        return {"enabled": False}
+    label = _safe_trace_label(f"{workload}_n{int(size)}")
+    trace_dir = root / label
+    return {
+        "enabled": True,
+        "label": label,
+        "trace_dir": str(trace_dir),
+        "create_perfetto_trace": bool(create_perfetto_trace),
+    }
+
+
+@contextmanager
+def _jax_profiler_trace(
+    trace: dict[str, object],
+    *,
+    workload: str,
+    size: int,
+):
+    if not trace.get("enabled", False):
+        yield
+        return
+
+    trace_dir = Path(str(trace["trace_dir"]))
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    with jax.profiler.trace(
+        str(trace_dir),
+        create_perfetto_trace=bool(trace.get("create_perfetto_trace", False)),
+    ):
+        with jax.profiler.StepTraceAnnotation(
+            "hotpath_run",
+            workload=str(workload),
+            size=int(size),
+        ):
+            yield
+
+
+def _safe_trace_label(value: str) -> str:
+    cleaned = "".join(
+        char if char.isalnum() or char in "._-" else "_"
+        for char in str(value)
+    ).strip("_")
+    return cleaned or "run"
 
 
 def build_simulation(

@@ -197,11 +197,28 @@ JAX compile/enqueue overhead onto every workload.
 - [x] Add an `auto` double-cable block-solver policy: keep Thomas for CPU/default
   execution, select PCR for GPU runs, and expose the resolved choice in
   benchmark manifests.
-- [ ] Re-run Colab `kernel_double_cable_extracellular_auto_long` to measure the
+- [x] Re-run Colab `kernel_double_cable_extracellular_auto_long` to measure the
   realistic CPU/GPU comparison after auto selection: CPU should use Thomas,
-  GPU should use PCR.
+  GPU should use PCR. Result: `auto` resolved correctly; GPU won
+  `2.51x/2.48x/2.08x/1.68x` at `n=100/300/600/2000`.
+- [x] Add homogeneous double-cable observer-only batch support for
+  `Recording.none()` plus solver-side `PeakVoltage`/`Activation` observers,
+  returning compact cohort observations instead of retained Vm traces.
+- [x] Re-run Colab `kernel_double_cable_observer_auto_long` to compare retained
+  center traces against compact observer-only output for the same double-cable
+  extracellular auto policy at `n=100/300/600/2000`. Result: observer-only
+  reduced GPU total by `28%/51%/59%/62%` vs retained center traces, and reduced
+  `results.split_batch` by at least `96%` at every tested size.
 - [x] Add solver-only/precomputed-input benchmarks for intra and extra paths so
   solver throughput is separated from preprocessing and result packaging.
+- [x] Add JAX profiler trace capture to the hotpath runner and Colab notebook:
+  `--jax-trace` records per-workload/per-size profiler directories in
+  manifests, and `kernel_double_cable_observer_auto_trace` captures GPU
+  timelines for the observer-only auto double-cable path.
+- [ ] Run Colab `kernel_double_cable_observer_auto_trace` and inspect the JAX
+  timeline for GPU optimization targets: XLA compile/count, kernel launch
+  density, host-to-device copies, PCR solver regions, dense `Vstim` handling,
+  and result synchronization.
 
 ## Phase 7.7 Stimulation And Placement API Cleanup
 
@@ -343,8 +360,8 @@ Canonical lightweight evidence loop:
 
 Open benchmark-agent tasks:
 
-- [ ] Implement or intentionally drop `jax_trace=True`; it currently raises
-  `NotImplementedError`.
+- [x] Implement opt-in JAX profiler traces for hotpath runs; traces are
+  recorded under `jax_traces/<workload>_n<size>/` and linked from manifests.
 - [ ] Add explicit cold-start/first-call signature labels.
 - [ ] Audit scalar `simulate(...)` instrumentation against pool
   instrumentation and ensure both expose consistent root spans.
@@ -454,6 +471,9 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `phase7_6_double_cable_pcr_batch_smoke` | Experimental PCR block solver landed behind `BatchOptions(double_cable_block_solver="pcr")` / `--double-cable-block-solver pcr`; local batch smoke passed at `n=2`, and numerical tests match Thomas. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_pcr_long_20260615_183818` | PCR block solver is the first strong double-cable GPU win: GPU totals `243.1/369.2/687.8 ms` at `n=100/300/600`, or `3.3x/2.3x/1.4x` faster than the best Thomas run. CPU regressed badly (`3092/10262/18699 ms`, `7.2x/11.6x/10.9x` slower), so the next comparison should use `auto`: PCR on GPU, Thomas on CPU. |
 | 2026-06-15 | `phase7_6_double_cable_auto_solver_policy` | Added `double_cable_block_solver="auto"` as the default batch option and hotpath CLI default. It resolves to PCR on GPU and Thomas elsewhere, while benchmark manifests record both requested and resolved solver choices. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_auto_long_20260615_185532` | Auto double-cable long run resolved GPU to PCR and CPU to Thomas. GPU totals were `336/768/1670/7523 ms` vs CPU `845/1907/3471/12619 ms` at `n=100/300/600/2000`, for `2.51x/2.48x/2.08x/1.68x` CPU/GPU speedups. |
+| 2026-06-15 | `phase7_6_double_cable_observer_batch_smoke` | Homogeneous double-cable observer-only batch path now returns compact cohort observations with `Vm=None`; local smoke for `double_cable_observer n=2` produced `recording_policy=none`, `vm_shapes=[]`, and `peak_voltage`/`activation` observations. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_190721` | Double-cable observer-only auto run kept `vm_shapes=[]`, GPU=PCR, CPU=Thomas. GPU totals were `243/378/682/2841 ms` at `n=100/300/600/2000`, `28%/51%/59%/62%` faster than retained center traces from `185532`; GPU `results.split_batch` fell to `0.10/0.20/0.55/1.15 ms` (`>=96%` lower). |
 
 ## Completed Roadmap Archive
 

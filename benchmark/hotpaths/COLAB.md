@@ -3,7 +3,7 @@
 Use this when local GPU execution is not available. The local machine publishes
 one committed AxonScope revision to the moving `bench-colab` branch, and Colab
 always clones that branch before running matching hotpath workloads on GPU and
-on a forced CPU JAX backend.
+optionally on a forced CPU JAX backend.
 
 The ready-to-run notebook lives at:
 
@@ -76,6 +76,10 @@ Available notebook cases:
   trace, but uses `Recording.none()` plus solver-side `PeakVoltage` and
   `Activation` observers at sizes `100/300/600/2000`. Use this to compare
   retained center traces against compact observer-only output on GPU.
+- `kernel_double_cable_observer_auto_trace`: focused GPU-only JAX profiler
+  capture for the observer-only auto path at sizes `600/2000`. It enables
+  `--jax-trace` and Perfetto trace export for GPU only, so the downloaded
+  archive includes profiler timelines under `gpu/jax_traces/`.
 - `kernel_double_cable_extracellular_pcr_long`: same long double-cable trace,
   but passes `--double-cable-block-solver pcr` to test the experimental
   parallel cyclic-reduction block solver against the default Thomas scan. Use
@@ -88,6 +92,25 @@ For CPU-only runs, keep `RUN_GPU = False` and `RUN_CPU = True`; the notebook
 writes a per-run `cpu_summary.csv` in addition to the normal manifest and
 workload summaries. For CPU/GPU comparison runs, enable both labels to also
 write `comparison_summary.csv`.
+
+For JAX/XLA timeline investigation, use
+`CASE = "kernel_double_cable_observer_auto_trace"` or set
+`JAX_TRACE_GPU = True` in the notebook. Each measured workload/size gets its
+own profiler directory, and the path is also stored in the matching
+`manifest.json` run entry:
+
+```text
+benchmark/results/hotpaths/<run_id>/gpu/jax_traces/
+    double_cable_observer_n600/
+    double_cable_observer_n2000/
+```
+
+Open those traces with TensorBoard's profile plugin or Perfetto/Chrome trace
+viewer, depending on the files JAX writes for the installed Colab version. Use
+the AxonScope `summary.csv` beside it to map the coarse stage names
+(`inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, `results.split_batch`)
+to the lower-level JAX/XLA timeline.
+
 For the `setup_scale` case, the effective commands are:
 
 ```bash
@@ -118,7 +141,7 @@ JAX_PLATFORMS=cpu python benchmark/hotpaths/run.py \
   --no-print-summary
 ```
 
-The output folder is created inside the Colab checkout with both traces:
+The output folder is created inside the Colab checkout with the enabled labels:
 
 ```text
 /content/AxonScope/benchmark/results/hotpaths/colab_cpu_gpu_<case>_YYYYMMDD_HHMMSS/

@@ -4,6 +4,8 @@ import axonscope as axs
 from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 from benchmark.hotpaths.run import (
     _describe_simulations,
+    _jax_trace_record,
+    _resolve_jax_trace_root,
     _simulation_labels,
     build_simulation,
     build_simulations,
@@ -106,8 +108,44 @@ def test_hotpath_runner_accepts_jax_compile_logging_flag_in_dry_run(capsys):
     assert capsys.readouterr().out.splitlines() == ["intracellular_only size=1"]
 
 
+def test_hotpath_runner_accepts_jax_trace_flags_in_dry_run(capsys, tmp_path):
+    main(
+        [
+            "--workload",
+            "double_cable_observer",
+            "--sizes",
+            "1",
+            "--dry-run",
+            "--jax-trace-dir",
+            str(tmp_path / "jax profiles"),
+            "--jax-trace-create-perfetto",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == ["double_cable_observer size=1"]
+
+
 def test_configure_jax_compile_logging_disabled_is_noop():
     assert configure_jax_compile_logging(False) == {"enabled": False}
+
+
+def test_jax_trace_metadata_defaults_under_run_root(tmp_path):
+    root = _resolve_jax_trace_root(run_root=tmp_path, requested_dir=None, enabled=True)
+    assert root == tmp_path / "jax_traces"
+
+    record = _jax_trace_record(
+        root,
+        workload="double/cable observer",
+        size=600,
+        create_perfetto_trace=True,
+    )
+
+    assert record == {
+        "enabled": True,
+        "label": "double_cable_observer_n600",
+        "trace_dir": str(tmp_path / "jax_traces" / "double_cable_observer_n600"),
+        "create_perfetto_trace": True,
+    }
 
 
 def test_hotpath_runner_accepts_time_chunk_steps_in_dry_run(capsys):
@@ -170,6 +208,7 @@ def test_hotpath_size_and_run_resolution():
         "intracellular_only",
         "point_source_extracellular",
         "double_cable_extracellular",
+        "double_cable_observer",
         "footprint_reuse_sweep",
         "solver_only_precomputed",
         "typed_footprint_drive_matrix",
