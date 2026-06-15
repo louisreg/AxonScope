@@ -42,20 +42,37 @@ make bench-colab-push GIT_REMOTE=origin BENCH_COLAB_BRANCH=bench-colab
 ## 3. Run The Notebook
 
 Open `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` in Colab, replace
-`REPO_URL` once, then run the notebook cell.
+`REPO_URL` once, choose `CASE`, then run the notebook cell.
+
+Available notebook cases:
+
+- `setup_scale`: short all-workload trace. This keeps `duration=0.30 ms`,
+  `dt=0.05 ms`, and small `Nx`; it is best for catching preparation,
+  dispatch, transfer, and result-packaging regressions.
+- `kernel_observer_long`: longer `observer_only` trace with `Recording.none()`,
+  `duration=10 ms`, `dt=0.01 ms`, and `51` compartments. This is the preferred
+  first GPU-scaling probe because it minimizes retained output while the solver
+  loop does real work.
+- `kernel_realistic_long`: longer `realistic_mixed_population` trace with
+  `duration=5 ms`, `dt=0.01 ms`, and `51` compartments. Use this after
+  `kernel_observer_long` to test realistic heterogeneity.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 that the default JAX backend is GPU, verifies that a separate process can force
-the CPU backend with `JAX_PLATFORMS=cpu`, and runs the same workload twice:
+the CPU backend with `JAX_PLATFORMS=cpu`, and runs the selected case twice.
+For the default `setup_scale` case, the effective commands are:
 
 ```bash
 python benchmark/hotpaths/run.py \
   --workload all \
   --preset scale \
+  --duration 0.30 \
+  --dt 0.05 \
+  --compartments 11 \
   --warmups 1 \
   --sweep-repeats 3 \
   --prefix gpu \
-  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS \
+  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_setup_scale_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
 
@@ -63,17 +80,20 @@ python benchmark/hotpaths/run.py \
 JAX_PLATFORMS=cpu python benchmark/hotpaths/run.py \
   --workload all \
   --preset scale \
+  --duration 0.30 \
+  --dt 0.05 \
+  --compartments 11 \
   --warmups 1 \
   --sweep-repeats 3 \
   --prefix cpu \
-  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS \
+  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_setup_scale_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
 
 The output folder is created inside the Colab checkout with both traces:
 
 ```text
-/content/AxonScope/benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS/
+/content/AxonScope/benchmark/results/hotpaths/colab_cpu_gpu_<case>_YYYYMMDD_HHMMSS/
     gpu/
     cpu/
     comparison_summary.csv
@@ -83,6 +103,13 @@ The output folder is created inside the Colab checkout with both traces:
 pairs: `simulation.pool.total`, `dispatch.build_plan`, `runtime.prepare`,
 `inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`,
 `kernel.wait`, `results.split_batch`, and `results.to_public`.
+
+For kernel-scaling evidence, switch `CASE` in the notebook instead of editing
+the command by hand. The result folder name includes the case, for example:
+
+```text
+benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_YYYYMMDD_HHMMSS/
+```
 
 Then the notebook zips the parent `colab_cpu_gpu_.../` folder and downloads it
 directly through the browser with `google.colab.files.download(...)`. No Google
@@ -126,9 +153,26 @@ still useful when you want to compare Colab against the development machine:
 python benchmark/hotpaths/run.py \
   --workload all \
   --preset scale \
+  --duration 0.30 \
+  --dt 0.05 \
+  --compartments 11 \
   --warmups 1 \
   --sweep-repeats 3 \
   --prefix cpu_YYYYMMDD_HHMMSS \
+  --no-print-summary
+```
+
+Run a local CPU version of the longer observer case:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload observer_only \
+  --sizes 500 1000 \
+  --duration 10.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1 \
+  --prefix cpu_kernel_observer_long_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
 

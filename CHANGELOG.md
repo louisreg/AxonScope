@@ -203,6 +203,9 @@ The format is inspired by Keep a Changelog.
 - Added first Phase 7.6 CPU/GPU bottleneck notes from
   `colab_cpu_gpu_20260615_095754`, confirming that short realistic mixed
   workloads are preparation-bound rather than GPU-compute-bound.
+- Added selectable Colab CPU/GPU benchmark cases for short setup traces and
+  longer kernel-weighted traces (`setup_scale`, `kernel_observer_long`, and
+  `kernel_realistic_long`).
 
 ### Changed
 
@@ -246,6 +249,9 @@ The format is inspired by Keep a Changelog.
   axon templates for repeated model/diameter/Nx combinations, so dispatcher
   timings reflect intended template reuse rather than artificial per-row model
   reconstruction.
+- Updated the Colab hotpath protocol and README to recommend longer
+  observer-only and realistic mixed-population runs when evaluating actual
+  CPU/GPU solver scaling.
 - Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
   now orchestrates groups and delegates compatible batch groups to the JAX
   backend runner through a neutral `DispatchResult` record.

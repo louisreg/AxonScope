@@ -59,6 +59,30 @@ Run the Phase 7.6 compact coverage matrix:
 python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke
 ```
 
+Run a longer trace-free kernel-scaling probe:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload observer_only \
+  --sizes 500 1000 \
+  --duration 10.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1
+```
+
+Run a longer realistic heterogeneous probe:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload realistic_mixed_population \
+  --sizes 500 \
+  --duration 5.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1
+```
+
 Outputs are written under `benchmark/results/hotpaths/`, which is intentionally
 ignored by git.
 
@@ -75,7 +99,7 @@ Then open the Colab notebook below. The generated results are written under one
 parent folder in the Colab checkout:
 
 ```text
-benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS/
+benchmark/results/hotpaths/colab_cpu_gpu_<case>_YYYYMMDD_HHMMSS/
     gpu/
     cpu/
     comparison_summary.csv
@@ -88,6 +112,10 @@ Colab runner and protocol:
 
 - `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`
 - `benchmark/hotpaths/COLAB.md`
+
+The notebook has selectable cases. Use `setup_scale` for short preparation and
+packaging regressions, then `kernel_observer_long` and
+`kernel_realistic_long` when the goal is to see real CPU/GPU kernel scaling.
 
 ## Current Workloads
 

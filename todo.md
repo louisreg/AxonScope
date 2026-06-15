@@ -21,8 +21,8 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
-- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, and run on Colab GPU/CPU.
-- [ ] Next priority before Phase 8: re-run Colab CPU/GPU scale traces after the first heterogeneous preparation and benchmark-template optimizations.
+- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, run on Colab GPU/CPU, and optimized once.
+- [ ] Next priority before Phase 8: run the new long Colab CPU/GPU cases so kernel scaling is measured with enough time steps.
 - [ ] Next implementation phase after Phase 7.6: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -101,13 +101,40 @@ realistic populations, not just clean homogeneous smoke workloads.
     `runtime.prepare 129.0 ms`, `kernel.enqueue 134.7 ms`.
   - Previous local post-cache/pre-template run was total `1459.8 ms`,
     `dispatch.build_plan 646.7 ms`, and `runtime.prepare 338.1 ms`.
-- [ ] Re-run Colab CPU/GPU comparison after the Phase 7.6 optimization pass.
+- [x] Re-run Colab CPU/GPU comparison after the Phase 7.6 optimization pass.
   - Use the same CPU/GPU notebook flow and compare against
     `colab_cpu_gpu_20260615_095754`.
-  - If `runtime.prepare` still dominates on GPU, investigate deeper structural
+  - Run analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_20260615_102221/`.
+  - The `realistic_mixed_population_n500` GPU path improved from
+    `11364.8 ms` to `556.3 ms` (`20.4x` faster). CPU improved from
+    `3698.0 ms` to `238.4 ms` (`15.5x` faster).
+  - The optimized `hotpath_matrix_n500` GPU path improved from `11655.0 ms`
+    to `1545.6 ms` (`7.5x` faster).
+  - Current `realistic_mixed_population_n500` GPU profile:
+    `runtime.prepare 220.3 ms`, `kernel.enqueue 246.6 ms`,
+    `dispatch.build_plan 10.7 ms`, `kernel.wait 0.44 ms`.
+  - Interpretation: the first preparation wall is gone, but the current
+    `duration=0.30 ms`, `dt=0.05 ms` traces only have `Nt=6`; they are still
+    dominated by setup/enqueue/packaging rather than useful solver work.
+- [x] Add longer Colab CPU/GPU cases to the notebook protocol.
+  - `setup_scale` keeps the current all-workload short trace for preparation
+    regressions.
+  - `kernel_observer_long` runs `observer_only` with `Recording.none()`,
+    sizes `500/1000`, `duration=10 ms`, `dt=0.01 ms`, and `51` compartments
+    to emphasize GPU kernel scaling while limiting retained output.
+  - `kernel_realistic_long` runs `realistic_mixed_population`, size `500`,
+    `duration=5 ms`, `dt=0.01 ms`, and `51` compartments to test realistic
+    heterogeneity after the observer-only kernel probe.
+- [ ] Run and analyze the long Colab CPU/GPU cases before Phase 8.
+  - Start with `CASE = "kernel_observer_long"` in
+    `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`.
+  - Then run `CASE = "kernel_realistic_long"` if the observer-only trace looks
+    healthy.
+  - If `runtime.prepare` still dominates, investigate deeper structural
     dispatcher caches and JAX transfer/compile boundaries.
-  - If `kernel.enqueue`, input materialization, or result packaging becomes the
-    new bottleneck, split Phase 7.6 into targeted hotpath tickets before Phase 8.
+  - If `kernel.enqueue`, input materialization, or result packaging dominates,
+    split Phase 7.6 into targeted hotpath tickets before Phase 8.
 - [ ] Extend realistic population benchmark workloads if the first traces show
   missing coverage.
   - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`
