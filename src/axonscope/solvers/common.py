@@ -408,9 +408,10 @@ def solve_block_tridiagonal_2x2_pcr(
     :func:`solve_block_tridiagonal_2x2_scalar`. It keeps every compartment row
     active at each reduction stage, eliminates neighbors at strides
     ``1, 2, 4, ...``, and finishes with independent 2x2 solves. The algorithm
-    does more local arithmetic and materializes full 2x2 off-diagonal blocks,
-    but exposes spatial parallelism that the Thomas forward/backward scan does
-    not.
+    does more local arithmetic, but exposes spatial parallelism that the Thomas
+    forward/backward scan does not. The implementation keeps the ``2x2`` block
+    components in separate arrays so XLA does not lower tiny block products to
+    many small GEMM/dot kernels.
     """
 
     n = int(a00.shape[0])
@@ -418,54 +419,56 @@ def solve_block_tridiagonal_2x2_pcr(
     idx = jnp.arange(n)
     zero = jnp.zeros((), dtype=dtype)
 
-    lower = jnp.zeros((n, 2, 2), dtype=dtype)
-    upper = jnp.zeros((n, 2, 2), dtype=dtype)
-    diag = jnp.zeros((n, 2, 2), dtype=dtype)
-    rhs = jnp.stack([rhs0, rhs1], axis=1)
+    lower00 = jnp.concatenate([zero[None], off0])
+    lower01 = jnp.zeros((n,), dtype=dtype)
+    lower10 = jnp.zeros((n,), dtype=dtype)
+    lower11 = jnp.concatenate([zero[None], off1])
+    upper00 = jnp.concatenate([off0, zero[None]])
+    upper01 = jnp.zeros((n,), dtype=dtype)
+    upper10 = jnp.zeros((n,), dtype=dtype)
+    upper11 = jnp.concatenate([off1, zero[None]])
+    diag00 = a00
+    diag01 = a01
+    diag10 = a10
+    diag11 = a11
+    r0 = rhs0
+    r1 = rhs1
 
-    diag = diag.at[:, 0, 0].set(a00)
-    diag = diag.at[:, 0, 1].set(a01)
-    diag = diag.at[:, 1, 0].set(a10)
-    diag = diag.at[:, 1, 1].set(a11)
-    lower = lower.at[1:, 0, 0].set(off0)
-    lower = lower.at[1:, 1, 1].set(off1)
-    upper = upper.at[:-1, 0, 0].set(off0)
-    upper = upper.at[:-1, 1, 1].set(off1)
-
-    def inv2_blocks(blocks: Array) -> Array:
-        m00 = blocks[:, 0, 0]
-        m01 = blocks[:, 0, 1]
-        m10 = blocks[:, 1, 0]
-        m11 = blocks[:, 1, 1]
+    def inv2_components(
+        m00: Array,
+        m01: Array,
+        m10: Array,
+        m11: Array,
+    ) -> tuple[Array, Array, Array, Array]:
         det = m00 * m11 - m01 * m10
-        out = jnp.zeros_like(blocks)
-        out = out.at[:, 0, 0].set(m11 / det)
-        out = out.at[:, 0, 1].set(-m01 / det)
-        out = out.at[:, 1, 0].set(-m10 / det)
-        out = out.at[:, 1, 1].set(m00 / det)
-        return out
+        return m11 / det, -m01 / det, -m10 / det, m00 / det
 
-    def matmul2(left: Array, right: Array) -> Array:
-        l00 = left[:, 0, 0]
-        l01 = left[:, 0, 1]
-        l10 = left[:, 1, 0]
-        l11 = left[:, 1, 1]
-        r00 = right[:, 0, 0]
-        r01 = right[:, 0, 1]
-        r10 = right[:, 1, 0]
-        r11 = right[:, 1, 1]
-        row0 = jnp.stack((l00 * r00 + l01 * r10, l00 * r01 + l01 * r11), axis=1)
-        row1 = jnp.stack((l10 * r00 + l11 * r10, l10 * r01 + l11 * r11), axis=1)
-        return jnp.stack((row0, row1), axis=1)
+    def matmul2_components(
+        l00: Array,
+        l01: Array,
+        l10: Array,
+        l11: Array,
+        r00: Array,
+        r01: Array,
+        r10: Array,
+        r11: Array,
+    ) -> tuple[Array, Array, Array, Array]:
+        return (
+            l00 * r00 + l01 * r10,
+            l00 * r01 + l01 * r11,
+            l10 * r00 + l11 * r10,
+            l10 * r01 + l11 * r11,
+        )
 
-    def matvec2(matrix: Array, vector: Array) -> Array:
-        m00 = matrix[:, 0, 0]
-        m01 = matrix[:, 0, 1]
-        m10 = matrix[:, 1, 0]
-        m11 = matrix[:, 1, 1]
-        v0 = vector[:, 0]
-        v1 = vector[:, 1]
-        return jnp.stack((m00 * v0 + m01 * v1, m10 * v0 + m11 * v1), axis=1)
+    def matvec2_components(
+        m00: Array,
+        m01: Array,
+        m10: Array,
+        m11: Array,
+        v0: Array,
+        v1: Array,
+    ) -> tuple[Array, Array]:
+        return m00 * v0 + m01 * v1, m10 * v0 + m11 * v1
 
     stride = 1
     while stride < n:
@@ -474,34 +477,102 @@ def solve_block_tridiagonal_2x2_pcr(
         has_left = idx >= stride
         has_right = idx + stride < n
 
-        left_inv = inv2_blocks(diag[left_idx])
-        right_inv = inv2_blocks(diag[right_idx])
-        left_factor = matmul2(lower, left_inv)
-        right_factor = matmul2(upper, right_inv)
-        left_factor = jnp.where(has_left[:, None, None], left_factor, zero)
-        right_factor = jnp.where(has_right[:, None, None], right_factor, zero)
-
-        next_lower = -matmul2(left_factor, lower[left_idx])
-        next_upper = -matmul2(right_factor, upper[right_idx])
-        next_diag = (
-            diag
-            - matmul2(left_factor, upper[left_idx])
-            - matmul2(right_factor, lower[right_idx])
+        left_inv = inv2_components(
+            diag00[left_idx],
+            diag01[left_idx],
+            diag10[left_idx],
+            diag11[left_idx],
         )
-        next_rhs = (
-            rhs
-            - matvec2(left_factor, rhs[left_idx])
-            - matvec2(right_factor, rhs[right_idx])
+        right_inv = inv2_components(
+            diag00[right_idx],
+            diag01[right_idx],
+            diag10[right_idx],
+            diag11[right_idx],
         )
+        lf00, lf01, lf10, lf11 = matmul2_components(
+            lower00,
+            lower01,
+            lower10,
+            lower11,
+            *left_inv,
+        )
+        rf00, rf01, rf10, rf11 = matmul2_components(
+            upper00,
+            upper01,
+            upper10,
+            upper11,
+            *right_inv,
+        )
+        lf00 = jnp.where(has_left, lf00, zero)
+        lf01 = jnp.where(has_left, lf01, zero)
+        lf10 = jnp.where(has_left, lf10, zero)
+        lf11 = jnp.where(has_left, lf11, zero)
+        rf00 = jnp.where(has_right, rf00, zero)
+        rf01 = jnp.where(has_right, rf01, zero)
+        rf10 = jnp.where(has_right, rf10, zero)
+        rf11 = jnp.where(has_right, rf11, zero)
 
-        lower = jnp.where(has_left[:, None, None], next_lower, zero)
-        upper = jnp.where(has_right[:, None, None], next_upper, zero)
-        diag = next_diag
-        rhs = next_rhs
+        nl00, nl01, nl10, nl11 = matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            lower00[left_idx],
+            lower01[left_idx],
+            lower10[left_idx],
+            lower11[left_idx],
+        )
+        nu00, nu01, nu10, nu11 = matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            upper00[right_idx],
+            upper01[right_idx],
+            upper10[right_idx],
+            upper11[right_idx],
+        )
+        ldu00, ldu01, ldu10, ldu11 = matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            upper00[left_idx],
+            upper01[left_idx],
+            upper10[left_idx],
+            upper11[left_idx],
+        )
+        rdl00, rdl01, rdl10, rdl11 = matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            lower00[right_idx],
+            lower01[right_idx],
+            lower10[right_idx],
+            lower11[right_idx],
+        )
+        lr0, lr1 = matvec2_components(lf00, lf01, lf10, lf11, r0[left_idx], r1[left_idx])
+        rr0, rr1 = matvec2_components(rf00, rf01, rf10, rf11, r0[right_idx], r1[right_idx])
+
+        lower00 = jnp.where(has_left, -nl00, zero)
+        lower01 = jnp.where(has_left, -nl01, zero)
+        lower10 = jnp.where(has_left, -nl10, zero)
+        lower11 = jnp.where(has_left, -nl11, zero)
+        upper00 = jnp.where(has_right, -nu00, zero)
+        upper01 = jnp.where(has_right, -nu01, zero)
+        upper10 = jnp.where(has_right, -nu10, zero)
+        upper11 = jnp.where(has_right, -nu11, zero)
+        diag00 = diag00 - ldu00 - rdl00
+        diag01 = diag01 - ldu01 - rdl01
+        diag10 = diag10 - ldu10 - rdl10
+        diag11 = diag11 - ldu11 - rdl11
+        r0 = r0 - lr0 - rr0
+        r1 = r1 - lr1 - rr1
         stride *= 2
 
-    solution = matvec2(inv2_blocks(diag), rhs)
-    return solution[:, 0], solution[:, 1]
+    inv00, inv01, inv10, inv11 = inv2_components(diag00, diag01, diag10, diag11)
+    return matvec2_components(inv00, inv01, inv10, inv11, r0, r1)
 
 
 def apply_diffusion_operator(V: Array, lower: Array, diag: Array, upper: Array) -> Array:

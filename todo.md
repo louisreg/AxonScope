@@ -224,11 +224,15 @@ JAX compile/enqueue overhead onto every workload.
   Dispatch planning dropped to `4 ms`/`9 ms` at `n=600/2000`; kernel-scoped
   traces now capture GPU events for `n=2000`; scalarized PCR removed the
   GEMM/dot hotspot and cut `n=600` device time from `554 ms` to `256 ms`.
-- [ ] Prototype a struct-of-arrays PCR variant that keeps the `2x2` block
+- [x] Prototype a struct-of-arrays PCR variant that keeps the `2x2` block
   components as scalar arrays instead of stacked `(Nx, 2, 2)` matrices. The
   `193544` trace shows the remaining GPU cost is dominated by many small
   elementwise slice/add/subtract fusions and one command-buffer execution per
   time step, not memory copies.
+- [ ] Re-run Colab `kernel_double_cable_observer_auto_trace` and
+  `kernel_double_cable_observer_auto_long` after the struct-of-arrays PCR
+  rewrite; expected trace signal is lower slice/scatter/transpose overhead,
+  with gathers remaining from PCR neighbor reads.
 - [x] Inspect
   `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515`.
   The `n=600` GPU trace shows the double-cable observer kernel spends about
@@ -500,6 +504,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_190721` | Double-cable observer-only auto run kept `vm_shapes=[]`, GPU=PCR, CPU=Thomas. GPU totals were `243/378/682/2841 ms` at `n=100/300/600/2000`, `28%/51%/59%/62%` faster than retained center traces from `185532`; GPU `results.split_batch` fell to `0.10/0.20/0.55/1.15 ms` (`>=96%` lower). |
 | 2026-06-15 | `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515` | JAX trace captured `n=600` GPU kernel details: device time was mostly PCR/XLA compute (`GEMM/dot` `43%`, transpose fusions `19%`, select/reduce `14%`), not transfers (`MemcpyH2D` `1.6%`). The `n=2000` full-run trace filled the profiler event budget with Python dispatch frames, motivating kernel-scoped tracing and incremental double-cable dispatch grouping. |
 | 2026-06-15 | `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_193544` | Kernel-scoped trace after dispatch and scalar-PCR changes: dispatch planning fell to `4/9 ms` at `n=600/2000`; `n=600` GPU device time fell from `554 ms` to `256 ms` and GEMM/dot disappeared; `n=2000` now captures GPU device time (`1200 ms`) with remaining cost dominated by small elementwise fusions and `1000` command-buffer/CUDA-graph executions. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_194140` | No-trace reference after scalar-PCR and dispatch cleanup. GPU totals were `185/190/296/1557 ms` at `n=100/300/600/2000`, vs CPU `475/817/2041/5229 ms`, for CPU/GPU speedups `2.57x/4.30x/6.89x/3.36x`. Compared with `190721`, GPU total improved by `24%/50%/57%/45%`; `n=600` kernel fell from `532 ms` to `204 ms`. Dense `Vstim` remains visible (`16-27%` of GPU total at `n>=300`). |
+| 2026-06-15 | `phase7_6_double_cable_pcr_soa_smoke` | Rewrote PCR internals to keep `2x2` block components as separate arrays. Local numerical tests match Thomas; the JAX/HLO audit for `Nx=45` reports `0` `dot`, `dot_general`, `scatter`, or `transpose` operations, leaving neighbor `gather`s as the expected PCR data movement. |
 
 ## Completed Roadmap Archive
 

@@ -133,6 +133,25 @@ def test_pcr_block_tridiagonal_solver_matches_thomas_for_non_power_of_two_size()
     np.testing.assert_allclose(np.asarray(pcr1), np.asarray(thomas1), rtol=1e-5, atol=1e-6)
 
 
+def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():
+    n = 7
+    x = jnp.arange(n, dtype=jnp.float32)
+    args = (
+        4.0 + 0.05 * x,
+        -0.9 - 0.01 * x,
+        -1.1 + 0.02 * x,
+        5.0 + 0.07 * x,
+        -0.10 - 0.01 * jnp.arange(n - 1, dtype=jnp.float32),
+        -0.07 - 0.005 * jnp.arange(n - 1, dtype=jnp.float32),
+        jnp.sin(0.3 * x),
+        jnp.cos(0.2 * x),
+    )
+
+    jaxpr = str(jax.make_jaxpr(solve_block_tridiagonal_2x2_pcr)(*args))
+
+    assert "dot_general" not in jaxpr
+
+
 def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():
     solve = jax.jit(solve_block_tridiagonal_2x2_scalar)
 
