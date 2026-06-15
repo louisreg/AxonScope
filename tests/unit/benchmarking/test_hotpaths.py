@@ -66,6 +66,39 @@ def test_nested_benchmark_sessions_are_rejected(tmp_path):
         disable_benchmark(print_summary=False, save=False)
 
 
+def test_enable_benchmark_accepts_jax_trace_metadata(tmp_path):
+    session = enable_benchmark(
+        tmp_path,
+        print_summary=False,
+        save=False,
+        jax_trace=True,
+        jax_trace_create_perfetto=True,
+    )
+    try:
+        trace = session.metadata["jax_trace"]
+    finally:
+        disable_benchmark(print_summary=False, save=False)
+
+    assert trace == {
+        "enabled": True,
+        "label": "benchmark",
+        "trace_dir": str(tmp_path / "jax_traces" / "benchmark"),
+        "create_perfetto_trace": True,
+        "scope": "kernel",
+    }
+
+
+def test_enable_benchmark_rejects_unsupported_jax_trace_scope(tmp_path):
+    with pytest.raises(ValueError, match="jax_trace_scope"):
+        enable_benchmark(
+            tmp_path,
+            print_summary=False,
+            save=False,
+            jax_trace=True,
+            jax_trace_scope="run",
+        )
+
+
 def test_reset_benchmark_clears_events(tmp_path):
     enable_benchmark(tmp_path, print_summary=False, save=False)
     try:

@@ -119,6 +119,8 @@ def test_hotpath_runner_accepts_jax_trace_flags_in_dry_run(capsys, tmp_path):
             "--jax-trace-dir",
             str(tmp_path / "jax profiles"),
             "--jax-trace-create-perfetto",
+            "--jax-trace-scope",
+            "kernel",
         ]
     )
 
@@ -138,6 +140,7 @@ def test_jax_trace_metadata_defaults_under_run_root(tmp_path):
         workload="double/cable observer",
         size=600,
         create_perfetto_trace=True,
+        scope="kernel",
     )
 
     assert record == {
@@ -145,6 +148,7 @@ def test_jax_trace_metadata_defaults_under_run_root(tmp_path):
         "label": "double_cable_observer_n600",
         "trace_dir": str(tmp_path / "jax_traces" / "double_cable_observer_n600"),
         "create_perfetto_trace": True,
+        "scope": "kernel",
     }
 
 

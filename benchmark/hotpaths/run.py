@@ -154,6 +154,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=False,
         help="Ask JAX to also write a Perfetto trace artifact when supported.",
     )
+    parser.add_argument(
+        "--jax-trace-scope",
+        choices=("kernel", "run"),
+        default="kernel",
+        help=(
+            "Trace only kernel.enqueue by default. Use 'run' to include "
+            "dispatch, input preparation, kernel execution, and result packaging."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -214,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "jax_trace": jax_trace_enabled,
             "jax_trace_dir": None if jax_trace_root is None else str(jax_trace_root),
             "jax_trace_create_perfetto": bool(args.jax_trace_create_perfetto),
+            "jax_trace_scope": args.jax_trace_scope,
         },
         "jax_compile_logging": jax_compile_logging,
         "runs": [],
@@ -240,6 +250,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     workload=run.workload,
                     size=run.size,
                     create_perfetto_trace=bool(args.jax_trace_create_perfetto),
+                    scope=args.jax_trace_scope,
                 ),
             )
             manifest["runs"].append(run_record)
@@ -298,6 +309,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             workload=run.workload,
             size=run.size,
             create_perfetto_trace=bool(args.jax_trace_create_perfetto),
+            scope=args.jax_trace_scope,
         )
         session.metadata["jax_trace"] = jax_trace
         try:
@@ -1025,6 +1037,7 @@ def _jax_trace_record(
     workload: str,
     size: int,
     create_perfetto_trace: bool,
+    scope: str,
 ) -> dict[str, object]:
     if root is None:
         return {"enabled": False}
@@ -1035,6 +1048,7 @@ def _jax_trace_record(
         "label": label,
         "trace_dir": str(trace_dir),
         "create_perfetto_trace": bool(create_perfetto_trace),
+        "scope": str(scope),
     }
 
 
@@ -1046,6 +1060,9 @@ def _jax_profiler_trace(
     size: int,
 ):
     if not trace.get("enabled", False):
+        yield
+        return
+    if trace.get("scope", "kernel") != "run":
         yield
         return
 

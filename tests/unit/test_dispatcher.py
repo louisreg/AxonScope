@@ -1,6 +1,7 @@
 import numpy as np
 
 import axonscope as axs
+import axonscope.dispatcher.plan as dispatch_plan_module
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
@@ -233,6 +234,27 @@ def test_pool_dispatch_pads_compatible_double_cable_axons():
         True
     }
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 11), (2, 13)]
+
+
+def test_dispatch_plan_groups_homogeneous_double_cable_rows_without_full_rescan(monkeypatch):
+    def fail_full_group_rescan(_signatures):
+        raise AssertionError("double-cable grouping should use incremental compatibility")
+
+    monkeypatch.setattr(
+        dispatch_plan_module,
+        "_double_cable_membranes_are_padding_compatible",
+        fail_full_group_rescan,
+    )
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
+        for index in range(8)
+    ]
+
+    plan = dispatch_plan_module.build_dispatch_plan(axons)
+
+    assert len(plan.groups) == 1
+    assert plan.groups[0].mode == "double"
+    assert plan.groups[0].size == len(axons)
 
 
 def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():

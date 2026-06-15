@@ -170,6 +170,7 @@ class BenchmarkSession:
     _stack: list[_ActiveSpan] = field(default_factory=list)
     _next_event_id: int = 0
     _token: Token[BenchmarkSession | None] | None = None
+    _jax_trace_active: bool = False
 
     @contextmanager
     def span(self, name: str, **metadata: Any) -> Iterator[None]:
@@ -193,7 +194,8 @@ class BenchmarkSession:
         self._stack.append(active)
         failed = False
         try:
-            yield
+            with self._span_jax_trace(name):
+                yield
         except BaseException as exc:
             failed = True
             active.metadata.update(
@@ -222,6 +224,34 @@ class BenchmarkSession:
                     metadata=dict(active.metadata),
                 )
             )
+
+    @contextmanager
+    def _span_jax_trace(self, name: str) -> Iterator[None]:
+        trace = self.metadata.get("jax_trace")
+        if (
+            name != "kernel.enqueue"
+            or self._jax_trace_active
+            or not isinstance(trace, Mapping)
+            or not trace.get("enabled", False)
+            or trace.get("scope", "kernel") != "kernel"
+        ):
+            yield
+            return
+
+        trace_dir = Path(str(trace["trace_dir"]))
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        self._jax_trace_active = True
+        try:
+            import jax
+
+            with jax.profiler.trace(
+                str(trace_dir),
+                create_perfetto_trace=bool(trace.get("create_perfetto_trace", False)),
+            ):
+                with jax.profiler.StepTraceAnnotation("kernel.enqueue"):
+                    yield
+        finally:
+            self._jax_trace_active = False
 
     def record_metadata(self, **metadata: Any) -> None:
         """Attach metadata to the currently active span."""
@@ -277,16 +307,19 @@ def enable_benchmark(
     record_memory: bool = True,
     level: str = "hotpaths",
     jax_trace: bool = False,
+    jax_trace_dir: str | Path | None = None,
+    jax_trace_create_perfetto: bool = False,
+    jax_trace_scope: str = "kernel",
 ) -> BenchmarkSession:
     """Enable hotpath instrumentation for subsequent AxonScope calls."""
 
-    if jax_trace:
-        raise NotImplementedError("jax_trace is planned but not implemented in hotpath mode.")
     active = _ACTIVE_BENCHMARK_SESSION.get()
     if active is not None and active.active:
         raise RuntimeError("An AxonScope benchmark session is already active.")
     if level != "hotpaths":
         raise ValueError("Only level='hotpaths' is supported for now.")
+    if jax_trace_scope not in {"kernel"}:
+        raise ValueError("Only jax_trace_scope='kernel' is supported by enable_benchmark.")
 
     path = Path(output_dir)
     if save:
@@ -304,6 +337,15 @@ def enable_benchmark(
         ),
         metadata=_collect_benchmark_metadata(path),
     )
+    if jax_trace:
+        trace_dir = Path(jax_trace_dir) if jax_trace_dir is not None else path / "jax_traces" / "benchmark"
+        session.metadata["jax_trace"] = {
+            "enabled": True,
+            "label": "benchmark",
+            "trace_dir": str(trace_dir),
+            "create_perfetto_trace": bool(jax_trace_create_perfetto),
+            "scope": "kernel",
+        }
     if reset:
         session.reset()
     session._token = _ACTIVE_BENCHMARK_SESSION.set(session)

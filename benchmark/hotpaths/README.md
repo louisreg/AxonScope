@@ -155,7 +155,10 @@ python benchmark/hotpaths/run.py \
 
 Profiler output is written under
 `benchmark/results/hotpaths/<run>/jax_traces/<workload>_n<size>/` and linked
-from each manifest run entry as `jax_trace.trace_dir`.
+from each manifest run entry as `jax_trace.trace_dir`. By default the trace
+captures only `kernel.enqueue`, which keeps large-batch GPU timelines from
+being flooded by Python dispatch events. Use `--jax-trace-scope run` only when
+the dispatch/preparation timeline itself is the target.
 
 Force the experimental double-cable PCR block solver:
 

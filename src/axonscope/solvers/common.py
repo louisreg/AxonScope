@@ -445,6 +445,28 @@ def solve_block_tridiagonal_2x2_pcr(
         out = out.at[:, 1, 1].set(m00 / det)
         return out
 
+    def matmul2(left: Array, right: Array) -> Array:
+        l00 = left[:, 0, 0]
+        l01 = left[:, 0, 1]
+        l10 = left[:, 1, 0]
+        l11 = left[:, 1, 1]
+        r00 = right[:, 0, 0]
+        r01 = right[:, 0, 1]
+        r10 = right[:, 1, 0]
+        r11 = right[:, 1, 1]
+        row0 = jnp.stack((l00 * r00 + l01 * r10, l00 * r01 + l01 * r11), axis=1)
+        row1 = jnp.stack((l10 * r00 + l11 * r10, l10 * r01 + l11 * r11), axis=1)
+        return jnp.stack((row0, row1), axis=1)
+
+    def matvec2(matrix: Array, vector: Array) -> Array:
+        m00 = matrix[:, 0, 0]
+        m01 = matrix[:, 0, 1]
+        m10 = matrix[:, 1, 0]
+        m11 = matrix[:, 1, 1]
+        v0 = vector[:, 0]
+        v1 = vector[:, 1]
+        return jnp.stack((m00 * v0 + m01 * v1, m10 * v0 + m11 * v1), axis=1)
+
     stride = 1
     while stride < n:
         left_idx = jnp.maximum(idx - stride, 0)
@@ -454,22 +476,22 @@ def solve_block_tridiagonal_2x2_pcr(
 
         left_inv = inv2_blocks(diag[left_idx])
         right_inv = inv2_blocks(diag[right_idx])
-        left_factor = lower @ left_inv
-        right_factor = upper @ right_inv
+        left_factor = matmul2(lower, left_inv)
+        right_factor = matmul2(upper, right_inv)
         left_factor = jnp.where(has_left[:, None, None], left_factor, zero)
         right_factor = jnp.where(has_right[:, None, None], right_factor, zero)
 
-        next_lower = -left_factor @ lower[left_idx]
-        next_upper = -right_factor @ upper[right_idx]
+        next_lower = -matmul2(left_factor, lower[left_idx])
+        next_upper = -matmul2(right_factor, upper[right_idx])
         next_diag = (
             diag
-            - left_factor @ upper[left_idx]
-            - right_factor @ lower[right_idx]
+            - matmul2(left_factor, upper[left_idx])
+            - matmul2(right_factor, lower[right_idx])
         )
         next_rhs = (
             rhs
-            - (left_factor @ rhs[left_idx, :, None])[:, :, 0]
-            - (right_factor @ rhs[right_idx, :, None])[:, :, 0]
+            - matvec2(left_factor, rhs[left_idx])
+            - matvec2(right_factor, rhs[right_idx])
         )
 
         lower = jnp.where(has_left[:, None, None], next_lower, zero)
@@ -478,7 +500,7 @@ def solve_block_tridiagonal_2x2_pcr(
         rhs = next_rhs
         stride *= 2
 
-    solution = (inv2_blocks(diag) @ rhs[:, :, None])[:, :, 0]
+    solution = matvec2(inv2_blocks(diag), rhs)
     return solution[:, 0], solution[:, 1]
 
 

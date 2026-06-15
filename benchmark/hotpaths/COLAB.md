@@ -106,8 +106,10 @@ benchmark/results/hotpaths/<run_id>/gpu/jax_traces/
 ```
 
 Open those traces with TensorBoard's profile plugin or Perfetto/Chrome trace
-viewer, depending on the files JAX writes for the installed Colab version. Use
-the AxonScope `summary.csv` beside it to map the coarse stage names
+viewer, depending on the files JAX writes for the installed Colab version. The
+runner defaults to `--jax-trace-scope kernel`, so large-batch traces focus on
+`kernel.enqueue` instead of filling the event budget with Python dispatch
+frames. Use the AxonScope `summary.csv` beside it to map the coarse stage names
 (`inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, `results.split_batch`)
 to the lower-level JAX/XLA timeline.
 

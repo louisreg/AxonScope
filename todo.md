@@ -215,10 +215,24 @@ JAX compile/enqueue overhead onto every workload.
   `--jax-trace` records per-workload/per-size profiler directories in
   manifests, and `kernel_double_cable_observer_auto_trace` captures GPU
   timelines for the observer-only auto double-cable path.
-- [ ] Run Colab `kernel_double_cable_observer_auto_trace` and inspect the JAX
-  timeline for GPU optimization targets: XLA compile/count, kernel launch
-  density, host-to-device copies, PCR solver regions, dense `Vstim` handling,
-  and result synchronization.
+- [ ] Re-run Colab `kernel_double_cable_observer_auto_trace` after
+  kernel-scoped tracing, incremental double-cable dispatch grouping, and
+  scalarized PCR block products; compare GPU timelines against
+  `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515`.
+- [x] Inspect
+  `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515`.
+  The `n=600` GPU trace shows the double-cable observer kernel spends about
+  `554 ms` on device, with `GEMM/dot` (`240 ms`, `43%`) plus transpose/gather/
+  select/scatter fusions dominating; H2D copy is only `8.8 ms` (`1.6%`).
+  The `n=2000` full-run trace hit the Python event budget before GPU events,
+  so future large traces must use kernel-only scope.
+- [x] Make JAX profiler traces kernel-scoped by default and keep
+  `--jax-trace-scope run` only for dispatch/preparation investigations.
+- [x] Optimize double-cable dispatch grouping after the trace exposed
+  repeated full-group padding checks; homogeneous/compatible double-cable rows
+  now maintain incremental membrane-prefix compatibility state.
+- [x] Scalarize PCR `2x2` block products to avoid lowering tiny block
+  multiplications as many GPU GEMM/dot kernels and transposes.
 
 ## Phase 7.7 Stimulation And Placement API Cleanup
 
@@ -474,6 +488,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_auto_long_20260615_185532` | Auto double-cable long run resolved GPU to PCR and CPU to Thomas. GPU totals were `336/768/1670/7523 ms` vs CPU `845/1907/3471/12619 ms` at `n=100/300/600/2000`, for `2.51x/2.48x/2.08x/1.68x` CPU/GPU speedups. |
 | 2026-06-15 | `phase7_6_double_cable_observer_batch_smoke` | Homogeneous double-cable observer-only batch path now returns compact cohort observations with `Vm=None`; local smoke for `double_cable_observer n=2` produced `recording_policy=none`, `vm_shapes=[]`, and `peak_voltage`/`activation` observations. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_190721` | Double-cable observer-only auto run kept `vm_shapes=[]`, GPU=PCR, CPU=Thomas. GPU totals were `243/378/682/2841 ms` at `n=100/300/600/2000`, `28%/51%/59%/62%` faster than retained center traces from `185532`; GPU `results.split_batch` fell to `0.10/0.20/0.55/1.15 ms` (`>=96%` lower). |
+| 2026-06-15 | `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515` | JAX trace captured `n=600` GPU kernel details: device time was mostly PCR/XLA compute (`GEMM/dot` `43%`, transpose fusions `19%`, select/reduce `14%`), not transfers (`MemcpyH2D` `1.6%`). The `n=2000` full-run trace filled the profiler event budget with Python dispatch frames, motivating kernel-scoped tracing and incremental double-cable dispatch grouping. |
 
 ## Completed Roadmap Archive
 

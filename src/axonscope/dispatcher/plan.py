@@ -79,6 +79,34 @@ class DispatchPlan:
     groups: tuple[DispatchGroup, ...]
 
 
+@dataclass
+class _PendingDispatchGroup:
+    """Mutable grouping state used while building a dispatch plan."""
+
+    items: list[DispatchItem]
+    longest_membrane_family_sequence: tuple[Any, ...]
+
+    @classmethod
+    def from_item(cls, item: DispatchItem) -> "_PendingDispatchGroup":
+        return cls(
+            items=[item],
+            longest_membrane_family_sequence=item.membrane_family_sequence,
+        )
+
+    def can_accept(self, item: DispatchItem) -> bool:
+        if item.mode == "single":
+            return item.signature == self.items[0].signature
+        return _double_cable_membrane_sequence_can_join(
+            self.longest_membrane_family_sequence,
+            item.membrane_family_sequence,
+        )
+
+    def append(self, item: DispatchItem) -> None:
+        self.items.append(item)
+        if len(item.membrane_family_sequence) > len(self.longest_membrane_family_sequence):
+            self.longest_membrane_family_sequence = item.membrane_family_sequence
+
+
 @dataclass(frozen=True)
 class _SolverDispatchMetadata:
     mode: _CableMode
@@ -95,27 +123,28 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
 
     with benchmark_span("dispatch.build_plan", pool_size=len(axons)):
         items = _normalize_dispatch_items(axons)
-        groups_by_signature: dict[tuple[Any, ...], list[list[DispatchItem]]] = {}
+        groups_by_signature: dict[tuple[Any, ...], list[_PendingDispatchGroup]] = {}
         for item in items:
             signature = item.signature
             compatible_groups = groups_by_signature.setdefault(signature, [])
-            target_group: list[DispatchItem] | None = None
+            target_group: _PendingDispatchGroup | None = None
             if item.mode == "single":
                 target_group = compatible_groups[0] if compatible_groups else None
             else:
-                for group_items in compatible_groups:
-                    candidate = [*group_items, item]
-                    if _items_can_share_batch_runtime(candidate):
-                        target_group = group_items
+                for group in compatible_groups:
+                    if group.can_accept(item):
+                        target_group = group
                         break
             if target_group is None:
-                target_group = []
+                target_group = _PendingDispatchGroup.from_item(item)
                 compatible_groups.append(target_group)
-            target_group.append(item)
+            else:
+                target_group.append(item)
 
         groups_list: list[DispatchGroup] = []
         for signature, signature_groups in groups_by_signature.items():
-            for group_items in signature_groups:
+            for pending_group in signature_groups:
+                group_items = pending_group.items
                 groups_list.append(
                     DispatchGroup(
                         group_id=len(groups_list),
@@ -271,6 +300,17 @@ def _double_cable_membranes_are_padding_compatible(
         return False
     longest = max(signatures, key=len)
     return all(longest[: len(signature)] == signature for signature in signatures)
+
+
+def _double_cable_membrane_sequence_can_join(
+    longest: tuple[Any, ...],
+    candidate: tuple[Any, ...],
+) -> bool:
+    """Return whether `candidate` preserves the prefix-padding invariant."""
+
+    if len(candidate) <= len(longest):
+        return longest[: len(candidate)] == candidate
+    return candidate[: len(longest)] == longest
 
 
 def _double_cable_membrane_family_signature(axon: SolverAxon) -> Any:
