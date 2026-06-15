@@ -348,24 +348,30 @@ def build_realistic_mixed_population(
 
     diameter_cycle_um = (0.6, 0.8, 1.0, 1.2)
     offsets = np.linspace(-60.0, 60.0, size) if size > 1 else np.asarray([0.0])
+    axon_templates: dict[tuple[str, float, int], axs.axons.Axon] = {}
     instances: list[axs.AxonInstance] = []
     for index, offset_um in enumerate(offsets):
         diameter_um = diameter_cycle_um[index % len(diameter_cycle_um)]
         row_compartments = max(3, int(compartments) + 2 * (index % 3))
-        if index % 2 == 0:
+        model_kind = "hh" if index % 2 == 0 else "rattay_aberham"
+        template_key = (model_kind, float(diameter_um), int(row_compartments))
+        axon = axon_templates.get(template_key)
+        if axon is None and model_kind == "hh":
             axon = axs.axons.HodgkinHuxley(
                 length=length_um * axs.um,
                 diameter=diameter_um * axs.um,
                 compartments=row_compartments,
                 celsius=6.3 * axs.degC,
             )
-        else:
+            axon_templates[template_key] = axon
+        elif axon is None:
             axon = axs.axons.RattayAberham(
                 length=length_um * axs.um,
                 diameter=diameter_um * axs.um,
                 compartments=row_compartments,
                 celsius=37.0 * axs.degC,
             )
+            axon_templates[template_key] = axon
 
         instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
         instance.add_current_clamp(

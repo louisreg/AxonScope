@@ -200,6 +200,9 @@ The format is inspired by Keep a Changelog.
 - Added a Colab CPU/GPU hotpath comparison flow that writes matching `gpu/` and
   forced-CPU `cpu/` runs under one downloaded folder with a generated
   `comparison_summary.csv`.
+- Added first Phase 7.6 CPU/GPU bottleneck notes from
+  `colab_cpu_gpu_20260615_095754`, confirming that short realistic mixed
+  workloads are preparation-bound rather than GPU-compute-bound.
 
 ### Changed
 
@@ -235,6 +238,14 @@ The format is inspired by Keep a Changelog.
   analytical-footprint inputs, fast-pathing zero extracellular batches, and
   materializing batched public results once instead of slicing JAX rows in a
   Python loop.
+- Reduced heterogeneous single-cable batch preparation overhead by building
+  row-specific cable operators with host NumPy arrays before one batched JAX
+  transfer, skipping unused scalar stimulation-callable compilation in batch
+  preparation, and caching compiled membrane/backend descriptors.
+- Updated the realistic mixed-population hotpath workload to reuse identical
+  axon templates for repeated model/diameter/Nx combinations, so dispatcher
+  timings reflect intended template reuse rather than artificial per-row model
+  reconstruction.
 - Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
   now orchestrates groups and delegates compatible batch groups to the JAX
   backend runner through a neutral `DispatchResult` record.

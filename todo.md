@@ -21,8 +21,8 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
-- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, and run once on Colab GPU.
-- [ ] Next priority before Phase 8: attack `runtime.prepare` for `parameter-single-cable` heterogeneous cohorts, then re-run CPU/GPU scale traces.
+- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, and run on Colab GPU/CPU.
+- [ ] Next priority before Phase 8: re-run Colab CPU/GPU scale traces after the first heterogeneous preparation and benchmark-template optimizations.
 - [ ] Next implementation phase after Phase 7.6: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -67,25 +67,47 @@ realistic populations, not just clean homogeneous smoke workloads.
     `83-84`; each group spends roughly `1.7-2.2 s` in preparation.
   - Decision: do not expand to MRG/double-cable until this simpler
     `parameter-single-cable` preparation stall is understood and reduced.
-- [ ] Add Colab CPU/GPU comparison traces for the same committed revision.
+- [x] Add and analyze Colab CPU/GPU comparison traces for the same committed revision.
   - Run GPU and forced-CPU JAX processes in the same Colab notebook so hardware
     and dependency drift are minimized.
   - Keep both results under one downloaded folder, with a generated comparison
     summary for `simulation.pool.total`, `runtime.prepare`, input
     materialization, kernel enqueue/wait, split, and public packaging.
   - Workflow implemented in `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` and
-    documented in `benchmark/hotpaths/COLAB.md`; next step is to commit/push to
-    `bench-colab`, run it in Colab, and import the `colab_cpu_gpu_...` archive.
-- [ ] Attack `runtime.prepare` for heterogeneous `parameter-single-cable`
-  groups before adding bigger workloads.
-  - Profile what is repeated per row/group during preparation.
-  - Cache or reuse `SolverAxon`, layout-derived arrays, rate tables, signatures,
-    intrinsic positions, and static membrane/runtime descriptors across rows
-    with the same model/geometry class.
-  - Avoid row-by-row JAX/device preparation when only diameter, model
-    parameters, or `Nx` vary inside a parameter batch.
-  - Re-run `realistic_mixed_population_n500` and `hotpath_matrix_n500` after
-    each meaningful preparation change, comparing CPU and GPU traces.
+    documented in `benchmark/hotpaths/COLAB.md`.
+  - Run analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_20260615_095754/`.
+  - Short `Nt=6` workloads are CPU-faster than GPU because setup dominates
+    execution. At `realistic_mixed_population_n500`, GPU total is `11364.8 ms`
+    versus CPU `3698.0 ms`; GPU `runtime.prepare` alone is `10480.7 ms`.
+  - `kernel.wait` stays small on GPU (`0.56 ms` for
+    `realistic_mixed_population_n500`), so this is still a host/preparation
+    stall, not a device compute bottleneck.
+- [x] Attack the first `runtime.prepare` bottleneck for heterogeneous
+  `parameter-single-cable` groups before adding bigger workloads.
+  - Profiled what is repeated per row/group during preparation.
+  - Replaced row-by-row JAX cable runtime stacking with host NumPy array
+    preparation followed by one batched JAX transfer.
+  - Skipped scalar stimulation-callable compilation in batch preparation when
+    batch kernels already receive materialized intracellular/extracellular
+    inputs.
+  - Cached compiled membrane descriptors and ICM backends for repeated
+    model/options/Nx signatures.
+  - Updated `realistic_mixed_population` to reuse identical axon templates for
+    repeated model/diameter/Nx combinations, so the dispatcher cache measures
+    realistic template reuse instead of artificial per-row re-instantiation.
+  - Local `realistic_mixed_population_n500` after the first optimization pass:
+    total `380.4 ms`, `dispatch.build_plan 16.7 ms`,
+    `runtime.prepare 129.0 ms`, `kernel.enqueue 134.7 ms`.
+  - Previous local post-cache/pre-template run was total `1459.8 ms`,
+    `dispatch.build_plan 646.7 ms`, and `runtime.prepare 338.1 ms`.
+- [ ] Re-run Colab CPU/GPU comparison after the Phase 7.6 optimization pass.
+  - Use the same CPU/GPU notebook flow and compare against
+    `colab_cpu_gpu_20260615_095754`.
+  - If `runtime.prepare` still dominates on GPU, investigate deeper structural
+    dispatcher caches and JAX transfer/compile boundaries.
+  - If `kernel.enqueue`, input materialization, or result packaging becomes the
+    new bottleneck, split Phase 7.6 into targeted hotpath tickets before Phase 8.
 - [ ] Extend realistic population benchmark workloads if the first traces show
   missing coverage.
   - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`

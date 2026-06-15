@@ -124,6 +124,10 @@ class SolverRuntime:
     extracellular: ExtracellularRuntime | None = None
 
 
+_COMPILED_MEMBRANE_CACHE: dict[tuple[Any, ...], IonChannelModelBase] = {}
+_BACKEND_CACHE: dict[tuple[Any, ...], ICMBackend] = {}
+
+
 def _with_rate_tables(
     model: IonChannelModelBase,
     options: SolverOptions,
@@ -135,6 +139,10 @@ def _with_rate_tables(
 
 def _resolve_solver_options(options: SolverOptions | None) -> SolverOptions:
     return SolverOptions() if options is None else options
+
+
+def _solver_options_cache_key(options: SolverOptions) -> tuple[Any, ...]:
+    return ("solver_options", repr(options))
 
 
 def compile_membrane_model(
@@ -232,24 +240,42 @@ def compile_axon_membrane(
     membrane_models = solver_data.membrane_models
     if len(membrane_models) == 0:
         raise ValueError("Axon membrane_models cannot be empty.")
+    cache_key = (
+        "axon_membrane",
+        tuple(model._static_signature() for model in membrane_models),
+        _solver_options_cache_key(options),
+    )
+    cached = _COMPILED_MEMBRANE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     first_signature = membrane_models[0]._static_signature()
     if all(model._static_signature() == first_signature for model in membrane_models):
-        return compile_membrane_model(
+        compiled = compile_membrane_model(
             membrane_models[0],
             solver_options=options,
         )
-    compiled = tuple(
-        compile_membrane_model(model, solver_options=options)
-        for model in membrane_models
-    )
-    return CompartmentMembraneLayout(compiled).as_membrane_model()
+    else:
+        compiled_components = tuple(
+            compile_membrane_model(model, solver_options=options)
+            for model in membrane_models
+        )
+        compiled = CompartmentMembraneLayout(compiled_components).as_membrane_model()
+    _COMPILED_MEMBRANE_CACHE[cache_key] = compiled
+    return compiled
 
 
 def _backend_from_compiled_membrane(membrane: IonChannelModelBase, nx: int) -> ICMBackend:
+    cache_key = ("backend", membrane._static_signature(), int(nx))
+    cached = _BACKEND_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     build_backend = getattr(membrane, "build_backend", None)
     if callable(build_backend):
-        return build_backend()
-    return UniformICMBackend.from_model(membrane, int(nx))
+        backend = build_backend()
+    else:
+        backend = UniformICMBackend.from_model(membrane, int(nx))
+    _BACKEND_CACHE[cache_key] = backend
+    return backend
 
 
 def build_icm_backend_from_axon(
@@ -334,10 +360,21 @@ def prepare_stimulation_runtime(
     grid: SimulationGrid | None = None,
     precompute_intracellular: bool = False,
     precompute_extracellular: bool = False,
+    compile_callables: bool = True,
 ) -> StimulationRuntime:
     use_extracellular = bool(getattr(axon, "use_extracellular", False))
-    inj_fun = build_intracellular_current_density_fn(axon, solver_axon=solver_axon)
-    vext_fun = build_extracellular_potential_fn(axon, solver_axon=solver_axon)
+    if compile_callables:
+        inj_fun = build_intracellular_current_density_fn(axon, solver_axon=solver_axon)
+        vext_fun = build_extracellular_potential_fn(axon, solver_axon=solver_axon)
+    else:
+        nx = int(solver_axon.n_compartments)
+
+        def inj_fun(_: float) -> Array:
+            return jnp.zeros((nx,), dtype=dtype_local)
+
+        def vext_fun(_: float) -> Array:
+            return jnp.zeros((nx,), dtype=dtype_local)
+
     iinj_mid = None
     vext_mid = None
     vext_initial_previous = None
@@ -404,6 +441,7 @@ def prepare_solver_runtime(
     include_area: bool | None = None,
     precompute_intracellular: bool = False,
     precompute_extracellular: bool | None = None,
+    compile_stimulation: bool = True,
     solver_options: SolverOptions | None = None,
 ) -> SolverRuntime:
     solver_axon = build_solver_axon(axon) if solver_axon is None else solver_axon
@@ -427,6 +465,7 @@ def prepare_solver_runtime(
         grid=grid,
         precompute_intracellular=precompute_intracellular,
         precompute_extracellular=precompute_extracellular,
+        compile_callables=compile_stimulation,
     )
     extracellular = (
         prepare_extracellular_runtime(solver_axon, membrane.dtype, cable)
