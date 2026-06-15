@@ -60,11 +60,14 @@ Available notebook cases:
 - `kernel_realistic_long`: longer `realistic_mixed_population` trace with
   `duration=5 ms`, `dt=0.01 ms`, and `51` compartments. Use this after
   `kernel_observer_long` to test realistic heterogeneity.
+- `kernel_single_cable_extracellular_long`: longer
+  `point_source_extracellular` trace with the same CPU/GPU comparison settings
+  as the double-cable run: sizes `100/300/600`, `duration=10 ms`,
+  `dt=0.01 ms`, and a target of `51` compartments.
 - `kernel_double_cable_extracellular_long`: longer
   `double_cable_extracellular` trace with MRG double-cable rows, analytical
-  point-source extracellular stimulation, `duration=5 ms`, `dt=0.01 ms`, and
-  a target of `51` compartments. Start with sizes `100/300`; raise the upper
-  size only after the first GPU trace is healthy.
+  point-source extracellular stimulation, sizes `100/300/600`,
+  `duration=10 ms`, `dt=0.01 ms`, and a target of `51` compartments.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 only the enabled backend(s), and runs the selected case for the enabled labels.

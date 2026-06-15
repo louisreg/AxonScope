@@ -295,12 +295,24 @@ def estimate_simulation(
     recording_width_max = max(recording_widths)
     intracellular_context_count = _intracellular_context_count(instances)
     max_intracellular_contexts = _max_intracellular_context_count(instances)
-    sparse_intracellular_input = _uses_sparse_intracellular_input_estimate(
-        instances,
-        observers=observers,
-        recording_width_max=recording_width_max,
-        is_population=is_population_run,
+    has_intracellular_contexts = intracellular_context_count > 0
+    sparse_intracellular_input = (
+        has_intracellular_contexts
+        and _uses_sparse_intracellular_input_estimate(
+            instances,
+            observers=observers,
+            recording_width_max=recording_width_max,
+            is_population=is_population_run,
+        )
     )
+    skipped_dense_iinj_shape = (axon_count, step_count, max_nx)
+    skipped_dense_iinj_nbytes = int(np.prod(skipped_dense_iinj_shape)) * int(dtype.itemsize)
+    if not has_intracellular_contexts:
+        intracellular_input_format = "zero_no_intracellular_context"
+    elif sparse_intracellular_input:
+        intracellular_input_format = "sparse_current_clamp"
+    else:
+        intracellular_input_format = "dense"
 
     items: list[MemoryEstimateItem] = []
     items.append(
@@ -323,48 +335,49 @@ def estimate_simulation(
             note="batched intrinsic positions",
         )
     )
-    if sparse_intracellular_input:
-        items.append(
-            _item(
-                "inputs.intracellular_current_density_sparse",
-                (axon_count, step_count, max_intracellular_contexts),
-                dtype,
-                role="kernel_input",
-                retained=False,
-                note="observer-only current-clamp path keeps Iinj sparse over compartments",
+    if has_intracellular_contexts:
+        if sparse_intracellular_input:
+            items.append(
+                _item(
+                    "inputs.intracellular_current_density_sparse",
+                    (axon_count, step_count, max_intracellular_contexts),
+                    dtype,
+                    role="kernel_input",
+                    retained=False,
+                    note="observer-only current-clamp path keeps Iinj sparse over compartments",
+                )
             )
-        )
-        items.append(
-            _item(
-                "inputs.intracellular_current_indices",
-                (axon_count, max_intracellular_contexts),
-                np.dtype("int32"),
-                role="kernel_input",
-                retained=False,
-                note="target compartment per sparse current-clamp slot",
+            items.append(
+                _item(
+                    "inputs.intracellular_current_indices",
+                    (axon_count, max_intracellular_contexts),
+                    np.dtype("int32"),
+                    role="kernel_input",
+                    retained=False,
+                    note="target compartment per sparse current-clamp slot",
+                )
             )
-        )
-        items.append(
-            _item(
-                "inputs.intracellular_current_mask",
-                (axon_count, max_intracellular_contexts),
-                np.dtype("bool"),
-                role="kernel_input",
-                retained=False,
-                note="valid sparse current-clamp slots",
+            items.append(
+                _item(
+                    "inputs.intracellular_current_mask",
+                    (axon_count, max_intracellular_contexts),
+                    np.dtype("bool"),
+                    role="kernel_input",
+                    retained=False,
+                    note="valid sparse current-clamp slots",
+                )
             )
-        )
-    else:
-        items.append(
-            _item(
-                "inputs.intracellular_current_density",
-                (axon_count, step_count, max_nx),
-                dtype,
-                role="kernel_input",
-                retained=False,
-                note="current batch backend materializes Iinj[B,Nt,Nx]",
+        else:
+            items.append(
+                _item(
+                    "inputs.intracellular_current_density",
+                    (axon_count, step_count, max_nx),
+                    dtype,
+                    role="kernel_input",
+                    retained=False,
+                    note="current batch backend materializes Iinj[B,Nt,Nx]",
+                )
             )
-        )
 
     context_count = _context_count(instances)
     electrode_rows = _electrode_row_count(instances)
@@ -422,6 +435,27 @@ def estimate_simulation(
         memory_budget_bytes=memory_budget_bytes,
         observers=observers,
     )
+    if not has_intracellular_contexts:
+        recommendations = (
+            *recommendations,
+            "No intracellular contexts are present; dense zero "
+            "Iinj[B,Nt,Nx] is excluded from the estimate "
+            f"({skipped_dense_iinj_nbytes / (1024**2):.3f} MiB skipped).",
+        )
+
+    metadata: dict[str, Any] = {
+        "context_count": context_count,
+        "intracellular_context_count": intracellular_context_count,
+        "max_intracellular_contexts": max_intracellular_contexts,
+        "intracellular_input_format": intracellular_input_format,
+        "electrode_rows": electrode_rows,
+        "unique_stimulus_count": stimulus_count,
+        "recording_policy": _recording_label(recording, batch_options),
+        "population_lifecycle": is_population_run,
+    }
+    if not has_intracellular_contexts:
+        metadata["skipped_dense_iinj_shape"] = list(skipped_dense_iinj_shape)
+        metadata["skipped_dense_iinj_nbytes"] = skipped_dense_iinj_nbytes
 
     return SimulationEstimate(
         axon_count=axon_count,
@@ -436,18 +470,7 @@ def estimate_simulation(
         items=tuple(items),
         warnings=warnings,
         recommendations=recommendations,
-        metadata={
-            "context_count": context_count,
-            "intracellular_context_count": intracellular_context_count,
-            "max_intracellular_contexts": max_intracellular_contexts,
-            "intracellular_input_format": (
-                "sparse_current_clamp" if sparse_intracellular_input else "dense"
-            ),
-            "electrode_rows": electrode_rows,
-            "unique_stimulus_count": stimulus_count,
-            "recording_policy": _recording_label(recording, batch_options),
-            "population_lifecycle": is_population_run,
-        },
+        metadata=metadata,
     )
 
 

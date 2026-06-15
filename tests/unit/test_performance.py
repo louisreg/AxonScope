@@ -101,8 +101,13 @@ def test_extracellular_estimate_surfaces_dense_vstim_and_factorized_footprint():
 
     assert estimate.metadata["context_count"] == 2
     assert estimate.metadata["electrode_rows"] == 2
+    assert estimate.metadata["intracellular_input_format"] == "zero_no_intracellular_context"
+    assert estimate.metadata["skipped_dense_iinj_shape"] == [2, 2, 5]
+    assert estimate.metadata["skipped_dense_iinj_nbytes"] > 0
     assert estimate.item("inputs.extracellular_potential_mid").shape == (2, 2, 5)
     assert estimate.item("footprints.factorized_rows").shape == (2, 5)
+    with pytest.raises(KeyError):
+        estimate.item("inputs.intracellular_current_density")
     assert any("Vstim[B,Nt,Nx]" in text for text in estimate.warnings)
 
 
