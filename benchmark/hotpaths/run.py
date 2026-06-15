@@ -259,6 +259,11 @@ def build_simulations(
             compartments=compartments,
             length_um=length_um,
         )
+    elif workload == "double_cable_extracellular":
+        instances = build_double_cable_extracellular_pool(
+            size=size,
+            compartments=compartments,
+        )
     elif workload == "footprint_reuse_sweep":
         return tuple(
             axs.AxonSimulation(
@@ -530,6 +535,49 @@ def build_point_source_pool(
         instance.add_extracellular_context(context=context)
         instances.append(instance)
     return instances
+
+
+def build_double_cable_extracellular_pool(
+    *,
+    size: int,
+    compartments: int,
+) -> list[axs.AxonInstance]:
+    """Build a homogeneous myelinated double-cable extracellular workload."""
+
+    nodes = _mrg_nodes_for_target_compartments(compartments)
+    axon = axs.axons.MRG(
+        diameter=5.7 * axs.um,
+        nodes=nodes,
+    )
+    center_x_um = 0.5 * float(axon.length)
+    stimulus = axs.Stimulus.pulse(
+        start=0.10 * axs.ms,
+        duration=0.10 * axs.ms,
+        amplitude=60.0 * axs.uA,
+    )
+    electrode = axs.PointSourceElectrode(
+        x=center_x_um * axs.um,
+        z=120.0 * axs.um,
+        stimulus=stimulus,
+    )
+    context = axs.AnalyticalExtracellularContext(
+        electrodes=[electrode],
+        sigma=0.3 * axs.S_per_m,
+    )
+
+    offsets = np.linspace(-80.0, 80.0, size) if size > 1 else np.asarray([0.0])
+    instances = []
+    for offset_um in offsets:
+        instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
+        instance.add_extracellular_context(context=context)
+        instances.append(instance)
+    return instances
+
+
+def _mrg_nodes_for_target_compartments(compartments: int) -> int:
+    """Return a small MRG node count close to a target compartment count."""
+
+    return max(3, int((int(compartments) + 10) // 11))
 
 
 def _simulation_labels(workload: str, count: int) -> tuple[str, ...]:

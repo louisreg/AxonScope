@@ -230,6 +230,14 @@ The format is inspired by Keep a Changelog.
 - Added Phase 7.6 compact-dispatch Colab evidence from
   `colab_cpu_gpu_kernel_observer_long_20260615_122541`, confirming that
   observer-only `results.split_batch` is no longer a dominant GPU cost.
+- Added Phase 7.6 pulse-vectorized sparse-input Colab evidence from
+  `colab_cpu_gpu_kernel_observer_long_20260615_132920`, confirming that
+  observer-only `inputs.intracellular` is no longer the dominant GPU cost.
+- Added the `double_cable_extracellular` hotpath workload for homogeneous MRG
+  double-cable populations driven by analytical point-source extracellular
+  stimulation.
+- Added the Colab case `kernel_double_cable_extracellular_long` for targeted
+  CPU/GPU traces of the priority myelinated extracellular path.
 
 ### Changed
 

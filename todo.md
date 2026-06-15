@@ -30,10 +30,12 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Compact dispatch cohort Colab validation is complete:
   `colab_cpu_gpu_kernel_observer_long_20260615_122541` reduced GPU
   `results.split_batch` at `n=1000` from `140.6 ms` to `0.76 ms`.
-- [ ] Next priority before broad Phase 8 APIs: quantify the pulse-vectorized
-  sparse current-clamp input builder on Colab with `kernel_observer_long`, then
-  finish the targeted hotpath cleanup by re-checking double-cable/MRG-like runs
-  and realistic extracellular-drive runs.
+- [x] Pulse-vectorized sparse current-clamp Colab validation is complete:
+  `colab_cpu_gpu_kernel_observer_long_20260615_132920` reduced GPU
+  `inputs.intracellular` at `n=1000` from `150.2 ms` to `23.8 ms`.
+- [ ] Next priority before broad Phase 8 APIs: run the new
+  `double_cable_extracellular` Colab case, then inspect realistic
+  extracellular-drive/footprint reuse pressure.
 - [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -224,6 +226,17 @@ realistic populations, not just clean homogeneous smoke workloads.
     - New observer-only GPU bottleneck map at `n=1000`: `inputs.intracellular
       150.2 ms`, `kernel.enqueue 115.5 ms`, `runtime.prepare 49.2 ms`;
       `results.split_batch` is no longer the target.
+  - Pulse-vectorized sparse current-clamp rerun analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_132920/`.
+    - The one-pulse sparse input fast path is a strong Colab GPU win:
+      at `n=1000`, `inputs.intracellular` drops from `150.2 ms` to
+      `23.8 ms`, and total GPU drops from `341.8 ms` to `176.8 ms`.
+    - At `n=500`, total GPU drops from `157.8 ms` to `133.7 ms`, with
+      `inputs.intracellular 16.4 ms`.
+    - CPU/GPU total speedup is now `14.7x` at `n=1000`; the remaining GPU
+      observer-only costs are mainly `kernel.enqueue 102.8 ms`,
+      `runtime.prepare 28.9 ms`, `inputs.intracellular 23.8 ms`, and
+      `dispatch.build_plan 14.9 ms`.
 
 - [ ] Phase 7.6 targeted cleanup before broad Phase 8 APIs.
   - [x] Add a compact/factorized intracellular-drive path for simple current clamps
@@ -261,8 +274,9 @@ realistic populations, not just clean homogeneous smoke workloads.
       files; mypy passed for `input_batches.py` and the modified dispatch/
       result modules; sparse current-clamp tests passed (`2 passed`) and the
       targeted dispatcher/public observer/performance run passed (`24 passed`).
-    - Remaining evidence gate: rerun Colab `kernel_observer_long` to check
-      whether the local input-materialization gain holds on GPU.
+    - Evidence gate completed on 2026-06-15:
+      `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_132920/`
+      confirmed the input-materialization gain on GPU.
   - [x] Avoid dense zero `Vstim[B,Nt,Nx]` materialization for homogeneous
     single-cable observer-only runs with no extracellular contexts.
     - The JAX runner now records `input_format="zero_no_context"` and passes no
@@ -300,6 +314,18 @@ realistic populations, not just clean homogeneous smoke workloads.
   - Before declaring this cleanup done, re-check the same bottleneck map on
     double-cable/MRG-like runs; this is a long-term priority path, not an
     optional edge case.
+    - Added `double_cable_extracellular` to `benchmark/hotpaths/`, using a
+      homogeneous MRG double-cable population with analytical point-source
+      extracellular stimulation.
+    - Added Colab notebook case `kernel_double_cable_extracellular_long`
+      with sizes `100/300`, `duration=5 ms`, `dt=0.01 ms`, and target
+      `51` compartments.
+    - Local smoke on 2026-06-15:
+      `benchmark/results/hotpaths/local_double_cable_extracellular_warm/`.
+      The run uses one `strict-double-cable` group with `geometry_shared=true`
+      and `has_padding=false`; warm local `n=5`, `Nt=4`, `Nx=23` profile is
+      total `38.1 ms`, `runtime.prepare 23.0 ms`, `kernel.enqueue 10.5 ms`,
+      `inputs.extracellular 1.93 ms`.
   - Before declaring this cleanup done, re-check extracellular stimulation
     runs with realistic `ExtracellularFootprint`/`ExtracellularDrive` usage,
     because dense `Vstim[B,Nt,Nx]` is expected to matter as much as dense

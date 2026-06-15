@@ -28,6 +28,14 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "contexts; useful to expose generic Vstim preprocessing cost."
         ),
     ),
+    "double_cable_extracellular": HotpathWorkload(
+        name="double_cable_extracellular",
+        description=(
+            "Homogeneous MRG double-cable pool driven by analytical point-source "
+            "extracellular contexts; useful to expose the priority myelinated "
+            "extracellular hotpath."
+        ),
+    ),
     "footprint_reuse_sweep": HotpathWorkload(
         name="footprint_reuse_sweep",
         description=(

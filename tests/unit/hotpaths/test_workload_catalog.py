@@ -15,6 +15,7 @@ def test_hotpath_catalog_lists_phase25_workloads():
     assert set(HOTPATH_WORKLOADS) == {
         "footprint_reuse_sweep",
         "intracellular_only",
+        "double_cable_extracellular",
         "hotpath_matrix",
         "observer_only",
         "point_source_extracellular",
@@ -30,6 +31,7 @@ def test_hotpath_runner_prints_list(capsys):
     out = capsys.readouterr().out
     assert "intracellular_only" in out
     assert "point_source_extracellular" in out
+    assert "double_cable_extracellular" in out
     assert "scale" in out
 
 
@@ -42,6 +44,8 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
         "intracellular_only size=3",
         "point_source_extracellular size=2",
         "point_source_extracellular size=3",
+        "double_cable_extracellular size=2",
+        "double_cable_extracellular size=3",
         "footprint_reuse_sweep size=2",
         "footprint_reuse_sweep size=3",
         "observer_only size=2",
@@ -60,6 +64,7 @@ def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
     assert lines == [
         "intracellular_only size=1",
         "point_source_extracellular size=1",
+        "double_cable_extracellular size=1",
         "footprint_reuse_sweep size=1",
         "observer_only size=1",
         "realistic_mixed_population size=1",
@@ -78,6 +83,7 @@ def test_hotpath_size_and_run_resolution():
     assert [run.workload for run in planned_runs("all", (1,))] == [
         "intracellular_only",
         "point_source_extracellular",
+        "double_cable_extracellular",
         "footprint_reuse_sweep",
         "observer_only",
         "realistic_mixed_population",
@@ -98,6 +104,26 @@ def test_hotpath_build_simulation_uses_public_root_object():
     assert isinstance(simulation, axs.AxonSimulation)
     assert simulation.is_population
     assert len(simulation.axons) == 2
+    assert all(instance.extracellular_context is not None for instance in simulation.axons)
+
+
+def test_hotpath_double_cable_extracellular_uses_mrg_double_cable_rows():
+    simulation = build_simulation(
+        "double_cable_extracellular",
+        size=2,
+        compartments=51,
+        length_um=40.0,
+        duration_ms=0.1,
+        dt_ms=0.05,
+    )
+
+    assert isinstance(simulation, axs.AxonSimulation)
+    assert simulation.is_population
+    assert len(simulation.axons) == 2
+    assert {type(instance.axon).__name__ for instance in simulation.axons} == {"MRG"}
+    assert {
+        instance.axon.resolved_formulation for instance in simulation.axons
+    } == {"double-cable"}
     assert all(instance.extracellular_context is not None for instance in simulation.axons)
 
 

@@ -123,6 +123,7 @@ packaging regressions, then `kernel_observer_long` and
 | --- | --- |
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
 | `point_source_extracellular` | HH population driven by analytical point-source extracellular contexts. Stresses the current generic `Vstim` preprocessing path highlighted in `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`. |
+| `double_cable_extracellular` | MRG double-cable population driven by analytical point-source extracellular contexts. Stresses the priority myelinated extracellular path before Phase 8 study/reuse APIs. |
 | `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
 | `observer_only` | HH population with solver-side peak-voltage and activation observers, `Recording.none()`, empty `vm_shapes`, and compact observation names in the manifest. Verifies the Phase 7.5 no-retained-Vm path. |
 | `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
