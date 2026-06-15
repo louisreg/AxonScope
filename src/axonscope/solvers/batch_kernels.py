@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 import jax
 import jax.numpy as jnp
@@ -740,6 +740,215 @@ def _run_single_cable_vstim_batch_sparse_observer_scan(
     static_argnames=(
         "backend",
         "membrane",
+        "stateless_vm_only",
+    ),
+)
+def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
+    *,
+    backend,
+    membrane,
+    stateless_vm_only: bool,
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    dl: Array,
+    d_static: Array,
+    du: Array,
+    Cm_uF_cm2: Array,
+    I_background: Array,
+    Vm0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    observer_state0: tuple[Array, ...],
+    observer_kind_codes: Array,
+    observer_indices: Array,
+    observer_mask: Array,
+    observer_original_indices: Array,
+    observer_positions_um: Array,
+    observer_thresholds_mV: Array,
+    observer_blanking_ms: Array,
+    intracellular_current_density_values_mid: Array,
+    intracellular_current_density_indices: Array,
+    intracellular_current_density_mask: Array,
+    time_start_index: Array,
+    dt_ms: Array,
+) -> tuple[Array, Array, tuple[Array, ...], ObserverState]:
+    """Run one observer chunk with sparse point clamps and zero extracellular drive."""
+
+    def one_batch(
+        Vm0_row,
+        gates0_row,
+        state0_row,
+        observer_state_row,
+        lower_row,
+        diag_row,
+        upper_row,
+        dl_row,
+        d_static_row,
+        du_row,
+        Cm_row,
+        I_background_row,
+        Iinj_values_mid,
+        Iinj_indices,
+        Iinj_mask,
+    ):
+        safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
+
+        def step(carry, step_inputs):
+            Iinj_values, local_step = step_inputs
+            Vm, gates, observer_state, *extra = carry
+            extra = tuple(extra)
+            Iinj = jnp.zeros_like(Vm).at[safe_iinj_indices].add(
+                jnp.where(Iinj_mask, Iinj_values, 0.0)
+            )
+
+            gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            if stateless_vm_only:
+                linearization_gates = gates_pred
+                explicit_outward_current = I_background_row
+                correction_current = jnp.zeros_like(Vm)
+            else:
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                step_plan_pred = membrane.prepare_membrane_step(
+                    V_mV=Vm,
+                    gates_prev=gates,
+                    gates_new=gates_pred,
+                    state=extra,
+                    dt=dt_ms,
+                    I_ion=Iion_pred,
+                    I_background=I_background_row,
+                )
+                linearization_gates = step_plan_pred.linearization_gates
+                explicit_outward_current = step_plan_pred.explicit_outward_current
+                correction_current = step_plan_pred.correction_current
+
+            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            d = d_static_row + (dt_ms / Cm_row) * Gm
+            rhs = (
+                Vm
+                + (dt_ms / Cm_row)
+                * (
+                    GE
+                    + Iinj
+                    - explicit_outward_current
+                    - correction_current
+                )
+            )
+            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+
+            if stateless_vm_only:
+                observer_state = update_observer_state_scalar(
+                    observer_state,
+                    vm_mV=Vm_new,
+                    time_ms=(time_start_index + local_step + 1) * dt_ms,
+                    kind_codes=observer_kind_codes,
+                    indices=observer_indices,
+                    mask=observer_mask,
+                    original_indices=observer_original_indices,
+                    positions_um=observer_positions_um,
+                    thresholds_mV=observer_thresholds_mV,
+                    blanking_ms=observer_blanking_ms,
+                )
+                return (Vm_new, gates_pred, observer_state, *extra), None
+
+            gates_new = membrane.final_gate_update(
+                gates_prev=gates,
+                V_mV_prev=Vm,
+                V_mV_new=Vm_new,
+                dt=dt_ms,
+                gates_predictor=gates_pred,
+            )
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            step_plan = membrane.prepare_membrane_step(
+                V_mV=Vm_new,
+                gates_prev=gates,
+                gates_new=gates_new,
+                state=extra,
+                dt=dt_ms,
+                I_ion=Iion_new,
+                I_background=I_background_row,
+            )
+            state_new = membrane.finalize_membrane_step(
+                V_mV_prev=Vm,
+                V_mV_new=Vm_new,
+                gates_prev=gates,
+                gates_new=gates_new,
+                state_prev=extra,
+                step_plan=step_plan,
+                dt=dt_ms,
+            )
+            observer_state = update_observer_state_scalar(
+                observer_state,
+                vm_mV=Vm_new,
+                time_ms=(time_start_index + local_step + 1) * dt_ms,
+                kind_codes=observer_kind_codes,
+                indices=observer_indices,
+                mask=observer_mask,
+                original_indices=observer_original_indices,
+                positions_um=observer_positions_um,
+                thresholds_mV=observer_thresholds_mV,
+                blanking_ms=observer_blanking_ms,
+            )
+            return (Vm_new, gates_new, observer_state, *state_new), None
+
+        final_carry, _ = jax.lax.scan(
+            step,
+            (Vm0_row, gates0_row, observer_state_row, *state0_row),
+            (
+                Iinj_values_mid,
+                jnp.arange(
+                    Iinj_values_mid.shape[0],
+                    dtype=jnp.asarray(time_start_index).dtype,
+                ),
+            ),
+        )
+        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+
+    state_axes = tuple(0 for _ in state0)
+    observer_axes = tuple(0 for _ in observer_state0)
+    return jax.vmap(
+        one_batch,
+        in_axes=(
+            0,
+            0,
+            state_axes,
+            observer_axes,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ),
+    )(
+        Vm0_mV,
+        gates0,
+        state0,
+        observer_state0,
+        lower,
+        diag,
+        upper,
+        dl,
+        d_static,
+        du,
+        Cm_uF_cm2,
+        I_background,
+        intracellular_current_density_values_mid,
+        intracellular_current_density_indices,
+        intracellular_current_density_mask,
+    )
+
+
+@partial(
+    jax.jit,
+    static_argnames=(
+        "backend",
+        "membrane",
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
@@ -1012,7 +1221,9 @@ class SingleCableVStimBatchKernel:
         self,
         *,
         extracellular_potential_mid_mV: Array | None = None,
-        intracellular_current_density_mid: Array | None = None,
+        intracellular_current_density_mid: (
+            Array | SparseIntracellularCurrentDensityBatch | None
+        ) = None,
         options: BatchOptions | None = None,
         observers: SolverObserverPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
@@ -1028,24 +1239,17 @@ class SingleCableVStimBatchKernel:
         grid = runtime.grid
         cable = runtime.cable
         dtype_local = membrane_runtime.dtype
+        has_driven_extracellular = (
+            runtime.stimulation.has_driven_extracellular
+            if self.has_driven_extracellular is None
+            else bool(self.has_driven_extracellular)
+        )
 
         vext_mid = (
             runtime.stimulation.extracellular_potential_mid_mV
             if extracellular_potential_mid_mV is None
             else extracellular_potential_mid_mV
         )
-        if vext_mid is None:
-            raise ValueError("extracellular_potential_mid_mV is required for Vstim batching.")
-
-        vext_batch = _as_batched_time_space_array(
-            "extracellular_potential_mid_mV",
-            vext_mid,
-            nt=grid.Nt,
-            nx=membrane_runtime.Nx,
-            dtype_local=dtype_local,
-        )
-        batch_size = int(vext_batch.shape[0])
-
         iinj_mid = (
             runtime.stimulation.intracellular_current_density_mid
             if intracellular_current_density_mid is None
@@ -1053,8 +1257,30 @@ class SingleCableVStimBatchKernel:
         )
         if iinj_mid is None:
             raise ValueError("intracellular_current_density_mid is required for Vstim batching.")
-        sparse_iinj = (
-            _as_sparse_intracellular_current_density_batch(
+
+        if vext_mid is None:
+            if has_driven_extracellular:
+                raise ValueError("extracellular_potential_mid_mV is required for Vstim batching.")
+            if not isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
+                raise ValueError(
+                    "extracellular_potential_mid_mV is required unless sparse "
+                    "observer-only current input defines the batch size."
+                )
+            batch_size = iinj_mid.batch_size
+            vext_batch = None
+        else:
+            vext_batch = _as_batched_time_space_array(
+                "extracellular_potential_mid_mV",
+                vext_mid,
+                nt=grid.Nt,
+                nx=membrane_runtime.Nx,
+                dtype_local=dtype_local,
+            )
+            batch_size = int(vext_batch.shape[0])
+
+        sparse_iinj = None
+        if isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
+            sparse_iinj = _as_sparse_intracellular_current_density_batch(
                 "intracellular_current_density_mid",
                 iinj_mid,
                 nt=grid.Nt,
@@ -1062,14 +1288,11 @@ class SingleCableVStimBatchKernel:
                 dtype_local=dtype_local,
                 batch_size=batch_size,
             )
-            if isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch)
-            else None
-        )
         iinj_batch = None
         if sparse_iinj is None:
             iinj_batch = _as_batched_time_space_array(
                 "intracellular_current_density_mid",
-                iinj_mid,
+                cast(Any, iinj_mid),
                 nt=grid.Nt,
                 nx=membrane_runtime.Nx,
                 dtype_local=dtype_local,
@@ -1082,11 +1305,6 @@ class SingleCableVStimBatchKernel:
         record_idx, record_full = _resolve_recording(options.recording, nx=membrane_runtime.Nx)
         record_voltage = options.recording.mode != "none"
         chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
-        has_driven_extracellular = (
-            runtime.stimulation.has_driven_extracellular
-            if self.has_driven_extracellular is None
-            else bool(self.has_driven_extracellular)
-        )
         stateless_vm_only = bool(
             membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
         )
@@ -1097,19 +1315,32 @@ class SingleCableVStimBatchKernel:
         )
         if observers is not None and not record_voltage:
             if sparse_iinj is not None:
-                observer_state = _run_single_cable_vstim_batch_sparse_observer_chunks(
-                    runtime=runtime,
-                    Cm_uF_cm2=jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local),
-                    observers=observers,
-                    has_driven_extracellular=has_driven_extracellular,
-                    stateless_vm_only=stateless_vm_only,
-                    intracellular_current_density_mid=sparse_iinj,
-                    extracellular_potential_mid_mV=vext_batch,
-                    time_chunk_steps=chunk_steps,
-                    progress_callback=progress_callback,
-                )
+                if vext_batch is None:
+                    observer_state = _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
+                        runtime=runtime,
+                        Cm_uF_cm2=jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local),
+                        observers=observers,
+                        stateless_vm_only=stateless_vm_only,
+                        intracellular_current_density_mid=sparse_iinj,
+                        batch_size=batch_size,
+                        time_chunk_steps=chunk_steps,
+                        progress_callback=progress_callback,
+                    )
+                else:
+                    observer_state = _run_single_cable_vstim_batch_sparse_observer_chunks(
+                        runtime=runtime,
+                        Cm_uF_cm2=jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local),
+                        observers=observers,
+                        has_driven_extracellular=has_driven_extracellular,
+                        stateless_vm_only=stateless_vm_only,
+                        intracellular_current_density_mid=sparse_iinj,
+                        extracellular_potential_mid_mV=vext_batch,
+                        time_chunk_steps=chunk_steps,
+                        progress_callback=progress_callback,
+                    )
             else:
                 assert iinj_batch is not None
+                assert vext_batch is not None
                 observer_state = _run_single_cable_vstim_batch_observer_chunks(
                     runtime=runtime,
                     Cm_uF_cm2=jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local),
@@ -1132,6 +1363,8 @@ class SingleCableVStimBatchKernel:
         if iinj_batch is None:
             assert sparse_iinj is not None
             iinj_batch = materialize_sparse_intracellular_current_density_batch(sparse_iinj)
+        if vext_batch is None:
+            raise ValueError("extracellular_potential_mid_mV is required when recording Vm.")
         if record_full and chunk_steps is None and shared_cable:
             out = _run_single_cable_vstim_batch_vm_scan(
                 backend=membrane_runtime.backend,
@@ -1559,6 +1792,87 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
             intracellular_current_density_indices=intracellular_current_density_mid.indices,
             intracellular_current_density_mask=intracellular_current_density_mid.mask,
             extracellular_potential_mid_mV=extracellular_potential_mid_mV[:, start:stop],
+            time_start_index=jnp.asarray(start, dtype=jnp.int32),
+            dt_ms=dt,
+        )
+        if progress_callback is not None:
+            progress_callback(chunk_index, len(chunk_ranges))
+
+    return observer_state
+
+
+def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
+    *,
+    runtime: SolverRuntime,
+    Cm_uF_cm2: Array,
+    observers: SolverObserverPlan,
+    stateless_vm_only: bool,
+    intracellular_current_density_mid: SparseIntracellularCurrentDensityBatch,
+    batch_size: int,
+    time_chunk_steps: int | None,
+    progress_callback: Callable[[int, int], None] | None,
+) -> ObserverState:
+    membrane_runtime = runtime.membrane
+    grid = runtime.grid
+    cable = runtime.cable
+    dtype_local = membrane_runtime.dtype
+    dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
+    lower = _as_batched_space_array(
+        "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    diag = _as_batched_space_array(
+        "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    upper = _as_batched_space_array(
+        "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    cm = _as_batched_scalar_or_space_array(
+        "Cm_uF_cm2",
+        Cm_uF_cm2,
+        nx=membrane_runtime.Nx,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+    background = _as_batched_space_array(
+        "I_background",
+        membrane_runtime.background_current,
+        nx=membrane_runtime.Nx,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+    Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
+    observer_state = init_observer_state(observers, batch_size=batch_size)
+
+    chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
+    for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
+        Vm, gates, state, observer_state = _run_single_cable_zero_vstim_batch_sparse_observer_scan(
+            backend=membrane_runtime.backend,
+            membrane=membrane_runtime.membrane,
+            stateless_vm_only=stateless_vm_only,
+            lower=lower,
+            diag=diag,
+            upper=upper,
+            dl=-dt * lower,
+            d_static=jnp.ones_like(diag) - dt * diag,
+            du=-dt * upper,
+            Cm_uF_cm2=cm,
+            I_background=background,
+            Vm0_mV=Vm,
+            gates0=gates,
+            state0=state,
+            observer_state0=observer_state,
+            observer_kind_codes=observers.kind_codes,
+            observer_indices=observers.indices,
+            observer_mask=observers.mask,
+            observer_original_indices=observers.original_indices,
+            observer_positions_um=observers.positions_um,
+            observer_thresholds_mV=observers.thresholds_mV,
+            observer_blanking_ms=observers.blanking_ms,
+            intracellular_current_density_values_mid=(
+                intracellular_current_density_mid.density_mid[:, start:stop]
+            ),
+            intracellular_current_density_indices=intracellular_current_density_mid.indices,
+            intracellular_current_density_mask=intracellular_current_density_mid.mask,
             time_start_index=jnp.asarray(start, dtype=jnp.int32),
             dt_ms=dt,
         )

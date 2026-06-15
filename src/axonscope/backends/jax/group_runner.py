@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import jax.numpy as jnp
 import numpy as np
@@ -176,7 +176,7 @@ def _run_single_cable_batch_group(
         dt_ms=dt_ms,
     ):
         runtime = prepare_solver_runtime(
-            representative,
+            cast(Any, representative),
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
             include_extracellular=False,
@@ -220,6 +220,7 @@ def _run_single_cable_batch_group(
         kernel_options=kernel_options,
         observers=observers,
     )
+    use_zero_extracellular = use_sparse_intracellular and cohort.context_count == 0
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -268,19 +269,29 @@ def _run_single_cable_batch_group(
         nt=runtime.grid.Nt,
         nx=group.nx,
     ):
-        vstim_mid = build_vstim_midpoint_batch(
-            cohort.representative,
-            cohort.contexts,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            x_positions_m=cohort.x_positions_m,
-            axon_y_um=cohort.axon_y_um,
-            axon_z_um=cohort.axon_z_um,
-            dtype_local=runtime.membrane.dtype,
-        )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
-        )
+        if use_zero_extracellular:
+            vstim_mid = None
+            dtype = np.dtype(runtime.membrane.dtype)
+            skipped_shape = (group.size, runtime.grid.Nt, group.nx)
+            record_benchmark_metadata(
+                input_format="zero_no_context",
+                skipped_dense_vstim_shape=list(skipped_shape),
+                skipped_dense_vstim_nbytes=int(np.prod(skipped_shape)) * int(dtype.itemsize),
+            )
+        else:
+            vstim_mid = build_vstim_midpoint_batch(
+                cohort.representative,
+                cohort.contexts,
+                tsim_ms=tsim_ms,
+                dt_ms=dt_ms,
+                x_positions_m=cohort.x_positions_m,
+                axon_y_um=cohort.axon_y_um,
+                axon_z_um=cohort.axon_z_um,
+                dtype_local=runtime.membrane.dtype,
+            )
+            record_benchmark_metadata(
+                **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
+            )
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,
@@ -351,7 +362,7 @@ def _run_double_cable_batch_group(
         dt_ms=dt_ms,
     ):
         runtime = prepare_solver_runtime(
-            representative,
+            cast(Any, representative),
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
             include_extracellular=True,
@@ -557,7 +568,7 @@ def _stack_membrane_runtime(
 
     rows = tuple(
         prepare_membrane_runtime(
-            item.simulation,
+            cast(Any, item.simulation),
             solver_axon=item.solver_axon,
             solver_options=solver_options,
         )

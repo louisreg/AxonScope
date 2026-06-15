@@ -22,7 +22,10 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
 - [x] Phase 7.6 evidence gate is complete: realistic mixed-population, hotpath-matrix, and long observer-only CPU/GPU traces have been run and analyzed.
-- [ ] Next priority before broad Phase 8 APIs: finish the targeted hotpath cleanup by re-checking double-cable/MRG-like runs and realistic extracellular-drive runs after the first sparse current-clamp/observer packaging pass.
+- [ ] Next priority before broad Phase 8 APIs: re-run the observer-only Colab
+  case after the `zero_no_context` patch, then finish the targeted hotpath
+  cleanup by re-checking double-cable/MRG-like runs and realistic
+  extracellular-drive runs.
 - [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -166,6 +169,22 @@ realistic populations, not just clean homogeneous smoke workloads.
   - The memory estimate confirms the next pressure point:
     `Iinj[B,Nt,Nx]` alone is `194.6 MiB` at `n=1000`, `Nt=1000`, `Nx=51`,
     even though no Vm trace is retained.
+  - Sparse current-clamp rerun analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_114221/`.
+    - The sparse path is a real Colab GPU win, not only a local memory cleanup:
+      at `n=1000`, GPU total improves from `673.4 ms` to `378.0 ms`, and CPU
+      total improves from `3884.2 ms` to `3140.4 ms`.
+    - `inputs.intracellular` drops from `296.3 ms` to `77.8 ms` on GPU and
+      from `455.4 ms` to `75.4 ms` on CPU at `n=1000`.
+    - CPU/GPU total speedup rises to `8.31x` at `n=1000` and `9.46x` at
+      `n=500`.
+    - The new dominant GPU costs at `n=1000` are `results.split_batch
+      140.5 ms`, `kernel.enqueue 109.2 ms`, and `inputs.intracellular
+      77.8 ms`.
+    - Important follow-up found in the same events: even with
+      `context_count=0`, the runner still materialized dense zero
+      `Vstim[B,Nt,Nx]` (`204 MB` at `n=1000`). This is now a targeted cleanup
+      item, distinct from real extracellular-drive compression.
 
 - [ ] Phase 7.6 targeted cleanup before broad Phase 8 APIs.
   - [x] Add a compact/factorized intracellular-drive path for simple current clamps
@@ -189,6 +208,17 @@ realistic populations, not just clean homogeneous smoke workloads.
       `batch_inputs.py`, `input_batches.py`, `batch_kernels.py`, and
       `performance.py`; targeted unit tests passed (`22 passed`), with an
       earlier broader batch/dispatcher/analysis/hotpath run at `47 passed`.
+  - [x] Avoid dense zero `Vstim[B,Nt,Nx]` materialization for homogeneous
+    single-cable observer-only runs with no extracellular contexts.
+    - The JAX runner now records `input_format="zero_no_context"` and passes no
+      `vstim_mid` array into the sparse observer kernel for this case.
+    - Local smoke benchmark on 2026-06-15:
+      `benchmark/results/hotpaths/phase7_6_after_zero_vstim_smoke/`.
+      `inputs.extracellular` reports `0.036 ms` for `n=100`, and the event
+      records the skipped dense shape `[100, 100, 51]`.
+    - Targeted validation on 2026-06-15: mypy passed for `batch_kernels.py`,
+      `group_runner.py`, and `performance.py`; targeted unit tests passed
+      (`13 passed`).
   - [x] Reduce the first layer of `results.split_batch` cost for observer-only runs by avoiding
     expensive per-row public packaging where a compact population observation
     can be carried until the user indexes/reports rows.

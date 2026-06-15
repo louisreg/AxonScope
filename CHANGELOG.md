@@ -215,6 +215,11 @@ The format is inspired by Keep a Changelog.
   observer-only GPU speedups with zero retained Vm and exposing dense
   intracellular input materialization plus observer result splitting as the next
   hotpath targets.
+- Added Phase 7.6 sparse observer-only Colab evidence from
+  `colab_cpu_gpu_kernel_observer_long_20260615_114221`, confirming that sparse
+  current-clamp lowering reduces observer-only GPU wall time and exposes
+  observer result splitting plus zero-field `Vstim` materialization as the next
+  bottlenecks.
 
 ### Changed
 
@@ -268,6 +273,10 @@ The format is inspired by Keep a Changelog.
   batch kernels by lowering point clamps to sparse compartment slots instead of
   materializing dense `Iinj[B,Nt,Nx]`; hotpath metadata and simulation estimates
   now report the `sparse_current_clamp` input format.
+- Reduced zero-field observer-only memory pressure by skipping dense
+  `Vstim[B,Nt,Nx]` materialization when homogeneous single-cable batch runs have
+  no extracellular contexts; hotpath metadata now reports
+  `input_format="zero_no_context"` for that path.
 - Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
   now orchestrates groups and delegates compatible batch groups to the JAX
   backend runner through a neutral `DispatchResult` record.

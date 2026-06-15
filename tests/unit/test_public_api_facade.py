@@ -221,6 +221,52 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     )
 
 
+def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
+    axons = []
+    for amplitude in (0.4, 0.5):
+        axon = axs.axons.HodgkinHuxley(
+            length=100.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=11,
+            celsius=6.3 * axs.degC,
+        )
+        sim = axs.AxonInstance(axon)
+        sim.add_current_clamp(
+            position=50.0 * axs.um,
+            current=axs.Stimulus.pulse(
+                start=0.02 * axs.ms,
+                duration=0.04 * axs.ms,
+                amplitude=amplitude * axs.nA,
+            ),
+        )
+        axons.append(sim)
+
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    axs.enable_benchmark("/tmp/axonscope-zero-vstim-test", print_summary=False, save=False)
+    try:
+        compact = axs.simulate_pool(
+            axons,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            recording=axs.Recording.none(),
+            observers=[peak],
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert compact.observations is not None
+    assert report is not None
+    extracellular_events = [
+        event for event in report.events if event.name == "inputs.extracellular"
+    ]
+    assert len(extracellular_events) == 1
+    metadata = extracellular_events[0].metadata
+    assert metadata["input_format"] == "zero_no_context"
+    assert "vstim_mid" not in metadata
+    assert metadata["skipped_dense_vstim_shape"] == [2, 2, 11]
+
+
 def test_public_recording_signals_filter_single_result():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
