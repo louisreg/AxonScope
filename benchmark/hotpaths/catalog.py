@@ -66,6 +66,13 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "mixed-population path for Phase 7.6 coverage."
         ),
     ),
+    "path_comparison_matrix": HotpathWorkload(
+        name="path_comparison_matrix",
+        description=(
+            "Controlled matrix for intra vs extra and single-cable vs double-cable "
+            "comparisons across center/full/observer retention policies."
+        ),
+    ),
 }
 
 

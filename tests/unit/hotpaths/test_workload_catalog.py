@@ -18,6 +18,7 @@ def test_hotpath_catalog_lists_phase25_workloads():
         "double_cable_extracellular",
         "hotpath_matrix",
         "observer_only",
+        "path_comparison_matrix",
         "point_source_extracellular",
         "realistic_mixed_population",
     }
@@ -54,6 +55,8 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
         "realistic_mixed_population size=3",
         "hotpath_matrix size=2",
         "hotpath_matrix size=3",
+        "path_comparison_matrix size=2",
+        "path_comparison_matrix size=3",
     ]
 
 
@@ -69,6 +72,7 @@ def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
         "observer_only size=1",
         "realistic_mixed_population size=1",
         "hotpath_matrix size=1",
+        "path_comparison_matrix size=1",
     ]
 
 
@@ -88,6 +92,7 @@ def test_hotpath_size_and_run_resolution():
         "observer_only",
         "realistic_mixed_population",
         "hotpath_matrix",
+        "path_comparison_matrix",
     ]
 
 
@@ -187,3 +192,28 @@ def test_hotpath_matrix_builds_labeled_coverage_scenarios():
         "HodgkinHuxley",
         "RattayAberham",
     }
+
+
+def test_path_comparison_matrix_builds_controlled_path_scenarios():
+    simulations = build_simulations(
+        "path_comparison_matrix",
+        size=3,
+        compartments=5,
+        length_um=40.0,
+        duration_ms=0.1,
+        dt_ms=0.05,
+    )
+
+    assert len(simulations) == 7
+    assert all(isinstance(simulation, axs.AxonSimulation) for simulation in simulations)
+    assert [simulation.recording.spatial.value for simulation in simulations[:2]] == [
+        "center",
+        "full",
+    ]
+    assert not simulations[2].recording.voltage
+    assert simulations[2].observers is not None
+    assert all(instance.extracellular_context is None for instance in simulations[0].axons)
+    assert any(instance.extracellular_context is not None for instance in simulations[3].axons)
+    assert {
+        instance.axon.resolved_formulation for instance in simulations[5].axons
+    } == {"double-cable"}

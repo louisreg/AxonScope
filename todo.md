@@ -53,11 +53,13 @@ This is the current order of attack. The detailed history stays below, but new
 work should start here so the TODO remains readable.
 
 - [ ] Phase 7.6.1: finish the benchmark evidence matrix.
-  - Compare intra versus extra, analytical point-source versus typed
+  - [x] Add `path_comparison_matrix` for controlled intra/extra and
+    single/double evidence before optimization.
+  - [ ] Compare intra versus extra, analytical point-source versus typed
     footprint/drive, single-cable versus double-cable, recording full/center/
     none, observer on/off, cold versus warm, and precomputed-input solver-only
     paths.
-  - Keep MRG/double-cable measurements clearly labelled; do not mix them with
+  - [x] Keep MRG/double-cable measurements clearly labelled; do not mix them with
     pure formulation comparisons unless the model/protocol/output policy is
     controlled.
 - [ ] Phase 7.6.2: attack memory-transfer and long-run execution.
@@ -447,15 +449,30 @@ realistic populations, not just clean homogeneous smoke workloads.
     padded kernels.
 - [ ] Phase 7.6.1 plan: make intra-vs-extra and single-vs-double-cable
   comparisons first-class benchmark evidence.
-  - [ ] Add explicit hotpath matrix rows that compare the same model/geometry
-    across stimulation and recording policies: no stimulation observer-only,
-    intracellular current clamp, analytical point-source extracellular,
-    typed `ExtracellularFootprint`/`ExtracellularDrive`, `Recording.full()`,
-    `Recording.center(...)`, `Recording.none()` with observers, cold run, and
-    warm run.
-  - [ ] Add a same-protocol single-cable versus double-cable comparison where
-    the output policy is identical, then keep MRG-labelled double-cable results
-    separate from pure formulation comparisons.
+  - [x] Add explicit hotpath matrix rows for the currently executable path
+    comparison: single-cable intracellular center/full-Vm/observer-none,
+    single-cable analytical point-source extracellular center/full-Vm, and MRG
+    double-cable analytical point-source extracellular center/full-Vm.
+    - Implemented as `path_comparison_matrix` in `benchmark/hotpaths/`.
+    - Local smokes on 2026-06-15:
+      `benchmark/results/hotpaths/phase7_6_path_comparison_matrix_smoke/`
+      and
+      `benchmark/results/hotpaths/phase7_6_path_comparison_matrix_metadata_smoke/`.
+      The manifest labels are `single_intracellular_center`,
+      `single_intracellular_full_vm`, `single_intracellular_observer_none`,
+      `single_point_source_center`, `single_point_source_full_vm`,
+      `double_mrg_point_source_center`, and
+      `double_mrg_point_source_full_vm`.
+  - [x] Add a same-output-policy single-cable versus double-cable comparison
+    while keeping MRG-labelled double-cable results separate from pure
+    formulation comparisons.
+  - [ ] Add typed `ExtracellularFootprint`/`ExtracellularDrive` execution rows
+    once the solver can consume factorized drives directly rather than using
+    them only for teaching/materialization.
+  - [x] Add explicit cold/warm annotations to hotpath runner outputs rather
+    than inferring cold-start behavior from separate command lines.
+    - `manifest.json` and each session `metadata.json` now record
+      `timing_mode`, `warmup_count`, and `simulation_labels`.
   - [ ] Add a solver-only or precomputed-input workload that bypasses dispatch
     planning and input materialization, so kernel throughput can be separated
     from preprocessing.

@@ -108,6 +108,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"{run.workload} size={run.size}")
         return
 
+    timing_mode = _timing_mode(args.warmups)
     run_root = make_run_root(args.out_dir, prefix=args.prefix)
     manifest = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -120,6 +121,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "duration_ms": float(args.duration),
             "dt_ms": float(args.dt),
             "warmups": int(args.warmups),
+            "timing_mode": timing_mode,
             "sweep_repeats": int(args.sweep_repeats),
             "sync_device": bool(args.sync_device),
         },
@@ -143,10 +145,20 @@ def main(argv: Sequence[str] | None = None) -> None:
                 simulation.run()
 
         output_dir = run_root / f"{run.workload}_n{run.size}"
-        axs.enable_benchmark(
+        session = axs.enable_benchmark(
             output_dir,
             print_summary=False,
             sync_device=bool(args.sync_device),
+        )
+        session.metadata.update(
+            {
+                "workload": run.workload,
+                "size": int(run.size),
+                "simulation_count": len(simulations),
+                "simulation_labels": list(simulation_labels),
+                "warmup_count": int(args.warmups),
+                "timing_mode": timing_mode,
+            }
         )
         try:
             result_batches = tuple(simulation.run() for simulation in simulations)
@@ -157,6 +169,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "workload": run.workload,
             "size": run.size,
             "simulation_count": len(simulations),
+            "warmup_count": int(args.warmups),
+            "timing_mode": timing_mode,
             "output_dir": str(output_dir),
             "simulation_labels": list(simulation_labels),
             "result_count": sum(_result_count(results) for results in result_batches),
@@ -215,6 +229,12 @@ def make_run_root(out_dir: Path, *, prefix: str | None) -> Path:
     root = out_dir / stem
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _timing_mode(warmups: int) -> str:
+    """Return a stable label for whether measured events include cold setup."""
+
+    return "cold" if int(warmups) == 0 else "warm"
 
 
 def build_simulation(
@@ -309,6 +329,14 @@ def build_simulations(
         )
     elif workload == "hotpath_matrix":
         return build_hotpath_matrix(
+            size=size,
+            compartments=compartments,
+            length_um=length_um,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+        )
+    elif workload == "path_comparison_matrix":
+        return build_path_comparison_matrix(
             size=size,
             compartments=compartments,
             length_um=length_um,
@@ -473,6 +501,95 @@ def build_hotpath_matrix(
     )
 
 
+def build_path_comparison_matrix(
+    *,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+) -> tuple[axs.AxonSimulation, ...]:
+    """Return controlled path comparisons for Phase 7.6.1 decisions."""
+
+    peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    def simulation(
+        instances: list[axs.AxonInstance],
+        *,
+        recording: axs.Recording,
+        observers: list[object] | None = None,
+    ) -> axs.AxonSimulation:
+        return axs.AxonSimulation(
+            axs.AxonPopulation(instances),
+            duration=duration_ms * axs.ms,
+            dt=dt_ms * axs.ms,
+            recording=recording,
+            observers=observers,
+        )
+
+    return (
+        simulation(
+            build_intracellular_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
+        simulation(
+            build_intracellular_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.voltage(),
+        ),
+        simulation(
+            build_intracellular_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.none(),
+            observers=[peak_voltage, activation],
+        ),
+        simulation(
+            build_point_source_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
+        simulation(
+            build_point_source_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.voltage(),
+        ),
+        simulation(
+            build_double_cable_extracellular_pool(
+                size=size,
+                compartments=compartments,
+            ),
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
+        simulation(
+            build_double_cable_extracellular_pool(
+                size=size,
+                compartments=compartments,
+            ),
+            recording=axs.Recording.voltage(),
+        ),
+    )
+
+
 def build_intracellular_pool(
     *,
     size: int,
@@ -588,6 +705,17 @@ def _simulation_labels(workload: str, count: int) -> tuple[str, ...]:
             "observer_only_none",
             "point_source_center",
             "realistic_mixed_center",
+        )
+        return labels[:count]
+    if workload == "path_comparison_matrix":
+        labels = (
+            "single_intracellular_center",
+            "single_intracellular_full_vm",
+            "single_intracellular_observer_none",
+            "single_point_source_center",
+            "single_point_source_full_vm",
+            "double_mrg_point_source_center",
+            "double_mrg_point_source_full_vm",
         )
         return labels[:count]
     if workload == "footprint_reuse_sweep":

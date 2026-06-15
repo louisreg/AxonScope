@@ -241,6 +241,12 @@ The format is inspired by Keep a Changelog.
 - Added a CPU-only Colab notebook case
   `cpu_double_cable_extracellular_heavy` plus per-run summary CSV generation
   for useful double-cable extracellular traces when GPU access is unavailable.
+- Added the `path_comparison_matrix` hotpath workload for controlled
+  intra/extra and single/double-cable comparisons across center/full-Vm/
+  observer retention policies.
+- Added hotpath runner timing metadata so manifests and per-run benchmark
+  metadata identify cold versus warm measurements and the simulation labels
+  included in each run.
 
 ### Changed
 

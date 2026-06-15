@@ -128,6 +128,7 @@ packaging regressions, then `kernel_observer_long` and
 | `observer_only` | HH population with solver-side peak-voltage and activation observers, `Recording.none()`, empty `vm_shapes`, and compact observation names in the manifest. Verifies the Phase 7.5 no-retained-Vm path. |
 | `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
 | `hotpath_matrix` | Compact matrix for center/probes recording, observer-only retention, point-source extracellular input, and mixed-population execution. Useful as the Phase 7.6 coverage run before deeper CPU/GPU work. |
+| `path_comparison_matrix` | Controlled matrix for Phase 7.6.1: single-cable intra center/full/observer, single-cable point-source extra center/full, and MRG double-cable point-source extra center/full. Useful to compare path families before optimizing. |
 
 Each run manifest records `simulation.estimate().to_dict()` so timing traces can
 be interpreted alongside estimated retained Vm, dense `Vstim`, and factorized
