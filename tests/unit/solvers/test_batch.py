@@ -37,7 +37,7 @@ def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3 *
     return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=sigma)
 
 
-def _hh_extracellular_axon() -> AxonInstance:
+def _hh_extracellular_axon(*, current_clamp: bool = True) -> AxonInstance:
     axon = AxonInstance(
         HodgkinHuxley(
             length=400.0 * axs.um,
@@ -46,10 +46,11 @@ def _hh_extracellular_axon() -> AxonInstance:
             celsius=6.3 * axs.degC,
         )
     )
-    axon.add_current_clamp(
-        position=200.0 * axs.um,
-        current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
-    )
+    if current_clamp:
+        axon.add_current_clamp(
+            position=200.0 * axs.um,
+            current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
+        )
     electrode = PointSourceElectrode(
         x=200e-6 * axs.m,
         y=100e-6 * axs.m,
@@ -414,6 +415,58 @@ def test_double_cable_batch_matches_scalar_loop_rows():
     np.testing.assert_allclose(
         np.asarray(batch.Vm),
         np.asarray(scalar),
+        atol=1e-3,
+        rtol=0.0,
+    )
+
+
+def test_double_cable_batch_absent_intracellular_matches_explicit_zero_input():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [
+        base_contexts,
+        scale_extracellular_contexts(base_contexts, 0.5),
+    ]
+    vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
+    vext_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    zero_iinj = jnp.zeros(
+        (vext_mid.shape[0], runtime.grid.Nt, runtime.membrane.Nx),
+        dtype=runtime.membrane.dtype,
+    )
+    kernel = DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    )
+
+    implicit_zero = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+    ).Vm
+    explicit_zero = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        intracellular_current_density_mid=zero_iinj,
+    ).Vm
+
+    assert implicit_zero.shape == explicit_zero.shape
+    np.testing.assert_allclose(
+        np.asarray(implicit_zero),
+        np.asarray(explicit_zero),
         atol=1e-3,
         rtol=0.0,
     )

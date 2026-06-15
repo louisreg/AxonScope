@@ -126,14 +126,20 @@ def _run_double_cable_batch_vm_scan(
     left_e: Array,
     right_e: Array,
     I_background: Array,
-    intracellular_current_density_mid: Array,
+    intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
     dt_ms: Array,
 ) -> Array:
     """Run the full double-cable scan over a leading batch axis."""
 
-    def one_batch(Iinj_mid: Array, vext_mid: Array, vext_previous: Array) -> Array:
+    def one_batch(
+        Iinj_mid: Array | None,
+        vext_mid: Array,
+        vext_previous: Array,
+    ) -> Array:
+        if Iinj_mid is None:
+            Iinj_mid = jnp.zeros_like(vext_mid)
         return _run_double_cable_vm_scan(
             backend=backend,
             membrane=membrane,
@@ -160,7 +166,8 @@ def _run_double_cable_batch_vm_scan(
             dt_ms=dt_ms,
         )
 
-    return jax.vmap(one_batch)(
+    iinj_in_axes = None if intracellular_current_density_mid is None else 0
+    return jax.vmap(one_batch, in_axes=(iinj_in_axes, 0, 0))(
         intracellular_current_density_mid,
         extracellular_potential_mid_mV,
         extracellular_potential_initial_previous_mV,
@@ -976,7 +983,7 @@ def _run_double_cable_batch_stateful_scan(
     left_e: Array,
     right_e: Array,
     I_background: Array,
-    intracellular_current_density_mid: Array,
+    intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
     row_indices: Array,
@@ -985,7 +992,11 @@ def _run_double_cable_batch_stateful_scan(
 ) -> tuple[Array, Array, Array, tuple[Array, ...], Array]:
     """Run one double-cable time chunk and return final batch state."""
 
-    intracellular_current_abs_mid = intracellular_current_density_mid * area_cm2[:, None, :]
+    intracellular_current_abs_mid = (
+        None
+        if intracellular_current_density_mid is None
+        else intracellular_current_density_mid * area_cm2[:, None, :]
+    )
 
     def one_batch(
         Vi0_row,
@@ -1078,8 +1089,15 @@ def _run_double_cable_batch_stateful_scan(
                 rhs1,
             )
 
-        def step(carry, step_inputs):
-            Iinj_abs, extracellular_drive_abs = step_inputs
+        def step(
+            carry,
+            step_inputs,
+        ):
+            if Iinj_abs_mid is None:
+                Iinj_abs = jnp.zeros_like(area_row)
+                extracellular_drive_abs = step_inputs
+            else:
+                Iinj_abs, extracellular_drive_abs = step_inputs
             Vi, Ve, gates, *extra = carry
             extra = tuple(extra)
             Vm = Vi - Ve
@@ -1170,17 +1188,43 @@ def _run_double_cable_batch_stateful_scan(
             output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
             return (Vi_new, Ve_new, gates_new, *state_new), output
 
+        scan_inputs = (
+            extracellular_rhs_drive
+            if Iinj_abs_mid is None
+            else (Iinj_abs_mid, extracellular_rhs_drive)
+        )
         final_carry, trace = jax.lax.scan(
             step,
             (Vi0_row, Ve0_row, gates0_row, *state0_row),
-            (Iinj_abs_mid, extracellular_rhs_drive),
+            scan_inputs,
         )
         return final_carry[0], final_carry[1], final_carry[2], tuple(final_carry[3:]), trace
 
     state_axes = tuple(0 for _ in state0)
+    iinj_in_axes = None if intracellular_current_abs_mid is None else 0
     return jax.vmap(
         one_batch,
-        in_axes=(0, 0, 0, state_axes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        in_axes=(
+            0,
+            0,
+            0,
+            state_axes,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            iinj_in_axes,
+            0,
+            0,
+            0,
+        ),
     )(
         Vi0_mV,
         Ve0_mV,
@@ -1483,10 +1527,7 @@ class DoubleCableBatchKernel:
             else intracellular_current_density_mid
         )
         if iinj_mid is None:
-            iinj_batch = jnp.zeros(
-                (batch_size, grid.Nt, nx),
-                dtype=dtype_local,
-            )
+            iinj_batch = None
         else:
             iinj_batch = _as_batched_time_space_array(
                 "intracellular_current_density_mid",
@@ -1893,7 +1934,7 @@ def _run_double_cable_batch_array_chunks(
     Veinit_mV: float,
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
-    intracellular_current_density_mid: Array,
+    intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
     record_indices: Array,
@@ -1981,6 +2022,11 @@ def _run_double_cable_batch_array_chunks(
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
         vext_chunk = extracellular_potential_mid_mV[:, start:stop]
+        iinj_chunk = (
+            None
+            if intracellular_current_density_mid is None
+            else intracellular_current_density_mid[:, start:stop]
+        )
         Vi, Ve, gates, state, trace = _run_double_cable_batch_stateful_scan(
             backend=membrane_runtime.backend,
             membrane=membrane_runtime.membrane,
@@ -2002,7 +2048,7 @@ def _run_double_cable_batch_array_chunks(
             left_e=left_e,
             right_e=right_e,
             I_background=background,
-            intracellular_current_density_mid=intracellular_current_density_mid[:, start:stop],
+            intracellular_current_density_mid=iinj_chunk,
             extracellular_potential_mid_mV=vext_chunk,
             extracellular_potential_initial_previous_mV=previous,
             row_indices=jnp.arange(batch_size, dtype=jnp.int32),

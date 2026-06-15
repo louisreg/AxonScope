@@ -165,14 +165,17 @@ JAX compile/enqueue overhead onto every workload.
 - [ ] Use double-cable Colab evidence as a backend-choice calibration point:
   CPU beats GPU at `n=100` (`465.1 ms` vs `824.9 ms`), GPU crosses over by
   `n=300`, and GPU wins at `n=600` (`1070.1 ms` vs `2485.8 ms`).
-- [ ] Run matching Colab `kernel_single_cable_extracellular_long` case
+- [x] Run matching Colab `kernel_single_cable_extracellular_long` case
   (`point_source_extracellular`, `n=100/300/600`, `duration=10 ms`,
   `dt=0.01 ms`, `51` compartments) to separate single-cable GPU scaling from
   double-cable block-solver scaling.
-- [ ] Investigate double-cable GPU kernel shape after the single-cable
+- [x] Identify first double-cable GPU kernel issue after the single-cable
   comparison: current evidence points to `Nt` scan plus per-step forward/reverse
   `Nx` scans inside `solve_block_tridiagonal_2x2_scalar`, so the GPU only gets
   batch-axis parallelism and does not saturate well at `B <= 600`.
+- [ ] Re-run Colab `kernel_double_cable_extracellular_long` after the
+  double-cable zero-Iinj kernel-input specialization to measure whether removing
+  the device-side dense zero `Iinj[B,Nt,Nx]` input improves GPU throughput.
 - [ ] Decide whether runtime/device/precision planning values remain estimates
   only or start selecting execution backends.
 - [x] Add solver-only/precomputed-input benchmarks for intra and extra paths so
@@ -421,6 +424,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `phase7_6_double_cable_warm_local` | Local MRG double-cable extracellular `n=5` warm total `19.2 ms`; zero-Iinj path reduced `inputs.intracellular` to `0.043 ms`, with `kernel.enqueue 13.0 ms`. |
 | 2026-06-15 | `phase7_6_observer_chunked_warm_local` | Runner-level `--time-chunk-steps 5` verified on observer-only `n=20`, `duration=1 ms`; total `16.9 ms`, sparse `inputs.intracellular 1.33 ms`, zero-field `inputs.extracellular 0.025 ms`. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_175837` | Double-cable extracellular long run: GPU loses at `n=100` (`824.9 ms` vs CPU `465.1 ms`), crosses over at `n=300` (`954.8 ms` vs `1165.8 ms`), and wins `2.32x` at `n=600` (`1070.1 ms` vs `2485.8 ms`). Runtime now skips dense zero `Iinj` (`108 MB` skipped at `n=600`); static memory estimates were aligned afterward. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_single_cable_extracellular_long_20260615_181029` | Matching single-cable extracellular long run scales much better on GPU: `5.43x`, `6.81x`, and `9.78x` CPU/GPU at `n=100/300/600`; double-cable slowdown is kernel-specific, not generic extracellular preprocessing. |
+| 2026-06-15 | `phase7_6_double_cable_zero_iinj_kernel_smoke` | Local smoke passed after keeping absent double-cable intracellular input as `None` through the kernel path instead of passing a dense device zero `Iinj[B,Nt,Nx]`; Colab double-cable rerun needed for GPU impact. |
 
 ## Completed Roadmap Archive
 
