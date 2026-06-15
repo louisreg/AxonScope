@@ -26,6 +26,8 @@ class Solver(ABC):
         dt: Any | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        record_voltage: bool = True,
+        observers: tuple[Any, ...] | None = None,
     ) -> SimResult:
         """Run a simulation and return voltage traces plus metadata."""
 

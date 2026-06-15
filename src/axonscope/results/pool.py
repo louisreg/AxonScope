@@ -9,6 +9,7 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
+from axonscope.analysis.core import AnalysisResult
 from axonscope.results.single import ObservationDict, RecordingDict, ResultArray, SimResult
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 
@@ -37,6 +38,63 @@ def _require_signal(signal: Any) -> Signal[Any]:
     if not isinstance(signal, Signal):
         raise TypeError("signal must be an axonscope.Signal descriptor.")
     return signal
+
+
+def _slice_analysis_result(result: AnalysisResult, row: int) -> AnalysisResult:
+    """Return a one-row view of an ``AnalysisResult``."""
+
+    return AnalysisResult(
+        name=result.name,
+        values=np.asarray(result.values)[row : row + 1],
+        statuses=(result.statuses[row],),
+        messages=(result.messages[row],),
+        unit=result.unit,
+        definition=result.definition,
+        events=(result.events[row],),
+        input_requirements=(result.input_requirements[row],),
+    )
+
+
+def _merge_analysis_results(results: Sequence[AnalysisResult]) -> AnalysisResult:
+    """Concatenate one-row analysis results along their population axis."""
+
+    if not results:
+        raise ValueError("at least one analysis result is required.")
+    first = results[0]
+    return AnalysisResult(
+        name=first.name,
+        values=np.concatenate([np.asarray(result.values) for result in results], axis=0),
+        statuses=tuple(status for result in results for status in result.statuses),
+        messages=tuple(message for result in results for message in result.messages),
+        unit=first.unit,
+        definition=first.definition,
+        events=tuple(event for result in results for event in result.events),
+        input_requirements=tuple(
+            requirement
+            for result in results
+            for requirement in result.input_requirements
+        ),
+    )
+
+
+def _merge_dispatch_observations(
+    rows: Sequence[DispatchResult],
+) -> ObservationDict | None:
+    """Merge per-dispatch-row observations into one cohort dictionary."""
+
+    row_observations = [row.observations for row in rows]
+    if not any(row_observations):
+        return None
+    if any(observation is None for observation in row_observations):
+        raise ValueError("dispatch rows must either all carry observations or none do.")
+
+    names = tuple(row_observations[0].keys())  # type: ignore[union-attr]
+    merged: ObservationDict = {}
+    for name in names:
+        merged[name] = _merge_analysis_results(
+            [observation[name] for observation in row_observations if observation is not None]
+        )
+    return merged
 
 
 @dataclass(frozen=True)
@@ -68,11 +126,12 @@ class CohortResult:
     input_indices: tuple[int, ...]
     axons: tuple[Axon, ...]
     simulations: tuple[AxonInstance, ...]
-    Vm: ResultArray
+    Vm: ResultArray | None
     t: ResultArray
     diagnostics: tuple[dict[str, Any], ...]
     record_indices: tuple[tuple[int, ...] | None, ...]
     recording: Recording | None = None
+    observations: ObservationDict | None = None
 
     @property
     def size(self) -> int:
@@ -99,16 +158,27 @@ class RecordingManifest:
         """Build the current Vm-only manifest from dense result cohorts."""
 
         requested = policy.signals if policy is not None else (MEMBRANE_VOLTAGE,)
-        available = (
-            RecordedSignal(
-                signal=MEMBRANE_VOLTAGE,
-                result_key=MEMBRANE_VOLTAGE.result_key,
-                unit=MEMBRANE_VOLTAGE.unit,
-                cohort_indices=tuple(range(len(cohorts))),
-                cohort_shapes=tuple(tuple(np.asarray(cohort.Vm).shape) for cohort in cohorts),
-                cohort_dtypes=tuple(str(np.asarray(cohort.Vm).dtype) for cohort in cohorts),
-            ),
+        vm_cohort_indices = tuple(
+            index for index, cohort in enumerate(cohorts) if cohort.Vm is not None
         )
+        available = ()
+        if vm_cohort_indices:
+            available = (
+                RecordedSignal(
+                    signal=MEMBRANE_VOLTAGE,
+                    result_key=MEMBRANE_VOLTAGE.result_key,
+                    unit=MEMBRANE_VOLTAGE.unit,
+                    cohort_indices=vm_cohort_indices,
+                    cohort_shapes=tuple(
+                        tuple(np.asarray(cohorts[index].Vm).shape)
+                        for index in vm_cohort_indices
+                    ),
+                    cohort_dtypes=tuple(
+                        str(np.asarray(cohorts[index].Vm).dtype)
+                        for index in vm_cohort_indices
+                    ),
+                ),
+            )
         return cls(
             requested_signals=tuple(requested),
             available=available,
@@ -175,6 +245,8 @@ class AxonResultView:
         """Membrane voltage matrix indexed as ``(time, recorded_position)``."""
 
         cohort, row = self._cohort_row
+        if cohort.Vm is None:
+            raise ValueError("this pool result row does not contain a Vm recording.")
         return cohort.Vm[row]
 
     @property
@@ -211,16 +283,25 @@ class AxonResultView:
         return cohort.record_indices[row]
 
     @property
-    def recordings(self) -> RecordingDict:
+    def recordings(self) -> RecordingDict | None:
         """Recording dictionary compatible with ``SimResult.recordings``."""
 
+        cohort, _ = self._cohort_row
+        if cohort.Vm is None:
+            return None
         return {"Vm": self.Vm}
 
     @property
     def observations(self) -> ObservationDict | None:
-        """Pool views do not currently carry compact solver observations."""
+        """Compact solver-side observations for this row, if requested."""
 
-        return None
+        cohort, row = self._cohort_row
+        if cohort.observations is None:
+            return None
+        return {
+            name: _slice_analysis_result(observation, row)
+            for name, observation in cohort.observations.items()
+        }
 
     def to_sim_result(self) -> SimResult:
         """Materialize this view as a standalone ``SimResult``."""
@@ -230,6 +311,7 @@ class AxonResultView:
             Vm=self.Vm,
             t=self.t,
             diagnostics=dict(self.diagnostics),
+            observations=self.observations,
             recording=self.recording,
             record_indices=self.record_indices,
             simulation=self.simulation,
@@ -279,15 +361,26 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 
         groups: dict[tuple[Any, ...], list[DispatchResult]] = {}
         for row in rows:
-            vm = np.asarray(row.Vm)
+            vm = None if row.Vm is None else np.asarray(row.Vm)
             t = np.asarray(row.t)
             record_indices = None if row.record_indices is None else tuple(row.record_indices)
-            key = (vm.shape, t.shape, str(vm.dtype), str(t.dtype), record_indices)
+            key = (
+                None if vm is None else vm.shape,
+                t.shape,
+                None if vm is None else str(vm.dtype),
+                str(t.dtype),
+                record_indices,
+                tuple(sorted((row.observations or {}).keys())),
+            )
             groups.setdefault(key, []).append(row)
 
         cohorts = []
         for grouped_rows in groups.values():
-            dense_vm = np.stack([np.asarray(row.Vm) for row in grouped_rows], axis=0)
+            dense_vm = (
+                None
+                if grouped_rows[0].Vm is None
+                else np.stack([np.asarray(row.Vm) for row in grouped_rows], axis=0)
+            )
             first = grouped_rows[0]
             cohorts.append(
                 CohortResult(
@@ -299,6 +392,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                     diagnostics=tuple(_dispatch_diagnostics(row) for row in grouped_rows),
                     record_indices=tuple(row.record_indices for row in grouped_rows),
                     recording=recording,
+                    observations=_merge_dispatch_observations(grouped_rows),
                 )
             )
 
@@ -380,6 +474,23 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         """Per-row dispatch diagnostics in input order."""
 
         return tuple(view.diagnostics for view in self)
+
+    @property
+    def observations(self) -> ObservationDict | None:
+        """Compact solver-side observations in input order, if requested."""
+
+        row_observations = [view.observations for view in self]
+        if not any(row_observations):
+            return None
+        if any(observation is None for observation in row_observations):
+            raise ValueError("pool observation rows are incomplete.")
+        names = tuple(row_observations[0].keys())  # type: ignore[union-attr]
+        return {
+            name: _merge_analysis_results(
+                [observation[name] for observation in row_observations if observation is not None]
+            )
+            for name in names
+        }
 
     def axon(self, index: int) -> AxonResultView:
         """Return the per-axon result view at ``index``."""

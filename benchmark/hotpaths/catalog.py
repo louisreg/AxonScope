@@ -35,6 +35,29 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "stimulus amplitude; useful to measure missing footprint/stimulus-only reuse."
         ),
     ),
+    "observer_only": HotpathWorkload(
+        name="observer_only",
+        description=(
+            "Homogeneous HH pool with solver-side PeakVoltage/Activation observers "
+            "and no retained Vm trace; useful to verify Phase 7.5 memory behavior."
+        ),
+    ),
+    "realistic_mixed_population": HotpathWorkload(
+        name="realistic_mixed_population",
+        description=(
+            "Mixed HH/Rattay-Aberham population with varied diameters, compartment "
+            "counts, intracellular clamps, and some extracellular rows; useful to "
+            "expose heterogeneous dispatch and preparation stalls."
+        ),
+    ),
+    "hotpath_matrix": HotpathWorkload(
+        name="hotpath_matrix",
+        description=(
+            "Compact matrix covering homogeneous center/probes recording, "
+            "observer-only retention, point-source extracellular input, and a "
+            "mixed-population path for Phase 7.6 coverage."
+        ),
+    ),
 }
 
 

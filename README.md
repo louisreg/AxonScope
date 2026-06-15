@@ -269,6 +269,21 @@ observer.update(result.time_values(unit=axs.ms) * axs.ms, result.Vm * axs.mV)
 activation = observer.finalize()
 ```
 
+For compact solver-side reductions, pass the same analysis definitions as
+simulation observers. `Recording.none()` keeps the result trace-free:
+
+```python
+simulation = axs.AxonSimulation(
+    population,
+    duration=1.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.none(),
+    observers=[axs.analysis.PeakVoltage(target=axs.positions.CENTER)],
+)
+results = simulation.run()
+peak = results.observations["peak_voltage"]
+```
+
 Repeated stimulation workflows live in `axs.protocols`:
 
 ```python
@@ -292,9 +307,6 @@ simulation = axs.AxonSimulation(
 )
 results = simulation.run()
 ```
-
-Solver-side observer execution is future work. Use recorded traces, structured
-post-hoc analyses, or lightweight Vm observers for current runnable workflows.
 
 ## Examples
 

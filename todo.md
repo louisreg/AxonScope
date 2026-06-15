@@ -7,9 +7,9 @@ Use this file as the step-by-step source of truth. At the start of each cleanup
 session, read this file first. When a new mismatch is found, add it here. When a
 task is done, check it only after code/docs/tests have been verified.
 
-## Current Status Before Phase 7.5
+## Current Status Before Phase 8
 
-- [x] Phases 0-7 are complete in code/tests/docs notes for the current public layer.
+- [x] Phases 0-7.5 are complete in code/tests/docs notes for the current public layer.
 - [x] Latest full unit validation after Phase 6: unit suite `300 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 6 completed with the real public `axs.analysis` package.
 - [x] Phase 6 namespace decision: use `axonscope.analysis` / `axs.analysis` as a real package, not a forwarding alias to `axs.results.analysis`.
@@ -18,8 +18,79 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Phase 6.4 added structured missing-input requirements with recording hints and required result fields.
 - [x] Phase 6.5 added online Vm observer definitions for activation and peak voltage, with online/post-hoc cross-validation tests.
 - [x] Phase 7 added simulation memory estimates, typed runtime/device/precision planning values, memory metadata in hotpath manifests, and the `footprint_reuse_sweep` workload.
-- [ ] Next implementation phase: Phase 7.5, solver-side observers wired into kernels as per-`dt` reductions to minimize GPU memory.
-- [ ] Keep current Phase 5-7 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
+- [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
+- [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
+- [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
+- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented and smoke-tested locally.
+- [ ] Next priority before Phase 8: finish Phase 7.6 evidence with scale/Colab runs and any missing matrix paths that still matter.
+- [ ] Next implementation phase after Phase 7.6: Phase 8, callable studies/reuse policies/retention policies.
+- [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
+
+## Phase 7.6 Priority Before Phase 8
+
+This phase should improve evidence quality before adding callable studies and
+reuse policies. The goal is to know which execution paths still stall on
+realistic populations, not just clean homogeneous smoke workloads.
+
+- [x] Add the first realistic population benchmark workload.
+  - Added `realistic_mixed_population` with mixed HH/Rattay-Aberham models,
+    mixed diameters, mixed compartment counts, intracellular clamps, and some
+    analytical point-source extracellular rows.
+  - Local smoke run on 2026-06-15:
+    `benchmark/results/hotpaths/phase7_6_realistic_smoke/manifest.json`.
+- [x] Add the first compact hotpath matrix workload.
+  - Added `hotpath_matrix` with homogeneous center recording, homogeneous
+    probes recording, observer-only `Recording.none()`, point-source
+    extracellular center recording, and realistic mixed-population center
+    recording.
+  - Local smoke run on 2026-06-15:
+    `benchmark/results/hotpaths/phase7_6_hotpath_matrix_smoke/manifest.json`.
+- [x] Keep manifests explicit about model mix, diameter distribution,
+  compartment distribution, stimulation coverage, recording policy, observers,
+  result retention, and per-simulation memory estimates.
+- [ ] Extend realistic population benchmark workloads if the first traces show
+  missing coverage.
+  - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`
+    population runs, MRG/double-cable paths, and larger realistic diameter/model
+    distributions.
+- [ ] Explore the remaining hotpath matrix to find remaining stalls.
+  - Cover scalar fallback, homogeneous batch, parameter batch, padded groups,
+    single-cable, double-cable, recording full/center/probes/none, observers
+    on/off, extracellular on/off, and warm/cold runs.
+  - Record whether the stall is in dispatch planning, preparation, input
+    materialization, kernel enqueue, kernel wait, result splitting, public
+    result packaging, or host transfer.
+  - Keep `benchmark/hotpaths/` as the lightweight probe location until the
+    larger benchmark-agent rewrite is justified by evidence.
+- [ ] Keep footprint compression as a later design topic.
+  - Candidate directions: sparse/low-rank footprints, shared footprint banks,
+    quantized/static footprint storage, stimulus-only reuse, or lazy materialized
+    dense `Vstim`.
+  - Do not design this before the realistic hotpath matrix shows where dense
+    footprint memory is actually limiting.
+- [ ] Do a cleanup pass over examples before treating the public learning path
+  as stable.
+  - Homogenize style, naming, plotting conventions, and run headers.
+  - Re-check examples against `agent.md`: didactic, line-by-line, not hidden
+    behind helper scaffolding unless helpers are truly pedagogical.
+  - Make examples verbose enough to guide a user through the workflow, with
+    comments that explain the purpose of each important step.
+  - Add more plots where they teach the signal/metric relationship: Vm traces,
+    activation/peak markers, recruitment curves, velocity metrics, and
+    recording/observer comparisons.
+  - Keep examples runnable and lightweight; benchmark-heavy evidence stays under
+    `benchmark/`.
+- [ ] Later: define logging policy.
+  - Decide what belongs in Python logging, benchmark traces, warnings, result
+    diagnostics, and user-facing summaries.
+- [ ] Later: define print/Rich/progress policy.
+  - Decide what AxonScope should print by default, what is opt-in, what belongs
+    to `progress=...`, and how `rich` output should degrade in notebooks/CI.
+- [ ] Later: docstring and file-header responsibility pass.
+  - Verify module docstrings, public class/function docstrings, file
+    responsibility headers, and internal boundary descriptions.
+  - Do this after Phase 7.6/8 clarifies which modules are stable enough to
+    document as ownership boundaries.
 
 ## Remaining Guidelines Gaps To Resolve During Phases 7-9
 
@@ -44,9 +115,12 @@ blockers, but they must stay visible while the architecture converges.
   - Future target includes intracellular potential, periaxonal potential, ionic current, and cable/role-aware signal availability.
 - [ ] Preserve the product boundary around external geometry packages.
   - AxonScope should consume footprints from geometry tools, not own CAD/electrode placement geometry.
-- [ ] Wire solver-side observers after Phase 7 memory evidence, before Phase 8 studies.
-  - Goal: observers update inside the solver loop at every `dt`, so observer-only runs can avoid storing or transferring full time-by-space traces.
-  - Keep the public observer/analysis specs in `axs.analysis`; lower them to backend-specific compact observer state during preparation/execution.
+- [x] Wire the first solver-side observers after Phase 7 memory evidence, before Phase 8 studies.
+  - Done for `axs.analysis.PeakVoltage` and `axs.analysis.Activation`.
+  - Scalar kernels and homogeneous single-cable batch kernels update compact observer state at every `dt`.
+  - Observer-only runs use `Recording.none()` and return `result.observations` without retaining `Vm`.
+  - Local hotpath evidence exists under `benchmark/results/hotpaths/phase7_5_observer_only_final/`.
+  - Double-cable batch observer-only execution remains a future kernel specialization; it is not a Phase 7.5 blocker because scalar double-cable observer-only execution is correct and public.
 
 ## Documentation Audit Gate
 
@@ -71,6 +145,9 @@ Standing rules:
 - Do not run or require NRV validation for cleanup steps unless explicitly requested; keep using the fast unit suite for non-NRV work.
 - Treat Sphinx setup as paused until the current API and architecture direction are stable enough to document.
 - Every advanced concept or non-trivial workflow needs a didactic `examples/advanced/` demo, written line-by-line with comments rather than hidden helper scaffolding.
+- Examples are user-guidance artifacts: make them verbose/commented enough to
+  demonstrate possibilities, and add plots when they help connect signals,
+  metrics, dispatch, memory, or observer behavior.
 - Update affected examples and `CHANGELOG.md` when changing public API or workflows.
 
 ### Phase 0 Guardrails Before Big Changes
@@ -291,16 +368,22 @@ Standing rules:
   - [x] Separate correctness validation, profiling, and product-level performance reports in docs/scripts.
     - README and `benchmark/hotpaths/README.md` now distinguish tests/NRV validation, hotpath diagnostics, memory estimates, and future benchmark-framework work.
   - Targeted validation on 2026-06-14: performance/hotpath/public API tests passed (`12 passed`); `mypy src/axonscope/performance.py benchmark/hotpaths/run.py` passed; `example_14_hotpath_benchmarking.py` ran; `footprint_reuse_sweep` smoke run wrote a manifest with memory estimates.
-- [ ] Phase 7.5 issue: wire observers directly into solver kernels to reduce GPU memory pressure.
-  - [ ] Define a backend-neutral observer lowering contract: public analysis/observer spec -> compact static observer state -> final observation output.
-  - [ ] Define the per-step kernel contract: every solver step calls observer `update(dt_index, t, Vm/current state, observer_state)` inside the scan/loop.
-  - [ ] Start with `PeakVoltageObserver`, because it is a simple max reduction and validates the state/update/finalize plumbing.
-  - [ ] Add `ActivationObserver` after peak voltage, preserving blanking, target positions, first-crossing time, and compact activation output.
-  - [ ] Support observer-only execution where possible: users can request compact observations without retaining full `Vm[t, x]`.
-  - [ ] Keep fixed-shape observer state vectorized over batch rows so JAX can compile it and GPU memory stays predictable.
-  - [ ] Add hotpath/memory traces proving observer-only runs avoid full Vm retention and device-to-host transfer.
-  - [ ] Cross-validate solver-side observer outputs against Phase 6 post-hoc/streamed Vm observers on scalar and pool traces.
-  - [ ] Add a didactic advanced example only if a public observer-only workflow lands.
+- [x] Phase 7.5 issue: wire observers directly into solver kernels to reduce GPU memory pressure.
+  - [x] Define a backend-neutral observer lowering contract: public analysis/observer spec -> compact static observer state -> final observation output.
+  - [x] Define the per-step kernel contract: every solver step calls observer `update(dt_index, t, Vm/current state, observer_state)` inside the scan/loop.
+  - [x] Start with `PeakVoltageObserver`, because it is a simple max reduction and validates the state/update/finalize plumbing.
+  - [x] Add `ActivationObserver` after peak voltage, preserving blanking, target positions, first-crossing time, and compact activation output.
+  - [x] Support observer-only execution where possible: users can request compact observations without retaining full `Vm[t, x]`.
+  - [x] Keep fixed-shape observer state vectorized over batch rows so JAX can compile it and GPU memory stays predictable.
+  - [x] Add hotpath/memory traces proving observer-only runs avoid full Vm retention and device-to-host transfer.
+    - Added `observer_only` to `benchmark/hotpaths/`.
+    - Final local smoke trace on 2026-06-15: `benchmark/results/hotpaths/phase7_5_observer_only_final/manifest.json`.
+    - Evidence: `vm_shapes=[]`, `observation_names=["activation", "peak_voltage"]`, `recording_policy="none"`, `recording_width_max=0`, `outputs.recorded_vm` shape `[5, 6, 0]`, `retained_mib=0.0`.
+  - [x] Cross-validate solver-side observer outputs against Phase 6 post-hoc/streamed Vm observers on scalar and pool traces.
+  - [x] Add a didactic advanced example for the public observer-only workflow.
+    - Added `examples/advanced/example_18_solver_side_observers.py` as the dedicated line-by-line observer-only demo.
+    - Updated `examples/advanced/example_14_hotpath_benchmarking.py` to show `Recording.none()` with solver-side `PeakVoltage` and `Activation` observers in the hotpath/memory context.
+  - [x] Scope decision: double-cable batch observer-only execution can remain on scalar fallback for Phase 7.5; moving it onto the double-cable batch kernel is a later backend-specialization task, not part of the first public observer-only workflow.
 - [ ] Phase 8 issue: add callable studies, reuse policies, retention policies, and study results.
   - [ ] Define the callable update contract for sweeps, thresholds, and recruitment.
   - [ ] Add reuse policies for prepared cohorts, compiled kernels, footprints, and stimulus-only updates.
@@ -327,7 +410,7 @@ Standing rules:
 - [x] Split planning, preparation, execution, and backend lowering so JAX-specific code is isolated under backend runtime modules.
 - [x] Replace eager `list[SimResult]` pool results with a canonical cohort-backed result model and per-axon views.
 - [x] Move activation/velocity analysis into a dedicated analysis layer with applicability/status/provenance metadata.
-- [ ] Wire solver-side observers directly into scalar and batch kernels as per-`dt` compact reductions before callable studies.
+- [x] Wire the first solver-side observers directly into scalar and single-cable batch kernels as per-`dt` compact reductions before callable studies.
 - [ ] Add callable studies, reuse policies, retention policies, and final serialization only after the object model/result model settle.
 
 ## Backlog: Documentation Audit Snapshot
@@ -342,8 +425,8 @@ pass, not a completed audit.
 | `docs/membranes.md` | mostly current | Built-in membrane namespace and unit normalization match `src/axonscope/membranes/`; still verify `Composite`, `SectionLayout`, and examples against tests. |
 | `docs/stimulation.md` | mostly current | Known `HodgkinHuxley(length_um=..., diameter_um=...)` snippet was updated to `length=...` and `diameter=...`; still do a final full-page pass before Sphinx. |
 | `docs/pool_dispatch.md` | mostly current | Public `simulate_pool`, dispatch diagnostics, and `build/print/plot_dispatch_plan` exist. Review for overlap with README and for any advanced batch API drift. |
-| `docs/results_recording_analysis.md` | mostly current | Good conceptual split for `Recording`, `SimResult`, analysis, visualization, and online Vm observers. Solver-side observer execution is now explicitly planned as Phase 7.5. |
-| `docs/recorders_observers_activation_strategy.md` | proposal | CPU/post-hoc activation, protocol sweeps, and lightweight Vm observers now exist; solver-side/GPU observer execution is now explicitly planned as Phase 7.5. |
+| `docs/results_recording_analysis.md` | partially stale | Good conceptual split for `Recording`, `SimResult`, analysis, visualization, and online Vm observers, but now needs a Phase 7.5 refresh for `Recording.none()` solver-side observations. |
+| `docs/recorders_observers_activation_strategy.md` | proposal | CPU/post-hoc activation, protocol sweeps, and lightweight Vm observers now exist; Phase 7.5 added the first solver-side observer-only execution path. |
 | `docs/api_public_draft.md` | proposal-only | Clear proposal/roadmap warning added at the top. Later split implemented API from proposal if this document remains user-facing. |
 | `docs/validation.md` | mostly current | Removed default GitHub Actions and stale NRV pass-count claims. No fresh NRV result is recorded yet. |
 
@@ -418,7 +501,7 @@ become accidental public contracts.
 | `AxonInstance(..., y_um=...)` / `set_position(y_um=...)` | Public placement API exposed internal canonical suffixes and accepted plain numbers. | Done: use `x_offset`, `y`, and `z` with required length units. Internal `x_offset_um`, `y_um`, and `z_um` remain runtime/result fields. | `src/axonscope/axon_instance.py`, docs/examples/tests using positioned instances |
 | Activation protocol currents | `find_activation_threshold`, `find_activation_threshold_curve`, and `recruitment_sweep` accepted plain current magnitudes as implicit microamperes. | Done: bounds, tolerances, callable bounds, vector bounds, and recruitment amplitudes must carry current units. Returned threshold fields still expose internal `*_uA` arrays plus quantity properties. | `src/axonscope/protocols/activation.py`, `tests/unit/test_protocols.py` |
 | `Stimulus` explicit time inputs | Public waveform constructors accepted plain start/duration/sample/shift times as implicit milliseconds. | Done: public constructors require unit-bearing explicit times. Omitted `start` still means 0 ms, and amplitudes remain generic until a clamp/electrode consumes them. | `src/axonscope/stimulation/stimuli.py`, stimulation docs/examples/tests |
-| `SimResult.Vm` | Convenience property/field used broadly in examples and tests. | Keep as a stable notebook-friendly convenience, not a temporary compatibility shim. Ensure errors stay clear when future observer-only runs do not carry Vm. | `src/axonscope/results/single.py`, recording/observer docs |
+| `SimResult.Vm` | Convenience property/field used broadly in examples and tests. | Keep as a stable notebook-friendly convenience, not a temporary compatibility shim. Errors are now explicit when observer-only runs do not carry Vm. | `src/axonscope/results/single.py`, recording/observer docs |
 | `clear_extracellular_contexts(...)` | Plural name while the current instance stores one extracellular context internally. | Done: renamed to singular `clear_extracellular_context(...)`. The runtime tuple property remains `extracellular_contexts` for lower-level batch helpers. | `src/axonscope/axon_instance.py`, `tests/unit/test_public_api_facade.py` |
 
 ## Backlog: Tutorials And Examples

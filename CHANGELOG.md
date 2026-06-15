@@ -178,6 +178,23 @@ The format is inspired by Keep a Changelog.
   `definition.online_observer(...)`.
 - Added `examples/advanced/example_17_analysis_layer.py` as the didactic demo
   for structured scientific analyses and lightweight online Vm observers.
+- Added solver-side observer lowering for `axs.analysis.PeakVoltage` and
+  `axs.analysis.Activation`, with compact per-`dt` observer state in scalar
+  kernels and homogeneous single-cable batch kernels.
+- Added observer-only execution with `Recording.none()` so simulations can
+  return trace-free `result.observations` without retaining full Vm recordings.
+- Added `examples/advanced/example_18_solver_side_observers.py` as the
+  didactic demo for solver-side observer-only execution.
+- Added the `observer_only` hotpath workload to record Phase 7.5 memory/timing
+  evidence for trace-free solver-side observations.
+- Added Phase 7.6 hotpath workloads for realistic mixed populations and a
+  compact coverage matrix that exercises center/probes recording,
+  observer-only retention, point-source extracellular input, and mixed
+  HH/Rattay-Aberham cohorts.
+- Added richer hotpath manifest metadata for multi-simulation workloads,
+  including simulation labels, per-simulation memory estimates, model/formulation
+  counts, diameter and compartment distributions, stimulation coverage,
+  recording policy, and observer names.
 
 ### Changed
 
@@ -194,6 +211,9 @@ The format is inspired by Keep a Changelog.
   or non-trivial workflow needs a runnable didactic demo in `examples/advanced/`.
 - Clarified in `agent.md` that examples should favor a line-by-line tutorial
   flow with short comments over extra helper-function scaffolding.
+- Clarified that examples should be verbose, user-guiding demonstrations and
+  should include useful plots whenever plots help connect signals, metrics,
+  dispatch, memory, or observer behavior.
 - Replaced public `Recording(variables=...)` and `spatial_mode=...` string
   selectors with typed `signals=...` and `spatial=...` inputs.
 - Replaced public `ActivationCriterion(positions=..., indices=...)` selectors
@@ -219,6 +239,11 @@ The format is inspired by Keep a Changelog.
 - Reduced `CrankNicholson` to a public solver facade that delegates scalar
   execution to the JAX backend boundary before wrapping the backend output in
   `SimResult`.
+- Updated `examples/advanced/example_14_hotpath_benchmarking.py` to demonstrate
+  observer-only hotpath benchmarking with `Recording.none()` and compact
+  solver-side observations.
+- Updated simulation estimates so `Recording.none()` reports
+  `recording_policy="none"` and zero retained Vm width.
 - Removed the direct JAX dependency from `simulation.py` recording filters.
 - Changed `simulate_pool(...)` to return an `AxonSimulationResult` instead of a
   plain `list[SimResult]`, while keeping ergonomic indexing, iteration, and

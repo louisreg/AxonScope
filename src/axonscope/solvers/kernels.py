@@ -13,6 +13,12 @@ from .common import (
     solve_block_tridiagonal_2x2_scalar,
 )
 from .observables import observable_matrices, package_recordings
+from .observer_runtime import (
+    SolverObserverPlan,
+    finalize_observer_state,
+    init_observer_state,
+    update_observer_state_scalar,
+)
 from .runtime import SolverRuntime
 
 
@@ -20,10 +26,11 @@ from .runtime import SolverRuntime
 class KernelResult:
     """Raw solver-kernel output before packaging into a public SimResult."""
 
-    Vm: Array
+    Vm: Array | None
     t: Array
     diagnostics: dict[str, Array] | None = None
     recordings: dict[str, dict[str, Array]] | None = None
+    observations: dict[str, object] | None = None
 
 
 def _precomputed_step_pair(
@@ -491,6 +498,8 @@ class SingleCableKernel:
         *,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        record_voltage: bool = True,
+        observers: SolverObserverPlan | None = None,
     ) -> KernelResult:
         runtime = self.runtime
         membrane_runtime = runtime.membrane
@@ -517,7 +526,9 @@ class SingleCableKernel:
         has_imposed_vstim = vext_mid is not None
 
         if (
-            not record_observables
+            observers is None
+            and record_voltage
+            and not record_observables
             and not record_diagnostics
             and Iinj_mid is not None
             and has_imposed_vstim
@@ -548,7 +559,9 @@ class SingleCableKernel:
             return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
 
         if (
-            not record_observables
+            observers is None
+            and record_voltage
+            and not record_observables
             and not record_diagnostics
             and Iinj_mid is not None
         ):
@@ -572,6 +585,131 @@ class SingleCableKernel:
                 dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
             )
             return KernelResult(Vm=out, t=runtime.grid.t_vec_ms)
+
+        if observers is not None:
+            if record_observables or record_diagnostics:
+                raise NotImplementedError(
+                    "solver-side observers cannot yet be combined with scalar "
+                    "observable/diagnostic recordings."
+                )
+
+            def observed_step(carry, n: int):
+                Vm, gates, observer_state, *extra = carry
+                extra = tuple(extra)
+                t_mid = dtype_local(n) * dt + dtype_local(0.5) * dt
+
+                gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=grid.dt_ms)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iinj = _intracellular_current_at(runtime, n, t_mid)
+                vstim_forcing = (
+                    apply_diffusion_operator(vext_mid[n], lower, diag, upper)
+                    if has_imposed_vstim
+                    else jnp.zeros_like(Vm)
+                )
+                step_plan_pred = membrane.prepare_membrane_step(
+                    V_mV=Vm,
+                    gates_prev=gates,
+                    gates_new=gates_pred,
+                    state=extra,
+                    dt=grid.dt_ms,
+                    I_ion=Iion_pred,
+                    I_background=I_bg,
+                )
+
+                if has_imposed_vstim:
+                    linearization_gates = step_plan_pred.linearization_gates
+                    if runtime.stimulation.has_driven_extracellular:
+                        linearization_gates = gates
+                    Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+                    d_step = d_vstim_static + (dt / Cm) * Gm
+                    rhs = (
+                        Vm
+                        + dt * vstim_forcing
+                        + (dt / Cm)
+                        * (
+                            GE
+                            + Iinj
+                            - step_plan_pred.explicit_outward_current
+                            - step_plan_pred.correction_current
+                        )
+                    )
+                    Vm_new = jax.lax.linalg.tridiagonal_solve(
+                        dl_vstim,
+                        d_step,
+                        du_vstim,
+                        rhs[:, None],
+                    )[:, 0]
+                else:
+                    diffusion = apply_diffusion_operator(Vm, lower, diag, upper)
+                    rhs = (
+                        Vm
+                        + dtype_local(0.5) * dt * diffusion
+                        + (dt / Cm)
+                        * (
+                            Iinj
+                            - step_plan_pred.total_outward_current
+                            - step_plan_pred.correction_current
+                        )
+                    )
+                    Vm_new = jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+
+                gates_new = membrane.final_gate_update(
+                    gates_prev=gates,
+                    V_mV_prev=Vm,
+                    V_mV_new=Vm_new,
+                    dt=grid.dt_ms,
+                    gates_predictor=gates_pred,
+                )
+                Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+                step_plan = membrane.prepare_membrane_step(
+                    V_mV=Vm_new,
+                    gates_prev=gates,
+                    gates_new=gates_new,
+                    state=extra,
+                    dt=grid.dt_ms,
+                    I_ion=Iion_new,
+                    I_background=I_bg,
+                )
+                state_new = membrane.finalize_membrane_step(
+                    V_mV_prev=Vm,
+                    V_mV_new=Vm_new,
+                    gates_prev=gates,
+                    gates_new=gates_new,
+                    state_prev=extra,
+                    step_plan=step_plan,
+                    dt=grid.dt_ms,
+                )
+                observer_state = update_observer_state_scalar(
+                    observer_state,
+                    vm_mV=Vm_new,
+                    time_ms=grid.t_vec_ms[n],
+                    kind_codes=observers.kind_codes,
+                    indices=observers.indices,
+                    mask=observers.mask,
+                    original_indices=observers.original_indices,
+                    positions_um=observers.positions_um,
+                    thresholds_mV=observers.thresholds_mV,
+                    blanking_ms=observers.blanking_ms,
+                )
+                output = Vm_new if record_voltage else jnp.empty((0,), dtype=dtype_local)
+                return (Vm_new, gates_new, observer_state, *state_new), output
+
+            init_carry = (
+                membrane_runtime.Vm0_mV,
+                membrane_runtime.gates0,
+                init_observer_state(observers),
+                *state0,
+            )
+            final_carry, out = jax.lax.scan(
+                observed_step,
+                init_carry,
+                jnp.arange(grid.Nt),
+            )
+            return KernelResult(
+                Vm=out if record_voltage else None,
+                t=runtime.grid.t_vec_ms,
+                observations=finalize_observer_state(observers, final_carry[2]),
+            )
 
         def step(carry, n: int):
             Vm, gates, *extra = carry
@@ -727,6 +865,8 @@ class DoubleCableKernel:
         *,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        record_voltage: bool = True,
+        observers: SolverObserverPlan | None = None,
     ) -> KernelResult:
         runtime = self.runtime
         membrane_runtime = runtime.membrane
@@ -769,7 +909,9 @@ class DoubleCableKernel:
         Iinj_mid = stimulation.intracellular_current_density_mid
 
         if (
-            not record_observables
+            observers is None
+            and record_voltage
+            and not record_observables
             and not record_diagnostics
             and Iinj_mid is not None
             and vext_mid_all is not None
@@ -858,6 +1000,107 @@ class DoubleCableKernel:
             if vext_mid_all is not None and vext_initial_previous is not None:
                 return _precomputed_step_pair(vext_mid_all, vext_initial_previous, n)
             return vext_fun(t_mid), vext_fun(t_mid - dt)
+
+        if observers is not None:
+            if record_observables or record_diagnostics:
+                raise NotImplementedError(
+                    "solver-side observers cannot yet be combined with scalar "
+                    "observable/diagnostic recordings."
+                )
+
+            def observed_step(carry, n: int):
+                Vi, Ve, gates, observer_state, *extra = carry
+                extra = tuple(extra)
+                Vm = Vi - Ve
+                t_mid = dtype_local(n) * dt + dtype_local(0.5) * dt
+
+                gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=grid.dt_ms)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iinj = _intracellular_current_at(runtime, n, t_mid)
+                step_plan_pred = membrane.prepare_membrane_step(
+                    V_mV=Vm,
+                    gates_prev=gates,
+                    gates_new=gates_pred,
+                    state=extra,
+                    dt=grid.dt_ms,
+                    I_ion=Iion_pred,
+                    I_background=I_bg,
+                )
+                linearization_gates = step_plan_pred.linearization_gates
+                if has_driven_extracellular:
+                    linearization_gates = gates
+
+                Vext, Vext_old = extracellular_drive_at(n, t_mid)
+                Vi_new, Ve_new = solve_vi_vperi(
+                    Vi=Vi,
+                    Ve=Ve,
+                    gates_new=linearization_gates,
+                    Iinj_den=Iinj,
+                    I_outward_den=step_plan_pred.explicit_outward_current,
+                    I_corr_den=step_plan_pred.correction_current,
+                    extracellular_potential_mV=Vext,
+                    Vext_old_mV=Vext_old,
+                )
+                Vm_new = Vi_new - Ve_new
+
+                gates_new = membrane.final_gate_update(
+                    gates_prev=gates,
+                    V_mV_prev=Vm,
+                    V_mV_new=Vm_new,
+                    dt=grid.dt_ms,
+                    gates_predictor=gates_pred,
+                )
+                Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+                step_plan = membrane.prepare_membrane_step(
+                    V_mV=Vm_new,
+                    gates_prev=gates,
+                    gates_new=gates_new,
+                    state=extra,
+                    dt=grid.dt_ms,
+                    I_ion=Iion_new,
+                    I_background=I_bg,
+                )
+                state_new = membrane.finalize_membrane_step(
+                    V_mV_prev=Vm,
+                    V_mV_new=Vm_new,
+                    gates_prev=gates,
+                    gates_new=gates_new,
+                    state_prev=extra,
+                    step_plan=step_plan,
+                    dt=grid.dt_ms,
+                )
+                observer_state = update_observer_state_scalar(
+                    observer_state,
+                    vm_mV=Vm_new,
+                    time_ms=grid.t_vec_ms[n],
+                    kind_codes=observers.kind_codes,
+                    indices=observers.indices,
+                    mask=observers.mask,
+                    original_indices=observers.original_indices,
+                    positions_um=observers.positions_um,
+                    thresholds_mV=observers.thresholds_mV,
+                    blanking_ms=observers.blanking_ms,
+                )
+                output = Vm_new if record_voltage else jnp.empty((0,), dtype=dtype_local)
+                return (Vi_new, Ve_new, gates_new, observer_state, *state_new), output
+
+            init_carry = (
+                Vi0,
+                Ve0,
+                gates0,
+                init_observer_state(observers),
+                *state0,
+            )
+            final_carry, out = jax.lax.scan(
+                observed_step,
+                init_carry,
+                jnp.arange(grid.Nt),
+            )
+            return KernelResult(
+                Vm=out if record_voltage else None,
+                t=runtime.grid.t_vec_ms,
+                observations=finalize_observer_state(observers, final_carry[3]),
+            )
 
         def step(carry, n: int):
             Vi, Ve, gates, *extra = carry

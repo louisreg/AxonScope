@@ -16,11 +16,12 @@ class DispatchResult:
     index: int
     axon: Axon
     simulation: AxonInstance
-    Vm: Any
+    Vm: Any | None
     t: Any
     group_id: int
     method: str
     record_indices: tuple[int, ...] | None = None
+    observations: dict[str, Any] | None = None
     group_size: int = 1
     batch_kind: str = "scalar"
     geometry_shared: bool = True

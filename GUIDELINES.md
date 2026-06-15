@@ -28,10 +28,12 @@ code.
 
 ## Current implementation status
 
-Snapshot updated on 2026-06-14.
+Snapshot updated on 2026-06-15.
 
 This document defines the target architecture. The codebase has implemented the
-roadmap through Phase 7. Phases 7.5-9 are still roadmap work.
+roadmap through Phase 7.5 for the current scalar and single-cable batch observer
+surface. Phase 7.6 is the current evidence pass before the Phase 8 study APIs.
+Phases 8-9 are still roadmap work.
 
 | Phase | Status | Implemented surface | Didactic example |
 | --- | --- | --- | --- |
@@ -42,9 +44,10 @@ roadmap through Phase 7. Phases 7.5-9 are still roadmap work.
 | Phase 3 — Planning and preparation | Done | Preparation signatures, internal prepared cohorts, lower planning/input overhead, footprint-oriented preparation path. | `examples/advanced/example_15_preparation_signatures.py` |
 | Phase 4 — JAX isolation | Done for the current boundary | JAX batch and scalar execution now enter through `axonscope.backends.jax`; public/descriptive layers are guarded against direct JAX imports. Low-level numerical kernels still live under `solvers/` until a later kernel ownership cleanup. | None; this is an internal backend boundary. |
 | Phase 5 — Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, extensible `Signal` descriptors, `SignalId`, `RecordingManifest`, `RecordedSignal`, no public `list[SimResult]` pool result. | `examples/advanced/example_16_canonical_pool_results.py` |
-| Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. Solver-side observer execution is planned for Phase 7.5. | `examples/advanced/example_17_analysis_layer.py` |
-| Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Current estimates explicitly surface dense `Vstim` memory risk; removing it is Phase 7.5. | `examples/advanced/example_14_hotpath_benchmarking.py` |
-| Phase 7.5 — Solver-side observers | Not started | Target: lower public observer specs into compact backend state, update observers at every solver `dt` inside the kernel/scan, and support observer-only runs without retaining full Vm traces. | To add if a public observer-only workflow lands. |
+| Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. | `examples/advanced/example_17_analysis_layer.py` |
+| Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Estimates surface dense `Vstim` and retained-`Vm` pressure so observer-only runs can be chosen deliberately. | `examples/advanced/example_14_hotpath_benchmarking.py` |
+| Phase 7.5 — Solver-side observers | Done for scalar + single-cable batch observer-only runs | Public `axs.analysis.PeakVoltage` and `axs.analysis.Activation` definitions lower to compact solver observer state; scalar kernels and single-cable batch kernels update that state at every `dt`; `Recording.none()` returns trace-free `result.observations`. Double-cable batch observer-only execution currently falls back to scalar for correctness. | `examples/advanced/example_18_solver_side_observers.py` |
+| Phase 7.6 — Realistic hotpath evidence | In progress | `realistic_mixed_population`, `hotpath_matrix`, and richer hotpath manifest metadata for model/formulation mix, diameter and compartment distributions, recording policy, observers, and per-simulation memory estimates. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
 | Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
 
@@ -61,9 +64,10 @@ Known implementation gaps against the final target:
   `axs.results.analysis`.
 - Backend-neutral axon structure descriptors, cable capabilities, and richer
   semantic signals remain future work.
-- Solver-side observer execution is a dedicated Phase 7.5 target: observers
-  should update inside the solver loop at each `dt` so compact outputs can avoid
-  full GPU trace retention and transfer.
+- Solver-side observer execution exists for scalar kernels and homogeneous
+  single-cable batch kernels. Double-cable batch observer-only execution should
+  only move back to the batch path once its compact observer state has the same
+  per-`dt` guarantees and correctness tests.
 
 ---
 
@@ -3089,6 +3093,8 @@ example_16_canonical_pool_results.py
     canonical pool results, per-axon views, and recording manifests
 example_17_analysis_layer.py
     structured analyses, missing-input requirements, and online Vm observers
+example_18_solver_side_observers.py
+    solver-side observers with trace-free Recording.none() results
 ```
 
 Examples must:
@@ -3096,8 +3102,13 @@ Examples must:
 - use the final API directly;
 - include a clear didactic demo in `examples/advanced/` whenever a new
   advanced concept or non-trivial user workflow is introduced;
-- teach one concept per demo when possible, with runnable code and comments
-  focused on the user workflow rather than internal implementation details;
+- teach one concept per demo when possible, with runnable, verbose,
+  line-by-line code and comments focused on guiding the user through the
+  workflow rather than hiding it behind helper scaffolding;
+- include plots whenever they make the feature easier to understand: Vm traces,
+  activation markers, peak-voltage markers, recruitment curves, velocity
+  metrics, dispatch layouts, recording/retention comparisons, or
+  observer-versus-recorded checks;
 - never require world position on `AxonInstance`;
 - construct footprints separately from stimuli;
 - group each footprint and stimulus into an `ExtracellularDrive`;
@@ -3202,7 +3213,8 @@ Implementation status: done for the current public layer. The public
 `axs.analysis` namespace, definition objects, low-level post-hoc helpers,
 structured input requirements, requirement/capability metadata, statuses,
 population denominators, reports, online Vm observers, and the didactic example
-exist. Solver-side observer execution is planned as Phase 7.5.
+exist. Phase 7.5 adds the first solver-side observer execution path for
+activation and peak-voltage definitions.
 
 - move activation and velocity into `analysis/`;
 - add requirements and applicability;
@@ -3230,7 +3242,7 @@ the solver-side kernel changes that remove unnecessary trace/input retention.
 
 ## Phase 7.5 — Solver-side observers
 
-Implementation status: not started.
+Implementation status: done for the first public observer-only workflow.
 
 Purpose: connect the public observer/analysis specifications to backend
 execution so compact observer state is updated at every solver `dt` inside the
@@ -3239,16 +3251,22 @@ kernel or scan loop. The memory goal is to avoid retaining full
 when the user only needs compact outputs such as activation, latency, peak
 voltage, spike counts, or block summaries.
 
-- define a backend-neutral observer lowering contract;
-- lower public `axs.analysis` observer specs into compact backend observer
-  state;
-- call observer updates inside scalar and batch solver kernels at each `dt`;
-- keep observer state static-shaped and vectorized over batch rows;
-- support observer-only execution without full Vm recording where the requested
-  analyses allow it;
-- start with peak voltage, then activation, then latency/block-style observers;
-- cross-validate solver-side outputs against post-hoc and streamed Vm observers;
-- add memory/hotpath evidence showing reduced GPU allocation and transfer.
+- done: lower public `axs.analysis.PeakVoltage` and `axs.analysis.Activation`
+  specs into compact backend observer state;
+- done: call observer updates inside scalar kernels and homogeneous single-cable
+  batch kernels at each `dt`;
+- done: keep single-cable batch observer state static-shaped and vectorized over
+  batch rows;
+- done: support observer-only execution with `Recording.none()` and trace-free
+  `result.observations`;
+- done: cross-validate solver-side peak voltage and activation against post-hoc
+  traces in unit tests;
+- done: add local hotpath/memory evidence showing no retained Vm output for an
+  observer-only run;
+- future optimization: move double-cable batch observer-only execution off
+  scalar fallback once the compact state is wired and validated;
+- future analysis design: decide whether latency/block-style analyses become
+  direct solver observers or thin views over activation observer state.
 
 ## Phase 8 — Studies
 

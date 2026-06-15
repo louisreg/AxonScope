@@ -41,6 +41,24 @@ Run the Phase 7 footprint/stimulus-only reuse probe:
 python benchmark/hotpaths/run.py --workload footprint_reuse_sweep --preset scale --sweep-repeats 3
 ```
 
+Run the Phase 7.5 observer-only memory probe:
+
+```bash
+python benchmark/hotpaths/run.py --workload observer_only --preset scale
+```
+
+Run the Phase 7.6 realistic mixed-population probe:
+
+```bash
+python benchmark/hotpaths/run.py --workload realistic_mixed_population --preset scale
+```
+
+Run the Phase 7.6 compact coverage matrix:
+
+```bash
+python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke
+```
+
 Outputs are written under `benchmark/results/hotpaths/`, which is intentionally
 ignored by git.
 
@@ -69,10 +87,15 @@ Colab runner and protocol:
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
 | `point_source_extracellular` | HH population driven by analytical point-source extracellular contexts. Stresses the current generic `Vstim` preprocessing path highlighted in `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`. |
 | `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
+| `observer_only` | HH population with solver-side peak-voltage and activation observers, `Recording.none()`, empty `vm_shapes`, and compact observation names in the manifest. Verifies the Phase 7.5 no-retained-Vm path. |
+| `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
+| `hotpath_matrix` | Compact matrix for center/probes recording, observer-only retention, point-source extracellular input, and mixed-population execution. Useful as the Phase 7.6 coverage run before deeper CPU/GPU work. |
 
 Each run manifest records `simulation.estimate().to_dict()` so timing traces can
 be interpreted alongside estimated retained Vm, dense `Vstim`, and factorized
-footprint sizes.
+footprint sizes. Multi-simulation workloads also record `memory_estimates`,
+`simulation_labels`, and `workload_metadata` with model, formulation, diameter,
+compartment, stimulation, recording, and observer summaries.
 
 ## Adding A Workload
 

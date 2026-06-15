@@ -232,8 +232,8 @@ class Recording:
     def none(cls) -> "Recording":
         """Request no stored outputs.
 
-        This is reserved for future observer-only runs; current public solvers
-        still require voltage storage.
+        Use this for observer-only runs when compact solver-side reductions are
+        enough and the full membrane-voltage trace should not be retained.
         """
 
         return cls(voltage=False)
@@ -291,7 +291,7 @@ class Recording:
         if self.wants_observables:
             raise NotImplementedError("pool recording currently supports Vm only.")
         if not self.voltage:
-            raise NotImplementedError("pool recording currently requires Vm.")
+            return BatchOptions.none()
         if self.positions_um is not None:
             raise NotImplementedError(
                 "position-based batch recording is not wired yet; "

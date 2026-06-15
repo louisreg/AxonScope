@@ -127,6 +127,99 @@ def test_public_recording_full_requests_observables():
     assert "conductances" in result.recordings
 
 
+def test_scalar_observer_only_run_returns_compact_observations_without_vm():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    sim = axs.AxonInstance(axon)
+    sim.add_current_clamp(
+        position=50.0 * axs.um,
+        current=axs.Stimulus.pulse(
+            start=0.02 * axs.ms,
+            duration=0.04 * axs.ms,
+            amplitude=0.5 * axs.nA,
+        ),
+    )
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    recorded = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
+    compact = axs.simulate(
+        sim,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[peak, activation],
+    )
+
+    assert compact.recordings is None
+    with pytest.raises(AttributeError, match="Vm recording"):
+        _ = compact.Vm
+    assert compact.observations is not None
+    assert compact.observations["peak_voltage"].value == pytest.approx(
+        recorded.analyze(peak).value
+    )
+    assert compact.observations["activation"].value == recorded.analyze(activation).value
+    assert (
+        compact.observations["activation"].events[0].first_index
+        == recorded.analyze(activation).events[0].first_index
+    )
+
+
+def test_pool_observer_only_run_returns_compact_observations_without_vm():
+    axons = []
+    for amplitude in (0.4, 0.5):
+        axon = axs.axons.HodgkinHuxley(
+            length=100.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=11,
+            celsius=6.3 * axs.degC,
+        )
+        sim = axs.AxonInstance(axon)
+        sim.add_current_clamp(
+            position=50.0 * axs.um,
+            current=axs.Stimulus.pulse(
+                start=0.02 * axs.ms,
+                duration=0.04 * axs.ms,
+                amplitude=amplitude * axs.nA,
+            ),
+        )
+        axons.append(sim)
+
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    recorded = axs.simulate_pool(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(),
+    )
+    compact = axs.simulate_pool(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[peak],
+    )
+
+    assert compact.recording_manifest.available == ()
+    assert compact.observations is not None
+    np.testing.assert_allclose(
+        compact.observations["peak_voltage"].values,
+        recorded.analyze(peak).values,
+    )
+    with pytest.raises(ValueError, match="Vm recording"):
+        _ = compact[0].Vm
+    assert compact[0].observations["peak_voltage"].value == pytest.approx(
+        compact.observations["peak_voltage"].values[0]
+    )
+
+
 def test_public_recording_signals_filter_single_result():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
@@ -170,7 +263,7 @@ def test_public_single_recording_requires_voltage_with_observables():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="single-axon simulation currently always returns Vm"):
+    with pytest.raises(NotImplementedError, match="observable-only recording"):
         axs.simulate(
             axon,
             duration=0.1 * axs.ms,

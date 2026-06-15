@@ -8,6 +8,7 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope.analysis.core import AnalysisResult
 from axonscope.benchmarking.hotpaths import (
     benchmark_array_metadata,
     benchmark_span,
@@ -23,10 +24,12 @@ from axonscope.backends.jax.input_batches import (
 )
 from axonscope.icm.backends import RowIndexedICMBackend
 from axonscope.preparation.cohort import PreparedCohort
+from axonscope.results import SimResult
 from axonscope.solvers.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
+from axonscope.solvers.observer_runtime import build_solver_observer_plan
 from axonscope.solvers.options import BatchOptions, BatchRecording, SolverOptions
 from axonscope.solvers.runtime import (
     CableRuntime,
@@ -47,6 +50,7 @@ def run_jax_batch_group(
     dt_ms: float,
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None = None,
     progress_callback: Any = None,
 ) -> tuple[DispatchResult, ...]:
     """Execute one compatible group through the JAX batch backend."""
@@ -58,6 +62,7 @@ def run_jax_batch_group(
             dt_ms=dt_ms,
             batch_options=batch_options,
             solver_options=solver_options,
+            observers=observers,
             progress_callback=progress_callback,
         )
     return _run_single_cable_batch_group(
@@ -66,6 +71,7 @@ def run_jax_batch_group(
         dt_ms=dt_ms,
         batch_options=batch_options,
         solver_options=solver_options,
+        observers=observers,
         progress_callback=progress_callback,
     )
 
@@ -79,6 +85,35 @@ def _dispatch_method(group: DispatchGroup) -> str:
     if group.mode == "double":
         return f"{prefix}-double-cable"
     return f"{prefix}-single-cable"
+
+
+def _batch_wait_target(out: Any) -> Any:
+    """Return a JAX/NumPy object that synchronizes a batch kernel result."""
+
+    if out.Vm is not None:
+        return out.Vm
+    if not out.observations:
+        raise RuntimeError("batch kernel produced neither Vm nor observations.")
+    first = next(iter(out.observations.values()))
+    return first.values
+
+
+def _observer_plan_for_cohort(
+    observers: tuple[Any, ...] | None,
+    *,
+    cohort: PreparedCohort,
+    dtype: Any,
+) -> Any:
+    """Lower public observers for one compatible prepared cohort."""
+
+    if observers is None:
+        return None
+    positions_um = np.asarray(cohort.x_positions_m[0], dtype=float) * 1e6
+    return build_solver_observer_plan(
+        observers,
+        positions_um=positions_um,
+        dtype=dtype,
+    )
 
 
 def _representative_item(group: DispatchGroup) -> DispatchItem:
@@ -108,6 +143,7 @@ def _run_single_cable_batch_group(
     dt_ms: float,
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
 ) -> tuple[DispatchResult, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
@@ -191,6 +227,11 @@ def _run_single_cable_batch_group(
             **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
         )
     kernel_options = _kernel_batch_options(group, batch_options)
+    observer_plan = _observer_plan_for_cohort(
+        observers,
+        cohort=cohort,
+        dtype=runtime.membrane.dtype,
+    )
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,
@@ -205,18 +246,20 @@ def _run_single_cable_batch_group(
             intracellular_current_density_mid=iinj_mid,
             extracellular_potential_mid_mV=vstim_mid,
             options=kernel_options,
+            observers=observer_plan,
             progress_callback=progress_callback,
         )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
-        )
+        if out.Vm is not None:
+            record_benchmark_metadata(
+                **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+            )
     with benchmark_span(
         "kernel.wait",
         group_id=group.group_id,
         group_size=group.size,
         mode=group.mode,
     ):
-        benchmark_wait(out.Vm)
+        benchmark_wait(_batch_wait_target(out))
     with benchmark_span(
         "results.split_batch",
         group_id=group.group_id,
@@ -227,6 +270,8 @@ def _run_single_cable_batch_group(
             group,
             Vm=out.Vm,
             t=out.t,
+            observations=out.observations,
+            observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
             kernel_batch_options=kernel_options,
@@ -240,6 +285,7 @@ def _run_double_cable_batch_group(
     dt_ms: float,
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
 ) -> tuple[DispatchResult, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
@@ -358,16 +404,17 @@ def _run_double_cable_batch_group(
             options=kernel_options,
             progress_callback=progress_callback,
         )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
-        )
+        if out.Vm is not None:
+            record_benchmark_metadata(
+                **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+            )
     with benchmark_span(
         "kernel.wait",
         group_id=group.group_id,
         group_size=group.size,
         mode=group.mode,
     ):
-        benchmark_wait(out.Vm)
+        benchmark_wait(_batch_wait_target(out))
     with benchmark_span(
         "results.split_batch",
         group_id=group.group_id,
@@ -378,6 +425,8 @@ def _run_double_cable_batch_group(
             group,
             Vm=out.Vm,
             t=out.t,
+            observations=out.observations,
+            observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
             kernel_batch_options=kernel_options,
@@ -665,18 +714,73 @@ def _group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarra
     )
 
 
+def _slice_analysis_result(result: AnalysisResult, row_index: int) -> AnalysisResult:
+    """Return one row from a batched observer result."""
+
+    return AnalysisResult(
+        name=result.name,
+        values=np.asarray(result.values)[row_index : row_index + 1],
+        statuses=(result.statuses[row_index],),
+        messages=(result.messages[row_index],),
+        unit=result.unit,
+        definition=result.definition,
+        events=(result.events[row_index],),
+        input_requirements=(result.input_requirements[row_index],),
+    )
+
+
+def _slice_batch_observations(
+    observations: dict[str, Any] | None,
+    row_index: int,
+) -> dict[str, Any] | None:
+    """Slice batched kernel observations into one dispatch row."""
+
+    if observations is None:
+        return None
+    return {
+        name: _slice_analysis_result(observation, row_index)
+        for name, observation in observations.items()
+    }
+
+
+def _posthoc_observations_for_row(
+    item: DispatchItem,
+    *,
+    row_vm: np.ndarray,
+    t: Any,
+    record_indices: tuple[int, ...] | None,
+    observer_definitions: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Evaluate observers post-hoc when Vm was intentionally recorded."""
+
+    row_result = SimResult(
+        item.simulation.axon,
+        row_vm,
+        np.asarray(t),
+        record_indices=record_indices,
+        simulation=item.simulation,
+    )
+    observations = {}
+    for definition in observer_definitions:
+        analysis = row_result.analyze(definition)
+        observations[analysis.name] = analysis
+    return observations
+
+
 def _dispatch_results_from_batch(
     group: DispatchGroup,
     *,
-    Vm: jnp.ndarray,
+    Vm: jnp.ndarray | None,
     t: jnp.ndarray,
+    observations: dict[str, Any] | None,
+    observer_definitions: tuple[Any, ...] | None,
     method: str,
     batch_options: BatchOptions,
     kernel_batch_options: BatchOptions,
 ) -> tuple[DispatchResult, ...]:
     """Split a batched solver output into per-axon dispatch results."""
 
-    vm_values = np.asarray(Vm)
+    vm_values = None if Vm is None else np.asarray(Vm)
     kernel_indices = kernel_batch_options.recording.indices_for(group.nx)
     kernel_record_indices = (
         None if kernel_indices is None else tuple(int(value) for value in kernel_indices)
@@ -684,10 +788,10 @@ def _dispatch_results_from_batch(
     results = []
     for row_index, item in enumerate(group.items):
         original_nx = int(item.solver_axon.n_compartments)
-        row_vm = vm_values[row_index]
+        row_vm = None if vm_values is None else vm_values[row_index]
         record_indices = kernel_record_indices
 
-        if kernel_indices is None:
+        if row_vm is not None and kernel_indices is None:
             row_vm = row_vm[:, :original_nx]
             requested_indices = batch_options.recording.indices_for(original_nx)
             if requested_indices is not None:
@@ -695,6 +799,18 @@ def _dispatch_results_from_batch(
                 record_indices = tuple(int(value) for value in requested_indices)
             else:
                 record_indices = None
+        if row_vm is None:
+            record_indices = None
+
+        row_observations = _slice_batch_observations(observations, row_index)
+        if row_observations is None and observer_definitions and row_vm is not None:
+            row_observations = _posthoc_observations_for_row(
+                item,
+                row_vm=row_vm,
+                t=t,
+                record_indices=record_indices,
+                observer_definitions=observer_definitions,
+            )
 
         results.append(
             DispatchResult(
@@ -706,6 +822,7 @@ def _dispatch_results_from_batch(
                 group_id=group.group_id,
                 method=method,
                 record_indices=record_indices,
+                observations=row_observations,
                 group_size=group.size,
                 batch_kind=group.batch_kind,
                 geometry_shared=group.geometry_shared,

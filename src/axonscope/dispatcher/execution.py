@@ -21,6 +21,7 @@ def run_pool(
     dt_ms: Any,
     solver_options: SolverOptions | None = None,
     batch_options: BatchOptions | None = None,
+    observers: Sequence[Any] | None = None,
     progress: ProgressOption = False,
 ) -> tuple[DispatchResult, ...]:
     """Run an axon pool and return one raw dispatch result per input simulation.
@@ -53,6 +54,7 @@ def run_pool(
             dt_ms=dt_ms,
             solver_options=solver_options,
             batch_options=batch_options,
+            observers=tuple(observers) if observers is not None else None,
             progress=progress,
         )
 
@@ -64,6 +66,7 @@ def _run_pool_checked(
     dt_ms: float,
     solver_options: SolverOptions | None,
     batch_options: BatchOptions | None,
+    observers: tuple[Any, ...] | None,
     progress: ProgressOption,
 ) -> tuple[DispatchResult, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
@@ -84,13 +87,14 @@ def _run_pool_checked(
                 has_padding=group.has_padding,
             ):
                 progress_reporter.start_group(group)
-                if _can_run_batch_group(group):
+                if _can_run_batch_group(group, observers=observers):
                     group_results = _run_batch_group(
                         group,
                         tsim_ms=tsim_ms,
                         dt_ms=dt_ms,
                         batch_options=resolved_batch_options,
                         solver_options=solver_options,
+                        observers=observers,
                         progress_callback=progress_reporter.kernel_callback(group),
                     )
                 else:
@@ -99,6 +103,8 @@ def _run_pool_checked(
                         tsim_ms=tsim_ms,
                         dt_ms=dt_ms,
                         solver_options=solver_options,
+                        observers=observers,
+                        record_voltage=resolved_batch_options.recording.mode != "none",
                     )
                     callback = progress_reporter.kernel_callback(group)
                     if callback is not None:
@@ -118,6 +124,8 @@ def _run_scalar_group(
     tsim_ms: float,
     dt_ms: float,
     solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
+    record_voltage: bool,
 ) -> tuple[DispatchResult, ...]:
     """Execute a dispatch group through scalar solves."""
 
@@ -125,17 +133,31 @@ def _run_scalar_group(
     return tuple(
         _dispatch_result_from_sim(
             item,
-            solver.solve(item.simulation, tsim=tsim_ms, dt=dt_ms),
+            solver.solve(
+                item.simulation,
+                tsim=tsim_ms,
+                dt=dt_ms,
+                record_voltage=record_voltage,
+                observers=observers,
+            ),
             group_id=group.group_id,
         )
         for item in group.items
     )
 
 
-def _can_run_batch_group(group: DispatchGroup) -> bool:
+def _can_run_batch_group(
+    group: DispatchGroup,
+    *,
+    observers: tuple[Any, ...] | None,
+) -> bool:
     """Return whether a dispatch group can use the current batch backend."""
 
     if group.size < 2:
+        return False
+    if observers and group.has_padding:
+        return False
+    if observers and group.mode == "double":
         return False
     return group.mode in {"single", "double"}
 
@@ -147,6 +169,7 @@ def _run_batch_group(
     dt_ms: float,
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
 ) -> tuple[DispatchResult, ...]:
     """Execute one compatible group through the JAX batch backend."""
@@ -157,6 +180,7 @@ def _run_batch_group(
         dt_ms=dt_ms,
         batch_options=batch_options,
         solver_options=solver_options,
+        observers=observers,
         progress_callback=progress_callback,
     )
 
@@ -173,11 +197,12 @@ def _dispatch_result_from_sim(
         index=item.index,
         axon=item.simulation.axon,
         simulation=item.simulation,
-        Vm=sim.Vm,
+        Vm=sim.recordings["Vm"] if sim.recordings is not None and "Vm" in sim.recordings else None,
         t=sim.t,
         group_id=group_id,
         method="scalar",
         record_indices=None,
+        observations=sim.observations,
         group_size=1,
         batch_kind="scalar",
         geometry_shared=True,

@@ -449,6 +449,8 @@ def _recording_widths(
     batch_options: BatchOptions | None,
     is_population: bool,
 ) -> tuple[int, ...]:
+    if recording is not None and not recording.voltage:
+        return tuple(0 for _ in instances)
     if is_population:
         if recording is not None:
             policy = recording.to_batch_options().recording
@@ -528,8 +530,8 @@ def _estimate_guidance(
         )
     if observers:
         recommendations.append(
-            "Solver-side observers are not wired yet; Phase 7.5 should lower these "
-            "specs into compact per-step kernel state."
+            "Use Recording.none() with solver-side observers to keep compact "
+            "per-step reductions instead of retaining Vm[Nt,Nx]."
         )
     if memory_budget_bytes is not None:
         total = sum(item.bytes for item in items)
@@ -549,6 +551,8 @@ def _estimate_guidance(
 
 def _recording_label(recording: Recording | None, batch_options: BatchOptions | None) -> str:
     if recording is not None:
+        if not recording.voltage:
+            return "none"
         return recording.spatial.value
     if batch_options is not None:
         return batch_options.recording.label

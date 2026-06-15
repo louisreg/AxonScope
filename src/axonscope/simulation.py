@@ -116,8 +116,6 @@ class AxonSimulation:
                 "explicit solver objects are currently supported only for single-axon "
                 "AxonSimulation runs; use solver_options for pools."
             )
-        if self.observers:
-            raise NotImplementedError("solver-side observers are not wired for pool runs yet.")
         return simulate_pool(
             self.axons,
             duration=self.duration,
@@ -125,6 +123,7 @@ class AxonSimulation:
             solver_options=self.solver_options,
             batch_options=self.batch_options,
             recording=self.recording,
+            observers=self.observers,
             progress=self.progress,
         )
 
@@ -182,11 +181,20 @@ def _resolve_recording(recording: Recording | None) -> Recording:
     return Recording() if recording is None else recording
 
 
-def _validate_single_recording(recording: Recording) -> None:
+def _validate_single_recording(
+    recording: Recording,
+    *,
+    observers_present: bool = False,
+) -> None:
     """Validate recording features currently supported by scalar public runs."""
 
-    if not recording.voltage:
-        raise NotImplementedError("single-axon simulation currently always returns Vm.")
+    if not recording.voltage and recording.wants_observables:
+        raise NotImplementedError(
+            "single-axon observable-only recording is not supported; include Vm "
+            "or use Recording.none() with solver-side observers."
+        )
+    if not recording.voltage and not observers_present:
+        raise NotImplementedError("Recording.none() requires solver-side observers.")
     if recording.positions_um is not None or recording.spatial is not RecordingSpatial.FULL:
         raise NotImplementedError("spatial single-axon recording filters are not wired yet.")
     if recording.sample_dt_ms is not None or recording.every_n_steps is not None:
@@ -220,6 +228,8 @@ def _filter_pool_recording(
 ) -> tuple[DispatchResult, ...]:
     """Apply spatial Vm filtering when a scalar fallback returned full traces."""
 
+    if not recording.voltage:
+        return tuple(results)
     batch_options = recording.to_batch_options()
     filtered = []
     for axon_result in results:
@@ -273,13 +283,12 @@ def simulate(
     creates a no-stimulation protocol around it.
     """
 
-    if observers:
-        raise NotImplementedError("solver-side observers are not wired yet.")
+    observer_defs = tuple(observers) if observers is not None else None
     simulation = as_axon_instance(axon)
     duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
     active_solver = _resolve_solver(solver, solver_options)
     rec = _resolve_recording(recording)
-    _validate_single_recording(rec)
+    _validate_single_recording(rec, observers_present=bool(observer_defs))
     with benchmark_span(
         "simulation.total",
         pool_size=1,
@@ -291,6 +300,8 @@ def simulate(
             tsim=duration_ms,
             dt=step_ms,
             record_observables=rec.wants_observables,
+            record_voltage=rec.voltage,
+            observers=observer_defs,
         )
         with benchmark_span("results.to_public", pool_size=1):
             return _finalize_single_result(result, rec)
@@ -304,6 +315,7 @@ def simulate_pool(
     solver_options: SolverOptions | None = None,
     batch_options: BatchOptions | None = None,
     recording: Recording | None = None,
+    observers: Sequence[Any] | None = None,
     progress: ProgressOption = False,
 ) -> AxonSimulationResult:
     """Run a pool and return a cohort-backed ``AxonSimulationResult``.
@@ -318,6 +330,14 @@ def simulate_pool(
     """
 
     population = pool if isinstance(pool, AxonPopulation) else AxonPopulation(pool)
+    observer_defs = tuple(observers) if observers is not None else None
+    if (
+        recording is not None
+        and not recording.voltage
+        and not recording.wants_observables
+        and not observer_defs
+    ):
+        raise NotImplementedError("Recording.none() requires solver-side observers.")
     duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
     resolved_batch_options = _pool_batch_options_for_recording(
         recording=recording,
@@ -329,6 +349,7 @@ def simulate_pool(
         dt_ms=step_ms,
         solver_options=solver_options,
         batch_options=resolved_batch_options,
+        observers=observer_defs,
         progress=progress,
     )
     with benchmark_span("results.to_public", pool_size=len(population.instances)):

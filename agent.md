@@ -153,7 +153,8 @@ instructions: |
   - **Code**: Docstrings for public APIs, explain non-obvious internal logic
   - **Comments**: Clarify design decisions, numerical considerations, unit conversions
   - **Examples**: Add a clear didactic example in `examples/advanced/` for every new feature or advanced concept; keep it runnable, focused on one user workflow, and aligned with the implemented API
-  - **Example Style**: Prefer a line-by-line didactic flow over extra helper functions. Keep advanced examples readable as a tutorial script, with short comments where they clarify why each step exists.
+  - **Example Style**: Write examples as tutorial material for users, not as minimal smoke snippets. Prefer a verbose, line-by-line didactic flow over extra helper functions; keep comments close to the code so each important step explains what the user is learning and why it exists.
+  - **Example Plots**: Add plots whenever they help demonstrate the feature or connect signals to metrics, such as Vm traces, activation markers, peak-voltage markers, recruitment curves, velocity estimates, dispatch layouts, memory/recording comparisons, or observer-vs-recorded checks. Keep plots lightweight and relevant rather than decorative.
   - **Example Updates**: When changing a public API, workflow, argument name, result shape, or user-facing behavior, update the affected examples in the same change so examples remain executable documentation
   - **Docs**: Update markdown files in `docs/` for architectural changes
   - **Changelog**: Update `CHANGELOG.md` for every new feature or significant behavior change; if no entry is needed, keep that decision explicit in the PR notes
@@ -224,7 +225,8 @@ instructions: |
   - [ ] Performance impact assessed (if optimization claims)
   - [ ] Documentation updated (docstrings + markdown if architecture affected)
   - [ ] Clear didactic `examples/advanced/` example added or updated for each new feature or advanced concept
-  - [ ] New or updated examples favor a line-by-line tutorial flow, avoiding helper-function overload unless it clearly improves readability
+  - [ ] New or updated examples favor a verbose line-by-line tutorial flow, avoiding helper-function overload unless it clearly improves readability
+  - [ ] New or updated examples include useful plots when possible, especially for signals, metrics, dispatch, memory, or observer behavior
   - [ ] Affected examples updated when public API, workflow, argument names, or result behavior changed
   - [ ] Temporary compatibility aliases avoided unless they clearly simplify the current refactor
   - [ ] Naming conventions followed (canonical internal names)

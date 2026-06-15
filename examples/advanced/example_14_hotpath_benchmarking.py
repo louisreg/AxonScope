@@ -1,12 +1,11 @@
-"""Advanced example 14: opt-in hotpath benchmarking and memory estimates.
+"""Advanced example 14: hotpath benchmarking for observer-only runs.
 
 Run:
     python examples/advanced/example_14_hotpath_benchmarking.py
 
 This diagnostic mode estimates array memory before execution, then times the
-major execution stages without changing the simulation result. It is useful
-before deciding whether a refactor should target planning, preprocessing, kernel
-execution, synchronization, recording retention, or result packaging.
+major execution stages. Here the simulation keeps compact solver-side
+observations instead of storing the full Vm[time, position] trace.
 """
 
 from __future__ import annotations
@@ -47,15 +46,23 @@ def main() -> None:
         ),
     )
 
-    # Step 3: keep the public result light; the benchmark records the hotpaths.
+    # Step 3: choose the compact analyses we want from the solver loop.
+    peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    # Step 4: request no stored traces; only the observer states are retained.
     simulation = axs.AxonSimulation(
         axs.AxonPopulation([axon_a, axon_b]),
         duration=0.30 * axs.ms,
         dt=0.01 * axs.ms,
-        recording=axs.Recording.center(axs.signals.Vm),
+        recording=axs.Recording.none(),
+        observers=[peak_voltage, activation],
     )
 
-    # Step 4: inspect the estimated array footprint before running anything.
+    # Step 5: inspect the estimated array footprint before running anything.
     estimate = simulation.estimate(
         runtime=axs.Runtime.JAX,
         device=axs.Device.auto(),
@@ -63,14 +70,24 @@ def main() -> None:
     )
     print(estimate.format())
 
-    # Step 5: write diagnostic files into a temporary folder for inspection.
+    # Step 6: write diagnostic files into a temporary folder for inspection.
     output_dir = Path(tempfile.mkdtemp(prefix="axonscope-hotpaths-"))
 
+    # Step 7: run with benchmark instrumentation enabled around the hotpaths.
     axs.enable_benchmark(output_dir, print_summary=False)
     results = simulation.run()
     report = axs.disable_benchmark(print_summary=True)
 
+    # Step 8: read compact observer outputs directly from the pool result.
+    observations = results.observations
+    if observations is None:
+        raise RuntimeError("observer-only run did not return observations.")
+    peak = observations["peak_voltage"]
+    activated = observations["activation"]
+
     print(f"results: {len(results)} axons")
+    print(f"peak voltage [mV]: {peak.values}")
+    print(f"activated: {activated.values}")
     print(f"trace files: {output_dir}")
     print(f"events: {0 if report is None else len(report.events)}")
     print(f"estimated retained Vm: {estimate.retained_mib:.3f} MiB")

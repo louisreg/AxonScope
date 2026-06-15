@@ -43,6 +43,9 @@ def test_solver_examples_are_importable():
         "examples.advanced.example_16_canonical_pool_results"
     )
     analysis_layer = importlib.import_module("examples.advanced.example_17_analysis_layer")
+    solver_side_observers = importlib.import_module(
+        "examples.advanced.example_18_solver_side_observers"
+    )
     pool_benchmark = importlib.import_module("benchmark.runtime.pool_batch_demo")
     assert callable(intracellular.main)
     assert callable(extracellular.main)
@@ -67,4 +70,5 @@ def test_solver_examples_are_importable():
     assert callable(preparation_signatures.main)
     assert callable(canonical_pool_results.main)
     assert callable(analysis_layer.main)
+    assert callable(solver_side_observers.main)
     assert callable(pool_benchmark.main)

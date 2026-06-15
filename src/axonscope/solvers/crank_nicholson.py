@@ -29,6 +29,8 @@ class CrankNicholson(Solver):
         dt: Any | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
+        record_voltage: bool = True,
+        observers: tuple[Any, ...] | None = None,
     ) -> SimResult:
         """Execute a Crank-Nicholson simulation."""
 
@@ -42,6 +44,8 @@ class CrankNicholson(Solver):
             solver_options=self.solver_options,
             record_diagnostics=record_diagnostics,
             record_observables=record_observables,
+            record_voltage=record_voltage,
+            observers=observers,
         )
         return SimResult(
             simulation.axon,
@@ -49,5 +53,6 @@ class CrankNicholson(Solver):
             out.t,
             diagnostics=out.diagnostics,
             recordings=out.recordings,
+            observations=out.observations,
             simulation=simulation,
         )

@@ -7,7 +7,7 @@ import numpy as np
 
 from axonscope.channel_models import RateTableConfig
 
-BatchRecordingMode = Literal["full", "center", "probes", "indices"]
+BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,12 @@ class BatchRecording:
         return cls(mode="indices", values=tuple(int(value) for value in values))
 
     @classmethod
+    def none(cls) -> "BatchRecording":
+        """Record no Vm trace."""
+
+        return cls(mode="none")
+
+    @classmethod
     def from_mode(cls, mode: str, *, probe_count: int = 8) -> "BatchRecording":
         """Build a recording policy from a simple mode string."""
 
@@ -69,10 +75,12 @@ class BatchRecording:
             return cls.center()
         if mode == "probes":
             return cls.probes(probe_count)
+        if mode == "none":
+            return cls.none()
         raise ValueError(f"unknown recording mode: {mode!r}.")
 
     def __post_init__(self) -> None:
-        if self.mode not in {"full", "center", "probes", "indices"}:
+        if self.mode not in {"full", "center", "probes", "indices", "none"}:
             raise ValueError(f"unknown recording mode: {self.mode!r}.")
         if int(self.probe_count) < 1:
             raise ValueError("probe_count must be >= 1.")
@@ -96,6 +104,8 @@ class BatchRecording:
 
         if nx < 1:
             raise ValueError("nx must be >= 1.")
+        if self.mode == "none":
+            return np.asarray([], dtype=np.int32)
         if self.mode == "full":
             return None
         if self.mode == "center":
@@ -154,6 +164,15 @@ class BatchOptions:
 
         return cls(
             recording=BatchRecording.probes(count),
+            time_chunk_steps=time_chunk_steps,
+        )
+
+    @classmethod
+    def none(cls, *, time_chunk_steps: int | None = None) -> "BatchOptions":
+        """Record no Vm trace, typically for solver-side observer runs."""
+
+        return cls(
+            recording=BatchRecording.none(),
             time_chunk_steps=time_chunk_steps,
         )
 
