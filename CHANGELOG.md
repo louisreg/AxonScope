@@ -227,6 +227,9 @@ The format is inspired by Keep a Changelog.
 - Added an internal compact dispatch cohort record so observer-only batch runs
   can keep one batched observations payload between the JAX backend and public
   pool results.
+- Added Phase 7.6 compact-dispatch Colab evidence from
+  `colab_cpu_gpu_kernel_observer_long_20260615_122541`, confirming that
+  observer-only `results.split_batch` is no longer a dominant GPU cost.
 
 ### Changed
 
@@ -280,6 +283,9 @@ The format is inspired by Keep a Changelog.
   batch kernels by lowering point clamps to sparse compartment slots instead of
   materializing dense `Iinj[B,Nt,Nx]`; hotpath metadata and simulation estimates
   now report the `sparse_current_clamp` input format.
+- Reduced common sparse current-clamp input preparation overhead by vectorizing
+  one-pulse current-clamp batches and caching repeated solver-axon geometry
+  during `inputs.intracellular` materialization.
 - Reduced zero-field observer-only memory pressure by skipping dense
   `Vstim[B,Nt,Nx]` materialization when homogeneous single-cable batch runs have
   no extracellular contexts; hotpath metadata now reports

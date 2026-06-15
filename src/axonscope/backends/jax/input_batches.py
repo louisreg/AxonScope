@@ -246,6 +246,17 @@ def _build_sparse_intracellular_current_density_batch_from_clamps(
 ) -> SparseIntracellularCurrentDensityBatch:
     np_dtype = np.dtype(dtype_local)
     t = np.asarray(t_ms, dtype=np_dtype)
+    fast_pulse_batch = _try_build_single_pulse_sparse_current_density_batch(
+        axons,
+        solver_axons,
+        t,
+        target_nx=target_nx,
+        dtype_local=dtype_local,
+        np_dtype=np_dtype,
+    )
+    if fast_pulse_batch is not None:
+        return fast_pulse_batch
+
     max_contexts = max(
         (len(tuple(getattr(axon, "intracellular_contexts", ()))) for axon in axons),
         default=0,
@@ -291,6 +302,100 @@ def _build_sparse_intracellular_current_density_batch_from_clamps(
         mask=jnp.asarray(mask, dtype=bool),
         target_nx=int(target_nx),
     )
+
+
+def _try_build_single_pulse_sparse_current_density_batch(
+    axons: Sequence[AxonLike],
+    solver_axons: Sequence[SolverAxon],
+    t: np.ndarray,
+    *,
+    target_nx: int,
+    dtype_local: jnp.dtype,
+    np_dtype: np.dtype[Any],
+) -> SparseIntracellularCurrentDensityBatch | None:
+    """Vectorize the common one-rectangular-pulse current-clamp case."""
+
+    if not axons:
+        return None
+
+    contexts_by_row = tuple(
+        tuple(getattr(axon, "intracellular_contexts", ())) for axon in axons
+    )
+    if not all(len(contexts) == 1 for contexts in contexts_by_row):
+        return None
+    if not all(
+        _is_three_point_hold_stimulus(contexts[0].current)
+        for contexts in contexts_by_row
+    ):
+        return None
+
+    pulse_times = np.stack(
+        [
+            np.asarray(contexts[0].current.t, dtype=np_dtype)
+            for contexts in contexts_by_row
+        ],
+        axis=0,
+    )
+    pulse_values = np.stack(
+        [
+            np.asarray(contexts[0].current.y, dtype=np_dtype)
+            for contexts in contexts_by_row
+        ],
+        axis=0,
+    )
+
+    indices = np.zeros((len(axons), 1), dtype=np.int32)
+    scales = np.zeros((len(axons),), dtype=np_dtype)
+    geometry_cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for row_index, (contexts, solver_axon) in enumerate(
+        zip(contexts_by_row, solver_axons, strict=True)
+    ):
+        if int(solver_axon.n_compartments) > int(target_nx):
+            raise ValueError(
+                f"target_nx must be >= array width, got target_nx={target_nx}, "
+                f"width={solver_axon.n_compartments}."
+            )
+        cache_key = id(solver_axon)
+        cached = geometry_cache.get(cache_key)
+        if cached is None:
+            cached = (
+                np.asarray(solver_axon.x_um, dtype=float),
+                _compartment_surface_area_cm2_numpy(solver_axon),
+            )
+            geometry_cache[cache_key] = cached
+        x_um, area_cm2 = cached
+        context = contexts[0]
+        index = int(np.argmin(np.abs(x_um - float(context.position_um))))
+        indices[row_index, 0] = index
+        scales[row_index] = np.asarray(1e-3, dtype=np_dtype) / area_cm2[index]
+
+    # This mirrors Stimulus.evaluate(..., mode="hold") for 3 sample points:
+    # baseline before t1, pulse value from t1 to t2, baseline after t2.
+    t_grid = t[None, :]
+    current_nA = np.where(
+        t_grid < pulse_times[:, 1:2],
+        pulse_values[:, 0:1],
+        np.where(
+            t_grid < pulse_times[:, 2:3],
+            pulse_values[:, 1:2],
+            pulse_values[:, 2:3],
+        ),
+    )
+    density_mid = current_nA[:, :, None] * scales[:, None, None]
+    mask = np.ones((len(axons), 1), dtype=bool)
+
+    return SparseIntracellularCurrentDensityBatch(
+        density_mid=jnp.asarray(density_mid, dtype=dtype_local),
+        indices=jnp.asarray(indices, dtype=jnp.int32),
+        mask=jnp.asarray(mask, dtype=bool),
+        target_nx=int(target_nx),
+    )
+
+
+def _is_three_point_hold_stimulus(stimulus: Stimulus) -> bool:
+    """Return whether a stimulus can use the vectorized pulse path."""
+
+    return stimulus.mode == "hold" and len(stimulus.t) == 3 and len(stimulus.y) == 3
 
 
 def _compartment_surface_area_cm2_numpy(solver_axon: SolverAxon) -> np.ndarray:

@@ -27,10 +27,13 @@ task is done, check it only after code/docs/tests have been verified.
   instead of materializing one internal dispatch result per axon row.
 - [x] Latest full unit validation after the compact dispatch cohort cleanup:
   unit suite `314 passed, 1 skipped` on 2026-06-15.
-- [ ] Next priority before broad Phase 8 APIs: quantify the compact dispatch
-  cohort change on Colab with `kernel_observer_long`, then finish the targeted
-  hotpath cleanup by re-checking double-cable/MRG-like runs and realistic
-  extracellular-drive runs.
+- [x] Compact dispatch cohort Colab validation is complete:
+  `colab_cpu_gpu_kernel_observer_long_20260615_122541` reduced GPU
+  `results.split_batch` at `n=1000` from `140.6 ms` to `0.76 ms`.
+- [ ] Next priority before broad Phase 8 APIs: quantify the pulse-vectorized
+  sparse current-clamp input builder on Colab with `kernel_observer_long`, then
+  finish the targeted hotpath cleanup by re-checking double-cable/MRG-like runs
+  and realistic extracellular-drive runs.
 - [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -205,6 +208,22 @@ realistic populations, not just clean homogeneous smoke workloads.
       at `n=1000`.
     - New dominant GPU costs at `n=1000`: `results.split_batch 140.6 ms`,
       `kernel.enqueue 101.9 ms`, `inputs.intracellular 80.9 ms`.
+  - Compact dispatch cohort rerun analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_122541/`.
+    - The compact dispatch result path closes the `results.split_batch`
+      bottleneck: at `n=1000`, GPU `results.split_batch` drops from
+      `140.6 ms` to `0.76 ms`, and CPU drops from `138.6 ms` to `0.43 ms`.
+    - Public packaging also drops: GPU `results.to_public` at `n=1000` is
+      `2.11 ms` instead of `10.26 ms`.
+    - End-to-end GPU improves more modestly because another cost moved up:
+      total `373.8 ms` -> `341.8 ms` at `n=1000`, while
+      `inputs.intracellular` varied upward (`80.9 ms` -> `150.2 ms`) and
+      `kernel.enqueue` rose (`101.9 ms` -> `115.5 ms`).
+    - At `n=500`, the total gain is cleaner: GPU `193.8 ms` -> `157.8 ms`,
+      with `results.split_batch` reduced from `38.4 ms` to `0.26 ms`.
+    - New observer-only GPU bottleneck map at `n=1000`: `inputs.intracellular
+      150.2 ms`, `kernel.enqueue 115.5 ms`, `runtime.prepare 49.2 ms`;
+      `results.split_batch` is no longer the target.
 
 - [ ] Phase 7.6 targeted cleanup before broad Phase 8 APIs.
   - [x] Add a compact/factorized intracellular-drive path for simple current clamps
@@ -228,6 +247,22 @@ realistic populations, not just clean homogeneous smoke workloads.
       `batch_inputs.py`, `input_batches.py`, `batch_kernels.py`, and
       `performance.py`; targeted unit tests passed (`22 passed`), with an
       earlier broader batch/dispatcher/analysis/hotpath run at `47 passed`.
+  - [x] Vectorize the common one-pulse sparse current-clamp builder.
+    - Implemented a conservative fast path for rows that each contain exactly
+      one point current clamp with a three-point hold/pulse stimulus.
+    - The fast path evaluates the whole `(B, Nt, 1)` pulse-density tensor with
+      NumPy broadcasting and caches repeated solver-axon geometry instead of
+      calling `Stimulus.evaluate(...)` row by row.
+    - Local smoke benchmark on 2026-06-15:
+      `benchmark/results/hotpaths/local_observer_pulse_fastpath/`.
+      `observer_only_n100` reports `inputs.intracellular 4.46 ms`; the closest
+      prior local zero-field smoke was `9.02 ms`.
+    - Targeted validation on 2026-06-15: compileall passed for the touched
+      files; mypy passed for `input_batches.py` and the modified dispatch/
+      result modules; sparse current-clamp tests passed (`2 passed`) and the
+      targeted dispatcher/public observer/performance run passed (`24 passed`).
+    - Remaining evidence gate: rerun Colab `kernel_observer_long` to check
+      whether the local input-materialization gain holds on GPU.
   - [x] Avoid dense zero `Vstim[B,Nt,Nx]` materialization for homogeneous
     single-cable observer-only runs with no extracellular contexts.
     - The JAX runner now records `input_format="zero_no_context"` and passes no
