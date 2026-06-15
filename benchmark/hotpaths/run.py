@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import jax
 import numpy as np
 import jax.numpy as jnp
 
@@ -36,7 +37,11 @@ from axonscope.benchmarking.hotpaths import (
     benchmark_wait,
     record_benchmark_metadata,
 )
-from axonscope.solvers import BatchOptions, SingleCableVStimBatchKernel
+from axonscope.solvers import (
+    BatchOptions,
+    SingleCableVStimBatchKernel,
+    resolve_double_cable_block_solver,
+)
 from axonscope.solvers.runtime import prepare_solver_runtime
 from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 
@@ -92,9 +97,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--double-cable-block-solver",
-        choices=("thomas", "pcr"),
-        default="thomas",
-        help="Double-cable batch block solver: serial Thomas scan or experimental PCR.",
+        choices=("auto", "thomas", "pcr"),
+        default="auto",
+        help=(
+            "Double-cable batch block solver: auto chooses PCR on GPU and "
+            "Thomas elsewhere."
+        ),
     )
     parser.add_argument(
         "--sweep-repeats",
@@ -150,6 +158,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     jax_compile_logging = configure_jax_compile_logging(bool(args.jax_log_compiles))
     timing_mode = _timing_mode(args.warmups)
+    jax_backend = jax.default_backend()
+    resolved_double_cable_block_solver = resolve_double_cable_block_solver(
+        args.double_cable_block_solver,
+        platform=jax_backend,
+    )
     run_root = make_run_root(args.out_dir, prefix=args.prefix)
     manifest = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -165,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "timing_mode": timing_mode,
             "time_chunk_steps": args.time_chunk_steps,
             "double_cable_block_solver": args.double_cable_block_solver,
+            "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
+            "jax_default_backend": jax_backend,
             "sweep_repeats": int(args.sweep_repeats),
             "sync_device": bool(args.sync_device),
             "jax_log_compiles": bool(args.jax_log_compiles),
@@ -233,6 +248,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "timing_mode": timing_mode,
                 "time_chunk_steps": args.time_chunk_steps,
                 "double_cable_block_solver": args.double_cable_block_solver,
+                "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
+                "jax_default_backend": jax_backend,
                 "jax_log_compiles": bool(args.jax_log_compiles),
             }
         )
@@ -632,8 +649,6 @@ def _with_batch_options(
 ) -> tuple[axs.AxonSimulation, ...]:
     """Return simulations with benchmark batch-kernel options applied."""
 
-    if time_chunk_steps is None and double_cable_block_solver == "thomas":
-        return tuple(simulations)
     updated = []
     for simulation in simulations:
         batch_options = simulation.batch_options or BatchOptions()

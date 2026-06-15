@@ -106,7 +106,23 @@ python benchmark/hotpaths/run.py \
   --time-chunk-steps 100
 ```
 
-Run the experimental double-cable PCR block solver:
+Run the double-cable long probe with automatic block-solver selection:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload double_cable_extracellular \
+  --sizes 100 300 600 \
+  --duration 10.0 \
+  --dt 0.01 \
+  --compartments 51 \
+  --warmups 1 \
+  --double-cable-block-solver auto
+```
+
+The automatic policy resolves to PCR on GPU and Thomas elsewhere, and the
+manifest records both the requested and resolved solver choices.
+
+Force the experimental double-cable PCR block solver:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -118,6 +134,10 @@ python benchmark/hotpaths/run.py \
   --warmups 1 \
   --double-cable-block-solver pcr
 ```
+
+Use forced PCR as a GPU-oriented diagnostic only for now. The Colab PCR run
+improved double-cable GPU totals strongly, but regressed CPU totals compared
+with the default Thomas scan.
 
 Run a longer realistic heterogeneous probe:
 

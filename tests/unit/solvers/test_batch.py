@@ -27,6 +27,7 @@ from axonscope.solvers import (
     DoubleCableBatchKernel,
     DoubleCableKernel,
     SingleCableVStimBatchKernel,
+    resolve_double_cable_block_solver,
 )
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
@@ -74,7 +75,12 @@ def test_batch_recording_resolves_common_policies():
     )
     with pytest.raises(ValueError, match="within"):
         BatchRecording.indices([5]).indices_for(5)
+    assert BatchOptions.center().double_cable_block_solver == "auto"
+    assert BatchOptions.center(double_cable_block_solver="auto").double_cable_block_solver == "auto"
     assert BatchOptions.center(double_cable_block_solver="pcr").double_cable_block_solver == "pcr"
+    assert resolve_double_cable_block_solver("auto", platform="cpu") == "thomas"
+    assert resolve_double_cable_block_solver("auto", platform="gpu") == "pcr"
+    assert resolve_double_cable_block_solver("thomas", platform="gpu") == "thomas"
     with pytest.raises(ValueError, match="double_cable_block_solver"):
         BatchOptions(double_cable_block_solver="dense")
 

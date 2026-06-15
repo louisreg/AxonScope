@@ -138,6 +138,22 @@ def test_hotpath_runner_accepts_double_cable_pcr_solver_in_dry_run(capsys):
     assert capsys.readouterr().out.splitlines() == ["double_cable_extracellular size=1"]
 
 
+def test_hotpath_runner_accepts_double_cable_auto_solver_in_dry_run(capsys):
+    main(
+        [
+            "--workload",
+            "double_cable_extracellular",
+            "--sizes",
+            "1",
+            "--dry-run",
+            "--double-cable-block-solver",
+            "auto",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == ["double_cable_extracellular size=1"]
+
+
 def test_hotpath_size_and_run_resolution():
     assert resolve_sizes("smoke", None) == (5,)
     assert resolve_sizes("scale", None) == (5, 50, 500)

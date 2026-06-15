@@ -68,9 +68,15 @@ Available notebook cases:
   `double_cable_extracellular` trace with MRG double-cable rows, analytical
   point-source extracellular stimulation, sizes `100/300/600`,
   `duration=10 ms`, `dt=0.01 ms`, and a target of `51` compartments.
+- `kernel_double_cable_extracellular_auto_long`: same long double-cable trace,
+  but passes `--double-cable-block-solver auto` so GPU runs resolve to PCR and
+  CPU runs resolve to Thomas. Use this for CPU/GPU comparison after the PCR
+  result.
 - `kernel_double_cable_extracellular_pcr_long`: same long double-cable trace,
   but passes `--double-cable-block-solver pcr` to test the experimental
-  parallel cyclic-reduction block solver against the default Thomas scan.
+  parallel cyclic-reduction block solver against the default Thomas scan. Use
+  it to reproduce forced-PCR results; current CPU evidence makes PCR much
+  slower than the default Thomas solver.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 only the enabled backend(s), and runs the selected case for the enabled labels.
@@ -78,7 +84,7 @@ For CPU-only runs, keep `RUN_GPU = False` and `RUN_CPU = True`; the notebook
 writes a per-run `cpu_summary.csv` in addition to the normal manifest and
 workload summaries. For CPU/GPU comparison runs, enable both labels to also
 write `comparison_summary.csv`.
-For the default `setup_scale` case, the effective commands are:
+For the `setup_scale` case, the effective commands are:
 
 ```bash
 python benchmark/hotpaths/run.py \

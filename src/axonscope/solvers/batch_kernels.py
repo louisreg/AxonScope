@@ -25,7 +25,11 @@ from .observer_runtime import (
     init_observer_state,
     update_observer_state_scalar,
 )
-from .options import BatchOptions, BatchRecording
+from .options import (
+    BatchOptions,
+    BatchRecording,
+    resolve_double_cable_block_solver,
+)
 from .runtime import SolverRuntime
 
 
@@ -1578,11 +1582,15 @@ class DoubleCableBatchKernel:
             and jnp.asarray(extracellular.Gax_i).ndim == 1
             and jnp.asarray(extracellular.Gax_e).ndim == 1
         )
+        block_solver = resolve_double_cable_block_solver(
+            options.double_cable_block_solver,
+            platform=jax.default_backend(),
+        )
         if (
             record_full
             and chunk_steps is None
             and shared_cable
-            and options.double_cable_block_solver == "thomas"
+            and block_solver == "thomas"
         ):
             Ve0 = jnp.full(
                 (nx,),
@@ -1623,7 +1631,7 @@ class DoubleCableBatchKernel:
                 Veinit_mV=float(self.Veinit_mV),
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
-                double_cable_block_solver=options.double_cable_block_solver,
+                double_cable_block_solver=block_solver,
                 intracellular_current_density_mid=iinj_batch,
                 extracellular_potential_mid_mV=vext_batch,
                 extracellular_potential_initial_previous_mV=vext_previous_batch,

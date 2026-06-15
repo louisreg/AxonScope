@@ -179,15 +179,27 @@ JAX compile/enqueue overhead onto every workload.
   `(B,Nx)` coefficient broadcasts improves GPU throughput. Result: zero-Iinj
   helped `n=600` GPU modestly; shared coefficients helped CPU strongly and
   GPU at `n=300`, but did not fix the GPU scaling ceiling.
-- [ ] Decide whether runtime/device/precision planning values remain estimates
-  only or start selecting execution backends.
+- [x] Start backend-aware execution selection with the double-cable block
+  solver: `auto` resolves to PCR on GPU and Thomas elsewhere, and hotpath
+  manifests record both requested and resolved solver choices.
+- [ ] Decide whether broader runtime/device/precision planning values remain
+  estimates only or start selecting execution backends beyond the double-cable
+  block solver.
 - [x] Prototype an
   algorithmic GPU solver change rather than more input cleanup: e.g. a batched
   or parallel block-tridiagonal solve for the per-step `2x2` system, then
   compare against the current `solve_block_tridiagonal_2x2_scalar` scan.
-- [ ] Re-run Colab `kernel_double_cable_extracellular_pcr_long` to compare the
+- [x] Re-run Colab `kernel_double_cable_extracellular_pcr_long` to compare the
   experimental PCR block solver against Thomas on GPU and CPU at
-  `n=100/300/600`.
+  `n=100/300/600`. Result: PCR is a strong GPU win (`243/369/688 ms` total at
+  `n=100/300/600`, `0.30x/0.43x/0.70x` of the best Thomas total), but a CPU
+  regression (`7.2x/11.6x/10.9x` slower than best Thomas).
+- [x] Add an `auto` double-cable block-solver policy: keep Thomas for CPU/default
+  execution, select PCR for GPU runs, and expose the resolved choice in
+  benchmark manifests.
+- [ ] Re-run Colab `kernel_double_cable_extracellular_auto_long` to measure the
+  realistic CPU/GPU comparison after auto selection: CPU should use Thomas,
+  GPU should use PCR.
 - [x] Add solver-only/precomputed-input benchmarks for intra and extra paths so
   solver throughput is separated from preprocessing and result packaging.
 
@@ -440,6 +452,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_181846` | Zero-Iinj kernel-input specialization: GPU total improved at `n=100` (`809.7 ms`, `-1.8%`) and `n=600` (`984.9 ms`, `-8.0%`) vs baseline, but regressed at `n=300` (`990.9 ms`, `+3.8%`); CPU improved `8-12%`. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_long_20260615_182156` | Shared-coefficient specialization: GPU improved at `n=300` (`859.4 ms`, `-10.0%`) and slightly at `n=600` (`1031.8 ms`, `-3.6%`) vs baseline, but regressed at `n=100` (`851.9 ms`, `+3.3%`); CPU improved most (`-30.7%` at `n=600`). |
 | 2026-06-15 | `phase7_6_double_cable_pcr_batch_smoke` | Experimental PCR block solver landed behind `BatchOptions(double_cable_block_solver="pcr")` / `--double-cable-block-solver pcr`; local batch smoke passed at `n=2`, and numerical tests match Thomas. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_extracellular_pcr_long_20260615_183818` | PCR block solver is the first strong double-cable GPU win: GPU totals `243.1/369.2/687.8 ms` at `n=100/300/600`, or `3.3x/2.3x/1.4x` faster than the best Thomas run. CPU regressed badly (`3092/10262/18699 ms`, `7.2x/11.6x/10.9x` slower), so the next comparison should use `auto`: PCR on GPU, Thomas on CPU. |
+| 2026-06-15 | `phase7_6_double_cable_auto_solver_policy` | Added `double_cable_block_solver="auto"` as the default batch option and hotpath CLI default. It resolves to PCR on GPU and Thomas elsewhere, while benchmark manifests record both requested and resolved solver choices. |
 
 ## Completed Roadmap Archive
 

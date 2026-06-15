@@ -1,14 +1,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Sequence
+from typing import Literal, Sequence, cast
 
 import numpy as np
 
 from axonscope.channel_models import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DoubleCableBlockSolver = Literal["thomas", "pcr"]
+DoubleCableBlockSolver = Literal["auto", "thomas", "pcr"]
+ResolvedDoubleCableBlockSolver = Literal["thomas", "pcr"]
+
+_DOUBLE_CABLE_BLOCK_SOLVERS = {"auto", "thomas", "pcr"}
+_GPU_PLATFORMS = {"cuda", "gpu", "metal", "rocm"}
+
+
+def resolve_double_cable_block_solver(
+    solver: DoubleCableBlockSolver | str,
+    *,
+    platform: str | None,
+) -> ResolvedDoubleCableBlockSolver:
+    """Resolve an automatic double-cable block-solver choice for a backend."""
+
+    if solver == "auto":
+        normalized = "" if platform is None else platform.lower()
+        return "pcr" if normalized in _GPU_PLATFORMS else "thomas"
+    if solver in {"thomas", "pcr"}:
+        return cast(ResolvedDoubleCableBlockSolver, solver)
+    raise ValueError(
+        "double_cable_block_solver must be 'auto', 'thomas', or 'pcr'."
+    )
 
 
 @dataclass(frozen=True)
@@ -135,14 +156,14 @@ class BatchOptions:
 
     recording: BatchRecording = field(default_factory=BatchRecording.full)
     time_chunk_steps: int | None = None
-    double_cable_block_solver: DoubleCableBlockSolver = "thomas"
+    double_cable_block_solver: DoubleCableBlockSolver = "auto"
 
     @classmethod
     def full(
         cls,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record full Vm, optionally chunking the time loop."""
 
@@ -157,7 +178,7 @@ class BatchOptions:
         cls,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record the center compartment only."""
 
@@ -173,7 +194,7 @@ class BatchOptions:
         count: int = 8,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record evenly spaced compartment probes."""
 
@@ -188,7 +209,7 @@ class BatchOptions:
         cls,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "thomas",
+        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record no Vm trace, typically for solver-side observer runs."""
 
@@ -203,9 +224,9 @@ class BatchOptions:
             raise TypeError("recording must be a BatchRecording.")
         if self.time_chunk_steps is not None and int(self.time_chunk_steps) < 1:
             raise ValueError("time_chunk_steps must be >= 1.")
-        if self.double_cable_block_solver not in {"thomas", "pcr"}:
+        if self.double_cable_block_solver not in _DOUBLE_CABLE_BLOCK_SOLVERS:
             raise ValueError(
-                "double_cable_block_solver must be either 'thomas' or 'pcr'."
+                "double_cable_block_solver must be 'auto', 'thomas', or 'pcr'."
             )
 
 
@@ -214,5 +235,7 @@ __all__ = [
     "BatchRecording",
     "BatchRecordingMode",
     "DoubleCableBlockSolver",
+    "ResolvedDoubleCableBlockSolver",
     "SolverOptions",
+    "resolve_double_cable_block_solver",
 ]

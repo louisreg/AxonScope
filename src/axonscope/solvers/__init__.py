@@ -9,7 +9,12 @@ from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
 from axonscope.solvers.kernels import DoubleCableKernel, KernelResult, SingleCableKernel
-from axonscope.solvers.options import BatchOptions, BatchRecording, SolverOptions
+from axonscope.solvers.options import (
+    BatchOptions,
+    BatchRecording,
+    SolverOptions,
+    resolve_double_cable_block_solver,
+)
 from axonscope.solvers.runtime import (
     CableRuntime,
     ExtracellularRuntime,
@@ -34,6 +39,7 @@ __all__ = [
     "BatchOptions",
     "BatchRecording",
     "SolverOptions",
+    "resolve_double_cable_block_solver",
     "DoubleCableBatchKernel",
     "SingleCableVStimBatchKernel",
     "SingleCableKernel",
