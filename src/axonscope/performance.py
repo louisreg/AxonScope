@@ -15,6 +15,7 @@ from axonscope.population import AxonPopulation
 from axonscope.recording import Recording
 from axonscope.solvers import BatchOptions
 from axonscope.solvers.common import simulation_step_count
+from axonscope.stimulation import IntracellularCurrentClamp
 from axonscope.utils import units
 
 
@@ -292,6 +293,14 @@ def estimate_simulation(
         is_population=is_population_run,
     )
     recording_width_max = max(recording_widths)
+    intracellular_context_count = _intracellular_context_count(instances)
+    max_intracellular_contexts = _max_intracellular_context_count(instances)
+    sparse_intracellular_input = _uses_sparse_intracellular_input_estimate(
+        instances,
+        observers=observers,
+        recording_width_max=recording_width_max,
+        is_population=is_population_run,
+    )
 
     items: list[MemoryEstimateItem] = []
     items.append(
@@ -314,16 +323,48 @@ def estimate_simulation(
             note="batched intrinsic positions",
         )
     )
-    items.append(
-        _item(
-            "inputs.intracellular_current_density",
-            (axon_count, step_count, max_nx),
-            dtype,
-            role="kernel_input",
-            retained=False,
-            note="current batch backend materializes Iinj[B,Nt,Nx]",
+    if sparse_intracellular_input:
+        items.append(
+            _item(
+                "inputs.intracellular_current_density_sparse",
+                (axon_count, step_count, max_intracellular_contexts),
+                dtype,
+                role="kernel_input",
+                retained=False,
+                note="observer-only current-clamp path keeps Iinj sparse over compartments",
+            )
         )
-    )
+        items.append(
+            _item(
+                "inputs.intracellular_current_indices",
+                (axon_count, max_intracellular_contexts),
+                np.dtype("int32"),
+                role="kernel_input",
+                retained=False,
+                note="target compartment per sparse current-clamp slot",
+            )
+        )
+        items.append(
+            _item(
+                "inputs.intracellular_current_mask",
+                (axon_count, max_intracellular_contexts),
+                np.dtype("bool"),
+                role="kernel_input",
+                retained=False,
+                note="valid sparse current-clamp slots",
+            )
+        )
+    else:
+        items.append(
+            _item(
+                "inputs.intracellular_current_density",
+                (axon_count, step_count, max_nx),
+                dtype,
+                role="kernel_input",
+                retained=False,
+                note="current batch backend materializes Iinj[B,Nt,Nx]",
+            )
+        )
 
     context_count = _context_count(instances)
     electrode_rows = _electrode_row_count(instances)
@@ -397,6 +438,11 @@ def estimate_simulation(
         recommendations=recommendations,
         metadata={
             "context_count": context_count,
+            "intracellular_context_count": intracellular_context_count,
+            "max_intracellular_contexts": max_intracellular_contexts,
+            "intracellular_input_format": (
+                "sparse_current_clamp" if sparse_intracellular_input else "dense"
+            ),
             "electrode_rows": electrode_rows,
             "unique_stimulus_count": stimulus_count,
             "recording_policy": _recording_label(recording, batch_options),
@@ -496,6 +542,46 @@ def _unique_stimulus_count(instances: Sequence[AxonInstance]) -> int:
     return len(seen)
 
 
+def _intracellular_context_rows(instances: Sequence[AxonInstance]) -> tuple[tuple[Any, ...], ...]:
+    rows: list[tuple[Any, ...]] = []
+    for instance in instances:
+        rows.append(tuple(getattr(instance, "intracellular_contexts", ())))
+    return tuple(rows)
+
+
+def _intracellular_context_count(instances: Sequence[AxonInstance]) -> int:
+    return sum(len(row) for row in _intracellular_context_rows(instances))
+
+
+def _max_intracellular_context_count(instances: Sequence[AxonInstance]) -> int:
+    return max((len(row) for row in _intracellular_context_rows(instances)), default=0)
+
+
+def _all_intracellular_contexts_are_current_clamps(
+    instances: Sequence[AxonInstance],
+) -> bool:
+    for row in _intracellular_context_rows(instances):
+        for context in row:
+            if not isinstance(context, IntracellularCurrentClamp):
+                return False
+    return True
+
+
+def _uses_sparse_intracellular_input_estimate(
+    instances: Sequence[AxonInstance],
+    *,
+    observers: Sequence[Any] | None,
+    recording_width_max: int,
+    is_population: bool,
+) -> bool:
+    return (
+        is_population
+        and bool(observers)
+        and recording_width_max == 0
+        and _all_intracellular_contexts_are_current_clamps(instances)
+    )
+
+
 def _estimate_guidance(
     items: Sequence[MemoryEstimateItem],
     *,
@@ -508,6 +594,20 @@ def _estimate_guidance(
     warnings: list[str] = []
     recommendations: list[str] = []
     item_map = {item.name: item for item in items}
+
+    dense_iinj = item_map.get("inputs.intracellular_current_density")
+    sparse_iinj = item_map.get("inputs.intracellular_current_density_sparse")
+    if dense_iinj is not None and observers and recording_width_max == 0:
+        warnings.append(
+            "Observer-only run still estimates dense Iinj[B,Nt,Nx] "
+            f"({dense_iinj.mib:.3f} MiB); sparse lowering applies only to "
+            "batch current-clamp rows."
+        )
+    if sparse_iinj is not None:
+        recommendations.append(
+            "Observer-only current-clamp input is estimated with sparse "
+            f"compartment slots ({sparse_iinj.mib:.3f} MiB before indices/mask)."
+        )
 
     dense_vext = item_map.get("inputs.extracellular_potential_mid")
     factorized = item_map.get("footprints.factorized_rows")

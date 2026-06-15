@@ -69,6 +69,7 @@ def main() -> None:
         precision=axs.PrecisionPolicy.float32(),
     )
     print(estimate.format())
+    print(f"intracellular input: {estimate.metadata['intracellular_input_format']}")
 
     # Step 6: write diagnostic files into a temporary folder for inspection.
     output_dir = Path(tempfile.mkdtemp(prefix="axonscope-hotpaths-"))

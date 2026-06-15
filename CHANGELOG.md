@@ -210,6 +210,11 @@ The format is inspired by Keep a Changelog.
   `colab_cpu_gpu_kernel_realistic_long_20260615_103306`, showing a GPU total
   speedup on the mixed-population workload while dense input materialization
   and launch/setup costs still dominate wall time.
+- Added Phase 7.6 long observer-only Colab evidence from
+  `colab_cpu_gpu_kernel_observer_long_20260615_104356`, showing stable
+  observer-only GPU speedups with zero retained Vm and exposing dense
+  intracellular input materialization plus observer result splitting as the next
+  hotpath targets.
 
 ### Changed
 
@@ -256,6 +261,13 @@ The format is inspired by Keep a Changelog.
 - Updated the Colab hotpath protocol and README to recommend longer
   observer-only and realistic mixed-population runs when evaluating actual
   CPU/GPU solver scaling.
+- Reduced observer-only pool result packaging overhead by carrying solver-side
+  observations as batched cohort observations instead of eagerly slicing and
+  re-merging one `AnalysisResult` per axon row.
+- Reduced observer-only current-clamp input memory in homogeneous single-cable
+  batch kernels by lowering point clamps to sparse compartment slots instead of
+  materializing dense `Iinj[B,Nt,Nx]`; hotpath metadata and simulation estimates
+  now report the `sparse_current_clamp` input format.
 - Moved batch JAX execution out of `dispatcher/execution.py`; the dispatcher
   now orchestrates groups and delegates compatible batch groups to the JAX
   backend runner through a neutral `DispatchResult` record.

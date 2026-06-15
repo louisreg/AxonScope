@@ -209,6 +209,7 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
 
     assert compact.recording_manifest.available == ()
     assert compact.observations is not None
+    assert compact.cohorts[0].observations is compact.observations
     np.testing.assert_allclose(
         compact.observations["peak_voltage"].values,
         recorded.analyze(peak).values,

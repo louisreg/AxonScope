@@ -21,9 +21,9 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
-- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, run on Colab GPU/CPU, and optimized once.
-- [ ] Next priority before Phase 8: run the new long Colab CPU/GPU cases so kernel scaling is measured with enough time steps.
-- [ ] Next implementation phase after Phase 7.6: Phase 8, callable studies/reuse policies/retention policies.
+- [x] Phase 7.6 evidence gate is complete: realistic mixed-population, hotpath-matrix, and long observer-only CPU/GPU traces have been run and analyzed.
+- [ ] Next priority before broad Phase 8 APIs: finish the targeted hotpath cleanup by re-checking double-cable/MRG-like runs and realistic extracellular-drive runs after the first sparse current-clamp/observer packaging pass.
+- [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
 ## Phase 7.6 Priority Before Phase 8
@@ -126,7 +126,7 @@ realistic populations, not just clean homogeneous smoke workloads.
   - `kernel_realistic_long` runs `realistic_mixed_population`, size `500`,
     `duration=5 ms`, `dt=0.01 ms`, and `51` compartments to test realistic
     heterogeneity after the observer-only kernel probe.
-- [ ] Run and analyze the long Colab CPU/GPU cases before Phase 8.
+- [x] Run and analyze the long Colab CPU/GPU cases before Phase 8.
   - Start with `CASE = "kernel_observer_long"` in
     `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`.
   - Then run `CASE = "kernel_realistic_long"` if the observer-only trace looks
@@ -151,10 +151,62 @@ realistic populations, not just clean homogeneous smoke workloads.
   - Next required trace is still `kernel_observer_long`, because
     `Recording.none()`/observers should isolate solver-side observer scaling
     from dense retained-output behavior.
-  - If `runtime.prepare` still dominates, investigate deeper structural
-    dispatcher caches and JAX transfer/compile boundaries.
-  - If `kernel.enqueue`, input materialization, or result packaging dominates,
-    split Phase 7.6 into targeted hotpath tickets before Phase 8.
+  - `kernel_observer_long` run analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_104356/`.
+  - Observer-only GPU total speedups are stable and meaningful:
+    `337.4 ms` GPU versus `1988.6 ms` CPU at `n=500` (`5.89x`), and
+    `673.4 ms` GPU versus `3884.2 ms` CPU at `n=1000` (`5.77x`).
+  - Observer-only retained Vm is correctly eliminated: `vm_shapes=[]`,
+    observation names are `activation`/`peak_voltage`, and
+    `retained_mib=0.0` for both `n=500` and `n=1000`.
+  - The dominant remaining GPU costs at `n=1000` are
+    `inputs.intracellular 296.3 ms`, `results.split_batch 170.6 ms`, and
+    `kernel.enqueue 146.8 ms`; `kernel.wait` is effectively zero for the
+    compact observer output path.
+  - The memory estimate confirms the next pressure point:
+    `Iinj[B,Nt,Nx]` alone is `194.6 MiB` at `n=1000`, `Nt=1000`, `Nx=51`,
+    even though no Vm trace is retained.
+
+- [ ] Phase 7.6 targeted cleanup before broad Phase 8 APIs.
+  - [x] Add a compact/factorized intracellular-drive path for simple current clamps
+    so observer-only and study runs do not have to materialize dense
+    `Iinj[B,Nt,Nx]` when the input is sparse in space and structured in time.
+    - Implemented first for homogeneous single-cable batch observer-only runs:
+      point current clamps lower to `sparse_current_clamp` arrays
+      `(B, Nt, K)` plus `(B, K)` indices/masks and are scattered inside the
+      solver observer scan.
+    - Local validation benchmark on 2026-06-15:
+      `benchmark/results/hotpaths/phase7_6_after_sparse_iinj_n1000/`.
+      At `n=1000`, `Nt=1000`, `Nx=51`, estimated `Iinj` drops from the previous
+      dense `194.6 MiB` shape to `3.8 MiB` for `density_mid` plus tiny
+      indices/mask arrays; `retained_mib=0.0` remains true.
+    - Local CPU timing note: `inputs.intracellular` improved to `98.2 ms`
+      compared with the previous dense local trace around `239 ms`, while the
+      sparse scatter shifts some cost into `kernel.enqueue`; verify on Colab GPU
+      before treating this as a speed win rather than a memory win.
+    - Targeted validation on 2026-06-15: compileall passed for
+      `src/axonscope`, `examples/advanced`, and `tests/unit`; mypy passed on
+      `batch_inputs.py`, `input_batches.py`, `batch_kernels.py`, and
+      `performance.py`; targeted unit tests passed (`22 passed`), with an
+      earlier broader batch/dispatcher/analysis/hotpath run at `47 passed`.
+  - [x] Reduce the first layer of `results.split_batch` cost for observer-only runs by avoiding
+    expensive per-row public packaging where a compact population observation
+    can be carried until the user indexes/reports rows.
+    - Done for the first layer: solver-side observations now stay attached as
+      batched cohort observations instead of being eagerly sliced/re-merged
+      into one `AnalysisResult` per axon row.
+    - Remaining cost: dispatch still materializes one `DispatchResult` per row;
+      deeper savings require a group/cohort-level dispatch result path.
+  - Before declaring this cleanup done, re-check the same bottleneck map on
+    double-cable/MRG-like runs; this is a long-term priority path, not an
+    optional edge case.
+  - Before declaring this cleanup done, re-check extracellular stimulation
+    runs with realistic `ExtracellularFootprint`/`ExtracellularDrive` usage,
+    because dense `Vstim[B,Nt,Nx]` is expected to matter as much as dense
+    `Iinj[B,Nt,Nx]` for the real product workload.
+  - Keep padded single-cable group collapsing as a later backend task until
+    row-specific recording selectors and observer masks are supported inside
+    padded kernels.
 - [ ] Extend realistic population benchmark workloads if the first traces show
   missing coverage.
   - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`

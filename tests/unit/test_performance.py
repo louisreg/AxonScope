@@ -49,6 +49,27 @@ def test_simulation_estimate_counts_center_recording_memory():
     assert "outputs.recorded_vm" in estimate.format()
 
 
+def test_observer_only_population_estimate_uses_sparse_current_clamp_inputs():
+    axon = _hh(compartments=5)
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    simulation = axs.AxonSimulation(
+        axs.AxonPopulation([_clamped_instance(axon), _clamped_instance(axon)]),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[peak],
+    )
+
+    estimate = simulation.estimate()
+
+    assert estimate.metadata["intracellular_input_format"] == "sparse_current_clamp"
+    assert estimate.item("inputs.intracellular_current_density_sparse").shape == (2, 2, 1)
+    assert estimate.item("inputs.intracellular_current_indices").shape == (2, 1)
+    assert estimate.item("outputs.recorded_vm").shape == (2, 2, 0)
+    with pytest.raises(KeyError):
+        estimate.item("inputs.intracellular_current_density")
+
+
 def test_extracellular_estimate_surfaces_dense_vstim_and_factorized_footprint():
     axon = _hh(compartments=5)
     stimulus = axs.Stimulus.pulse(

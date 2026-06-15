@@ -7,7 +7,7 @@ backend arrays for batch execution.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Sequence, cast
 
 import jax
 import jax.numpy as jnp
@@ -25,6 +25,7 @@ from axonscope.stimulation.runtime import (
     compile_intracellular_contexts,
     compile_stimulus,
 )
+from axonscope.solvers.batch_inputs import SparseIntracellularCurrentDensityBatch
 from axonscope.solvers.runtime import SolverRuntime
 from axonscope.solvers.axon_runtime import SolverAxon
 from axonscope.solvers.common import simulation_step_count
@@ -143,6 +144,50 @@ def build_intracellular_current_density_batch(
     )
 
 
+def can_build_sparse_intracellular_current_density_batch(
+    axons: Sequence[AxonLike],
+) -> bool:
+    """Return whether axon rows contain only point current clamps."""
+
+    return _can_build_intracellular_rows_from_clamps(axons)
+
+
+def build_sparse_intracellular_current_density_batch(
+    axons: Sequence[AxonLike],
+    runtime: SolverRuntime,
+    *,
+    solver_axons: Sequence[SolverAxon] | None = None,
+    target_nx: int | None = None,
+) -> SparseIntracellularCurrentDensityBatch:
+    """Build sparse ``Iinj`` data from point current clamps.
+
+    This keeps the time axis but removes the dense compartment axis. It is
+    intended for observer-only kernels where the current density can be
+    scattered into the solver state inside each time step.
+    """
+
+    if not _can_build_intracellular_rows_from_clamps(axons):
+        raise TypeError("sparse intracellular batches currently support current clamps only.")
+    if solver_axons is not None and len(solver_axons) != len(axons):
+        raise ValueError("solver_axons must contain one row per axon.")
+    dtype = runtime.membrane.dtype
+    target_width = runtime.membrane.Nx if target_nx is None else int(target_nx)
+    t_mid = (
+        jnp.arange(runtime.grid.Nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
+    ) * jnp.asarray(runtime.grid.dt_ms, dtype=dtype)
+    resolved_solver_axons = tuple(
+        runtime.axon if solver_axons is None else solver_axons[index]
+        for index in range(len(axons))
+    )
+    return _build_sparse_intracellular_current_density_batch_from_clamps(
+        axons,
+        resolved_solver_axons,
+        t_mid,
+        target_nx=target_width,
+        dtype_local=dtype,
+    )
+
+
 def _can_build_intracellular_rows_from_clamps(axons: Sequence[AxonLike]) -> bool:
     for axon in axons:
         for context in getattr(axon, "intracellular_contexts", ()):
@@ -189,6 +234,63 @@ def _build_intracellular_current_density_batch_from_clamps(
                 np.asarray(1e-3, dtype=np_dtype) / area_cm2[idx]
             )
     return jnp.asarray(values, dtype=dtype_local)
+
+
+def _build_sparse_intracellular_current_density_batch_from_clamps(
+    axons: Sequence[AxonLike],
+    solver_axons: Sequence[SolverAxon],
+    t_ms: Array,
+    *,
+    target_nx: int,
+    dtype_local: jnp.dtype,
+) -> SparseIntracellularCurrentDensityBatch:
+    np_dtype = np.dtype(dtype_local)
+    t = np.asarray(t_ms, dtype=np_dtype)
+    max_contexts = max(
+        (len(tuple(getattr(axon, "intracellular_contexts", ()))) for axon in axons),
+        default=0,
+    )
+    density_mid = np.zeros(
+        (len(axons), int(t.shape[0]), int(max_contexts)),
+        dtype=np_dtype,
+    )
+    indices = np.zeros((len(axons), int(max_contexts)), dtype=np.int32)
+    mask = np.zeros((len(axons), int(max_contexts)), dtype=bool)
+    current_cache: dict[int, np.ndarray] = {}
+
+    for row_index, (axon, solver_axon) in enumerate(zip(axons, solver_axons, strict=True)):
+        if int(solver_axon.n_compartments) > int(target_nx):
+            raise ValueError(
+                f"target_nx must be >= array width, got target_nx={target_nx}, "
+                f"width={solver_axon.n_compartments}."
+            )
+        contexts = tuple(getattr(axon, "intracellular_contexts", ()))
+        if not contexts:
+            continue
+        x_um = np.asarray(solver_axon.x_um, dtype=float)
+        area_cm2 = _compartment_surface_area_cm2_numpy(solver_axon)
+        for context_index, context in enumerate(contexts):
+            idx = int(np.argmin(np.abs(x_um - float(context.position_um))))
+            cache_key = id(context.current)
+            current_nA = current_cache.get(cache_key)
+            if current_nA is None:
+                current_nA = np.asarray(
+                    context.current.evaluate(t, unit="nanoampere"),
+                    dtype=np_dtype,
+                )
+                current_cache[cache_key] = current_nA
+            density_mid[row_index, :, context_index] = current_nA * (
+                np.asarray(1e-3, dtype=np_dtype) / area_cm2[idx]
+            )
+            indices[row_index, context_index] = idx
+            mask[row_index, context_index] = True
+
+    return SparseIntracellularCurrentDensityBatch(
+        density_mid=jnp.asarray(density_mid, dtype=dtype_local),
+        indices=jnp.asarray(indices, dtype=jnp.int32),
+        mask=jnp.asarray(mask, dtype=bool),
+        target_nx=int(target_nx),
+    )
 
 
 def _compartment_surface_area_cm2_numpy(solver_axon: SolverAxon) -> np.ndarray:
@@ -528,7 +630,7 @@ def _resolve_dtype(axon: object, dtype_local: jnp.dtype | None) -> jnp.dtype:
 
 
 def _jax_scalar_dtype(dtype_like: object) -> jnp.dtype:
-    return jnp.float64 if np.dtype(dtype_like).name == "float64" else jnp.float32
+    return jnp.float64 if np.dtype(cast(Any, dtype_like)).name == "float64" else jnp.float32
 
 
 def _resolve_x_positions_m(
@@ -799,10 +901,12 @@ __all__ = [
     "ContextBatchRow",
     "FootprintEngine",
     "build_intracellular_current_density_batch",
+    "build_sparse_intracellular_current_density_batch",
     "build_footprint_vstim_batch",
     "build_footprint_vstim_initial_previous_batch",
     "build_footprint_vstim_midpoint_batch",
     "build_vstim_batch",
     "build_vstim_initial_previous_batch",
     "build_vstim_midpoint_batch",
+    "can_build_sparse_intracellular_current_density_batch",
 ]

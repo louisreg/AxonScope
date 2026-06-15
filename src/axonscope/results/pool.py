@@ -87,6 +87,11 @@ def _merge_dispatch_observations(
         return None
     if any(observation is None for observation in row_observations):
         raise ValueError("dispatch rows must either all carry observations or none do.")
+    if all(row.observations_are_batched for row in rows):
+        first = row_observations[0]
+        if not all(observation is first for observation in row_observations):
+            raise ValueError("batched dispatch observations must share one object.")
+        return first
 
     names = tuple(row_observations[0].keys())  # type: ignore[union-attr]
     merged: ObservationDict = {}
@@ -371,6 +376,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                 str(t.dtype),
                 record_indices,
                 tuple(sorted((row.observations or {}).keys())),
+                id(row.observations) if row.observations_are_batched else None,
             )
             groups.setdefault(key, []).append(row)
 
@@ -478,6 +484,11 @@ class AxonSimulationResult(Sequence[AxonResultView]):
     @property
     def observations(self) -> ObservationDict | None:
         """Compact solver-side observations in input order, if requested."""
+
+        if len(self.cohorts) == 1:
+            cohort = self.cohorts[0]
+            if cohort.input_indices == tuple(range(self.size)):
+                return cohort.observations
 
         row_observations = [view.observations for view in self]
         if not any(row_observations):

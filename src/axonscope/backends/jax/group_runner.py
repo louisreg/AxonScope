@@ -8,7 +8,6 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.analysis.core import AnalysisResult
 from axonscope.benchmarking.hotpaths import (
     benchmark_array_metadata,
     benchmark_span,
@@ -19,8 +18,10 @@ from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher.results import DispatchResult
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
+    build_sparse_intracellular_current_density_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
+    can_build_sparse_intracellular_current_density_batch,
 )
 from axonscope.icm.backends import RowIndexedICMBackend
 from axonscope.preparation.cohort import PreparedCohort
@@ -135,6 +136,23 @@ def _kernel_batch_options(group: DispatchGroup, options: BatchOptions) -> BatchO
     )
 
 
+def _should_use_sparse_intracellular_batch(
+    *,
+    group: DispatchGroup,
+    cohort: PreparedCohort,
+    kernel_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+) -> bool:
+    """Return whether sparse point-clamp lowering can feed this group."""
+
+    return (
+        group.mode == "single"
+        and observers is not None
+        and kernel_options.recording.mode == "none"
+        and can_build_sparse_intracellular_current_density_batch(cohort.axons)
+    )
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -190,6 +208,18 @@ def _run_single_cable_batch_group(
             ),
             context_count=cohort.context_count,
         )
+    kernel_options = _kernel_batch_options(group, batch_options)
+    observer_plan = _observer_plan_for_cohort(
+        observers,
+        cohort=cohort,
+        dtype=runtime.membrane.dtype,
+    )
+    use_sparse_intracellular = _should_use_sparse_intracellular_batch(
+        group=group,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        observers=observers,
+    )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -197,15 +227,40 @@ def _run_single_cable_batch_group(
         nt=runtime.grid.Nt,
         nx=group.nx,
     ):
-        iinj_mid = build_intracellular_current_density_batch(
-            cohort.axons,
-            runtime,
-            solver_axons=cohort.solver_axons,
-            target_nx=cohort.nx,
-        )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
-        )
+        if use_sparse_intracellular:
+            iinj_mid = build_sparse_intracellular_current_density_batch(
+                cohort.axons,
+                runtime,
+                solver_axons=cohort.solver_axons,
+                target_nx=cohort.nx,
+            )
+            record_benchmark_metadata(
+                input_format="sparse_current_clamp",
+                target_nx=iinj_mid.target_nx,
+                max_sparse_entries=iinj_mid.max_sparse_entries,
+                **benchmark_array_metadata(
+                    "iinj_density_mid",
+                    iinj_mid.density_mid,
+                    role="kernel_input",
+                ),
+                **benchmark_array_metadata(
+                    "iinj_indices",
+                    iinj_mid.indices,
+                    role="kernel_input",
+                ),
+                **benchmark_array_metadata("iinj_mask", iinj_mid.mask, role="kernel_input"),
+            )
+        else:
+            iinj_mid = build_intracellular_current_density_batch(
+                cohort.axons,
+                runtime,
+                solver_axons=cohort.solver_axons,
+                target_nx=cohort.nx,
+            )
+            record_benchmark_metadata(
+                input_format="dense",
+                **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input"),
+            )
     with benchmark_span(
         "inputs.extracellular",
         group_id=group.group_id,
@@ -226,12 +281,6 @@ def _run_single_cable_batch_group(
         record_benchmark_metadata(
             **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
         )
-    kernel_options = _kernel_batch_options(group, batch_options)
-    observer_plan = _observer_plan_for_cohort(
-        observers,
-        cohort=cohort,
-        dtype=runtime.membrane.dtype,
-    )
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,
@@ -845,35 +894,6 @@ def _group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarra
     )
 
 
-def _slice_analysis_result(result: AnalysisResult, row_index: int) -> AnalysisResult:
-    """Return one row from a batched observer result."""
-
-    return AnalysisResult(
-        name=result.name,
-        values=np.asarray(result.values)[row_index : row_index + 1],
-        statuses=(result.statuses[row_index],),
-        messages=(result.messages[row_index],),
-        unit=result.unit,
-        definition=result.definition,
-        events=(result.events[row_index],),
-        input_requirements=(result.input_requirements[row_index],),
-    )
-
-
-def _slice_batch_observations(
-    observations: dict[str, Any] | None,
-    row_index: int,
-) -> dict[str, Any] | None:
-    """Slice batched kernel observations into one dispatch row."""
-
-    if observations is None:
-        return None
-    return {
-        name: _slice_analysis_result(observation, row_index)
-        for name, observation in observations.items()
-    }
-
-
 def _posthoc_observations_for_row(
     item: DispatchItem,
     *,
@@ -933,7 +953,8 @@ def _dispatch_results_from_batch(
         if row_vm is None:
             record_indices = None
 
-        row_observations = _slice_batch_observations(observations, row_index)
+        row_observations = observations
+        observations_are_batched = row_observations is not None
         if row_observations is None and observer_definitions and row_vm is not None:
             row_observations = _posthoc_observations_for_row(
                 item,
@@ -942,6 +963,7 @@ def _dispatch_results_from_batch(
                 record_indices=record_indices,
                 observer_definitions=observer_definitions,
             )
+            observations_are_batched = False
 
         results.append(
             DispatchResult(
@@ -954,6 +976,7 @@ def _dispatch_results_from_batch(
                 method=method,
                 record_indices=record_indices,
                 observations=row_observations,
+                observations_are_batched=observations_are_batched,
                 group_size=group.size,
                 batch_kind=group.batch_kind,
                 geometry_shared=group.geometry_shared,

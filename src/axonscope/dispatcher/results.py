@@ -22,6 +22,7 @@ class DispatchResult:
     method: str
     record_indices: tuple[int, ...] | None = None
     observations: dict[str, Any] | None = None
+    observations_are_batched: bool = False
     group_size: int = 1
     batch_kind: str = "scalar"
     geometry_shared: bool = True

@@ -4,6 +4,7 @@ import axonscope as axs
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
+    build_sparse_intracellular_current_density_batch,
     build_vstim_midpoint_batch,
 )
 from axonscope.dispatcher import build_dispatch_plan, run_pool
@@ -13,6 +14,9 @@ from axonscope.dispatcher.runtime_batches import (
     x_positions_batch_m,
 )
 from axonscope.solvers.axon_runtime import build_solver_axon
+from axonscope.solvers.batch_inputs import (
+    materialize_sparse_intracellular_current_density_batch,
+)
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
@@ -526,3 +530,56 @@ def test_intracellular_current_density_batch_uses_current_clamps():
     expected[0, :, idx] = 2.0e-3 / area_cm2[idx]
     expected[1, :, idx] = -1.0e-3 / area_cm2[idx]
     np.testing.assert_allclose(np.asarray(batch), expected)
+
+
+def test_sparse_intracellular_current_density_batch_matches_dense_clamps():
+    model = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_a = axs.AxonInstance(model)
+    axon_b = axs.AxonInstance(model)
+    axon_a.add_current_clamp(
+        position=50.0 * axs.um,
+        current=Stimulus.constant(2.0 * axs.nA, start=0.0 * axs.ms),
+    )
+    axon_a.add_current_clamp(
+        position=50.0 * axs.um,
+        current=Stimulus.constant(0.5 * axs.nA, start=0.0 * axs.ms),
+    )
+    axon_b.add_current_clamp(
+        position=30.0 * axs.um,
+        current=Stimulus.constant(-1.0 * axs.nA, start=0.0 * axs.ms),
+    )
+    solver_axon = build_solver_axon(axon_a)
+    runtime = prepare_solver_runtime(
+        axon_a,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        solver_axon=solver_axon,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+
+    dense = build_intracellular_current_density_batch(
+        [axon_a, axon_b],
+        runtime,
+        solver_axons=[solver_axon, solver_axon],
+    )
+    sparse = build_sparse_intracellular_current_density_batch(
+        [axon_a, axon_b],
+        runtime,
+        solver_axons=[solver_axon, solver_axon],
+    )
+
+    assert sparse.density_mid.shape == (2, 2, 2)
+    assert sparse.indices.shape == (2, 2)
+    assert sparse.mask.shape == (2, 2)
+    np.testing.assert_allclose(
+        np.asarray(materialize_sparse_intracellular_current_density_batch(sparse)),
+        np.asarray(dense),
+    )
