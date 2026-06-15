@@ -21,7 +21,15 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
-- [x] Phase 7.6 evidence gate is complete: realistic mixed-population, hotpath-matrix, and long observer-only CPU/GPU traces have been run and analyzed.
+- [x] Phase 7.6 initial evidence gate is complete: realistic mixed-population, hotpath-matrix, and long observer-only CPU/GPU traces have been run and analyzed.
+- [x] Local CPU path comparison on 2026-06-15: single-cable intra
+  `89.9 ms`, single-cable point-source extra `76.0 ms`, and MRG
+  double-cable extra `176.0 ms` at `n=100`, `duration=2 ms`,
+  `dt=0.02 ms`, `target compartments=51`, warm run.
+- [x] Basic example 06/07/08 profiling confirms the apparent slowness is not
+  plotting or surrounding protocol code: the time is dominated by simulation,
+  first-call JAX/runtime preparation, kernel enqueue/wait, and MRG/double-cable
+  work.
 - [x] First observer-only `results.split_batch` cleanup is implemented locally:
   batched solver-side observations now stay in one compact dispatch cohort
   instead of materializing one internal dispatch result per axon row.
@@ -33,13 +41,60 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Pulse-vectorized sparse current-clamp Colab validation is complete:
   `colab_cpu_gpu_kernel_observer_long_20260615_132920` reduced GPU
   `inputs.intracellular` at `n=1000` from `150.2 ms` to `23.8 ms`.
-- [ ] Next priority before broad Phase 8 APIs: run the new
-  `double_cable_extracellular` Colab case, then inspect realistic
-  extracellular-drive/footprint reuse pressure.
-- [ ] Next implementation phase after the targeted hotpath cleanup: Phase 8, callable studies/reuse policies/retention policies.
+- [ ] Next priority before broad Phase 8 APIs: finish the intra-vs-extra and
+  single-vs-double-cable hotpath matrix, then optimize only the paths where
+  evidence shows stable stalls.
+- [ ] Next implementation phase after the targeted hotpath/API cleanup: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
-## Phase 7.6 Priority Before Phase 8
+## Immediate Work Queue Before Phase 8
+
+This is the current order of attack. The detailed history stays below, but new
+work should start here so the TODO remains readable.
+
+- [ ] Phase 7.6.1: finish the benchmark evidence matrix.
+  - Compare intra versus extra, analytical point-source versus typed
+    footprint/drive, single-cable versus double-cable, recording full/center/
+    none, observer on/off, cold versus warm, and precomputed-input solver-only
+    paths.
+  - Keep MRG/double-cable measurements clearly labelled; do not mix them with
+    pure formulation comparisons unless the model/protocol/output policy is
+    controlled.
+- [ ] Phase 7.6.2: attack memory-transfer and long-run execution.
+  - Add chunked long/gross simulations: keep prepared runtime, geometry,
+    dispatch plan, recording policy, and solver state stable, then update only
+    the stimulus/current chunk between solver calls.
+  - Use chunking to avoid transferring/materializing full `B x Nt x Nx`
+    tensors for long runs when only a moving time window is needed.
+  - When looping over a pool or amplitude/stimulus sweep, reuse prepared
+    artifacts and minimize host/device transfers instead of rebuilding and
+    moving the whole pool every iteration.
+- [ ] Phase 7.6.3: add backend choices for tiny workloads.
+  - Prototype a SciPy backend for tiny batches and scalar-ish workloads, using
+    SciPy tridiagonal/banded solvers rather than a hand-rolled NumPy solver.
+  - Benchmark the SciPy path against JAX CPU/GPU for tiny `B`, short `Nt`, and
+    threshold-search loops where JAX compile/enqueue overhead dominates.
+- [ ] Phase 7.7: clean the stimulation/placement API before Phase 8.
+  - Remove `y`/`z` placement from axon model constructors entirely. An `Axon`
+    describes cable/membrane/length/diameter/layout only; physical placement
+    belongs to an instance/population/study layer.
+  - Remove public `intracellular_context` / `extracellular_context` terminology
+    and APIs. Replace them with clean user-facing stimulation concepts:
+    current clamps, electrodes, point sources, extracellular drives/footprints,
+    and study inputs.
+  - Keep PointSource and related electrode/footprint concepts, but make sure
+    they do not force users through generic "context" objects.
+  - Update tests, docs, and examples in the same pass; no retrocompatibility is
+    needed while the package is pre-release.
+- [ ] Phase 7.8: examples learning-path cleanup.
+  - Update examples after the API cleanup.
+  - Keep examples verbose, didactic, line-by-line, commented, and plot-rich
+    when a plot helps demonstrate signals, metrics, activation, recruitment,
+    velocity, observer outputs, or benchmark bottlenecks.
+  - Keep heavy benchmark evidence under `benchmark/`; examples should guide
+    users, not act as stress-test scripts.
+
+## Phase 7.6 Benchmark And Hotpath Workstream
 
 This phase should improve evidence quality before adding callable studies and
 reuse policies. The goal is to know which execution paths still stall on
@@ -369,6 +424,20 @@ realistic populations, not just clean homogeneous smoke workloads.
       local costs are dominated by `kernel.enqueue 23.4 ms` and
       `kernel.wait 19.3 ms`, so the next meaningful decision needs a Colab GPU
       trace rather than another CPU-only micro-optimization.
+    - Local path matrix on 2026-06-15, while Colab is unavailable:
+      `benchmark/results/hotpaths/local_path_matrix_single_intra_n100/`,
+      `benchmark/results/hotpaths/local_path_matrix_single_extra_n100/`, and
+      `benchmark/results/hotpaths/local_path_matrix_double_extra_n100/`.
+      Warm CPU totals at `n=100`, `duration=2 ms`, `dt=0.02 ms`, target
+      `51` compartments are: single-cable intracellular `89.9 ms`,
+      single-cable point-source extracellular `76.0 ms`, and MRG double-cable
+      extracellular `176.0 ms`.
+    - Interpretation: on this warm single-cable probe, extracellular
+      stimulation is not slower than intracellular stimulation end-to-end
+      (`inputs.extracellular 2.42 ms` versus `inputs.intracellular 9.70 ms`
+      on the intra workload). The important jump is the MRG/double-cable path:
+      `kernel.wait 143.2 ms` and `kernel.enqueue 16.0 ms`, versus roughly
+      `58-67 ms` wait and `3.6-3.8 ms` enqueue on single-cable.
   - Before declaring this cleanup done, re-check extracellular stimulation
     runs with realistic `ExtracellularFootprint`/`ExtracellularDrive` usage,
     because dense `Vstim[B,Nt,Nx]` is expected to matter as much as dense
@@ -376,6 +445,38 @@ realistic populations, not just clean homogeneous smoke workloads.
   - Keep padded single-cable group collapsing as a later backend task until
     row-specific recording selectors and observer masks are supported inside
     padded kernels.
+- [ ] Phase 7.6.1 plan: make intra-vs-extra and single-vs-double-cable
+  comparisons first-class benchmark evidence.
+  - [ ] Add explicit hotpath matrix rows that compare the same model/geometry
+    across stimulation and recording policies: no stimulation observer-only,
+    intracellular current clamp, analytical point-source extracellular,
+    typed `ExtracellularFootprint`/`ExtracellularDrive`, `Recording.full()`,
+    `Recording.center(...)`, `Recording.none()` with observers, cold run, and
+    warm run.
+  - [ ] Add a same-protocol single-cable versus double-cable comparison where
+    the output policy is identical, then keep MRG-labelled double-cable results
+    separate from pure formulation comparisons.
+  - [ ] Add a solver-only or precomputed-input workload that bypasses dispatch
+    planning and input materialization, so kernel throughput can be separated
+    from preprocessing.
+  - [ ] Add a JAX compilation diagnostic mode for benchmark runs
+    (`JAX_LOG_COMPILES`/first-call signature labels) to make cold-start costs
+    explicit instead of mixing them with steady-state timings.
+  - [ ] Optimize extracellular paths only after the matrix identifies a stable
+    stall: first candidates are solver-side factorized forcing
+    `waveform[Nt] * footprint[B,Nx]`, avoiding dense `Vstim[B,Nt,Nx]`, and
+    comparing analytical-context lowering against typed footprint/drive
+    lowering.
+  - [ ] Optimize double-cable paths separately: add a double-cable
+    observer-only batch kernel, avoid dense zero `Iinj` when no intracellular
+    clamps are present, avoid duplicated midpoint/previous extracellular field
+    materialization, and profile whether the tridiagonal/periaxonal kernel work
+    or the host/device boundary dominates.
+  - [ ] Keep the basic examples unchanged for pedagogical output, but keep
+    their benchmark notes: example 06 is dominated by HH/MRG simulation time,
+    example 07 by first-call preparation plus repeated MRG threshold runs, and
+    example 08 by a large first population compile/preparation followed by
+    warm amplitude sweeps.
 - [ ] Extend realistic population benchmark workloads if the first traces show
   missing coverage.
   - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`
@@ -564,7 +665,8 @@ Standing rules:
     - [x] Probe-run the scale preset on the current environment on 2026-06-14: `python benchmark/hotpaths/run.py --workload all --preset scale --prefix scale_probe --no-print-summary`.
     - [x] Document the manual Google Colab GPU protocol in `benchmark/hotpaths/COLAB.md`; local GPU execution is not assumed.
     - [x] Manually run the first Google Colab GPU trace and bring it back under `benchmark/results/hotpaths/colab_gpu_YYYYMMDD/`.
-    - [x] Compare the first CPU/GPU traces against `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
+    - [x] Compare the first CPU/GPU traces against the extracted CPU/GPU
+      bottleneck notes, now represented directly in this TODO.
       - Evidence from `n=500`: GPU `kernel.wait` is negligible (`0.13 ms` intracellular-only, `0.116 ms` point-source), so the first bottleneck is not device execution wait.
       - Evidence from `n=500`: `dispatch.build_plan` is a major host-side cost (`~7.0-7.5 s` on Colab GPU, `~10.7-16.9 s` on the local CPU run).
       - Evidence from `n=500`: input materialization dominates after planning (`inputs.intracellular` up to `9.5 s`, `inputs.extracellular` up to `6.76 s` on Colab GPU).
@@ -681,7 +783,8 @@ Standing rules:
     - Updated `examples/advanced/example_17_analysis_layer.py` with online/post-hoc observer comparison.
   - Fresh final unit run on 2026-06-14 after completing Phase 6: `MPLBACKEND=Agg /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit --tb=short` (`300 passed, 1 skipped`).
 - [x] Phase 7 issue: finalize benchmark/performance story, footprint reuse, and memory estimates.
-  - [x] Reconcile `benchmark/hotpaths/` with `ideas/AXONSCOPE_BENCHMARKING_AGENT_SPEC.md` before building a larger benchmark framework.
+  - [x] Reconcile `benchmark/hotpaths/` with the extracted benchmark-agent
+    checklist before building a larger benchmark framework.
     - Decision: keep `benchmark/hotpaths/` as the lightweight evidence loop, add memory estimates to manifests, and defer the larger benchmark-agent rewrite until after solver-side observers/studies clarify the steady API.
   - [x] Keep hotpath traces as the evidence loop for CPU/GPU bottlenecks; do not overfit one Colab run.
     - `benchmark/hotpaths/run.py` now records `simulation.estimate().to_dict()` in each run manifest.
@@ -807,6 +910,21 @@ pass, not a completed audit.
 - [x] Rename public simulation placement inputs from `x_offset_um`/`y_um`/`z_um` to `x_offset`/`y`/`z`; require length units while keeping internal `*_um` fields.
 - [x] Add/update tests for unit-bearing membrane `diameter` parameters and public examples.
 - [x] Make docs consistent about public names with units versus internal canonical suffixes.
+- [ ] Phase 7.7 object/stimulation API cleanup before Phase 8.
+  - [ ] Remove any remaining public `y`/`z` placement parameters from axon
+    model constructors. Descriptive axons have length/layout/diameter/membrane
+    only; spatial placement belongs to instances/populations/studies.
+  - [ ] Remove public `intracellular_context` and `extracellular_context`
+    naming from user-facing APIs and examples.
+  - [ ] Replace generic context methods with explicit domain commands:
+    attach/add current clamp, point-source electrode, extracellular drive,
+    footprint, stimulation, or study input.
+  - [ ] Keep PointSource/electrode/footprint concepts, but make them feel like
+    first-class stimulation objects rather than hidden context plumbing.
+  - [ ] Decide which internal lower-level objects may keep "context" as an
+    implementation detail, and keep them out of the public facade and examples.
+  - [ ] Update examples, docs, public API tests, benchmark workload builders,
+    and `tests/unit/test_examples.py` in the same PR.
 
 ### API Compatibility Audit
 
@@ -856,22 +974,87 @@ become accidental public contracts.
 
 ## Backlog: Benchmarks, CPU/GPU, And Bottlenecks
 
-- [ ] Rework benchmark strategy; current benchmark story is not convincing enough --> see `ideas/AXONSCOPE_BENCHMARKING_AGENT_SPEC.md`.
+- [x] Extract the useful content from the old benchmarking and CPU/GPU idea
+  documents into this TODO, then delete those idea documents so there is one
+  active source of truth.
 - [x] Use a Phase 2.5 diagnostic pass before rebuilding the full benchmark suite: add opt-in hotpath spans, run a few representative traces, then use the evidence to steer Phase 3.
   - [x] Added `axs.enable_benchmark(...)`, `axs.disable_benchmark(...)`, `axs.benchmark_report(...)`, `axs.reset_benchmark()`, and `with axs.benchmark(...)`.
   - [x] Added raw `events.jsonl`, aggregate `summary.csv`, and `metadata.json` outputs for hotpath sessions.
   - [x] Added `examples/advanced/example_14_hotpath_benchmarking.py` as the didactic diagnostic demo.
   - [x] Added `benchmark/hotpaths/` as the registered location for Phase 2.5 workload scripts.
   - [x] Added `benchmark/hotpaths/run.py --list` and `benchmark/hotpaths/README.md` to catalog available hotpath workloads.
-- [ ] Find a robust way to benchmark CPU versus GPU for representative workloads.
-- [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits. --> see `ideas/AXONSCOPE_CPU_GPU_BOTTLENECK_ANALYSIS.md`.
+- [x] Record environment/device metadata for benchmark runs.
+- [ ] Finish the remaining benchmark-agent acceptance criteria.
+  - [ ] Implement or intentionally drop `jax_trace=True`; it currently raises
+    `NotImplementedError`.
+  - [ ] Add explicit cold-start/first-call signature labels so reports can
+    separate JAX compilation and runtime preparation from warm execution.
+  - [ ] Audit scalar `simulate(...)` instrumentation against pool
+    instrumentation and ensure both expose consistent root spans.
+  - [ ] Decide whether `level="minimal"` and `level="detailed"` are worth
+    implementing, or keep only `level="hotpaths"` and document that choice.
+  - [ ] Improve benchmark summaries with percentages of root time, median/p95
+    columns, parent names, and enough dimensions to compare runs without
+    reopening every `events.jsonl`.
+  - [ ] Keep hierarchical reporting compact, but add a percentage/tree view if
+    it helps identify the dominant stage faster.
+  - [ ] Add or refresh docs for asynchronous GPU timing, `kernel.enqueue`,
+    `kernel.wait`, first-call classification, output files, and JAX trace
+    limitations.
+  - [ ] Add skipped GPU integration tests that verify device metadata and
+    `kernel.wait` behavior when a GPU is available.
+- [x] Find a robust way to benchmark CPU versus GPU for representative workloads.
+  - Current workflow: `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` runs
+    matched GPU and forced-CPU JAX processes in Colab and downloads outputs
+    under `benchmark/results/hotpaths/`.
+- [ ] Identify current bottlenecks and where the GPU path will likely hit memory, compilation, transfer, or batching limits.
   - [x] First hotpath traces confirm the analysis direction: the immediate bottlenecks are `dispatch.build_plan`, `inputs.intracellular`, and `inputs.extracellular`, not GPU `kernel.wait`.
   - [x] Decision on timing: attack these as Phase 3.2 planning/preparation fixes now; do not wait for Phase 7 or Phase 4 backend isolation.
   - [x] Phase 3.2 used `benchmark/hotpaths/` as the evidence loop and closed the host-side planning/input bottlenecks.
-  - [ ] Keep `benchmark/hotpaths/` as the Phase 7 evidence loop for memory estimates, footprint reuse, and CPU/GPU comparisons.
+  - [x] Keep `benchmark/hotpaths/` as the Phase 7 evidence loop for memory
+    estimates, footprint reuse, and CPU/GPU comparisons.
+  - [x] Implement the first sparse intracellular-current path, zero
+    extracellular no-context path, compact observer result path, and
+    double-cable extracellular workload.
+  - [ ] Implement or reject solver-side factorized extracellular forcing:
+    pass `waveform[Nt]` and `footprint[B,Nx]` / forcing footprint into the
+    solver instead of materializing dense `Vstim[B,Nt,Nx]`.
+  - [ ] Generalize vectorized extracellular preprocessing beyond the current
+    conservative point-source fast paths: no per-fiber Python loops, no
+    device-scalar `float(...)` conversions, and no duplicated midpoint/
+    previous field construction.
+  - [ ] Special-case absent intracellular stimulation beyond the first
+    observer-only fast paths so double-cable and retained-output runs do not
+    build dense zero `Iinj[B,Nt,Nx]`.
+  - [ ] Add chunked long/gross simulations: keep runtime/cable/recording state
+    stable, update only stimulus/current windows, and limit host/device
+    transfers for long `Nt`.
+  - [ ] When looping around a pool for thresholds, recruitment, amplitude
+    sweeps, or parameter sweeps, reuse prepared artifacts and transfer only the
+    changed stimulus inputs.
+  - [ ] Add a prepared-pool/reusable-study API only after the path matrix proves
+    which artifacts should be cached: dispatch plans, runtime structures,
+    footprints, input schedules, kernels, or result policies.
+  - [ ] Add a shared-cable center-recording fast-path audit: compare
+    `Recording.full()` and `Recording.center(...)` on identical shared
+    geometry, then specialize only if center recording still misses the best
+    kernel branch.
+  - [ ] Add solver-only/precomputed-input benchmarks for both intra and extra
+    so solver throughput is separated from preprocessing and result packaging.
+  - [ ] Add a SciPy backend for tiny batches and scalar-ish threshold loops,
+    using SciPy tridiagonal/banded solvers instead of a NumPy-only reference
+    solver.
+  - [ ] Add correctness diagnostics for CPU/GPU differences around spike timing
+    once the performance matrix is stable.
 - [ ] Separate correctness validation from performance benchmarking in docs and scripts.
-- [ ] Record environment/device metadata for benchmark runs.
-- [ ] Defer the larger benchmark agent/spec implementation until after planning/preparation/cohort boundaries are clearer.
+- [ ] Clean legacy benchmark assets only after the benchmark-agent and
+  bottleneck-analysis leftovers above are closed.
+  - Existing legacy areas to classify: `benchmark/runtime/`,
+    `benchmark/results/runtime/`, `benchmark/reports/runtime/`, old
+    standalone runtime scripts, generated caches, and dated exploratory output
+    files.
+  - After cleanup, the repo should have one canonical benchmark implementation
+    and no dormant compatibility layer for old benchmark trace formats.
 
 ## Backlog: Documentation Platform
 

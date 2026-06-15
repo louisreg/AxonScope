@@ -253,6 +253,8 @@ The format is inspired by Keep a Changelog.
 - Expanded `todo.md` with the guideline-derived implementation queue through
   the object-model, typed API, extracellular footprint, planning, backend,
   result, analysis, performance, study, and serialization phases.
+- Consolidated the old benchmarking and CPU/GPU bottleneck idea documents into
+  `todo.md` as the active benchmark/API cleanup plan.
 - Clarified in `GUIDELINES.md` and `agent.md` that each new advanced concept
   or non-trivial workflow needs a runnable didactic demo in `examples/advanced/`.
 - Clarified in `agent.md` that examples should favor a line-by-line tutorial
@@ -449,6 +451,8 @@ The format is inspired by Keep a Changelog.
 - Fixed MRG extracellular validation drift visible in the gating variable `m`
   against NRV.
 - Fixed examples that still called removed stimulus/context convenience methods.
+- Fixed basic example 07 so activation-threshold tolerances use explicit
+  current units with the current public API.
 - Fixed stale internal imports that referenced the old flat module layout.
 - Removed stale playground diagnostics and Crank-Nicholson backend experiments
   that referenced older runtime internals.
