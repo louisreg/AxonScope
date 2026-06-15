@@ -14,6 +14,7 @@ from axonscope.backends.jax.input_batches import (
     build_footprint_vstim_midpoint_batch,
     build_vstim_batch,
     build_vstim_initial_previous_batch,
+    build_vstim_midpoint_and_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
 from axonscope.dispatcher.runtime_batches import (
@@ -215,6 +216,44 @@ def test_build_vstim_midpoint_batch_rejects_partial_final_step():
         build_vstim_midpoint_batch(axon, [None], tsim_ms=1.0, dt_ms=0.3)
 
 
+def test_combined_vstim_builder_matches_separate_double_cable_inputs():
+    axon = _hh_extracellular_axon()
+    contexts = tuple(axon.extracellular_contexts)
+    tsim = 0.2
+    dt = 0.05
+
+    separate_mid = build_vstim_midpoint_batch(
+        axon,
+        [contexts, contexts],
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    separate_previous = build_vstim_initial_previous_batch(
+        axon,
+        [contexts, contexts],
+        dt_ms=dt,
+    )
+    combined_mid, combined_previous = build_vstim_midpoint_and_initial_previous_batch(
+        axon,
+        [contexts, contexts],
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(combined_mid),
+        np.asarray(separate_mid),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(combined_previous),
+        np.asarray(separate_previous),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
 def test_build_vstim_batch_accepts_per_row_positions():
     axon = _hh_extracellular_axon()
     contexts = tuple(axon.extracellular_contexts)
@@ -230,6 +269,41 @@ def test_build_vstim_batch_accepts_per_row_positions():
 
     assert vext_batch.shape == (2, 1, axon.n_compartments)
     assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0
+
+
+def test_build_vstim_batch_shared_point_source_matches_context_formula():
+    axon = _hh_extracellular_axon()
+    context = axon.extracellular_contexts[0]
+    electrode = context.electrodes[0]
+    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
+    y_rows_um = np.asarray([0.0, 50.0], dtype=float)
+    t_ms = np.asarray([0.35], dtype=float)
+
+    vext_batch = build_vstim_batch(
+        axon,
+        [context, context],
+        t_ms=jnp.asarray(t_ms),
+        x_positions_m=np.stack([base_x_m, base_x_m]),
+        axon_y_um=y_rows_um,
+        axon_z_um=np.asarray([0.0, 0.0]),
+    )
+
+    current_A = electrode.stimulus.evaluate(t_ms, unit="ampere")
+    expected = np.stack(
+        [
+            current_A[:, None]
+            * context.footprint_for_electrode(
+                electrode,
+                base_x_m,
+                axon_y_um=y_um,
+                axon_z_um=0.0,
+            )[None, :]
+            * 1e3
+            for y_um in y_rows_um
+        ],
+        axis=0,
+    )
+    np.testing.assert_allclose(np.asarray(vext_batch), expected, rtol=1e-6, atol=1e-6)
 
 
 def test_build_footprint_vstim_batch_matches_generic_context_builder():

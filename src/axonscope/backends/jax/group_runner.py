@@ -19,7 +19,7 @@ from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, D
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
-    build_vstim_initial_previous_batch,
+    build_vstim_midpoint_and_initial_previous_batch,
     build_vstim_midpoint_batch,
     can_build_sparse_intracellular_current_density_batch,
 )
@@ -421,19 +421,10 @@ def _run_double_cable_batch_group(
         nt=runtime.grid.Nt,
         nx=group.nx,
     ):
-        vstim_mid = build_vstim_midpoint_batch(
+        vstim_mid, vstim_previous = build_vstim_midpoint_and_initial_previous_batch(
             cohort.representative,
             cohort.contexts,
             tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            x_positions_m=cohort.x_positions_m,
-            axon_y_um=cohort.axon_y_um,
-            axon_z_um=cohort.axon_z_um,
-            dtype_local=runtime.membrane.dtype,
-        )
-        vstim_previous = build_vstim_initial_previous_batch(
-            cohort.representative,
-            cohort.contexts,
             dt_ms=dt_ms,
             x_positions_m=cohort.x_positions_m,
             axon_y_um=cohort.axon_y_um,

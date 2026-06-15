@@ -16,8 +16,10 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (
+    AnalyticalExtracellularContext,
     ExtracellularContext,
     IntracellularCurrentClamp,
+    PointSourceElectrode,
     Stimulus,
 )
 from axonscope.stimulation.runtime import (
@@ -96,6 +98,40 @@ def build_vstim_initial_previous_batch(
         dtype_local=dtype,
     )
     return samples[:, 0, :]
+
+
+def build_vstim_midpoint_and_initial_previous_batch(
+    axon: object,
+    contexts_batch: Sequence[ContextBatchRow],
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    x_positions_m: Array | None = None,
+    axon_y_um: Array | None = None,
+    axon_z_um: Array | None = None,
+    dtype_local: jnp.dtype | None = None,
+) -> tuple[Array, Array]:
+    """Build double-cable midpoint and previous imposed fields together."""
+
+    dtype = _resolve_dtype(axon, dtype_local)
+    nt = simulation_step_count(tsim_ms, dt_ms)
+    t_mid_ms = (
+        jnp.arange(nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
+    ) * jnp.asarray(dt_ms, dtype=dtype)
+    t_all_ms = jnp.concatenate(
+        [jnp.asarray([-0.5 * dt_ms], dtype=dtype), t_mid_ms],
+        axis=0,
+    )
+    samples = build_vstim_batch(
+        axon,
+        contexts_batch,
+        t_ms=t_all_ms,
+        x_positions_m=x_positions_m,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        dtype_local=dtype,
+    )
+    return samples[:, 1:, :], samples[:, 0, :]
 
 
 def build_intracellular_current_density_batch(
@@ -641,6 +677,18 @@ def _build_vstim_batch_from_footprints(
     x = np.asarray(x_rows, dtype=float)
     y = np.asarray(axon_y_um, dtype=float)
     z = np.asarray(axon_z_um, dtype=float)
+    fast_point_source = _try_build_shared_point_source_vstim_batch(
+        rows,
+        t,
+        x_rows=x,
+        axon_y_um=y,
+        axon_z_um=z,
+        np_dtype=np_dtype,
+        dtype_local=dtype_local,
+    )
+    if fast_point_source is not None:
+        return fast_point_source
+
     values = np.zeros((len(rows), int(t.shape[0]), int(x.shape[1])), dtype=np_dtype)
     current_cache: dict[int, np.ndarray] = {}
     mV_per_V = np.asarray(1e3, dtype=np_dtype)
@@ -671,6 +719,50 @@ def _build_vstim_batch_from_footprints(
                     dtype=np_dtype,
                 )
                 values[row_index] += current_A[:, None] * footprint[None, :] * mV_per_V
+    return jnp.asarray(values, dtype=dtype_local)
+
+
+def _try_build_shared_point_source_vstim_batch(
+    rows: Sequence[tuple[ExtracellularContext, ...]],
+    t_ms: np.ndarray,
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+    dtype_local: jnp.dtype,
+) -> Array | None:
+    if not rows or any(len(row) != 1 for row in rows):
+        return None
+    first_context = rows[0][0]
+    if not isinstance(first_context, AnalyticalExtracellularContext):
+        return None
+    if any(row[0] is not first_context for row in rows):
+        return None
+    if len(first_context.electrodes) != 1:
+        return None
+    electrode = first_context.electrodes[0]
+    if not isinstance(electrode, PointSourceElectrode):
+        return None
+    stimulus = getattr(electrode, "stimulus", None)
+    if stimulus is None:
+        return None
+
+    current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+    x_rel_m = x_rows - float(electrode.x0_m)
+    y_rel_m = (float(electrode.y_um) - axon_y_um)[:, None] * 1e-6
+    z_rel_m = (float(electrode.z_um) - axon_z_um)[:, None] * 1e-6
+    radius_m = np.sqrt(x_rel_m**2 + y_rel_m**2 + z_rel_m**2)
+    radius_m = np.maximum(radius_m, float(electrode.min_distance_m))
+    footprint = np.asarray(
+        1.0 / (4.0 * np.pi * float(first_context.sigma_S_m) * radius_m),
+        dtype=np_dtype,
+    )
+    values = (
+        current_A[None, :, None]
+        * footprint[:, None, :]
+        * np.asarray(1e3, dtype=np_dtype)
+    )
     return jnp.asarray(values, dtype=dtype_local)
 
 
@@ -1012,6 +1104,7 @@ __all__ = [
     "build_footprint_vstim_midpoint_batch",
     "build_vstim_batch",
     "build_vstim_initial_previous_batch",
+    "build_vstim_midpoint_and_initial_previous_batch",
     "build_vstim_midpoint_batch",
     "can_build_sparse_intracellular_current_density_batch",
 ]

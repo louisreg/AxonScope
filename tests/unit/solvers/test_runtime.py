@@ -16,9 +16,13 @@ from axonscope.stimulation import (
 )
 from axonscope.solvers.runtime import (
     precompute_extracellular_potential_mV,
+    prepare_cable_runtime,
+    prepare_extracellular_runtime,
+    prepare_membrane_runtime,
     prepare_simulation_grid,
     prepare_solver_runtime,
 )
+from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
 from axonscope.stimulation.runtime import (
@@ -70,6 +74,87 @@ def test_prepare_solver_runtime_collects_membrane_cable_and_stimulus_arrays():
     inj_off = np.asarray(runtime.stimulation.intracellular_current_density(0.5))
     assert inj_on.max() > 0.0
     assert np.allclose(inj_off, 0.0)
+
+
+def test_prepare_membrane_runtime_reuses_static_runtime_for_same_signature():
+    axon = HodgkinHuxley(
+        length=300.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+
+    first = prepare_membrane_runtime(axon)
+    second = prepare_membrane_runtime(axon)
+
+    assert second is first
+
+
+def test_prepare_membrane_runtime_keeps_initial_voltage_in_cache_key():
+    axon_a = HodgkinHuxley(
+        length=300.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+        v_init=-67.5 * axs.mV,
+    )
+    axon_b = HodgkinHuxley(
+        length=300.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+        v_init=-65.0 * axs.mV,
+    )
+
+    runtime_a = prepare_membrane_runtime(axon_a)
+    runtime_b = prepare_membrane_runtime(axon_b)
+
+    assert runtime_b is not runtime_a
+    assert np.asarray(runtime_a.Vm0_mV)[0] == pytest.approx(-67.5)
+    assert np.asarray(runtime_b.Vm0_mV)[0] == pytest.approx(-65.0)
+
+
+def test_prepare_cable_runtime_reuses_static_geometry_runtime():
+    axon = HodgkinHuxley(
+        length=300.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    solver_axon = build_solver_axon(axon)
+    membrane = prepare_membrane_runtime(axon, solver_axon=solver_axon)
+
+    first = prepare_cable_runtime(solver_axon, membrane.dtype)
+    second = prepare_cable_runtime(solver_axon, membrane.dtype)
+    without_area = prepare_cable_runtime(solver_axon, membrane.dtype, include_area=False)
+
+    assert second is first
+    assert without_area is not first
+
+
+def test_prepare_extracellular_runtime_reuses_static_layer_runtime():
+    axon = AxonInstance(
+        HodgkinHuxley(
+            length=300.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=11,
+            celsius=6.3 * axs.degC,
+        )
+    )
+    axon.set_extracellular_layer(
+        xraxial_MOhm_per_cm=np.full((axon.n_compartments,), 1e8, dtype=float),
+        xg_S_per_cm2=np.full((axon.n_compartments,), 1e-3, dtype=float),
+        xc_uF_per_cm2=np.full((axon.n_compartments,), 0.01, dtype=float),
+        use_extracellular=True,
+    )
+    solver_axon = build_solver_axon(axon)
+    membrane = prepare_membrane_runtime(axon, solver_axon=solver_axon)
+    cable = prepare_cable_runtime(solver_axon, membrane.dtype)
+
+    first = prepare_extracellular_runtime(solver_axon, membrane.dtype, cable)
+    second = prepare_extracellular_runtime(solver_axon, membrane.dtype, cable)
+
+    assert second is first
 
 
 def test_compile_intracellular_contexts_returns_callable_collection():

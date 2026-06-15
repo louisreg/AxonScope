@@ -294,6 +294,14 @@ The format is inspired by Keep a Changelog.
 - Reduced common sparse current-clamp input preparation overhead by vectorizing
   one-pulse current-clamp batches and caching repeated solver-axon geometry
   during `inputs.intracellular` materialization.
+- Reduced repeated solver runtime preparation overhead by caching
+  `MembraneRuntime`, `CableRuntime`, and `ExtracellularRuntime` objects for
+  identical static axon/model/options/geometry signatures, with initial voltage
+  and temperature included in membrane cache keys.
+- Reduced analytical point-source `Vstim` batch materialization overhead for
+  shared homogeneous extracellular contexts by vectorizing footprint evaluation
+  across batch rows/transverse axon offsets and by building double-cable
+  midpoint and previous imposed-field arrays in one shared pass.
 - Reduced zero-field observer-only memory pressure by skipping dense
   `Vstim[B,Nt,Nx]` materialization when homogeneous single-cable batch runs have
   no extracellular contexts; hotpath metadata now reports

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from axonscope.axons.axon import Axon
 from axonscope.channel_models.axnode import AxnodeICM
@@ -126,6 +128,9 @@ class SolverRuntime:
 
 _COMPILED_MEMBRANE_CACHE: dict[tuple[Any, ...], IonChannelModelBase] = {}
 _BACKEND_CACHE: dict[tuple[Any, ...], ICMBackend] = {}
+_MEMBRANE_RUNTIME_CACHE: dict[tuple[Any, ...], MembraneRuntime] = {}
+_CABLE_RUNTIME_CACHE: dict[tuple[Any, ...], CableRuntime] = {}
+_EXTRACELLULAR_RUNTIME_CACHE: dict[tuple[Any, ...], ExtracellularRuntime] = {}
 
 
 def _with_rate_tables(
@@ -143,6 +148,72 @@ def _resolve_solver_options(options: SolverOptions | None) -> SolverOptions:
 
 def _solver_options_cache_key(options: SolverOptions) -> tuple[Any, ...]:
     return ("solver_options", repr(options))
+
+
+def _membrane_runtime_cache_key(
+    axon: Axon,
+    solver_data: SolverAxon,
+    options: SolverOptions,
+) -> tuple[Any, ...]:
+    return (
+        "membrane_runtime",
+        tuple(model._static_signature() for model in solver_data.membrane_models),
+        _solver_options_cache_key(options),
+        int(solver_data.n_compartments),
+        solver_data.dtype.str,
+        float(getattr(axon, "v_init", 0.0)),
+        float(getattr(axon, "temperature", 0.0)),
+    )
+
+
+def _array_cache_key(values: Any) -> tuple[tuple[int, ...], str, str]:
+    array = np.ascontiguousarray(np.asarray(values))
+    digest = hashlib.blake2b(array.tobytes(), digest_size=16).hexdigest()
+    return tuple(array.shape), array.dtype.str, digest
+
+
+def _solver_cable_cache_key(axon: SolverAxon) -> tuple[Any, ...]:
+    return (
+        "solver_cable",
+        axon.formulation,
+        axon.dtype.str,
+        int(axon.n_compartments),
+        bool(axon.has_heterogeneous_cable_properties),
+        _array_cache_key(axon.compartment_lengths_um),
+        _array_cache_key(axon.h_cm),
+        _array_cache_key(axon.diam_um),
+        _array_cache_key(axon.Ra_ohm_cm),
+        _array_cache_key(axon.Cm_uF_cm2),
+    )
+
+
+def _cable_runtime_cache_key(
+    axon: SolverAxon,
+    dtype_local: jnp.dtype,
+    *,
+    include_area: bool,
+) -> tuple[Any, ...]:
+    return (
+        "cable_runtime",
+        _solver_cable_cache_key(axon),
+        np.dtype(dtype_local).str,
+        bool(include_area),
+    )
+
+
+def _extracellular_runtime_cache_key(
+    axon: SolverAxon,
+    dtype_local: jnp.dtype,
+) -> tuple[Any, ...]:
+    return (
+        "extracellular_runtime",
+        _solver_cable_cache_key(axon),
+        np.dtype(dtype_local).str,
+        _array_cache_key(axon.dx_cm),
+        _array_cache_key(axon.xraxial_MOhm_per_cm),
+        _array_cache_key(axon.xg_S_cm2),
+        _array_cache_key(axon.xc_uF_cm2),
+    )
 
 
 def compile_membrane_model(
@@ -296,7 +367,9 @@ def build_icm_backend_from_axon(
 
 def prepare_simulation_grid(tsim_ms: float, dt_ms: float, dtype_local: jnp.dtype) -> SimulationGrid:
     Nt = simulation_step_count(tsim_ms, dt_ms)
-    t_vec = (jnp.arange(Nt, dtype=dtype_local) + dtype_local(1.0)) * dt_ms
+    t_vec = (
+        jnp.arange(Nt, dtype=dtype_local) + jnp.asarray(1.0, dtype=dtype_local)
+    ) * jnp.asarray(dt_ms, dtype=dtype_local)
     return SimulationGrid(
         tsim_ms=float(tsim_ms),
         dt_ms=float(dt_ms),
@@ -311,11 +384,16 @@ def prepare_membrane_runtime(
     solver_axon: SolverAxon | None = None,
     solver_options: SolverOptions | None = None,
 ) -> MembraneRuntime:
+    options = _resolve_solver_options(solver_options)
     solver_data = build_solver_axon(axon) if solver_axon is None else solver_axon
+    cache_key = _membrane_runtime_cache_key(axon, solver_data, options)
+    cached = _MEMBRANE_RUNTIME_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     membrane = compile_axon_membrane(
         axon,
         solver_axon=solver_data,
-        solver_options=solver_options,
+        solver_options=options,
     )
     backend = _backend_from_compiled_membrane(membrane, int(solver_data.n_compartments))
     dtype_local = backend.dtype
@@ -323,7 +401,7 @@ def prepare_membrane_runtime(
     Vm0 = initial_voltage(axon, Nx, dtype_local)
     gates0 = backend.init_gates(V0_mV=Vm0)
     state0 = membrane.init_membrane_state(Nx=Nx, dtype_local=dtype_local, V0_mV=Vm0)
-    return MembraneRuntime(
+    runtime = MembraneRuntime(
         backend=backend,
         membrane=membrane,
         dtype=dtype_local,
@@ -335,6 +413,8 @@ def prepare_membrane_runtime(
         observable_names=membrane_observable_names(membrane),
         diagnostic_names=membrane.diagnostic_names(),
     )
+    _MEMBRANE_RUNTIME_CACHE[cache_key] = runtime
+    return runtime
 
 
 def prepare_cable_runtime(
@@ -343,13 +423,19 @@ def prepare_cable_runtime(
     *,
     include_area: bool = True,
 ) -> CableRuntime:
+    cache_key = _cable_runtime_cache_key(axon, dtype_local, include_area=include_area)
+    cached = _CABLE_RUNTIME_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
     area = (
         compartment_area_cm2(axon, dtype_local)
         if include_area
         else jnp.zeros((axon.n_compartments,), dtype=dtype_local)
     )
-    return CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
+    runtime = CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
+    _CABLE_RUNTIME_CACHE[cache_key] = runtime
+    return runtime
 
 
 def prepare_stimulation_runtime(
@@ -380,8 +466,8 @@ def prepare_stimulation_runtime(
     vext_initial_previous = None
     if grid is not None and (precompute_intracellular or precompute_extracellular):
         t_mid = (
-            jnp.arange(grid.Nt, dtype=dtype_local) + dtype_local(0.5)
-        ) * dtype_local(grid.dt_ms)
+            jnp.arange(grid.Nt, dtype=dtype_local) + jnp.asarray(0.5, dtype=dtype_local)
+        ) * jnp.asarray(grid.dt_ms, dtype=dtype_local)
         if precompute_intracellular:
             iinj_mid = sample_intracellular_current_density(
                 inj_fun,
@@ -412,13 +498,17 @@ def prepare_extracellular_runtime(
     dtype_local: jnp.dtype,
     cable: CableRuntime,
 ) -> ExtracellularRuntime:
+    cache_key = _extracellular_runtime_cache_key(axon, dtype_local)
+    cached = _EXTRACELLULAR_RUNTIME_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     Cm_abs, Cx_abs, Gx_abs, Gax_e = extracellular_absolute_arrays(axon, dtype_local)
     Gax_i = 0.5 * (cable.upper[:-1] * Cm_abs[:-1] + cable.lower[1:] * Cm_abs[1:])
     left_i = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_i])
     right_i = jnp.concatenate([Gax_i, jnp.zeros((1,), dtype=dtype_local)])
     left_e = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_e])
     right_e = jnp.concatenate([Gax_e, jnp.zeros((1,), dtype=dtype_local)])
-    return ExtracellularRuntime(
+    runtime = ExtracellularRuntime(
         Cm_abs=Cm_abs,
         Cx_abs=Cx_abs,
         Gx_abs=Gx_abs,
@@ -429,6 +519,8 @@ def prepare_extracellular_runtime(
         left_e=left_e,
         right_e=right_e,
     )
+    _EXTRACELLULAR_RUNTIME_CACHE[cache_key] = runtime
+    return runtime
 
 
 def prepare_solver_runtime(
@@ -531,7 +623,8 @@ def sample_intracellular_current_density(
 ) -> Array:
     """Sample a compiled intracellular current-density function on a time grid."""
     t = jnp.asarray(t_ms, dtype=dtype_local)
-    return jax.vmap(current_density_fn)(t)
+    sampled_fn = cast(Callable[[Array], Array], current_density_fn)
+    return jax.vmap(sampled_fn)(t)
 
 
 def sample_extracellular_potential_mV(
@@ -542,4 +635,5 @@ def sample_extracellular_potential_mV(
 ) -> Array:
     """Sample a compiled Vstim function on a time grid, returning shape (Nt, Nx)."""
     t = jnp.asarray(t_ms, dtype=dtype_local)
-    return jax.vmap(potential_fn)(t)
+    sampled_fn = cast(Callable[[Array], Array], potential_fn)
+    return jax.vmap(sampled_fn)(t)

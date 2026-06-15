@@ -309,8 +309,8 @@ realistic populations, not just clean homogeneous smoke workloads.
       result/simulation modules; targeted observer-only tests passed (`3
       passed`), related dispatcher/public API tests passed (`52 passed`), and
       hotpath catalog/performance tests passed (`14 passed`).
-    - Remaining evidence gate: rerun Colab `kernel_observer_long` after this
-      change is pushed to quantify the n=500/n=1000 GPU impact.
+    - Evidence gate completed by
+      `benchmark/results/hotpaths/colab_cpu_gpu_kernel_observer_long_20260615_122541/`.
   - Before declaring this cleanup done, re-check the same bottleneck map on
     double-cable/MRG-like runs; this is a long-term priority path, not an
     optional edge case.
@@ -326,6 +326,49 @@ realistic populations, not just clean homogeneous smoke workloads.
       and `has_padding=false`; warm local `n=5`, `Nt=4`, `Nx=23` profile is
       total `38.1 ms`, `runtime.prepare 23.0 ms`, `kernel.enqueue 10.5 ms`,
       `inputs.extracellular 1.93 ms`.
+    - Local fallback probes while Colab is unavailable:
+      `benchmark/results/hotpaths/local_double_cable_extracellular_probe_n20/`
+      and `benchmark/results/hotpaths/local_double_cable_extracellular_probe_n50/`.
+      With `duration=1 ms`, `dt=0.02 ms`, target `51` compartments
+      (`MRG Nx=45`), warm local CPU profiles are:
+      `n=20` total `71.0 ms`, `runtime.prepare 33.5 ms`,
+      `kernel.enqueue 17.5 ms`, `kernel.wait 12.4 ms`,
+      `inputs.extracellular 3.25 ms`; `n=50` total `108.8 ms`,
+      `runtime.prepare 45.3 ms`, `kernel.enqueue 25.0 ms`,
+      `kernel.wait 24.4 ms`, `inputs.extracellular 6.23 ms`.
+    - Local interpretation: the first double-cable extracellular bottleneck is
+      runtime preparation plus actual double-cable kernel work. Dense
+      `Vstim[B,Nt,Nx]` is visible and should remain tracked, but it is not yet
+      the dominant local CPU cost at these sizes.
+    - Local optimization while Colab is unavailable: cache
+      `MembraneRuntime`, `CableRuntime`, and `ExtracellularRuntime` by static
+      axon/model/options/geometry signatures. The membrane key includes `Nx`,
+      dtype, `v_init`, and temperature; cable/extracellular keys hash the
+      solver-side geometry and periaxonal arrays.
+    - Local validation on 2026-06-15:
+      `benchmark/results/hotpaths/local_double_cable_extracellular_after_runtime_cache_n50/`.
+      On the same warm `n=50`, `duration=1 ms`, `dt=0.02 ms`, target
+      `51` compartments (`MRG Nx=45`) probe, `runtime.prepare` dropped from
+      `45.3 ms` to `2.55 ms`, and total wall time dropped from `108.8 ms` to
+      `55.6 ms`.
+    - Updated interpretation: double-cable extracellular preparation is no
+      longer the dominant local cost. The next visible costs are the
+      double-cable kernel boundary/work itself (`kernel.enqueue 25.0 ms`,
+      `kernel.wait 16.0 ms`) plus dense extracellular input materialization
+      (`inputs.extracellular 5.93 ms`). Do not over-optimize local CPU noise;
+      re-check on Colab GPU as soon as possible.
+    - Added a conservative analytical point-source fast path for shared
+      homogeneous extracellular contexts, vectorizing footprint evaluation
+      across batch rows/transverse axon offsets, then combined double-cable
+      midpoint and initial-previous `Vstim` building so footprints are prepared
+      once for both arrays.
+    - Local validation on 2026-06-15:
+      `benchmark/results/hotpaths/local_double_cable_extracellular_after_combined_vstim_builder_n50/`.
+      On the same warm `n=50` probe, `inputs.extracellular` dropped from
+      `5.93 ms` to `2.81 ms`; total wall time is now `54.4 ms`. The remaining
+      local costs are dominated by `kernel.enqueue 23.4 ms` and
+      `kernel.wait 19.3 ms`, so the next meaningful decision needs a Colab GPU
+      trace rather than another CPU-only micro-optimization.
   - Before declaring this cleanup done, re-check extracellular stimulation
     runs with realistic `ExtracellularFootprint`/`ExtracellularDrive` usage,
     because dense `Vstim[B,Nt,Nx]` is expected to matter as much as dense
