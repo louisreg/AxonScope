@@ -992,11 +992,15 @@ def _run_double_cable_batch_stateful_scan(
 ) -> tuple[Array, Array, Array, tuple[Array, ...], Array]:
     """Run one double-cable time chunk and return final batch state."""
 
-    intracellular_current_abs_mid = (
-        None
-        if intracellular_current_density_mid is None
-        else intracellular_current_density_mid * area_cm2[:, None, :]
-    )
+    if intracellular_current_density_mid is None:
+        intracellular_current_abs_mid = None
+    else:
+        area_for_iinj = (
+            area_cm2[None, None, :]
+            if jnp.asarray(area_cm2).ndim == 1
+            else area_cm2[:, None, :]
+        )
+        intracellular_current_abs_mid = intracellular_current_density_mid * area_for_iinj
 
     def one_batch(
         Vi0_row,
@@ -1201,6 +1205,9 @@ def _run_double_cable_batch_stateful_scan(
         return final_carry[0], final_carry[1], final_carry[2], tuple(final_carry[3:]), trace
 
     state_axes = tuple(0 for _ in state0)
+    space_in_axes = None if jnp.asarray(area_cm2).ndim == 1 else 0
+    edge_in_axes = None if jnp.asarray(Gax_i).ndim == 1 else 0
+    background_in_axes = None if jnp.asarray(I_background).ndim <= 1 else 0
     iinj_in_axes = None if intracellular_current_abs_mid is None else 0
     return jax.vmap(
         one_batch,
@@ -1209,17 +1216,17 @@ def _run_double_cable_batch_stateful_scan(
             0,
             0,
             state_axes,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
+            space_in_axes,
+            space_in_axes,
+            space_in_axes,
+            space_in_axes,
+            edge_in_axes,
+            edge_in_axes,
+            space_in_axes,
+            space_in_axes,
+            space_in_axes,
+            space_in_axes,
+            background_in_axes,
             iinj_in_axes,
             0,
             0,
@@ -1950,71 +1957,108 @@ def _run_double_cable_batch_array_chunks(
     dtype_local = membrane_runtime.dtype
     nx = membrane_runtime.Nx
     batch_size = int(extracellular_potential_mid_mV.shape[0])
-    area_cm2 = _as_batched_space_array(
-        "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local, batch_size=batch_size
+    shared_coefficients = (
+        jnp.asarray(runtime.cable.area_cm2).ndim == 1
+        and jnp.asarray(extracellular.Cm_abs).ndim == 1
+        and jnp.asarray(extracellular.Cx_abs).ndim == 1
+        and jnp.asarray(extracellular.Gx_abs).ndim == 1
+        and jnp.asarray(extracellular.Gax_e).ndim == 1
+        and jnp.asarray(extracellular.Gax_i).ndim == 1
+        and jnp.asarray(extracellular.left_i).ndim == 1
+        and jnp.asarray(extracellular.right_i).ndim == 1
+        and jnp.asarray(extracellular.left_e).ndim == 1
+        and jnp.asarray(extracellular.right_e).ndim == 1
+        and jnp.asarray(membrane_runtime.background_current).ndim <= 1
     )
-    Cm_abs = _as_batched_space_array(
-        "Cm_abs",
-        extracellular.Cm_abs,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    Cx_abs = _as_batched_space_array(
-        "Cx_abs",
-        extracellular.Cx_abs,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    Gx_abs = _as_batched_space_array(
-        "Gx_abs",
-        extracellular.Gx_abs,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    Gax_e = _as_batched_edge_array(
-        "Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local, batch_size=batch_size
-    )
-    Gax_i = _as_batched_edge_array(
-        "Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local, batch_size=batch_size
-    )
-    left_i = _as_batched_space_array(
-        "left_i",
-        extracellular.left_i,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    right_i = _as_batched_space_array(
-        "right_i",
-        extracellular.right_i,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    left_e = _as_batched_space_array(
-        "left_e",
-        extracellular.left_e,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    right_e = _as_batched_space_array(
-        "right_e",
-        extracellular.right_e,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
-    background = _as_batched_space_array(
-        "I_background",
-        membrane_runtime.background_current,
-        nx=nx,
-        dtype_local=dtype_local,
-        batch_size=batch_size,
-    )
+    if shared_coefficients:
+        area_cm2 = _as_space_array(
+            "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local
+        )
+        Cm_abs = _as_space_array("Cm_abs", extracellular.Cm_abs, nx=nx, dtype_local=dtype_local)
+        Cx_abs = _as_space_array("Cx_abs", extracellular.Cx_abs, nx=nx, dtype_local=dtype_local)
+        Gx_abs = _as_space_array("Gx_abs", extracellular.Gx_abs, nx=nx, dtype_local=dtype_local)
+        Gax_e = _as_edge_array("Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local)
+        Gax_i = _as_edge_array("Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local)
+        left_i = _as_space_array("left_i", extracellular.left_i, nx=nx, dtype_local=dtype_local)
+        right_i = _as_space_array(
+            "right_i", extracellular.right_i, nx=nx, dtype_local=dtype_local
+        )
+        left_e = _as_space_array("left_e", extracellular.left_e, nx=nx, dtype_local=dtype_local)
+        right_e = _as_space_array(
+            "right_e", extracellular.right_e, nx=nx, dtype_local=dtype_local
+        )
+        background = _as_scalar_or_space_array(
+            "I_background",
+            membrane_runtime.background_current,
+            nx=nx,
+            dtype_local=dtype_local,
+        )
+    else:
+        area_cm2 = _as_batched_space_array(
+            "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local, batch_size=batch_size
+        )
+        Cm_abs = _as_batched_space_array(
+            "Cm_abs",
+            extracellular.Cm_abs,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        Cx_abs = _as_batched_space_array(
+            "Cx_abs",
+            extracellular.Cx_abs,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        Gx_abs = _as_batched_space_array(
+            "Gx_abs",
+            extracellular.Gx_abs,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        Gax_e = _as_batched_edge_array(
+            "Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local, batch_size=batch_size
+        )
+        Gax_i = _as_batched_edge_array(
+            "Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local, batch_size=batch_size
+        )
+        left_i = _as_batched_space_array(
+            "left_i",
+            extracellular.left_i,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        right_i = _as_batched_space_array(
+            "right_i",
+            extracellular.right_i,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        left_e = _as_batched_space_array(
+            "left_e",
+            extracellular.left_e,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        right_e = _as_batched_space_array(
+            "right_e",
+            extracellular.right_e,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
+        background = _as_batched_space_array(
+            "I_background",
+            membrane_runtime.background_current,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
+        )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
     previous = extracellular_potential_initial_previous_mV
     chunks = []
@@ -2224,6 +2268,48 @@ def _as_batched_time_space_array(
     if arr.shape[0] == 1:
         return jnp.broadcast_to(arr, (batch_size, nt, nx))
     raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+
+
+def _as_space_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim != 1 or arr.shape != (nx,):
+        raise ValueError(f"{name} must have shape (Nx,)=({nx},), got {arr.shape}.")
+    return arr
+
+
+def _as_edge_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    edge_count = max(int(nx) - 1, 0)
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim != 1 or arr.shape != (edge_count,):
+        raise ValueError(
+            f"{name} must have shape (Nx-1,)=({edge_count},), got {arr.shape}."
+        )
+    return arr
+
+
+def _as_scalar_or_space_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 0:
+        return arr
+    return _as_space_array(name, arr, nx=nx, dtype_local=dtype_local)
 
 
 def _as_batched_space_array(
