@@ -46,6 +46,10 @@ Open `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` in Colab, replace
 
 Available notebook cases:
 
+- `cpu_double_cable_extracellular_heavy`: CPU-only stress trace for the
+  priority MRG double-cable extracellular path while GPU access is unavailable.
+  It runs `double_cable_extracellular` at sizes `100/300/600`, `duration=10 ms`,
+  `dt=0.01 ms`, and a target of `51` compartments.
 - `setup_scale`: short all-workload trace. This keeps `duration=0.30 ms`,
   `dt=0.05 ms`, and small `Nx`; it is best for catching preparation,
   dispatch, transfer, and result-packaging regressions.
@@ -63,8 +67,11 @@ Available notebook cases:
   size only after the first GPU trace is healthy.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
-that the default JAX backend is GPU, verifies that a separate process can force
-the CPU backend with `JAX_PLATFORMS=cpu`, and runs the selected case twice.
+only the enabled backend(s), and runs the selected case for the enabled labels.
+For CPU-only runs, keep `RUN_GPU = False` and `RUN_CPU = True`; the notebook
+writes a per-run `cpu_summary.csv` in addition to the normal manifest and
+workload summaries. For CPU/GPU comparison runs, enable both labels to also
+write `comparison_summary.csv`.
 For the default `setup_scale` case, the effective commands are:
 
 ```bash

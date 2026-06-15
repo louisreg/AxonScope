@@ -238,6 +238,9 @@ The format is inspired by Keep a Changelog.
   stimulation.
 - Added the Colab case `kernel_double_cable_extracellular_long` for targeted
   CPU/GPU traces of the priority myelinated extracellular path.
+- Added a CPU-only Colab notebook case
+  `cpu_double_cable_extracellular_heavy` plus per-run summary CSV generation
+  for useful double-cable extracellular traces when GPU access is unavailable.
 
 ### Changed
 
