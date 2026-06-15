@@ -195,6 +195,11 @@ The format is inspired by Keep a Changelog.
   including simulation labels, per-simulation memory estimates, model/formulation
   counts, diameter and compartment distributions, stimulation coverage,
   recording policy, and observer names.
+- Added run-parameter metadata to hotpath manifests, including warmups,
+  duration, `dt`, compartment count, sweep repeats, and device synchronization.
+- Added a Colab CPU/GPU hotpath comparison flow that writes matching `gpu/` and
+  forced-CPU `cpu/` runs under one downloaded folder with a generated
+  `comparison_summary.csv`.
 
 ### Changed
 

@@ -21,8 +21,8 @@ task is done, check it only after code/docs/tests have been verified.
 - [x] Latest full unit validation after Phase 7: unit suite `306 passed, 1 skipped` on 2026-06-14.
 - [x] Phase 7.5 added solver-side observers for `PeakVoltage` and `Activation`, including scalar kernels, homogeneous single-cable batch observer-only runs, and trace-free `Recording.none()` results.
 - [x] Latest full unit validation after Phase 7.5: unit suite `308 passed, 1 skipped` on 2026-06-15.
-- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented and smoke-tested locally.
-- [ ] Next priority before Phase 8: finish Phase 7.6 evidence with scale/Colab runs and any missing matrix paths that still matter.
+- [ ] Phase 7.6 is in progress: first realistic mixed-population and compact hotpath-matrix workloads are implemented, smoke-tested locally, and run once on Colab GPU.
+- [ ] Next priority before Phase 8: attack `runtime.prepare` for `parameter-single-cable` heterogeneous cohorts, then re-run CPU/GPU scale traces.
 - [ ] Next implementation phase after Phase 7.6: Phase 8, callable studies/reuse policies/retention policies.
 - [ ] Keep current Phase 5-7.5 changes uncommitted until the user asks for a commit or the next checkpoint requires it.
 
@@ -48,6 +48,44 @@ realistic populations, not just clean homogeneous smoke workloads.
 - [x] Keep manifests explicit about model mix, diameter distribution,
   compartment distribution, stimulation coverage, recording policy, observers,
   result retention, and per-simulation memory estimates.
+- [x] Analyze first Colab GPU scale trace for Phase 7.6.
+  - Run analyzed on 2026-06-15:
+    `benchmark/results/hotpaths/colab_gpu_20260615_094639/`.
+  - Colab reported `jax_default_backend="gpu"` and device `cuda:0`.
+  - `kernel.wait` is not the bottleneck at `n=500`: `intracellular_only`
+    `0.082 ms`, `point_source_extracellular` `0.098 ms`,
+    `observer_only` `0.016 ms`, `realistic_mixed_population` `0.444 ms`,
+    and `hotpath_matrix` `0.753 ms`.
+  - Homogeneous `n=500` workloads are in the `108-160 ms` range. The realistic
+    mixed population is `11.5 s`, and `hotpath_matrix` is `11.9 s` because it
+    includes the same mixed-population path.
+  - The stall is concentrated in `runtime.prepare`: `10.8 s` for
+    `realistic_mixed_population_n500` and `10.5 s` for
+    `hotpath_matrix_n500`.
+  - The realistic workload splits into six `parameter-single-cable` groups with
+    `geometry_shared=False`, `Nx` values `11/13/15`, and group sizes around
+    `83-84`; each group spends roughly `1.7-2.2 s` in preparation.
+  - Decision: do not expand to MRG/double-cable until this simpler
+    `parameter-single-cable` preparation stall is understood and reduced.
+- [ ] Add Colab CPU/GPU comparison traces for the same committed revision.
+  - Run GPU and forced-CPU JAX processes in the same Colab notebook so hardware
+    and dependency drift are minimized.
+  - Keep both results under one downloaded folder, with a generated comparison
+    summary for `simulation.pool.total`, `runtime.prepare`, input
+    materialization, kernel enqueue/wait, split, and public packaging.
+  - Workflow implemented in `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` and
+    documented in `benchmark/hotpaths/COLAB.md`; next step is to commit/push to
+    `bench-colab`, run it in Colab, and import the `colab_cpu_gpu_...` archive.
+- [ ] Attack `runtime.prepare` for heterogeneous `parameter-single-cable`
+  groups before adding bigger workloads.
+  - Profile what is repeated per row/group during preparation.
+  - Cache or reuse `SolverAxon`, layout-derived arrays, rate tables, signatures,
+    intrinsic positions, and static membrane/runtime descriptors across rows
+    with the same model/geometry class.
+  - Avoid row-by-row JAX/device preparation when only diameter, model
+    parameters, or `Nx` vary inside a parameter batch.
+  - Re-run `realistic_mixed_population_n500` and `hotpath_matrix_n500` after
+    each meaningful preparation change, comparing CPU and GPU traces.
 - [ ] Extend realistic population benchmark workloads if the first traces show
   missing coverage.
   - Candidate additions: factorized `ExtracellularFootprint`/`ExtracellularDrive`

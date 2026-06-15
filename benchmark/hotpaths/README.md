@@ -62,7 +62,7 @@ python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke
 Outputs are written under `benchmark/results/hotpaths/`, which is intentionally
 ignored by git.
 
-## GPU Runs
+## Colab CPU/GPU Runs
 
 Local GPU execution is not assumed. For now, run GPU traces manually in Google
 Colab. Publish the committed local revision with:
@@ -71,9 +71,18 @@ Colab. Publish the committed local revision with:
 make bench-colab-push
 ```
 
-Then open the Colab notebook below. The generated results are written under
-`benchmark/results/hotpaths/<prefix>/` in the Colab checkout, zipped, and
-downloaded directly through the browser.
+Then open the Colab notebook below. The generated results are written under one
+parent folder in the Colab checkout:
+
+```text
+benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS/
+    gpu/
+    cpu/
+    comparison_summary.csv
+```
+
+The notebook zips that parent folder and downloads it directly through the
+browser.
 
 Colab runner and protocol:
 

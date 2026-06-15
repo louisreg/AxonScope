@@ -114,6 +114,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         "preset": args.preset,
         "sizes": list(dict.fromkeys(run.size for run in runs)),
         "workloads": list(dict.fromkeys(run.workload for run in runs)),
+        "parameters": {
+            "compartments": int(args.compartments),
+            "length_um": float(args.length_um),
+            "duration_ms": float(args.duration),
+            "dt_ms": float(args.dt),
+            "warmups": int(args.warmups),
+            "sweep_repeats": int(args.sweep_repeats),
+            "sync_device": bool(args.sync_device),
+        },
         "runs": [],
     }
 

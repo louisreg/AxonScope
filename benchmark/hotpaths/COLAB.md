@@ -1,8 +1,9 @@
-# Colab GPU Hotpath Protocol
+# Colab CPU/GPU Hotpath Protocol
 
 Use this when local GPU execution is not available. The local machine publishes
 one committed AxonScope revision to the moving `bench-colab` branch, and Colab
-always clones that branch before running the hotpath workloads.
+always clones that branch before running matching hotpath workloads on GPU and
+on a forced CPU JAX backend.
 
 The ready-to-run notebook lives at:
 
@@ -44,7 +45,8 @@ Open `benchmark/hotpaths/colab_gpu_hotpaths.ipynb` in Colab, replace
 `REPO_URL` once, then run the notebook cell.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
-that JAX uses a GPU backend, and runs:
+that the default JAX backend is GPU, verifies that a separate process can force
+the CPU backend with `JAX_PLATFORMS=cpu`, and runs the same workload twice:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -52,19 +54,39 @@ python benchmark/hotpaths/run.py \
   --preset scale \
   --warmups 1 \
   --sweep-repeats 3 \
-  --prefix colab_gpu_YYYYMMDD_HHMMSS \
-  --out-dir benchmark/results/hotpaths \
+  --prefix gpu \
+  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS \
   --no-print-summary
 ```
 
-The output folder is created inside the Colab checkout:
-
-```text
-/content/AxonScope/benchmark/results/hotpaths/<run_id>/
+```bash
+JAX_PLATFORMS=cpu python benchmark/hotpaths/run.py \
+  --workload all \
+  --preset scale \
+  --warmups 1 \
+  --sweep-repeats 3 \
+  --prefix cpu \
+  --out-dir benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS \
+  --no-print-summary
 ```
 
-Then the notebook zips `<run_id>/` and downloads it directly through the
-browser with `google.colab.files.download(...)`. No Google Drive mount is used.
+The output folder is created inside the Colab checkout with both traces:
+
+```text
+/content/AxonScope/benchmark/results/hotpaths/colab_cpu_gpu_YYYYMMDD_HHMMSS/
+    gpu/
+    cpu/
+    comparison_summary.csv
+```
+
+`comparison_summary.csv` compares the main stages for matching workload/size
+pairs: `simulation.pool.total`, `dispatch.build_plan`, `runtime.prepare`,
+`inputs.intracellular`, `inputs.extracellular`, `kernel.enqueue`,
+`kernel.wait`, `results.split_batch`, and `results.to_public`.
+
+Then the notebook zips the parent `colab_cpu_gpu_.../` folder and downloads it
+directly through the browser with `google.colab.files.download(...)`. No Google
+Drive mount is used.
 
 Important: `google.colab.files.download(...)` works from a Colab notebook cell,
 not from the Colab terminal or a plain `python` REPL. If you ran the script in
@@ -84,18 +106,21 @@ benchmark/results/hotpaths/
 
 The output folder will contain:
 
-- `manifest.json`
-- each workload's `events.jsonl`
-- each workload's `summary.csv`
-- each workload's `metadata.json`
+- `gpu/manifest.json`
+- `cpu/manifest.json`
+- `comparison_summary.csv`
+- each workload's `events.jsonl`, `summary.csv`, and `metadata.json` under the
+  matching `gpu/` or `cpu/` folder
 
-The top-level `manifest.json` also includes each workload's
+Each manifest also includes each workload's
 `simulation.estimate().to_dict()` output, including dense `Vstim`, retained Vm,
-factorized footprint, and sampled-stimulus estimates.
+factorized footprint, sampled-stimulus estimates, and the run parameters such
+as warmup count, duration, `dt`, compartments, and sweep repeats.
 
-## 4. Run A Matching Local CPU Reference
+## 4. Optional Local CPU Reference
 
-Run a local CPU reference with the same hotpath preset and warmup count:
+The Colab notebook already runs a forced CPU reference. A local CPU reference is
+still useful when you want to compare Colab against the development machine:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -119,9 +144,9 @@ Compare these stages first:
 - `results.split_batch`
 - `results.to_public`
 
-If CPU and GPU stay close while `inputs.extracellular`, `runtime.prepare`, or
-the manifest's dense `Vstim` estimate dominates, prioritize Phase 7.5
-solver-side observer/drive reductions before adding higher-level study APIs.
+If CPU and GPU stay close while `runtime.prepare`, `inputs.extracellular`, or
+the manifest's dense `Vstim` estimate dominates, prioritize preparation and
+drive/observer reductions before adding higher-level study APIs.
 
 If `kernel.wait` dominates and separates clearly by device, prioritize backend
 kernel/runtime isolation.
@@ -141,6 +166,12 @@ git status --short
 Switch the Colab runtime to a GPU accelerator and restart the runtime. The
 trace is not useful for CPU/GPU comparison unless `jax.default_backend()` is
 `gpu`.
+
+### Colab Reports `Forced CPU backend did not activate`
+
+The notebook runs CPU traces in a separate process with `JAX_PLATFORMS=cpu`.
+Restart the runtime and rerun the notebook cell. If it still fails, Colab's JAX
+installation changed enough that the CPU/GPU comparison protocol needs updating.
 
 ### Colab Still Runs Old Code
 
