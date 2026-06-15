@@ -268,6 +268,57 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     assert metadata["skipped_dense_vstim_shape"] == [2, 2, 11]
 
 
+def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    stimulus = axs.Stimulus.pulse(
+        start=0.02 * axs.ms,
+        duration=0.04 * axs.ms,
+        amplitude=20.0 * axs.uA,
+    )
+    electrode = axs.PointSourceElectrode(
+        x=50.0 * axs.um,
+        z=120.0 * axs.um,
+        stimulus=stimulus,
+    )
+    context = axs.AnalyticalExtracellularContext(
+        electrodes=[electrode],
+        sigma=0.3 * axs.S_per_m,
+    )
+    axons = []
+    for y_um in (-10.0, 10.0):
+        instance = axs.AxonInstance(axon, y=y_um * axs.um)
+        instance.add_extracellular_context(context=context)
+        axons.append(instance)
+
+    axs.enable_benchmark("/tmp/axonscope-zero-iinj-test", print_summary=False, save=False)
+    try:
+        result = axs.simulate_pool(
+            axons,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            recording=axs.Recording.center(axs.signals.Vm),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert result[0].Vm.shape == (2, 1)
+    assert report is not None
+    intracellular_events = [
+        event for event in report.events if event.name == "inputs.intracellular"
+    ]
+    assert len(intracellular_events) == 1
+    metadata = intracellular_events[0].metadata
+    assert metadata["input_format"] == "zero_no_intracellular_context"
+    assert "iinj_mid" not in metadata
+    assert metadata["skipped_dense_iinj_shape"] == [2, 2, 11]
+
+
 def test_public_recording_signals_filter_single_result():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,

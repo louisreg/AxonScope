@@ -153,6 +153,28 @@ def _should_use_sparse_intracellular_batch(
     )
 
 
+def _has_intracellular_contexts(cohort: PreparedCohort) -> bool:
+    """Return whether any row has an attached intracellular input."""
+
+    return any(getattr(axon, "intracellular_contexts", ()) for axon in cohort.axons)
+
+
+def _record_zero_intracellular_metadata(
+    *,
+    group: DispatchGroup,
+    runtime: SolverRuntime,
+) -> None:
+    """Record skipped dense-Iinj metadata for zero-input cohorts."""
+
+    dtype = np.dtype(runtime.membrane.dtype)
+    skipped_shape = (group.size, runtime.grid.Nt, group.nx)
+    record_benchmark_metadata(
+        input_format="zero_no_intracellular_context",
+        skipped_dense_iinj_shape=list(skipped_shape),
+        skipped_dense_iinj_nbytes=int(np.prod(skipped_shape)) * int(dtype.itemsize),
+    )
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -220,6 +242,9 @@ def _run_single_cable_batch_group(
         kernel_options=kernel_options,
         observers=observers,
     )
+    use_zero_intracellular = (
+        not use_sparse_intracellular and not _has_intracellular_contexts(cohort)
+    )
     use_zero_extracellular = use_sparse_intracellular and cohort.context_count == 0
     with benchmark_span(
         "inputs.intracellular",
@@ -251,6 +276,9 @@ def _run_single_cable_batch_group(
                 ),
                 **benchmark_array_metadata("iinj_mask", iinj_mid.mask, role="kernel_input"),
             )
+        elif use_zero_intracellular:
+            iinj_mid = None
+            _record_zero_intracellular_metadata(group=group, runtime=runtime)
         else:
             iinj_mid = build_intracellular_current_density_batch(
                 cohort.axons,
@@ -405,15 +433,20 @@ def _run_double_cable_batch_group(
         nt=runtime.grid.Nt,
         nx=group.nx,
     ):
-        iinj_mid = build_intracellular_current_density_batch(
-            cohort.axons,
-            runtime,
-            solver_axons=cohort.solver_axons,
-            target_nx=cohort.nx,
-        )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input")
-        )
+        if _has_intracellular_contexts(cohort):
+            iinj_mid = build_intracellular_current_density_batch(
+                cohort.axons,
+                runtime,
+                solver_axons=cohort.solver_axons,
+                target_nx=cohort.nx,
+            )
+            record_benchmark_metadata(
+                input_format="dense",
+                **benchmark_array_metadata("iinj_mid", iinj_mid, role="kernel_input"),
+            )
+        else:
+            iinj_mid = None
+            _record_zero_intracellular_metadata(group=group, runtime=runtime)
     with benchmark_span(
         "inputs.extracellular",
         group_id=group.group_id,

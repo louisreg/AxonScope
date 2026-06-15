@@ -1255,8 +1255,6 @@ class SingleCableVStimBatchKernel:
             if intracellular_current_density_mid is None
             else intracellular_current_density_mid
         )
-        if iinj_mid is None:
-            raise ValueError("intracellular_current_density_mid is required for Vstim batching.")
 
         if vext_mid is None:
             if has_driven_extracellular:
@@ -1289,7 +1287,12 @@ class SingleCableVStimBatchKernel:
                 batch_size=batch_size,
             )
         iinj_batch = None
-        if sparse_iinj is None:
+        if sparse_iinj is None and iinj_mid is None:
+            iinj_batch = jnp.zeros(
+                (batch_size, grid.Nt, membrane_runtime.Nx),
+                dtype=dtype_local,
+            )
+        elif sparse_iinj is None:
             iinj_batch = _as_batched_time_space_array(
                 "intracellular_current_density_mid",
                 cast(Any, iinj_mid),
@@ -1480,17 +1483,19 @@ class DoubleCableBatchKernel:
             else intracellular_current_density_mid
         )
         if iinj_mid is None:
-            raise ValueError(
-                "intracellular_current_density_mid is required for double-cable batching."
+            iinj_batch = jnp.zeros(
+                (batch_size, grid.Nt, nx),
+                dtype=dtype_local,
             )
-        iinj_batch = _as_batched_time_space_array(
-            "intracellular_current_density_mid",
-            iinj_mid,
-            nt=grid.Nt,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
+        else:
+            iinj_batch = _as_batched_time_space_array(
+                "intracellular_current_density_mid",
+                iinj_mid,
+                nt=grid.Nt,
+                nx=nx,
+                dtype_local=dtype_local,
+                batch_size=batch_size,
+            )
 
         options = _normalize_batch_options(options)
         record_idx, record_full = _resolve_recording(options.recording, nx=nx)

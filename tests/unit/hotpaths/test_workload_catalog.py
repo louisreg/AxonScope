@@ -3,8 +3,11 @@ from __future__ import annotations
 import axonscope as axs
 from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 from benchmark.hotpaths.run import (
+    _describe_simulations,
+    _simulation_labels,
     build_simulation,
     build_simulations,
+    configure_jax_compile_logging,
     main,
     planned_runs,
     resolve_sizes,
@@ -21,6 +24,8 @@ def test_hotpath_catalog_lists_phase25_workloads():
         "path_comparison_matrix",
         "point_source_extracellular",
         "realistic_mixed_population",
+        "solver_only_precomputed",
+        "typed_footprint_drive_matrix",
     }
     assert HOTPATH_PRESETS["smoke"] == (5,)
     assert HOTPATH_PRESETS["scale"] == (5, 50, 500)
@@ -49,6 +54,10 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
         "double_cable_extracellular size=3",
         "footprint_reuse_sweep size=2",
         "footprint_reuse_sweep size=3",
+        "solver_only_precomputed size=2",
+        "solver_only_precomputed size=3",
+        "typed_footprint_drive_matrix size=2",
+        "typed_footprint_drive_matrix size=3",
         "observer_only size=2",
         "observer_only size=3",
         "realistic_mixed_population size=2",
@@ -69,11 +78,48 @@ def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
         "point_source_extracellular size=1",
         "double_cable_extracellular size=1",
         "footprint_reuse_sweep size=1",
+        "solver_only_precomputed size=1",
+        "typed_footprint_drive_matrix size=1",
         "observer_only size=1",
         "realistic_mixed_population size=1",
         "hotpath_matrix size=1",
         "path_comparison_matrix size=1",
     ]
+
+
+def test_hotpath_runner_accepts_jax_compile_logging_flag_in_dry_run(capsys):
+    main(
+        [
+            "--workload",
+            "intracellular_only",
+            "--sizes",
+            "1",
+            "--dry-run",
+            "--jax-log-compiles",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == ["intracellular_only size=1"]
+
+
+def test_configure_jax_compile_logging_disabled_is_noop():
+    assert configure_jax_compile_logging(False) == {"enabled": False}
+
+
+def test_hotpath_runner_accepts_time_chunk_steps_in_dry_run(capsys):
+    main(
+        [
+            "--workload",
+            "observer_only",
+            "--sizes",
+            "1",
+            "--dry-run",
+            "--time-chunk-steps",
+            "2",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == ["observer_only size=1"]
 
 
 def test_hotpath_size_and_run_resolution():
@@ -89,6 +135,8 @@ def test_hotpath_size_and_run_resolution():
         "point_source_extracellular",
         "double_cable_extracellular",
         "footprint_reuse_sweep",
+        "solver_only_precomputed",
+        "typed_footprint_drive_matrix",
         "observer_only",
         "realistic_mixed_population",
         "hotpath_matrix",
@@ -204,16 +252,40 @@ def test_path_comparison_matrix_builds_controlled_path_scenarios():
         dt_ms=0.05,
     )
 
-    assert len(simulations) == 7
+    assert len(simulations) == 10
     assert all(isinstance(simulation, axs.AxonSimulation) for simulation in simulations)
-    assert [simulation.recording.spatial.value for simulation in simulations[:2]] == [
+    assert [simulation.recording.spatial.value for simulation in simulations[:3]] == [
         "center",
+        "probes",
         "full",
     ]
-    assert not simulations[2].recording.voltage
-    assert simulations[2].observers is not None
+    assert not simulations[3].recording.voltage
+    assert simulations[3].observers is not None
     assert all(instance.extracellular_context is None for instance in simulations[0].axons)
-    assert any(instance.extracellular_context is not None for instance in simulations[3].axons)
+    assert any(instance.extracellular_context is not None for instance in simulations[4].axons)
+    assert not simulations[7].recording.voltage
+    assert simulations[7].observers is not None
     assert {
-        instance.axon.resolved_formulation for instance in simulations[5].axons
+        instance.axon.resolved_formulation for instance in simulations[8].axons
     } == {"double-cable"}
+
+    metadata = _describe_simulations(
+        _simulation_labels("path_comparison_matrix", len(simulations)),
+        simulations,
+    )
+    assert metadata[0]["comparison_axes"]["recording_spatial"] == "center"
+    assert metadata[1]["comparison_axes"]["recording_spatial"] == "probes"
+    assert metadata[3]["comparison_axes"] == {
+        "path_family": "single_intracellular",
+        "stimulation": "intracellular_current_clamp",
+        "recording_spatial": "none",
+        "recording_voltage": False,
+        "observer_mode": "solver_side",
+    }
+    assert metadata[7]["comparison_axes"] == {
+        "path_family": "single_point_source_extracellular",
+        "stimulation": "analytical_point_source_extracellular",
+        "recording_spatial": "none",
+        "recording_voltage": False,
+        "observer_mode": "solver_side",
+    }

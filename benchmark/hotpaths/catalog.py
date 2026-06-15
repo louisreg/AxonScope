@@ -43,6 +43,20 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "stimulus amplitude; useful to measure missing footprint/stimulus-only reuse."
         ),
     ),
+    "solver_only_precomputed": HotpathWorkload(
+        name="solver_only_precomputed",
+        description=(
+            "Direct backend workload with runtime and inputs prepared before timing; "
+            "useful to separate kernel throughput from dispatch and input materialization."
+        ),
+    ),
+    "typed_footprint_drive_matrix": HotpathWorkload(
+        name="typed_footprint_drive_matrix",
+        description=(
+            "Direct backend workload comparing analytical context lowering against "
+            "typed ExtracellularFootprint/ExtracellularDrive lowering."
+        ),
+    ),
     "observer_only": HotpathWorkload(
         name="observer_only",
         description=(
@@ -70,7 +84,7 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
         name="path_comparison_matrix",
         description=(
             "Controlled matrix for intra vs extra and single-cable vs double-cable "
-            "comparisons across center/full/observer retention policies."
+            "comparisons across center/probes/full/observer retention policies."
         ),
     ),
 }

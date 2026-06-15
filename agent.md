@@ -178,35 +178,21 @@ instructions: |
 
   The markdown docs are useful but currently uneven. Before treating a claim as
   canonical, compare it against `src/axonscope/`, `tests/unit/`, and the active
-  examples. Keep the checklist below alive: fill it in, split items when they
-  grow, and mark each item complete only after the docs and code have both been
-  checked.
+  examples.
 
-  The canonical living TODO for this audit is `todo.md`. Read it at the start
-  of documentation/API cleanup work, add newly discovered mismatches there, and
-  update checkboxes as tasks are completed. The first task is to audit `/docs`
-  against the current code before building the Sphinx documentation.
+  The canonical living TODO for documentation/API cleanup is `todo.md`. Read it
+  at the start of cleanup work, add newly discovered mismatches there, and
+  update checkboxes only after code, docs, examples, and relevant tests have
+  been checked. Keep `agent.md` focused on working rules; do not duplicate the
+  operational checklist here.
 
-  ### Current High-Signal Mismatches
+  Current high-signal documentation reminders:
 
-  - `docs/api_public_draft.md` is proposal-only and now has a clear top warning; later split implemented API from proposal if it remains user-facing.
-  - `docs/recorders_observers_activation_strategy.md` is a proposal with refreshed status: CPU/post-hoc activation and protocol sweeps exist, while `ActivationObserver`, `PeakVoltageObserver`, observer-only runs, amplitude-batched sweeps, and `thresholds_for_pool` remain future.
-  - No fresh NRV pass count is recorded in docs; rerun the NRV suite in an NRV-ready environment before adding dated validation notes.
-
-  ### Incremental Documentation TODO
-
-  - [x] Fix the example 06 rename everywhere: README commands, example docstring, and `tests/unit/test_examples.py`.
-  - [x] Update the README package map to point to `results/analysis.py` and `results/visualization.py`, or explicitly explain the top-level compatibility aliases.
-  - [x] Normalize constructor examples in docs to the implemented public names: `length`, `diameter`, `position`, `positions`, `sample_dt`, `duration`/`dt` for public wrappers, and `tsim`/`dt` for direct solver calls. Current docs are aligned outside the explicitly proposal-only `docs/api_public_draft.md`.
-  - [x] Add a clear warning at the top of `docs/api_public_draft.md` so stale target snippets are not mistaken for current runnable API.
-  - [ ] Later split `docs/api_public_draft.md` into implemented API versus proposal if it remains part of the user-facing docs.
-  - [x] Refresh `docs/recorders_observers_activation_strategy.md` implementation status with the current protocol functions and keep observer-only/GPU observer work marked future.
-  - [x] Audit `CHANGELOG.md` against files that actually exist in this checkout; remove or reword absent module names and CI claims.
-  - [x] Re-run `python -m pytest -q tests/unit` after doc/example/API cleanup fixes and record only fresh results. Fresh run on 2026-06-14 after typed recording signals: `MPLBACKEND=Agg MPLCONFIGDIR=/private/tmp/axonscope-mpl /Users/louisregnacq/miniforge3/envs/Axonscope-env/bin/python -m pytest -q tests/unit` (`254 passed, 1 skipped`).
-  - [ ] Re-run NRV validation only in an NRV-ready environment; record dated validation notes after a fresh run.
-  - [x] Remove duplicated narrative between README, `docs/pool_dispatch.md`, and `docs/results_recording_analysis.md` by making README a short entry point and keeping detailed contracts in `docs/`.
-  - [ ] After each doc cleanup, update this checklist so future agents can continue from the latest verified state.
-  - [ ] Keep `todo.md` in sync with this section and use it as the source of truth for the step-by-step cleanup.
+  - Audit `/docs` against current code before building Sphinx documentation.
+  - Keep proposal/roadmap pages clearly labelled so users do not run future API
+    snippets as current behavior.
+  - Record NRV validation notes only after a fresh run in an NRV-ready
+    environment.
   
   ## Common Pitfalls to Avoid
   
@@ -347,7 +333,7 @@ helpfulLinks:
   - path: docs/validation.md
     description: Testing policy and NRV validation approach
   - path: todo.md
-    description: Living project TODO; first task is auditing docs against current code before Sphinx docs
+    description: Living operational roadmap for documentation, API cleanup, benchmarks, examples, and Phase 8+ work
   - path: examples/basic
     description: Didactic examples covering core concepts
   - path: examples/advanced

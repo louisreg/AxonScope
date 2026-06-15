@@ -11,12 +11,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+import jax.numpy as jnp
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[2]
@@ -24,10 +25,29 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(repo_root))
 
 import axonscope as axs
+from axonscope.backends.jax.input_batches import (
+    build_footprint_vstim_midpoint_batch,
+    build_intracellular_current_density_batch,
+    build_vstim_midpoint_batch,
+)
+from axonscope.benchmarking.hotpaths import (
+    benchmark_array_metadata,
+    benchmark_span,
+    benchmark_wait,
+    record_benchmark_metadata,
+)
+from axonscope.solvers import BatchOptions, SingleCableVStimBatchKernel
+from axonscope.solvers.runtime import prepare_solver_runtime
 from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 
 
 DEFAULT_OUT_DIR = Path("benchmark/results/hotpaths")
+DIRECT_WORKLOADS = frozenset(
+    {
+        "solver_only_precomputed",
+        "typed_footprint_drive_matrix",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +85,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--dt", type=float, default=0.05, help="Step size in ms.")
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument(
+        "--time-chunk-steps",
+        type=int,
+        default=None,
+        help="Optional batch-kernel time chunk size for long-run probes.",
+    )
+    parser.add_argument(
         "--sweep-repeats",
         type=int,
         default=3,
@@ -86,6 +112,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=True,
         help="Synchronize JAX arrays at kernel.wait.",
     )
+    parser.add_argument(
+        "--jax-log-compiles",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable JAX compile logging for cold-start diagnostic runs.",
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -99,6 +131,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--dt must be > 0.")
     if args.warmups < 0:
         raise ValueError("--warmups must be >= 0.")
+    if args.time_chunk_steps is not None and args.time_chunk_steps < 1:
+        raise ValueError("--time-chunk-steps must be >= 1.")
     if args.sweep_repeats < 1:
         raise ValueError("--sweep-repeats must be >= 1.")
 
@@ -108,6 +142,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"{run.workload} size={run.size}")
         return
 
+    jax_compile_logging = configure_jax_compile_logging(bool(args.jax_log_compiles))
     timing_mode = _timing_mode(args.warmups)
     run_root = make_run_root(args.out_dir, prefix=args.prefix)
     manifest = {
@@ -122,13 +157,39 @@ def main(argv: Sequence[str] | None = None) -> None:
             "dt_ms": float(args.dt),
             "warmups": int(args.warmups),
             "timing_mode": timing_mode,
+            "time_chunk_steps": args.time_chunk_steps,
             "sweep_repeats": int(args.sweep_repeats),
             "sync_device": bool(args.sync_device),
+            "jax_log_compiles": bool(args.jax_log_compiles),
         },
+        "jax_compile_logging": jax_compile_logging,
         "runs": [],
     }
 
     for run in runs:
+        if run.workload in DIRECT_WORKLOADS:
+            run_record = run_direct_workload(
+                run.workload,
+                size=run.size,
+                compartments=args.compartments,
+                length_um=args.length_um,
+                duration_ms=args.duration,
+                dt_ms=args.dt,
+                warmups=args.warmups,
+                timing_mode=timing_mode,
+                sync_device=bool(args.sync_device),
+                print_summary=bool(args.print_summary),
+                output_dir=run_root / f"{run.workload}_n{run.size}",
+                jax_log_compiles=bool(args.jax_log_compiles),
+                time_chunk_steps=args.time_chunk_steps,
+            )
+            manifest["runs"].append(run_record)
+            print(
+                f"{run.workload} size={run.size}: "
+                f"{run_record['event_count']} events -> {run_record['output_dir']}"
+            )
+            continue
+
         simulations = build_simulations(
             run.workload,
             size=run.size,
@@ -138,6 +199,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             dt_ms=args.dt,
             sweep_repeats=args.sweep_repeats,
         )
+        simulations = _with_time_chunk_steps(simulations, args.time_chunk_steps)
         estimates = [simulation.estimate().to_dict() for simulation in simulations]
         simulation_labels = _simulation_labels(run.workload, len(simulations))
         for _ in range(args.warmups):
@@ -158,6 +220,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "simulation_labels": list(simulation_labels),
                 "warmup_count": int(args.warmups),
                 "timing_mode": timing_mode,
+                "time_chunk_steps": args.time_chunk_steps,
+                "jax_log_compiles": bool(args.jax_log_compiles),
             }
         )
         try:
@@ -193,6 +257,333 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"manifest: {manifest_path}")
 
 
+def run_direct_workload(
+    workload: str,
+    *,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+    warmups: int,
+    timing_mode: str,
+    sync_device: bool,
+    print_summary: bool,
+    output_dir: Path,
+    jax_log_compiles: bool,
+    time_chunk_steps: int | None,
+) -> dict[str, object]:
+    """Run a backend-level hotpath workload that bypasses public dispatch."""
+
+    if workload == "solver_only_precomputed":
+        return _run_solver_only_precomputed(
+            workload=workload,
+            size=size,
+            compartments=compartments,
+            length_um=length_um,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+            warmups=warmups,
+            timing_mode=timing_mode,
+            sync_device=sync_device,
+            print_summary=print_summary,
+            output_dir=output_dir,
+            jax_log_compiles=jax_log_compiles,
+            time_chunk_steps=time_chunk_steps,
+        )
+    if workload == "typed_footprint_drive_matrix":
+        return _run_typed_footprint_drive_matrix(
+            workload=workload,
+            size=size,
+            compartments=compartments,
+            length_um=length_um,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+            warmups=warmups,
+            timing_mode=timing_mode,
+            sync_device=sync_device,
+            print_summary=print_summary,
+            output_dir=output_dir,
+            jax_log_compiles=jax_log_compiles,
+            time_chunk_steps=time_chunk_steps,
+        )
+    raise ValueError(f"Unknown direct hotpath workload: {workload!r}.")
+
+
+def _run_solver_only_precomputed(
+    *,
+    workload: str,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+    warmups: int,
+    timing_mode: str,
+    sync_device: bool,
+    print_summary: bool,
+    output_dir: Path,
+    jax_log_compiles: bool,
+    time_chunk_steps: int | None,
+) -> dict[str, object]:
+    """Run kernels with runtime and inputs prepared before benchmarking."""
+
+    intra_axons = build_intracellular_pool(
+        size=size,
+        compartments=compartments,
+        length_um=length_um,
+    )
+    extra_axons = build_point_source_pool(
+        size=size,
+        compartments=compartments,
+        length_um=length_um,
+    )
+    intra_runtime = _single_cable_runtime(intra_axons[0], duration_ms=duration_ms, dt_ms=dt_ms)
+    extra_runtime = _single_cable_runtime(extra_axons[0], duration_ms=duration_ms, dt_ms=dt_ms)
+    intra_iinj = build_intracellular_current_density_batch(intra_axons, intra_runtime)
+    intra_vstim = jnp.zeros(
+        (size, intra_runtime.grid.Nt, intra_runtime.membrane.Nx),
+        dtype=intra_runtime.membrane.dtype,
+    )
+    extra_vstim = _context_vstim_for_instances(
+        extra_axons,
+        extra_runtime,
+        duration_ms=duration_ms,
+        dt_ms=dt_ms,
+    )
+    cases = (
+        {
+            "label": "solver_only_single_intracellular_precomputed",
+            "runtime": intra_runtime,
+            "iinj": intra_iinj,
+            "vstim": intra_vstim,
+            "has_driven_extracellular": False,
+            "time_chunk_steps": time_chunk_steps,
+            "estimate": _simulation_estimate(
+                intra_axons,
+                duration_ms=duration_ms,
+                dt_ms=dt_ms,
+            ),
+        },
+        {
+            "label": "solver_only_single_point_source_precomputed",
+            "runtime": extra_runtime,
+            "iinj": None,
+            "vstim": extra_vstim,
+            "has_driven_extracellular": True,
+            "time_chunk_steps": time_chunk_steps,
+            "estimate": _simulation_estimate(
+                extra_axons,
+                duration_ms=duration_ms,
+                dt_ms=dt_ms,
+            ),
+        },
+    )
+
+    for _ in range(int(warmups)):
+        for case in cases:
+            _run_precomputed_single_cable_case(case)
+
+    session = axs.enable_benchmark(
+        output_dir,
+        print_summary=False,
+        sync_device=bool(sync_device),
+    )
+    session.metadata.update(
+        {
+            "workload": workload,
+            "size": int(size),
+            "simulation_count": len(cases),
+            "simulation_labels": [str(case["label"]) for case in cases],
+            "warmup_count": int(warmups),
+            "timing_mode": timing_mode,
+            "jax_log_compiles": bool(jax_log_compiles),
+            "direct_backend_workload": True,
+            "precomputed_inputs": True,
+            "time_chunk_steps": time_chunk_steps,
+        }
+    )
+    try:
+        outputs = tuple(_run_precomputed_single_cable_case(case) for case in cases)
+    finally:
+        report = axs.disable_benchmark(print_summary=bool(print_summary))
+
+    return _direct_run_record(
+        workload=workload,
+        size=size,
+        output_dir=output_dir,
+        warmups=warmups,
+        timing_mode=timing_mode,
+        labels=[str(case["label"]) for case in cases],
+        estimates=[case["estimate"] for case in cases],
+        outputs=outputs,
+        report=report,
+        metadata=[
+            _direct_case_metadata(
+                str(case["label"]),
+                case,
+                bypasses_input_materialization=True,
+            )
+            for case in cases
+        ],
+    )
+
+
+def _run_typed_footprint_drive_matrix(
+    *,
+    workload: str,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+    warmups: int,
+    timing_mode: str,
+    sync_device: bool,
+    print_summary: bool,
+    output_dir: Path,
+    jax_log_compiles: bool,
+    time_chunk_steps: int | None,
+) -> dict[str, object]:
+    """Compare analytical-context lowering against typed drive lowering."""
+
+    axons = build_point_source_pool(
+        size=size,
+        compartments=compartments,
+        length_um=length_um,
+    )
+    runtime = _single_cable_runtime(axons[0], duration_ms=duration_ms, dt_ms=dt_ms)
+    estimate = _simulation_estimate(axons, duration_ms=duration_ms, dt_ms=dt_ms)
+    label = "typed_footprint_drive_single_point_source"
+
+    for _ in range(int(warmups)):
+        context_vstim = _context_vstim_for_instances(
+            axons,
+            runtime,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+        )
+        typed_vstim = _typed_drive_vstim_for_instances(
+            axons,
+            runtime,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+        )
+        _run_precomputed_single_cable_case(
+            {
+                "label": label,
+                "runtime": runtime,
+                "iinj": None,
+                "vstim": typed_vstim,
+                "has_driven_extracellular": True,
+                "time_chunk_steps": time_chunk_steps,
+            }
+        )
+        benchmark_wait(context_vstim)
+
+    session = axs.enable_benchmark(
+        output_dir,
+        print_summary=False,
+        sync_device=bool(sync_device),
+    )
+    session.metadata.update(
+        {
+            "workload": workload,
+            "size": int(size),
+            "simulation_count": 1,
+            "simulation_labels": [label],
+            "warmup_count": int(warmups),
+            "timing_mode": timing_mode,
+            "jax_log_compiles": bool(jax_log_compiles),
+            "direct_backend_workload": True,
+            "typed_footprint_drive": True,
+            "time_chunk_steps": time_chunk_steps,
+        }
+    )
+    try:
+        with benchmark_span(
+            "inputs.extracellular.context",
+            workload=workload,
+            simulation_label=label,
+            input_format="analytical_context_dense_vstim",
+        ):
+            context_vstim = _context_vstim_for_instances(
+                axons,
+                runtime,
+                duration_ms=duration_ms,
+                dt_ms=dt_ms,
+            )
+            record_benchmark_metadata(
+                **benchmark_array_metadata(
+                    "vstim_mid_context",
+                    context_vstim,
+                    role="kernel_input",
+                )
+            )
+        with benchmark_span(
+            "inputs.extracellular.typed_drive",
+            workload=workload,
+            simulation_label=label,
+            input_format="typed_footprint_drive_dense_vstim",
+        ):
+            typed_vstim = _typed_drive_vstim_for_instances(
+                axons,
+                runtime,
+                duration_ms=duration_ms,
+                dt_ms=dt_ms,
+            )
+            record_benchmark_metadata(
+                **benchmark_array_metadata(
+                    "vstim_mid_typed_drive",
+                    typed_vstim,
+                    role="kernel_input",
+                )
+            )
+        with benchmark_span("inputs.extracellular.compare", workload=workload):
+            delta = np.asarray(context_vstim) - np.asarray(typed_vstim)
+            record_benchmark_metadata(max_abs_delta_mV=float(np.max(np.abs(delta))))
+        output = _run_precomputed_single_cable_case(
+            {
+                "label": label,
+                "runtime": runtime,
+                "iinj": None,
+                "vstim": typed_vstim,
+                "has_driven_extracellular": True,
+                "time_chunk_steps": time_chunk_steps,
+            }
+        )
+    finally:
+        report = axs.disable_benchmark(print_summary=bool(print_summary))
+
+    return _direct_run_record(
+        workload=workload,
+        size=size,
+        output_dir=output_dir,
+        warmups=warmups,
+        timing_mode=timing_mode,
+        labels=[label],
+        estimates=[estimate],
+        outputs=(output,),
+        report=report,
+        metadata=[
+            {
+                "label": label,
+                "direct_backend_workload": True,
+                "path_family": "single_point_source_extracellular",
+                "stimulation": "typed_footprint_drive",
+                "recording_policy": {"spatial": "center", "signals": ["membrane_voltage"]},
+                "comparison_axes": {
+                    "path_family": "single_point_source_extracellular",
+                    "stimulation": "typed_footprint_drive",
+                    "recording_spatial": "center",
+                    "recording_voltage": True,
+                    "observer_mode": "none",
+                },
+            }
+        ],
+    )
+
+
 def print_workloads() -> None:
     print("Hotpath workloads:")
     for name, workload in HOTPATH_WORKLOADS.items():
@@ -201,6 +592,268 @@ def print_workloads() -> None:
     for name, sizes in HOTPATH_PRESETS.items():
         joined = ", ".join(str(size) for size in sizes)
         print(f"  {name:28s} sizes={joined}")
+
+
+def _single_cable_runtime(
+    representative: axs.AxonInstance,
+    *,
+    duration_ms: float,
+    dt_ms: float,
+):
+    return prepare_solver_runtime(
+        representative,
+        tsim_ms=duration_ms,
+        dt_ms=dt_ms,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_stimulation=False,
+    )
+
+
+def _with_time_chunk_steps(
+    simulations: Sequence[axs.AxonSimulation],
+    time_chunk_steps: int | None,
+) -> tuple[axs.AxonSimulation, ...]:
+    """Return simulations with an optional batch time-chunk policy applied."""
+
+    if time_chunk_steps is None:
+        return tuple(simulations)
+    updated = []
+    for simulation in simulations:
+        batch_options = simulation.batch_options or BatchOptions()
+        updated.append(
+            axs.AxonSimulation(
+                simulation.population,
+                duration=simulation.duration,
+                dt=simulation.dt,
+                recording=simulation.recording,
+                solver=simulation.solver,
+                solver_options=simulation.solver_options,
+                batch_options=replace(
+                    batch_options,
+                    time_chunk_steps=int(time_chunk_steps),
+                ),
+                observers=simulation.observers,
+                progress=simulation.progress,
+            )
+        )
+    return tuple(updated)
+
+
+def _simulation_estimate(
+    instances: Sequence[axs.AxonInstance],
+    *,
+    duration_ms: float,
+    dt_ms: float,
+) -> axs.SimulationEstimate:
+    simulation = axs.AxonSimulation(
+        axs.AxonPopulation(instances),
+        duration=duration_ms * axs.ms,
+        dt=dt_ms * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
+    )
+    return simulation.estimate()
+
+
+def _x_positions_m_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
+    rows = []
+    for instance in instances:
+        x_um = np.asarray(instance.axon.layout.position_values(unit="micrometer"), dtype=float)
+        rows.append((x_um + float(getattr(instance, "x_offset_um", 0.0))) * 1e-6)
+    return np.stack(rows, axis=0)
+
+
+def _axon_y_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
+    return np.asarray([float(getattr(instance, "y_um", 0.0)) for instance in instances])
+
+
+def _axon_z_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
+    return np.asarray([float(getattr(instance, "z_um", 0.0)) for instance in instances])
+
+
+def _context_vstim_for_instances(
+    instances: Sequence[axs.AxonInstance],
+    runtime: object,
+    *,
+    duration_ms: float,
+    dt_ms: float,
+):
+    return build_vstim_midpoint_batch(
+        instances[0],
+        [instance.extracellular_context for instance in instances],
+        tsim_ms=duration_ms,
+        dt_ms=dt_ms,
+        x_positions_m=_x_positions_m_for_instances(instances),
+        axon_y_um=_axon_y_um_for_instances(instances),
+        axon_z_um=_axon_z_um_for_instances(instances),
+        dtype_local=runtime.membrane.dtype,
+    )
+
+
+def _typed_drive_vstim_for_instances(
+    instances: Sequence[axs.AxonInstance],
+    runtime: object,
+    *,
+    duration_ms: float,
+    dt_ms: float,
+):
+    context = instances[0].extracellular_context
+    if context is None:
+        raise ValueError("typed drive workload requires extracellular contexts.")
+    electrode = context.electrodes[0]
+    stimulus = getattr(electrode, "stimulus", None)
+    if stimulus is None:
+        raise ValueError("typed drive workload requires a stimulated electrode.")
+
+    positions_um = np.asarray(
+        instances[0].axon.layout.position_values(unit="micrometer"),
+        dtype=float,
+    )
+    x_rows_m = _x_positions_m_for_instances(instances)
+    y_rows_um = _axon_y_um_for_instances(instances)
+    z_rows_um = _axon_z_um_for_instances(instances)
+    values = np.stack(
+        [
+            context.footprint_for_electrode(
+                electrode,
+                x_rows_m[row_index],
+                axon_y_um=float(y_rows_um[row_index]),
+                axon_z_um=float(z_rows_um[row_index]),
+            )
+            for row_index in range(len(instances))
+        ],
+        axis=0,
+    )
+    axon_ids = tuple(axs.AxonId(f"row_{index}") for index in range(len(instances)))
+    footprint = axs.ExtracellularFootprint(
+        values=values,
+        positions=positions_um * axs.um,
+        axon_ids=axon_ids,
+        source_id="hotpath_point_source",
+        metadata={"builder": "benchmark.hotpaths.typed_footprint_drive_matrix"},
+    )
+    drive = axs.ExtracellularDrive(
+        id=axs.DriveId("point_source"),
+        footprint=footprint,
+        stimulus=stimulus,
+    )
+    stimulation = axs.ExtracellularStimulation([drive])
+    vstim = build_footprint_vstim_midpoint_batch(
+        stimulus=drive.stimulus,
+        footprint_V_per_A=drive.footprint.values_V_per_A,
+        tsim_ms=duration_ms,
+        dt_ms=dt_ms,
+        dtype_local=runtime.membrane.dtype,
+    )
+    record_benchmark_metadata(
+        drive_ids=[str(value) for value in stimulation.names],
+        footprint_rows=len(axon_ids),
+        footprint_positions=footprint.n_positions,
+    )
+    return vstim
+
+
+def _run_precomputed_single_cable_case(case: dict[str, object]):
+    runtime = case["runtime"]
+    time_chunk_steps = case.get("time_chunk_steps")
+    chunk_steps = None if time_chunk_steps is None else int(time_chunk_steps)
+    with benchmark_span(
+        "kernel.enqueue",
+        workload="direct_backend",
+        simulation_label=str(case["label"]),
+        recording_mode="center",
+    ):
+        out = SingleCableVStimBatchKernel(
+            runtime=runtime,
+            Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
+            has_driven_extracellular=bool(case["has_driven_extracellular"]),
+        ).run(
+            intracellular_current_density_mid=case.get("iinj"),
+            extracellular_potential_mid_mV=case["vstim"],
+            options=BatchOptions.center(time_chunk_steps=chunk_steps),
+        )
+        if out.Vm is not None:
+            record_benchmark_metadata(
+                **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+            )
+    with benchmark_span(
+        "kernel.wait",
+        workload="direct_backend",
+        simulation_label=str(case["label"]),
+    ):
+        benchmark_wait(out.Vm)
+    return out
+
+
+def _direct_case_metadata(
+    label: str,
+    case: dict[str, object],
+    *,
+    bypasses_input_materialization: bool,
+) -> dict[str, object]:
+    stimulation = (
+        "analytical_point_source_extracellular"
+        if bool(case["has_driven_extracellular"])
+        else "intracellular_current_clamp"
+    )
+    path_family = (
+        "single_point_source_extracellular"
+        if bool(case["has_driven_extracellular"])
+        else "single_intracellular"
+    )
+    return {
+        "label": label,
+        "direct_backend_workload": True,
+        "precomputed_inputs": bool(bypasses_input_materialization),
+        "path_family": path_family,
+        "stimulation": stimulation,
+        "recording_policy": {"spatial": "center", "signals": ["membrane_voltage"]},
+        "comparison_axes": {
+            "path_family": path_family,
+            "stimulation": stimulation,
+            "recording_spatial": "center",
+            "recording_voltage": True,
+            "observer_mode": "none",
+        },
+    }
+
+
+def _direct_run_record(
+    *,
+    workload: str,
+    size: int,
+    output_dir: Path,
+    warmups: int,
+    timing_mode: str,
+    labels: Sequence[str],
+    estimates: Sequence[axs.SimulationEstimate],
+    outputs: Sequence[object],
+    report: axs.BenchmarkReport | None,
+    metadata: Sequence[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "workload": workload,
+        "size": int(size),
+        "simulation_count": len(labels),
+        "warmup_count": int(warmups),
+        "timing_mode": timing_mode,
+        "output_dir": str(output_dir),
+        "simulation_labels": list(labels),
+        "result_count": int(size) * len(labels),
+        "vm_shapes": [
+            list(np.asarray(output.Vm).shape)
+            for output in outputs
+            if getattr(output, "Vm", None) is not None
+        ][:3],
+        "observation_names": [],
+        "memory_estimate": estimates[0].to_dict(),
+        "memory_estimates": [estimate.to_dict() for estimate in estimates],
+        "workload_metadata": list(metadata),
+        "event_count": 0 if report is None else len(report.events),
+        "summary": [] if report is None else [row.to_dict() for row in report.summary],
+    }
 
 
 def resolve_sizes(preset: str, sizes: Sequence[int] | None) -> tuple[int, ...]:
@@ -235,6 +888,21 @@ def _timing_mode(warmups: int) -> str:
     """Return a stable label for whether measured events include cold setup."""
 
     return "cold" if int(warmups) == 0 else "warm"
+
+
+def configure_jax_compile_logging(enabled: bool) -> dict[str, object]:
+    """Enable JAX compile logging for diagnostic runs when requested."""
+
+    if not enabled:
+        return {"enabled": False}
+
+    import jax
+
+    jax.config.update("jax_log_compiles", True)
+    return {
+        "enabled": True,
+        "mechanism": "jax.config.update('jax_log_compiles', True)",
+    }
 
 
 def build_simulation(
@@ -546,6 +1214,14 @@ def build_path_comparison_matrix(
                 compartments=compartments,
                 length_um=length_um,
             ),
+            recording=axs.Recording.probes(axs.signals.Vm, count=5),
+        ),
+        simulation(
+            build_intracellular_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
             recording=axs.Recording.voltage(),
         ),
         simulation(
@@ -571,7 +1247,24 @@ def build_path_comparison_matrix(
                 compartments=compartments,
                 length_um=length_um,
             ),
+            recording=axs.Recording.probes(axs.signals.Vm, count=5),
+        ),
+        simulation(
+            build_point_source_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
             recording=axs.Recording.voltage(),
+        ),
+        simulation(
+            build_point_source_pool(
+                size=size,
+                compartments=compartments,
+                length_um=length_um,
+            ),
+            recording=axs.Recording.none(),
+            observers=[peak_voltage, activation],
         ),
         simulation(
             build_double_cable_extracellular_pool(
@@ -710,10 +1403,13 @@ def _simulation_labels(workload: str, count: int) -> tuple[str, ...]:
     if workload == "path_comparison_matrix":
         labels = (
             "single_intracellular_center",
+            "single_intracellular_probes",
             "single_intracellular_full_vm",
             "single_intracellular_observer_none",
             "single_point_source_center",
+            "single_point_source_probes",
             "single_point_source_full_vm",
+            "single_point_source_observer_none",
             "double_mrg_point_source_center",
             "double_mrg_point_source_full_vm",
         )
@@ -756,6 +1452,42 @@ def _describe_simulation(
             str(getattr(observer, "name", type(observer).__name__))
             for observer in (simulation.observers or ())
         ],
+        "comparison_axes": _comparison_axes(label, simulation),
+    }
+
+
+def _comparison_axes(
+    label: str,
+    simulation: axs.AxonSimulation,
+) -> dict[str, object]:
+    """Return stable matrix axes for controlled comparison labels."""
+
+    if label.startswith("single_intracellular_"):
+        path_family = "single_intracellular"
+        stimulation = "intracellular_current_clamp"
+    elif label.startswith("single_point_source_"):
+        path_family = "single_point_source_extracellular"
+        stimulation = "analytical_point_source_extracellular"
+    elif label.startswith("double_mrg_point_source_"):
+        path_family = "double_mrg_point_source_extracellular"
+        stimulation = "analytical_point_source_extracellular"
+    else:
+        return {}
+
+    recording = simulation.recording
+    recording_voltage = True if recording is None else bool(recording.voltage)
+    if recording is None:
+        recording_spatial = "default"
+    elif not recording_voltage:
+        recording_spatial = "none"
+    else:
+        recording_spatial = recording.spatial.value
+    return {
+        "path_family": path_family,
+        "stimulation": stimulation,
+        "recording_spatial": recording_spatial,
+        "recording_voltage": recording_voltage,
+        "observer_mode": "solver_side" if simulation.observers else "none",
     }
 
 
