@@ -37,7 +37,7 @@ Run a compact local smoke:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 8 128 \
   --nx 32 51 \
-  --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_padded pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 3
@@ -49,7 +49,7 @@ Run the GPU-oriented sweep from the exact double-cable roadmap:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1 8 128 512 1024 2048 4096 \
   --nx 16 32 51 64 96 100 128 \
-  --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_padded pcr_adaptive \
   --dtypes float32 float64 \
   --warmups 1 \
   --repeats 5
@@ -62,6 +62,8 @@ float64 reference unless `--skip-reference` is used.
 `pcr_soa` is measured with the batch-native
 `solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
 that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
+`thomas_batched` is a benchmark-only exact candidate that runs block Thomas as
+one batch-first scan instead of an outer `vmap` over fibers.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.

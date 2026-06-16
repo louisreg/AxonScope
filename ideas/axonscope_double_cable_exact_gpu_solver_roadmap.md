@@ -568,9 +568,30 @@ But start with `[B, Nx]`, because this matches batch-first AxonScope patterns.
 
 ---
 
+## Phase 1C.1 — Batch-native Thomas baseline
+
+Status on 2026-06-16: implemented locally as
+`solve_block_tridiagonal_2x2_scalar_batched(...)` and exposed only to the
+solver-only benchmark as `thomas_batched`. This is the exact same block-Thomas
+algebra as `thomas`, but scans once over `Nx` with batch lanes instead of using
+an outer `vmap` over fibers. It is not a public `BatchOptions` solver choice
+and is not routed by `auto`.
+
+Local tests cover shared coefficients, batched coefficients, and `Nx=1` against
+the vmapped Thomas reference. Next evidence needed: Kaggle P100 solver-only
+`linear` comparison of `thomas_batched` versus `thomas`.
+
+Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, with max
+absolute error about `4.6e-08` versus Thomas64. It was slightly faster than the
+current vmapped Thomas path on this CPU/local smoke, but that is not GPU
+performance evidence.
+
+---
+
 ## Phase 1D — Padding Nx to 32/64/128
 
-Status on 2026-06-16: helper and benchmark-only candidate implemented.
+Status on 2026-06-16: helper and benchmark-only candidate implemented and
+tested on P100.
 `double_cable_power_bucket(...)`,
 `pad_double_cable_system_to_power_bucket(...)`, and
 `solve_block_tridiagonal_2x2_pcr_soa_batched_padded(...)` keep padded rows as
@@ -585,6 +606,13 @@ Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, comparing
 `7.8e-08`. This CPU/local smoke is not GPU performance evidence; the padded
 path was slower than unpadded at this tiny batch size. The next useful result is
 the Kaggle P100 solver-only `linear` matrix.
+
+Kaggle P100 `20260616_220653_linear_NvidiaTeslaP100` measured `B=128..4096`,
+`Nx=32/51/64/96`, `float32`, five repeats. `pcr_soa_padded` stayed numerically
+aligned with Thomas64 (`~1.4e-07` max absolute error), but was not a general
+speed win over unpadded batch-native `pcr_soa`: `6/20` cases faster and
+geomean `1.086x` slower. Decision: keep padding as benchmark-only/standby and
+do not route it through `auto`.
 
 ## Why
 

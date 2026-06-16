@@ -53,6 +53,21 @@ def test_planned_cases_allow_benchmark_only_padded_pcr_soa():
     assert resolve_kernel_solver("pcr_soa_padded", batch_size=512) == "pcr_soa_padded"
 
 
+def test_planned_cases_allow_benchmark_only_batched_thomas():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["thomas_batched"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "thomas_batched"
+    assert cases[0].resolved_solver == "thomas"
+    assert cases[0].kernel_solver == "thomas_batched"
+    assert resolve_kernel_solver("thomas_batched", batch_size=512) == "thomas_batched"
+
+
 def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
     main(
         [

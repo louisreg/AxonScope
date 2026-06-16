@@ -14,6 +14,7 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_scalar_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 
@@ -251,6 +252,128 @@ def test_batched_pcr_soa_matches_vmapped_thomas_for_shared_coefficients():
         rtol=1e-5,
         atol=1e-6,
     )
+
+
+def test_batched_thomas_matches_vmapped_thomas_for_batched_coefficients():
+    batch_size = 4
+    n = 8
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+    edge = jnp.arange(n - 1, dtype=jnp.float32)[None, :]
+
+    a00 = 4.0 + 0.05 * x + 0.01 * batch
+    a01 = -0.9 - 0.01 * x + 0.002 * batch
+    a10 = -1.1 + 0.02 * x - 0.003 * batch
+    a11 = 5.0 + 0.07 * x + 0.008 * batch
+    off0 = -0.10 - 0.01 * edge - 0.001 * batch
+    off1 = -0.07 - 0.005 * edge - 0.0015 * batch
+    rhs0 = jnp.sin(0.3 * x + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x - 0.1 * batch)
+
+    vmapped0, vmapped1 = jax.vmap(solve_block_tridiagonal_2x2_scalar)(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    batched0, batched1 = solve_block_tridiagonal_2x2_scalar_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(np.asarray(batched0), np.asarray(vmapped0), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(batched1), np.asarray(vmapped1), rtol=1e-5, atol=1e-6)
+
+
+def test_batched_thomas_matches_vmapped_thomas_for_shared_coefficients():
+    batch_size = 3
+    n = 9
+    x = jnp.arange(n, dtype=jnp.float32)
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+
+    a00 = 4.0 + 0.05 * x
+    a01 = -0.9 - 0.01 * x
+    a10 = -1.1 + 0.02 * x
+    a11 = 5.0 + 0.07 * x
+    off0 = -0.10 - 0.01 * jnp.arange(n - 1, dtype=jnp.float32)
+    off1 = -0.07 - 0.005 * jnp.arange(n - 1, dtype=jnp.float32)
+    rhs0 = jnp.sin(0.3 * x[None, :] + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x[None, :] - 0.1 * batch)
+
+    vmapped0, vmapped1 = jax.vmap(
+        solve_block_tridiagonal_2x2_scalar,
+        in_axes=(None, None, None, None, None, None, 0, 0),
+    )(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    batched0, batched1 = solve_block_tridiagonal_2x2_scalar_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(np.asarray(batched0), np.asarray(vmapped0), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(batched1), np.asarray(vmapped1), rtol=1e-5, atol=1e-6)
+
+
+def test_batched_thomas_handles_single_compartment_systems():
+    a00 = jnp.array([4.0], dtype=jnp.float32)
+    a01 = jnp.array([-0.5], dtype=jnp.float32)
+    a10 = jnp.array([-0.25], dtype=jnp.float32)
+    a11 = jnp.array([5.0], dtype=jnp.float32)
+    off0 = jnp.zeros((0,), dtype=jnp.float32)
+    off1 = jnp.zeros((0,), dtype=jnp.float32)
+    rhs0 = jnp.array([[1.0], [2.0]], dtype=jnp.float32)
+    rhs1 = jnp.array([[0.5], [-1.0]], dtype=jnp.float32)
+
+    vmapped0, vmapped1 = jax.vmap(
+        solve_block_tridiagonal_2x2_scalar,
+        in_axes=(None, None, None, None, None, None, 0, 0),
+    )(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    batched0, batched1 = solve_block_tridiagonal_2x2_scalar_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(np.asarray(batched0), np.asarray(vmapped0), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(batched1), np.asarray(vmapped1), rtol=1e-6, atol=1e-6)
 
 
 def test_double_cable_power_bucket_matches_roadmap_buckets():

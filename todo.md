@@ -156,8 +156,19 @@ Near-term tasks:
     `pcr_soa_padded` matched the Thomas64 reference with max absolute error
     about `7.8e-08`. Local CPU timing was slower at this tiny batch and is not
     used as GPU performance evidence.
-  - [ ] Run the Kaggle solver-only `linear` matrix with `pcr_soa_padded` and
-    compare against unpadded `pcr_soa`.
+  - [x] Kaggle P100 `20260616_220653_linear_NvidiaTeslaP100`: padded matched
+    Thomas64 within `~1.4e-07` max abs error but was not a general speed win
+    versus unpadded `pcr_soa` (`6/20` wins, geomean `1.086x` slower). Keep it
+    benchmark-only/standby; do not route it into `auto`.
+- [ ] Add and benchmark batch-native exact Thomas as a real solver candidate.
+  - [x] Add `solve_block_tridiagonal_2x2_scalar_batched(...)` and
+    benchmark-only `thomas_batched`.
+  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
+    `thomas_batched` matched the Thomas64 reference with max absolute error
+    about `4.6e-08`. Local CPU timing was slightly faster but is not GPU
+    performance evidence.
+  - [ ] Run the Kaggle solver-only `linear` matrix with `thomas_batched` and
+    compare against current vmapped `thomas`.
 - [ ] Evaluate optimized Thomas, PCR hybrid, associative scans, split iterative,
   and Pallas only in the sequence described by the exact-GPU roadmap.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
@@ -185,7 +196,7 @@ Solver-only diagnostic command:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 128 512 1024 \
   --nx 32 51 64 \
-  --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_padded pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

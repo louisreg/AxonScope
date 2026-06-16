@@ -11,7 +11,7 @@ Examples:
     python benchmark/solvers/bench_double_cable_linear_solvers.py \
       --batch-sizes 128 512 1024 \
       --nx 32 51 64 \
-      --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
+      --solvers thomas thomas_batched pcr pcr_soa pcr_soa_padded pcr_adaptive \
       --dtypes float32 \
       --warmups 1 \
       --repeats 5
@@ -46,13 +46,22 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_scalar_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 
 
 DEFAULT_OUT_DIR = Path("benchmark/results/solvers")
-SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_soa_padded", "pcr_adaptive")
-KERNEL_SOLVERS = ("thomas", "pcr", "pcr_soa", "pcr_soa_padded")
+SOLVER_CHOICES = (
+    "auto",
+    "thomas",
+    "thomas_batched",
+    "pcr",
+    "pcr_soa",
+    "pcr_soa_padded",
+    "pcr_adaptive",
+)
+KERNEL_SOLVERS = ("thomas", "thomas_batched", "pcr", "pcr_soa", "pcr_soa_padded")
 PCR_SOA_MAX_BATCH = 4096
 
 
@@ -132,9 +141,9 @@ def planned_cases(
                 for solver in solvers:
                     if solver not in SOLVER_CHOICES:
                         raise ValueError(f"unknown solver choice: {solver!r}.")
-                    if solver == "pcr_soa_padded":
-                        resolved = "pcr_soa"
-                        kernel_solver = "pcr_soa_padded"
+                    if solver in {"thomas_batched", "pcr_soa_padded"}:
+                        resolved = "thomas" if solver == "thomas_batched" else "pcr_soa"
+                        kernel_solver = solver
                     else:
                         resolved = resolve_double_cable_block_solver(
                             solver,
@@ -379,6 +388,33 @@ def _compute_reference(batch_size: int, nx: int) -> jax.Array:
 
 
 def _make_batched_solver(kernel_solver: str):
+    if kernel_solver == "thomas_batched":
+
+        @jax.jit
+        def solve_batch_native_thomas(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        ):
+            x0, x1 = solve_block_tridiagonal_2x2_scalar_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off0,
+                off1,
+                rhs0,
+                rhs1,
+            )
+            return jnp.stack((x0, x1), axis=-1)
+
+        return solve_batch_native_thomas
+
     if kernel_solver in {"pcr_soa", "pcr_soa_padded"}:
         solve_pcr_soa_batch = (
             solve_block_tridiagonal_2x2_pcr_soa_batched_padded

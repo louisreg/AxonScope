@@ -145,6 +145,7 @@ def test_kaggle_linear_includes_padded_solver_candidate(tmp_path, monkeypatch):
     solvers_end = command.index("--warmups")
     assert command[solvers_start:solvers_end] == [
         "thomas",
+        "thomas_batched",
         "pcr",
         "pcr_soa",
         "pcr_soa_padded",
