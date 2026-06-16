@@ -9,6 +9,7 @@ from axonscope.solvers.common import (
     diffusion_operator_coeffs,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
+    solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_scalar,
 )
 
@@ -118,19 +119,30 @@ def test_pcr_block_tridiagonal_solver_matches_thomas_for_non_power_of_two_size()
         rhs0,
         rhs1,
     )
-    pcr0, pcr1 = solve_block_tridiagonal_2x2_pcr(
-        a00,
-        a01,
-        a10,
-        a11,
-        off0,
-        off1,
-        rhs0,
-        rhs1,
-    )
+    for solve in (solve_block_tridiagonal_2x2_pcr, solve_block_tridiagonal_2x2_pcr_soa):
+        pcr0, pcr1 = solve(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        )
 
-    np.testing.assert_allclose(np.asarray(pcr0), np.asarray(thomas0), rtol=1e-5, atol=1e-6)
-    np.testing.assert_allclose(np.asarray(pcr1), np.asarray(thomas1), rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(
+            np.asarray(pcr0),
+            np.asarray(thomas0),
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(pcr1),
+            np.asarray(thomas1),
+            rtol=1e-5,
+            atol=1e-6,
+        )
 
 
 def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():
@@ -147,9 +159,10 @@ def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():
         jnp.cos(0.2 * x),
     )
 
-    jaxpr = str(jax.make_jaxpr(solve_block_tridiagonal_2x2_pcr)(*args))
+    for solve in (solve_block_tridiagonal_2x2_pcr, solve_block_tridiagonal_2x2_pcr_soa):
+        jaxpr = str(jax.make_jaxpr(solve)(*args))
 
-    assert "dot_general" not in jaxpr
+        assert "dot_general" not in jaxpr
 
 
 def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():
@@ -179,26 +192,28 @@ def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():
 
 
 def test_pcr_block_tridiagonal_solver_handles_single_row_under_jit():
-    solve = jax.jit(solve_block_tridiagonal_2x2_pcr)
-
-    scalar0, scalar1 = solve(
-        jnp.asarray([4.0], dtype=jnp.float32),
-        jnp.asarray([-1.0], dtype=jnp.float32),
-        jnp.asarray([-1.0], dtype=jnp.float32),
-        jnp.asarray([5.0], dtype=jnp.float32),
-        jnp.asarray([], dtype=jnp.float32),
-        jnp.asarray([], dtype=jnp.float32),
-        jnp.asarray([2.0], dtype=jnp.float32),
-        jnp.asarray([3.0], dtype=jnp.float32),
-    )
-
     expected = np.linalg.solve(
         np.asarray([[4.0, -1.0], [-1.0, 5.0]], dtype=np.float32),
         np.asarray([2.0, 3.0], dtype=np.float32),
     )
-    np.testing.assert_allclose(
-        np.asarray([scalar0[0], scalar1[0]]),
-        expected,
-        rtol=1e-6,
-        atol=1e-6,
-    )
+
+    for solve_fn in (solve_block_tridiagonal_2x2_pcr, solve_block_tridiagonal_2x2_pcr_soa):
+        solve = jax.jit(solve_fn)
+
+        scalar0, scalar1 = solve(
+            jnp.asarray([4.0], dtype=jnp.float32),
+            jnp.asarray([-1.0], dtype=jnp.float32),
+            jnp.asarray([-1.0], dtype=jnp.float32),
+            jnp.asarray([5.0], dtype=jnp.float32),
+            jnp.asarray([], dtype=jnp.float32),
+            jnp.asarray([], dtype=jnp.float32),
+            jnp.asarray([2.0], dtype=jnp.float32),
+            jnp.asarray([3.0], dtype=jnp.float32),
+        )
+
+        np.testing.assert_allclose(
+            np.asarray([scalar0[0], scalar1[0]]),
+            expected,
+            rtol=1e-6,
+            atol=1e-6,
+        )

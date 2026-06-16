@@ -69,9 +69,9 @@ Available notebook cases:
   point-source extracellular stimulation, sizes `100/300/600`,
   `duration=10 ms`, `dt=0.01 ms`, and a target of `51` compartments.
 - `kernel_double_cable_extracellular_auto_long`: same long double-cable trace,
-  but passes `--double-cable-block-solver auto` so GPU runs resolve to PCR and
-  CPU runs resolve to Thomas. It includes sizes `100/300/600/2000` for the
-  longer CPU/GPU comparison after the PCR result.
+  but passes `--double-cable-block-solver auto` so GPU runs resolve to the
+  adaptive PCR policy and CPU runs resolve to Thomas. It includes sizes
+  `100/300/600/2000` for the longer CPU/GPU comparison after the PCR result.
 - `kernel_double_cable_observer_auto_long`: same MRG double-cable extracellular
   trace, but uses `Recording.none()` plus solver-side `PeakVoltage` and
   `Activation` observers at sizes `100/300/600/2000`. Use this to compare
@@ -81,10 +81,11 @@ Available notebook cases:
   `--jax-trace` and Perfetto trace export for GPU only, so the downloaded
   archive includes profiler timelines under `gpu/jax_traces/`.
 - `kernel_double_cable_extracellular_pcr_long`: same long double-cable trace,
-  but passes `--double-cable-block-solver pcr` to test the experimental
+  but passes `--double-cable-block-solver pcr` to test the matrix-layout
   parallel cyclic-reduction block solver against the default Thomas scan. Use
   it to reproduce forced-PCR results; current CPU evidence makes PCR much
-  slower than the default Thomas solver.
+  slower than the default Thomas solver. Use `pcr_soa` to force the
+  struct-of-arrays variant.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 only the enabled backend(s), and runs the selected case for the enabled labels.

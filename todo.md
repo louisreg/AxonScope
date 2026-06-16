@@ -29,7 +29,8 @@ Updated on 2026-06-15.
 | --- | --- | --- |
 | Phases 0-7.5 | Done | Guardrails, object model, typed contracts, preparation, JAX boundary, canonical pool results, analysis layer, performance estimates, and first solver-side observers are implemented for the current public layer. |
 | Phase 7.6 | In progress | Evidence and targeted hotpath cleanup before broad Phase 8 APIs. |
-| Phase 7.7 | Not started | Stimulation/placement API cleanup before studies. |
+| Phase 7.6.4 | In progress | Experimental pseudo-double-cable / pseudo-MRG validation; physiology first, GPU speed second. |
+| Phase 7.7 | Not started | Re-read `GUIDELINES.md`, then clean stimulation/placement APIs before studies. |
 | Phase 7.8 | Not started | Examples learning-path cleanup after API cleanup. |
 | Phase 8 | Not started | Callable studies, reuse policies, retention policies, and study results. |
 | Phase 9 | Not started | Final serialization schemas and NumPy/reference backend validation. |
@@ -58,8 +59,10 @@ Work should start here unless the user asks otherwise.
 
 - [x] Phase 7.6.1: finish the benchmark evidence matrix.
 - [x] Phase 7.6.2: attack memory-transfer and long-run execution.
-- [ ] Phase 7.6.3: add backend choices for tiny workloads.
-- [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
+- [ ] Phase 7.6.3: later full backend/solver-choice phase.
+- [ ] Phase 7.6.4: experimental pseudo-double-cable / pseudo-MRG validation.
+- [ ] Phase 7.7: re-read `GUIDELINES.md`, then clean stimulation and
+  placement APIs before Phase 8.
 - [ ] Phase 7.8: clean the examples learning path after the API cleanup.
 - [ ] Phase 8: add callable studies, reuse policies, retention policies, and
   study result containers.
@@ -153,10 +156,43 @@ for long runs and study loops.
   row-specific recording selectors and observer masks are supported inside
   padded kernels.
 
-## Phase 7.6.3 Tiny Workloads And Backend Choice
+## Phase 7.6.3 Backend And Solver Choice
 
-Goal: make scalar-ish threshold loops and tiny batches efficient without forcing
-JAX compile/enqueue overhead onto every workload.
+Status: deferred full phase. Do not treat the current adaptive-PCR cleanup as
+the whole backend-choice story; use the evidence below to design a proper
+later pass.
+
+Goal: make scalar-ish threshold loops, tiny batches, and double-cable GPU
+solver choices efficient without forcing JAX compile/enqueue overhead or the
+wrong block solver onto every workload.
+
+Future scope:
+
+- [ ] Define a backend/solver decision matrix covering CPU JAX, GPU JAX,
+  SciPy/NumPy reference candidates, Thomas, optimized Thomas, PCR,
+  `pcr_soa`, and `pcr_adaptive`.
+- [ ] Add a forced Thomas GPU benchmark after implementing an ultra-optimized
+  Thomas variant, so GPU Thomas is compared fairly against PCR rather than
+  dismissed based on the current scan-heavy implementation.
+- [ ] Prototype the ultra-optimized GPU Thomas path for double-cable:
+  reduce per-step nested scan overhead, exploit shared coefficients where
+  possible, avoid tiny per-row launches/fusions, and keep the implementation
+  JAX/XLA-friendly unless evidence justifies a lower-level kernel.
+- [ ] Benchmark optimized GPU Thomas against `pcr`, `pcr_soa`, and
+  `pcr_adaptive` on the same double-cable observer/extracellular matrix:
+  `n=100/300/600/2000`, `duration=10 ms`, `dt=0.01 ms`, `51` compartments,
+  trace-free and trace-captured runs.
+- [ ] Decide whether `auto` should remain threshold-based, become
+  benchmark-calibrated by backend/device, or expose a user-visible
+  performance policy.
+- [ ] Add advanced examples for solver/backend options once the public
+  contract is stable: show `auto`, `thomas`, `pcr`, `pcr_soa`,
+  `pcr_adaptive`, and explain when forced choices are diagnostic versus
+  production-oriented.
+- [ ] Keep benchmark-heavy solver comparisons under `benchmark/`; examples
+  should teach options and interpretation, not become timing stress tests.
+
+Backlog and evidence already collected for this phase:
 
 - [ ] Prototype a SciPy backend for tiny batches and scalar-ish workloads using
   SciPy tridiagonal/banded solvers.
@@ -180,8 +216,8 @@ JAX compile/enqueue overhead onto every workload.
   helped `n=600` GPU modestly; shared coefficients helped CPU strongly and
   GPU at `n=300`, but did not fix the GPU scaling ceiling.
 - [x] Start backend-aware execution selection with the double-cable block
-  solver: `auto` resolves to PCR on GPU and Thomas elsewhere, and hotpath
-  manifests record both requested and resolved solver choices.
+  solver: `auto` now resolves to adaptive PCR on GPU and Thomas elsewhere,
+  and hotpath manifests record both requested and resolved solver choices.
 - [ ] Decide whether broader runtime/device/precision planning values remain
   estimates only or start selecting execution backends beyond the double-cable
   block solver.
@@ -195,11 +231,11 @@ JAX compile/enqueue overhead onto every workload.
   `n=100/300/600`, `0.30x/0.43x/0.70x` of the best Thomas total), but a CPU
   regression (`7.2x/11.6x/10.9x` slower than best Thomas).
 - [x] Add an `auto` double-cable block-solver policy: keep Thomas for CPU/default
-  execution, select PCR for GPU runs, and expose the resolved choice in
+  execution, select adaptive PCR for GPU runs, and expose the resolved choice in
   benchmark manifests.
 - [x] Re-run Colab `kernel_double_cable_extracellular_auto_long` to measure the
   realistic CPU/GPU comparison after auto selection: CPU should use Thomas,
-  GPU should use PCR. Result: `auto` resolved correctly; GPU won
+  GPU should use the GPU PCR policy. Result: `auto` resolved correctly; GPU won
   `2.51x/2.48x/2.08x/1.68x` at `n=100/300/600/2000`.
 - [x] Add homogeneous double-cable observer-only batch support for
   `Recording.none()` plus solver-side `PeakVoltage`/`Activation` observers,
@@ -229,10 +265,21 @@ JAX compile/enqueue overhead onto every workload.
   `193544` trace shows the remaining GPU cost is dominated by many small
   elementwise slice/add/subtract fusions and one command-buffer execution per
   time step, not memory copies.
-- [ ] Re-run Colab `kernel_double_cable_observer_auto_trace` and
+- [x] Re-run Colab `kernel_double_cable_observer_auto_trace` and
   `kernel_double_cable_observer_auto_long` after the struct-of-arrays PCR
-  rewrite; expected trace signal is lower slice/scatter/transpose overhead,
-  with gathers remaining from PCR neighbor reads.
+  rewrite. SoA is a conditional win: no-trace GPU totals improved at
+  `n=100/300/600` (`148/167/230 ms`, `-20%/-12%/-22%` vs `194140`) but
+  regressed at `n=2000` (`1984 ms`, `+27%`). Trace confirms that SoA removes
+  the heavy slice fusions but shifts large-batch cost into `select_reduce`
+  fusions (`1470 ms` at `n=2000`).
+- [x] Split double-cable PCR variants after the SoA evidence gate:
+  `pcr` keeps the matrix-layout scalarized PCR, `pcr_soa` exposes the
+  struct-of-arrays prototype, and GPU `auto` now resolves to `pcr_adaptive`
+  so small/medium batches use SoA while larger batches fall back to the
+  matrix-layout PCR.
+- [ ] Re-run Colab `kernel_double_cable_observer_auto_long` after
+  `pcr_adaptive` to confirm the combined target: keep the SoA gains through
+  `n=600` without the `n=2000` regression.
 - [x] Inspect
   `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_192515`.
   The `n=600` GPU trace shows the double-cable observer kernel spends about
@@ -248,9 +295,209 @@ JAX compile/enqueue overhead onto every workload.
 - [x] Scalarize PCR `2x2` block products to avoid lowering tiny block
   multiplications as many GPU GEMM/dot kernels and transposes.
 
+## Phase 7.6.4 Experimental Pseudo-Double-Cable / Pseudo-MRG
+
+Status: in progress. This is an experimental validation phase, not a default
+solver replacement. Exact double-cable remains the reference implementation
+and the final arbiter for ambiguous or biophysically critical cases.
+
+Goal: evaluate whether pseudo-double-cable / pseudo-MRG variants can preserve
+the relevant physiological behavior of the exact double-cable model before
+optimizing them for GPU throughput. Speed is useful only after threshold,
+activation, propagation, and recruitment behavior are credible.
+
+Source notes to use:
+
+- [x] Read and keep aligned with
+  `ideas/axonscope_pseudo_double_cable_gpu_implementation_plan.md`.
+- [x] Read and keep aligned with `ideas/pseudo_mrg.md`.
+- [x] Read and keep aligned with
+  `ideas/axonscope_double_to_single_electrical_reduction_plan.md`. This is the
+  most concrete guide for the next pseudo-double implementation pass:
+  `series` -> `schur_local` -> `dynamic`, with exact double-cable remaining the
+  reference.
+
+Experimental guardrails:
+
+- [x] Keep all pseudo-double modes opt-in and clearly labelled experimental.
+- [x] Do not silently reinterpret `double` as pseudo-double.
+- [ ] Do not make pseudo-double part of `auto` solver selection until the
+  physiological validation gates below pass.
+- [ ] Keep exact double-cable runs available in every validation script as the
+  reference and refinement path.
+- [ ] Prefer high recall over high precision when pseudo modes are used as a
+  pre-filter; near-threshold or ambiguous cases must be rerun with exact
+  double-cable.
+
+Physiology-first validation harness:
+
+- [x] Add a deterministic pseudo-double validation harness before adding broad
+  GPU performance claims. It should run exact double and pseudo candidates on
+  the same generated or fixture-backed workloads.
+- [ ] Start with small correctness/physiology cases:
+  `Nx=32/51/64/96`, low `B` for deterministic comparisons, and amplitudes
+  below threshold, near threshold, and above threshold.
+- [ ] Compare operational physiology metrics against exact double-cable:
+  activation boolean, activation time, activation node, threshold amplitude,
+  recruitment curve, conduction velocity, spike initiation location, peak Vm,
+  time-to-peak, RMS/probe trace error, and subthreshold response.
+- [ ] Include MRG-specific sanity checks where available: node/internode
+  response, strength-duration behavior, refractory behavior, and conduction
+  block or strong-gradient cases.
+- [ ] Track periaxonal/auxiliary-state behavior for pseudo modes that expose
+  it, but do not require pseudo-effective to reproduce full periaxonal traces.
+- [x] Save validation summaries as JSON/CSV with mode, workload, backend,
+  dtype, `Nx`, `B`, `Nt`, speed, memory/output size, and all error metrics.
+- [x] Add optional PNG plots for pseudo-double validation runs: activation
+  summary, physiology errors, thresholds, timings, and selected trace
+  comparisons.
+
+Initial acceptance gates:
+
+- [ ] `pseudo_double_effective` is acceptable as a rough screening mode only if
+  it gives useful speed and high recall for exact-double activations, even when
+  trace error is imperfect.
+- [ ] Target threshold relative error: ideal `<=1-3%`, acceptable screening
+  `<=5%`; above `5-10%` should be labelled rough pre-screen only.
+- [ ] Target activation agreement near the operating range: at least `95%`;
+  ambiguous-zone recall should be near `99%` for pre-filter use.
+- [ ] Recruitment and electrode/configuration ranking should preserve ordering
+  well enough for screening, with rank correlation tracked explicitly.
+- [ ] Do not advance a pseudo mode toward production examples until it passes a
+  held-out physiology validation set, not just one calibration workload.
+
+Implementation sequence:
+
+- [x] Add explicit experimental mode names and plumbing only after the
+  validation harness exists: `pseudo_double_effective`,
+  `pseudo_double_single_myelinated_chain`, `pseudo_double_series`,
+  `pseudo_double_split`, `pseudo_double_schur_local`, and optional
+  `pseudo_double_modal`.
+- [x] Keep not-yet-implemented pseudo mode strings raising clear
+  `NotImplementedError` until their kernels exist.
+- [x] Implement `pseudo_double_effective` v0 as a scalar-cable surrogate with a
+  calibrated extracellular coupling multiplier. Reuse existing scalar
+  tridiagonal infrastructure instead of duplicating the single-cable solver.
+- [ ] Derive and implement real effective pseudo-double coefficients beyond
+  scalar `vext_scale` if the v0 physiology evidence is promising enough.
+- [x] Add mini calibration plumbing for `pseudo_double_effective` and include a
+  same-run baseline comparison against `mrg_single_cable_surrogate`.
+- [ ] Validate `pseudo_double_effective` against exact double before optimizing
+  it. Decide whether it is useful for rough screening, calibrated screening,
+  or not useful.
+- [x] Implement `pseudo_double_split` v0 after the effective-model smoke:
+  keep one local implicit auxiliary extracellular-response state and reuse the
+  scalar single-cable path. This first version is field-filtered only; it does
+  not yet include spatial periaxonal coupling or Vm feedback.
+- [x] Add coefficient-level electrical-reduction helpers from the
+  double-to-single plan: local series equivalent and diagonal-App Schur local
+  v1, with synthetic tests proving Schur v1 is exact when the eliminated block
+  has no spatial off-diagonal coupling.
+- [x] Promote the first coefficient-derived reduction into a runnable validation
+  mode: `pseudo_double_schur_local` now derives a scalar tridiagonal system
+  from exact double-cable coefficients via diagonal-`App` Schur elimination.
+- [x] Add a runnable `pseudo_double_series` validation mode. It uses the exact
+  double-cable runtime arrays, local axolemma/myelin RC-series reduction, node
+  fallback for degenerate myelin capacitance, and one scalar tridiagonal solve
+  per step.
+- [x] Add `pseudo_double_single_myelinated_chain` from the double-to-single
+  plan as a validation-only one-voltage MRG-like chain built directly from
+  AxonScope single-cable primitives. It preserves NODE/MYSA/FLUT/STIN sections,
+  uses active nodes plus passive effective internodes, and supports
+  segment-specific extracellular alpha without changing core `src/axonscope`.
+- [ ] Decide the public vocabulary later: keep `pseudo_double_effective` /
+  `pseudo_double_split` aliases, or expose plan-aligned names such as
+  `pseudo_double_series`, `pseudo_double_schur_local`, and
+  `pseudo_double_dynamic`.
+- [ ] Tune `pseudo_double_single_myelinated_chain` beyond global
+  `vext_scale`: sweep segment-specific Cm/leak/alpha and near-threshold
+  amplitudes before calling the behavior physiologically credible.
+- [ ] Derive a stronger `pseudo_double_split` kernel with true pointwise or
+  semi-local periaxonal/myelin feedback once v0 behavior is understood.
+- [ ] Validate `pseudo_double_split` on stronger double-cable regimes:
+  strong extracellular gradients, short/long pulses, near-threshold
+  amplitudes, heterogeneous cable properties, and long `Nt` stability.
+- [ ] Consider `pseudo_double_modal` only after effective/split evidence shows
+  a real fidelity gap. Add a one-step linear-system approximation test before
+  full time integration.
+
+Testing plan:
+
+- [x] Add unit tests for mode parsing, explicit experimental status,
+  pseudo-effective config/score helpers, and explicit `NotImplementedError`
+  behavior for pseudo modes whose kernels have not landed.
+- [x] Add unit tests for pseudo-mode shape/dtype stability at the validation
+  harness level for `pseudo_double_effective`, `pseudo_double_series`, and
+  `pseudo_double_split`.
+- [x] Add synthetic coefficient tests for local series reduction and Schur local
+  v1 exactness when `App` is diagonal.
+- [x] Add unit tests for `pseudo_double_single_myelinated_chain` segment
+  taxonomy, single-cable/periaxonal layout, segment alpha vector, validation
+  routing, dry-run output, and scaled extracellular footprint behavior.
+- [ ] Add unit tests for compact observer outputs and no dense zero `Iinj`
+  materialization once pseudo kernels exist below the harness layer.
+- [ ] Add loose numerical/physiology tests against exact double on small,
+  deterministic cases. Avoid brittle full-trace equality; test thresholds,
+  activation decisions, and bounded summary errors first.
+- [ ] Add optional GPU/performance tests behind a marker only after behavior
+  validation exists; normal CI should not depend on GPU timing.
+- [ ] Add regression tests that exact double remains unchanged when pseudo
+  modes are added.
+
+GPU and memory work after physiology gates:
+
+- [ ] Benchmark pseudo modes against exact double at target scale:
+  `B=512/1024/2048/4096`, `Nx=32/51/64/96`, realistic `Nt`, compact observers
+  and optional retained traces.
+- [ ] Keep timings separated into compile, first run, steady-state run,
+  host-device transfer, device execution, and postprocessing/output.
+- [ ] Add JAX trace capture for pseudo modes and compare kernel structure
+  against exact double-cable.
+- [ ] Add factorized extracellular stimulation support
+  `waveform[Nt] * footprint[B,Nx]` before claiming production-scale memory
+  behavior.
+- [ ] Ensure pseudo modes work with compact solver-side observers so full
+  `Vm[B,Nt,Nx]` output stays opt-in.
+
+Hybrid/refinement path:
+
+- [ ] Add a pseudo-first / exact-refinement validation workflow: run pseudo on
+  all fibers/configurations, identify clearly active, clearly inactive, and
+  ambiguous cases, then rerun exact double on ambiguous cases.
+- [ ] Merged outputs must mark which rows were exact-refined and report how
+  much exact double-cable work was avoided.
+- [ ] Later, evaluate multi-fidelity pseudo-MRG ideas from `pseudo_mrg.md`:
+  pseudo-single exterior, corrected pseudo-single region, pseudo-double buffer,
+  and exact full double-cable core around critical zones.
+- [ ] Use activating-function and disagreement metrics for any spatial or
+  dynamic fidelity promotion. Promotion should be fast; demotion should be
+  conservative.
+
+Documentation and examples:
+
+- [ ] Document limitations prominently: pseudo modes are approximations, exact
+  double remains the reference, and each new fiber/stimulation regime needs
+  validation.
+- [ ] Add an advanced experimental pseudo-double example only after the first
+  validation gates pass. The example should demonstrate validation and
+  interpretation, not only speed.
+- [ ] Keep benchmark-heavy Pareto fronts under `benchmark/`; examples should
+  teach safe usage and when to rerun exact double.
+
 ## Phase 7.7 Stimulation And Placement API Cleanup
 
 Goal: make the public API match the product boundary before Phase 8 studies.
+
+Implementation gate:
+
+- [ ] Re-read `GUIDELINES.md` before implementing Phase 7.7 and extract the
+  concrete target boundary for stimulation, placement, populations, and study
+  inputs.
+- [ ] Compare `GUIDELINES.md` against current source, tests, examples, and
+  docs before editing public APIs; write the rename/delete checklist here or
+  in a short implementation note.
+- [ ] If the intended implementation differs from `GUIDELINES.md`, update
+  `GUIDELINES.md` first, then align `todo.md` and `agent.md`.
 
 - [ ] Remove remaining public `y` / `z` placement parameters from axon model
   constructors. An `Axon` describes cable, membrane, length, diameter, and
@@ -277,6 +524,13 @@ Goal: keep examples didactic, runnable, plot-rich where helpful, and aligned
 with the cleaned public API.
 
 - [ ] Update examples after the stimulation/placement API cleanup.
+- [ ] Add an advanced solver-options example after Phase 7.6.3 stabilizes the
+  public contract: demonstrate `BatchOptions` / hotpath CLI choices for
+  `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`, with clear guidance
+  that forced solver choices are mainly diagnostic unless selected by `auto`.
+- [ ] Add a separate advanced pseudo-double / pseudo-MRG experimental example
+  only after Phase 7.6.4 has a validated physiology harness; keep it framed as
+  validation-first approximation work, not a default solver tutorial.
 - [ ] Keep examples verbose, line-by-line, and commented near the code being
   taught.
 - [ ] Add useful plots for signals, metrics, activation, recruitment, velocity,
@@ -506,6 +760,17 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_193544` | Kernel-scoped trace after dispatch and scalar-PCR changes: dispatch planning fell to `4/9 ms` at `n=600/2000`; `n=600` GPU device time fell from `554 ms` to `256 ms` and GEMM/dot disappeared; `n=2000` now captures GPU device time (`1200 ms`) with remaining cost dominated by small elementwise fusions and `1000` command-buffer/CUDA-graph executions. |
 | 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_194140` | No-trace reference after scalar-PCR and dispatch cleanup. GPU totals were `185/190/296/1557 ms` at `n=100/300/600/2000`, vs CPU `475/817/2041/5229 ms`, for CPU/GPU speedups `2.57x/4.30x/6.89x/3.36x`. Compared with `190721`, GPU total improved by `24%/50%/57%/45%`; `n=600` kernel fell from `532 ms` to `204 ms`. Dense `Vstim` remains visible (`16-27%` of GPU total at `n>=300`). |
 | 2026-06-15 | `phase7_6_double_cable_pcr_soa_smoke` | Rewrote PCR internals to keep `2x2` block components as separate arrays. Local numerical tests match Thomas; the JAX/HLO audit for `Nx=45` reports `0` `dot`, `dot_general`, `scatter`, or `transpose` operations, leaving neighbor `gather`s as the expected PCR data movement. |
+| 2026-06-15 | `colab_gpu_only_kernel_double_cable_observer_auto_trace_20260615_195401` | Kernel-scoped trace after SoA PCR: GPU device time improved at `n=600` (`282 -> 223 ms`, `-21%`) but regressed at `n=2000` (`1236 -> 1627 ms`, `+32%`) vs `193544`. SoA removed slice fusions (`64/675 ms -> ~0`) but shifted cost to `select_reduce` (`152/1470 ms`), while memcpy remained negligible. |
+| 2026-06-15 | `colab_cpu_gpu_kernel_double_cable_observer_auto_long_20260615_195524` | No-trace SoA PCR run: GPU totals `148/167/230/1984 ms` vs CPU `441/840/1994/4804 ms` at `n=100/300/600/2000`, giving CPU/GPU speedups `2.98x/5.04x/8.67x/2.42x`. Versus `194140`, SoA improves GPU totals through `n=600` (`-20%/-12%/-22%`) but regresses `n=2000` (`+27%`). |
+| 2026-06-15 | `phase7_6_double_cable_pcr_adaptive_policy` | Kept both PCR layouts: `pcr` is the matrix-layout scalarized solver, `pcr_soa` is the struct-of-arrays solver, and GPU `auto` resolves to `pcr_adaptive`, selecting SoA for batches up to `1024` and matrix-layout PCR beyond that. Targeted solver/batch tests and a local `double_cable_observer n=2` hotpath smoke pass. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_validation_harness` | Added experimental pseudo-double validation harness under `benchmark/pseudo_double/`: exact double-cable reference versus `mrg_single_cable_surrogate` on matched MRG point-source workloads, JSON/CSV physiology metrics, explicit `NotImplementedError` for planned pseudo modes, and local smoke `size=1`, `nodes=3`, amplitudes `20/60 uA`. Unit tests cover mode metadata, formulation routing, threshold summaries, dry-run, and output writing. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_effective_v0_smoke` | Implemented `pseudo_double_effective` v0 as an experimental MRG single-cable surrogate with calibratable extracellular coupling (`--pseudo-vext-scale`, `--calibrate-vext-scales`) and automatic baseline comparison. Local smoke `size=1`, `nodes=3`, `duration=0.5 ms`, amplitudes `20/60/100/140 uA`, scales `8/10/12/16` selected `vext_scale=10`: activation agreement `1.0`, threshold relative error `0.0`, and no false negatives on this tiny workload, while baseline single-cable missed the exact activation threshold. Peak/RMS trace errors remain large (`peak_abs_error_mean_mV` up to `57.2`, `rms_vm_error_mean_mV` up to `143.8`), so this is not yet physiology-accepted beyond rough activation screening. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_split_v0_smoke` | Implemented `pseudo_double_split` v0 in the validation harness as a scalar-cable surrogate with one implicit local auxiliary extracellular-response state (`--split-aux-tau-ms`, `--split-direct-scale`, `--split-aux-scale`, `--split-aux-alpha`) plus `--calibrate-vext-scales`. Local smoke `size=1`, `nodes=3`, `duration=0.5 ms`, amplitudes `20/60/100/140 uA`, `aux_tau_ms=0.05`, scales `4/6/8/10` selected `vext_scale=6`: activation agreement `1.0`, threshold relative error `0.0`, no false negatives, and baseline single-cable still missed the exact activation threshold. Trace fidelity remains rough (`peak_abs_error_mean_mV` up to `56.1`, `rms_vm_error_mean_mV` up to `161.7`), so split v0 is not yet physiology-accepted; next work is stronger periaxonal feedback/spatial coupling and broader validation. |
+| 2026-06-15 | `phase7_6_4_double_to_single_reduction_helpers` | Incorporated `ideas/axonscope_double_to_single_electrical_reduction_plan.md` into Phase 7.6.4 and added experimental coefficient helpers under `benchmark/pseudo_double/reductions.py`: `series_equivalent`, exact-solver-sign-convention block coefficient assembly, and `schur_local_v1`. Synthetic tests prove series equivalents are bounded and Schur local v1 matches the exact 2x2 block solve for `Vi` when the eliminated `App` block is diagonal. This prepares real `pseudo_double_series` / `pseudo_double_schur_local` validation modes instead of only stimulus-scale surrogates. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_schur_local_v1_smoke` | Added runnable `pseudo_double_schur_local` validation mode using the exact double-cable coefficient assembly and diagonal-`App` Schur elimination, returning normal `AxonSimulationResult` rows from a custom validation-only scalar tridiagonal runner. Local smoke `size=1`, `nodes=3`, `duration=0.5 ms`, amplitudes `20/60/100/140 uA`, scales `4/6/8/10` selected `vext_scale=8`: activation agreement `1.0`, threshold relative error `0.0`, and no false negatives; baseline single-cable still missed the exact activation threshold. Trace errors remain too large for acceptance (`peak_abs_error_mean_mV` up to `51.3`, `rms_vm_error_mean_mV` up to `219.0`), but this is now the first coefficient-derived runnable surrogate rather than a pure stimulus-scale probe. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_series_v1_smoke` | Added runnable `pseudo_double_series` validation mode using exact double-cable runtime arrays, local axolemma/myelin RC-series reduction, a node fallback when myelin capacitance is degenerate, and one scalar tridiagonal solve per step. Local smoke `size=1`, `nodes=3`, `duration=0.5 ms`, amplitudes `20/60/100/140 uA`, scales `1/2/4/8`, `capacitance_floor_fraction=0.02` selected `vext_scale=1`: activation agreement `1.0`, threshold relative error `0.0`, no false negatives, peak error `<=2.7 mV`; RMS trace error still rose to `66.2 mV`. Broader local smoke `size=2`, amplitudes `20/40/60/80/100/140 uA`, scales `0.5/1/2/4` selected `vext_scale=2`: activation agreement `1.0`, threshold relative error `0.0`, no false negatives, peak error was small in the active mid-range (`0.7-2.9 mV` at `40-100 uA`) but worse at subthreshold/strong extremes (`19.2 mV` at `20 uA`, `39.8 mV` at `140 uA`) and RMS stayed high (`83.0 mV` max). This is the most promising physiology candidate so far, but the current runner is validation-only and not a GPU performance result. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_validation_plots` | Added optional validation plotting via `--plots`, writing `activation_summary.png`, `error_summary.png`, `thresholds.png`, `timings.png`, and selected `trace_amp_*_row_*.png` files under `OUT_DIR/plots`. Trace samples are limited by `--plot-trace-rows` and `--plot-trace-amplitudes-uA` so larger runs do not silently dump every `Vm` trace. Smoke with `pseudo_double_series`, `size=1`, `nodes=3`, amplitudes `20/60/100/140 uA`, trace amplitudes `60/140 uA`, wrote 6 PNGs successfully under `/tmp/axonscope-pseudo-double-series-plots-smoke/plots`. |
+| 2026-06-15 | `phase7_6_4_pseudo_double_single_myelinated_chain_smoke` | Added `pseudo_double_single_myelinated_chain`, a validation-only one-voltage NODE/MYSA/FLUT/STIN chain built from AxonScope single-cable primitives, with active nodes, passive effective internodes, series Cm/leak options, and per-segment extracellular alpha scaling. Local smoke `size=1`, amplitudes `20/60/100/140 uA`, scales `0.25/0.5/0.75/1.0` selected `vext_scale=0.75`: activation agreement `1.0`, threshold relative error `0.0`, no false negatives, peak error `3.7 mV` subthreshold and `9.7-10.9 mV` active. Broader `size=2`, amplitudes `20/40/60/80/100/140 uA`, scales down to `0.05` still false-positive activated at `20 uA` while exact threshold was `40 uA`, so global Vext scale alone cannot fix excitability. A no-series-Cm diagnostic removed the `20 uA` false positive but produced false negatives at `40-140 uA`, confirming Cm/alpha must be tuned by segment rather than toggled globally. |
 
 ## Completed Roadmap Archive
 

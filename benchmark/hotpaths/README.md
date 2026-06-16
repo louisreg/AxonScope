@@ -119,8 +119,8 @@ python benchmark/hotpaths/run.py \
   --double-cable-block-solver auto
 ```
 
-The automatic policy resolves to PCR on GPU and Thomas elsewhere, and the
-manifest records both the requested and resolved solver choices.
+The automatic policy resolves to adaptive PCR on GPU and Thomas elsewhere, and
+the manifest records both the requested and resolved solver choices.
 
 Run the same double-cable probe with compact solver-side observers:
 
@@ -160,7 +160,7 @@ captures only `kernel.enqueue`, which keeps large-batch GPU timelines from
 being flooded by Python dispatch events. Use `--jax-trace-scope run` only when
 the dispatch/preparation timeline itself is the target.
 
-Force the experimental double-cable PCR block solver:
+Force the double-cable PCR block solver:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -175,7 +175,9 @@ python benchmark/hotpaths/run.py \
 
 Use forced PCR as a GPU-oriented diagnostic only for now. The Colab PCR run
 improved double-cable GPU totals strongly, but regressed CPU totals compared
-with the default Thomas scan.
+with the default Thomas scan. `pcr_soa` forces the struct-of-arrays variant;
+`pcr_adaptive` selects SoA for small/medium batches and matrix-layout PCR for
+larger batches.
 
 Run a longer realistic heterogeneous probe:
 

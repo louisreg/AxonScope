@@ -402,6 +402,117 @@ def solve_block_tridiagonal_2x2_pcr(
     rhs0: Array,
     rhs1: Array,
 ) -> tuple[Array, Array]:
+    """Solve the 2x2 block system with matrix-layout parallel cyclic reduction.
+
+    This is a GPU-oriented alternative to
+    :func:`solve_block_tridiagonal_2x2_scalar`. It keeps every compartment row
+    active at each reduction stage, eliminates neighbors at strides
+    ``1, 2, 4, ...``, and finishes with independent 2x2 solves. The tiny block
+    products are scalarized manually so XLA does not lower them to GEMM/dot
+    kernels, while the block arrays remain in ``(N, 2, 2)`` layout.
+    """
+
+    n = int(a00.shape[0])
+    dtype = a00.dtype
+    idx = jnp.arange(n)
+    zero = jnp.zeros((), dtype=dtype)
+
+    lower = jnp.zeros((n, 2, 2), dtype=dtype)
+    upper = jnp.zeros((n, 2, 2), dtype=dtype)
+    diag = jnp.zeros((n, 2, 2), dtype=dtype)
+    rhs = jnp.stack([rhs0, rhs1], axis=1)
+
+    diag = diag.at[:, 0, 0].set(a00)
+    diag = diag.at[:, 0, 1].set(a01)
+    diag = diag.at[:, 1, 0].set(a10)
+    diag = diag.at[:, 1, 1].set(a11)
+    lower = lower.at[1:, 0, 0].set(off0)
+    lower = lower.at[1:, 1, 1].set(off1)
+    upper = upper.at[:-1, 0, 0].set(off0)
+    upper = upper.at[:-1, 1, 1].set(off1)
+
+    def inv2_blocks(blocks: Array) -> Array:
+        m00 = blocks[:, 0, 0]
+        m01 = blocks[:, 0, 1]
+        m10 = blocks[:, 1, 0]
+        m11 = blocks[:, 1, 1]
+        det = m00 * m11 - m01 * m10
+        out = jnp.zeros_like(blocks)
+        out = out.at[:, 0, 0].set(m11 / det)
+        out = out.at[:, 0, 1].set(-m01 / det)
+        out = out.at[:, 1, 0].set(-m10 / det)
+        out = out.at[:, 1, 1].set(m00 / det)
+        return out
+
+    def matmul2(left: Array, right: Array) -> Array:
+        l00 = left[:, 0, 0]
+        l01 = left[:, 0, 1]
+        l10 = left[:, 1, 0]
+        l11 = left[:, 1, 1]
+        r00 = right[:, 0, 0]
+        r01 = right[:, 0, 1]
+        r10 = right[:, 1, 0]
+        r11 = right[:, 1, 1]
+        row0 = jnp.stack((l00 * r00 + l01 * r10, l00 * r01 + l01 * r11), axis=1)
+        row1 = jnp.stack((l10 * r00 + l11 * r10, l10 * r01 + l11 * r11), axis=1)
+        return jnp.stack((row0, row1), axis=1)
+
+    def matvec2(matrix: Array, vector: Array) -> Array:
+        m00 = matrix[:, 0, 0]
+        m01 = matrix[:, 0, 1]
+        m10 = matrix[:, 1, 0]
+        m11 = matrix[:, 1, 1]
+        v0 = vector[:, 0]
+        v1 = vector[:, 1]
+        return jnp.stack((m00 * v0 + m01 * v1, m10 * v0 + m11 * v1), axis=1)
+
+    stride = 1
+    while stride < n:
+        left_idx = jnp.maximum(idx - stride, 0)
+        right_idx = jnp.minimum(idx + stride, n - 1)
+        has_left = idx >= stride
+        has_right = idx + stride < n
+
+        left_inv = inv2_blocks(diag[left_idx])
+        right_inv = inv2_blocks(diag[right_idx])
+        left_factor = matmul2(lower, left_inv)
+        right_factor = matmul2(upper, right_inv)
+        left_factor = jnp.where(has_left[:, None, None], left_factor, zero)
+        right_factor = jnp.where(has_right[:, None, None], right_factor, zero)
+
+        next_lower = -matmul2(left_factor, lower[left_idx])
+        next_upper = -matmul2(right_factor, upper[right_idx])
+        next_diag = (
+            diag
+            - matmul2(left_factor, upper[left_idx])
+            - matmul2(right_factor, lower[right_idx])
+        )
+        next_rhs = (
+            rhs
+            - matvec2(left_factor, rhs[left_idx])
+            - matvec2(right_factor, rhs[right_idx])
+        )
+
+        lower = jnp.where(has_left[:, None, None], next_lower, zero)
+        upper = jnp.where(has_right[:, None, None], next_upper, zero)
+        diag = next_diag
+        rhs = next_rhs
+        stride *= 2
+
+    solution = matvec2(inv2_blocks(diag), rhs)
+    return solution[:, 0], solution[:, 1]
+
+
+def solve_block_tridiagonal_2x2_pcr_soa(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+) -> tuple[Array, Array]:
     """Solve the 2x2 block system with parallel cyclic reduction.
 
     This is a GPU-oriented alternative to

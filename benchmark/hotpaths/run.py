@@ -98,11 +98,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--double-cable-block-solver",
-        choices=("auto", "thomas", "pcr"),
+        choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"),
         default="auto",
         help=(
-            "Double-cable batch block solver: auto chooses PCR on GPU and "
-            "Thomas elsewhere."
+            "Double-cable batch block solver: auto chooses adaptive PCR on GPU "
+            "and Thomas elsewhere."
         ),
     )
     parser.add_argument(

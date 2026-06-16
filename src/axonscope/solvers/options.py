@@ -8,10 +8,10 @@ import numpy as np
 from axonscope.channel_models import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DoubleCableBlockSolver = Literal["auto", "thomas", "pcr"]
-ResolvedDoubleCableBlockSolver = Literal["thomas", "pcr"]
+DoubleCableBlockSolver = Literal["auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"]
+ResolvedDoubleCableBlockSolver = Literal["thomas", "pcr", "pcr_soa", "pcr_adaptive"]
 
-_DOUBLE_CABLE_BLOCK_SOLVERS = {"auto", "thomas", "pcr"}
+_DOUBLE_CABLE_BLOCK_SOLVERS = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
 _GPU_PLATFORMS = {"cuda", "gpu", "metal", "rocm"}
 
 
@@ -24,11 +24,12 @@ def resolve_double_cable_block_solver(
 
     if solver == "auto":
         normalized = "" if platform is None else platform.lower()
-        return "pcr" if normalized in _GPU_PLATFORMS else "thomas"
-    if solver in {"thomas", "pcr"}:
+        return "pcr_adaptive" if normalized in _GPU_PLATFORMS else "thomas"
+    if solver in {"thomas", "pcr", "pcr_soa", "pcr_adaptive"}:
         return cast(ResolvedDoubleCableBlockSolver, solver)
     raise ValueError(
-        "double_cable_block_solver must be 'auto', 'thomas', or 'pcr'."
+        "double_cable_block_solver must be 'auto', 'thomas', 'pcr', "
+        "'pcr_soa', or 'pcr_adaptive'."
     )
 
 
@@ -226,7 +227,8 @@ class BatchOptions:
             raise ValueError("time_chunk_steps must be >= 1.")
         if self.double_cable_block_solver not in _DOUBLE_CABLE_BLOCK_SOLVERS:
             raise ValueError(
-                "double_cable_block_solver must be 'auto', 'thomas', or 'pcr'."
+                "double_cable_block_solver must be 'auto', 'thomas', 'pcr', "
+                "'pcr_soa', or 'pcr_adaptive'."
             )
 
 

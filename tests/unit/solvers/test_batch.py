@@ -78,9 +78,18 @@ def test_batch_recording_resolves_common_policies():
     assert BatchOptions.center().double_cable_block_solver == "auto"
     assert BatchOptions.center(double_cable_block_solver="auto").double_cable_block_solver == "auto"
     assert BatchOptions.center(double_cable_block_solver="pcr").double_cable_block_solver == "pcr"
+    assert (
+        BatchOptions.center(double_cable_block_solver="pcr_soa").double_cable_block_solver
+        == "pcr_soa"
+    )
+    assert (
+        BatchOptions.center(double_cable_block_solver="pcr_adaptive").double_cable_block_solver
+        == "pcr_adaptive"
+    )
     assert resolve_double_cable_block_solver("auto", platform="cpu") == "thomas"
-    assert resolve_double_cable_block_solver("auto", platform="gpu") == "pcr"
+    assert resolve_double_cable_block_solver("auto", platform="gpu") == "pcr_adaptive"
     assert resolve_double_cable_block_solver("thomas", platform="gpu") == "thomas"
+    assert resolve_double_cable_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
     with pytest.raises(ValueError, match="double_cable_block_solver"):
         BatchOptions(double_cable_block_solver="dense")
 
@@ -515,19 +524,20 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
         extracellular_potential_initial_previous_mV=vext_previous,
         options=BatchOptions.center(),
     ).Vm
-    pcr = kernel.run(
-        extracellular_potential_mid_mV=vext_mid,
-        extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.center(double_cable_block_solver="pcr"),
-    ).Vm
+    for solver in ("pcr", "pcr_soa", "pcr_adaptive"):
+        pcr = kernel.run(
+            extracellular_potential_mid_mV=vext_mid,
+            extracellular_potential_initial_previous_mV=vext_previous,
+            options=BatchOptions.center(double_cable_block_solver=solver),
+        ).Vm
 
-    assert pcr.shape == thomas.shape
-    np.testing.assert_allclose(
-        np.asarray(pcr),
-        np.asarray(thomas),
-        atol=1e-3,
-        rtol=0.0,
-    )
+        assert pcr.shape == thomas.shape
+        np.testing.assert_allclose(
+            np.asarray(pcr),
+            np.asarray(thomas),
+            atol=1e-3,
+            rtol=0.0,
+        )
 
 
 def test_double_cable_batch_requires_extracellular_runtime():

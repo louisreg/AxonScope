@@ -15,6 +15,7 @@ from .common import (
     Array,
     apply_diffusion_operator,
     solve_block_tridiagonal_2x2_pcr,
+    solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_scalar,
 )
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
@@ -40,6 +41,29 @@ class BatchKernelResult:
     Vm: Array | None
     t: Array
     observations: dict[str, object] | None = None
+
+
+_DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 1024
+
+
+def _resolve_double_cable_kernel_block_solver(
+    solver: str,
+    *,
+    batch_size: int,
+) -> str:
+    if solver == "pcr_adaptive":
+        return "pcr_soa" if batch_size <= _DOUBLE_CABLE_PCR_SOA_MAX_BATCH else "pcr"
+    return solver
+
+
+def _double_cable_block_solve_fn(solver: str):
+    if solver == "pcr_soa":
+        return solve_block_tridiagonal_2x2_pcr_soa
+    if solver == "pcr":
+        return solve_block_tridiagonal_2x2_pcr
+    if solver == "thomas":
+        return solve_block_tridiagonal_2x2_scalar
+    raise ValueError(f"Unsupported double-cable block solver: {solver!r}")
 
 
 @partial(
@@ -1093,11 +1117,7 @@ def _run_double_cable_batch_stateful_scan(
                 + I_corr_abs
             )
 
-            solve_block = (
-                solve_block_tridiagonal_2x2_pcr
-                if double_cable_block_solver == "pcr"
-                else solve_block_tridiagonal_2x2_scalar
-            )
+            solve_block = _double_cable_block_solve_fn(double_cable_block_solver)
             return solve_block(
                 a00,
                 a01,
@@ -1411,11 +1431,7 @@ def _run_double_cable_batch_observer_scan(
                 + I_corr_abs
             )
 
-            solve_block = (
-                solve_block_tridiagonal_2x2_pcr
-                if double_cable_block_solver == "pcr"
-                else solve_block_tridiagonal_2x2_scalar
-            )
+            solve_block = _double_cable_block_solve_fn(double_cable_block_solver)
             return solve_block(
                 a00,
                 a01,
@@ -2362,6 +2378,10 @@ def _run_double_cable_batch_array_chunks(
     dtype_local = membrane_runtime.dtype
     nx = membrane_runtime.Nx
     batch_size = int(extracellular_potential_mid_mV.shape[0])
+    kernel_block_solver = _resolve_double_cable_kernel_block_solver(
+        double_cable_block_solver,
+        batch_size=batch_size,
+    )
     shared_coefficients = (
         jnp.asarray(runtime.cable.area_cm2).ndim == 1
         and jnp.asarray(extracellular.Cm_abs).ndim == 1
@@ -2482,7 +2502,7 @@ def _run_double_cable_batch_array_chunks(
             has_driven_extracellular=has_driven_extracellular,
             stateless_vm_only=stateless_vm_only,
             record_full=record_full,
-            double_cable_block_solver=double_cable_block_solver,
+            double_cable_block_solver=kernel_block_solver,
             Vi0_mV=Vi,
             Ve0_mV=Ve,
             gates0=gates,
@@ -2535,6 +2555,10 @@ def _run_double_cable_batch_observer_chunks(
     dtype_local = membrane_runtime.dtype
     nx = membrane_runtime.Nx
     batch_size = int(extracellular_potential_mid_mV.shape[0])
+    kernel_block_solver = _resolve_double_cable_kernel_block_solver(
+        double_cable_block_solver,
+        batch_size=batch_size,
+    )
     shared_coefficients = (
         jnp.asarray(runtime.cable.area_cm2).ndim == 1
         and jnp.asarray(extracellular.Cm_abs).ndim == 1
@@ -2666,7 +2690,7 @@ def _run_double_cable_batch_observer_chunks(
             membrane=membrane_runtime.membrane,
             has_driven_extracellular=has_driven_extracellular,
             stateless_vm_only=stateless_vm_only,
-            double_cable_block_solver=double_cable_block_solver,
+            double_cable_block_solver=kernel_block_solver,
             Vi0_mV=Vi,
             Ve0_mV=Ve,
             gates0=gates,
