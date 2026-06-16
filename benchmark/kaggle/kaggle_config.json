@@ -1,0 +1,6 @@
+{
+  "benchmark": "e2e",
+  "branch": "kaggle-bench/0f2729f",
+  "repo_url": "https://github.com/louisreg/AxonScope.git",
+  "require_gpu": true
+}

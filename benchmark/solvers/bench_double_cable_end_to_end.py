@@ -180,8 +180,32 @@ def main(argv: Sequence[str] | None = None) -> None:
         trace_root = args.jax_trace_dir or run_root / "jax_traces"
         trace_root.mkdir(parents=True, exist_ok=True)
 
-    rows = [
-        run_case(
+    parameters = {
+        "batch_sizes": [int(value) for value in args.batch_sizes],
+        "nx": [int(value) for value in args.nx],
+        "nt": [int(value) for value in args.nt],
+        "dt_ms": float(args.dt),
+        "recordings": list(args.recordings),
+        "iinj_modes": list(args.iinj_modes),
+        "solvers": list(args.solvers),
+        "warmups": int(args.warmups),
+        "repeats": int(args.repeats),
+        "time_chunk_steps": args.time_chunk_steps,
+        "jax_trace": trace_root is not None,
+        "jax_trace_dir": None if trace_root is None else str(trace_root),
+        "jax_trace_create_perfetto": bool(args.jax_trace_create_perfetto),
+    }
+
+    rows = []
+    for case_index, case in enumerate(cases, start=1):
+        print(
+            "case "
+            f"{case_index}/{len(cases)}: "
+            f"{case.requested_solver} B={case.batch_size} targetNx={case.target_nx} "
+            f"Nt={case.nt} rec={case.recording} iinj={case.iinj_mode}",
+            flush=True,
+        )
+        row = run_case(
             case,
             platform=platform,
             warmups=args.warmups,
@@ -190,30 +214,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             trace_root=trace_root,
             create_perfetto_trace=bool(args.jax_trace_create_perfetto),
         )
-        for case in cases
-    ]
+        rows.append(row)
+        _write_outputs(run_root, rows=rows, parameters=parameters, platform=platform)
+        print(_format_row(row), flush=True)
     _write_outputs(
         run_root,
         rows=rows,
-        parameters={
-            "batch_sizes": [int(value) for value in args.batch_sizes],
-            "nx": [int(value) for value in args.nx],
-            "nt": [int(value) for value in args.nt],
-            "dt_ms": float(args.dt),
-            "recordings": list(args.recordings),
-            "iinj_modes": list(args.iinj_modes),
-            "solvers": list(args.solvers),
-            "warmups": int(args.warmups),
-            "repeats": int(args.repeats),
-            "time_chunk_steps": args.time_chunk_steps,
-            "jax_trace": trace_root is not None,
-            "jax_trace_dir": None if trace_root is None else str(trace_root),
-            "jax_trace_create_perfetto": bool(args.jax_trace_create_perfetto),
-        },
+        parameters=parameters,
         platform=platform,
     )
-    for row in rows:
-        print(_format_row(row))
     print(f"results: {run_root}")
 
 

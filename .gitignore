@@ -44,5 +44,6 @@ target
 .claude/
 benchmark/reports/
 benchmark/results/
+benchmark/kaggle/axonscope_solver_benchmarks_generated.py
 figures/nrv_tests/
 figures/physics_tests/*.png

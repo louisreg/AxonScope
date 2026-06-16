@@ -1,0 +1,15 @@
+{
+  "code_file": "axonscope_solver_benchmarks_generated.py",
+  "competition_sources": [],
+  "dataset_sources": [],
+  "enable_gpu": "true",
+  "enable_internet": "true",
+  "id": "louisregnacq/axonscope-double-cable-solver-benchmarks",
+  "is_private": "true",
+  "kernel_sources": [],
+  "kernel_type": "script",
+  "language": "python",
+  "machine_shape": "NvidiaTeslaP100",
+  "model_sources": [],
+  "title": "AxonScope Double-Cable Solver Benchmarks"
+}
