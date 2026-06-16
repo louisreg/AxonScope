@@ -11,6 +11,7 @@ linear solve used inside each implicit myelinated time step.
 Colab notebook:
 
 - `benchmark/solvers/colab_double_cable_linear_solvers.ipynb`
+- `benchmark/solvers/colab_double_cable_end_to_end.ipynb`
 
 Before opening it in Colab, publish the committed local revision:
 
@@ -57,6 +58,33 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
 Each row records compile time, first compiled run time, steady-state min/median/
 p95 time, `B * Nx` node-solves per second, and max error versus a Thomas
 float64 reference unless `--skip-reference` is used.
+
+Summarize one or more downloaded `summary.csv` files:
+
+```bash
+python benchmark/solvers/summarize_double_cable_linear_solvers.py \
+  benchmark/results/solvers/<run_id>/gpu/summary.csv \
+  --out benchmark/results/solvers/<run_id>/crossover_summary.csv
+```
+
+Run the end-to-end double-cable batch-kernel matrix:
+
+```bash
+python benchmark/solvers/bench_double_cable_end_to_end.py \
+  --batch-sizes 512 1024 2048 \
+  --nx 32 51 64 \
+  --nt 500 1000 \
+  --recordings none center full \
+  --iinj-modes none dense_zero nonzero \
+  --solvers auto thomas pcr_adaptive \
+  --warmups 1 \
+  --repeats 3
+```
+
+This runner builds MRG-like double-cable batches, materializes dense `Vext`,
+optionally materializes dense `Iinj`, and records setup/runtime/input/kernel/
+output byte metrics. It is the Phase 0.2 complement to the isolated linear
+solver benchmark.
 
 Capture a JAX profiler trace for one case:
 

@@ -137,6 +137,8 @@ Near-term tasks:
   throughput, separate from dispatch/input/result packaging.
 - [x] Add a small JAX trace script or hotpath preset for exact double-cable
   linear solvers, with Thomas, `pcr`, `pcr_soa`, and `pcr_adaptive`.
+- [x] Add an end-to-end exact double-cable batch-kernel benchmark for
+  recording/Iinj pressure before GPU reruns.
 - [ ] Decide whether to keep the current Literal-based solver option or promote
   it to a typed enum after the option set stabilizes.
 - [ ] Test batch-native PCR and `Nx` padding buckets only after the solver-only
@@ -465,6 +467,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | Double-cable observer-only | Homogeneous double-cable observer-only batch runs returned compact observations with `Vm=None` and greatly reduced result packaging. |
 | 2026-06-15 | Double-cable PCR SoA/adaptive | `pcr_soa` improved smaller GPU batches but regressed at `n=2000`; `pcr_adaptive` now selects SoA up to `B=1024` and matrix-layout PCR beyond that. |
 | 2026-06-15 | Pseudo-double validation | Harness and candidate modes exist, but candidates remain rough screening probes with trace errors too large for production acceptance. Pseudo-double is standby. |
+| 2026-06-16 | Local CPU solver-only baseline | `benchmark/solvers/bench_double_cable_linear_solvers.py` local CPU matrix at `B=8/128/512`, `Nx=32/51/64`, `float32` confirms Thomas is the CPU/default path; PCR variants are slower for production CPU use, with only tiny `B=8,Nx=32` noise favoring matrix PCR. |
+| 2026-06-16 | End-to-end double-cable benchmark smoke | `benchmark/solvers/bench_double_cable_end_to_end.py` local smokes passed for center/no-Iinj, observer-only/dense-zero-Iinj, and full/nonzero-Iinj at `B=2`, target `Nx=51`, `Nt=3`; Colab notebook is ready for GPU runs. |
 
 ## Completed Roadmap Archive
 

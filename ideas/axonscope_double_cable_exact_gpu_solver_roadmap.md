@@ -199,33 +199,51 @@ tests.
 
 ### 0.2 Add end-to-end double-cable benchmark
 
-Create or extend:
+Status on 2026-06-16: implemented as:
 
 ```text
 benchmark/solvers/bench_double_cable_end_to_end.py
+benchmark/solvers/colab_double_cable_end_to_end.ipynb
 ```
 
-Matrix:
+The runner builds homogeneous MRG-like double-cable batches, prepares runtime
+arrays, materializes dense `Vext`, optionally materializes dense `Iinj`, and
+runs `DoubleCableBatchKernel` directly. This keeps the axes needed for Phase
+0.2 without relying on public APIs that cannot force dense-zero current input.
+
+Configured matrix:
 
 ```text
-B  = 512, 1024, 2048, 4096
-Nx = 32, 51, 64, 96, 100
-Nt = 500, 1000
+B  = configurable; Colab defaults include 512, 1024, 2048
+Nx = configurable target compartments; Colab defaults include 51, 64, 96
+Nt = configurable; Colab defaults include 500, 1000
 recording = none, center, full
-Iinj = None, dense_zero, nonzero
-Vext = dense, factorized if available
+Iinj = none, dense_zero, nonzero
+Vext = dense
+solver = auto, thomas, pcr_adaptive, plus explicit variants as needed
 ```
 
-Report:
+Reported metrics:
 
 ```text
-total wall time
-solver time if isolated
-GPU trace location
+setup time
+runtime preparation time
+dense Vext materialization time
+dense Iinj materialization time
+kernel enqueue median/min
+kernel wait median/min
+total setup time
+total setup + median kernel time
+case wall time
+trace location
 Vm output bytes
 input Vext bytes
-max memory usage
+input Iinj bytes
+actual MRG Nx
 ```
+
+Future extension: add factorized `Vext` once the exact double-cable kernel can
+consume it without first materializing a dense `(B, Nt, Nx)` tensor.
 
 ### 0.3 Add JAX profiler traces
 
