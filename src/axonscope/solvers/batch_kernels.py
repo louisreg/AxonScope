@@ -16,6 +16,7 @@ from .common import (
     apply_diffusion_operator,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
+    solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
@@ -43,7 +44,7 @@ class BatchKernelResult:
     observations: dict[str, object] | None = None
 
 
-_DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 1024
+_DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -1298,6 +1299,332 @@ def _run_double_cable_batch_stateful_scan(
         "membrane",
         "has_driven_extracellular",
         "stateless_vm_only",
+        "record_full",
+    ),
+)
+def _run_double_cable_batch_stateful_pcr_soa_scan(
+    *,
+    backend,
+    membrane,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    record_full: bool,
+    Vi0_mV: Array,
+    Ve0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
+    intracellular_current_density_mid: Array | None,
+    extracellular_potential_mid_mV: Array,
+    extracellular_potential_initial_previous_mV: Array,
+    row_indices: Array,
+    record_indices: Array,
+    dt_ms: Array,
+) -> tuple[Array, Array, Array, tuple[Array, ...], Array]:
+    """Run one time chunk using the batch-native SoA PCR block solver."""
+
+    batch_size = int(Vi0_mV.shape[0])
+    nx = int(Vi0_mV.shape[1])
+
+    def batch_space(values: Array) -> Array:
+        arr = jnp.asarray(values)
+        if arr.ndim == 0:
+            return jnp.broadcast_to(arr, (batch_size, nx))
+        if arr.ndim == 1:
+            return jnp.broadcast_to(arr[None, :], (batch_size, nx))
+        return arr
+
+    area_batch = batch_space(area_cm2)
+    cm_over_dt = batch_space(Cm_abs) / dt_ms
+    cx_over_dt = batch_space(Cx_abs) / dt_ms
+    Gx_abs_batch = batch_space(Gx_abs)
+    left_i_batch = batch_space(left_i)
+    right_i_batch = batch_space(right_i)
+    left_e_batch = batch_space(left_e)
+    right_e_batch = batch_space(right_e)
+    background_batch = batch_space(I_background)
+
+    off_i = -jnp.asarray(Gax_i)
+    off_e = -jnp.asarray(Gax_e)
+    vext_previous_mV = jnp.concatenate(
+        [
+            extracellular_potential_initial_previous_mV[:, None, :],
+            extracellular_potential_mid_mV[:, :-1, :],
+        ],
+        axis=1,
+    )
+    extracellular_rhs_drive = (
+        (cx_over_dt + Gx_abs_batch)[:, None, :] * extracellular_potential_mid_mV
+        - cx_over_dt[:, None, :] * vext_previous_mV
+    )
+
+    if intracellular_current_density_mid is None:
+        intracellular_current_abs_mid = None
+    else:
+        intracellular_current_abs_mid = intracellular_current_density_mid * area_batch[:, None, :]
+
+    state_axes = tuple(0 for _ in state0)
+
+    def batch_gate_update(gates: Array, Vm: Array) -> Array:
+        row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
+        if callable(row_gate_update):
+            return jax.vmap(
+                lambda row_index, gates_row, vm_row: row_gate_update(
+                    row_index,
+                    g_prev=gates_row,
+                    V_mV=vm_row,
+                    dt=dt_ms,
+                )
+            )(row_indices, gates, Vm)
+        return jax.vmap(
+            lambda gates_row, vm_row: backend.cn_gate_update(
+                g_prev=gates_row,
+                V_mV=vm_row,
+                dt=dt_ms,
+            )
+        )(gates, Vm)
+
+    def batch_currents(Vm: Array, gates: Array) -> Array:
+        row_currents = getattr(backend, "currents_for_row", None)
+        if callable(row_currents):
+            return jax.vmap(
+                lambda row_index, vm_row, gates_row: row_currents(
+                    row_index,
+                    V_mV=vm_row,
+                    gates=gates_row,
+                )
+            )(row_indices, Vm, gates)
+        return jax.vmap(
+            lambda vm_row, gates_row: backend.currents(V_mV=vm_row, gates=gates_row)
+        )(Vm, gates)
+
+    def batch_membrane_conductance_terms(gates: Array) -> tuple[Array, Array]:
+        row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
+        if callable(row_terms):
+            return jax.vmap(
+                lambda row_index, gates_row: row_terms(row_index, gates_row)
+            )(row_indices, gates)
+        return jax.vmap(backend.membrane_conductance_terms)(gates)
+
+    def batch_prepare_membrane_step(
+        Vm: Array,
+        gates_prev: Array,
+        gates_new: Array,
+        state: tuple[Array, ...],
+        I_ion: Array,
+        I_background_row: Array,
+    ):
+        return jax.vmap(
+            lambda vm_row, gates_prev_row, gates_new_row, state_row, iion_row, ibg_row: (
+                membrane.prepare_membrane_step(
+                    V_mV=vm_row,
+                    gates_prev=gates_prev_row,
+                    gates_new=gates_new_row,
+                    state=state_row,
+                    dt=dt_ms,
+                    I_ion=iion_row,
+                    I_background=ibg_row,
+                )
+            ),
+            in_axes=(0, 0, 0, state_axes, 0, 0),
+        )(Vm, gates_prev, gates_new, state, I_ion, I_background_row)
+
+    def batch_final_gate_update(
+        gates_prev: Array,
+        Vm_prev: Array,
+        Vm_new: Array,
+        gates_predictor: Array,
+    ) -> Array:
+        return jax.vmap(
+            lambda gates_prev_row, vm_prev_row, vm_new_row, gates_predictor_row: (
+                membrane.final_gate_update(
+                    gates_prev=gates_prev_row,
+                    V_mV_prev=vm_prev_row,
+                    V_mV_new=vm_new_row,
+                    dt=dt_ms,
+                    gates_predictor=gates_predictor_row,
+                )
+            )
+        )(gates_prev, Vm_prev, Vm_new, gates_predictor)
+
+    def batch_finalize_membrane_step(
+        Vm_prev: Array,
+        Vm_new: Array,
+        gates_prev: Array,
+        gates_new: Array,
+        state_prev: tuple[Array, ...],
+        step_plan,
+    ) -> tuple[Array, ...]:
+        return jax.vmap(
+            lambda vm_prev_row, vm_new_row, gates_prev_row, gates_new_row, state_row, step_plan_row: (
+                membrane.finalize_membrane_step(
+                    V_mV_prev=vm_prev_row,
+                    V_mV_new=vm_new_row,
+                    gates_prev=gates_prev_row,
+                    gates_new=gates_new_row,
+                    state_prev=state_row,
+                    step_plan=step_plan_row,
+                    dt=dt_ms,
+                )
+            ),
+            in_axes=(0, 0, 0, 0, state_axes, 0),
+        )(Vm_prev, Vm_new, gates_prev, gates_new, state_prev, step_plan)
+
+    def solve_vi_vperi(
+        Vi: Array,
+        Ve: Array,
+        gates_new: Array,
+        Iinj_abs: Array,
+        I_outward_den: Array,
+        I_corr_den: Array,
+        extracellular_drive_abs: Array,
+    ) -> tuple[Array, Array]:
+        Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
+        Gm_abs = Gm_den * area_batch
+        GE_abs = GE_den * area_batch
+
+        I_outward_abs = I_outward_den * area_batch
+        I_corr_abs = I_corr_den * area_batch
+        Vm = Vi - Ve
+
+        a00 = cm_over_dt + Gm_abs + left_i_batch + right_i_batch
+        a01 = -(cm_over_dt + Gm_abs)
+        rhs0 = cm_over_dt * Vm + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
+
+        a10 = a01
+        a11 = (
+            cm_over_dt
+            + Gm_abs
+            + cx_over_dt
+            + Gx_abs_batch
+            + left_e_batch
+            + right_e_batch
+        )
+        rhs1 = (
+            -cm_over_dt * Vm
+            - GE_abs
+            + cx_over_dt * Ve
+            + extracellular_drive_abs
+            + I_outward_abs
+            + I_corr_abs
+        )
+
+        return solve_block_tridiagonal_2x2_pcr_soa_batched(
+            a00,
+            a01,
+            a10,
+            a11,
+            off_i,
+            off_e,
+            rhs0,
+            rhs1,
+        )
+
+    def step(carry, step_inputs):
+        if intracellular_current_abs_mid is None:
+            Iinj_abs = jnp.zeros_like(area_batch)
+            extracellular_drive_abs = step_inputs
+        else:
+            Iinj_abs, extracellular_drive_abs = step_inputs
+        Vi, Ve, gates, *extra = carry
+        extra = tuple(extra)
+        Vm = Vi - Ve
+
+        gates_pred = batch_gate_update(gates, Vm)
+        if stateless_vm_only:
+            linearization_gates = gates if has_driven_extracellular else gates_pred
+            explicit_outward_current = background_batch
+            correction_current = jnp.zeros_like(Vm)
+        else:
+            Iion_pred = batch_currents(Vm, gates_pred)
+            step_plan_pred = batch_prepare_membrane_step(
+                Vm,
+                gates,
+                gates_pred,
+                extra,
+                Iion_pred,
+                background_batch,
+            )
+            linearization_gates = step_plan_pred.linearization_gates
+            if has_driven_extracellular:
+                linearization_gates = gates
+            explicit_outward_current = step_plan_pred.explicit_outward_current
+            correction_current = step_plan_pred.correction_current
+
+        Vi_new, Ve_new = solve_vi_vperi(
+            Vi=Vi,
+            Ve=Ve,
+            gates_new=linearization_gates,
+            Iinj_abs=Iinj_abs,
+            I_outward_den=explicit_outward_current,
+            I_corr_den=correction_current,
+            extracellular_drive_abs=extracellular_drive_abs,
+        )
+        Vm_new = Vi_new - Ve_new
+
+        output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=1)
+        if stateless_vm_only:
+            return (Vi_new, Ve_new, gates_pred, *extra), output
+
+        gates_new = batch_final_gate_update(gates, Vm, Vm_new, gates_pred)
+        Iion_new = batch_currents(Vm_new, gates_new)
+        step_plan = batch_prepare_membrane_step(
+            Vm_new,
+            gates,
+            gates_new,
+            extra,
+            Iion_new,
+            background_batch,
+        )
+        state_new = batch_finalize_membrane_step(
+            Vm,
+            Vm_new,
+            gates,
+            gates_new,
+            extra,
+            step_plan,
+        )
+        return (Vi_new, Ve_new, gates_new, *state_new), output
+
+    scan_inputs = (
+        jnp.swapaxes(extracellular_rhs_drive, 0, 1)
+        if intracellular_current_abs_mid is None
+        else (
+            jnp.swapaxes(intracellular_current_abs_mid, 0, 1),
+            jnp.swapaxes(extracellular_rhs_drive, 0, 1),
+        )
+    )
+    final_carry, trace = jax.lax.scan(
+        step,
+        (Vi0_mV, Ve0_mV, gates0, *state0),
+        scan_inputs,
+    )
+    return (
+        final_carry[0],
+        final_carry[1],
+        final_carry[2],
+        tuple(final_carry[3:]),
+        jnp.swapaxes(trace, 0, 1),
+    )
+
+
+@partial(
+    jax.jit,
+    static_argnames=(
+        "backend",
+        "membrane",
+        "has_driven_extracellular",
+        "stateless_vm_only",
         "double_cable_block_solver",
     ),
 )
@@ -2496,35 +2823,65 @@ def _run_double_cable_batch_array_chunks(
             if intracellular_current_density_mid is None
             else intracellular_current_density_mid[:, start:stop]
         )
-        Vi, Ve, gates, state, trace = _run_double_cable_batch_stateful_scan(
-            backend=membrane_runtime.backend,
-            membrane=membrane_runtime.membrane,
-            has_driven_extracellular=has_driven_extracellular,
-            stateless_vm_only=stateless_vm_only,
-            record_full=record_full,
-            double_cable_block_solver=kernel_block_solver,
-            Vi0_mV=Vi,
-            Ve0_mV=Ve,
-            gates0=gates,
-            state0=state,
-            area_cm2=area_cm2,
-            Cm_abs=Cm_abs,
-            Cx_abs=Cx_abs,
-            Gx_abs=Gx_abs,
-            Gax_e=Gax_e,
-            Gax_i=Gax_i,
-            left_i=left_i,
-            right_i=right_i,
-            left_e=left_e,
-            right_e=right_e,
-            I_background=background,
-            intracellular_current_density_mid=iinj_chunk,
-            extracellular_potential_mid_mV=vext_chunk,
-            extracellular_potential_initial_previous_mV=previous,
-            row_indices=jnp.arange(batch_size, dtype=jnp.int32),
-            record_indices=record_indices,
-            dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
-        )
+        if kernel_block_solver == "pcr_soa":
+            Vi, Ve, gates, state, trace = _run_double_cable_batch_stateful_pcr_soa_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                record_full=record_full,
+                Vi0_mV=Vi,
+                Ve0_mV=Ve,
+                gates0=gates,
+                state0=state,
+                area_cm2=area_cm2,
+                Cm_abs=Cm_abs,
+                Cx_abs=Cx_abs,
+                Gx_abs=Gx_abs,
+                Gax_e=Gax_e,
+                Gax_i=Gax_i,
+                left_i=left_i,
+                right_i=right_i,
+                left_e=left_e,
+                right_e=right_e,
+                I_background=background,
+                intracellular_current_density_mid=iinj_chunk,
+                extracellular_potential_mid_mV=vext_chunk,
+                extracellular_potential_initial_previous_mV=previous,
+                row_indices=jnp.arange(batch_size, dtype=jnp.int32),
+                record_indices=record_indices,
+                dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+            )
+        else:
+            Vi, Ve, gates, state, trace = _run_double_cable_batch_stateful_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                record_full=record_full,
+                double_cable_block_solver=kernel_block_solver,
+                Vi0_mV=Vi,
+                Ve0_mV=Ve,
+                gates0=gates,
+                state0=state,
+                area_cm2=area_cm2,
+                Cm_abs=Cm_abs,
+                Cx_abs=Cx_abs,
+                Gx_abs=Gx_abs,
+                Gax_e=Gax_e,
+                Gax_i=Gax_i,
+                left_i=left_i,
+                right_i=right_i,
+                left_e=left_e,
+                right_e=right_e,
+                I_background=background,
+                intracellular_current_density_mid=iinj_chunk,
+                extracellular_potential_mid_mV=vext_chunk,
+                extracellular_potential_initial_previous_mV=previous,
+                row_indices=jnp.arange(batch_size, dtype=jnp.int32),
+                record_indices=record_indices,
+                dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+            )
         previous = vext_chunk[:, -1]
         chunks.append(trace)
         if progress_callback is not None:

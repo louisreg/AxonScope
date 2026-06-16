@@ -59,6 +59,10 @@ Each row records compile time, first compiled run time, steady-state min/median/
 p95 time, `B * Nx` node-solves per second, and max error versus a Thomas
 float64 reference unless `--skip-reference` is used.
 
+`pcr_soa` is measured with the batch-native
+`solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
+that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
+
 Summarize one or more downloaded `summary.csv` files:
 
 ```bash

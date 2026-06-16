@@ -38,7 +38,7 @@ The currently implemented choices are:
 | `thomas` | Exact block-Thomas scan. |
 | `pcr` | Exact matrix-layout PCR variant. |
 | `pcr_soa` | Exact struct-of-arrays PCR variant. |
-| `pcr_adaptive` | `pcr_soa` for `B <= 1024`, matrix-layout `pcr` for larger batches. |
+| `pcr_adaptive` | `pcr_soa` for `B <= 4096`, matrix-layout `pcr` for larger batches. This threshold is calibrated from the 2026-06-16 P100 solver-only sweep and should be revisited with more devices. |
 
 Do not add more solver-choice names to public or benchmark CLI surfaces until
 they exist in code, have Thomas-vs-candidate tests, and have benchmark evidence.
@@ -397,7 +397,7 @@ def choose_double_cable_solver(B: int, Nx: int, device: str) -> DoubleCableLinea
 Inside the current batch kernel, `PCR_ADAPTIVE` resolves by batch size:
 
 ```python
-if B <= 1024:
+if B <= 4096:
     return PCR_SOA
 return PCR
 ```
@@ -501,6 +501,18 @@ activation/threshold unchanged
 ---
 
 ## Phase 1C — Batch-native PCR_SOA
+
+Status on 2026-06-16: implemented as
+`solve_block_tridiagonal_2x2_pcr_soa_batched(...)`. The solver accepts shared
+`[Nx]` coefficients or per-row `[B, Nx]` coefficients and operates directly on
+batch-first right-hand sides `[B, Nx]`. The solver-focused benchmark uses this
+batch-native path for `pcr_soa` / `pcr_adaptive` when they resolve to SoA, and
+`DoubleCableBatchKernel` uses it for array-output double-cable chunks when the
+resolved kernel solver is `pcr_soa`.
+
+Remaining work: thread the same batch-aware solve through the observer-only
+path. The observer scan still evaluates each fiber under `vmap` before calling
+the one-fiber block solver.
 
 ## Problem
 

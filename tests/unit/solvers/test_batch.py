@@ -29,6 +29,7 @@ from axonscope.solvers import (
     SingleCableVStimBatchKernel,
     resolve_double_cable_block_solver,
 )
+from axonscope.solvers.batch_kernels import _resolve_double_cable_kernel_block_solver
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
@@ -92,6 +93,14 @@ def test_batch_recording_resolves_common_policies():
     assert resolve_double_cable_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
     with pytest.raises(ValueError, match="double_cable_block_solver"):
         BatchOptions(double_cable_block_solver="dense")
+
+
+def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
+    assert (
+        _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4096)
+        == "pcr_soa"
+    )
+    assert _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4097) == "pcr"
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -538,6 +547,33 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
             atol=1e-3,
             rtol=0.0,
         )
+
+    pcr_soa_center = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.center(double_cable_block_solver="pcr_soa"),
+    ).Vm
+    pcr_soa_chunked = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.center(
+            time_chunk_steps=7,
+            double_cable_block_solver="pcr_soa",
+        ),
+    ).Vm
+    np.testing.assert_allclose(
+        np.asarray(pcr_soa_chunked),
+        np.asarray(pcr_soa_center),
+        atol=1e-3,
+        rtol=0.0,
+    )
+
+    pcr_soa_none = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+    ).Vm
+    assert pcr_soa_none.shape == (2, int(round(tsim / dt)), 0)
 
 
 def test_double_cable_batch_requires_extracellular_runtime():

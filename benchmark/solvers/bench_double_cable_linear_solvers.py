@@ -44,6 +44,7 @@ from axonscope.solvers import resolve_double_cable_block_solver
 from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
+    solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 
@@ -51,7 +52,7 @@ from axonscope.solvers.common import (
 DEFAULT_OUT_DIR = Path("benchmark/results/solvers")
 SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive")
 KERNEL_SOLVERS = ("thomas", "pcr", "pcr_soa")
-PCR_SOA_MAX_BATCH = 1024
+PCR_SOA_MAX_BATCH = 4096
 
 
 @dataclass(frozen=True)
@@ -373,6 +374,33 @@ def _compute_reference(batch_size: int, nx: int) -> jax.Array:
 
 
 def _make_batched_solver(kernel_solver: str):
+    if kernel_solver == "pcr_soa":
+
+        @jax.jit
+        def solve_batch_native(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        ):
+            x0, x1 = solve_block_tridiagonal_2x2_pcr_soa_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off0,
+                off1,
+                rhs0,
+                rhs1,
+            )
+            return jnp.stack((x0, x1), axis=-1)
+
+        return solve_batch_native
+
     solve_one = _solve_fn(kernel_solver)
 
     @jax.jit
@@ -514,4 +542,3 @@ def _numpy_dtype(dtype: str) -> Any:
 
 if __name__ == "__main__":
     main()
-

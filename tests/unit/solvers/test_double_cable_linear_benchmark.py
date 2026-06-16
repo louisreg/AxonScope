@@ -26,7 +26,7 @@ def test_generate_linear_solver_system_shapes():
 
 def test_planned_cases_resolve_adaptive_kernel_solver():
     cases = planned_cases(
-        batch_sizes=[1024, 1025],
+        batch_sizes=[4096, 4097],
         nx_values=[51],
         dtypes=["float32"],
         solvers=["pcr_adaptive"],
@@ -34,8 +34,8 @@ def test_planned_cases_resolve_adaptive_kernel_solver():
     )
 
     assert [case.kernel_solver for case in cases] == ["pcr_soa", "pcr"]
-    assert resolve_kernel_solver("pcr_adaptive", batch_size=1024) == "pcr_soa"
-    assert resolve_kernel_solver("pcr_adaptive", batch_size=1025) == "pcr"
+    assert resolve_kernel_solver("pcr_adaptive", batch_size=4096) == "pcr_soa"
+    assert resolve_kernel_solver("pcr_adaptive", batch_size=4097) == "pcr"
 
 
 def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
@@ -60,4 +60,3 @@ def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
         "thomas -> thomas -> thomas B=2 Nx=5 dtype=float32",
         "pcr_soa -> pcr_soa -> pcr_soa B=2 Nx=5 dtype=float32",
     ]
-

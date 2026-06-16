@@ -10,6 +10,7 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
+    solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 
@@ -145,6 +146,110 @@ def test_pcr_block_tridiagonal_solver_matches_thomas_for_non_power_of_two_size()
         )
 
 
+def test_batched_pcr_soa_matches_vmapped_thomas_for_batched_coefficients():
+    batch_size = 4
+    n = 7
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+    edge = jnp.arange(n - 1, dtype=jnp.float32)[None, :]
+
+    a00 = 4.0 + 0.05 * x + 0.01 * batch
+    a01 = -0.9 - 0.01 * x + 0.002 * batch
+    a10 = -1.1 + 0.02 * x - 0.003 * batch
+    a11 = 5.0 + 0.07 * x + 0.008 * batch
+    off0 = -0.10 - 0.01 * edge - 0.001 * batch
+    off1 = -0.07 - 0.005 * edge - 0.0015 * batch
+    rhs0 = jnp.sin(0.3 * x + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x - 0.1 * batch)
+
+    thomas0, thomas1 = jax.vmap(solve_block_tridiagonal_2x2_scalar)(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    pcr0, pcr1 = solve_block_tridiagonal_2x2_pcr_soa_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(pcr0),
+        np.asarray(thomas0),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pcr1),
+        np.asarray(thomas1),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_batched_pcr_soa_matches_vmapped_thomas_for_shared_coefficients():
+    batch_size = 3
+    n = 9
+    x = jnp.arange(n, dtype=jnp.float32)
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+
+    a00 = 4.0 + 0.05 * x
+    a01 = -0.9 - 0.01 * x
+    a10 = -1.1 + 0.02 * x
+    a11 = 5.0 + 0.07 * x
+    off0 = -0.10 - 0.01 * jnp.arange(n - 1, dtype=jnp.float32)
+    off1 = -0.07 - 0.005 * jnp.arange(n - 1, dtype=jnp.float32)
+    rhs0 = jnp.sin(0.3 * x[None, :] + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x[None, :] - 0.1 * batch)
+
+    thomas0, thomas1 = jax.vmap(
+        solve_block_tridiagonal_2x2_scalar,
+        in_axes=(None, None, None, None, None, None, 0, 0),
+    )(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    pcr0, pcr1 = solve_block_tridiagonal_2x2_pcr_soa_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(pcr0),
+        np.asarray(thomas0),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(pcr1),
+        np.asarray(thomas1),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
 def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():
     n = 7
     x = jnp.arange(n, dtype=jnp.float32)
@@ -163,6 +268,11 @@ def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():
         jaxpr = str(jax.make_jaxpr(solve)(*args))
 
         assert "dot_general" not in jaxpr
+
+    batched_args = tuple(arg[None, :] for arg in args[:6]) + tuple(arg[None, :] for arg in args[6:])
+    jaxpr = str(jax.make_jaxpr(solve_block_tridiagonal_2x2_pcr_soa_batched)(*batched_args))
+
+    assert "dot_general" not in jaxpr
 
 
 def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():
@@ -217,3 +327,22 @@ def test_pcr_block_tridiagonal_solver_handles_single_row_under_jit():
             rtol=1e-6,
             atol=1e-6,
         )
+
+    solve_batch = jax.jit(solve_block_tridiagonal_2x2_pcr_soa_batched)
+    batch0, batch1 = solve_batch(
+        jnp.asarray([4.0], dtype=jnp.float32),
+        jnp.asarray([-1.0], dtype=jnp.float32),
+        jnp.asarray([-1.0], dtype=jnp.float32),
+        jnp.asarray([5.0], dtype=jnp.float32),
+        jnp.asarray([], dtype=jnp.float32),
+        jnp.asarray([], dtype=jnp.float32),
+        jnp.asarray([[2.0]], dtype=jnp.float32),
+        jnp.asarray([[3.0]], dtype=jnp.float32),
+    )
+
+    np.testing.assert_allclose(
+        np.asarray([batch0[0, 0], batch1[0, 0]]),
+        expected,
+        rtol=1e-6,
+        atol=1e-6,
+    )
