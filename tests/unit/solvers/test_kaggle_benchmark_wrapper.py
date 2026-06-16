@@ -150,10 +150,45 @@ def test_kaggle_linear_includes_active_split_iterative_candidates(tmp_path, monk
         "pcr_soa",
         "pcr_adaptive",
         "split_jacobi_4",
-        "split_jacobi_8",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
         "split_gs_4",
-        "split_gs_8",
-        "split_richardson_4",
+    ]
+
+
+def test_kaggle_linear_split_focus_is_bounded_to_current_candidates(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear_split_focus(tmp_path)
+
+    (command,) = commands
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
+        "32",
+        "51",
+        "64",
+        "96",
+    ]
+    solvers_start = command.index("--solvers") + 1
+    solvers_end = command.index("--warmups")
+    assert command[solvers_start:solvers_end] == [
+        "pcr_soa",
+        "pcr_adaptive",
+        "split_jacobi_4",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
+        "split_gs_4",
     ]
 
 

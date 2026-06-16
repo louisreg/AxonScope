@@ -33,7 +33,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--benchmark",
         default="smoke",
-        choices=("smoke", "linear", "e2e", "e2e_full", "both"),
+        choices=("smoke", "linear", "linear_split_focus", "e2e", "e2e_full", "both"),
         help="Benchmark suite to run inside the Kaggle kernel.",
     )
     parser.add_argument(

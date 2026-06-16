@@ -12,6 +12,7 @@ from axonscope.solvers.common import (
     pad_double_cable_system_to_power_bucket,
     solve_double_cable_split_gauss_seidel_batched,
     solve_double_cable_split_jacobi_batched,
+    solve_double_cable_split_jacobi_then_gauss_seidel_batched,
     solve_double_cable_split_richardson_batched,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
@@ -521,11 +522,22 @@ def test_split_iterative_solvers_are_exact_for_decoupled_rails():
     )(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
 
     split_solvers = (
-        (solve_double_cable_split_jacobi_batched, {}),
-        (solve_double_cable_split_gauss_seidel_batched, {}),
-        (solve_double_cable_split_richardson_batched, {"relaxation": 1.0}),
+        (solve_double_cable_split_jacobi_batched, {"iterations": 1, "init": "zero"}),
+        (solve_double_cable_split_gauss_seidel_batched, {"iterations": 1, "init": "zero"}),
+        (
+            solve_double_cable_split_jacobi_then_gauss_seidel_batched,
+            {
+                "jacobi_iterations": 1,
+                "gauss_seidel_iterations": 1,
+                "init": "zero",
+            },
+        ),
+        (
+            solve_double_cable_split_richardson_batched,
+            {"iterations": 1, "init": "zero", "relaxation": 1.0},
+        ),
     )
-    for solve, extra_kwargs in split_solvers:
+    for solve, kwargs in split_solvers:
         got0, got1 = solve(
             a00,
             a01,
@@ -535,9 +547,7 @@ def test_split_iterative_solvers_are_exact_for_decoupled_rails():
             off1,
             rhs0,
             rhs1,
-            iterations=1,
-            init="zero",
-            **extra_kwargs,
+            **kwargs,
         )
         np.testing.assert_allclose(np.asarray(got0), np.asarray(thomas0), rtol=1e-5, atol=1e-6)
         np.testing.assert_allclose(np.asarray(got1), np.asarray(thomas1), rtol=1e-5, atol=1e-6)

@@ -37,7 +37,7 @@ Run a compact local smoke:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 8 128 \
   --nx 32 51 \
-  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_gs_4 \
+  --solvers thomas pcr pcr_soa pcr_adaptive split_gs_2 split_gs_3 split_gs_4 split_jacobi4_gs1 \
   --dtypes float32 \
   --warmups 1 \
   --repeats 3
@@ -49,7 +49,7 @@ Run the GPU-oriented sweep from the exact double-cable roadmap:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1 8 128 512 1024 2048 4096 \
   --nx 16 32 51 64 96 100 128 \
-  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi_8 split_gs_4 split_gs_8 split_richardson_4 \
+  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi4_gs1 split_gs_2 split_gs_3 split_gs_4 \
   --dtypes float32 float64 \
   --warmups 1 \
   --repeats 5
@@ -73,11 +73,11 @@ RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
-`split_jacobi_4`, `split_jacobi_8`, `split_gs_4`, `split_gs_8`, and
-`split_richardson_4` are benchmark-only Phase 1.5 candidates. They are
-fixed-iteration approximate split solvers, not exact direct solvers, so judge
-them by both speed and residual/error columns before considering any public
-routing.
+`split_jacobi_4`, `split_jacobi4_gs1`, `split_gs_2`, `split_gs_3`,
+`split_gs_4`, `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` are
+benchmark-only Phase 1.5 candidates. They are fixed-iteration approximate split
+solvers, not exact direct solvers, so judge them by both speed and
+residual/error columns before considering any public routing.
 
 Summarize one or more downloaded `summary.csv` files:
 

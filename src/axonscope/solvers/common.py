@@ -2039,6 +2039,43 @@ def solve_double_cable_split_gauss_seidel_batched(
     return vi, ve
 
 
+def solve_double_cable_split_jacobi_then_gauss_seidel_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    jacobi_iterations: int = 4,
+    gauss_seidel_iterations: int = 1,
+    init: str = "rhs_guess",
+) -> tuple[Array, Array]:
+    """Fixed-K split Jacobi with Gauss-Seidel cleanup iterations."""
+
+    vi, ve = solve_double_cable_split_jacobi_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        iterations=jacobi_iterations,
+        init=init,
+    )
+    lower_i, diag_i, upper_i, lower_e, diag_e, upper_e, cie, cei, bi, be = (
+        split_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+    for _ in range(int(gauss_seidel_iterations)):
+        vi = solve_tridiagonal_batched(lower_i, diag_i, upper_i, bi - cie * ve)
+        ve = solve_tridiagonal_batched(lower_e, diag_e, upper_e, be - cei * vi)
+    return vi, ve
+
+
 def solve_double_cable_split_richardson_batched(
     a00: Array,
     a01: Array,

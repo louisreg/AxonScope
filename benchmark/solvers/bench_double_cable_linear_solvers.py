@@ -45,6 +45,7 @@ from axonscope.solvers.common import (
     double_cable_block_residual_norm,
     solve_double_cable_split_gauss_seidel_batched,
     solve_double_cable_split_jacobi_batched,
+    solve_double_cable_split_jacobi_then_gauss_seidel_batched,
     solve_double_cable_split_richardson_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
@@ -72,6 +73,9 @@ SOLVER_CHOICES = (
     "pcr_adaptive",
     "split_jacobi_4",
     "split_jacobi_8",
+    "split_jacobi4_gs1",
+    "split_gs_2",
+    "split_gs_3",
     "split_gs_4",
     "split_gs_8",
     "split_richardson_4",
@@ -88,6 +92,9 @@ KERNEL_SOLVERS = (
     "pcr_soa_padded",
     "split_jacobi_4",
     "split_jacobi_8",
+    "split_jacobi4_gs1",
+    "split_gs_2",
+    "split_gs_3",
     "split_gs_4",
     "split_gs_8",
     "split_richardson_4",
@@ -101,6 +108,9 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "pcr_soa_padded": "pcr_soa",
     "split_jacobi_4": "split_iterative",
     "split_jacobi_8": "split_iterative",
+    "split_jacobi4_gs1": "split_iterative",
+    "split_gs_2": "split_iterative",
+    "split_gs_3": "split_iterative",
     "split_gs_4": "split_iterative",
     "split_gs_8": "split_iterative",
     "split_richardson_4": "split_iterative",
@@ -445,19 +455,49 @@ def _make_batched_solver(kernel_solver: str):
     if kernel_solver in {
         "split_jacobi_4",
         "split_jacobi_8",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
         "split_gs_4",
         "split_gs_8",
         "split_richardson_4",
     }:
-        split_solve, iterations, extra_kwargs = {
-            "split_jacobi_4": (solve_double_cable_split_jacobi_batched, 4, {}),
-            "split_jacobi_8": (solve_double_cable_split_jacobi_batched, 8, {}),
-            "split_gs_4": (solve_double_cable_split_gauss_seidel_batched, 4, {}),
-            "split_gs_8": (solve_double_cable_split_gauss_seidel_batched, 8, {}),
+        split_solve, split_kwargs = {
+            "split_jacobi_4": (
+                solve_double_cable_split_jacobi_batched,
+                {"iterations": 4, "init": "rhs_guess"},
+            ),
+            "split_jacobi_8": (
+                solve_double_cable_split_jacobi_batched,
+                {"iterations": 8, "init": "rhs_guess"},
+            ),
+            "split_jacobi4_gs1": (
+                solve_double_cable_split_jacobi_then_gauss_seidel_batched,
+                {
+                    "jacobi_iterations": 4,
+                    "gauss_seidel_iterations": 1,
+                    "init": "rhs_guess",
+                },
+            ),
+            "split_gs_2": (
+                solve_double_cable_split_gauss_seidel_batched,
+                {"iterations": 2, "init": "rhs_guess"},
+            ),
+            "split_gs_3": (
+                solve_double_cable_split_gauss_seidel_batched,
+                {"iterations": 3, "init": "rhs_guess"},
+            ),
+            "split_gs_4": (
+                solve_double_cable_split_gauss_seidel_batched,
+                {"iterations": 4, "init": "rhs_guess"},
+            ),
+            "split_gs_8": (
+                solve_double_cable_split_gauss_seidel_batched,
+                {"iterations": 8, "init": "rhs_guess"},
+            ),
             "split_richardson_4": (
                 solve_double_cable_split_richardson_batched,
-                4,
-                {"relaxation": 0.75},
+                {"iterations": 4, "relaxation": 0.75, "init": "rhs_guess"},
             ),
         }[kernel_solver]
 
@@ -481,9 +521,7 @@ def _make_batched_solver(kernel_solver: str):
                 off1,
                 rhs0,
                 rhs1,
-                iterations=iterations,
-                init="rhs_guess",
-                **extra_kwargs,
+                **split_kwargs,
             )
             return jnp.stack((x0, x1), axis=-1)
 

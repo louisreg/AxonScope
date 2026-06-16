@@ -115,6 +115,9 @@ def test_planned_cases_allow_benchmark_only_split_iterative_variants():
     solvers = [
         "split_jacobi_4",
         "split_jacobi_8",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
         "split_gs_4",
         "split_gs_8",
         "split_richardson_4",

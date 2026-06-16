@@ -75,6 +75,8 @@ def main() -> None:
         run_e2e(out_dir, smoke=True)
     elif BENCHMARK == "linear":
         run_linear(out_dir, smoke=False)
+    elif BENCHMARK == "linear_split_focus":
+        run_linear_split_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
     elif BENCHMARK == "e2e_full":
@@ -83,7 +85,10 @@ def main() -> None:
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
     else:
-        raise ValueError("AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, e2e, or both.")
+        raise ValueError(
+            "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
+            "linear_split_focus, e2e, e2e_full, or both."
+        )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
     print(f"\nResults folder: {out_dir}")
@@ -161,10 +166,10 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
                 "pcr_soa",
                 "pcr_adaptive",
                 "split_jacobi_4",
-                "split_jacobi_8",
+                "split_jacobi4_gs1",
+                "split_gs_2",
+                "split_gs_3",
                 "split_gs_4",
-                "split_gs_8",
-                "split_richardson_4",
                 "--warmups",
                 "1",
                 "--repeats",
@@ -173,6 +178,42 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
         )
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear" / "summary.csv", mode="linear")
+
+
+def run_linear_split_focus(out_dir: pathlib.Path) -> None:
+    command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_linear_solvers.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_split_focus",
+        "--batch-sizes",
+        "1024",
+        "2048",
+        "4096",
+        "--nx",
+        "32",
+        "51",
+        "64",
+        "96",
+        "--dtypes",
+        "float32",
+        "--solvers",
+        "pcr_soa",
+        "pcr_adaptive",
+        "split_jacobi_4",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
+        "split_gs_4",
+        "--warmups",
+        "1",
+        "--repeats",
+        "5",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "linear_split_focus" / "summary.csv", mode="linear")
 
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:

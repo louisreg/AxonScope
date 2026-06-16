@@ -824,6 +824,9 @@ benchmark-only candidates:
 ```text
 split_jacobi_4
 split_jacobi_8
+split_jacobi4_gs1
+split_gs_2
+split_gs_3
 split_gs_4
 split_gs_8
 split_richardson_4
@@ -850,7 +853,53 @@ all Phase 1.5 candidates. `split_jacobi_8`, `split_gs_4`, and `split_gs_8`
 matched the exact baseline with max error/residual around `1e-7`.
 `split_jacobi_4` was close but less accurate (`~6e-6` residual).
 `split_richardson_4` was not accurate enough in this smoke (`~1e-3` residual).
-Use Kaggle P100 evidence for performance and for the first go/no-go decision.
+
+Kaggle P100 `20260616_233228_linear_NvidiaTeslaP100` measured the focused
+solver-only `linear` matrix (`B=128..4096`, `Nx=32/51/64/96`, `float32`):
+
+```text
+split_gs_4:
+    max_residual ~2.1e-7
+    max_abs_error ~1.6e-7
+    13/20 wins vs pcr_soa
+    0.893x geomean runtime vs pcr_soa overall
+    0.687x geomean runtime vs pcr_soa for B>=2048, winning 8/8
+
+split_jacobi_4:
+    16/20 wins vs pcr_soa
+    0.818x geomean runtime vs pcr_soa overall
+    but max_residual ~7.1e-6 and max_abs_error ~2.5e-6
+
+split_jacobi_8:
+    exact-like residual/error, but 1.149x geomean runtime vs pcr_soa
+
+split_gs_8:
+    exact-like residual/error, but 1.319x geomean runtime vs pcr_soa
+
+split_richardson_4:
+    not accurate enough; max_residual ~1.1e-3
+```
+
+Decision: carry `split_gs_4` forward to E2E/physiology validation as the only
+clean Phase 1.5 candidate. Keep `split_jacobi_4` benchmark-only as a possible
+approximate physiology experiment. Put `split_jacobi_8`, `split_gs_8`, and
+`split_richardson_4` in standby. Do not route any split solver into `auto`
+before end-to-end and physiological agreement checks.
+
+Follow-up local smoke on 2026-06-16 added:
+
+```text
+split_gs_2
+split_gs_3
+split_jacobi4_gs1
+```
+
+Local CPU smoke (`B=2`, `Nx=45/89`, `float32`) showed `split_gs_3` and
+`split_jacobi4_gs1` at near-exact residual/error levels (`~4e-7`) while running
+faster than local `split_gs_4`. `split_gs_2` was too approximate locally
+(`~5e-5` residual). Next evidence needed: Kaggle P100 `linear_split_focus`
+over `B>=1024`, comparing `split_gs_3` and `split_jacobi4_gs1` against
+`split_gs_4` and `pcr_soa`.
 
 ---
 
@@ -1237,7 +1286,7 @@ Recommended order:
 4. Implement split_jacobi_fixed_k. [done as benchmark-only]
 5. Implement split_gauss_seidel_fixed_k. [done as benchmark-only]
 6. Add residual checker. [done]
-7. Benchmark vs Thomas/PCR. [local smoke done; Kaggle P100 next]
+7. Benchmark vs Thomas/PCR. [P100 baseline done; focused P100 follow-up next]
 8. Only then decide whether associative scan or Pallas is still necessary.
 ```
 
@@ -1955,11 +2004,11 @@ All AUTO decisions must be benchmark-backed and stored in a small table.
 ```text
 1. Add split_double_cable_block_system_soa. [done]
 2. Implement split_jacobi_fixed_k. [done as split_jacobi_4/8]
-3. Implement split_gauss_seidel_fixed_k. [done as split_gs_4/8]
+3. Implement split_gauss_seidel_fixed_k. [done as split_gs_2/3/4/8]
 4. Implement residual checker. [done]
-5. Test K = 4, 8 with rhs_guess initialization in solver-only benchmark. [local smoke done; Kaggle next]
-6. Compare speed and residual/error vs Thomas and PCR_SOA. [local smoke done; Kaggle next]
-7. Run physiology/E2E validation only if solver-only residuals and speed are credible.
+5. Test K = 4, 8 with rhs_guess initialization in solver-only benchmark. [done]
+6. Compare speed and residual/error vs Thomas and PCR_SOA. [done; focus follow-up next for split_gs_3 and split_jacobi4_gs1]
+7. Run physiology/E2E validation only if solver-only residuals and speed are credible. [after focused P100]
 8. Decide whether split_best should enter AUTO policy.
 ```
 
