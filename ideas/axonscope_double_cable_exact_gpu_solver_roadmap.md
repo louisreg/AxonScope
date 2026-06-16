@@ -508,7 +508,9 @@ Status on 2026-06-16: implemented as
 batch-first right-hand sides `[B, Nx]`. The solver-focused benchmark uses this
 batch-native path for `pcr_soa` / `pcr_adaptive` when they resolve to SoA, and
 `DoubleCableBatchKernel` uses it for array-output double-cable chunks when the
-resolved kernel solver is `pcr_soa`.
+resolved kernel solver is `pcr_soa` and `B >= 2048`. The P100 E2E run showed
+that the batch-native route improves large batches but regresses `B=512`, so
+small batches keep the previous per-fiber `vmap` route for now.
 
 Remaining work: thread the same batch-aware solve through the observer-only
 path. The observer scan still evaluates each fiber under `vmap` before calling
@@ -567,6 +569,22 @@ But start with `[B, Nx]`, because this matches batch-first AxonScope patterns.
 ---
 
 ## Phase 1D — Padding Nx to 32/64/128
+
+Status on 2026-06-16: helper and benchmark-only candidate implemented.
+`double_cable_power_bucket(...)`,
+`pad_double_cable_system_to_power_bucket(...)`, and
+`solve_block_tridiagonal_2x2_pcr_soa_batched_padded(...)` keep padded rows as
+identity equations and slice the real rows after the solve. Local tests cover
+shared and batched coefficients for `Nx=45 -> 64` and `Nx=89 -> 128`.
+`pcr_soa_padded` is available only in the solver-only benchmark and Kaggle
+`linear` matrix; it is not a public `BatchOptions.double_cable_block_solver`
+choice and is not routed by `auto`.
+
+Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, comparing
+`pcr_soa_padded` to the Thomas64 reference with max absolute error about
+`7.8e-08`. This CPU/local smoke is not GPU performance evidence; the padded
+path was slower than unpadded at this tiny batch size. The next useful result is
+the Kaggle P100 solver-only `linear` matrix.
 
 ## Why
 
@@ -670,6 +688,12 @@ By the end of Phase 1:
    solver-only baseline still justifies them.
 6. AUTO policy is updated only from benchmark evidence.
 ```
+
+Working rule: prioritize implementing roadmap solver backends and reusable
+solver primitives before spending time on fine-grained heuristic thresholds.
+Small routing thresholds such as batch-size crossovers should be recorded as
+benchmark-backed calibration after a substantive backend exists, not treated as
+the main optimization work.
 
 ## Phase 1 expected outcome
 

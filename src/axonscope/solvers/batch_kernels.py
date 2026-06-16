@@ -45,6 +45,7 @@ class BatchKernelResult:
 
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
+_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 2048
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -55,6 +56,17 @@ def _resolve_double_cable_kernel_block_solver(
     if solver == "pcr_adaptive":
         return "pcr_soa" if batch_size <= _DOUBLE_CABLE_PCR_SOA_MAX_BATCH else "pcr"
     return solver
+
+
+def _use_batch_native_double_cable_pcr_soa_solver(
+    solver: str,
+    *,
+    batch_size: int,
+) -> bool:
+    return (
+        solver == "pcr_soa"
+        and int(batch_size) >= _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH
+    )
 
 
 def _double_cable_block_solve_fn(solver: str):
@@ -2823,7 +2835,10 @@ def _run_double_cable_batch_array_chunks(
             if intracellular_current_density_mid is None
             else intracellular_current_density_mid[:, start:stop]
         )
-        if kernel_block_solver == "pcr_soa":
+        if _use_batch_native_double_cable_pcr_soa_solver(
+            kernel_block_solver,
+            batch_size=batch_size,
+        ):
             Vi, Ve, gates, state, trace = _run_double_cable_batch_stateful_pcr_soa_scan(
                 backend=membrane_runtime.backend,
                 membrane=membrane_runtime.membrane,

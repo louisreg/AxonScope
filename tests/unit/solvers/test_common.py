@@ -7,10 +7,13 @@ import jax.numpy as jnp
 from axonscope.solvers.common import (
     apply_diffusion_operator,
     diffusion_operator_coeffs,
+    double_cable_power_bucket,
+    pad_double_cable_system_to_power_bucket,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
     solve_block_tridiagonal_2x2_scalar,
 )
 
@@ -248,6 +251,126 @@ def test_batched_pcr_soa_matches_vmapped_thomas_for_shared_coefficients():
         rtol=1e-5,
         atol=1e-6,
     )
+
+
+def test_double_cable_power_bucket_matches_roadmap_buckets():
+    assert double_cable_power_bucket(1) == 32
+    assert double_cable_power_bucket(32) == 32
+    assert double_cable_power_bucket(33) == 64
+    assert double_cable_power_bucket(64) == 64
+    assert double_cable_power_bucket(65) == 128
+    assert double_cable_power_bucket(128) == 128
+
+
+def test_pad_double_cable_system_to_power_bucket_preserves_real_solution():
+    batch_size = 3
+    n = 45
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)
+
+    a00 = 4.0 + 0.05 * x
+    a01 = -0.9 - 0.01 * x
+    a10 = -1.1 + 0.02 * x
+    a11 = 5.0 + 0.07 * x
+    off0 = -0.10 - 0.01 * jnp.arange(n - 1, dtype=jnp.float32)
+    off1 = -0.07 - 0.005 * jnp.arange(n - 1, dtype=jnp.float32)
+    rhs0 = jnp.sin(0.3 * x[None, :] + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x[None, :] - 0.1 * batch)
+
+    padded = pad_double_cable_system_to_power_bucket(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    assert [array.shape for array in padded] == [
+        (64,),
+        (64,),
+        (64,),
+        (64,),
+        (63,),
+        (63,),
+        (batch_size, 64),
+        (batch_size, 64),
+    ]
+    np.testing.assert_allclose(np.asarray(padded[0][n:]), 1.0)
+    np.testing.assert_allclose(np.asarray(padded[1][n:]), 0.0)
+    np.testing.assert_allclose(np.asarray(padded[2][n:]), 0.0)
+    np.testing.assert_allclose(np.asarray(padded[3][n:]), 1.0)
+    np.testing.assert_allclose(np.asarray(padded[4][n - 1 :]), 0.0)
+    np.testing.assert_allclose(np.asarray(padded[5][n - 1 :]), 0.0)
+    np.testing.assert_allclose(np.asarray(padded[6][:, n:]), 0.0)
+    np.testing.assert_allclose(np.asarray(padded[7][:, n:]), 0.0)
+
+    unpadded0, unpadded1 = solve_block_tridiagonal_2x2_pcr_soa_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    padded0, padded1 = solve_block_tridiagonal_2x2_pcr_soa_batched_padded(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(np.asarray(padded0), np.asarray(unpadded0), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(padded1), np.asarray(unpadded1), rtol=1e-5, atol=1e-6)
+
+
+def test_padded_batched_pcr_soa_handles_batched_coefficients_to_128_bucket():
+    batch_size = 2
+    n = 89
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+    edge = jnp.arange(n - 1, dtype=jnp.float32)[None, :]
+
+    a00 = 4.0 + 0.05 * x + 0.01 * batch
+    a01 = -0.9 - 0.01 * x + 0.002 * batch
+    a10 = -1.1 + 0.02 * x - 0.003 * batch
+    a11 = 5.0 + 0.07 * x + 0.008 * batch
+    off0 = -0.10 - 0.01 * edge - 0.001 * batch
+    off1 = -0.07 - 0.005 * edge - 0.0015 * batch
+    rhs0 = jnp.sin(0.3 * x + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x - 0.1 * batch)
+
+    thomas0, thomas1 = jax.vmap(solve_block_tridiagonal_2x2_scalar)(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+    padded0, padded1 = solve_block_tridiagonal_2x2_pcr_soa_batched_padded(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+    np.testing.assert_allclose(np.asarray(padded0), np.asarray(thomas0), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(padded1), np.asarray(thomas1), rtol=1e-5, atol=1e-6)
 
 
 def test_pcr_block_tridiagonal_solver_jaxpr_avoids_dot_general():

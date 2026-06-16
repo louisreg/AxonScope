@@ -48,8 +48,10 @@ Current code audit:
   `pcr`, `pcr_soa`, and `pcr_adaptive`.
 - `auto` resolves in `resolve_double_cable_block_solver(...)`: CPU/default
   backends use `thomas`; GPU-like backends use `pcr_adaptive`.
-- `pcr_adaptive` is resolved inside batch kernels: `B <= 1024` uses `pcr_soa`,
-  larger batches use `pcr`.
+- `pcr_adaptive` is resolved inside batch kernels: `B <= 4096` uses `pcr_soa`,
+  larger batches use `pcr`. The array-output `pcr_soa` path currently uses the
+  batch-native scan for larger batches and keeps the previous per-fiber route
+  for smaller batches until more device evidence exists.
 - Pseudo-double modes are benchmark harness candidates only:
   `mrg_single_cable_surrogate`, `pseudo_double_effective`,
   `pseudo_double_single_myelinated_chain`, `pseudo_double_series`,
@@ -61,6 +63,9 @@ Current code audit:
 Work should start here unless the user asks otherwise.
 
 - [ ] Phase 7.6.3: finish the exact double-cable GPU solver optimization pass.
+- [ ] During Phase 7.6.3, prioritize substantive solver implementations
+  from the exact-GPU roadmap over small heuristic retuning. Record heuristic
+  thresholds as benchmark-backed follow-up calibration, not as the main work.
 - [x] Keep pseudo-double/pseudo-MRG on standby until exact-solver work exposes a
   clear need for approximate screening again.
 - [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
@@ -123,7 +128,7 @@ Current solver option contract:
 | `thomas` | Exact block-Thomas scan. | CPU/default fallback and correctness reference. |
 | `pcr` | Exact matrix-layout PCR variant. | GPU diagnostic and larger-batch fallback inside adaptive PCR. |
 | `pcr_soa` | Exact struct-of-arrays PCR variant. | GPU diagnostic for small/medium batches. |
-| `pcr_adaptive` | Current GPU policy: SoA up to `B=1024`, matrix-layout PCR above. | Explicit reproduction of current GPU `auto` behavior. |
+| `pcr_adaptive` | Current GPU policy: SoA up to `B=4096`, matrix-layout PCR above. | Explicit reproduction of current GPU `auto` behavior. |
 
 Near-term tasks:
 
@@ -141,8 +146,18 @@ Near-term tasks:
   recording/Iinj pressure before GPU reruns.
 - [ ] Decide whether to keep the current Literal-based solver option or promote
   it to a typed enum after the option set stabilizes.
-- [ ] Test batch-native PCR and `Nx` padding buckets only after the solver-only
-  baseline shows the linear solve is still the bottleneck.
+- [x] Add batch-native PCR_SOA and route it through array-output
+  `DoubleCableBatchKernel` chunks where current evidence supports it.
+- [ ] Add and benchmark `Nx` padding buckets as a real solver candidate before
+  further threshold/heuristic tuning.
+  - [x] Add exact identity-row padding helpers and a benchmark-only
+    `pcr_soa_padded` candidate.
+  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
+    `pcr_soa_padded` matched the Thomas64 reference with max absolute error
+    about `7.8e-08`. Local CPU timing was slower at this tiny batch and is not
+    used as GPU performance evidence.
+  - [ ] Run the Kaggle solver-only `linear` matrix with `pcr_soa_padded` and
+    compare against unpadded `pcr_soa`.
 - [ ] Evaluate optimized Thomas, PCR hybrid, associative scans, split iterative,
   and Pallas only in the sequence described by the exact-GPU roadmap.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
@@ -170,7 +185,7 @@ Solver-only diagnostic command:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 128 512 1024 \
   --nx 32 51 64 \
-  --solvers thomas pcr pcr_soa pcr_adaptive \
+  --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5
@@ -179,6 +194,15 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
 Local smoke on 2026-06-16 passed with `B=2`, `Nx=5`, `float32`, `thomas` and
 `pcr_soa`; the profiler wrapper produced JAX trace files under
 `jax_traces/.../plugins/profile/...`.
+
+Kaggle P100 E2E evidence on 2026-06-16:
+
+- `20260616_205416_e2e_NvidiaTeslaP100`: baseline bounded E2E matrix.
+- `20260616_214351_e2e_NvidiaTeslaP100`: batch-native PCR_SOA array-output
+  scan. Direct `pcr_adaptive` kernel improved at `B=2048` (`~1.46x` median for
+  `Nx=51`, `~1.09x` for `Nx=96`) but regressed at `B=512`; notebook wall time
+  improved from about `377s` to `346s`. E2E total remained dominated by
+  Vext/setup materialization.
 
 ## Phase 7.6.4 Pseudo-Double / Pseudo-MRG Standby
 

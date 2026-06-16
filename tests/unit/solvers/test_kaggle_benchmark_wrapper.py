@@ -130,6 +130,28 @@ def test_kaggle_standard_e2e_is_bounded(tmp_path, monkeypatch):
     assert "1000" not in command
 
 
+def test_kaggle_linear_includes_padded_solver_candidate(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear(tmp_path, smoke=False)
+
+    (command,) = commands
+    solvers_start = command.index("--solvers") + 1
+    solvers_end = command.index("--warmups")
+    assert command[solvers_start:solvers_end] == [
+        "thomas",
+        "pcr",
+        "pcr_soa",
+        "pcr_soa_padded",
+        "pcr_adaptive",
+    ]
+
+
 def test_kaggle_checkout_stays_out_of_persisted_working_dir():
     assert kaggle_bench.CHECKOUT_DIR == Path("/tmp/AxonScope")
 

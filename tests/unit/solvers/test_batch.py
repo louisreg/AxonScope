@@ -29,7 +29,10 @@ from axonscope.solvers import (
     SingleCableVStimBatchKernel,
     resolve_double_cable_block_solver,
 )
-from axonscope.solvers.batch_kernels import _resolve_double_cable_kernel_block_solver
+from axonscope.solvers.batch_kernels import (
+    _resolve_double_cable_kernel_block_solver,
+    _use_batch_native_double_cable_pcr_soa_solver,
+)
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
@@ -101,6 +104,12 @@ def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
         == "pcr_soa"
     )
     assert _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4097) == "pcr"
+
+
+def test_pcr_soa_batch_native_route_is_reserved_for_large_batches():
+    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=512)
+    assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
+    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=2048)
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():

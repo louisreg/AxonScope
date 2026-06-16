@@ -38,6 +38,21 @@ def test_planned_cases_resolve_adaptive_kernel_solver():
     assert resolve_kernel_solver("pcr_adaptive", batch_size=4097) == "pcr"
 
 
+def test_planned_cases_allow_benchmark_only_padded_pcr_soa():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_padded"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pcr_soa_padded"
+    assert cases[0].resolved_solver == "pcr_soa"
+    assert cases[0].kernel_solver == "pcr_soa_padded"
+    assert resolve_kernel_solver("pcr_soa_padded", batch_size=512) == "pcr_soa_padded"
+
+
 def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
     main(
         [

@@ -159,6 +159,7 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
                 "thomas",
                 "pcr",
                 "pcr_soa",
+                "pcr_soa_padded",
                 "pcr_adaptive",
                 "--warmups",
                 "1",

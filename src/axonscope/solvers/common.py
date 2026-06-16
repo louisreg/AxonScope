@@ -929,6 +929,116 @@ def solve_block_tridiagonal_2x2_pcr_soa_batched(
     return matvec2_components(inv00, inv01, inv10, inv11, r0, r1)
 
 
+def double_cable_power_bucket(
+    nx: int,
+    *,
+    buckets: tuple[int, ...] = (32, 64, 128),
+) -> int:
+    """Return the smallest supported PCR padding bucket for ``nx``."""
+
+    value = int(nx)
+    if value < 1:
+        raise ValueError("nx must be >= 1.")
+    for bucket in buckets:
+        if value <= int(bucket):
+            return int(bucket)
+    raise ValueError(f"nx={value} exceeds supported padding buckets {buckets}.")
+
+
+def pad_double_cable_system_to_power_bucket(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    bucket: int | None = None,
+) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array]:
+    """Pad a batched 2x2 double-cable system to a power bucket.
+
+    Padding rows are exact identity equations:
+
+    ``I * x_pad = 0`` with zero coupling to the real system.
+
+    The real solution is therefore unchanged after slicing back to the original
+    ``Nx``. Coefficients may be shared ``[Nx]`` / ``[Nx - 1]`` or batched
+    ``[B, Nx]`` / ``[B, Nx - 1]``; RHS arrays must be batch-first ``[B, Nx]``.
+    """
+
+    rhs0 = jnp.asarray(rhs0)
+    rhs1 = jnp.asarray(rhs1)
+    if rhs0.ndim != 2 or rhs1.ndim != 2:
+        raise ValueError("rhs0 and rhs1 must have shape (batch_size, Nx).")
+    if rhs0.shape != rhs1.shape:
+        raise ValueError(
+            f"rhs0 and rhs1 must have the same shape, got {rhs0.shape} and {rhs1.shape}."
+        )
+
+    _, nx = rhs0.shape
+    target = double_cable_power_bucket(nx) if bucket is None else int(bucket)
+    if target < nx:
+        raise ValueError(f"bucket must be >= Nx={nx}, got {target}.")
+    if target == nx:
+        return a00, a01, a10, a11, off0, off1, rhs0, rhs1
+
+    def pad_last_axis(values: Array, *, current: int, fill: float) -> Array:
+        arr = jnp.asarray(values)
+        if arr.shape[-1] != current:
+            raise ValueError(
+                f"expected trailing length {current}, got shape {arr.shape}."
+            )
+        pad = target - current
+        pad_width = ((0, pad),) if arr.ndim == 1 else ((0, 0), (0, pad))
+        return jnp.pad(arr, pad_width, constant_values=jnp.asarray(fill, dtype=arr.dtype))
+
+    edge_count = max(nx - 1, 0)
+    edge_target = max(target - 1, 0)
+
+    return (
+        pad_last_axis(a00, current=nx, fill=1.0),
+        pad_last_axis(a01, current=nx, fill=0.0),
+        pad_last_axis(a10, current=nx, fill=0.0),
+        pad_last_axis(a11, current=nx, fill=1.0),
+        pad_last_axis(off0, current=edge_count, fill=0.0)[..., :edge_target],
+        pad_last_axis(off1, current=edge_count, fill=0.0)[..., :edge_target],
+        pad_last_axis(rhs0, current=nx, fill=0.0),
+        pad_last_axis(rhs1, current=nx, fill=0.0),
+    )
+
+
+def solve_block_tridiagonal_2x2_pcr_soa_batched_padded(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    bucket: int | None = None,
+) -> tuple[Array, Array]:
+    """Solve a batched SoA PCR system after exact identity-row padding."""
+
+    nx = int(jnp.asarray(rhs0).shape[1])
+    padded = pad_double_cable_system_to_power_bucket(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        bucket=bucket,
+    )
+    x0, x1 = solve_block_tridiagonal_2x2_pcr_soa_batched(*padded)
+    return x0[:, :nx], x1[:, :nx]
+
+
 def apply_diffusion_operator(V: Array, lower: Array, diag: Array, upper: Array) -> Array:
     """
     Apply the discrete diffusion operator represented by the tridiagonal rows.

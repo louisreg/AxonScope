@@ -11,7 +11,7 @@ Examples:
     python benchmark/solvers/bench_double_cable_linear_solvers.py \
       --batch-sizes 128 512 1024 \
       --nx 32 51 64 \
-      --solvers thomas pcr pcr_soa pcr_adaptive \
+      --solvers thomas pcr pcr_soa pcr_soa_padded pcr_adaptive \
       --dtypes float32 \
       --warmups 1 \
       --repeats 5
@@ -45,13 +45,14 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
     solve_block_tridiagonal_2x2_scalar,
 )
 
 
 DEFAULT_OUT_DIR = Path("benchmark/results/solvers")
-SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive")
-KERNEL_SOLVERS = ("thomas", "pcr", "pcr_soa")
+SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_soa_padded", "pcr_adaptive")
+KERNEL_SOLVERS = ("thomas", "pcr", "pcr_soa", "pcr_soa_padded")
 PCR_SOA_MAX_BATCH = 4096
 
 
@@ -131,14 +132,18 @@ def planned_cases(
                 for solver in solvers:
                     if solver not in SOLVER_CHOICES:
                         raise ValueError(f"unknown solver choice: {solver!r}.")
-                    resolved = resolve_double_cable_block_solver(
-                        solver,
-                        platform=platform,
-                    )
-                    kernel_solver = resolve_kernel_solver(
-                        resolved,
-                        batch_size=int(batch_size),
-                    )
+                    if solver == "pcr_soa_padded":
+                        resolved = "pcr_soa"
+                        kernel_solver = "pcr_soa_padded"
+                    else:
+                        resolved = resolve_double_cable_block_solver(
+                            solver,
+                            platform=platform,
+                        )
+                        kernel_solver = resolve_kernel_solver(
+                            resolved,
+                            batch_size=int(batch_size),
+                        )
                     cases.append(
                         LinearSolverCase(
                             batch_size=int(batch_size),
@@ -374,7 +379,12 @@ def _compute_reference(batch_size: int, nx: int) -> jax.Array:
 
 
 def _make_batched_solver(kernel_solver: str):
-    if kernel_solver == "pcr_soa":
+    if kernel_solver in {"pcr_soa", "pcr_soa_padded"}:
+        solve_pcr_soa_batch = (
+            solve_block_tridiagonal_2x2_pcr_soa_batched_padded
+            if kernel_solver == "pcr_soa_padded"
+            else solve_block_tridiagonal_2x2_pcr_soa_batched
+        )
 
         @jax.jit
         def solve_batch_native(
@@ -387,7 +397,7 @@ def _make_batched_solver(kernel_solver: str):
             rhs0,
             rhs1,
         ):
-            x0, x1 = solve_block_tridiagonal_2x2_pcr_soa_batched(
+            x0, x1 = solve_pcr_soa_batch(
                 a00,
                 a01,
                 a10,
