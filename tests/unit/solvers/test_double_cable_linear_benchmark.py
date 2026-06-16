@@ -1,0 +1,63 @@
+import jax.numpy as jnp
+
+from benchmark.solvers.bench_double_cable_linear_solvers import (
+    generate_system,
+    planned_cases,
+    resolve_kernel_solver,
+    main,
+)
+
+
+def test_generate_linear_solver_system_shapes():
+    system = generate_system(batch_size=3, nx=5, dtype="float32")
+
+    assert [array.shape for array in system] == [
+        (3, 5),
+        (3, 5),
+        (3, 5),
+        (3, 5),
+        (3, 4),
+        (3, 4),
+        (3, 5),
+        (3, 5),
+    ]
+    assert all(array.dtype == jnp.float32 for array in system)
+
+
+def test_planned_cases_resolve_adaptive_kernel_solver():
+    cases = planned_cases(
+        batch_sizes=[1024, 1025],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_adaptive"],
+        platform="gpu",
+    )
+
+    assert [case.kernel_solver for case in cases] == ["pcr_soa", "pcr"]
+    assert resolve_kernel_solver("pcr_adaptive", batch_size=1024) == "pcr_soa"
+    assert resolve_kernel_solver("pcr_adaptive", batch_size=1025) == "pcr"
+
+
+def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
+    main(
+        [
+            "--batch-sizes",
+            "2",
+            "--nx",
+            "5",
+            "--dtypes",
+            "float32",
+            "--solvers",
+            "thomas",
+            "pcr_soa",
+            "--out-dir",
+            str(tmp_path),
+            "--dry-run",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == [
+        "thomas -> thomas -> thomas B=2 Nx=5 dtype=float32",
+        "pcr_soa -> pcr_soa -> pcr_soa B=2 Nx=5 dtype=float32",
+    ]
+

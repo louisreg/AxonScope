@@ -7,6 +7,7 @@ from benchmark.hotpaths.run import (
     _jax_trace_record,
     _resolve_jax_trace_root,
     _simulation_labels,
+    _timing_signature,
     build_simulation,
     build_simulations,
     configure_jax_compile_logging,
@@ -129,6 +130,25 @@ def test_hotpath_runner_accepts_jax_trace_flags_in_dry_run(capsys, tmp_path):
 
 def test_configure_jax_compile_logging_disabled_is_noop():
     assert configure_jax_compile_logging(False) == {"enabled": False}
+
+
+def test_timing_signature_labels_first_call_runs():
+    assert _timing_signature(0) == {
+        "label": "cold_first_call",
+        "mode": "cold",
+        "warmup_count": 0,
+        "first_call_included": True,
+        "setup_may_be_included": True,
+        "jax_compile_may_be_included": True,
+    }
+    assert _timing_signature(1) == {
+        "label": "warm_post_warmup",
+        "mode": "warm",
+        "warmup_count": 1,
+        "first_call_included": False,
+        "setup_may_be_included": False,
+        "jax_compile_may_be_included": False,
+    }
 
 
 def test_jax_trace_metadata_defaults_under_run_root(tmp_path):

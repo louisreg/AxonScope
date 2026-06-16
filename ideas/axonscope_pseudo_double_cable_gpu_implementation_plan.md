@@ -1,5 +1,12 @@
 # AxonScope: GPU-Compatible Pseudo-Double-Cable Implementation Plan
 
+Status: standby as of 2026-06-16. Keep this as background research and do not
+use it as the active implementation roadmap unless pseudo-double work is
+explicitly resumed. Current active solver work is the exact double-cable GPU
+optimization in `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`.
+Pseudo-double modes remain validation-only under `benchmark/pseudo_double/` and
+must not be added to `BatchOptions.double_cable_block_solver` or `auto`.
+
 ## 0. Goal and scope
 
 This document describes a step-by-step implementation plan for adding one or more **pseudo-double-cable** modes to AxonScope.
@@ -167,6 +174,11 @@ Do not start with the modal implementation. Start with the simplest useful surro
 ---
 
 # Step 1 — Add public mode plumbing
+
+Standby override: do not implement this step while pseudo-double work is
+paused. Keep any pseudo-double plumbing confined to `benchmark/pseudo_double/`
+unless the project explicitly resumes this line of work and updates `todo.md`
+first.
 
 ## Goal
 

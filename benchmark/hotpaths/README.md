@@ -7,6 +7,10 @@ refactors.
 These scripts are not the final benchmark framework. They are focused probes
 for the new `axs.enable_benchmark(...)` instrumentation.
 
+`axs.enable_benchmark(...)` currently supports only `level="hotpaths"`. Keep
+that level until a real consumer needs separate `minimal` or `detailed` modes;
+adding more labels before then would only create reporting drift.
+
 ## Registry
 
 The canonical workload registry lives in:
@@ -46,6 +50,10 @@ Run the Phase 7.6.1 solver-only/precomputed-input probe:
 ```bash
 python benchmark/hotpaths/run.py --workload solver_only_precomputed --sizes 5 --warmups 1
 ```
+
+For the exact double-cable linear solve itself, use the solver-focused runner
+under `benchmark/solvers/`; it bypasses axon construction, dispatch, input
+materialization, and result packaging.
 
 Run the Phase 7.6.1 typed footprint/drive lowering probe:
 
@@ -160,7 +168,22 @@ captures only `kernel.enqueue`, which keeps large-batch GPU timelines from
 being flooded by Python dispatch events. Use `--jax-trace-scope run` only when
 the dispatch/preparation timeline itself is the target.
 
-Force the double-cable PCR block solver:
+Timing notes:
+
+- `kernel.enqueue` measures Python-side submission of a JAX computation. On GPU,
+  this can return before device work has finished.
+- `kernel.wait` measures the explicit device synchronization. Use enqueue and
+  wait together when comparing GPU runs.
+- Warm runs use `--warmups` to separate first-call compilation/preparation from
+  repeated execution. Treat any run without warmups as cold-start evidence.
+  Manifest parameters, per-workload run records, and benchmark metadata include
+  `timing_signature.label`: `cold_first_call` for `--warmups 0` and
+  `warm_post_warmup` otherwise.
+- Correctness validation and scientific acceptance are separate from these
+  hotpath timings; performance probes should not replace unit, NRV, or
+  physiology validation.
+
+Force a double-cable block-solver choice for diagnostics:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -173,7 +196,9 @@ python benchmark/hotpaths/run.py \
   --double-cable-block-solver pcr
 ```
 
-Use forced PCR as a GPU-oriented diagnostic only for now. The Colab PCR run
+Use forced PCR-family choices as GPU-oriented diagnostics only for now. Normal
+runs should start with `auto`, which keeps Thomas on CPU/default backends and
+uses the adaptive PCR policy on GPU-like backends. The forced `pcr` Colab run
 improved double-cable GPU totals strongly, but regressed CPU totals compared
 with the default Thomas scan. `pcr_soa` forces the struct-of-arrays variant;
 `pcr_adaptive` selects SoA for small/medium batches and matrix-layout PCR for

@@ -1,5 +1,10 @@
 # AxonScope: Electrical Reduction from Double Cable to GPU-Compatible Single Cable
 
+Status: standby as of 2026-06-16. Keep this as background research for a
+possible future pseudo-double/pseudo-MRG validation pass. The active roadmap is
+now exact double-cable GPU solver optimization, and reduced modes must remain
+outside `BatchOptions.double_cable_block_solver` and `auto`.
+
 ## 0. Purpose
 
 This document adds a concrete implementation plan for reducing AxonScope's exact double-cable model into one or more **GPU-compatible single-cable-like surrogate models**.
@@ -670,6 +675,10 @@ This is important so reduced-model outputs are never confused with exact double-
 ## 9. Implementation steps
 
 ## Step 1 — Add model mode enum / dispatch plumbing
+
+Standby override: do not implement public mode or dispatch plumbing while this
+plan is paused. Keep reduced-mode experiments in `benchmark/pseudo_double/`
+unless `todo.md` explicitly resumes pseudo-double work.
 
 ### Goal
 
@@ -1832,6 +1841,9 @@ unless debug output explicitly requests surrogate-internal diagnostics.
 ### 19.10 Implementation files
 
 Likely files/modules to touch:
+
+Standby override: do not touch these core modules for pseudo-double while this
+plan is paused.
 
 ```text
 src/axonscope/models/              add pseudo-double config/model type if such module exists

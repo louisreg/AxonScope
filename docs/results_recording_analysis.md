@@ -13,8 +13,8 @@ This layer has three separate responsibilities:
 
 Keeping these responsibilities separate matters because a result may not contain
 the full `Vm[Nt, Nx]` matrix. Pool runs can record only the center compartment
-or a small set of probes, and future solvers should be able to return observer
-outputs without materializing the whole voltage movie.
+or a small set of probes, and observer-only runs can return compact observations
+without materializing the whole voltage movie.
 
 ## Recording
 
@@ -41,6 +41,7 @@ Current support:
   and `conductances` alongside `Vm`;
 - pool runs currently support `Vm` recording with `full`, `center`, `probes`,
   or explicit compartment `indices` spatial modes;
+- `Recording.none()` is supported when solver-side observers are supplied;
 - single-axon spatial filters, position-based recording, temporal subsampling,
   and pool observable groups are explicit future work.
 
@@ -98,7 +99,7 @@ result.Vm              # convenience alias for recordings["Vm"]
 result.recording       # Recording policy used by the public wrapper, if any
 result.record_indices  # original axon indices represented by Vm columns, if filtered
 result.recordings      # Vm plus optional gates/currents/etc.
-result.observations    # compact observer outputs, once observer support lands
+result.observations    # compact observer outputs for observer-only runs
 result.diagnostics     # optional metadata such as pool index/method
 ```
 
@@ -220,7 +221,7 @@ event.first_position_um
 ```
 
 These criteria are CPU/post-hoc companions to the lightweight online Vm
-observers and future solver-side observers.
+observers and the current solver-side observer path.
 
 ## Visualization
 
@@ -265,21 +266,19 @@ online_activation = observer.finalize()
 posthoc_activation = result.analyze(activation)
 ```
 
-Solver-side observer execution is not implemented yet; it is planned as the
-Phase 7.5 memory-reduction pass. The current runnable paths are to record traces
-with `Recording`, use structured post-hoc definitions such as
-`axs.analysis.Activation(...)`, or feed Vm chunks to the lightweight observers.
-
-The long-term solver-side mechanism should be observer-style. Observer state
-should be updated at every solver `dt` inside the kernel/scan loop so compact
-outputs can avoid retaining full Vm traces on the GPU. This is a future API
-sketch, not current runnable code:
+Solver-side observer execution is implemented for the current
+`axs.analysis.Activation(...)` and `axs.analysis.PeakVoltage(...)` definitions
+when they are passed as simulation observers with `Recording.none()`. Observer
+state is updated at every solver `dt` inside the scalar or compatible batch
+kernel, and the result carries compact `observations` rather than retained Vm
+traces.
 
 ```python
 result = axs.simulate(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
+    recording=axs.Recording.none(),
     observers=[
         axs.analysis.Activation(threshold=-20.0 * axs.mV),
         axs.analysis.PeakVoltage(),
@@ -287,7 +286,9 @@ result = axs.simulate(
 )
 ```
 
-Observers should share names and semantics with post-hoc analysis functions, but
-they will run inside the solver loop and store compact derived outputs. That is
-the path for rasterization, peak detection, thresholds, and summaries that do
-not need full voltage storage.
+For pool runs, homogeneous single-cable and homogeneous double-cable groups can
+use the compact observer-only batch path. Incompatible or padded groups may
+still fall back to scalar execution or post-hoc observer evaluation depending on
+the requested recording and group shape. Solver-side observers currently support
+membrane-voltage based `Activation` and `PeakVoltage`; richer latency, block,
+spike-count, and non-Vm signal observers remain future work.

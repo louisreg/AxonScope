@@ -1,7 +1,13 @@
 # Experimental pseudo-double-cable validation
 
+Status: standby as of 2026-06-16.
+
 This folder is for Phase 7.6.4 validation work. It is not a public solver API.
-Exact double-cable remains the reference model.
+Exact double-cable remains the reference model. The first validation pass found
+useful harness infrastructure but did not produce a physiology-accepted
+replacement for exact double-cable, so new optimization work should focus on the
+exact double-cable GPU solver unless pseudo modes are explicitly needed as a
+high-recall pre-filter.
 
 The electrical-reduction direction is tracked in
 `ideas/axonscope_double_to_single_electrical_reduction_plan.md`. The harness now
@@ -156,7 +162,7 @@ negatives, threshold estimates, peak voltage error, activation time error, and
 RMS Vm error against exact double-cable. Near-threshold or ambiguous cases
 should be rerun with exact double-cable.
 
-Current status: `pseudo_double_effective`,
+Current validation status: `pseudo_double_effective`,
 `pseudo_double_single_myelinated_chain`, `pseudo_double_series`,
 `pseudo_double_split`, and `pseudo_double_schur_local` can be calibrated on
 tiny smoke cases for activation/threshold probes, but peak and RMS trace errors
@@ -164,8 +170,13 @@ are still large.
 Treat them as experimental rough-screening probes only, not validated
 double-cable replacements. `pseudo_double_series` and
 `pseudo_double_schur_local` are the first runnable coefficient-derived paths;
-the next fidelity pass should test them on broader workloads and add
-local/periaxonal coupling corrections rather than tuning only stimulus scale.
+the next fidelity pass, if this work resumes, should test them on broader
+workloads and add local/periaxonal coupling corrections rather than tuning only
+stimulus scale.
+
+Do not add these modes to `BatchOptions.double_cable_block_solver`, the hotpath
+`--double-cable-block-solver` choices, or public examples while the work is in
+standby.
 
 Planned experimental modes:
 

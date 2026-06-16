@@ -1,8 +1,9 @@
 # Recorders, Observers, Thresholds, and Recruitment
 
-This document is a design proposal. CPU/post-hoc analyses, threshold protocols,
-and lightweight Vm observers are implemented; solver-side observer execution
-and observer-only runs are planned as AxonScope Phase 7.5.
+This document is a design proposal plus implementation-status note. CPU/post-hoc
+analyses, threshold protocols, lightweight Vm observers, and the first
+solver-side observer-only paths are implemented. Broader study APIs and
+amplitude-batched GPU sweeps remain future work.
 
 The goal is to make AxonScope useful for stimulation studies such as activation
 thresholds and recruitment curves while keeping the GPU path sane. The central
@@ -16,12 +17,13 @@ but often only needs one boolean per fiber per amplitude.
 
 ## Implementation Status
 
-Current status on 2026-06-14:
+Current status on 2026-06-16:
 
-- Phase 1 is partially implemented:
+- Phase 1 is implemented for the current result surface:
   - `SimResult.recordings["Vm"]` is the conceptual home of membrane voltage.
   - `result.Vm` remains a convenience alias for existing examples and tests.
-  - `SimResult.observations` exists as the target container for future observers.
+  - `SimResult.observations` stores compact observer outputs for observer-only
+    scalar runs.
 - Phase 2 is implemented in CPU/post-hoc mode:
   - `axs.analysis.ActivationCriterion` evaluates activation from recorded Vm
     traces.
@@ -33,10 +35,15 @@ Current status on 2026-06-14:
   - `axs.analysis.ActivationObserver` and
     `axs.analysis.PeakVoltageObserver` consume streamed Vm chunks and are
     cross-validated against post-hoc results.
-- Phase 7.5 is the planned solver-side observer pass:
-  - public `axs.analysis` observer specs should lower to compact backend state;
-  - solver kernels should call observer updates at every `dt`;
-  - observer-only runs should avoid retaining or transferring full Vm traces.
+- Phase 7.5 is implemented for the first public observer-only workflow:
+  - public `axs.analysis.Activation(...)` and
+    `axs.analysis.PeakVoltage(...)` lower to compact backend observer state;
+  - scalar kernels and compatible homogeneous batch kernels call observer
+    updates at every `dt`;
+  - `Recording.none()` plus observers avoids retaining full Vm traces and
+    returns compact `result.observations`;
+  - homogeneous double-cable batch observer-only runs are supported for current
+    MRG-like hotpaths.
 - Phase 4/5 protocol helpers are implemented in CPU/post-hoc mode:
   - `axs.protocols.find_activation_threshold(...)` runs a binary search over
     stimulus amplitude.
@@ -56,10 +63,12 @@ Current status on 2026-06-14:
 
 Not implemented yet:
 
-- JAX on-the-fly observers.
-- Observer-only runs with `Recording.none()`.
 - Amplitude-batched GPU sweeps.
-- Public `ActivationObserver` and `PeakVoltageObserver` classes.
+- Solver-side observers beyond membrane-voltage `Activation` and
+  `PeakVoltage`.
+- Combining scalar solver-side observers with retained scalar Vm traces in one
+  kernel call.
+- Padded heterogeneous batch observer masks.
 - A dedicated `thresholds_for_pool(...)` convenience wrapper.
 
 ## Target Use Cases
@@ -807,9 +816,11 @@ JAX-specific observer details out of the public analysis layer.
 
 ### Phase 0: Documentation and API Agreement
 
-- Validate this document.
-- Decide final names: `Recording` vs `Recorder`, `observations` vs `observer_outputs`.
-- Decide whether `result.Vm` remains a permanent convenience alias.
+- Done: validate this document as a strategy/proposal with current-status notes.
+- Done: keep public policy named `Recording`.
+- Done: keep compact observer outputs under `observations`.
+- Done: keep `result.Vm` as a permanent convenience alias for retained Vm
+  recordings, with an explicit error when Vm was not retained.
 
 ### Phase 1: Normalize `Vm` as a Recording Variable
 
@@ -844,15 +855,21 @@ Validation:
 
 ### Solver-Side Observer Infrastructure
 
-- Add `observations` to `SimResult`.
-- Add public observer specs. Current status: lightweight public
+- Done: add `observations` to `SimResult`.
+- Done: add public observer specs. Current status: lightweight public
   `ActivationObserver` and `PeakVoltageObserver` specs exist for streamed Vm
   chunks.
-- Add solver-side compiled observer interface as AxonScope Phase 7.5.
-- Wire observers through scalar solver kernels.
-- Wire observers through batch kernels.
-- Call observer updates at every solver `dt` inside the kernel/scan loop.
-- Support observer-only runs without retaining full Vm traces where possible.
+- Done for `Activation` and `PeakVoltage`: add solver-side compiled observer
+  interface as AxonScope Phase 7.5.
+- Done for scalar observer-only runs: wire observers through scalar solver
+  kernels.
+- Done for compatible homogeneous batch observer-only runs: wire observers
+  through batch kernels.
+- Done: call observer updates at every solver `dt` inside the kernel/scan loop.
+- Done for current compatible paths: support observer-only runs without
+  retaining full Vm traces.
+- Future: add more observer kinds, padded heterogeneous batch masks, and
+  amplitude-batched study execution.
 
 Validation:
 
@@ -898,72 +915,62 @@ This phase is an optimization, not a prerequisite for the public API.
 
 ## Example Roadmap
 
-After implementation, add:
-
-```text
-examples/advanced/example_06_activation_threshold.py
-examples/advanced/example_07_recruitment_curve.py
-```
-
 Current examples:
 
 ```text
 examples/advanced/example_05_recording_options.py
 examples/advanced/example_06_activation_criterion.py
 examples/advanced/example_07_recruitment_curve.py
+examples/advanced/example_18_solver_side_observers.py
 ```
 
 `example_05_recording_options.py` shows the current recording policy surface:
 `Vm`, observable groups, and pool Vm retention modes.
 
 `example_06_activation_criterion.py` shows the post-hoc activation criterion
-that will share semantics with the future `ActivationObserver`.
+that shares semantics with `axs.analysis.Activation`.
 
 `example_07_recruitment_curve.py` shows the high-level protocol API for one
 extracellular binary activation threshold search and one sampled recruitment
 curve from a point-source electrode.
 
-`example_06_activation_threshold.py` should show:
+`example_18_solver_side_observers.py` shows homogeneous single-cable and
+double-cable observer-only runs with `Recording.none()` and compares compact
+observer outputs against post-hoc analysis.
 
-- one axon;
-- one electrode/stimulus family;
-- binary search threshold;
-- optional full trace at threshold for inspection.
+Future examples should focus on missing public orchestration rather than new
+recording primitives:
 
-`example_07_recruitment_curve.py` should show:
-
-- a small pool;
-- one shared extracellular context per amplitude;
-- activation observer;
-- recruitment fraction curve;
-- optional threshold distribution.
+- callable extracellular stimulation families for threshold/recruitment
+  studies;
+- optional full-trace reruns at threshold for inspection;
+- solver-option presets once Phase 7.6.3 establishes benchmark-backed
+  defaults.
 
 ## Open Questions
 
-Questions to decide before implementation:
+Remaining questions to decide before API freeze:
 
-1. Should the public name stay `Recording`, or should we introduce `Recorder`
-   while keeping `Recording` as the user-facing policy?
-2. Should `result.Vm` be a permanent alias or a temporary compatibility bridge?
-3. Should `recordings` be flat (`"Vm"`, `"gates.m"`) or mixed nested
+1. Should `recordings` be flat (`"Vm"`, `"gates.m"`) or mixed nested
    (`"Vm"`, `"gates": {"m": ...}`)?
-4. What should the default activation criterion be for extracellular
+2. What should the default activation criterion be for extracellular
    stimulation: simple threshold, distal threshold, or propagated crossing?
-5. Should threshold protocols assume monotonicity by default and expose a
+3. Should threshold protocols assume monotonicity by default and expose a
    `check_monotonic=True` diagnostic option?
-6. Where should public protocols live: `axs.protocols`, `axs.experiments`, or
-   `axs.results.protocols`?
 
-My current recommendation:
+Settled recommendations:
 
 - Keep public policy named `Recording`.
 - Treat `Vm` as `recordings["Vm"]`.
 - Keep `result.Vm` as a convenience alias for notebooks and compatibility.
+- Put public criteria/observers in `axs.analysis`.
+- Put threshold/recruitment orchestration in `axs.protocols`.
+
+Current recommendation for the remaining questions:
+
 - Use nested recordings for grouped variables:
   - `recordings["Vm"]`
   - `recordings["gates"]["m"]`
   - `recordings["currents"]["I_na"]`
-- Put public criteria/observers in `axs.results`.
-- Put threshold/recruitment orchestration in `axs.protocols`.
 - Make propagated/distal activation the recommended extracellular criterion,
   while still allowing simple threshold crossing for didactic examples.

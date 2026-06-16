@@ -88,17 +88,25 @@ instructions: |
   ### Current State
   - Single-axon + small pools validated against NRV reference
   - Single-cable: Imposed-field Vstim forcing (scalar term, efficient for large pools)
-  - Double-cable: Coupled Vi/Vperi/Ve solving (more expensive)
+  - Double-cable: Coupled Vi/Vperi/Ve solving (more expensive); current exact
+    block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and
+    `pcr_adaptive`
   - JAX JIT explicitly enabled in SingleCableKernel and DoubleCableKernel
+  - Pseudo-double / pseudo-MRG modes are validation-only under
+    `benchmark/pseudo_double/` and are on standby; they are not public solver
+    options and must not be added to `auto`
   
   ### Optimization Opportunities
   - Batch kernels ready (pre-designed for data-parallel GPU execution)
+  - Exact double-cable GPU optimization is the active Phase 7.6.3 path; use
+    `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md` as the roadmap
   - Rate table precomputation (configurable solver option)
   - Vstim sample precomputation (extracellular solves)
   - Cache locality via dispatch grouping
   
   ### When Optimizing
-  1. Profile first with benchmark suite in `benchmark/runtime/`
+  1. Profile first with `benchmark/hotpaths/`; use `benchmark/runtime/` only for
+     older or lower-level runtime probes
   2. Maintain validation against NRV comparison tests; verify the current count locally instead of relying on stale numbers
   3. Document performance implications in code comments
   4. Add regression detection to benchmark suite

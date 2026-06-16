@@ -189,6 +189,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     jax_compile_logging = configure_jax_compile_logging(bool(args.jax_log_compiles))
     timing_mode = _timing_mode(args.warmups)
+    timing_signature = _timing_signature(args.warmups)
     jax_backend = jax.default_backend()
     resolved_double_cable_block_solver = resolve_double_cable_block_solver(
         args.double_cable_block_solver,
@@ -213,6 +214,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "dt_ms": float(args.dt),
             "warmups": int(args.warmups),
             "timing_mode": timing_mode,
+            "timing_signature": timing_signature,
             "time_chunk_steps": args.time_chunk_steps,
             "double_cable_block_solver": args.double_cable_block_solver,
             "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
@@ -297,6 +299,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "simulation_labels": list(simulation_labels),
                 "warmup_count": int(args.warmups),
                 "timing_mode": timing_mode,
+                "timing_signature": timing_signature,
                 "time_chunk_steps": args.time_chunk_steps,
                 "double_cable_block_solver": args.double_cable_block_solver,
                 "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
@@ -328,6 +331,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "simulation_count": len(simulations),
             "warmup_count": int(args.warmups),
             "timing_mode": timing_mode,
+            "timing_signature": timing_signature,
             "output_dir": str(output_dir),
             "simulation_labels": list(simulation_labels),
             "result_count": sum(_result_count(results) for results in result_batches),
@@ -497,6 +501,7 @@ def _run_solver_only_precomputed(
             "simulation_labels": [str(case["label"]) for case in cases],
             "warmup_count": int(warmups),
             "timing_mode": timing_mode,
+            "timing_signature": _timing_signature(warmups),
             "jax_log_compiles": bool(jax_log_compiles),
             "direct_backend_workload": True,
             "precomputed_inputs": True,
@@ -598,6 +603,7 @@ def _run_typed_footprint_drive_matrix(
             "simulation_labels": [label],
             "warmup_count": int(warmups),
             "timing_mode": timing_mode,
+            "timing_signature": _timing_signature(warmups),
             "jax_log_compiles": bool(jax_log_compiles),
             "direct_backend_workload": True,
             "typed_footprint_drive": True,
@@ -953,6 +959,7 @@ def _direct_run_record(
         "simulation_count": len(labels),
         "warmup_count": int(warmups),
         "timing_mode": timing_mode,
+        "timing_signature": _timing_signature(warmups),
         "output_dir": str(output_dir),
         "simulation_labels": list(labels),
         "result_count": int(size) * len(labels),
@@ -1003,6 +1010,21 @@ def _timing_mode(warmups: int) -> str:
     """Return a stable label for whether measured events include cold setup."""
 
     return "cold" if int(warmups) == 0 else "warm"
+
+
+def _timing_signature(warmups: int) -> dict[str, object]:
+    """Return explicit first-call labels for hotpath manifests."""
+
+    warmup_count = int(warmups)
+    cold_start = warmup_count == 0
+    return {
+        "label": "cold_first_call" if cold_start else "warm_post_warmup",
+        "mode": _timing_mode(warmup_count),
+        "warmup_count": warmup_count,
+        "first_call_included": cold_start,
+        "setup_may_be_included": cold_start,
+        "jax_compile_may_be_included": cold_start,
+    }
 
 
 def configure_jax_compile_logging(enabled: bool) -> dict[str, object]:

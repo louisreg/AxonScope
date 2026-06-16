@@ -28,11 +28,12 @@ code.
 
 ## Current implementation status
 
-Snapshot updated on 2026-06-15.
+Snapshot updated on 2026-06-16.
 
 This document defines the target architecture. The codebase has implemented the
-roadmap through Phase 7.5 for the current scalar and single-cable batch observer
-surface. Phase 7.6 is the current evidence pass before the Phase 8 study APIs.
+roadmap through Phase 7.5 and the first Phase 7.6 hotpath/memory passes for the
+current public layer. Phase 7.6.3 is the current exact double-cable GPU solver
+optimization pass before the Phase 7.7 API cleanup and Phase 8 study APIs.
 Phases 8-9 are still roadmap work.
 
 | Phase | Status | Implemented surface | Didactic example |
@@ -46,8 +47,10 @@ Phases 8-9 are still roadmap work.
 | Phase 5 — Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, extensible `Signal` descriptors, `SignalId`, `RecordingManifest`, `RecordedSignal`, no public `list[SimResult]` pool result. | `examples/advanced/example_16_canonical_pool_results.py` |
 | Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. | `examples/advanced/example_17_analysis_layer.py` |
 | Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Estimates surface dense `Vstim` and retained-`Vm` pressure so observer-only runs can be chosen deliberately. | `examples/advanced/example_14_hotpath_benchmarking.py` |
-| Phase 7.5 — Solver-side observers | Done for scalar + single-cable batch observer-only runs | Public `axs.analysis.PeakVoltage` and `axs.analysis.Activation` definitions lower to compact solver observer state; scalar kernels and single-cable batch kernels update that state at every `dt`; `Recording.none()` returns trace-free `result.observations`. Double-cable batch observer-only execution currently falls back to scalar for correctness. | `examples/advanced/example_18_solver_side_observers.py` |
-| Phase 7.6 — Realistic hotpath evidence | In progress | `realistic_mixed_population`, `hotpath_matrix`, and richer hotpath manifest metadata for model/formulation mix, diameter and compartment distributions, recording policy, observers, and per-simulation memory estimates. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
+| Phase 7.5 — Solver-side observers | Done for the current scalar and homogeneous batch observer-only runs | Public `axs.analysis.PeakVoltage` and `axs.analysis.Activation` definitions lower to compact solver observer state; scalar kernels, homogeneous single-cable batch kernels, and homogeneous double-cable batch kernels update compact observer state at every `dt`; `Recording.none()` returns trace-free `result.observations`. | `examples/advanced/example_18_solver_side_observers.py` |
+| Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
+| Phase 7.6.3 — Exact double-cable GPU solver optimization | In progress | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Planned solver names from roadmaps should stay out of public docs until implemented and tested. | Benchmark-focused phase; no public example until solver option semantics stabilize. |
+| Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
 | Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
 
@@ -65,9 +68,9 @@ Known implementation gaps against the final target:
 - Backend-neutral axon structure descriptors, cable capabilities, and richer
   semantic signals remain future work.
 - Solver-side observer execution exists for scalar kernels and homogeneous
-  single-cable batch kernels. Double-cable batch observer-only execution should
-  only move back to the batch path once its compact observer state has the same
-  per-`dt` guarantees and correctness tests.
+  single-cable/double-cable batch kernels. Heterogeneous observer-only
+  execution, richer semantic signals, and final backend-neutral recording
+  lowering remain future work.
 
 ---
 

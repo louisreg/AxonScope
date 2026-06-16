@@ -85,7 +85,8 @@ Available notebook cases:
   parallel cyclic-reduction block solver against the default Thomas scan. Use
   it to reproduce forced-PCR results; current CPU evidence makes PCR much
   slower than the default Thomas solver. Use `pcr_soa` to force the
-  struct-of-arrays variant.
+  struct-of-arrays variant, or `pcr_adaptive` to reproduce the current GPU
+  adaptive policy explicitly.
 
 The notebook clones `bench-colab`, installs `.[examples,benchmark]`, verifies
 only the enabled backend(s), and runs the selected case for the enabled labels.

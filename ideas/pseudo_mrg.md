@@ -1,5 +1,10 @@
 # AxonScope Solver Review — GPU Batching, Extracellular Modeling, MRG, and Pseudo-MRG
 
+Status: standby as of 2026-06-16. Treat pseudo-MRG content here as background
+research only. Current active solver work is exact double-cable GPU
+optimization; pseudo-MRG modes are not public solver options and must not be
+selected by `auto`.
+
 ## 10. Pseudo-MRG: Reducing Double Cable to Single Cable
 
 A “pseudo-MRG” model is a strong candidate for large GPU batches.

@@ -1,18 +1,45 @@
 # Public API Draft
 
-Status on 2026-06-13: this is a proposal/roadmap document, not a current API
-reference. Snippets that use `length_um`, `diameter_um`,
-`axs.simulate(..., duration_ms=...)`, `PointSourceElectrode(x_um=...)`,
-`AxonInstance(..., y_um=...)`, `IntracellularCurrentClamp(position_um=...)`,
-`Recording(..., positions_um=...)`, `Recording.none()` as runnable behavior,
-observer classes, or other target names should be read as older roadmap
-sketches unless the surrounding text explicitly says they are implemented
-today. For current runnable examples, prefer `README.md`, `examples/basic/`,
+Status on 2026-06-16: this is a proposal/roadmap document with one current-API
+snapshot near the top. Treat the sections after **Implemented Today** as design
+intent unless the surrounding text explicitly says they are implemented today.
+For current runnable examples, prefer `README.md`, `examples/basic/`,
 `examples/advanced/`, and the non-draft pages under `docs/`.
 
 This document is a working proposal for the public AxonScope API before adding
 new features. The goal is to make the package didactic and modular while keeping
 the current solver/runtime internals free to evolve.
+
+## Implemented Today
+
+The currently runnable public surface is exposed from `axonscope.__init__` and
+the examples. In short:
+
+- `axs.axons`, `axs.membranes`, `axs.stimulation`, `axs.results`,
+  `axs.analysis`, `axs.performance`, `axs.protocols`, `axs.dispatcher`,
+  `axs.solvers`, `axs.signals`, `axs.positions`, and `axs.identifiers` are
+  importable public namespaces.
+- Public construction examples should use Pint quantities at boundaries:
+  `length=500 * axs.um`, `diameter=0.5 * axs.um`,
+  `duration=5 * axs.ms`, and `dt=0.01 * axs.ms`.
+- `axs.AxonInstance`, `axs.AxonPopulation`, `axs.AxonSimulation`,
+  `axs.simulate(...)`, and `axs.simulate_pool(...)` are the current execution
+  entry points.
+- `axs.Recording.full()`, `axs.Recording.center(...)`, `axs.Recording.none()`,
+  `axs.signals`, `SimResult.Vm`, `recording_manifest`, and compact
+  `observations` are current result/recording concepts.
+- `axs.analysis.Activation`, `axs.analysis.PeakVoltage`, and their observer
+  aliases are current analysis concepts. Solver-side observer execution exists
+  for homogeneous single- and double-cable batch paths; broader observer kinds
+  and public study orchestration remain roadmap work.
+- `axs.SolverOptions` exposes current solver choices. Pseudo-double-cable
+  options are standby research artifacts, not recommended public API.
+
+Legacy roadmap snippets below may still use older names such as `length_um`,
+`diameter_um`, `duration_ms`, `PointSourceElectrode(x_um=...)`,
+`AxonInstance(..., y_um=...)`, `IntracellularCurrentClamp(position_um=...)`, or
+`Recording(..., positions_um=...)`. Do not copy those forms into new examples
+without checking current source and examples first.
 
 ## Design Intent
 
