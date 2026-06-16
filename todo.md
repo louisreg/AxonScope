@@ -180,8 +180,23 @@ Near-term tasks:
     `pcr_soa_transposed` matched the Thomas64 reference with max absolute error
     about `7.8e-08`. Local CPU timing was faster than batch-first `pcr_soa`,
     but the routing decision needs P100 evidence.
-  - [ ] Run the Kaggle solver-only `linear` matrix with `pcr_soa_transposed`
-    and compare against batch-first `pcr_soa`.
+  - [x] Kaggle P100 recovered output under `benchmark/results/kaggle/linear`
+    from the `20260616_223754_linear_NvidiaTeslaP100` run: transposed matched
+    Thomas64 within `~1.4e-07` max abs error but was not a general speed win
+    versus batch-first `pcr_soa` (`8/20` wins, geomean `1.047x` slower).
+    Keep it benchmark-only/standby; do not route it into `auto`.
+- [ ] Phase 1E: add and benchmark exact hybrid PCR/Thomas candidates.
+  - [x] Add `solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(...)` and
+    benchmark-only `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and
+    `pcr_soa_hybrid_16`.
+  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
+    all hybrid variants matched the Thomas64 reference with max absolute error
+    about `7.8e-08`. CPU/local timing was mixed (`hybrid_4` faster at `Nx=89`,
+    slower at `Nx=45`); use P100 evidence for go/no-go.
+  - [ ] Run Kaggle solver-only `linear` and compare against batch-native
+    `pcr_soa`.
+  - [ ] Keep only if solver-only speedup is `>1.2x` vs batch-native `pcr_soa`
+    with unchanged numerical error; otherwise mark standby.
 - [ ] Evaluate optimized Thomas, PCR hybrid, associative scans, split iterative,
   and Pallas only in the sequence described by the exact-GPU roadmap.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
@@ -209,7 +224,7 @@ Solver-only diagnostic command:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 128 512 1024 \
   --nx 32 51 64 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_transposed pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

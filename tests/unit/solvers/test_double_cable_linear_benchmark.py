@@ -71,6 +71,31 @@ def test_planned_cases_allow_benchmark_only_transposed_pcr_soa():
     )
 
 
+def test_planned_cases_allow_benchmark_only_hybrid_pcr_soa_variants():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_hybrid_4", "pcr_soa_hybrid_8", "pcr_soa_hybrid_16"],
+        platform="gpu",
+    )
+
+    assert [case.requested_solver for case in cases] == [
+        "pcr_soa_hybrid_4",
+        "pcr_soa_hybrid_8",
+        "pcr_soa_hybrid_16",
+    ]
+    assert [case.resolved_solver for case in cases] == ["pcr_soa", "pcr_soa", "pcr_soa"]
+    assert [case.kernel_solver for case in cases] == [
+        "pcr_soa_hybrid_4",
+        "pcr_soa_hybrid_8",
+        "pcr_soa_hybrid_16",
+    ]
+    assert resolve_kernel_solver("pcr_soa_hybrid_4", batch_size=512) == "pcr_soa_hybrid_4"
+    assert resolve_kernel_solver("pcr_soa_hybrid_8", batch_size=512) == "pcr_soa_hybrid_8"
+    assert resolve_kernel_solver("pcr_soa_hybrid_16", batch_size=512) == "pcr_soa_hybrid_16"
+
+
 def test_planned_cases_allow_benchmark_only_batched_thomas():
     cases = planned_cases(
         batch_sizes=[512],

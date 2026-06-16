@@ -570,13 +570,20 @@ Status on 2026-06-16: the benchmark-only exact candidate
 `solve_block_tridiagonal_2x2_pcr_soa_batched_transposed(...)` /
 `pcr_soa_transposed` was added to test this layout without changing public
 solver options or `auto`. It accepts the same `[B, Nx]` RHS shape as
-`pcr_soa`, transposes internally to `[Nx, B]`, and must be compared against
-batch-first `pcr_soa` in the next Kaggle solver-only `linear` run.
+`pcr_soa` and transposes internally to `[Nx, B]`.
 
 Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, with max
 absolute error about `7.8e-08` versus Thomas64. It was faster than batch-first
 `pcr_soa` in this tiny CPU/local smoke, but the go/no-go decision needs P100
 solver-only evidence.
+
+Kaggle P100 output recovered under `benchmark/results/kaggle/linear` from the
+`20260616_223754_linear_NvidiaTeslaP100` run measured `B=128..4096`,
+`Nx=32/51/64/96`, `float32`, five repeats. `pcr_soa_transposed` stayed
+numerically aligned with Thomas64 (`~1.4e-07` max absolute error), but was not a
+general speed win over batch-first `pcr_soa`: `8/20` cases faster and geomean
+`1.047x` slower. Decision: keep benchmark-only/standby and do not route it
+through `auto`.
 
 ---
 
@@ -682,6 +689,20 @@ Assert padded and unpadded solutions match for real rows.
 ---
 
 ## Phase 1E — Hybrid PCR + Thomas
+
+Status on 2026-06-16: benchmark-only exact candidates implemented locally as
+`solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(...)` with
+`pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16`. The
+implementation runs PCR stages until remaining couplings jump by the requested
+stride, then solves the independent residual chains defined by `i % stride`
+with exact batch-native 2x2 block Thomas. These variants are not public
+`BatchOptions` choices and are not routed by `auto`.
+
+Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, with max
+absolute error about `7.8e-08` versus Thomas64 for all three hybrid variants.
+CPU/local timing was mixed (`hybrid_4` faster than `pcr_soa` at `Nx=89` but
+slower at `Nx=45`); the go/no-go decision needs the Kaggle P100 solver-only
+`linear` matrix.
 
 ## Motivation
 

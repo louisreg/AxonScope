@@ -37,7 +37,7 @@ Run a compact local smoke:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 8 128 \
   --nx 32 51 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_transposed pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 3
@@ -49,7 +49,7 @@ Run the GPU-oriented sweep from the exact double-cable roadmap:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1 8 128 512 1024 2048 4096 \
   --nx 16 32 51 64 96 100 128 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_transposed pcr_soa_padded pcr_adaptive \
+  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
   --dtypes float32 float64 \
   --warmups 1 \
   --repeats 5
@@ -64,6 +64,9 @@ float64 reference unless `--skip-reference` is used.
 that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
 `thomas_batched` is a benchmark-only exact candidate that runs block Thomas as
 one batch-first scan instead of an outer `vmap` over fibers.
+`pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16` are
+benchmark-only Phase 1E candidates that run partial PCR, then exact block
+Thomas on the independent residual chains.
 `pcr_soa_transposed` is a benchmark-only exact candidate that keeps the public
 RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to

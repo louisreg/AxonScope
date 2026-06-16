@@ -1331,6 +1331,441 @@ def solve_block_tridiagonal_2x2_pcr_soa_batched_transposed(
     return jnp.swapaxes(x0, 0, 1), jnp.swapaxes(x1, 0, 1)
 
 
+def solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    chain_stride: int = 8,
+) -> tuple[Array, Array]:
+    """Exact hybrid PCR/Thomas solve for batched double-cable systems.
+
+    PCR stages first eliminate neighbors until remaining couplings jump by
+    ``chain_stride`` compartments. The residual system then splits into
+    independent chains by ``i % chain_stride``; each chain is solved exactly
+    with a batch-native 2x2 block-Thomas pass.
+    """
+
+    target_stride = int(chain_stride)
+    if target_stride < 1 or target_stride & (target_stride - 1):
+        raise ValueError("chain_stride must be a positive power of two.")
+
+    rhs0 = jnp.asarray(rhs0)
+    rhs1 = jnp.asarray(rhs1)
+    if rhs0.ndim != 2 or rhs1.ndim != 2:
+        raise ValueError("rhs0 and rhs1 must have shape (batch_size, Nx).")
+    if rhs0.shape != rhs1.shape:
+        raise ValueError(
+            f"rhs0 and rhs1 must have the same shape, got {rhs0.shape} and {rhs1.shape}."
+        )
+
+    batch_size, n = rhs0.shape
+    dtype = rhs0.dtype
+    idx = jnp.arange(n)
+    zero = jnp.zeros((), dtype=dtype)
+
+    def broadcast_space(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        if arr.ndim == 1:
+            if arr.shape[0] != n:
+                raise ValueError(f"{name} must have length Nx={n}, got {arr.shape}.")
+            return jnp.broadcast_to(arr[None, :], (batch_size, n))
+        if arr.ndim == 2:
+            if arr.shape != (batch_size, n):
+                raise ValueError(
+                    f"{name} must have shape ({batch_size}, {n}), got {arr.shape}."
+                )
+            return arr
+        raise ValueError(
+            f"{name} must have shape (Nx,) or (batch_size, Nx), got {arr.shape}."
+        )
+
+    def broadcast_edges(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        edge_shape = (batch_size, max(n - 1, 0))
+        if arr.ndim == 1:
+            if arr.shape[0] != edge_shape[1]:
+                raise ValueError(
+                    f"{name} must have length Nx - 1={edge_shape[1]}, got {arr.shape}."
+                )
+            return jnp.broadcast_to(arr[None, :], edge_shape)
+        if arr.ndim == 2:
+            if arr.shape != edge_shape:
+                raise ValueError(f"{name} must have shape {edge_shape}, got {arr.shape}.")
+            return arr
+        raise ValueError(
+            f"{name} must have shape (Nx - 1,) or (batch_size, Nx - 1), got {arr.shape}."
+        )
+
+    diag00 = broadcast_space("a00", a00)
+    diag01 = broadcast_space("a01", a01)
+    diag10 = broadcast_space("a10", a10)
+    diag11 = broadcast_space("a11", a11)
+    off0_batched = broadcast_edges("off0", off0)
+    off1_batched = broadcast_edges("off1", off1)
+
+    zero_col = jnp.zeros((batch_size, 1), dtype=dtype)
+    zeros = jnp.zeros((batch_size, n), dtype=dtype)
+    lower00 = jnp.concatenate([zero_col, off0_batched], axis=1)
+    lower01 = zeros
+    lower10 = zeros
+    lower11 = jnp.concatenate([zero_col, off1_batched], axis=1)
+    upper00 = jnp.concatenate([off0_batched, zero_col], axis=1)
+    upper01 = zeros
+    upper10 = zeros
+    upper11 = jnp.concatenate([off1_batched, zero_col], axis=1)
+    r0 = rhs0
+    r1 = rhs1
+
+    def inv2_components(
+        m00: Array,
+        m01: Array,
+        m10: Array,
+        m11: Array,
+    ) -> tuple[Array, Array, Array, Array]:
+        det = m00 * m11 - m01 * m10
+        return m11 / det, -m01 / det, -m10 / det, m00 / det
+
+    def matmul2_components(
+        l00: Array,
+        l01: Array,
+        l10: Array,
+        l11: Array,
+        r00: Array,
+        r01: Array,
+        r10: Array,
+        r11: Array,
+    ) -> tuple[Array, Array, Array, Array]:
+        return (
+            l00 * r00 + l01 * r10,
+            l00 * r01 + l01 * r11,
+            l10 * r00 + l11 * r10,
+            l10 * r01 + l11 * r11,
+        )
+
+    def matvec2_components(
+        m00: Array,
+        m01: Array,
+        m10: Array,
+        m11: Array,
+        v0: Array,
+        v1: Array,
+    ) -> tuple[Array, Array]:
+        return m00 * v0 + m01 * v1, m10 * v0 + m11 * v1
+
+    stride = 1
+    while stride < n and stride < target_stride:
+        left_idx = jnp.maximum(idx - stride, 0)
+        right_idx = jnp.minimum(idx + stride, n - 1)
+        has_left = (idx >= stride)[None, :]
+        has_right = (idx + stride < n)[None, :]
+
+        left_inv = inv2_components(
+            diag00[:, left_idx],
+            diag01[:, left_idx],
+            diag10[:, left_idx],
+            diag11[:, left_idx],
+        )
+        right_inv = inv2_components(
+            diag00[:, right_idx],
+            diag01[:, right_idx],
+            diag10[:, right_idx],
+            diag11[:, right_idx],
+        )
+        lf00, lf01, lf10, lf11 = matmul2_components(
+            lower00,
+            lower01,
+            lower10,
+            lower11,
+            *left_inv,
+        )
+        rf00, rf01, rf10, rf11 = matmul2_components(
+            upper00,
+            upper01,
+            upper10,
+            upper11,
+            *right_inv,
+        )
+        lf00 = jnp.where(has_left, lf00, zero)
+        lf01 = jnp.where(has_left, lf01, zero)
+        lf10 = jnp.where(has_left, lf10, zero)
+        lf11 = jnp.where(has_left, lf11, zero)
+        rf00 = jnp.where(has_right, rf00, zero)
+        rf01 = jnp.where(has_right, rf01, zero)
+        rf10 = jnp.where(has_right, rf10, zero)
+        rf11 = jnp.where(has_right, rf11, zero)
+
+        nl00, nl01, nl10, nl11 = matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            lower00[:, left_idx],
+            lower01[:, left_idx],
+            lower10[:, left_idx],
+            lower11[:, left_idx],
+        )
+        nu00, nu01, nu10, nu11 = matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            upper00[:, right_idx],
+            upper01[:, right_idx],
+            upper10[:, right_idx],
+            upper11[:, right_idx],
+        )
+        ldu00, ldu01, ldu10, ldu11 = matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            upper00[:, left_idx],
+            upper01[:, left_idx],
+            upper10[:, left_idx],
+            upper11[:, left_idx],
+        )
+        rdl00, rdl01, rdl10, rdl11 = matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            lower00[:, right_idx],
+            lower01[:, right_idx],
+            lower10[:, right_idx],
+            lower11[:, right_idx],
+        )
+        lr0, lr1 = matvec2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            r0[:, left_idx],
+            r1[:, left_idx],
+        )
+        rr0, rr1 = matvec2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            r0[:, right_idx],
+            r1[:, right_idx],
+        )
+
+        lower00 = jnp.where(has_left, -nl00, zero)
+        lower01 = jnp.where(has_left, -nl01, zero)
+        lower10 = jnp.where(has_left, -nl10, zero)
+        lower11 = jnp.where(has_left, -nl11, zero)
+        upper00 = jnp.where(has_right, -nu00, zero)
+        upper01 = jnp.where(has_right, -nu01, zero)
+        upper10 = jnp.where(has_right, -nu10, zero)
+        upper11 = jnp.where(has_right, -nu11, zero)
+        diag00 = diag00 - ldu00 - rdl00
+        diag01 = diag01 - ldu01 - rdl01
+        diag10 = diag10 - ldu10 - rdl10
+        diag11 = diag11 - ldu11 - rdl11
+        r0 = r0 - lr0 - rr0
+        r1 = r1 - lr1 - rr1
+        stride *= 2
+
+    def solve_chain(
+        c_diag00: Array,
+        c_diag01: Array,
+        c_diag10: Array,
+        c_diag11: Array,
+        c_lower00: Array,
+        c_lower01: Array,
+        c_lower10: Array,
+        c_lower11: Array,
+        c_upper00: Array,
+        c_upper01: Array,
+        c_upper10: Array,
+        c_upper11: Array,
+        c_rhs0: Array,
+        c_rhs1: Array,
+    ) -> tuple[Array, Array]:
+        inv00, inv01, inv10, inv11 = inv2_components(
+            c_diag00[:, 0],
+            c_diag01[:, 0],
+            c_diag10[:, 0],
+            c_diag11[:, 0],
+        )
+        c00_0, c01_0, c10_0, c11_0 = matmul2_components(
+            inv00,
+            inv01,
+            inv10,
+            inv11,
+            c_upper00[:, 0],
+            c_upper01[:, 0],
+            c_upper10[:, 0],
+            c_upper11[:, 0],
+        )
+        d0_0, d1_0 = matvec2_components(
+            inv00,
+            inv01,
+            inv10,
+            inv11,
+            c_rhs0[:, 0],
+            c_rhs1[:, 0],
+        )
+
+        def fwd(carry, xs):
+            c00_prev, c01_prev, c10_prev, c11_prev, d0_prev, d1_prev = carry
+            (
+                d00_i,
+                d01_i,
+                d10_i,
+                d11_i,
+                l00_i,
+                l01_i,
+                l10_i,
+                l11_i,
+                u00_i,
+                u01_i,
+                u10_i,
+                u11_i,
+                rhs0_i,
+                rhs1_i,
+            ) = xs
+            lc00, lc01, lc10, lc11 = matmul2_components(
+                l00_i,
+                l01_i,
+                l10_i,
+                l11_i,
+                c00_prev,
+                c01_prev,
+                c10_prev,
+                c11_prev,
+            )
+            m00 = d00_i - lc00
+            m01 = d01_i - lc01
+            m10 = d10_i - lc10
+            m11 = d11_i - lc11
+            inv00_i, inv01_i, inv10_i, inv11_i = inv2_components(m00, m01, m10, m11)
+
+            ld0, ld1 = matvec2_components(
+                l00_i,
+                l01_i,
+                l10_i,
+                l11_i,
+                d0_prev,
+                d1_prev,
+            )
+            r0_i = rhs0_i - ld0
+            r1_i = rhs1_i - ld1
+            c00_i, c01_i, c10_i, c11_i = matmul2_components(
+                inv00_i,
+                inv01_i,
+                inv10_i,
+                inv11_i,
+                u00_i,
+                u01_i,
+                u10_i,
+                u11_i,
+            )
+            d0_i, d1_i = matvec2_components(
+                inv00_i,
+                inv01_i,
+                inv10_i,
+                inv11_i,
+                r0_i,
+                r1_i,
+            )
+            out = (c00_i, c01_i, c10_i, c11_i, d0_i, d1_i)
+            return out, out
+
+        _, forward_tail = jax.lax.scan(
+            fwd,
+            (c00_0, c01_0, c10_0, c11_0, d0_0, d1_0),
+            (
+                c_diag00[:, 1:].T,
+                c_diag01[:, 1:].T,
+                c_diag10[:, 1:].T,
+                c_diag11[:, 1:].T,
+                c_lower00[:, 1:].T,
+                c_lower01[:, 1:].T,
+                c_lower10[:, 1:].T,
+                c_lower11[:, 1:].T,
+                c_upper00[:, 1:].T,
+                c_upper01[:, 1:].T,
+                c_upper10[:, 1:].T,
+                c_upper11[:, 1:].T,
+                c_rhs0[:, 1:].T,
+                c_rhs1[:, 1:].T,
+            ),
+        )
+        c00_tail, c01_tail, c10_tail, c11_tail, d0_tail, d1_tail = forward_tail
+        c00 = jnp.concatenate([c00_0[None, :], c00_tail], axis=0)
+        c01 = jnp.concatenate([c01_0[None, :], c01_tail], axis=0)
+        c10 = jnp.concatenate([c10_0[None, :], c10_tail], axis=0)
+        c11 = jnp.concatenate([c11_0[None, :], c11_tail], axis=0)
+        d0 = jnp.concatenate([d0_0[None, :], d0_tail], axis=0)
+        d1 = jnp.concatenate([d1_0[None, :], d1_tail], axis=0)
+
+        def bwd(carry, xs):
+            next0, next1 = carry
+            c00_i, c01_i, c10_i, c11_i, d0_i, d1_i = xs
+            cx0, cx1 = matvec2_components(
+                c00_i,
+                c01_i,
+                c10_i,
+                c11_i,
+                next0,
+                next1,
+            )
+            x0_i = d0_i - cx0
+            x1_i = d1_i - cx1
+            return (x0_i, x1_i), (x0_i, x1_i)
+
+        x0_last = d0[-1]
+        x1_last = d1[-1]
+        _, reverse_tail = jax.lax.scan(
+            bwd,
+            (x0_last, x1_last),
+            (
+                c00[:-1][::-1],
+                c01[:-1][::-1],
+                c10[:-1][::-1],
+                c11[:-1][::-1],
+                d0[:-1][::-1],
+                d1[:-1][::-1],
+            ),
+        )
+        x0_rev, x1_rev = reverse_tail
+        x0 = jnp.concatenate([x0_rev[::-1], x0_last[None, :]], axis=0)
+        x1 = jnp.concatenate([x1_rev[::-1], x1_last[None, :]], axis=0)
+        return x0.T, x1.T
+
+    solution0 = jnp.zeros_like(rhs0)
+    solution1 = jnp.zeros_like(rhs1)
+    for residue in range(min(stride, n)):
+        chain_idx = jnp.arange(residue, n, stride)
+        chain0, chain1 = solve_chain(
+            diag00[:, chain_idx],
+            diag01[:, chain_idx],
+            diag10[:, chain_idx],
+            diag11[:, chain_idx],
+            lower00[:, chain_idx],
+            lower01[:, chain_idx],
+            lower10[:, chain_idx],
+            lower11[:, chain_idx],
+            upper00[:, chain_idx],
+            upper01[:, chain_idx],
+            upper10[:, chain_idx],
+            upper11[:, chain_idx],
+            r0[:, chain_idx],
+            r1[:, chain_idx],
+        )
+        solution0 = solution0.at[:, chain_idx].set(chain0)
+        solution1 = solution1.at[:, chain_idx].set(chain1)
+    return solution0, solution1
+
+
 def double_cable_power_bucket(
     nx: int,
     *,
