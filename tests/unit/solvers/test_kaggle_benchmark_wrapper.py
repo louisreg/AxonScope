@@ -5,6 +5,7 @@ from pathlib import Path
 
 from benchmark.kaggle import axonscope_solver_benchmarks as kaggle_bench
 from benchmark.kaggle import run_kernel as kaggle_runner
+from benchmark.kaggle import stream_logs as kaggle_stream_logs
 from benchmark.kaggle.prepare_kernel_metadata import main as prepare_metadata
 from benchmark.kaggle.run_kernel import (
     default_publish_branch,
@@ -202,3 +203,17 @@ def test_kaggle_attach_does_not_push(tmp_path, monkeypatch):
         ("files", "owner/kernel"),
         ("download", "owner/kernel", ".*axonscope_solver_results.*"),
     ]
+
+
+def test_kaggle_stream_log_formatters():
+    payload = json.dumps({"stream_name": "stdout", "time": 1.0, "data": "case 1/48\n"})
+    persisted = json.dumps(
+        [
+            {"stream_name": "stdout", "time": 1.0, "data": "hello\n"},
+            {"stream_name": "stderr", "time": 2.0, "data": "warn\n"},
+        ]
+    )
+
+    assert kaggle_stream_logs.parse_kernel_ref("owner/kernel") == ("owner", "kernel")
+    assert kaggle_stream_logs.format_stream_payload(payload) == "case 1/48\n"
+    assert kaggle_stream_logs.format_persisted_log(persisted) == "hello\nwarn\n"
