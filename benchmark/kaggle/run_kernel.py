@@ -109,6 +109,7 @@ def monitor_kernel(
         kernel_ref=kernel_ref,
         poll_interval=args.poll_interval,
         wait_timeout=args.wait_timeout,
+        max_status_fetch_failures=args.max_status_fetch_failures,
         run_dir=run_dir,
     )
     fetch_logs(kaggle_bin, kernel_ref, run_dir)
@@ -194,6 +195,17 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=int,
         default=60,
         help="Seconds between status checks.",
+    )
+    parser.add_argument(
+        "--max-status-fetch-failures",
+        type=int,
+        default=5,
+        help=(
+            "Consecutive Kaggle status fetch failures tolerated after at least one "
+            "successful status response. This handles transient Kaggle API errors "
+            "while still failing immediately for wrong slugs/auth before any status "
+            "was fetched."
+        ),
     )
     parser.add_argument(
         "--kernel-dir",
@@ -354,10 +366,15 @@ def poll_status(
     kernel_ref: str,
     poll_interval: int,
     wait_timeout: int,
+    max_status_fetch_failures: int,
     run_dir: Path,
 ) -> tuple[str, str]:
     deadline = time.monotonic() + wait_timeout
     status_log = run_dir / "status.log"
+    consecutive_fetch_failures = 0
+    saw_successful_status = status_log.exists() and bool(
+        re.search(r'status\s+"[^"]+"', status_log.read_text(encoding="utf-8"))
+    )
     while True:
         result = run(
             [kaggle_bin, "kernels", "status", kernel_ref],
@@ -367,8 +384,22 @@ def poll_status(
         output = command_output(result)
         append_text(status_log, f"\n[{datetime.now().isoformat(timespec='seconds')}]\n{output}\n")
         if result.returncode != 0:
+            if saw_successful_status:
+                consecutive_fetch_failures += 1
+                if consecutive_fetch_failures <= max_status_fetch_failures:
+                    print(
+                        "Could not fetch Kaggle status "
+                        f"({consecutive_fetch_failures}/{max_status_fetch_failures}); "
+                        f"retrying. See {status_log}"
+                    )
+                    if time.monotonic() >= deadline:
+                        raise SystemExit(f"Timed out waiting for Kaggle kernel. See {status_log}")
+                    time.sleep(poll_interval)
+                    continue
             raise SystemExit(f"Could not fetch Kaggle status. See {status_log}")
 
+        consecutive_fetch_failures = 0
+        saw_successful_status = True
         status = parse_kernel_status(output)
         kind = status_kind(status)
         print(output.strip())

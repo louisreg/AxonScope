@@ -1,6 +1,6 @@
 {
   "benchmark": "linear",
-  "branch": "kaggle-bench/39c10e6",
+  "branch": "kaggle-bench/76601ad",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }

@@ -11,6 +11,7 @@ from benchmark.kaggle.run_kernel import (
     default_publish_branch,
     parse_kernel_status,
     parse_args,
+    poll_status,
     run_kernel,
     status_kind,
 )
@@ -227,6 +228,89 @@ def test_kaggle_attach_does_not_push(tmp_path, monkeypatch):
         ("files", "owner/kernel"),
         ("download", "owner/kernel", ".*axonscope_solver_results.*"),
     ]
+
+
+def test_kaggle_status_retry_after_successful_running_status(tmp_path, monkeypatch):
+    responses = [
+        subprocess.CompletedProcess(
+            ["kaggle", "kernels", "status", "owner/kernel"],
+            0,
+            'owner/kernel has status "KernelWorkerStatus.RUNNING"',
+            "",
+        ),
+        subprocess.CompletedProcess(
+            ["kaggle", "kernels", "status", "owner/kernel"],
+            1,
+            "",
+            "Cannot access kernel 'owner/kernel' (Permission 'kernels.get' was denied).",
+        ),
+        subprocess.CompletedProcess(
+            ["kaggle", "kernels", "status", "owner/kernel"],
+            0,
+            'owner/kernel has status "KernelWorkerStatus.COMPLETE"',
+            "",
+        ),
+    ]
+
+    def fake_run(command, *, capture, check, cwd=None):
+        return responses.pop(0)
+
+    monkeypatch.setattr(kaggle_runner, "run", fake_run)
+    monkeypatch.setattr(kaggle_runner.time, "sleep", lambda _seconds: None)
+
+    status, kind = poll_status(
+        kaggle_bin="kaggle",
+        kernel_ref="owner/kernel",
+        poll_interval=1,
+        wait_timeout=30,
+        max_status_fetch_failures=2,
+        run_dir=tmp_path,
+    )
+
+    assert status == "KernelWorkerStatus.COMPLETE"
+    assert kind == "success"
+    assert not responses
+    assert "Permission 'kernels.get' was denied" in (tmp_path / "status.log").read_text()
+
+
+def test_kaggle_status_retry_uses_existing_status_log_for_attach(tmp_path, monkeypatch):
+    (tmp_path / "status.log").write_text(
+        'owner/kernel has status "KernelWorkerStatus.RUNNING"\n',
+        encoding="utf-8",
+    )
+    responses = [
+        subprocess.CompletedProcess(
+            ["kaggle", "kernels", "status", "owner/kernel"],
+            1,
+            "",
+            "Cannot access kernel 'owner/kernel' (Permission 'kernels.get' was denied).",
+        ),
+        subprocess.CompletedProcess(
+            ["kaggle", "kernels", "status", "owner/kernel"],
+            0,
+            'owner/kernel has status "KernelWorkerStatus.COMPLETE"',
+            "",
+        ),
+    ]
+
+    def fake_run(command, *, capture, check, cwd=None):
+        return responses.pop(0)
+
+    monkeypatch.setattr(kaggle_runner, "run", fake_run)
+    monkeypatch.setattr(kaggle_runner.time, "sleep", lambda _seconds: None)
+
+    status, kind = poll_status(
+        kaggle_bin="kaggle",
+        kernel_ref="owner/kernel",
+        poll_interval=1,
+        wait_timeout=30,
+        max_status_fetch_failures=2,
+        run_dir=tmp_path,
+    )
+
+    assert status == "KernelWorkerStatus.COMPLETE"
+    assert kind == "success"
+    assert not responses
 
 
 def test_kaggle_stream_log_formatters():
