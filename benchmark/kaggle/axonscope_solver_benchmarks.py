@@ -160,6 +160,7 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
                 "thomas_batched",
                 "pcr",
                 "pcr_soa",
+                "pcr_soa_transposed",
                 "pcr_soa_padded",
                 "pcr_adaptive",
                 "--warmups",

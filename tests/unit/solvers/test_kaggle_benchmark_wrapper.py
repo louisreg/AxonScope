@@ -148,6 +148,7 @@ def test_kaggle_linear_includes_padded_solver_candidate(tmp_path, monkeypatch):
         "thomas_batched",
         "pcr",
         "pcr_soa",
+        "pcr_soa_transposed",
         "pcr_soa_padded",
         "pcr_adaptive",
     ]

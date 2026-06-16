@@ -566,11 +566,23 @@ rhs0, rhs1 = [Nx, B]
 
 But start with `[B, Nx]`, because this matches batch-first AxonScope patterns.
 
+Status on 2026-06-16: the benchmark-only exact candidate
+`solve_block_tridiagonal_2x2_pcr_soa_batched_transposed(...)` /
+`pcr_soa_transposed` was added to test this layout without changing public
+solver options or `auto`. It accepts the same `[B, Nx]` RHS shape as
+`pcr_soa`, transposes internally to `[Nx, B]`, and must be compared against
+batch-first `pcr_soa` in the next Kaggle solver-only `linear` run.
+
+Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, with max
+absolute error about `7.8e-08` versus Thomas64. It was faster than batch-first
+`pcr_soa` in this tiny CPU/local smoke, but the go/no-go decision needs P100
+solver-only evidence.
+
 ---
 
 ## Phase 1C.1 — Batch-native Thomas baseline
 
-Status on 2026-06-16: implemented locally as
+Status on 2026-06-16: implemented and tested on P100 as
 `solve_block_tridiagonal_2x2_scalar_batched(...)` and exposed only to the
 solver-only benchmark as `thomas_batched`. This is the exact same block-Thomas
 algebra as `thomas`, but scans once over `Nx` with batch lanes instead of using
@@ -585,6 +597,13 @@ Local smoke on 2026-06-16 passed for `B=2`, `Nx=45/89`, `float32`, with max
 absolute error about `4.6e-08` versus Thomas64. It was slightly faster than the
 current vmapped Thomas path on this CPU/local smoke, but that is not GPU
 performance evidence.
+
+Kaggle P100 `20260616_222231_linear_NvidiaTeslaP100` measured `B=128..4096`,
+`Nx=32/51/64/96`, `float32`, five repeats. `thomas_batched` stayed numerically
+aligned with Thomas64 (`~1.4e-07` max absolute error), but was not a steady-state
+GPU win over the current vmapped `thomas`: `8/20` cases faster and geomean
+`1.009x` slower. Compile time improved (`0.885x` geomean), but runtime does not
+justify routing this path into `auto`. Decision: keep benchmark-only/standby.
 
 ---
 

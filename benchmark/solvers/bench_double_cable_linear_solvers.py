@@ -11,7 +11,7 @@ Examples:
     python benchmark/solvers/bench_double_cable_linear_solvers.py \
       --batch-sizes 128 512 1024 \
       --nx 32 51 64 \
-      --solvers thomas thomas_batched pcr pcr_soa pcr_soa_padded pcr_adaptive \
+      --solvers thomas thomas_batched pcr pcr_soa pcr_soa_transposed pcr_soa_padded pcr_adaptive \
       --dtypes float32 \
       --warmups 1 \
       --repeats 5
@@ -46,6 +46,7 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_scalar_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
@@ -58,10 +59,18 @@ SOLVER_CHOICES = (
     "thomas_batched",
     "pcr",
     "pcr_soa",
+    "pcr_soa_transposed",
     "pcr_soa_padded",
     "pcr_adaptive",
 )
-KERNEL_SOLVERS = ("thomas", "thomas_batched", "pcr", "pcr_soa", "pcr_soa_padded")
+KERNEL_SOLVERS = (
+    "thomas",
+    "thomas_batched",
+    "pcr",
+    "pcr_soa",
+    "pcr_soa_transposed",
+    "pcr_soa_padded",
+)
 PCR_SOA_MAX_BATCH = 4096
 
 
@@ -141,7 +150,11 @@ def planned_cases(
                 for solver in solvers:
                     if solver not in SOLVER_CHOICES:
                         raise ValueError(f"unknown solver choice: {solver!r}.")
-                    if solver in {"thomas_batched", "pcr_soa_padded"}:
+                    if solver in {
+                        "thomas_batched",
+                        "pcr_soa_transposed",
+                        "pcr_soa_padded",
+                    }:
                         resolved = "thomas" if solver == "thomas_batched" else "pcr_soa"
                         kernel_solver = solver
                     else:
@@ -415,12 +428,12 @@ def _make_batched_solver(kernel_solver: str):
 
         return solve_batch_native_thomas
 
-    if kernel_solver in {"pcr_soa", "pcr_soa_padded"}:
-        solve_pcr_soa_batch = (
-            solve_block_tridiagonal_2x2_pcr_soa_batched_padded
-            if kernel_solver == "pcr_soa_padded"
-            else solve_block_tridiagonal_2x2_pcr_soa_batched
-        )
+    if kernel_solver in {"pcr_soa", "pcr_soa_transposed", "pcr_soa_padded"}:
+        solve_pcr_soa_batch = {
+            "pcr_soa": solve_block_tridiagonal_2x2_pcr_soa_batched,
+            "pcr_soa_transposed": solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
+            "pcr_soa_padded": solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+        }[kernel_solver]
 
         @jax.jit
         def solve_batch_native(

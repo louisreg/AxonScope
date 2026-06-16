@@ -53,6 +53,24 @@ def test_planned_cases_allow_benchmark_only_padded_pcr_soa():
     assert resolve_kernel_solver("pcr_soa_padded", batch_size=512) == "pcr_soa_padded"
 
 
+def test_planned_cases_allow_benchmark_only_transposed_pcr_soa():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_transposed"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pcr_soa_transposed"
+    assert cases[0].resolved_solver == "pcr_soa"
+    assert cases[0].kernel_solver == "pcr_soa_transposed"
+    assert (
+        resolve_kernel_solver("pcr_soa_transposed", batch_size=512)
+        == "pcr_soa_transposed"
+    )
+
+
 def test_planned_cases_allow_benchmark_only_batched_thomas():
     cases = planned_cases(
         batch_sizes=[512],
