@@ -111,6 +111,29 @@ def test_planned_cases_allow_benchmark_only_batched_thomas():
     assert resolve_kernel_solver("thomas_batched", batch_size=512) == "thomas_batched"
 
 
+def test_planned_cases_allow_benchmark_only_split_iterative_variants():
+    solvers = [
+        "split_jacobi_4",
+        "split_jacobi_8",
+        "split_gs_4",
+        "split_gs_8",
+        "split_richardson_4",
+    ]
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=solvers,
+        platform="gpu",
+    )
+
+    assert [case.requested_solver for case in cases] == solvers
+    assert [case.resolved_solver for case in cases] == ["split_iterative"] * len(solvers)
+    assert [case.kernel_solver for case in cases] == solvers
+    for solver in solvers:
+        assert resolve_kernel_solver(solver, batch_size=512) == solver
+
+
 def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
     main(
         [
@@ -122,7 +145,7 @@ def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
             "float32",
             "--solvers",
             "thomas",
-            "pcr_soa",
+            "split_jacobi_4",
             "--out-dir",
             str(tmp_path),
             "--dry-run",
@@ -131,5 +154,5 @@ def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
 
     assert capsys.readouterr().out.splitlines() == [
         "thomas -> thomas -> thomas B=2 Nx=5 dtype=float32",
-        "pcr_soa -> pcr_soa -> pcr_soa B=2 Nx=5 dtype=float32",
+        "split_jacobi_4 -> split_iterative -> split_jacobi_4 B=2 Nx=5 dtype=float32",
     ]

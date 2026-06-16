@@ -131,7 +131,7 @@ def test_kaggle_standard_e2e_is_bounded(tmp_path, monkeypatch):
     assert "1000" not in command
 
 
-def test_kaggle_linear_includes_padded_solver_candidate(tmp_path, monkeypatch):
+def test_kaggle_linear_includes_active_split_iterative_candidates(tmp_path, monkeypatch):
     commands = []
 
     def fake_run(command, *, cwd=None):
@@ -146,15 +146,14 @@ def test_kaggle_linear_includes_padded_solver_candidate(tmp_path, monkeypatch):
     solvers_end = command.index("--warmups")
     assert command[solvers_start:solvers_end] == [
         "thomas",
-        "thomas_batched",
         "pcr",
         "pcr_soa",
-        "pcr_soa_hybrid_4",
-        "pcr_soa_hybrid_8",
-        "pcr_soa_hybrid_16",
-        "pcr_soa_transposed",
-        "pcr_soa_padded",
         "pcr_adaptive",
+        "split_jacobi_4",
+        "split_jacobi_8",
+        "split_gs_4",
+        "split_gs_8",
+        "split_richardson_4",
     ]
 
 

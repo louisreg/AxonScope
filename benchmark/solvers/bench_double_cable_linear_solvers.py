@@ -11,7 +11,7 @@ Examples:
     python benchmark/solvers/bench_double_cable_linear_solvers.py \
       --batch-sizes 128 512 1024 \
       --nx 32 51 64 \
-      --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
+      --solvers thomas pcr pcr_soa split_jacobi_4 split_gs_4 pcr_adaptive \
       --dtypes float32 \
       --warmups 1 \
       --repeats 5
@@ -42,6 +42,10 @@ if __package__ in (None, ""):
 
 from axonscope.solvers import resolve_double_cable_block_solver
 from axonscope.solvers.common import (
+    double_cable_block_residual_norm,
+    solve_double_cable_split_gauss_seidel_batched,
+    solve_double_cable_split_jacobi_batched,
+    solve_double_cable_split_richardson_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -66,6 +70,11 @@ SOLVER_CHOICES = (
     "pcr_soa_transposed",
     "pcr_soa_padded",
     "pcr_adaptive",
+    "split_jacobi_4",
+    "split_jacobi_8",
+    "split_gs_4",
+    "split_gs_8",
+    "split_richardson_4",
 )
 KERNEL_SOLVERS = (
     "thomas",
@@ -77,7 +86,25 @@ KERNEL_SOLVERS = (
     "pcr_soa_hybrid_16",
     "pcr_soa_transposed",
     "pcr_soa_padded",
+    "split_jacobi_4",
+    "split_jacobi_8",
+    "split_gs_4",
+    "split_gs_8",
+    "split_richardson_4",
 )
+BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
+    "thomas_batched": "thomas",
+    "pcr_soa_hybrid_4": "pcr_soa",
+    "pcr_soa_hybrid_8": "pcr_soa",
+    "pcr_soa_hybrid_16": "pcr_soa",
+    "pcr_soa_transposed": "pcr_soa",
+    "pcr_soa_padded": "pcr_soa",
+    "split_jacobi_4": "split_iterative",
+    "split_jacobi_8": "split_iterative",
+    "split_gs_4": "split_iterative",
+    "split_gs_8": "split_iterative",
+    "split_richardson_4": "split_iterative",
+}
 PCR_SOA_MAX_BATCH = 4096
 
 
@@ -157,15 +184,8 @@ def planned_cases(
                 for solver in solvers:
                     if solver not in SOLVER_CHOICES:
                         raise ValueError(f"unknown solver choice: {solver!r}.")
-                    if solver in {
-                        "thomas_batched",
-                        "pcr_soa_hybrid_4",
-                        "pcr_soa_hybrid_8",
-                        "pcr_soa_hybrid_16",
-                        "pcr_soa_transposed",
-                        "pcr_soa_padded",
-                    }:
-                        resolved = "thomas" if solver == "thomas_batched" else "pcr_soa"
+                    if solver in BENCHMARK_ONLY_SOLVER_RESOLUTIONS:
+                        resolved = BENCHMARK_ONLY_SOLVER_RESOLUTIONS[solver]
                         kernel_solver = solver
                     else:
                         resolved = resolve_double_cable_block_solver(
@@ -378,6 +398,15 @@ def run_case(
         denominator = np.maximum(np.abs(ref), 1e-12)
         max_rel_error = float(np.max(delta / denominator))
 
+    residual = _block_until_ready(
+        double_cable_block_residual_norm(
+            *args,
+            last_output[..., 0],
+            last_output[..., 1],
+        )
+    )
+    residual_np = np.asarray(residual, dtype=np.float64)
+
     median_seconds = float(statistics.median(run_times))
     p95_seconds = float(np.percentile(np.asarray(run_times), 95.0))
     node_solves = int(case.batch_size) * int(case.nx)
@@ -396,6 +425,8 @@ def run_case(
         "node_solves_per_s": node_solves / median_seconds,
         "max_abs_error_vs_thomas64": max_abs_error,
         "max_rel_error_vs_thomas64": max_rel_error,
+        "max_block_residual_norm": float(np.max(residual_np)),
+        "median_block_residual_norm": float(np.median(residual_np)),
         "trace_dir": None if trace_dir is None else str(trace_dir),
     }
 
@@ -411,6 +442,53 @@ def _compute_reference(batch_size: int, nx: int) -> jax.Array:
 
 
 def _make_batched_solver(kernel_solver: str):
+    if kernel_solver in {
+        "split_jacobi_4",
+        "split_jacobi_8",
+        "split_gs_4",
+        "split_gs_8",
+        "split_richardson_4",
+    }:
+        split_solve, iterations, extra_kwargs = {
+            "split_jacobi_4": (solve_double_cable_split_jacobi_batched, 4, {}),
+            "split_jacobi_8": (solve_double_cable_split_jacobi_batched, 8, {}),
+            "split_gs_4": (solve_double_cable_split_gauss_seidel_batched, 4, {}),
+            "split_gs_8": (solve_double_cable_split_gauss_seidel_batched, 8, {}),
+            "split_richardson_4": (
+                solve_double_cable_split_richardson_batched,
+                4,
+                {"relaxation": 0.75},
+            ),
+        }[kernel_solver]
+
+        @jax.jit
+        def solve_split(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        ):
+            x0, x1 = split_solve(
+                a00,
+                a01,
+                a10,
+                a11,
+                off0,
+                off1,
+                rhs0,
+                rhs1,
+                iterations=iterations,
+                init="rhs_guess",
+                **extra_kwargs,
+            )
+            return jnp.stack((x0, x1), axis=-1)
+
+        return solve_split
+
     if kernel_solver == "thomas_batched":
 
         @jax.jit
@@ -578,6 +656,8 @@ def _write_outputs(
         "node_solves_per_s",
         "max_abs_error_vs_thomas64",
         "max_rel_error_vs_thomas64",
+        "max_block_residual_norm",
+        "median_block_residual_norm",
         "trace_dir",
     )
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -607,12 +687,14 @@ def _write_outputs(
 def _format_row(row: dict[str, Any]) -> str:
     err = row["max_abs_error_vs_thomas64"]
     err_text = "n/a" if err is None else f"{err:.3e}"
+    residual_text = f"{row['max_block_residual_norm']:.3e}"
     return (
         f"{row['requested_solver']}({row['kernel_solver']}) "
         f"B={row['batch_size']} Nx={row['nx']} {row['dtype']}: "
         f"median={row['steady_median_ms']:.3f} ms, "
         f"nodes/s={row['node_solves_per_s']:.3e}, "
-        f"max_abs_err={err_text}"
+        f"max_abs_err={err_text}, "
+        f"max_residual={residual_text}"
     )
 
 

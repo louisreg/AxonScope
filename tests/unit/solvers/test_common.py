@@ -6,9 +6,13 @@ import jax.numpy as jnp
 
 from axonscope.solvers.common import (
     apply_diffusion_operator,
+    double_cable_block_residual_norm,
     diffusion_operator_coeffs,
     double_cable_power_bucket,
     pad_double_cable_system_to_power_bucket,
+    solve_double_cable_split_gauss_seidel_batched,
+    solve_double_cable_split_jacobi_batched,
+    solve_double_cable_split_richardson_batched,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
@@ -18,6 +22,8 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_scalar_batched,
     solve_block_tridiagonal_2x2_scalar,
+    solve_tridiagonal_batched,
+    split_double_cable_block_system_soa,
 )
 
 
@@ -446,6 +452,133 @@ def test_hybrid_batched_pcr_soa_matches_vmapped_thomas_for_shared_coefficients()
             rtol=1e-5,
             atol=1e-6,
         )
+
+
+def test_split_double_cable_block_system_soa_returns_scalar_rails():
+    n = 5
+    a00 = jnp.arange(n, dtype=jnp.float32) + 4.0
+    a01 = -0.2 * jnp.ones((n,), dtype=jnp.float32)
+    a10 = -0.3 * jnp.ones((n,), dtype=jnp.float32)
+    a11 = jnp.arange(n, dtype=jnp.float32) + 5.0
+    off0 = -0.1 * jnp.ones((n - 1,), dtype=jnp.float32)
+    off1 = -0.05 * jnp.ones((n - 1,), dtype=jnp.float32)
+    rhs0 = jnp.ones((2, n), dtype=jnp.float32)
+    rhs1 = 2.0 * jnp.ones((2, n), dtype=jnp.float32)
+
+    lower_i, diag_i, upper_i, lower_e, diag_e, upper_e, cie, cei, bi, be = (
+        split_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+
+    assert lower_i is off0
+    assert diag_i is a00
+    assert upper_i is off0
+    assert lower_e is off1
+    assert diag_e is a11
+    assert upper_e is off1
+    assert cie is a01
+    assert cei is a10
+    assert bi is rhs0
+    assert be is rhs1
+
+
+def test_solve_tridiagonal_batched_matches_single_system_solve():
+    lower = jnp.asarray([-0.1, -0.2, -0.15], dtype=jnp.float32)
+    diag = jnp.asarray([2.0, 2.2, 2.1, 2.3], dtype=jnp.float32)
+    upper = jnp.asarray([-0.05, -0.07, -0.06], dtype=jnp.float32)
+    rhs = jnp.asarray([[1.0, 0.0, -1.0, 2.0], [0.5, 0.25, -0.5, 1.5]], dtype=jnp.float32)
+
+    batched = solve_tridiagonal_batched(lower, diag, upper, rhs)
+    vmapped = jax.vmap(
+        lambda row: jax.lax.linalg.tridiagonal_solve(
+            jnp.concatenate([jnp.zeros((1,), dtype=row.dtype), lower]),
+            diag,
+            jnp.concatenate([upper, jnp.zeros((1,), dtype=row.dtype)]),
+            row[:, None],
+        )[:, 0]
+    )(rhs)
+
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(vmapped), rtol=1e-6, atol=1e-6)
+
+
+def test_split_iterative_solvers_are_exact_for_decoupled_rails():
+    batch_size = 3
+    n = 9
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)
+
+    a00 = 4.0 + 0.05 * x
+    a01 = jnp.zeros((n,), dtype=jnp.float32)
+    a10 = jnp.zeros((n,), dtype=jnp.float32)
+    a11 = 5.0 + 0.07 * x
+    off0 = -0.10 - 0.01 * jnp.arange(n - 1, dtype=jnp.float32)
+    off1 = -0.07 - 0.005 * jnp.arange(n - 1, dtype=jnp.float32)
+    rhs0 = jnp.sin(0.3 * x[None, :] + 0.2 * batch)
+    rhs1 = jnp.cos(0.2 * x[None, :] - 0.1 * batch)
+
+    thomas0, thomas1 = jax.vmap(
+        solve_block_tridiagonal_2x2_scalar,
+        in_axes=(None, None, None, None, None, None, 0, 0),
+    )(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+
+    split_solvers = (
+        (solve_double_cable_split_jacobi_batched, {}),
+        (solve_double_cable_split_gauss_seidel_batched, {}),
+        (solve_double_cable_split_richardson_batched, {"relaxation": 1.0}),
+    )
+    for solve, extra_kwargs in split_solvers:
+        got0, got1 = solve(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+            iterations=1,
+            init="zero",
+            **extra_kwargs,
+        )
+        np.testing.assert_allclose(np.asarray(got0), np.asarray(thomas0), rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(np.asarray(got1), np.asarray(thomas1), rtol=1e-5, atol=1e-6)
+
+
+def test_split_iterative_residual_norm_decreases_for_weak_coupling():
+    batch_size = 2
+    n = 11
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)
+
+    a00 = 4.0 + 0.04 * x
+    a01 = -0.05 * jnp.ones((n,), dtype=jnp.float32)
+    a10 = -0.04 * jnp.ones((n,), dtype=jnp.float32)
+    a11 = 5.0 + 0.03 * x
+    off0 = -0.05 * jnp.ones((n - 1,), dtype=jnp.float32)
+    off1 = -0.04 * jnp.ones((n - 1,), dtype=jnp.float32)
+    rhs0 = jnp.sin(0.2 * x[None, :] + 0.1 * batch)
+    rhs1 = jnp.cos(0.15 * x[None, :] - 0.05 * batch)
+
+    guess0, guess1 = jnp.zeros_like(rhs0), jnp.zeros_like(rhs1)
+    initial = double_cable_block_residual_norm(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1, guess0, guess1
+    )
+    solved0, solved1 = solve_double_cable_split_gauss_seidel_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        iterations=4,
+        init="zero",
+    )
+    final = double_cable_block_residual_norm(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1, solved0, solved1
+    )
+
+    assert float(jnp.max(final)) < float(jnp.max(initial))
 
 
 def test_batched_thomas_matches_vmapped_thomas_for_batched_coefficients():

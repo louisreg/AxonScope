@@ -1766,6 +1766,311 @@ def solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(
     return solution0, solution1
 
 
+def split_double_cable_block_system_soa(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+) -> tuple[Array, Array, Array, Array, Array, Array, Array, Array, Array, Array]:
+    """Return the two scalar rails and local rail coupling terms.
+
+    The specialized double-cable 2x2 block system is reordered as:
+
+    ``Ti * Vi + Cie * Ve = bi``
+    ``Te * Ve + Cei * Vi = be``
+
+    Off-block rail coupling must remain diagonal/local for this split to be
+    valid. The current SoA representation only exposes diagonal off-block edge
+    arrays, so the helper returns the same edge array as lower and upper for
+    each scalar rail.
+    """
+
+    return off0, a00, off0, off1, a11, off1, a01, a10, rhs0, rhs1
+
+
+def solve_tridiagonal_batched(
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    rhs: Array,
+) -> Array:
+    """Solve batch-first scalar tridiagonal systems.
+
+    ``diag`` and ``rhs`` use shape ``[B, Nx]`` or shared ``diag`` shape
+    ``[Nx]``. ``lower``/``upper`` are edge arrays with trailing length
+    ``Nx - 1`` and may likewise be shared or batch-specific.
+    """
+
+    rhs = jnp.asarray(rhs)
+    if rhs.ndim != 2:
+        raise ValueError("rhs must have shape (batch_size, Nx).")
+    batch_size, n = rhs.shape
+
+    def as_space(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        if arr.ndim == 1:
+            if arr.shape[0] != n:
+                raise ValueError(f"{name} must have length Nx={n}, got {arr.shape}.")
+            return jnp.broadcast_to(arr[None, :], (batch_size, n))
+        if arr.ndim == 2 and arr.shape == (batch_size, n):
+            return arr
+        raise ValueError(
+            f"{name} must have shape ({n},) or ({batch_size}, {n}), got {arr.shape}."
+        )
+
+    def as_edges(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        edge_shape = (batch_size, max(n - 1, 0))
+        if arr.ndim == 1:
+            if arr.shape[0] != edge_shape[1]:
+                raise ValueError(
+                    f"{name} must have length Nx - 1={edge_shape[1]}, got {arr.shape}."
+                )
+            return jnp.broadcast_to(arr[None, :], edge_shape)
+        if arr.ndim == 2 and arr.shape == edge_shape:
+            return arr
+        raise ValueError(
+            f"{name} must have shape ({edge_shape[1]},) or {edge_shape}, got {arr.shape}."
+        )
+
+    d = as_space("diag", diag)
+    lower_b = as_edges("lower", lower)
+    upper_b = as_edges("upper", upper)
+    zero_col = jnp.zeros((batch_size, 1), dtype=rhs.dtype)
+    dl = jnp.concatenate([zero_col, lower_b], axis=1)
+    du = jnp.concatenate([upper_b, zero_col], axis=1)
+    return jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[..., None])[..., 0]
+
+
+def apply_double_cable_block_system_soa(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    x0: Array,
+    x1: Array,
+) -> tuple[Array, Array]:
+    """Apply the specialized double-cable block system to ``(x0, x1)``."""
+
+    x0 = jnp.asarray(x0)
+    x1 = jnp.asarray(x1)
+    if x0.ndim != 2 or x1.ndim != 2:
+        raise ValueError("x0 and x1 must have shape (batch_size, Nx).")
+    if x0.shape != x1.shape:
+        raise ValueError(f"x0 and x1 must have the same shape, got {x0.shape} and {x1.shape}.")
+    batch_size, n = x0.shape
+
+    def as_space(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        if arr.ndim == 1:
+            if arr.shape[0] != n:
+                raise ValueError(f"{name} must have length Nx={n}, got {arr.shape}.")
+            return jnp.broadcast_to(arr[None, :], (batch_size, n))
+        if arr.ndim == 2 and arr.shape == (batch_size, n):
+            return arr
+        raise ValueError(
+            f"{name} must have shape ({n},) or ({batch_size}, {n}), got {arr.shape}."
+        )
+
+    def as_edges(name: str, values: Array) -> Array:
+        arr = jnp.asarray(values)
+        edge_shape = (batch_size, max(n - 1, 0))
+        if arr.ndim == 1:
+            if arr.shape[0] != edge_shape[1]:
+                raise ValueError(
+                    f"{name} must have length Nx - 1={edge_shape[1]}, got {arr.shape}."
+                )
+            return jnp.broadcast_to(arr[None, :], edge_shape)
+        if arr.ndim == 2 and arr.shape == edge_shape:
+            return arr
+        raise ValueError(
+            f"{name} must have shape ({edge_shape[1]},) or {edge_shape}, got {arr.shape}."
+        )
+
+    a00_b = as_space("a00", a00)
+    a01_b = as_space("a01", a01)
+    a10_b = as_space("a10", a10)
+    a11_b = as_space("a11", a11)
+    off0_b = as_edges("off0", off0)
+    off1_b = as_edges("off1", off1)
+    zero_col = jnp.zeros((batch_size, 1), dtype=x0.dtype)
+
+    y0 = a00_b * x0 + a01_b * x1
+    y1 = a10_b * x0 + a11_b * x1
+    y0 = y0 + jnp.concatenate([zero_col, off0_b * x0[:, :-1]], axis=1)
+    y0 = y0 + jnp.concatenate([off0_b * x0[:, 1:], zero_col], axis=1)
+    y1 = y1 + jnp.concatenate([zero_col, off1_b * x1[:, :-1]], axis=1)
+    y1 = y1 + jnp.concatenate([off1_b * x1[:, 1:], zero_col], axis=1)
+    return y0, y1
+
+
+def double_cable_block_residual_norm(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    x0: Array,
+    x1: Array,
+    *,
+    eps: float = 1e-12,
+) -> Array:
+    """Return per-row relative residual norms for a double-cable block solve."""
+
+    rhs0 = jnp.asarray(rhs0)
+    rhs1 = jnp.asarray(rhs1)
+    ax0, ax1 = apply_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, x0, x1)
+    residual0 = ax0 - rhs0
+    residual1 = ax1 - rhs1
+    numerator = jnp.sqrt(jnp.sum(residual0 * residual0 + residual1 * residual1, axis=1))
+    denominator = jnp.sqrt(jnp.sum(rhs0 * rhs0 + rhs1 * rhs1, axis=1))
+    return numerator / (denominator + jnp.asarray(eps, dtype=rhs0.dtype))
+
+
+def split_initial_guess(
+    a00: Array,
+    a11: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    init: str = "rhs_guess",
+) -> tuple[Array, Array]:
+    """Return an initial guess for fixed-K split iterative solvers."""
+
+    rhs0 = jnp.asarray(rhs0)
+    rhs1 = jnp.asarray(rhs1)
+    if init == "zero":
+        return jnp.zeros_like(rhs0), jnp.zeros_like(rhs1)
+    if init == "rhs_guess":
+        batch_size, n = rhs0.shape
+
+        def as_space(values: Array) -> Array:
+            arr = jnp.asarray(values)
+            if arr.ndim == 1:
+                return jnp.broadcast_to(arr[None, :], (batch_size, n))
+            return arr
+
+        return rhs0 / as_space(a00), rhs1 / as_space(a11)
+    raise ValueError("init must be 'zero' or 'rhs_guess'.")
+
+
+def solve_double_cable_split_jacobi_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    iterations: int = 4,
+    init: str = "rhs_guess",
+) -> tuple[Array, Array]:
+    """Fixed-K split Jacobi solve for the two coupled scalar rails."""
+
+    lower_i, diag_i, upper_i, lower_e, diag_e, upper_e, cie, cei, bi, be = (
+        split_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+    vi, ve = split_initial_guess(diag_i, diag_e, bi, be, init=init)
+    batch_size = jnp.asarray(bi).shape[0]
+
+    for _ in range(int(iterations)):
+        rhs_i = bi - cie * ve
+        rhs_e = be - cei * vi
+        rail_lower = jnp.concatenate(
+            [
+                jnp.broadcast_to(jnp.asarray(lower_i), (batch_size, lower_i.shape[-1])),
+                jnp.broadcast_to(jnp.asarray(lower_e), (batch_size, lower_e.shape[-1])),
+            ],
+            axis=0,
+        )
+        rail_diag = jnp.concatenate(
+            [
+                jnp.broadcast_to(jnp.asarray(diag_i), (batch_size, diag_i.shape[-1])),
+                jnp.broadcast_to(jnp.asarray(diag_e), (batch_size, diag_e.shape[-1])),
+            ],
+            axis=0,
+        )
+        rail_upper = jnp.concatenate(
+            [
+                jnp.broadcast_to(jnp.asarray(upper_i), (batch_size, upper_i.shape[-1])),
+                jnp.broadcast_to(jnp.asarray(upper_e), (batch_size, upper_e.shape[-1])),
+            ],
+            axis=0,
+        )
+        rail_rhs = jnp.concatenate([rhs_i, rhs_e], axis=0)
+        solved = solve_tridiagonal_batched(rail_lower, rail_diag, rail_upper, rail_rhs)
+        vi, ve = solved[:batch_size], solved[batch_size:]
+    return vi, ve
+
+
+def solve_double_cable_split_gauss_seidel_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    iterations: int = 4,
+    init: str = "rhs_guess",
+) -> tuple[Array, Array]:
+    """Fixed-K split Gauss-Seidel solve for the two coupled scalar rails."""
+
+    lower_i, diag_i, upper_i, lower_e, diag_e, upper_e, cie, cei, bi, be = (
+        split_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+    vi, ve = split_initial_guess(diag_i, diag_e, bi, be, init=init)
+    for _ in range(int(iterations)):
+        vi = solve_tridiagonal_batched(lower_i, diag_i, upper_i, bi - cie * ve)
+        ve = solve_tridiagonal_batched(lower_e, diag_e, upper_e, be - cei * vi)
+    return vi, ve
+
+
+def solve_double_cable_split_richardson_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    iterations: int = 4,
+    relaxation: float = 0.75,
+    init: str = "rhs_guess",
+) -> tuple[Array, Array]:
+    """Fixed-K preconditioned Richardson solve for the coupled rail system."""
+
+    lower_i, diag_i, upper_i, lower_e, diag_e, upper_e, cie, cei, bi, be = (
+        split_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+    vi, ve = split_initial_guess(diag_i, diag_e, bi, be, init=init)
+    omega = jnp.asarray(relaxation, dtype=jnp.asarray(rhs0).dtype)
+    for _ in range(int(iterations)):
+        avi, ave = apply_double_cable_block_system_soa(a00, a01, a10, a11, off0, off1, vi, ve)
+        ri = bi - avi
+        re = be - ave
+        zi = solve_tridiagonal_batched(lower_i, diag_i, upper_i, ri)
+        ze = solve_tridiagonal_batched(lower_e, diag_e, upper_e, re)
+        vi = vi + omega * zi
+        ve = ve + omega * ze
+    return vi, ve
+
+
 def double_cable_power_bucket(
     nx: int,
     *,

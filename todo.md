@@ -66,6 +66,8 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
+- [ ] Phase 1.5 split iterative solver: finish local smoke, then run the
+  focused Kaggle `linear` matrix before considering any routing change.
 - [x] Keep pseudo-double/pseudo-MRG on standby until exact-solver work exposes a
   clear need for approximate screening again.
 - [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
@@ -185,7 +187,7 @@ Near-term tasks:
     Thomas64 within `~1.4e-07` max abs error but was not a general speed win
     versus batch-first `pcr_soa` (`8/20` wins, geomean `1.047x` slower).
     Keep it benchmark-only/standby; do not route it into `auto`.
-- [ ] Phase 1E: add and benchmark exact hybrid PCR/Thomas candidates.
+- [x] Phase 1E: add and benchmark exact hybrid PCR/Thomas candidates.
   - [x] Add `solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(...)` and
     benchmark-only `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and
     `pcr_soa_hybrid_16`.
@@ -193,12 +195,26 @@ Near-term tasks:
     all hybrid variants matched the Thomas64 reference with max absolute error
     about `7.8e-08`. CPU/local timing was mixed (`hybrid_4` faster at `Nx=89`,
     slower at `Nx=45`); use P100 evidence for go/no-go.
-  - [ ] Run Kaggle solver-only `linear` and compare against batch-native
-    `pcr_soa`.
-  - [ ] Keep only if solver-only speedup is `>1.2x` vs batch-native `pcr_soa`
-    with unchanged numerical error; otherwise mark standby.
+  - [x] Kaggle P100 `20260616_225915_linear_NvidiaTeslaP100`: all hybrid
+    variants matched Thomas64 within `~1.4e-07` max abs error but were much
+    slower than batch-native `pcr_soa`. `hybrid_4` won `0/20` cases and was
+    `3.405x` slower geomean; `hybrid_8` was `3.828x` slower; `hybrid_16` was
+    `4.274x` slower. Decision: keep all hybrid variants benchmark-only/standby;
+    do not route them into `auto`.
 - [ ] Evaluate optimized Thomas, PCR hybrid, associative scans, split iterative,
   and Pallas only in the sequence described by the exact-GPU roadmap.
+  - [x] Add Phase 1.5 split-system helpers, scalar batched tridiagonal solve,
+    fixed-K Jacobi/Gauss-Seidel/Richardson candidates, and residual metric.
+  - [x] Keep split candidates benchmark-only as `split_jacobi_4`,
+    `split_jacobi_8`, `split_gs_4`, `split_gs_8`, and `split_richardson_4`.
+  - [x] Local split smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`,
+    `float32`. `split_jacobi_8`, `split_gs_4`, and `split_gs_8` reached
+    residual/error near the exact `pcr_soa` baseline (`~1e-7`); `split_jacobi_4`
+    stayed around `~6e-6` residual; `split_richardson_4` was not acceptable
+    locally (`~1e-3` residual). Treat local timing as CPU-only smoke, not GPU
+    evidence.
+  - [ ] Run Kaggle P100 `linear` with official solvers plus split candidates;
+    decide whether Phase 1.5 is worth E2E/physiology validation.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
   in manifests.
 - [ ] Add a didactic advanced solver-options example after the API is stable.
@@ -224,7 +240,7 @@ Solver-only diagnostic command:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 128 512 1024 \
   --nx 32 51 64 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
+  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi_8 split_gs_4 split_gs_8 split_richardson_4 \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

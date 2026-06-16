@@ -40,9 +40,10 @@ The currently implemented choices are:
 | `pcr_soa` | Exact struct-of-arrays PCR variant. |
 | `pcr_adaptive` | `pcr_soa` for `B <= 4096`, matrix-layout `pcr` for larger batches. This threshold is calibrated from the 2026-06-16 P100 solver-only sweep and should be revisited with more devices. |
 
-Do not add more solver-choice names to public or benchmark CLI surfaces until
-they exist in code, have Thomas-vs-candidate tests, and have benchmark evidence.
-The names below are roadmap candidates, not current API.
+Do not add more solver-choice names to public surfaces until they exist in code,
+have Thomas-vs-candidate tests, and have benchmark evidence. Benchmark-only
+names may exist in solver-focused runners while gathering that evidence, but
+must stay out of `BatchOptions.double_cable_block_solver` and `auto`.
 
 Pseudo-double and pseudo-MRG modes are now on standby. They live only under
 `benchmark/pseudo_double/` as validation harness candidates and must not be
@@ -190,6 +191,7 @@ steady-state min/median/p95 time
 node-solves/s = B * Nx / time
 max_abs_error vs Thomas float64
 max_rel_error vs Thomas float64
+max/median block residual norm
 ```
 
 All timings call `jax.block_until_ready(out)`. Future candidate solver names
@@ -690,7 +692,8 @@ Assert padded and unpadded solutions match for real rows.
 
 ## Phase 1E — Hybrid PCR + Thomas
 
-Status on 2026-06-16: benchmark-only exact candidates implemented locally as
+Status on 2026-06-16: benchmark-only exact candidates implemented and tested on
+P100 as
 `solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(...)` with
 `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16`. The
 implementation runs PCR stages until remaining couplings jump by the requested
@@ -703,6 +706,14 @@ absolute error about `7.8e-08` versus Thomas64 for all three hybrid variants.
 CPU/local timing was mixed (`hybrid_4` faster than `pcr_soa` at `Nx=89` but
 slower at `Nx=45`); the go/no-go decision needs the Kaggle P100 solver-only
 `linear` matrix.
+
+Kaggle P100 `20260616_225915_linear_NvidiaTeslaP100` measured `B=128..4096`,
+`Nx=32/51/64/96`, `float32`, five repeats. All hybrid variants stayed
+numerically aligned with Thomas64 (`~1.4e-07` max absolute error), but failed
+the go/no-go by a wide margin: `hybrid_4` won `0/20` cases and was `3.405x`
+slower than batch-native `pcr_soa` geomean; `hybrid_8` was `3.828x` slower;
+`hybrid_16` was `4.274x` slower. Decision: keep all hybrid variants
+benchmark-only/standby and do not route them through `auto`.
 
 ## Motivation
 
@@ -806,6 +817,40 @@ Cie, Cei = local diagonal coupling between the two rails
 If `Vi` and `Ve` were independent, each rail would be a normal single-cable solve. They are not independent, but they can be solved iteratively using the scalar tridiagonal solver that already scales well on GPU.
 
 This does not replace the exact direct block solver. It adds an iterative backend that is exact only if iterated to convergence. Fixed small iteration counts are approximate but may be accurate enough for threshold/recruitment if the residual is small.
+
+Status on 2026-06-16: Phase 1.5 is implemented as solver-only,
+benchmark-only candidates:
+
+```text
+split_jacobi_4
+split_jacobi_8
+split_gs_4
+split_gs_8
+split_richardson_4
+```
+
+Implemented primitives:
+
+```text
+split_double_cable_block_system_soa(...)
+solve_tridiagonal_batched(...)
+solve_double_cable_split_jacobi_batched(...)
+solve_double_cable_split_gauss_seidel_batched(...)
+solve_double_cable_split_richardson_batched(...)
+double_cable_block_residual_norm(...)
+```
+
+These names are not public `BatchOptions.double_cable_block_solver` choices and
+are not used by `auto`. The Kaggle `linear` preset now runs only the official
+direct solvers plus these split candidates, leaving prior non-winning
+`thomas_batched`, padded, transposed, and hybrid candidates in standby.
+
+Local CPU smoke on 2026-06-16 (`B=2`, `Nx=45/89`, `float32`) compiled and ran
+all Phase 1.5 candidates. `split_jacobi_8`, `split_gs_4`, and `split_gs_8`
+matched the exact baseline with max error/residual around `1e-7`.
+`split_jacobi_4` was close but less accurate (`~6e-6` residual).
+`split_richardson_4` was not accurate enough in this smoke (`~1e-3` residual).
+Use Kaggle P100 evidence for performance and for the first go/no-go decision.
 
 ---
 
@@ -1125,7 +1170,7 @@ Compare against:
 ```text
 THOMAS
 PCR_SOA
-PCR_HYBRID
+PCR_ADAPTIVE
 ```
 
 Metrics:
@@ -1186,13 +1231,13 @@ This phase should be implemented after Phase 1A/1B because it needs clean solver
 Recommended order:
 
 ```text
-1. Add solver dispatch.
-2. Make PCR_SOA official.
-3. Add split_double_cable_block_system_soa.
-4. Implement split_jacobi_fixed_k.
-5. Implement split_gauss_seidel_fixed_k.
-6. Add residual checker.
-7. Benchmark vs Thomas/PCR.
+1. Add solver dispatch. [done]
+2. Make PCR_SOA official. [done]
+3. Add split_double_cable_block_system_soa. [done]
+4. Implement split_jacobi_fixed_k. [done as benchmark-only]
+5. Implement split_gauss_seidel_fixed_k. [done as benchmark-only]
+6. Add residual checker. [done]
+7. Benchmark vs Thomas/PCR. [local smoke done; Kaggle P100 next]
 8. Only then decide whether associative scan or Pallas is still necessary.
 ```
 
@@ -1908,13 +1953,14 @@ All AUTO decisions must be benchmark-backed and stored in a small table.
 ## Week 3.5 — Phase 1.5 two-rail split solver
 
 ```text
-1. Add split_double_cable_block_system_soa.
-2. Implement split_jacobi_fixed_k.
-3. Implement split_gauss_seidel_fixed_k.
-4. Implement residual checker.
-5. Test K = 1, 2, 4, 8 with previous-timestep initialization.
-6. Compare speed and physiological outputs vs Thomas and PCR_SOA.
-7. Decide whether split_best should enter AUTO policy.
+1. Add split_double_cable_block_system_soa. [done]
+2. Implement split_jacobi_fixed_k. [done as split_jacobi_4/8]
+3. Implement split_gauss_seidel_fixed_k. [done as split_gs_4/8]
+4. Implement residual checker. [done]
+5. Test K = 4, 8 with rhs_guess initialization in solver-only benchmark. [local smoke done; Kaggle next]
+6. Compare speed and residual/error vs Thomas and PCR_SOA. [local smoke done; Kaggle next]
+7. Run physiology/E2E validation only if solver-only residuals and speed are credible.
+8. Decide whether split_best should enter AUTO policy.
 ```
 
 ## Week 4 — Phase 2 associative scan

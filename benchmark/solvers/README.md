@@ -37,7 +37,7 @@ Run a compact local smoke:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 8 128 \
   --nx 32 51 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
+  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_gs_4 \
   --dtypes float32 \
   --warmups 1 \
   --repeats 3
@@ -49,7 +49,7 @@ Run the GPU-oriented sweep from the exact double-cable roadmap:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1 8 128 512 1024 2048 4096 \
   --nx 16 32 51 64 96 100 128 \
-  --solvers thomas thomas_batched pcr pcr_soa pcr_soa_hybrid_4 pcr_soa_hybrid_8 pcr_soa_hybrid_16 pcr_adaptive \
+  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi_8 split_gs_4 split_gs_8 split_richardson_4 \
   --dtypes float32 float64 \
   --warmups 1 \
   --repeats 5
@@ -57,7 +57,8 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
 
 Each row records compile time, first compiled run time, steady-state min/median/
 p95 time, `B * Nx` node-solves per second, and max error versus a Thomas
-float64 reference unless `--skip-reference` is used.
+float64 reference unless `--skip-reference` is used. It also records max and
+median relative block residual norms for the solved linear system.
 
 `pcr_soa` is measured with the batch-native
 `solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
@@ -72,6 +73,11 @@ RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
+`split_jacobi_4`, `split_jacobi_8`, `split_gs_4`, `split_gs_8`, and
+`split_richardson_4` are benchmark-only Phase 1.5 candidates. They are
+fixed-iteration approximate split solvers, not exact direct solvers, so judge
+them by both speed and residual/error columns before considering any public
+routing.
 
 Summarize one or more downloaded `summary.csv` files:
 
