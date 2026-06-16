@@ -8,6 +8,22 @@ linear solve used inside each implicit myelinated time step.
 
 ## Double-Cable Linear Solvers
 
+Colab notebook:
+
+- `benchmark/solvers/colab_double_cable_linear_solvers.ipynb`
+
+Before opening it in Colab, publish the committed local revision:
+
+```bash
+git add -A
+git commit -m "Benchmark double-cable linear solvers"
+make bench-colab-push
+```
+
+The notebook clones `bench-colab`, installs `.[benchmark]`, runs one selectable
+case (`smoke`, `gpu_matrix`, `gpu_full`, or `trace_pcr_adaptive`), and downloads
+a zipped `benchmark/results/solvers/<run_id>/` folder.
+
 Dry-run the default matrix:
 
 ```bash
