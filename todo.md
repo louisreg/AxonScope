@@ -378,10 +378,16 @@ Near-term tasks:
       scratch allocation. Fix the GPU path to allocate scratch with
       `jax.experimental.pallas.mosaic_gpu.SMEM(...)`, while keeping the generic
       Pallas memory-ref fallback for local `interpret=True` and older APIs.
-    - [ ] Re-run `linear_pallas_focus` on a GPU backend after committing the
-      JAX 0.10 compatibility shim, Kaggle CUDA-plugin fix, and Pallas SMEM
-      scratch fix. This is the next useful Pallas decision point; local CPU
-      timing remains interpret-mode only and is not GPU evidence.
+    - [x] Tenth Kaggle P100 attempt
+      `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` confirmed SMEM is
+      the right Mosaic GPU scratch memory space, but the current
+      `pallas_thomas_128` design exceeds P100 shared memory
+      (`smem_bytes=419848 > max_smem_bytes=49152`) before any Pallas timing is
+      recorded. Decision: keep `pallas_thomas_128` benchmark-only/standby; do
+      not spend more Kaggle runs on this full-`Nx` scratch design. A future
+      Pallas attempt needs a different design, e.g. much smaller block size,
+      streaming/recomputed backward coefficients, or a PCR-style kernel with
+      bounded scratch.
   - [x] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
@@ -732,6 +738,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Kaggle JAX 0.10.1 Pallas retry setup | P100 run `20260617_211635_linear_pallas_focus_NvidiaTeslaP100` reached GPU backend, then failed before benchmark due stale Kaggle `jax_cuda12_plugin==0.7.2` against `jaxlib==0.10.1`. Kaggle wrapper now installs matching `jax[cuda12]==<installed jax version>` for P100 runs. |
 | 2026-06-17 | Kaggle Pallas scratch memory retry | P100 run `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` reached GPU benchmark execution and measured the non-Pallas first case, then Pallas lowering failed on scratch `MemorySpace.ANY`. Pallas scratch refs now prefer `MemorySpace.DEFAULT`; local Pallas smoke still passes (`11 passed`). |
 | 2026-06-17 | Kaggle Pallas SMEM scratch retry | P100 run `20260617_212605_linear_pallas_focus_NvidiaTeslaP100` showed `MemorySpace.DEFAULT` becomes unsupported `gmem` scratch under Mosaic GPU. GPU Pallas scratch now uses `mosaic_gpu.SMEM(...)`; local Pallas smoke still passes (`11 passed`). |
+| 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
 
 ## Completed Roadmap Archive
 

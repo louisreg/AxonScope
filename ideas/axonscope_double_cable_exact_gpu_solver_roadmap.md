@@ -1930,6 +1930,25 @@ fix: allocate GPU scratch with jax.experimental.pallas.mosaic_gpu.SMEM(...);
 Local `interpret=True` Pallas tests still pass after switching the GPU scratch
 path to SMEM. Re-run `linear_pallas_focus` once this fix is committed.
 
+Fourth Kaggle P100 retry after the JAX 0.10.1 local update:
+
+```text
+run: 20260617_213002_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas measurement
+progress: Mosaic GPU accepted the SMEM scratch allocation path.
+cause: the full-Nx Pallas Thomas design stores 6 forward coefficients for
+       block_b=128 and Nx=51 in shared memory, leading to
+       smem_bytes=419848 > max_smem_bytes=49152 on P100.
+decision: keep pallas_thomas_128 benchmark-only/standby. Do not spend more
+          Kaggle runs on this full-Nx scratch design.
+```
+
+Future Pallas work should be a redesign rather than another compatibility
+patch. Plausible directions are much smaller block sizes, recomputing or
+streaming the backward coefficients to bound scratch, or moving directly to a
+PCR/hybrid Pallas kernel whose scratch scales with stages rather than
+`block_b * Nx`.
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
