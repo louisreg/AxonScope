@@ -78,6 +78,8 @@ def main() -> None:
         run_linear(out_dir, smoke=False)
     elif BENCHMARK == "linear_assoc_focus":
         run_linear_assoc_focus(out_dir)
+    elif BENCHMARK == "linear_pcr_soa_trace":
+        run_linear_pcr_soa_trace(out_dir)
     elif BENCHMARK == "linear_pallas_focus":
         run_linear_pallas_focus(out_dir)
     elif BENCHMARK == "e2e":
@@ -90,7 +92,8 @@ def main() -> None:
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_assoc_focus, linear_pallas_focus, e2e, e2e_full, or both."
+            "linear_assoc_focus, linear_pcr_soa_trace, linear_pallas_focus, "
+            "e2e, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -230,6 +233,40 @@ def run_linear_assoc_focus(out_dir: pathlib.Path) -> None:
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear_assoc_focus" / "summary.csv", mode="linear")
+
+
+def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
+    trace_dir = out_dir / "linear_pcr_soa_trace" / "jax_traces"
+    command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_linear_solvers.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_pcr_soa_trace",
+        "--batch-sizes",
+        "2048",
+        "4096",
+        "--nx",
+        "51",
+        "96",
+        "--dtypes",
+        "float32",
+        "--solvers",
+        "pcr",
+        "pcr_soa",
+        "pcr_adaptive",
+        "--warmups",
+        "1",
+        "--repeats",
+        "2",
+        "--skip-reference",
+        "--jax-trace",
+        "--jax-trace-dir",
+        str(trace_dir),
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "linear_pcr_soa_trace" / "summary.csv", mode="linear")
 
 
 def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:

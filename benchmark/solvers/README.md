@@ -103,6 +103,37 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --repeats 5
 ```
 
+Capture a focused GPU JAX trace for PCR/SoA work:
+
+```bash
+python benchmark/solvers/bench_double_cable_linear_solvers.py \
+  --batch-sizes 2048 4096 \
+  --nx 51 96 \
+  --solvers pcr pcr_soa pcr_adaptive \
+  --dtypes float32 \
+  --warmups 1 \
+  --repeats 2 \
+  --skip-reference \
+  --jax-trace
+```
+
+On Kaggle, use the same matrix through the dedicated preset:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_trace \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
+
+Downloaded outputs include the zipped `jax_traces/` folder under the
+`linear_pcr_soa_trace` result directory. Open it with TensorBoard's profile
+viewer or the generated Perfetto trace when `--jax-trace-create-perfetto` is
+used locally.
+
 Run the focused Phase 3A Pallas-Thomas spike:
 
 ```bash

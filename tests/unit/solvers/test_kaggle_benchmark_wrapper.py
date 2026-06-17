@@ -209,6 +209,41 @@ def test_kaggle_linear_assoc_focus_is_bounded_to_exact_candidates(tmp_path, monk
     ]
 
 
+def test_kaggle_linear_pcr_soa_trace_profiles_focused_gpu_cases(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear_pcr_soa_trace(tmp_path)
+
+    (command,) = commands
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
+        "2048",
+        "4096",
+    ]
+    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
+        "51",
+        "96",
+    ]
+    solvers_start = command.index("--solvers") + 1
+    solvers_end = command.index("--warmups")
+    assert command[solvers_start:solvers_end] == ["pcr", "pcr_soa", "pcr_adaptive"]
+    assert "--skip-reference" in command
+    assert "--jax-trace" in command
+    assert command[command.index("--jax-trace-dir") + 1] == str(
+        tmp_path / "linear_pcr_soa_trace" / "jax_traces"
+    )
+
+
+def test_kaggle_runner_accepts_linear_pcr_soa_trace_choice():
+    args = parse_args(["--username", "owner", "--benchmark", "linear_pcr_soa_trace"])
+
+    assert args.benchmark == "linear_pcr_soa_trace"
+
+
 def test_kaggle_linear_pallas_focus_is_bounded_to_exact_candidates(tmp_path, monkeypatch):
     commands = []
 

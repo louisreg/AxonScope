@@ -255,6 +255,17 @@ Status on 2026-06-16: linear-solver tracing is implemented as:
 benchmark/solvers/profile_double_cable_linear_solvers.py
 ```
 
+Status on 2026-06-17: the main linear-solver runner also supports
+`--jax-trace`, and Kaggle exposes a focused P100 preset:
+
+```text
+linear_pcr_soa_trace
+```
+
+This preset traces `pcr`, `pcr_soa`, and `pcr_adaptive` at `B=2048/4096` and
+`Nx=51/96`, skips the Thomas64 reference to keep the profiler focused, and
+packages `jax_traces/` inside the downloaded Kaggle output archive.
+
 Run at minimum:
 
 ```bash
@@ -269,6 +280,18 @@ python benchmark/solvers/profile_double_cable_linear_solvers.py \
   --batch-size 1024 \
   --nx 64 \
   --trace-dir /tmp/as-pcr-B1024-Nx64
+```
+
+Kaggle P100 command:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_trace \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
 ```
 
 End-to-end double-cable traces that include time stepping, stimulation inputs,

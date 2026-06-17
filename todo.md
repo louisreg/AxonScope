@@ -66,6 +66,10 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
+- [ ] Phase 7.6.3 next: optimize exact `pcr_soa`/`pcr_adaptive` rather than
+  continuing Pallas-Thomas. Start with the Kaggle P100
+  `linear_pcr_soa_trace` profiler preset to identify gather/scatter,
+  temporary-array, or kernel-count bottlenecks before changing solver code.
 - [x] Phase 1.5 split iterative solver: validate `split_gs_3` in an
   end-to-end/physiology harness, with `split_gs_4` as the stricter residual
   fallback, before considering any routing change. Result: fixed-K
@@ -151,6 +155,8 @@ Near-term tasks:
   throughput, separate from dispatch/input/result packaging.
 - [x] Add a small JAX trace script or hotpath preset for exact double-cable
   linear solvers, with Thomas, `pcr`, `pcr_soa`, and `pcr_adaptive`.
+- [x] Add Kaggle P100 `linear_pcr_soa_trace` preset for focused GPU
+  `jax.profiler` traces of `pcr`, `pcr_soa`, and `pcr_adaptive`.
 - [x] Add an end-to-end exact double-cable batch-kernel benchmark for
   recording/Iinj pressure before GPU reruns.
 - [ ] Decide whether to keep the current Literal-based solver option or promote
