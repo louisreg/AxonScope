@@ -937,8 +937,33 @@ the end-to-end benchmark through an internal benchmark-only kernel override.
 split path is intentionally limited to array-output recordings (`center` or
 `full`) so it exercises the batch-native array kernel, not the observer-only
 per-fiber path. Local smoke passed for `B=2`, actual `Nx=45`, `Nt=3`,
-`recording=center`, `Iinj=none`. Next evidence needed: Kaggle P100
-`e2e_split_focus`.
+`recording=center`, `Iinj=none`.
+
+Kaggle P100 `20260617_105250_e2e_split_focus_NvidiaTeslaP100` measured
+`pcr_adaptive`, `split_gs_3`, and `split_gs_4` for `B=1024/2048/4096`,
+`target_Nx=51/96`, `Nt=500`, `recording=center`, and `Iinj=none`:
+
+```text
+median kernel time, split_gs_3 vs pcr_adaptive:
+    all cases: 5/6 wins, 0.721x geomean runtime = 1.39x speedup
+    B>=2048: 4/4 wins, 0.604x geomean runtime = 1.66x speedup
+    B>=2048 and actual_Nx=89: 2/2 wins, 0.514x runtime = 1.94x speedup
+
+median kernel time, split_gs_3 vs split_gs_4:
+    6/6 wins, 0.792x geomean runtime = 1.26x speedup
+
+total_with_inputs, split_gs_3 vs pcr_adaptive:
+    all cases: 1.46x geomean speedup
+    B>=2048: 1.05x geomean speedup
+    B>=2048 and actual_Nx=89: 1.09x geomean speedup
+```
+
+Decision: `split_gs_3` remains the main Phase 1.5 candidate. The E2E kernel
+gain is real, especially for larger batches and larger `Nx`, but full
+end-to-end impact is heavily limited by dense `Vext` materialization. Before
+any public solver-option exposure or `auto` routing, add output-agreement and
+physiology validation versus `pcr_adaptive`/Thomas on held-out double-cable
+workloads.
 
 ---
 
@@ -1420,6 +1445,23 @@ XLA lowering is worse than reverse scan
 or performance gain is negligible
 ```
 
+## Current status — 2026-06-17
+
+Implemented as benchmark-only `assoc_backward` via
+`solve_block_tridiagonal_2x2_assoc_backward_batched(...)`.
+
+Local smoke:
+
+```text
+B=2, Nx=45/89, float32
+solvers: thomas, thomas_batched, assoc_backward, pcr_soa
+max_abs_error_vs_thomas64 for assoc_backward: ~5.0e-08
+max_block_residual_norm for assoc_backward: ~9.3e-08
+```
+
+This is a correctness/integration smoke only; local CPU timing is not GPU
+evidence. Next required evidence is the P100 `linear_assoc_focus` run.
+
 ---
 
 ## Phase 2B — Full transfer-matrix associative scan
@@ -1565,6 +1607,22 @@ float32 diverges
 condition issues appear in physical systems
 dense version is already much slower than PCR and unlikely to optimize enough
 ```
+
+## Current status — 2026-06-17
+
+Implemented as benchmark-only diagnostic `assoc_transfer_dense` via
+`solve_block_tridiagonal_2x2_assoc_transfer_dense_batched(...)`.
+
+Result:
+
+```text
+well-conditioned artificial systems: matches Thomas in local tests
+benchmark-like float32 systems: numerically unstable due transfer amplification
+```
+
+Do not include this candidate in Kaggle focus runs and do not optimize it to
+SoA unless a stabilized transfer/Riccati formulation is derived. It remains a
+diagnostic prototype, not a routing candidate.
 
 ---
 

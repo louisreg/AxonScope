@@ -47,6 +47,8 @@ from axonscope.solvers.common import (
     solve_double_cable_split_jacobi_batched,
     solve_double_cable_split_jacobi_then_gauss_seidel_batched,
     solve_double_cable_split_richardson_batched,
+    solve_block_tridiagonal_2x2_assoc_backward_batched,
+    solve_block_tridiagonal_2x2_assoc_transfer_dense_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -71,6 +73,8 @@ SOLVER_CHOICES = (
     "pcr_soa_transposed",
     "pcr_soa_padded",
     "pcr_adaptive",
+    "assoc_backward",
+    "assoc_transfer_dense",
     "split_jacobi_4",
     "split_jacobi_8",
     "split_jacobi4_gs1",
@@ -90,6 +94,8 @@ KERNEL_SOLVERS = (
     "pcr_soa_hybrid_16",
     "pcr_soa_transposed",
     "pcr_soa_padded",
+    "assoc_backward",
+    "assoc_transfer_dense",
     "split_jacobi_4",
     "split_jacobi_8",
     "split_jacobi4_gs1",
@@ -101,6 +107,8 @@ KERNEL_SOLVERS = (
 )
 BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "thomas_batched": "thomas",
+    "assoc_backward": "thomas",
+    "assoc_transfer_dense": "thomas",
     "pcr_soa_hybrid_4": "pcr_soa",
     "pcr_soa_hybrid_8": "pcr_soa",
     "pcr_soa_hybrid_16": "pcr_soa",
@@ -553,6 +561,60 @@ def _make_batched_solver(kernel_solver: str):
             return jnp.stack((x0, x1), axis=-1)
 
         return solve_batch_native_thomas
+
+    if kernel_solver == "assoc_backward":
+
+        @jax.jit
+        def solve_assoc_backward(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        ):
+            x0, x1 = solve_block_tridiagonal_2x2_assoc_backward_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off0,
+                off1,
+                rhs0,
+                rhs1,
+            )
+            return jnp.stack((x0, x1), axis=-1)
+
+        return solve_assoc_backward
+
+    if kernel_solver == "assoc_transfer_dense":
+
+        @jax.jit
+        def solve_assoc_transfer_dense(
+            a00,
+            a01,
+            a10,
+            a11,
+            off0,
+            off1,
+            rhs0,
+            rhs1,
+        ):
+            x0, x1 = solve_block_tridiagonal_2x2_assoc_transfer_dense_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off0,
+                off1,
+                rhs0,
+                rhs1,
+            )
+            return jnp.stack((x0, x1), axis=-1)
+
+        return solve_assoc_transfer_dense
 
     if kernel_solver in {
         "pcr_soa",

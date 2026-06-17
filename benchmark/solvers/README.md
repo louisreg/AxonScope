@@ -70,6 +70,14 @@ benchmark-only Phase 1E candidates that run partial PCR, then exact block
 Thomas on the independent residual chains.
 `pcr_soa_transposed` is a benchmark-only exact candidate that keeps the public
 RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
+`assoc_backward` is a benchmark-only Phase 2A exact candidate that keeps the
+Thomas forward elimination and replaces the reverse substitution scan with an
+associative affine scan.
+`assoc_transfer_dense` is a benchmark-only Phase 2B prototype that uses dense
+5x5 transfer matrices and an associative prefix product; it is a
+stability/performance probe, not an optimized backend. It is numerically
+fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
+unless a stabilized formulation is added.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
@@ -78,6 +86,18 @@ RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
 benchmark-only Phase 1.5 candidates. They are fixed-iteration approximate split
 solvers, not exact direct solvers, so judge them by both speed and
 residual/error columns before considering any public routing.
+
+Run the focused Phase 2A associative-backward comparison:
+
+```bash
+python benchmark/solvers/bench_double_cable_linear_solvers.py \
+  --batch-sizes 1024 2048 4096 \
+  --nx 51 64 96 \
+  --solvers thomas thomas_batched assoc_backward pcr_soa pcr_adaptive \
+  --dtypes float32 \
+  --warmups 1 \
+  --repeats 5
+```
 
 Summarize one or more downloaded `summary.csv` files:
 

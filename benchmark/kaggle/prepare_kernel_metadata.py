@@ -37,6 +37,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "smoke",
             "linear",
             "linear_split_focus",
+            "linear_assoc_focus",
             "e2e",
             "e2e_split_focus",
             "e2e_full",

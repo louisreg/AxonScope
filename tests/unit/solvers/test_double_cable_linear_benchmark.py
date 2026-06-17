@@ -111,6 +111,31 @@ def test_planned_cases_allow_benchmark_only_batched_thomas():
     assert resolve_kernel_solver("thomas_batched", batch_size=512) == "thomas_batched"
 
 
+def test_planned_cases_allow_benchmark_only_assoc_backward():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["assoc_backward", "assoc_transfer_dense"],
+        platform="gpu",
+    )
+
+    assert [case.requested_solver for case in cases] == [
+        "assoc_backward",
+        "assoc_transfer_dense",
+    ]
+    assert [case.resolved_solver for case in cases] == ["thomas", "thomas"]
+    assert [case.kernel_solver for case in cases] == [
+        "assoc_backward",
+        "assoc_transfer_dense",
+    ]
+    assert resolve_kernel_solver("assoc_backward", batch_size=512) == "assoc_backward"
+    assert (
+        resolve_kernel_solver("assoc_transfer_dense", batch_size=512)
+        == "assoc_transfer_dense"
+    )
+
+
 def test_planned_cases_allow_benchmark_only_split_iterative_variants():
     solvers = [
         "split_jacobi_4",

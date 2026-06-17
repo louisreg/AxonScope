@@ -256,9 +256,38 @@ Near-term tasks:
     `Nt=3`, `recording=center`, `Iinj=none`, and solvers `pcr_adaptive`,
     `split_gs_3`, `split_gs_4`. Local CPU/JIT timing is not performance
     evidence.
-  - [ ] Run Kaggle P100 `e2e_split_focus` for `pcr_adaptive`, `split_gs_3`,
-    and `split_gs_4`; decide whether split iterative deserves physiology
-    agreement testing.
+  - [x] Kaggle P100 `20260617_105250_e2e_split_focus_NvidiaTeslaP100`:
+    `split_gs_3` kept the solver-only signal in the real array-output E2E
+    kernel. Versus `pcr_adaptive`, it won `5/6` cases on median kernel time
+    (`1.39x` geomean speedup), `4/4` for `B>=2048` (`1.66x`), and `2/2` for
+    `B>=2048` with actual `Nx=89` (`1.94x`). `split_gs_3` also beat
+    `split_gs_4` in `6/6` kernel cases (`1.26x` geomean speedup).
+  - [x] Kaggle P100 `20260617_105250_e2e_split_focus_NvidiaTeslaP100`:
+    full total-with-input gains were much smaller for large batches because
+    dense `Vext` materialization dominated. For `B>=2048`, `split_gs_3`
+    improved `total_with_inputs_ms` only `~1.05x` geomean overall, and
+    `~1.09x` for actual `Nx=89`. Decision: the solver win is real, but
+    end-to-end impact now requires either output/physiology agreement proof or
+    reducing dense input materialization overhead.
+  - [x] Add Phase 2A benchmark-only exact `assoc_backward`: same Thomas forward
+    elimination as `thomas_batched`, with associative affine scan for backward
+    substitution. Keep it out of `BatchOptions` and `auto` until P100 evidence
+    exists.
+  - [x] Local Phase 2A smoke passed on 2026-06-17 for `B=2`, `Nx=45/89`,
+    `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
+    `pcr_soa`. `assoc_backward` matched Thomas64 with max absolute error
+    about `5.0e-08` and max residual about `9.3e-08`. Local CPU timing is not
+    GPU performance evidence.
+  - [x] Add Phase 2B dense-transfer associative prototype as
+    `assoc_transfer_dense` for diagnostics only. It matches Thomas on
+    well-conditioned artificial systems, but benchmark-like float32 systems are
+    numerically unstable due transfer-matrix amplification. Keep it out of the
+    Kaggle focus and standby unless a stabilized formulation is derived.
+  - [ ] Run Kaggle P100 `linear_assoc_focus` for Phase 2A before deciding
+    whether associative backward deserves any further work.
+  - [ ] Add output-agreement/physiology validation for `split_gs_3` against
+    `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
+    solver-option exposure or `auto` routing.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
   in manifests.
 - [ ] Add a didactic advanced solver-options example after the API is stable.
