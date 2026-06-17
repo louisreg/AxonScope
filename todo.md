@@ -322,6 +322,12 @@ Near-term tasks:
       `jax.experimental.pallas.triton.CompilerParams` rather than the older
       `TritonCompilerParams`. Remove explicit Triton compiler params for this
       spike and let Pallas choose defaults; rerun required.
+    - [x] Fourth Kaggle P100 attempt
+      `20260617_120625_linear_pallas_focus_NvidiaTeslaP100` reached Pallas
+      kernel tracing, then failed on direct scratch writes
+      `scratch_ref[:, row, k] = ...` with a `swap.abstract_eval` error in
+      JAX `0.7.2`. Replace scratch/output direct indexing with explicit
+      `pl.store`/`pl.load`; rerun required.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.

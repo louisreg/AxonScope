@@ -1795,6 +1795,15 @@ cause: JAX 0.7.2 exposes pallas.triton.CompilerParams, not TritonCompilerParams
 fix: remove explicit Triton compiler params and use Pallas defaults for spike
 ```
 
+Fourth Kaggle attempt:
+
+```text
+run: 20260617_120625_linear_pallas_focus_NvidiaTeslaP100
+status: failed during Pallas kernel tracing
+cause: direct scratch/output indexing writes hit swap.abstract_eval in JAX 0.7.2
+fix: use explicit pl.store/pl.load for scratch and output refs
+```
+
 Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
 
 ---
