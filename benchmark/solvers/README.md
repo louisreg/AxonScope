@@ -78,6 +78,9 @@ associative affine scan.
 stability/performance probe, not an optimized backend. It is numerically
 fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
 unless a stabilized formulation is added.
+`pallas_thomas_128` is a benchmark-only Phase 3A spike that runs exact block
+Thomas in a Pallas kernel with `BLOCK_B=128`. It requires `B` divisible by 128
+and is not a public solver option.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
@@ -94,6 +97,18 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1024 2048 4096 \
   --nx 51 64 96 \
   --solvers thomas thomas_batched assoc_backward pcr_soa pcr_adaptive \
+  --dtypes float32 \
+  --warmups 1 \
+  --repeats 5
+```
+
+Run the focused Phase 3A Pallas-Thomas spike:
+
+```bash
+python benchmark/solvers/bench_double_cable_linear_solvers.py \
+  --batch-sizes 1024 2048 4096 \
+  --nx 51 64 96 \
+  --solvers thomas thomas_batched assoc_backward pallas_thomas_128 pcr_soa pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

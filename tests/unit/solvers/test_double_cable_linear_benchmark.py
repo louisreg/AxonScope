@@ -136,6 +136,21 @@ def test_planned_cases_allow_benchmark_only_assoc_backward():
     )
 
 
+def test_planned_cases_allow_benchmark_only_pallas_thomas():
+    cases = planned_cases(
+        batch_sizes=[1024],
+        nx_values=[64],
+        dtypes=["float32"],
+        solvers=["pallas_thomas_128"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pallas_thomas_128"
+    assert cases[0].resolved_solver == "thomas"
+    assert cases[0].kernel_solver == "pallas_thomas_128"
+    assert resolve_kernel_solver("pallas_thomas_128", batch_size=1024) == "pallas_thomas_128"
+
+
 def test_planned_cases_allow_benchmark_only_split_iterative_variants():
     solvers = [
         "split_jacobi_4",

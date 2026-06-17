@@ -79,6 +79,8 @@ def main() -> None:
         run_linear_split_focus(out_dir)
     elif BENCHMARK == "linear_assoc_focus":
         run_linear_assoc_focus(out_dir)
+    elif BENCHMARK == "linear_pallas_focus":
+        run_linear_pallas_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
     elif BENCHMARK == "e2e_split_focus":
@@ -91,8 +93,8 @@ def main() -> None:
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_split_focus, linear_assoc_focus, e2e, e2e_split_focus, "
-            "e2e_full, or both."
+            "linear_split_focus, linear_assoc_focus, linear_pallas_focus, e2e, "
+            "e2e_split_focus, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -252,6 +254,40 @@ def run_linear_assoc_focus(out_dir: pathlib.Path) -> None:
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear_assoc_focus" / "summary.csv", mode="linear")
+
+
+def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:
+    command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_linear_solvers.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_pallas_focus",
+        "--batch-sizes",
+        "1024",
+        "2048",
+        "4096",
+        "--nx",
+        "51",
+        "64",
+        "96",
+        "--dtypes",
+        "float32",
+        "--solvers",
+        "thomas",
+        "thomas_batched",
+        "assoc_backward",
+        "pallas_thomas_128",
+        "pcr_soa",
+        "pcr_adaptive",
+        "--warmups",
+        "1",
+        "--repeats",
+        "5",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "linear_pallas_focus" / "summary.csv", mode="linear")
 
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:

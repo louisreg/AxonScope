@@ -283,8 +283,27 @@ Near-term tasks:
     well-conditioned artificial systems, but benchmark-like float32 systems are
     numerically unstable due transfer-matrix amplification. Keep it out of the
     Kaggle focus and standby unless a stabilized formulation is derived.
-  - [ ] Run Kaggle P100 `linear_assoc_focus` for Phase 2A before deciding
-    whether associative backward deserves any further work.
+  - [x] Kaggle P100 `20260617_112515_linear_assoc_focus_NvidiaTeslaP100`:
+    `assoc_backward` matched Thomas64 cleanly (`max_abs_error ~1.0e-7`,
+    `max_residual ~1.3e-7`) and beat `thomas` in `9/9` cases (`1.42x`
+    geomean speedup), so the associative backward pass works as a Thomas
+    optimization. It did not beat current exact `pcr_soa` overall (`3/9` wins,
+    `1.313x` geomean runtime vs `pcr_soa`), although it won all `B=4096` cases
+    (`1.26x` geomean speedup vs `pcr_soa`). Decision: keep benchmark-only/
+    standby; do not route into `auto` unless future workloads specifically
+    need an exact large-batch Thomas-family fallback.
+  - [x] Add Phase 3A Pallas spike `pallas_thomas_128` as a benchmark-only
+    exact Thomas-family candidate. It runs one Pallas program per `128` fibers
+    over the full `Nx`, requires `B` divisible by `128`, and stays out of
+    `BatchOptions`/`auto`.
+  - [x] Local Pallas smoke passed on 2026-06-17 for `B=128`, `Nx=16`,
+    `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
+    `pallas_thomas_128`, `pcr_soa`. `pallas_thomas_128` matched Thomas64 with
+    max absolute error about `5.9e-08` and max residual about `1.2e-07`.
+    Local execution used Pallas `interpret=True` on CPU, so timing is not GPU
+    performance evidence.
+  - [ ] Run Kaggle P100 `linear_pallas_focus` and decide whether Pallas Thomas
+    justifies any Phase 3B PCR/hybrid work.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.

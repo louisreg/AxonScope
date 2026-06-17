@@ -257,6 +257,39 @@ def test_kaggle_linear_assoc_focus_is_bounded_to_exact_candidates(tmp_path, monk
     ]
 
 
+def test_kaggle_linear_pallas_focus_is_bounded_to_exact_candidates(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear_pallas_focus(tmp_path)
+
+    (command,) = commands
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
+        "51",
+        "64",
+        "96",
+    ]
+    solvers_start = command.index("--solvers") + 1
+    solvers_end = command.index("--warmups")
+    assert command[solvers_start:solvers_end] == [
+        "thomas",
+        "thomas_batched",
+        "assoc_backward",
+        "pallas_thomas_128",
+        "pcr_soa",
+        "pcr_adaptive",
+    ]
+
+
 def test_kaggle_checkout_stays_out_of_persisted_working_dir():
     assert kaggle_bench.CHECKOUT_DIR == Path("/tmp/AxonScope")
 

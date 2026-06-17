@@ -1459,8 +1459,22 @@ max_abs_error_vs_thomas64 for assoc_backward: ~5.0e-08
 max_block_residual_norm for assoc_backward: ~9.3e-08
 ```
 
-This is a correctness/integration smoke only; local CPU timing is not GPU
-evidence. Next required evidence is the P100 `linear_assoc_focus` run.
+P100 result:
+
+```text
+run: 20260617_112515_linear_assoc_focus_NvidiaTeslaP100
+max_abs_error_vs_thomas64: ~1.0e-07
+max_block_residual_norm: ~1.3e-07
+vs thomas: 9/9 wins, 0.706x geomean runtime, 1.42x speedup
+vs thomas_batched: 9/9 wins, 0.696x geomean runtime, 1.44x speedup
+vs pcr_soa: 3/9 wins, 1.313x geomean runtime, 0.76x speedup
+vs pcr_soa at B=4096: 3/3 wins, 0.792x geomean runtime, 1.26x speedup
+```
+
+Decision: `assoc_backward` is a successful Thomas-family optimization, but it
+is not a better general exact backend than `pcr_soa`/`pcr_adaptive`. Keep it
+benchmark-only/standby. Revisit only if future workloads specifically require
+an exact large-batch fallback where `B≈4096` dominates.
 
 ---
 
@@ -1735,6 +1749,24 @@ or trace shows lower kernel count / better occupancy
 ```
 
 If Pallas Thomas is not faster, Pallas PCR may still help, but the bar is higher.
+
+## Current status — 2026-06-17
+
+Implemented as benchmark-only `pallas_thomas_128` via
+`solve_block_tridiagonal_2x2_pallas_thomas_batched(...)`.
+
+Local smoke:
+
+```text
+B=128, Nx=16, float32
+solvers: thomas, thomas_batched, assoc_backward, pallas_thomas_128, pcr_soa
+max_abs_error_vs_thomas64 for pallas_thomas_128: ~5.9e-08
+max_block_residual_norm for pallas_thomas_128: ~1.2e-07
+```
+
+Local execution used Pallas `interpret=True` on CPU, so timing is not GPU
+evidence. The first useful decision point is the P100 `linear_pallas_focus`
+run. Keep this candidate benchmark-only and do not add any public routing.
 
 ---
 
