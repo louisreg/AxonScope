@@ -1899,6 +1899,22 @@ The P100 needs the CUDA 12 JAX extra rather than CUDA 13 because P100 is SM 6.0
 and CUDA 13 JAX wheels require newer GPUs. Re-run `linear_pallas_focus` after
 committing the Kaggle CUDA-plugin fix before making a final Phase 3A decision.
 
+Second Kaggle P100 retry after the JAX 0.10.1 local update:
+
+```text
+run: 20260617_212151_linear_pallas_focus_NvidiaTeslaP100
+status: failed during Pallas lowering
+progress: the Kaggle wrapper installed jax-cuda12-plugin 0.10.1, selected the
+          P100 GPU backend, and measured thomas/thomas_batched/assoc_backward
+          for the first case.
+cause: Pallas Mosaic GPU lowering rejects scratch MemorySpace.ANY.
+fix: make the Pallas scratch MemoryRef prefer MemorySpace.DEFAULT, with ANY
+     retained only as a fallback for older/interpreter paths.
+```
+
+Local `interpret=True` Pallas tests still pass after the memory-space change.
+Re-run `linear_pallas_focus` once this fix is committed.
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas

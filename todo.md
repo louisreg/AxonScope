@@ -365,10 +365,17 @@ Near-term tasks:
       (`PJRT_FFI_UserData_Add_Args size` mismatch). Fix the Kaggle wrapper to
       install the matching JAX CUDA 12 extra after project install:
       `jax[cuda12]==<installed jax version>`.
+    - [x] Eighth Kaggle P100 attempt
+      `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` confirmed the CUDA
+      plugin fix: Kaggle installed `jax-cuda12-plugin==0.10.1`, selected the
+      P100 GPU backend, and measured `thomas`, `thomas_batched`, and
+      `assoc_backward` for the first case. It then failed during Pallas
+      lowering with `Unsupported memory space: any`. Fix the Pallas scratch ref
+      helper to prefer `MemorySpace.DEFAULT` and keep `ANY` only as fallback.
     - [ ] Re-run `linear_pallas_focus` on a GPU backend after committing the
-      JAX 0.10 compatibility shim and Kaggle CUDA-plugin fix. This is the next
-      useful Pallas decision point; local CPU timing remains interpret-mode
-      only and is not GPU evidence.
+      JAX 0.10 compatibility shim, Kaggle CUDA-plugin fix, and Pallas scratch
+      memory-space fix. This is the next useful Pallas decision point; local
+      CPU timing remains interpret-mode only and is not GPU evidence.
   - [x] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
@@ -717,6 +724,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Split E2E agreement validation | Added `benchmark/solvers/validate_double_cable_solver_agreement.py`; local held-out smoke failed `split_gs_3`/`split_gs_4` with `~77 mV` center-trace error and false activations versus `pcr_adaptive`, while exact PCR controls stayed close to Thomas. Split iterative approaches are abandoned/closed for this optimization pass despite timing wins. |
 | 2026-06-17 | JAX 0.10.1 local validation | Environment now uses Python `3.12.13`, `jax==0.10.1`, `jaxlib==0.10.1`; full unit `424 passed, 1 skipped`. Updated Pallas compatibility for JAX 0.10.1 and local `interpret=True` Pallas smoke passes, but GPU lowering still needs Kaggle/Colab validation. |
 | 2026-06-17 | Kaggle JAX 0.10.1 Pallas retry setup | P100 run `20260617_211635_linear_pallas_focus_NvidiaTeslaP100` reached GPU backend, then failed before benchmark due stale Kaggle `jax_cuda12_plugin==0.7.2` against `jaxlib==0.10.1`. Kaggle wrapper now installs matching `jax[cuda12]==<installed jax version>` for P100 runs. |
+| 2026-06-17 | Kaggle Pallas scratch memory retry | P100 run `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` reached GPU benchmark execution and measured the non-Pallas first case, then Pallas lowering failed on scratch `MemorySpace.ANY`. Pallas scratch refs now prefer `MemorySpace.DEFAULT`; local Pallas smoke still passes (`11 passed`). |
 
 ## Completed Roadmap Archive
 

@@ -123,18 +123,25 @@ def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype):
 
         memory_ref = pallas_core.MemoryRef
         memory_space = pallas_core.MemorySpace
-    try:
-        return memory_space.ANY(shape, dtype)
-    except (AttributeError, TypeError):
-        pass
-    try:
-        return memory_ref(jax.core.ShapedArray(shape, dtype), memory_space.ANY)
-    except (AttributeError, TypeError):
-        pass
-    try:
-        return memory_ref(shape, dtype, memory_space.ANY)
-    except TypeError:
-        return memory_ref(shape, dtype)
+    spaces = tuple(
+        space
+        for name in ("DEFAULT", "ANY")
+        if (space := getattr(memory_space, name, None)) is not None
+    )
+    for space in spaces:
+        try:
+            return space(shape, dtype)
+        except TypeError:
+            pass
+        try:
+            return memory_ref(jax.core.ShapedArray(shape, dtype), space)
+        except (AttributeError, TypeError):
+            pass
+        try:
+            return memory_ref(shape, dtype, space)
+        except TypeError:
+            pass
+    return memory_ref(shape, dtype)
 
 
 def _pallas_thomas_2x2_kernel(
