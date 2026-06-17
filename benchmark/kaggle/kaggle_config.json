@@ -1,6 +1,6 @@
 {
-  "benchmark": "e2e_split_focus",
-  "branch": "kaggle-bench/165b61e",
+  "benchmark": "linear_assoc_focus",
+  "branch": "kaggle-bench/37bec2a",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }
