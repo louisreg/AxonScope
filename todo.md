@@ -66,9 +66,15 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
-- [ ] Phase 1.5 split iterative solver: validate `split_gs_3` in an
+- [x] Phase 1.5 split iterative solver: validate `split_gs_3` in an
   end-to-end/physiology harness, with `split_gs_4` as the stricter residual
-  fallback, before considering any routing change.
+  fallback, before considering any routing change. Result: fixed-K
+  `split_gs_3`/`split_gs_4` failed local E2E trace agreement and are in
+  abandoned/closed status.
+- [x] Abandon split iterative double-cable solver approaches for the current
+  optimization pass. Do not spend more Kaggle runs or implementation time on
+  split Jacobi/Gauss-Seidel/Richardson variants unless the user explicitly
+  reopens the line.
 - [x] Keep pseudo-double/pseudo-MRG on standby until exact-solver work exposes a
   clear need for approximate screening again.
 - [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
@@ -266,9 +272,9 @@ Near-term tasks:
     full total-with-input gains were much smaller for large batches because
     dense `Vext` materialization dominated. For `B>=2048`, `split_gs_3`
     improved `total_with_inputs_ms` only `~1.05x` geomean overall, and
-    `~1.09x` for actual `Nx=89`. Decision: the solver win is real, but
-    end-to-end impact now requires either output/physiology agreement proof or
-    reducing dense input materialization overhead.
+    `~1.09x` for actual `Nx=89`. Decision at this point: the solver timing
+    win was real, but it still needed output/physiology agreement proof before
+    any routing change.
   - [x] Add Phase 2A benchmark-only exact `assoc_backward`: same Thomas forward
     elimination as `thomas_batched`, with associative affine scan for backward
     substitution. Keep it out of `BatchOptions` and `auto` until P100 evidence
@@ -342,9 +348,31 @@ Near-term tasks:
       range`. Decision: put Phase 3A `pallas_thomas_128` in standby and do not
       spend more Kaggle runs on Pallas until the kernel is rewritten against
       the current JAX/Pallas indexing API in a controlled environment.
-  - [ ] Add output-agreement/physiology validation for `split_gs_3` against
+    - [x] Local JAX upgrade retest on 2026-06-17: environment is Python
+      `3.12.13`, `jax==0.10.1`, `jaxlib==0.10.1`, CPU backend. Updated the
+      Pallas shim for the current API: `pl.load`/`pl.store` are no longer
+      public exports, and `MemoryRef` now needs a shaped abstract value through
+      `MemorySpace.ANY(shape, dtype)`/`ShapedArray`. Local `interpret=True`
+      Pallas smoke passes against Thomas with max error about `6e-08`; the
+      small solver benchmark passes for `B=128`, `Nx=16`, `float32`.
+      Non-interpreted Pallas still requires a real GPU backend; CPU reports
+      `Only interpret mode is supported on CPU backend`.
+    - [ ] Re-run `linear_pallas_focus` on a GPU backend after committing the
+      JAX 0.10 compatibility shim. This is the next useful Pallas decision
+      point; local CPU timing remains interpret-mode only and is not GPU
+      evidence.
+  - [x] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
+  - [x] Local E2E agreement validation on 2026-06-17 failed fixed-K
+    `split_gs_3` and `split_gs_4`: `B=2`, target `Nx=51`, actual `Nx=45`,
+    `Nt=3`, `dt=0.05 ms`, `recording=center`, `Iinj=none` diverged from
+    `pcr_adaptive` by about `77 mV` and produced false activations at
+    `-20 mV`. Exact controls in the same harness (`pcr_soa`/`pcr_adaptive`
+    versus `thomas`) were close at about `0.0014 mV` max absolute error.
+    Decision: split iterative approaches are abandoned/closed for this
+    optimization pass; keep the existing code benchmark-only for historical
+    reproducibility until a later cleanup removes failed candidates.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
   in manifests.
 - [ ] Add a didactic advanced solver-options example after the API is stable.
@@ -678,6 +706,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-15 | Pseudo-double validation | Harness and candidate modes exist, but candidates remain rough screening probes with trace errors too large for production acceptance. Pseudo-double is standby. |
 | 2026-06-16 | Local CPU solver-only baseline | `benchmark/solvers/bench_double_cable_linear_solvers.py` local CPU matrix at `B=8/128/512`, `Nx=32/51/64`, `float32` confirms Thomas is the CPU/default path; PCR variants are slower for production CPU use, with only tiny `B=8,Nx=32` noise favoring matrix PCR. |
 | 2026-06-16 | End-to-end double-cable benchmark smoke | `benchmark/solvers/bench_double_cable_end_to_end.py` local smokes passed for center/no-Iinj, observer-only/dense-zero-Iinj, and full/nonzero-Iinj at `B=2`, target `Nx=51`, `Nt=3`; Colab notebook is ready for GPU runs. |
+| 2026-06-17 | Split E2E agreement validation | Added `benchmark/solvers/validate_double_cable_solver_agreement.py`; local held-out smoke failed `split_gs_3`/`split_gs_4` with `~77 mV` center-trace error and false activations versus `pcr_adaptive`, while exact PCR controls stayed close to Thomas. Split iterative approaches are abandoned/closed for this optimization pass despite timing wins. |
+| 2026-06-17 | JAX 0.10.1 local validation | Environment now uses Python `3.12.13`, `jax==0.10.1`, `jaxlib==0.10.1`; full unit `424 passed, 1 skipped`. Updated Pallas compatibility for JAX 0.10.1 and local `interpret=True` Pallas smoke passes, but GPU lowering still needs Kaggle/Colab validation. |
 
 ## Completed Roadmap Archive
 

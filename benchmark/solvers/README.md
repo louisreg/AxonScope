@@ -37,7 +37,7 @@ Run a compact local smoke:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 8 128 \
   --nx 32 51 \
-  --solvers thomas pcr pcr_soa pcr_adaptive split_gs_2 split_gs_3 split_gs_4 split_jacobi4_gs1 \
+  --solvers thomas pcr pcr_soa pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 3
@@ -49,7 +49,7 @@ Run the GPU-oriented sweep from the exact double-cable roadmap:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1 8 128 512 1024 2048 4096 \
   --nx 16 32 51 64 96 100 128 \
-  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi4_gs1 split_gs_2 split_gs_3 split_gs_4 \
+  --solvers thomas pcr pcr_soa pcr_adaptive \
   --dtypes float32 float64 \
   --warmups 1 \
   --repeats 5
@@ -86,9 +86,10 @@ and is not a public solver option.
 `BatchOptions.double_cable_block_solver` value.
 `split_jacobi_4`, `split_jacobi4_gs1`, `split_gs_2`, `split_gs_3`,
 `split_gs_4`, `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` are
-benchmark-only Phase 1.5 candidates. They are fixed-iteration approximate split
-solvers, not exact direct solvers, so judge them by both speed and
-residual/error columns before considering any public routing.
+historical benchmark-only Phase 1.5 candidates. The 2026-06-17 E2E agreement
+smoke failed for the best split candidates, so split iterative approaches are
+abandoned for the current optimization pass and should not be included in new
+Kaggle runs except to reproduce old evidence.
 
 Run the focused Phase 2A associative-backward comparison:
 
@@ -136,7 +137,7 @@ python benchmark/solvers/bench_double_cable_end_to_end.py \
   --repeats 3
 ```
 
-Run the focused Phase 1.5 split E2E comparison:
+Historical closed Phase 1.5 split E2E comparison:
 
 ```bash
 python benchmark/solvers/bench_double_cable_end_to_end.py \
@@ -150,6 +151,27 @@ python benchmark/solvers/bench_double_cable_end_to_end.py \
   --warmups 1 \
   --repeats 2
 ```
+
+Historical split trace validation that closed the split line:
+
+```bash
+python benchmark/solvers/validate_double_cable_solver_agreement.py \
+  --batch-sizes 2 \
+  --nx 51 \
+  --nt 3 \
+  --dt 0.05 \
+  --recordings center \
+  --iinj-modes none \
+  --reference-solvers pcr_adaptive \
+  --candidate-solvers split_gs_3 split_gs_4 \
+  --warmups 0
+```
+
+The 2026-06-17 local smoke failed for `split_gs_3` and `split_gs_4`
+(`~77 mV` center-trace error and false activations versus `pcr_adaptive`), so
+split iterative approaches are abandoned for the current optimization pass
+despite their timing wins. Keep the validation runner for future non-split
+candidates; do not use the split timing benchmark alone as acceptance evidence.
 
 This runner builds MRG-like double-cable batches, materializes dense `Vext`,
 optionally materializes dense `Iinj`, and records setup/runtime/input/kernel/

@@ -144,11 +144,9 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         choices=(
             "smoke",
             "linear",
-            "linear_split_focus",
             "linear_assoc_focus",
             "linear_pallas_focus",
             "e2e",
-            "e2e_split_focus",
             "e2e_full",
             "both",
         ),

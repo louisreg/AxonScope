@@ -924,12 +924,12 @@ split_gs_2:
     fastest but not accurate enough; max_residual ~6.2e-5
 ```
 
-Decision: carry `split_gs_3` forward to E2E/physiology validation as the main
-Phase 1.5 candidate, with `split_gs_4` as the stricter residual fallback. Keep
-`split_jacobi4_gs1`, `split_gs_2`, `split_jacobi_4`, `split_jacobi_8`,
-`split_gs_8`, and `split_richardson_4` benchmark-only/standby. Do not route
-any split solver into `auto` before end-to-end and physiological agreement
-checks.
+Interim decision at this point: carry `split_gs_3` forward to E2E/physiology
+validation as the main Phase 1.5 candidate, with `split_gs_4` as the stricter
+residual fallback. Keep `split_jacobi4_gs1`, `split_gs_2`, `split_jacobi_4`,
+`split_jacobi_8`, `split_gs_8`, and `split_richardson_4`
+benchmark-only/standby. This interim decision was superseded by the E2E
+agreement validation below.
 
 E2E focus status on 2026-06-17: `split_gs_3` and `split_gs_4` are wired into
 the end-to-end benchmark through an internal benchmark-only kernel override.
@@ -958,12 +958,25 @@ total_with_inputs, split_gs_3 vs pcr_adaptive:
     B>=2048 and actual_Nx=89: 1.09x geomean speedup
 ```
 
-Decision: `split_gs_3` remains the main Phase 1.5 candidate. The E2E kernel
-gain is real, especially for larger batches and larger `Nx`, but full
-end-to-end impact is heavily limited by dense `Vext` materialization. Before
-any public solver-option exposure or `auto` routing, add output-agreement and
-physiology validation versus `pcr_adaptive`/Thomas on held-out double-cable
-workloads.
+Validation update on 2026-06-17: added
+`benchmark/solvers/validate_double_cable_solver_agreement.py` to compare
+recorded `Vm` traces, peak-voltage errors, activation agreement, and
+first-threshold-crossing timing against exact public solvers. A local held-out
+smoke (`B=2`, target `Nx=51`, actual `Nx=45`, `Nt=3`, `dt=0.05 ms`,
+`recording=center`, `Iinj=none`) found that `split_gs_3` and `split_gs_4`
+diverge from `pcr_adaptive` by about `77 mV` at the center trace and introduce
+false activations at the public `-20 mV` activation threshold. The exact
+controls in the same harness (`pcr_soa`/`pcr_adaptive` versus `thomas`) stayed
+close at about `0.0014 mV` max absolute error on this tiny local smoke.
+
+Decision: abandon split iterative approaches (`split_jacobi_*`,
+`split_gs_*`, `split_richardson_*`, and mixed Jacobi/GS cleanup) for the
+current double-cable GPU optimization pass. The physical MRG double-cable
+systems are too strongly coupled for a few split iterations, and the E2E
+total-with-input gains were not strong enough to justify pursuing more split
+variants. Keep existing split code benchmark-only for historical
+reproducibility until a later cleanup removes failed candidates. Do not route
+any split solver into `BatchOptions` or `auto`.
 
 ---
 
@@ -1828,7 +1841,46 @@ correct in local Pallas `interpret=True` mode, but the current implementation is
 not compatible with Kaggle's JAX/Pallas `0.7.2` tracing path. Revisit only if
 we can reproduce against the Kaggle JAX/Pallas version locally, or if the
 kernel is rewritten against the current Pallas indexing API. Return to
-`split_gs_3` validation and Vext work.
+exact JAX solver candidates and dense-input/Vext work; split iterative
+approaches are now closed.
+
+JAX 0.10.1 local retest on 2026-06-17:
+
+```text
+environment: Python 3.12.13, jax 0.10.1, jaxlib 0.10.1
+backend: CPU
+local Pallas mode: interpret=True
+```
+
+The Pallas compatibility shim was updated for the current API:
+
+```text
+1. jax.experimental.pallas no longer exports pl.load/pl.store.
+   The spike now falls back to jax._src.pallas.primitives.load/store.
+2. MemoryRef now expects a shaped abstract value. Scratch refs use
+   MemorySpace.ANY(shape, dtype), with fallbacks for older signatures.
+```
+
+Local Pallas smoke now passes again:
+
+```text
+B=128, Nx=8, float32, pallas_thomas_128 vs Thomas
+max_abs_error Vi: ~5.96e-08
+max_abs_error Ve: ~2.98e-08
+```
+
+Small solver benchmark on CPU interpret mode:
+
+```text
+B=128, Nx=16, float32
+thomas:            median ~0.221 ms
+pallas_thomas_128: median ~0.483 ms
+pcr_soa:           median ~2.549 ms
+```
+
+This CPU timing is not GPU evidence because non-interpreted Pallas is not
+supported on the CPU backend. The next useful decision point is a fresh GPU
+`linear_pallas_focus` run after committing the JAX 0.10 compatibility shim.
 
 ---
 

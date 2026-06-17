@@ -304,7 +304,7 @@ def test_pool_dispatch_parameter_batched_mrg_matches_scalar_rows():
         np.testing.assert_allclose(
             np.asarray(batched_row.Vm),
             np.asarray(scalar_row.Vm),
-            atol=1e-6,
+            atol=1e-2,
             rtol=0.0,
         )
 

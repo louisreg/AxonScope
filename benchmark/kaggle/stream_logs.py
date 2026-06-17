@@ -9,11 +9,13 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from kaggle.api.kaggle_api_extended import KaggleApi
-from kagglesdk.kernels.types.kernels_api_service import ApiGetKernelSessionLogsStreamRequest
-
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    from kagglesdk.kernels.types.kernels_api_service import (
+        ApiGetKernelSessionLogsStreamRequest,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kernel", help="Kernel ref in owner/slug format.")
     parser.add_argument(

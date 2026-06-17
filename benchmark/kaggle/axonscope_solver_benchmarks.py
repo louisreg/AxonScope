@@ -75,16 +75,12 @@ def main() -> None:
         run_e2e(out_dir, smoke=True)
     elif BENCHMARK == "linear":
         run_linear(out_dir, smoke=False)
-    elif BENCHMARK == "linear_split_focus":
-        run_linear_split_focus(out_dir)
     elif BENCHMARK == "linear_assoc_focus":
         run_linear_assoc_focus(out_dir)
     elif BENCHMARK == "linear_pallas_focus":
         run_linear_pallas_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
-    elif BENCHMARK == "e2e_split_focus":
-        run_e2e(out_dir, mode="split_focus")
     elif BENCHMARK == "e2e_full":
         run_e2e(out_dir, mode="full")
     elif BENCHMARK == "both":
@@ -93,8 +89,7 @@ def main() -> None:
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_split_focus, linear_assoc_focus, linear_pallas_focus, e2e, "
-            "e2e_split_focus, e2e_full, or both."
+            "linear_assoc_focus, linear_pallas_focus, e2e, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -172,11 +167,6 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
                 "pcr",
                 "pcr_soa",
                 "pcr_adaptive",
-                "split_jacobi_4",
-                "split_jacobi4_gs1",
-                "split_gs_2",
-                "split_gs_3",
-                "split_gs_4",
                 "--warmups",
                 "1",
                 "--repeats",
@@ -185,42 +175,6 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
         )
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear" / "summary.csv", mode="linear")
-
-
-def run_linear_split_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_split_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "32",
-        "51",
-        "64",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "pcr_adaptive",
-        "split_jacobi_4",
-        "split_jacobi4_gs1",
-        "split_gs_2",
-        "split_gs_3",
-        "split_gs_4",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_split_focus" / "summary.csv", mode="linear")
 
 
 def run_linear_assoc_focus(out_dir: pathlib.Path) -> None:
@@ -351,34 +305,6 @@ def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard
                 "2",
             ]
         )
-    elif mode == "split_focus":
-        command.extend(
-            [
-                "--batch-sizes",
-                "1024",
-                "2048",
-                "4096",
-                "--nx",
-                "51",
-                "96",
-                "--nt",
-                "500",
-                "--dt",
-                "0.01",
-                "--recordings",
-                "center",
-                "--iinj-modes",
-                "none",
-                "--solvers",
-                "pcr_adaptive",
-                "split_gs_3",
-                "split_gs_4",
-                "--warmups",
-                "1",
-                "--repeats",
-                "2",
-            ]
-        )
     elif mode == "full":
         command.extend(
             [
@@ -431,6 +357,16 @@ def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:
                 f"{row['requested_solver']}({row['kernel_solver']}) "
                 f"B={row['batch_size']} Nx={row['nx']} {row['dtype']}: "
                 f"median={float(row['steady_median_ms']):.3f} ms"
+            )
+        elif mode == "validation":
+            status = "PASS" if row["passed_thresholds"] == "True" else "CHECK"
+            print(
+                f"{status} {row['candidate_solver']} vs {row['reference_solver']} "
+                f"B={row['batch_size']} Nx={row['actual_nx']} Nt={row['nt']} "
+                f"rec={row['recording']} iinj={row['iinj_mode']}: "
+                f"max_abs={float(row['max_abs_mV']):.4g} mV "
+                f"rms={float(row['rms_mV']):.4g} mV "
+                f"activation={float(row['activation_agreement']):.3f}"
             )
         else:
             kernel_ms = float(row["kernel_enqueue_median_ms"]) + float(

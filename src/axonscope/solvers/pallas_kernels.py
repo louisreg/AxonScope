@@ -8,6 +8,15 @@ from jax.experimental import pallas as pl
 
 from axonscope.solvers.common import Array
 
+try:
+    _pallas_load = pl.load
+    _pallas_store = pl.store
+except AttributeError:
+    from jax._src.pallas import primitives as _pallas_primitives
+
+    _pallas_load = _pallas_primitives.load
+    _pallas_store = _pallas_primitives.store
+
 
 def solve_block_tridiagonal_2x2_pallas_thomas_batched(
     a00: Array,
@@ -114,6 +123,14 @@ def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype):
 
         memory_ref = pallas_core.MemoryRef
         memory_space = pallas_core.MemorySpace
+    try:
+        return memory_space.ANY(shape, dtype)
+    except (AttributeError, TypeError):
+        pass
+    try:
+        return memory_ref(jax.core.ShapedArray(shape, dtype), memory_space.ANY)
+    except (AttributeError, TypeError):
+        pass
     try:
         return memory_ref(shape, dtype, memory_space.ANY)
     except TypeError:
@@ -271,7 +288,7 @@ def _store_forward_component(
     component: int,
     value: Array,
 ) -> None:
-    pl.store(scratch_ref, _vector_indices(batch_indices, row, component), value)
+    _pallas_store(scratch_ref, _vector_indices(batch_indices, row, component), value)
 
 
 def _load_forward_component(
@@ -280,7 +297,7 @@ def _load_forward_component(
     row: int,
     component: int,
 ) -> Array:
-    return pl.load(scratch_ref, _vector_indices(batch_indices, row, component))
+    return _pallas_load(scratch_ref, _vector_indices(batch_indices, row, component))
 
 
 def _store_output_component(
@@ -290,4 +307,4 @@ def _store_output_component(
     component: int,
     value: Array,
 ) -> None:
-    pl.store(out_ref, _vector_indices(batch_indices, row, component), value)
+    _pallas_store(out_ref, _vector_indices(batch_indices, row, component), value)
