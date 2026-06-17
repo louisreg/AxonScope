@@ -115,7 +115,10 @@ def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype):
 
         memory_ref = pallas_core.MemoryRef
         memory_space = pallas_core.MemorySpace
-    return memory_ref(shape, dtype, memory_space.ANY)
+    try:
+        return memory_ref(shape, dtype, memory_space.ANY)
+    except TypeError:
+        return memory_ref(shape, dtype)
 
 
 def _pallas_thomas_2x2_kernel(

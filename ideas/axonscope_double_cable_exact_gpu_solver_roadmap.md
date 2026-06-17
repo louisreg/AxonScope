@@ -1777,6 +1777,15 @@ cause: Kaggle JAX 0.7.2 no longer exposes jax.experimental.pallas.MemoryRef
 fix: compatibility shim falls back to jax._src.pallas.core.MemoryRef
 ```
 
+Second Kaggle attempt:
+
+```text
+run: 20260617_115323_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas measurement
+cause: JAX 0.7.2 private MemoryRef uses signature (shape, dtype)
+fix: compatibility shim accepts both two- and three-argument MemoryRef forms
+```
+
 Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
 
 ---

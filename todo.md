@@ -310,6 +310,12 @@ Near-term tasks:
       `jax.experimental.pallas.MemoryRef` is no longer public. Add a small
       compatibility shim that falls back to `jax._src.pallas.core.MemoryRef`;
       rerun required.
+    - [x] Second Kaggle P100 attempt
+      `20260617_115323_linear_pallas_focus_NvidiaTeslaP100` reached the
+      fallback `MemoryRef`, but JAX `0.7.2` uses a two-argument
+      `(shape, dtype)` signature instead of the older three-argument
+      `(shape, dtype, memory_space)` form. Make the shim accept both
+      signatures; rerun required.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
