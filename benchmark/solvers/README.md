@@ -63,6 +63,11 @@ median relative block residual norms for the solved linear system.
 `pcr_soa` is measured with the batch-native
 `solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
 that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
+`pcr_soa_nomask` is a benchmark-only Phase 1C candidate that removes explicit
+per-stage boundary `where` masks from the batch-native SoA PCR update, relying
+on zero boundary-coupling invariants instead.
+`pcr_soa_shift` is a benchmark-only Phase 1C candidate that also replaces
+clamped neighbor gathers with static slice/concat shifts at each PCR stride.
 `thomas_batched` is a benchmark-only exact candidate that runs block Thomas as
 one batch-first scan instead of an outer `vmap` over fibers.
 `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16` are
@@ -133,6 +138,18 @@ Downloaded outputs include the zipped `jax_traces/` folder under the
 `linear_pcr_soa_trace` result directory. Open it with TensorBoard's profile
 viewer or the generated Perfetto trace when `--jax-trace-create-perfetto` is
 used locally.
+
+Run the focused Phase 1C PCR_SOA no-mask candidate on Kaggle:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_nomask_focus \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
 
 Run the focused Phase 3A Pallas-Thomas spike:
 

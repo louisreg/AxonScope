@@ -266,6 +266,28 @@ This preset traces `pcr`, `pcr_soa`, and `pcr_adaptive` at `B=2048/4096` and
 `Nx=51/96`, skips the Thomas64 reference to keep the profiler focused, and
 packages `jax_traces/` inside the downloaded Kaggle output archive.
 
+P100 result on 2026-06-17:
+
+```text
+run: benchmark/results/kaggle/20260617_214032_linear_pcr_soa_trace_NvidiaTeslaP100
+solvers: pcr, pcr_soa, pcr_adaptive
+B: 2048, 4096
+Nx: 51, 96
+dtype: float32
+```
+
+The trace confirms that `pcr_soa` is the better pure-JAX exact PCR layout for
+these focused cases. It is `1.09x-1.38x` faster than matrix-layout `pcr` on
+steady medians, and cuts device fusion events from `31-48` for `pcr` to `7-13`
+for `pcr_soa`. Matrix `pcr` spends time in many `loop_slice_fusion_*` kernels;
+`pcr_soa` mostly spends time in `loop_select_subtract_fusion_*`. Treat the
+profiler host/solve scopes as noisy because `jax.profiler` overhead dominates
+them; use the steady medians and device event counts as the actionable signal.
+
+Decision: do not optimize matrix-layout PCR first. Continue with
+batch-native `pcr_soa` and target its per-stage `where`/boundary-mask/gather
+behavior before more threshold tuning.
+
 Run at minimum:
 
 ```bash
@@ -609,6 +631,48 @@ numerically aligned with Thomas64 (`~1.4e-07` max absolute error), but was not a
 general speed win over batch-first `pcr_soa`: `8/20` cases faster and geomean
 `1.047x` slower. Decision: keep benchmark-only/standby and do not route it
 through `auto`.
+
+Focused JAX trace on 2026-06-17 (`linear_pcr_soa_trace`, P100) showed the
+remaining `pcr_soa` device time concentrated in `loop_select_subtract_fusion_*`
+kernels:
+
+```text
+B=2048, Nx=51: pcr_soa 0.731 ms vs pcr 1.009 ms, 7 vs 31 device fusion events
+B=2048, Nx=96: pcr_soa 1.211 ms vs pcr 1.564 ms, 8 vs 40 device fusion events
+B=4096, Nx=51: pcr_soa 1.315 ms vs pcr 1.437 ms, 7 vs 31 device fusion events
+B=4096, Nx=96: pcr_soa 1.972 ms vs pcr 2.591 ms, 13 vs 48 device fusion events
+```
+
+This keeps Phase 1C open as an implementation-optimization phase: reduce
+per-stage mask/select work and neighbor gathers in the existing batch-first SoA
+solver before revisiting solver-policy thresholds.
+
+Status on 2026-06-17: added two benchmark-only candidates:
+
+```text
+solve_block_tridiagonal_2x2_pcr_soa_batched_nomask(...) / pcr_soa_nomask
+solve_block_tridiagonal_2x2_pcr_soa_batched_shift(...)  / pcr_soa_shift
+```
+
+`pcr_soa_nomask` removes explicit boundary `where` masks from each PCR stage
+and relies on the invariant that invalid lower/upper couplings are already zero
+at the start of each stride. `pcr_soa_shift` also replaces clamped neighbor
+gathers with static slice/concat shifts and identity/zero fills. Local targeted
+tests passed against masked `pcr_soa` and vmapped Thomas; local solver-only
+smoke kept the same Thomas64 error/residual envelope. A local HLO smoke at
+`B=8`, `Nx=13` reduced `pcr_soa_shift` gather/select counts from `104/105` to
+`0/0`, replacing them with static slices/concats. Next evidence gate is the P100
+`linear_pcr_soa_nomask_focus` preset:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_nomask_focus \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
 
 ---
 

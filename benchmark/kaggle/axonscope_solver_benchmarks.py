@@ -80,6 +80,8 @@ def main() -> None:
         run_linear_assoc_focus(out_dir)
     elif BENCHMARK == "linear_pcr_soa_trace":
         run_linear_pcr_soa_trace(out_dir)
+    elif BENCHMARK == "linear_pcr_soa_nomask_focus":
+        run_linear_pcr_soa_nomask_focus(out_dir)
     elif BENCHMARK == "linear_pallas_focus":
         run_linear_pallas_focus(out_dir)
     elif BENCHMARK == "e2e":
@@ -92,8 +94,9 @@ def main() -> None:
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_assoc_focus, linear_pcr_soa_trace, linear_pallas_focus, "
-            "e2e, e2e_full, or both."
+            "linear_assoc_focus, linear_pcr_soa_trace, "
+            "linear_pcr_soa_nomask_focus, linear_pallas_focus, e2e, "
+            "e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -267,6 +270,35 @@ def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear_pcr_soa_trace" / "summary.csv", mode="linear")
+
+
+def run_linear_pcr_soa_nomask_focus(out_dir: pathlib.Path) -> None:
+    command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_linear_solvers.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_pcr_soa_nomask_focus",
+        "--batch-sizes",
+        "2048",
+        "4096",
+        "--nx",
+        "51",
+        "96",
+        "--dtypes",
+        "float32",
+        "--solvers",
+        "pcr_soa",
+        "pcr_soa_nomask",
+        "pcr_soa_shift",
+        "--warmups",
+        "1",
+        "--repeats",
+        "5",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "linear_pcr_soa_nomask_focus" / "summary.csv", mode="linear")
 
 
 def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:

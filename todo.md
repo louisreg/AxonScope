@@ -70,6 +70,14 @@ Work should start here unless the user asks otherwise.
   continuing Pallas-Thomas. Start with the Kaggle P100
   `linear_pcr_soa_trace` profiler preset to identify gather/scatter,
   temporary-array, or kernel-count bottlenecks before changing solver code.
+- [ ] Phase 7.6.3 next implementation target: optimize the existing
+  batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
+  matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
+  are `loop_select_subtract_fusion_*`, so prioritize reducing per-stage
+  `where`/boundary-mask/gather work over more heuristic threshold tuning.
+- [ ] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
+  benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
+  `pcr_soa` on GPU.
 - [x] Phase 1.5 split iterative solver: validate `split_gs_3` in an
   end-to-end/physiology harness, with `split_gs_4` as the stricter residual
   fallback, before considering any routing change. Result: fixed-K
@@ -157,6 +165,17 @@ Near-term tasks:
   linear solvers, with Thomas, `pcr`, `pcr_soa`, and `pcr_adaptive`.
 - [x] Add Kaggle P100 `linear_pcr_soa_trace` preset for focused GPU
   `jax.profiler` traces of `pcr`, `pcr_soa`, and `pcr_adaptive`.
+- [x] Run Kaggle P100 `linear_pcr_soa_trace` and inspect GPU trace output.
+  Result: `pcr_soa` is `1.09x-1.38x` faster than matrix-layout `pcr` on the
+  focused `B=2048/4096`, `Nx=51/96`, `float32` cases; trace evidence says the
+  useful optimization target is inside PCR_SOA stage fusion/masking.
+- [x] Add benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates for
+  PCR_SOA stage optimization. `pcr_soa_nomask` removes explicit boundary
+  `where` masks; `pcr_soa_shift` also replaces clamped neighbor gathers with
+  static slice/concat shifts. Local targeted tests passed; P100 timing still
+  needs validation. Local HLO smoke at `B=8`, `Nx=13` reduced
+  `pcr_soa_shift` gather/select counts from `104/105` to `0/0`, replacing
+  them with static slices/concats.
 - [x] Add an end-to-end exact double-cable batch-kernel benchmark for
   recording/Iinj pressure before GPU reruns.
 - [ ] Decide whether to keep the current Literal-based solver option or promote
@@ -744,6 +763,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Kaggle JAX 0.10.1 Pallas retry setup | P100 run `20260617_211635_linear_pallas_focus_NvidiaTeslaP100` reached GPU backend, then failed before benchmark due stale Kaggle `jax_cuda12_plugin==0.7.2` against `jaxlib==0.10.1`. Kaggle wrapper now installs matching `jax[cuda12]==<installed jax version>` for P100 runs. |
 | 2026-06-17 | Kaggle Pallas scratch memory retry | P100 run `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` reached GPU benchmark execution and measured the non-Pallas first case, then Pallas lowering failed on scratch `MemorySpace.ANY`. Pallas scratch refs now prefer `MemorySpace.DEFAULT`; local Pallas smoke still passes (`11 passed`). |
 | 2026-06-17 | Kaggle Pallas SMEM scratch retry | P100 run `20260617_212605_linear_pallas_focus_NvidiaTeslaP100` showed `MemorySpace.DEFAULT` becomes unsupported `gmem` scratch under Mosaic GPU. GPU Pallas scratch now uses `mosaic_gpu.SMEM(...)`; local Pallas smoke still passes (`11 passed`). |
+| 2026-06-17 | Kaggle PCR_SOA JAX trace | P100 run `20260617_214032_linear_pcr_soa_trace_NvidiaTeslaP100` completed. `pcr_soa` beat matrix-layout `pcr` by `1.09x-1.38x` steady median on focused `B=2048/4096`, `Nx=51/96`, `float32` cases, reducing device fusion events from `31-48` to `7-13`. Remaining hot spots are `loop_select_subtract_fusion_*`, so next work should optimize PCR_SOA stage masking/gather behavior. |
 | 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
 
 ## Completed Roadmap Archive

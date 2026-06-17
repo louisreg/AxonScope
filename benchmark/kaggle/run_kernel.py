@@ -146,6 +146,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "linear",
             "linear_assoc_focus",
             "linear_pcr_soa_trace",
+            "linear_pcr_soa_nomask_focus",
             "linear_pallas_focus",
             "e2e",
             "e2e_full",

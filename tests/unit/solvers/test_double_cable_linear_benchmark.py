@@ -71,6 +71,25 @@ def test_planned_cases_allow_benchmark_only_transposed_pcr_soa():
     )
 
 
+def test_planned_cases_allow_benchmark_only_nomask_pcr_soa():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_nomask", "pcr_soa_shift"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pcr_soa_nomask"
+    assert cases[0].resolved_solver == "pcr_soa"
+    assert cases[0].kernel_solver == "pcr_soa_nomask"
+    assert cases[1].requested_solver == "pcr_soa_shift"
+    assert cases[1].resolved_solver == "pcr_soa"
+    assert cases[1].kernel_solver == "pcr_soa_shift"
+    assert resolve_kernel_solver("pcr_soa_nomask", batch_size=512) == "pcr_soa_nomask"
+    assert resolve_kernel_solver("pcr_soa_shift", batch_size=512) == "pcr_soa_shift"
+
+
 def test_planned_cases_allow_benchmark_only_hybrid_pcr_soa_variants():
     cases = planned_cases(
         batch_sizes=[512],

@@ -1,6 +1,6 @@
 {
-  "benchmark": "linear_pallas_focus",
-  "branch": "kaggle-bench/658e3e1",
+  "benchmark": "linear_pcr_soa_trace",
+  "branch": "kaggle-bench/cea0b0f",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }
