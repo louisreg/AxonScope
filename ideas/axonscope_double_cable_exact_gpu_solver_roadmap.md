@@ -1813,8 +1813,21 @@ cause: scratch refs in JAX 0.7.2 do not expose .shape
 fix: compute batch indices from input block shape and reuse for pl.store/pl.load
 ```
 
-Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
-If this still fails before measurement, put Phase 3A in standby and return to
+Sixth Kaggle attempt:
+
+```text
+run: 20260617_121708_linear_pallas_focus_NvidiaTeslaP100
+status: failed during Pallas kernel tracing
+cause: explicit pl.store on scratch ref reaches Pallas swap abstract eval, then
+       fails with IndexError: tuple index out of range
+decision: no Pallas timing was recorded; put Phase 3A in standby
+```
+
+Decision: stop spending Kaggle runs on `pallas_thomas_128`. The candidate is
+correct in local Pallas `interpret=True` mode, but the current implementation is
+not compatible with Kaggle's JAX/Pallas `0.7.2` tracing path. Revisit only if
+we can reproduce against the Kaggle JAX/Pallas version locally, or if the
+kernel is rewritten against the current Pallas indexing API. Return to
 `split_gs_3` validation and Vext work.
 
 ---

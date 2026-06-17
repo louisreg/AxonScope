@@ -302,7 +302,7 @@ Near-term tasks:
     max absolute error about `5.9e-08` and max residual about `1.2e-07`.
     Local execution used Pallas `interpret=True` on CPU, so timing is not GPU
     performance evidence.
-  - [ ] Run Kaggle P100 `linear_pallas_focus` and decide whether Pallas Thomas
+  - [x] Run Kaggle P100 `linear_pallas_focus` and decide whether Pallas Thomas
     justifies any Phase 3B PCR/hybrid work.
     - [x] First Kaggle P100 attempt
       `20260617_114922_linear_pallas_focus_NvidiaTeslaP100` failed before
@@ -335,6 +335,13 @@ Near-term tasks:
       batch indices once from the input block shape and reuse them for
       `pl.store`/`pl.load`. This is the last compatibility patch before
       putting the Pallas spike in standby if Kaggle still fails.
+    - [x] Sixth Kaggle P100 attempt
+      `20260617_121708_linear_pallas_focus_NvidiaTeslaP100` still failed before
+      measuring Pallas. It reached explicit `pl.store`, then failed inside
+      Pallas `swap` abstract evaluation with `IndexError: tuple index out of
+      range`. Decision: put Phase 3A `pallas_thomas_128` in standby and do not
+      spend more Kaggle runs on Pallas until the kernel is rewritten against
+      the current JAX/Pallas indexing API in a controlled environment.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
