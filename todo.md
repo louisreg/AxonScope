@@ -316,6 +316,12 @@ Near-term tasks:
       `(shape, dtype)` signature instead of the older three-argument
       `(shape, dtype, memory_space)` form. Make the shim accept both
       signatures; rerun required.
+    - [x] Third Kaggle P100 attempt
+      `20260617_115814_linear_pallas_focus_NvidiaTeslaP100` reached scratch
+      creation, then failed because Kaggle/JAX `0.7.2` exposes
+      `jax.experimental.pallas.triton.CompilerParams` rather than the older
+      `TritonCompilerParams`. Remove explicit Triton compiler params for this
+      spike and let Pallas choose defaults; rerun required.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.

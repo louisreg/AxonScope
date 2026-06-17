@@ -5,7 +5,6 @@ import functools
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from jax.experimental.pallas import triton as plgpu
 
 from axonscope.solvers.common import Array
 
@@ -75,6 +74,7 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
     if interpret is None:
         interpret = jax.default_backend() != "gpu"
 
+    del num_warps
     block_b = int(block_b)
     in_specs = (
         _block_spec_2d(block_b, n),
@@ -95,7 +95,6 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
         in_specs=in_specs,
         out_specs=out_spec,
         scratch_shapes=(scratch,),
-        compiler_params=plgpu.TritonCompilerParams(num_warps=int(num_warps)),
         interpret=bool(interpret),
         name=f"double_cable_pallas_thomas_b{block_b}",
     )

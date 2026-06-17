@@ -1786,6 +1786,15 @@ cause: JAX 0.7.2 private MemoryRef uses signature (shape, dtype)
 fix: compatibility shim accepts both two- and three-argument MemoryRef forms
 ```
 
+Third Kaggle attempt:
+
+```text
+run: 20260617_115814_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas measurement
+cause: JAX 0.7.2 exposes pallas.triton.CompilerParams, not TritonCompilerParams
+fix: remove explicit Triton compiler params and use Pallas defaults for spike
+```
+
 Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
 
 ---
