@@ -14,6 +14,7 @@ from .batch_inputs import (
 from .common import (
     Array,
     apply_diffusion_operator,
+    solve_double_cable_split_gauss_seidel_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -46,6 +47,7 @@ class BatchKernelResult:
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 2048
+_DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS = frozenset({"split_gs_3", "split_gs_4"})
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -63,10 +65,19 @@ def _use_batch_native_double_cable_pcr_soa_solver(
     *,
     batch_size: int,
 ) -> bool:
-    return (
-        solver == "pcr_soa"
-        and int(batch_size) >= _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH
-    )
+    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS:
+        return True
+    return solver == "pcr_soa" and int(batch_size) >= _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH
+
+
+def _resolve_double_cable_run_block_solver(
+    solver: str,
+    *,
+    platform: str,
+) -> str:
+    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS:
+        return solver
+    return resolve_double_cable_block_solver(solver, platform=platform)
 
 
 def _double_cable_block_solve_fn(solver: str):
@@ -1312,6 +1323,7 @@ def _run_double_cable_batch_stateful_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "double_cable_block_solver",
     ),
 )
 def _run_double_cable_batch_stateful_pcr_soa_scan(
@@ -1321,6 +1333,7 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    double_cable_block_solver: str,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
@@ -1343,7 +1356,7 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     record_indices: Array,
     dt_ms: Array,
 ) -> tuple[Array, Array, Array, tuple[Array, ...], Array]:
-    """Run one time chunk using the batch-native SoA PCR block solver."""
+    """Run one time chunk using a batch-native double-cable block solver."""
 
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
@@ -1531,15 +1544,45 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
             + I_corr_abs
         )
 
-        return solve_block_tridiagonal_2x2_pcr_soa_batched(
-            a00,
-            a01,
-            a10,
-            a11,
-            off_i,
-            off_e,
-            rhs0,
-            rhs1,
+        if double_cable_block_solver == "pcr_soa":
+            return solve_block_tridiagonal_2x2_pcr_soa_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off_i,
+                off_e,
+                rhs0,
+                rhs1,
+            )
+        if double_cable_block_solver == "split_gs_3":
+            return solve_double_cable_split_gauss_seidel_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off_i,
+                off_e,
+                rhs0,
+                rhs1,
+                iterations=3,
+                init="rhs_guess",
+            )
+        if double_cable_block_solver == "split_gs_4":
+            return solve_double_cable_split_gauss_seidel_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off_i,
+                off_e,
+                rhs0,
+                rhs1,
+                iterations=4,
+                init="rhs_guess",
+            )
+        raise ValueError(
+            f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
         )
 
     def step(carry, step_inputs):
@@ -2205,6 +2248,7 @@ class DoubleCableBatchKernel:
         options: BatchOptions | None = None,
         observers: SolverObserverPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        benchmark_double_cable_block_solver: str | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
         extracellular = runtime.extracellular
@@ -2289,8 +2333,10 @@ class DoubleCableBatchKernel:
             and jnp.asarray(extracellular.Gax_i).ndim == 1
             and jnp.asarray(extracellular.Gax_e).ndim == 1
         )
-        block_solver = resolve_double_cable_block_solver(
-            options.double_cable_block_solver,
+        block_solver = _resolve_double_cable_run_block_solver(
+            options.double_cable_block_solver
+            if benchmark_double_cable_block_solver is None
+            else benchmark_double_cable_block_solver,
             platform=jax.default_backend(),
         )
         if observers is not None and options.recording.mode == "none":
@@ -2845,6 +2891,7 @@ def _run_double_cable_batch_array_chunks(
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
                 record_full=record_full,
+                double_cable_block_solver=kernel_block_solver,
                 Vi0_mV=Vi,
                 Ve0_mV=Ve,
                 gates0=gates,

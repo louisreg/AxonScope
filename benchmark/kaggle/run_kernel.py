@@ -141,7 +141,15 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--benchmark",
         default="smoke",
-        choices=("smoke", "linear", "linear_split_focus", "e2e", "e2e_full", "both"),
+        choices=(
+            "smoke",
+            "linear",
+            "linear_split_focus",
+            "e2e",
+            "e2e_split_focus",
+            "e2e_full",
+            "both",
+        ),
         help="Benchmark suite to run.",
     )
     parser.add_argument(

@@ -131,6 +131,39 @@ def test_kaggle_standard_e2e_is_bounded(tmp_path, monkeypatch):
     assert "1000" not in command
 
 
+def test_kaggle_split_focus_e2e_is_bounded_to_array_kernel_candidates(
+    tmp_path,
+    monkeypatch,
+):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_e2e(tmp_path, mode="split_focus")
+
+    (command,) = commands
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert command[command.index("--nx") + 1 : command.index("--nt")] == ["51", "96"]
+    assert command[command.index("--recordings") + 1 : command.index("--iinj-modes")] == [
+        "center"
+    ]
+    assert command[command.index("--iinj-modes") + 1 : command.index("--solvers")] == [
+        "none"
+    ]
+    assert command[command.index("--solvers") + 1 : command.index("--warmups")] == [
+        "pcr_adaptive",
+        "split_gs_3",
+        "split_gs_4",
+    ]
+
+
 def test_kaggle_linear_includes_active_split_iterative_candidates(tmp_path, monkeypatch):
     commands = []
 

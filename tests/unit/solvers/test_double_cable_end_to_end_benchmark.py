@@ -1,8 +1,10 @@
 from benchmark.solvers.bench_double_cable_end_to_end import (
     _build_iinj,
     planned_cases,
+    resolve_e2e_solver,
     main,
 )
+import pytest
 
 
 def test_end_to_end_planned_cases_expand_dimensions():
@@ -32,6 +34,35 @@ def test_end_to_end_iinj_modes_shape_and_none():
     assert float(nonzero.sum()) > 0.0
 
 
+def test_end_to_end_allows_split_benchmark_solvers_for_array_recording():
+    cases = planned_cases(
+        batch_sizes=[2],
+        nx_values=[51],
+        nt_values=[3],
+        dt_ms=0.05,
+        recordings=["center"],
+        iinj_modes=["none"],
+        solvers=["split_gs_3", "split_gs_4"],
+    )
+
+    assert [case.requested_solver for case in cases] == ["split_gs_3", "split_gs_4"]
+    assert resolve_e2e_solver("split_gs_3", platform="gpu") == "split_iterative"
+    assert resolve_e2e_solver("split_gs_4", platform="gpu") == "split_iterative"
+
+
+def test_end_to_end_rejects_split_benchmark_solvers_for_observer_only_recording():
+    with pytest.raises(ValueError, match="batch-native array kernel"):
+        planned_cases(
+            batch_sizes=[2],
+            nx_values=[51],
+            nt_values=[3],
+            dt_ms=0.05,
+            recordings=["none"],
+            iinj_modes=["none"],
+            solvers=["split_gs_3"],
+        )
+
+
 def test_end_to_end_benchmark_dry_run(capsys, tmp_path):
     main(
         [
@@ -48,7 +79,7 @@ def test_end_to_end_benchmark_dry_run(capsys, tmp_path):
             "--iinj-modes",
             "none",
             "--solvers",
-            "thomas",
+            "split_gs_3",
             "--out-dir",
             str(tmp_path),
             "--dry-run",
@@ -56,5 +87,5 @@ def test_end_to_end_benchmark_dry_run(capsys, tmp_path):
     )
 
     assert capsys.readouterr().out.splitlines() == [
-        "thomas->thomas B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
+        "split_gs_3->split_iterative B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
     ]

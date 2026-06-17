@@ -880,11 +880,11 @@ split_richardson_4:
     not accurate enough; max_residual ~1.1e-3
 ```
 
-Decision: carry `split_gs_4` forward to E2E/physiology validation as the only
-clean Phase 1.5 candidate. Keep `split_jacobi_4` benchmark-only as a possible
-approximate physiology experiment. Put `split_jacobi_8`, `split_gs_8`, and
-`split_richardson_4` in standby. Do not route any split solver into `auto`
-before end-to-end and physiological agreement checks.
+Interim decision: keep `split_gs_4` as the first clean Phase 1.5 candidate,
+but test lower-K cleanup variants before spending an E2E/physiology run. Keep
+`split_jacobi_4` benchmark-only as a possible approximate physiology
+experiment. Put `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` in
+standby.
 
 Follow-up local smoke on 2026-06-16 added:
 
@@ -897,9 +897,48 @@ split_jacobi4_gs1
 Local CPU smoke (`B=2`, `Nx=45/89`, `float32`) showed `split_gs_3` and
 `split_jacobi4_gs1` at near-exact residual/error levels (`~4e-7`) while running
 faster than local `split_gs_4`. `split_gs_2` was too approximate locally
-(`~5e-5` residual). Next evidence needed: Kaggle P100 `linear_split_focus`
-over `B>=1024`, comparing `split_gs_3` and `split_jacobi4_gs1` against
-`split_gs_4` and `pcr_soa`.
+(`~5e-5` residual).
+
+Kaggle P100 `20260616_235328_linear_split_focus_NvidiaTeslaP100` measured the
+focused follow-up (`B=1024/2048/4096`, `Nx=32/51/64/96`, `float32`):
+
+```text
+split_gs_3:
+    max_residual ~6.5e-7
+    max_abs_error ~3.1e-7
+    11/12 wins vs pcr_soa
+    0.648x geomean runtime vs pcr_soa
+    12/12 wins vs split_gs_4
+    0.818x geomean runtime vs split_gs_4
+
+split_gs_4:
+    stricter residual/error, max_residual ~2.1e-7
+    10/12 wins vs pcr_soa
+    0.792x geomean runtime vs pcr_soa
+
+split_jacobi4_gs1:
+    same residual/error level as split_gs_3
+    slower than split_gs_3 and split_gs_4 on this panel
+
+split_gs_2:
+    fastest but not accurate enough; max_residual ~6.2e-5
+```
+
+Decision: carry `split_gs_3` forward to E2E/physiology validation as the main
+Phase 1.5 candidate, with `split_gs_4` as the stricter residual fallback. Keep
+`split_jacobi4_gs1`, `split_gs_2`, `split_jacobi_4`, `split_jacobi_8`,
+`split_gs_8`, and `split_richardson_4` benchmark-only/standby. Do not route
+any split solver into `auto` before end-to-end and physiological agreement
+checks.
+
+E2E focus status on 2026-06-17: `split_gs_3` and `split_gs_4` are wired into
+the end-to-end benchmark through an internal benchmark-only kernel override.
+`BatchOptions.double_cable_block_solver` and `auto` remain unchanged. The E2E
+split path is intentionally limited to array-output recordings (`center` or
+`full`) so it exercises the batch-native array kernel, not the observer-only
+per-fiber path. Local smoke passed for `B=2`, actual `Nx=45`, `Nt=3`,
+`recording=center`, `Iinj=none`. Next evidence needed: Kaggle P100
+`e2e_split_focus`.
 
 ---
 
@@ -1286,7 +1325,7 @@ Recommended order:
 4. Implement split_jacobi_fixed_k. [done as benchmark-only]
 5. Implement split_gauss_seidel_fixed_k. [done as benchmark-only]
 6. Add residual checker. [done]
-7. Benchmark vs Thomas/PCR. [P100 baseline done; focused P100 follow-up next]
+7. Benchmark vs Thomas/PCR. [done for solver-only P100]
 8. Only then decide whether associative scan or Pallas is still necessary.
 ```
 
@@ -2007,8 +2046,8 @@ All AUTO decisions must be benchmark-backed and stored in a small table.
 3. Implement split_gauss_seidel_fixed_k. [done as split_gs_2/3/4/8]
 4. Implement residual checker. [done]
 5. Test K = 4, 8 with rhs_guess initialization in solver-only benchmark. [done]
-6. Compare speed and residual/error vs Thomas and PCR_SOA. [done; focus follow-up next for split_gs_3 and split_jacobi4_gs1]
-7. Run physiology/E2E validation only if solver-only residuals and speed are credible. [after focused P100]
+6. Compare speed and residual/error vs Thomas and PCR_SOA. [done]
+7. Run physiology/E2E validation only if solver-only residuals and speed are credible. [E2E focus wired; Kaggle next]
 8. Decide whether split_best should enter AUTO policy.
 ```
 

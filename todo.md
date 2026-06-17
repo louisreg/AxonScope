@@ -66,9 +66,9 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
-- [ ] Phase 1.5 split iterative solver: run the compact `linear_split_focus`
-  Kaggle comparison, then validate the best clean candidate in an
-  end-to-end/physiology harness before considering any routing change.
+- [ ] Phase 1.5 split iterative solver: validate `split_gs_3` in an
+  end-to-end/physiology harness, with `split_gs_4` as the stricter residual
+  fallback, before considering any routing change.
 - [x] Keep pseudo-double/pseudo-MRG on standby until exact-solver work exposes a
   clear need for approximate screening again.
 - [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
@@ -238,11 +238,27 @@ Near-term tasks:
     residual/error near the exact baseline (`~4e-7`) while running faster than
     local `split_gs_4`; `split_gs_2` was too approximate locally
     (`~5e-5` residual). Treat local timing as smoke only.
-  - [ ] Run Kaggle P100 `linear_split_focus` to compare `split_gs_3` and
-    `split_jacobi4_gs1` against `split_gs_4` and `pcr_soa` for `B>=1024`.
-  - [ ] Add a benchmark-only E2E/physiology validation path for the best clean
-    split candidate before considering public solver-option exposure or `auto`
-    routing.
+  - [x] Kaggle P100 `20260616_235328_linear_split_focus_NvidiaTeslaP100`:
+    `split_gs_3` was the best clean follow-up candidate. It kept
+    `max_residual ~6.5e-7` and `max_abs_error ~3.1e-7`, won `11/12` cases
+    versus `pcr_soa`, and was `0.648x` geomean runtime versus `pcr_soa`.
+    It also beat `split_gs_4` in `12/12` cases (`0.818x` geomean runtime).
+  - [x] Kaggle P100 `20260616_235328_linear_split_focus_NvidiaTeslaP100`:
+    `split_jacobi4_gs1` had the same residual/error level as `split_gs_3` but
+    was slower (`0.839x` geomean runtime vs `pcr_soa`, `1.060x` vs
+    `split_gs_4`). `split_gs_2` and `split_jacobi_4` were faster but too
+    approximate (`~6e-5` and `~7e-6` max residual). Keep them benchmark-only
+    and out of exact-routing decisions.
+  - [x] Add a benchmark-only E2E path for `split_gs_3`, with `split_gs_4` as
+    the stricter residual fallback. This is wired through an internal kernel
+    override and does not expose split solvers through `BatchOptions` or `auto`.
+  - [x] Local E2E smoke passed on 2026-06-17 for `B=2`, actual `Nx=45`,
+    `Nt=3`, `recording=center`, `Iinj=none`, and solvers `pcr_adaptive`,
+    `split_gs_3`, `split_gs_4`. Local CPU/JIT timing is not performance
+    evidence.
+  - [ ] Run Kaggle P100 `e2e_split_focus` for `pcr_adaptive`, `split_gs_3`,
+    and `split_gs_4`; decide whether split iterative deserves physiology
+    agreement testing.
 - [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
   in manifests.
 - [ ] Add a didactic advanced solver-options example after the API is stable.

@@ -101,6 +101,21 @@ python benchmark/solvers/bench_double_cable_end_to_end.py \
   --repeats 3
 ```
 
+Run the focused Phase 1.5 split E2E comparison:
+
+```bash
+python benchmark/solvers/bench_double_cable_end_to_end.py \
+  --batch-sizes 1024 2048 4096 \
+  --nx 51 96 \
+  --nt 500 \
+  --dt 0.01 \
+  --recordings center \
+  --iinj-modes none \
+  --solvers pcr_adaptive split_gs_3 split_gs_4 \
+  --warmups 1 \
+  --repeats 2
+```
+
 This runner builds MRG-like double-cable batches, materializes dense `Vext`,
 optionally materializes dense `Iinj`, and records setup/runtime/input/kernel/
 output byte metrics. It is the Phase 0.2 complement to the isolated linear

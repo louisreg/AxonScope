@@ -79,6 +79,8 @@ def main() -> None:
         run_linear_split_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
+    elif BENCHMARK == "e2e_split_focus":
+        run_e2e(out_dir, mode="split_focus")
     elif BENCHMARK == "e2e_full":
         run_e2e(out_dir, mode="full")
     elif BENCHMARK == "both":
@@ -87,7 +89,7 @@ def main() -> None:
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_split_focus, e2e, e2e_full, or both."
+            "linear_split_focus, e2e, e2e_split_focus, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -271,6 +273,34 @@ def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard
                 "auto",
                 "thomas",
                 "pcr_adaptive",
+                "--warmups",
+                "1",
+                "--repeats",
+                "2",
+            ]
+        )
+    elif mode == "split_focus":
+        command.extend(
+            [
+                "--batch-sizes",
+                "1024",
+                "2048",
+                "4096",
+                "--nx",
+                "51",
+                "96",
+                "--nt",
+                "500",
+                "--dt",
+                "0.01",
+                "--recordings",
+                "center",
+                "--iinj-modes",
+                "none",
+                "--solvers",
+                "pcr_adaptive",
+                "split_gs_3",
+                "split_gs_4",
                 "--warmups",
                 "1",
                 "--repeats",
