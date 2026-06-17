@@ -55,6 +55,7 @@ REPO_URL = string_setting(
 BRANCH = string_setting("AXONSCOPE_BRANCH", "branch", "bench-colab")
 BENCHMARK = string_setting("AXONSCOPE_KAGGLE_BENCHMARK", "benchmark", "smoke")
 REQUIRE_GPU = bool_setting("AXONSCOPE_REQUIRE_GPU", "require_gpu", True)
+JAX_CUDA_EXTRA = string_setting("AXONSCOPE_JAX_CUDA_EXTRA", "jax_cuda_extra", "cuda12")
 
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
 CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
@@ -104,6 +105,27 @@ def setup_repo() -> None:
     run(["git", "rev-parse", "--short", "HEAD"], cwd=CHECKOUT_DIR)
     run([sys.executable, "-m", "pip", "install", "-U", "pip"])
     run([sys.executable, "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
+    if REQUIRE_GPU and JAX_CUDA_EXTRA:
+        install_jax_gpu_extra()
+
+
+def install_jax_gpu_extra() -> None:
+    jax_version = installed_package_version("jax")
+    requirement = f"jax[{JAX_CUDA_EXTRA}]=={jax_version}"
+    run([sys.executable, "-m", "pip", "install", "--upgrade", requirement], cwd=CHECKOUT_DIR)
+
+
+def installed_package_version(package_name: str) -> str:
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import importlib.metadata as metadata; "
+            f"print(metadata.version({package_name!r}))"
+        ),
+    ]
+    print("\n$", " ".join(str(part) for part in command), flush=True)
+    return subprocess.check_output(command, cwd=CHECKOUT_DIR, text=True).strip()
 
 
 def verify_backend() -> None:

@@ -1882,6 +1882,23 @@ This CPU timing is not GPU evidence because non-interpreted Pallas is not
 supported on the CPU backend. The next useful decision point is a fresh GPU
 `linear_pallas_focus` run after committing the JAX 0.10 compatibility shim.
 
+Kaggle P100 retry after the JAX 0.10.1 local update:
+
+```text
+run: 20260617_211635_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas measurement
+environment reached: Python 3.12, Tesla P100, jax/jaxlib 0.10.1, backend gpu
+cause: Kaggle kept preinstalled jax_cuda12_plugin 0.7.2 while the project
+       installed jaxlib 0.10.1, causing a PJRT plugin ABI mismatch before the
+       benchmark generated its first case.
+fix: update the Kaggle wrapper to install jax[cuda12]==<installed jax version>
+     after the project install, so the CUDA plugin/PJRT packages match jaxlib.
+```
+
+The P100 needs the CUDA 12 JAX extra rather than CUDA 13 because P100 is SM 6.0
+and CUDA 13 JAX wheels require newer GPUs. Re-run `linear_pallas_focus` after
+committing the Kaggle CUDA-plugin fix before making a final Phase 3A decision.
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas

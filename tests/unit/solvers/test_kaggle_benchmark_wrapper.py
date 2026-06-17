@@ -1,6 +1,7 @@
 import json
 import py_compile
 import subprocess
+import sys
 from pathlib import Path
 
 from benchmark.kaggle import axonscope_solver_benchmarks as kaggle_bench
@@ -81,6 +82,30 @@ def test_kaggle_backend_probe_escapes_runtime_fstring(monkeypatch):
 
     assert len(commands) == 2
     assert "{backend!r}" in commands[1][-1]
+
+
+def test_kaggle_gpu_jax_extra_matches_installed_jax_version(monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+    monkeypatch.setattr(kaggle_bench, "installed_package_version", lambda name: "0.10.1")
+    monkeypatch.setattr(kaggle_bench, "JAX_CUDA_EXTRA", "cuda12")
+
+    kaggle_bench.install_jax_gpu_extra()
+
+    assert commands == [
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "jax[cuda12]==0.10.1",
+        ]
+    ]
 
 
 def test_kaggle_smoke_commands_are_small(tmp_path, monkeypatch):
