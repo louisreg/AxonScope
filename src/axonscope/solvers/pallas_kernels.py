@@ -87,7 +87,7 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
         _block_spec_2d(block_b, n),
     )
     out_spec = pl.BlockSpec((block_b, n, 2), lambda block_id: (block_id, 0, 0))
-    scratch = pl.MemoryRef((block_b, n, 6), rhs0.dtype, pl.MemorySpace.ANY)
+    scratch = _memory_ref((block_b, n, 6), rhs0.dtype)
     solve = pl.pallas_call(
         functools.partial(_pallas_thomas_2x2_kernel, n=n),
         out_shape=jax.ShapeDtypeStruct((batch_size, n, 2), rhs0.dtype),
@@ -105,6 +105,17 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
 
 def _block_spec_2d(block_b: int, n: int) -> pl.BlockSpec:
     return pl.BlockSpec((block_b, n), lambda block_id: (block_id, 0))
+
+
+def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype):
+    memory_ref = getattr(pl, "MemoryRef", None)
+    memory_space = getattr(pl, "MemorySpace", None)
+    if memory_ref is None or memory_space is None:
+        from jax._src.pallas import core as pallas_core
+
+        memory_ref = pallas_core.MemoryRef
+        memory_space = pallas_core.MemorySpace
+    return memory_ref(shape, dtype, memory_space.ANY)
 
 
 def _pallas_thomas_2x2_kernel(

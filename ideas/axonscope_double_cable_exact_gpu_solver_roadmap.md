@@ -1768,6 +1768,17 @@ Local execution used Pallas `interpret=True` on CPU, so timing is not GPU
 evidence. The first useful decision point is the P100 `linear_pallas_focus`
 run. Keep this candidate benchmark-only and do not add any public routing.
 
+First Kaggle attempt:
+
+```text
+run: 20260617_114922_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas measurement
+cause: Kaggle JAX 0.7.2 no longer exposes jax.experimental.pallas.MemoryRef
+fix: compatibility shim falls back to jax._src.pallas.core.MemoryRef
+```
+
+Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
