@@ -96,7 +96,7 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
         _block_spec_2d(block_b, n),
     )
     out_spec = pl.BlockSpec((block_b, n, 2), lambda block_id: (block_id, 0, 0))
-    scratch = _memory_ref((block_b, n, 6), rhs0.dtype)
+    scratch = _memory_ref((block_b, n, 6), rhs0.dtype, gpu_smem=not bool(interpret))
     solve = pl.pallas_call(
         functools.partial(_pallas_thomas_2x2_kernel, n=n),
         out_shape=jax.ShapeDtypeStruct((batch_size, n, 2), rhs0.dtype),
@@ -115,7 +115,15 @@ def _block_spec_2d(block_b: int, n: int) -> pl.BlockSpec:
     return pl.BlockSpec((block_b, n), lambda block_id: (block_id, 0))
 
 
-def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype):
+def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype, *, gpu_smem: bool = False):
+    if gpu_smem:
+        try:
+            from jax.experimental.pallas import mosaic_gpu as plgpu
+
+            return plgpu.SMEM(shape, dtype)
+        except (ImportError, AttributeError, TypeError):
+            pass
+
     memory_ref = getattr(pl, "MemoryRef", None)
     memory_space = getattr(pl, "MemorySpace", None)
     if memory_ref is None or memory_space is None:

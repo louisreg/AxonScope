@@ -1915,6 +1915,21 @@ fix: make the Pallas scratch MemoryRef prefer MemorySpace.DEFAULT, with ANY
 Local `interpret=True` Pallas tests still pass after the memory-space change.
 Re-run `linear_pallas_focus` once this fix is committed.
 
+Third Kaggle P100 retry after the JAX 0.10.1 local update:
+
+```text
+run: 20260617_212605_linear_pallas_focus_NvidiaTeslaP100
+status: failed during Pallas lowering
+cause: MemorySpace.DEFAULT lowers to gmem for scratch allocation, and Mosaic GPU
+       rejects gmem scratch just like any.
+fix: allocate GPU scratch with jax.experimental.pallas.mosaic_gpu.SMEM(...);
+     keep the generic Pallas MemoryRef fallback for local interpret=True and
+     older API paths.
+```
+
+Local `interpret=True` Pallas tests still pass after switching the GPU scratch
+path to SMEM. Re-run `linear_pallas_focus` once this fix is committed.
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
