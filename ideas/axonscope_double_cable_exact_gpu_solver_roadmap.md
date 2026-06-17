@@ -1804,7 +1804,18 @@ cause: direct scratch/output indexing writes hit swap.abstract_eval in JAX 0.7.2
 fix: use explicit pl.store/pl.load for scratch and output refs
 ```
 
+Fifth Kaggle attempt:
+
+```text
+run: 20260617_121201_linear_pallas_focus_NvidiaTeslaP100
+status: failed during Pallas kernel tracing
+cause: scratch refs in JAX 0.7.2 do not expose .shape
+fix: compute batch indices from input block shape and reuse for pl.store/pl.load
+```
+
 Rerun `linear_pallas_focus` before making any Phase 3A go/no-go decision.
+If this still fails before measurement, put Phase 3A in standby and return to
+`split_gs_3` validation and Vext work.
 
 ---
 

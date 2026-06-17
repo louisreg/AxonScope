@@ -135,6 +135,7 @@ def _pallas_thomas_2x2_kernel(
     n: int,
 ) -> None:
     zero = jnp.zeros((a00_ref.shape[0],), dtype=a00_ref.dtype)
+    batch_indices = jnp.arange(a00_ref.shape[0], dtype=jnp.int32)
 
     def inv_components(
         m00: Array,
@@ -157,7 +158,7 @@ def _pallas_thomas_2x2_kernel(
     c11 = inv11 * off1_ref[:, 0]
     d0 = inv00 * rhs0_ref[:, 0] + inv01 * rhs1_ref[:, 0]
     d1 = inv10 * rhs0_ref[:, 0] + inv11 * rhs1_ref[:, 0]
-    _store_forward_row(scratch_ref, 0, c00, c01, c10, c11, d0, d1)
+    _store_forward_row(scratch_ref, batch_indices, 0, c00, c01, c10, c11, d0, d1)
 
     def forward_body(i: int, carry: tuple[Array, Array, Array, Array, Array, Array]):
         c00_prev, c01_prev, c10_prev, c11_prev, d0_prev, d1_prev = carry
@@ -180,7 +181,17 @@ def _pallas_thomas_2x2_kernel(
         c11_i = inv11_i * upper1
         d0_i = inv00_i * r0 + inv01_i * r1
         d1_i = inv10_i * r0 + inv11_i * r1
-        _store_forward_row(scratch_ref, i, c00_i, c01_i, c10_i, c11_i, d0_i, d1_i)
+        _store_forward_row(
+            scratch_ref,
+            batch_indices,
+            i,
+            c00_i,
+            c01_i,
+            c10_i,
+            c11_i,
+            d0_i,
+            d1_i,
+        )
         return c00_i, c01_i, c10_i, c11_i, d0_i, d1_i
 
     c00, c01, c10, c11, d0, d1 = jax.lax.fori_loop(
@@ -202,23 +213,23 @@ def _pallas_thomas_2x2_kernel(
     r1 = rhs1_ref[:, i] - lower1 * d1
     d0 = inv00 * r0 + inv01 * r1
     d1 = inv10 * r0 + inv11 * r1
-    _store_forward_row(scratch_ref, i, zero, zero, zero, zero, d0, d1)
-    _store_output_component(out_ref, i, 0, d0)
-    _store_output_component(out_ref, i, 1, d1)
+    _store_forward_row(scratch_ref, batch_indices, i, zero, zero, zero, zero, d0, d1)
+    _store_output_component(out_ref, batch_indices, i, 0, d0)
+    _store_output_component(out_ref, batch_indices, i, 1, d1)
 
     def backward_body(k: int, carry: tuple[Array, Array]) -> tuple[Array, Array]:
         next0, next1 = carry
         row = (n - 2) - k
-        c00_i = _load_forward_component(scratch_ref, row, 0)
-        c01_i = _load_forward_component(scratch_ref, row, 1)
-        c10_i = _load_forward_component(scratch_ref, row, 2)
-        c11_i = _load_forward_component(scratch_ref, row, 3)
-        d0_i = _load_forward_component(scratch_ref, row, 4)
-        d1_i = _load_forward_component(scratch_ref, row, 5)
+        c00_i = _load_forward_component(scratch_ref, batch_indices, row, 0)
+        c01_i = _load_forward_component(scratch_ref, batch_indices, row, 1)
+        c10_i = _load_forward_component(scratch_ref, batch_indices, row, 2)
+        c11_i = _load_forward_component(scratch_ref, batch_indices, row, 3)
+        d0_i = _load_forward_component(scratch_ref, batch_indices, row, 4)
+        d1_i = _load_forward_component(scratch_ref, batch_indices, row, 5)
         x0 = d0_i - c00_i * next0 - c01_i * next1
         x1 = d1_i - c10_i * next0 - c11_i * next1
-        _store_output_component(out_ref, row, 0, x0)
-        _store_output_component(out_ref, row, 1, x1)
+        _store_output_component(out_ref, batch_indices, row, 0, x0)
+        _store_output_component(out_ref, batch_indices, row, 1, x1)
         return x0, x1
 
     jax.lax.fori_loop(0, n - 1, backward_body, (d0, d1))
@@ -226,6 +237,7 @@ def _pallas_thomas_2x2_kernel(
 
 def _store_forward_row(
     scratch_ref,
+    batch_indices: Array,
     row: int,
     c00: Array,
     c01: Array,
@@ -234,28 +246,48 @@ def _store_forward_row(
     d0: Array,
     d1: Array,
 ) -> None:
-    _store_forward_component(scratch_ref, row, 0, c00)
-    _store_forward_component(scratch_ref, row, 1, c01)
-    _store_forward_component(scratch_ref, row, 2, c10)
-    _store_forward_component(scratch_ref, row, 3, c11)
-    _store_forward_component(scratch_ref, row, 4, d0)
-    _store_forward_component(scratch_ref, row, 5, d1)
+    _store_forward_component(scratch_ref, batch_indices, row, 0, c00)
+    _store_forward_component(scratch_ref, batch_indices, row, 1, c01)
+    _store_forward_component(scratch_ref, batch_indices, row, 2, c10)
+    _store_forward_component(scratch_ref, batch_indices, row, 3, c11)
+    _store_forward_component(scratch_ref, batch_indices, row, 4, d0)
+    _store_forward_component(scratch_ref, batch_indices, row, 5, d1)
 
 
-def _vector_indices(ref, row: int, component: int) -> tuple[Array, Array, Array]:
-    batch = jnp.arange(ref.shape[0], dtype=jnp.int32)
-    rows = jnp.zeros_like(batch) + row
-    components = jnp.zeros_like(batch) + component
-    return batch, rows, components
+def _vector_indices(
+    batch_indices: Array,
+    row: int,
+    component: int,
+) -> tuple[Array, Array, Array]:
+    rows = jnp.zeros_like(batch_indices) + row
+    components = jnp.zeros_like(batch_indices) + component
+    return batch_indices, rows, components
 
 
-def _store_forward_component(scratch_ref, row: int, component: int, value: Array) -> None:
-    pl.store(scratch_ref, _vector_indices(scratch_ref, row, component), value)
+def _store_forward_component(
+    scratch_ref,
+    batch_indices: Array,
+    row: int,
+    component: int,
+    value: Array,
+) -> None:
+    pl.store(scratch_ref, _vector_indices(batch_indices, row, component), value)
 
 
-def _load_forward_component(scratch_ref, row: int, component: int) -> Array:
-    return pl.load(scratch_ref, _vector_indices(scratch_ref, row, component))
+def _load_forward_component(
+    scratch_ref,
+    batch_indices: Array,
+    row: int,
+    component: int,
+) -> Array:
+    return pl.load(scratch_ref, _vector_indices(batch_indices, row, component))
 
 
-def _store_output_component(out_ref, row: int, component: int, value: Array) -> None:
-    pl.store(out_ref, _vector_indices(out_ref, row, component), value)
+def _store_output_component(
+    out_ref,
+    batch_indices: Array,
+    row: int,
+    component: int,
+    value: Array,
+) -> None:
+    pl.store(out_ref, _vector_indices(batch_indices, row, component), value)

@@ -328,6 +328,13 @@ Near-term tasks:
       `scratch_ref[:, row, k] = ...` with a `swap.abstract_eval` error in
       JAX `0.7.2`. Replace scratch/output direct indexing with explicit
       `pl.store`/`pl.load`; rerun required.
+    - [x] Fifth Kaggle P100 attempt
+      `20260617_121201_linear_pallas_focus_NvidiaTeslaP100` still failed
+      during Pallas tracing because scratch refs in JAX `0.7.2` do not expose
+      `.shape`. Stop deriving vector indices from `scratch_ref.shape`; compute
+      batch indices once from the input block shape and reuse them for
+      `pl.store`/`pl.load`. This is the last compatibility patch before
+      putting the Pallas spike in standby if Kaggle still fails.
   - [ ] Add output-agreement/physiology validation for `split_gs_3` against
     `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
     solver-option exposure or `auto` routing.
