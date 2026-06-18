@@ -2650,6 +2650,40 @@ Decision order:
    for now and return to JAX-native solver work or a coarser E2E boundary.
 ```
 
+T4 result on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_221506_linear_jax_triton_focus_NvidiaTeslaT4
+status: COMPLETE
+jax version: 0.10.2 CUDA backend
+jax-triton: 0.3.1
+baseline: JAX pcr_soa
+candidate: jax_triton_block_thomas
+
+B=1024, Nx=51:  pcr_soa 0.504 ms, jax_triton 0.397 ms, speedup 1.271x
+B=1024, Nx=96:  pcr_soa 0.915 ms, jax_triton 0.543 ms, speedup 1.685x
+B=1024, Nx=128: pcr_soa 1.196 ms, jax_triton 0.621 ms, speedup 1.925x
+B=2048, Nx=51:  pcr_soa 1.007 ms, jax_triton 0.530 ms, speedup 1.900x
+B=2048, Nx=96:  pcr_soa 1.781 ms, jax_triton 0.774 ms, speedup 2.300x
+B=2048, Nx=128: pcr_soa 2.183 ms, jax_triton 0.927 ms, speedup 2.354x
+B=4096, Nx=51:  pcr_soa 1.726 ms, jax_triton 0.778 ms, speedup 2.217x
+B=4096, Nx=96:  pcr_soa 3.079 ms, jax_triton 1.316 ms, speedup 2.339x
+B=4096, Nx=128: pcr_soa 3.810 ms, jax_triton 1.706 ms, speedup 2.234x
+
+geomean speedup vs JAX pcr_soa: 1.991x
+win count vs JAX pcr_soa: 9/9
+speedup range: 1.271x-2.354x
+max dense64-smoke abs error: ~4.99e-08
+max block residual norm: ~3.97e-07
+
+comparison with earlier pure Torch/Triton Thomas on overlapping 6 cases:
+    jax-triton bridge is 1.425x geomean slower than pure Triton,
+    but keeps enough of the win to justify integration work.
+decision: prefer jax-triton over lower-level CUDA FFI for the next integration
+          attempt. Keep CUDA FFI as standby/fallback, not the immediate next
+          Kaggle run.
+```
+
 Use static buckets:
 
 ```text

@@ -174,16 +174,23 @@ Work should start here unless the user asks otherwise.
   pure Triton path. Decision: do not use Python/DLPack bridge as production
   routing inside the time loop; pursue deeper integration or a coarser E2E
   boundary if continuing Triton.
-- [ ] Phase 7.6.3 jax-triton integration gate: run Kaggle T4
+- [x] Phase 7.6.3 jax-triton integration gate: run Kaggle T4
   `linear_jax_triton_focus`. This uses benchmark-only
   `jax_triton_block_thomas` via `jax-ml/jax-triton`, with two Triton custom
   calls inside `jax.jit`, and compares against JAX `pcr_soa` for
   `B=1024/2048/4096`, `Nx=51/96/128`. Treat `Nx=51/96` as the optimized
-  regime and `Nx=128` as a guard, not as a hard solver boundary. If this keeps
-  most of the pure Triton speedup, prefer this bridge over lower-level CUDA FFI.
-- [ ] Phase 7.6.3 CUDA FFI fallback gate: run Kaggle T4
-  `linear_cuda_ffi_focus` only if `linear_jax_triton_focus` fails to install/
-  compile or loses most of the pure Triton gain. This uses benchmark-only
+  regime and `Nx=128` as a guard, not as a hard solver boundary. Result:
+  Kaggle T4 `20260618_221506_linear_jax_triton_focus_NvidiaTeslaT4` completed.
+  `jax_triton_block_thomas` beat JAX `pcr_soa` in all 9 focused cases:
+  `1.991x` geomean speedup, range `1.271x-2.354x`, max dense64-smoke error
+  about `4.99e-08`, max block residual about `3.97e-07`. Compared with the
+  earlier pure Torch/Triton Thomas result on the overlapping 6 cases, the
+  jax-triton bridge is still `1.425x` geomean slower, but it preserves enough
+  speedup to become the preferred integration path for the next work item.
+- [ ] Phase 7.6.3 CUDA FFI fallback gate: keep Kaggle T4
+  `linear_cuda_ffi_focus` in standby. Run it only if `jax-triton` becomes
+  blocked in end-to-end integration or loses too much speed once wired into the
+  real time-step loop. This uses benchmark-only
   `cuda_ffi_block_thomas`, a JAX FFI custom call launching a simple CUDA
   block-Thomas kernel on the XLA CUDA stream.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
