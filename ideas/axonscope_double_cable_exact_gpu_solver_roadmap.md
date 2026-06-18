@@ -2211,6 +2211,20 @@ local validation: local_pallas_pcr128_direct_index_smoke at B=128, Nx=51,
                   float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
 ```
 
+Third P100 attempt:
+
+```text
+run: 20260618_193013_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: output stores used `value[:, None]`, which lowered through
+       `broadcast_in_dim` on `WGStridedFragLayout(shape=(128,), vec_size=1)`;
+       Mosaic GPU reports that layout as unsupported for this broadcast.
+fix: keep `(128, 1)` output block specs but write with direct ref assignment
+     `ref[:, 0] = value`, avoiding the explicit broadcast.
+local validation: local_pallas_pcr128_direct_store_smoke at B=128, Nx=51,
+                  float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
+```
+
 Use static buckets:
 
 ```text

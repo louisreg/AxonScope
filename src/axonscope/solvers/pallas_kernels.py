@@ -560,7 +560,7 @@ def _pallas_pcr_2x2_stage_kernel(
     )
 
     def store(ref, value):
-        _pallas_store(ref, (slice(None), pl.ds(0, 1)), value[:, None])
+        ref[:, 0] = value
 
     store(out_lower00_ref, -nl00)
     store(out_lower01_ref, -nl01)
