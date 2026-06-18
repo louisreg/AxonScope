@@ -85,21 +85,35 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
 
     del num_warps
     block_b = int(block_b)
+    n_storage = _round_up_to_multiple(n, 8)
+    n_edge_storage = _round_up_to_multiple(n - 1, 8)
+    a00_b = _pad_trailing_axis(a00_b, n_storage)
+    a01_b = _pad_trailing_axis(a01_b, n_storage)
+    a10_b = _pad_trailing_axis(a10_b, n_storage)
+    a11_b = _pad_trailing_axis(a11_b, n_storage)
+    off0_b = _pad_trailing_axis(off0_b, n_edge_storage)
+    off1_b = _pad_trailing_axis(off1_b, n_edge_storage)
+    rhs0_b = _pad_trailing_axis(rhs0, n_storage)
+    rhs1_b = _pad_trailing_axis(rhs1, n_storage)
     in_specs = (
-        _block_spec_2d(block_b, n),
-        _block_spec_2d(block_b, n),
-        _block_spec_2d(block_b, n),
-        _block_spec_2d(block_b, n),
-        _block_spec_2d(block_b, n - 1),
-        _block_spec_2d(block_b, n - 1),
-        _block_spec_2d(block_b, n),
-        _block_spec_2d(block_b, n),
+        _block_spec_2d(block_b, n_storage),
+        _block_spec_2d(block_b, n_storage),
+        _block_spec_2d(block_b, n_storage),
+        _block_spec_2d(block_b, n_storage),
+        _block_spec_2d(block_b, n_edge_storage),
+        _block_spec_2d(block_b, n_edge_storage),
+        _block_spec_2d(block_b, n_storage),
+        _block_spec_2d(block_b, n_storage),
     )
-    out_spec = pl.BlockSpec((block_b, n, 2), lambda block_id: (block_id, 0, 0))
-    scratch = _memory_ref((block_b, n, 6), rhs0.dtype, gpu_smem=not bool(interpret))
+    out_spec = pl.BlockSpec((block_b, n_storage, 2), lambda block_id: (block_id, 0, 0))
+    scratch = _memory_ref(
+        (block_b, n_storage, 6),
+        rhs0.dtype,
+        gpu_smem=not bool(interpret),
+    )
     solve = pl.pallas_call(
         functools.partial(_pallas_thomas_2x2_kernel, n=n),
-        out_shape=jax.ShapeDtypeStruct((batch_size, n, 2), rhs0.dtype),
+        out_shape=jax.ShapeDtypeStruct((batch_size, n_storage, 2), rhs0.dtype),
         grid=(batch_size // block_b,),
         in_specs=in_specs,
         out_specs=out_spec,
@@ -107,12 +121,23 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
         interpret=bool(interpret),
         name=f"double_cable_pallas_thomas_b{block_b}",
     )
-    out = solve(a00_b, a01_b, a10_b, a11_b, off0_b, off1_b, rhs0, rhs1)
-    return out[..., 0], out[..., 1]
+    out = solve(a00_b, a01_b, a10_b, a11_b, off0_b, off1_b, rhs0_b, rhs1_b)
+    return out[:, :n, 0], out[:, :n, 1]
 
 
 def _block_spec_2d(block_b: int, n: int) -> pl.BlockSpec:
     return pl.BlockSpec((block_b, n), lambda block_id: (block_id, 0))
+
+
+def _round_up_to_multiple(value: int, multiple: int) -> int:
+    return ((int(value) + int(multiple) - 1) // int(multiple)) * int(multiple)
+
+
+def _pad_trailing_axis(values: Array, target_length: int) -> Array:
+    pad = int(target_length) - int(values.shape[-1])
+    if pad <= 0:
+        return values
+    return jnp.pad(values, ((0, 0), (0, pad)))
 
 
 def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype, *, gpu_smem: bool = False):

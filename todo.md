@@ -358,7 +358,13 @@ Near-term tasks:
     too close to the P100 SMEM ceiling at `Nx=96`; use it only if `4` is
     correct but too slow to be informative. Local smoke
     `local_pallas_blocks_smoke` passed for `pallas_thomas_4/8/16` at `B=16`,
-    `Nx=8`, with max error `4.575e-08` vs Thomas64.
+    `Nx=8`, with max error `4.575e-08` vs Thomas64. First P100 attempt
+    `20260618_184529_linear_pallas_focus_NvidiaTeslaP100` passed the SMEM
+    limit but failed on Mosaic's 128-byte gmem-to-smem transfer alignment
+    requirement (`4 * 51 * 4 = 816` bytes). Internal Pallas block specs now pad
+    storage lengths to multiples of 8 and slice outputs back to real `Nx`;
+    local padded smoke `local_pallas_padded_smoke` matched Thomas64 for
+    `pallas_thomas_4/8/16` at `B=16`, `Nx=51` with max error `6.493e-08`.
   - [x] Local Pallas smoke passed on 2026-06-17 for `B=128`, `Nx=16`,
     `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
     `pallas_thomas_128`, `pcr_soa`. `pallas_thomas_128` matched Thomas64 with
@@ -800,6 +806,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
 | 2026-06-18 | Kaggle exact assoc retest | P100 run `20260618_182820_linear_assoc_focus_NvidiaTeslaP100` installed JAX `0.10.2` and completed. `assoc_backward` remains a good Thomas-family optimization (`1.385x` geomean speedup vs `thomas_batched`) but not a better general backend than `pcr_soa` (`1/9` wins, `1.570x` geomean runtime vs `pcr_soa`). No `auto` routing change. |
 | 2026-06-18 | Pallas Thomas bounded-SMEM retry | P100 run `20260618_183720_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU lowering with JAX `0.10.2` but `pallas_thomas_16` still exceeded shared memory (`60424 > 49152` bytes) before timing. Added benchmark-only `pallas_thomas_4/8`; local smoke `local_pallas_blocks_smoke` matched Thomas64 for `4/8/16`, and the next Kaggle focus uses `pallas_thomas_4`. |
+| 2026-06-18 | Pallas Thomas transfer-alignment retry | P100 run `20260618_184529_linear_pallas_focus_NvidiaTeslaP100` showed `pallas_thomas_4` clears the previous SMEM limit but fails Mosaic's gmem-to-smem copy alignment (`816` bytes not divisible by `128`) at `B=1024`, `Nx=51`. Pallas internal block specs now pad main/edge/rhs/output storage lengths to multiples of 8 while preserving real-`Nx` Thomas loops; local padded smoke matched Thomas64 for `pallas_thomas_4/8/16`. |
 
 ## Completed Roadmap Archive
 

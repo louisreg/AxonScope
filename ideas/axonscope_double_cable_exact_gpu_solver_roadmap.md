@@ -2106,6 +2106,21 @@ therefore uses `pallas_thomas_4` first to get a complete timing sweep. If `4`
 is correct but obviously dominated by launch/program overhead, skip further
 Thomas block-size tuning and move to Phase 3B Pallas PCR/hybrid.
 
+First `pallas_thomas_4` P100 attempt:
+
+```text
+run: 20260618_184529_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: Mosaic GPU gmem->smem block copies must transfer a byte count divisible
+       by the 128-byte warpgroup size. For BLOCK_B=4 and Nx=51, each float32
+       input block transfers 4 * 51 * 4 = 816 bytes.
+fix: pad Pallas internal storage lengths to multiples of 8 for main, edge,
+     rhs, and output block specs, while keeping the Thomas loop bounded by the
+     real Nx and slicing the returned output back to Nx.
+local validation: local_pallas_padded_smoke at B=16, Nx=51, float32 matched
+                  Thomas64 for pallas_thomas_4/8/16 with max_abs_err 6.493e-08
+```
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
