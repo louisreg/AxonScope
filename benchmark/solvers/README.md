@@ -98,12 +98,14 @@ variants out of routing and avoid more Kaggle runs until a Phase 3B PCR/hybrid
 Pallas layout replaces the Thomas spike.
 `pallas_pcr_128` is the first Phase 3B benchmark-only Pallas PCR spike. It
 runs one Pallas stage kernel per PCR stride with programs shaped as
-`128 fibers x 1 cable column`, keeping the 128-element batch width that Mosaic
-GPU wants while avoiding full-cable SMEM residency. Local `interpret=True`
-smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and `Nx=51`. Internal PCR
-work arrays are padded to a four-column multiple so non-power-of-two `Nx` cases
-such as `51` still satisfy Mosaic's 16-byte GMEM stride requirement; GPU timing
-still requires Kaggle/Colab after that padding fix.
+`128 fibers x 4 cable columns`, keeping the 128-element batch width that Mosaic
+GPU wants while giving float32 output blocks a 16-byte minormost dimension.
+Local `interpret=True` smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and
+`Nx=51`. Internal PCR work arrays are padded to a four-column multiple so
+non-power-of-two `Nx` cases such as `51` still satisfy Mosaic's 16-byte GMEM
+stride requirement. Official JAX docs currently list Mosaic GPU support only
+for Hopper and newer GPUs, so do not spend Kaggle P100/T4 runs on this path;
+time it only on a supported Hopper+ GPU.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.

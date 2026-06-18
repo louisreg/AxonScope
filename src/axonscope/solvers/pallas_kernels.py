@@ -278,10 +278,15 @@ def _block_spec_2d(block_b: int, n: int) -> pl.BlockSpec:
     return pl.BlockSpec((block_b, n), lambda block_id: (block_id, 0))
 
 
-def _block_spec_column(block_b: int, *, memory_space=None) -> pl.BlockSpec:
+def _block_spec_column(
+    block_b: int,
+    block_n: int = 1,
+    *,
+    memory_space=None,
+) -> pl.BlockSpec:
     return pl.BlockSpec(
-        (block_b, 1),
-        lambda batch_block, column: (batch_block, column),
+        (block_b, block_n),
+        lambda batch_block, column_block: (batch_block, column_block),
         memory_space=memory_space,
     )
 
@@ -418,16 +423,24 @@ def _pallas_pcr_2x2_stage(
 ) -> tuple[Array, ...]:
     gmem = _gpu_memory_space("GMEM", enabled=not bool(interpret))
     in_specs = (_whole_array_spec(memory_space=gmem),) * 14
-    out_spec = _block_spec_column(block_b)
+    # Four float32 columns make the minormost output block exactly 16 bytes,
+    # matching Mosaic GPU's documented block-size requirement.
+    block_n = 4
+    out_spec = _block_spec_column(block_b, block_n)
     out_specs = (out_spec,) * 14
     out_shape = tuple(
         jax.ShapeDtypeStruct((batch_size, n_storage), lower00.dtype)
         for _ in range(14)
     )
     stage = pl.pallas_call(
-        functools.partial(_pallas_pcr_2x2_stage_kernel, stride=int(stride), n=int(n)),
+        functools.partial(
+            _pallas_pcr_2x2_stage_kernel,
+            stride=int(stride),
+            n=int(n),
+            block_n=block_n,
+        ),
         out_shape=out_shape,
-        grid=(batch_size // block_b, n_storage),
+        grid=(batch_size // block_b, n_storage // block_n),
         in_specs=in_specs,
         out_specs=out_specs,
         interpret=bool(interpret),
@@ -483,137 +496,145 @@ def _pallas_pcr_2x2_stage_kernel(
     *,
     stride: int,
     n: int,
+    block_n: int,
 ) -> None:
     batch_block = pl.program_id(0)
-    col = pl.program_id(1)
+    column_block = pl.program_id(1)
     rows = pl.ds(batch_block * out_lower00_ref.shape[0], out_lower00_ref.shape[0])
-    current = (rows, pl.ds(col, 1))
-    left_col = jnp.maximum(col - int(stride), 0)
-    right_col = jnp.minimum(col + int(stride), int(n) - 1)
-    left = (rows, pl.ds(left_col, 1))
-    right = (rows, pl.ds(right_col, 1))
+    base_col = column_block * int(block_n)
 
     def load(ref, index):
         return ref[index][:, 0]
 
-    l00 = load(lower00_ref, current)
-    l01 = load(lower01_ref, current)
-    l10 = load(lower10_ref, current)
-    l11 = load(lower11_ref, current)
-    u00 = load(upper00_ref, current)
-    u01 = load(upper01_ref, current)
-    u10 = load(upper10_ref, current)
-    u11 = load(upper11_ref, current)
+    def store(ref, local_col: int, value):
+        ref[:, local_col] = value
 
-    left_inv = _inv2_components(
-        load(diag00_ref, left),
-        load(diag01_ref, left),
-        load(diag10_ref, left),
-        load(diag11_ref, left),
-    )
-    right_inv = _inv2_components(
-        load(diag00_ref, right),
-        load(diag01_ref, right),
-        load(diag10_ref, right),
-        load(diag11_ref, right),
-    )
-    lf00, lf01, lf10, lf11 = _matmul2_components(l00, l01, l10, l11, *left_inv)
-    rf00, rf01, rf10, rf11 = _matmul2_components(u00, u01, u10, u11, *right_inv)
+    def solve_column(local_col: int) -> None:
+        col = base_col + local_col
+        current = (rows, pl.ds(col, 1))
+        left_col = jnp.maximum(col - int(stride), 0)
+        right_col = jnp.minimum(col + int(stride), int(n) - 1)
+        left = (rows, pl.ds(left_col, 1))
+        right = (rows, pl.ds(right_col, 1))
 
-    zero = jnp.zeros_like(lf00)
-    one = jnp.ones_like(lf00)
-    is_padding = col >= int(n)
-    has_left = col >= int(stride)
-    has_right = col + int(stride) < int(n)
-    lf00 = jnp.where(has_left, lf00, zero)
-    lf01 = jnp.where(has_left, lf01, zero)
-    lf10 = jnp.where(has_left, lf10, zero)
-    lf11 = jnp.where(has_left, lf11, zero)
-    rf00 = jnp.where(has_right, rf00, zero)
-    rf01 = jnp.where(has_right, rf01, zero)
-    rf10 = jnp.where(has_right, rf10, zero)
-    rf11 = jnp.where(has_right, rf11, zero)
+        l00 = load(lower00_ref, current)
+        l01 = load(lower01_ref, current)
+        l10 = load(lower10_ref, current)
+        l11 = load(lower11_ref, current)
+        u00 = load(upper00_ref, current)
+        u01 = load(upper01_ref, current)
+        u10 = load(upper10_ref, current)
+        u11 = load(upper11_ref, current)
 
-    nl00, nl01, nl10, nl11 = _matmul2_components(
-        lf00,
-        lf01,
-        lf10,
-        lf11,
-        load(lower00_ref, left),
-        load(lower01_ref, left),
-        load(lower10_ref, left),
-        load(lower11_ref, left),
-    )
-    nu00, nu01, nu10, nu11 = _matmul2_components(
-        rf00,
-        rf01,
-        rf10,
-        rf11,
-        load(upper00_ref, right),
-        load(upper01_ref, right),
-        load(upper10_ref, right),
-        load(upper11_ref, right),
-    )
-    ldu00, ldu01, ldu10, ldu11 = _matmul2_components(
-        lf00,
-        lf01,
-        lf10,
-        lf11,
-        load(upper00_ref, left),
-        load(upper01_ref, left),
-        load(upper10_ref, left),
-        load(upper11_ref, left),
-    )
-    rdl00, rdl01, rdl10, rdl11 = _matmul2_components(
-        rf00,
-        rf01,
-        rf10,
-        rf11,
-        load(lower00_ref, right),
-        load(lower01_ref, right),
-        load(lower10_ref, right),
-        load(lower11_ref, right),
-    )
-    lr0, lr1 = _matvec2_components(
-        lf00,
-        lf01,
-        lf10,
-        lf11,
-        load(r0_ref, left),
-        load(r1_ref, left),
-    )
-    rr0, rr1 = _matvec2_components(
-        rf00,
-        rf01,
-        rf10,
-        rf11,
-        load(r0_ref, right),
-        load(r1_ref, right),
-    )
+        left_inv = _inv2_components(
+            load(diag00_ref, left),
+            load(diag01_ref, left),
+            load(diag10_ref, left),
+            load(diag11_ref, left),
+        )
+        right_inv = _inv2_components(
+            load(diag00_ref, right),
+            load(diag01_ref, right),
+            load(diag10_ref, right),
+            load(diag11_ref, right),
+        )
+        lf00, lf01, lf10, lf11 = _matmul2_components(l00, l01, l10, l11, *left_inv)
+        rf00, rf01, rf10, rf11 = _matmul2_components(u00, u01, u10, u11, *right_inv)
 
-    def store(ref, value):
-        ref[:, 0] = value
+        zero = jnp.zeros_like(lf00)
+        one = jnp.ones_like(lf00)
+        is_padding = col >= int(n)
+        has_left = col >= int(stride)
+        has_right = col + int(stride) < int(n)
+        lf00 = jnp.where(has_left, lf00, zero)
+        lf01 = jnp.where(has_left, lf01, zero)
+        lf10 = jnp.where(has_left, lf10, zero)
+        lf11 = jnp.where(has_left, lf11, zero)
+        rf00 = jnp.where(has_right, rf00, zero)
+        rf01 = jnp.where(has_right, rf01, zero)
+        rf10 = jnp.where(has_right, rf10, zero)
+        rf11 = jnp.where(has_right, rf11, zero)
 
-    store(out_lower00_ref, jnp.where(is_padding, zero, -nl00))
-    store(out_lower01_ref, jnp.where(is_padding, zero, -nl01))
-    store(out_lower10_ref, jnp.where(is_padding, zero, -nl10))
-    store(out_lower11_ref, jnp.where(is_padding, zero, -nl11))
-    store(out_upper00_ref, jnp.where(is_padding, zero, -nu00))
-    store(out_upper01_ref, jnp.where(is_padding, zero, -nu01))
-    store(out_upper10_ref, jnp.where(is_padding, zero, -nu10))
-    store(out_upper11_ref, jnp.where(is_padding, zero, -nu11))
-    new_diag00 = load(diag00_ref, current) - ldu00 - rdl00
-    new_diag01 = load(diag01_ref, current) - ldu01 - rdl01
-    new_diag10 = load(diag10_ref, current) - ldu10 - rdl10
-    new_diag11 = load(diag11_ref, current) - ldu11 - rdl11
-    new_r0 = load(r0_ref, current) - lr0 - rr0
-    new_r1 = load(r1_ref, current) - lr1 - rr1
-    store(out_diag00_ref, jnp.where(is_padding, one, new_diag00))
-    store(out_diag01_ref, jnp.where(is_padding, zero, new_diag01))
-    store(out_diag10_ref, jnp.where(is_padding, zero, new_diag10))
-    store(out_diag11_ref, jnp.where(is_padding, one, new_diag11))
-    store(out_r0_ref, jnp.where(is_padding, zero, new_r0))
-    store(out_r1_ref, jnp.where(is_padding, zero, new_r1))
+        nl00, nl01, nl10, nl11 = _matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            load(lower00_ref, left),
+            load(lower01_ref, left),
+            load(lower10_ref, left),
+            load(lower11_ref, left),
+        )
+        nu00, nu01, nu10, nu11 = _matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            load(upper00_ref, right),
+            load(upper01_ref, right),
+            load(upper10_ref, right),
+            load(upper11_ref, right),
+        )
+        ldu00, ldu01, ldu10, ldu11 = _matmul2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            load(upper00_ref, left),
+            load(upper01_ref, left),
+            load(upper10_ref, left),
+            load(upper11_ref, left),
+        )
+        rdl00, rdl01, rdl10, rdl11 = _matmul2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            load(lower00_ref, right),
+            load(lower01_ref, right),
+            load(lower10_ref, right),
+            load(lower11_ref, right),
+        )
+        lr0, lr1 = _matvec2_components(
+            lf00,
+            lf01,
+            lf10,
+            lf11,
+            load(r0_ref, left),
+            load(r1_ref, left),
+        )
+        rr0, rr1 = _matvec2_components(
+            rf00,
+            rf01,
+            rf10,
+            rf11,
+            load(r0_ref, right),
+            load(r1_ref, right),
+        )
+
+        store(out_lower00_ref, local_col, jnp.where(is_padding, zero, -nl00))
+        store(out_lower01_ref, local_col, jnp.where(is_padding, zero, -nl01))
+        store(out_lower10_ref, local_col, jnp.where(is_padding, zero, -nl10))
+        store(out_lower11_ref, local_col, jnp.where(is_padding, zero, -nl11))
+        store(out_upper00_ref, local_col, jnp.where(is_padding, zero, -nu00))
+        store(out_upper01_ref, local_col, jnp.where(is_padding, zero, -nu01))
+        store(out_upper10_ref, local_col, jnp.where(is_padding, zero, -nu10))
+        store(out_upper11_ref, local_col, jnp.where(is_padding, zero, -nu11))
+        new_diag00 = load(diag00_ref, current) - ldu00 - rdl00
+        new_diag01 = load(diag01_ref, current) - ldu01 - rdl01
+        new_diag10 = load(diag10_ref, current) - ldu10 - rdl10
+        new_diag11 = load(diag11_ref, current) - ldu11 - rdl11
+        new_r0 = load(r0_ref, current) - lr0 - rr0
+        new_r1 = load(r1_ref, current) - lr1 - rr1
+        store(out_diag00_ref, local_col, jnp.where(is_padding, one, new_diag00))
+        store(out_diag01_ref, local_col, jnp.where(is_padding, zero, new_diag01))
+        store(out_diag10_ref, local_col, jnp.where(is_padding, zero, new_diag10))
+        store(out_diag11_ref, local_col, jnp.where(is_padding, one, new_diag11))
+        store(out_r0_ref, local_col, jnp.where(is_padding, zero, new_r0))
+        store(out_r1_ref, local_col, jnp.where(is_padding, zero, new_r1))
+
+    for local_col in range(int(block_n)):
+        solve_column(local_col)
 
 
 def _pallas_thomas_2x2_kernel(

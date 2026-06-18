@@ -2240,6 +2240,29 @@ local validation: local_pallas_pcr128_padded_stride_smoke at B=128, Nx=51,
                   float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
 ```
 
+Fifth P100 attempt and documentation check:
+
+```text
+run: 20260618_194249_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: after row-stride padding, Mosaic async-copy lowering rejected the
+       minormost output block width: a `(128, 1)` float32 block copies only
+       32 bits along the last dimension, but the lowering requires 128 bits.
+fix: group four cable columns per Pallas program. The stage now uses
+     `(128 fibers x 4 cable columns)`, preserving the 128-fiber batch width
+     while making the float32 minormost block exactly 16 bytes / 128 bits.
+local validation: local_pallas_pcr128_block4_smoke at B=128, Nx=51, float32
+                  matched pcr_soa/Thomas with max_abs_err 1.021e-07
+doc check: official JAX Pallas docs state that Mosaic GPU support is only for
+           Hopper and newer GPUs. Kaggle P100 is Pascal, and Kaggle T4 is
+           Turing, so neither is a documented Mosaic GPU target. Treat the
+           repeated P100 failures as compatibility/lowering barriers, not as
+           performance evidence.
+decision: pause Kaggle P100/T4 Pallas runs. Keep `pallas_pcr_128` as a
+          benchmark-only Hopper+ candidate, and return to pure-JAX exact solver
+          optimizations for the current accessible GPU pool.
+```
+
 Use static buckets:
 
 ```text
