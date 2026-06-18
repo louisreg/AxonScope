@@ -65,9 +65,12 @@ median relative block residual norms for the solved linear system.
 that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
 `pcr_soa_nomask` is a benchmark-only Phase 1C candidate that removes explicit
 per-stage boundary `where` masks from the batch-native SoA PCR update, relying
-on zero boundary-coupling invariants instead.
+on zero boundary-coupling invariants instead. It was neutral on the 2026-06-17
+P100 `linear_pcr_soa_nomask_focus` run and should not be routed by `auto`.
 `pcr_soa_shift` is a benchmark-only Phase 1C candidate that also replaces
 clamped neighbor gathers with static slice/concat shifts at each PCR stride.
+It was slower in all focused P100 cases and is standby/closed unless future
+XLA lowering changes.
 `thomas_batched` is a benchmark-only exact candidate that runs block Thomas as
 one batch-first scan instead of an outer `vmap` over fibers.
 `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16` are
@@ -83,9 +86,11 @@ associative affine scan.
 stability/performance probe, not an optimized backend. It is numerically
 fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
 unless a stabilized formulation is added.
-`pallas_thomas_128` is a benchmark-only Phase 3A spike that runs exact block
-Thomas in a Pallas kernel with `BLOCK_B=128`. It requires `B` divisible by 128
-and is not a public solver option.
+`pallas_thomas_16` and `pallas_thomas_128` are benchmark-only Phase 3A spikes
+that run exact block Thomas in a Pallas kernel. `pallas_thomas_16` uses
+`BLOCK_B=16` to stay under P100 shared-memory limits at `Nx=96`.
+`pallas_thomas_128` is the historical full-block spike; it exceeded P100 SMEM
+and remains standby.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
@@ -107,6 +112,11 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --warmups 1 \
   --repeats 5
 ```
+
+Latest P100 retest: `20260618_182820_linear_assoc_focus_NvidiaTeslaP100`
+installed JAX `0.10.2`. `assoc_backward` remained faster than
+`thomas_batched`, but did not beat `pcr_soa` generally (`1/9` wins), so it
+stays benchmark-only/standby.
 
 Capture a focused GPU JAX trace for PCR/SoA work:
 
@@ -157,7 +167,7 @@ Run the focused Phase 3A Pallas-Thomas spike:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1024 2048 4096 \
   --nx 51 64 96 \
-  --solvers thomas thomas_batched assoc_backward pallas_thomas_128 pcr_soa pcr_adaptive \
+  --solvers thomas thomas_batched assoc_backward pallas_thomas_16 pcr_soa pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

@@ -674,6 +674,24 @@ python benchmark/kaggle/run_kernel.py \
   --max-status-fetch-failures 20
 ```
 
+P100 result on 2026-06-17:
+
+```text
+run: benchmark/results/kaggle/20260617_220929_linear_pcr_soa_nomask_focus_NvidiaTeslaP100
+B=2048, Nx=51: pcr_soa_nomask 0.995x runtime vs pcr_soa; pcr_soa_shift 2.051x
+B=2048, Nx=96: pcr_soa_nomask 1.001x runtime vs pcr_soa; pcr_soa_shift 1.662x
+B=4096, Nx=51: pcr_soa_nomask 0.983x runtime vs pcr_soa; pcr_soa_shift 1.946x
+B=4096, Nx=96: pcr_soa_nomask 1.025x runtime vs pcr_soa; pcr_soa_shift 1.535x
+```
+
+`pcr_soa_nomask` was effectively neutral (`2/4` wins, geomean `1.001x`
+runtime vs `pcr_soa`). `pcr_soa_shift` was slower in every focused case
+(`1.786x` geomean runtime vs `pcr_soa`), even though local HLO removed gathers
+and selects. The static slice/concat replacement is therefore not a useful P100
+GPU optimization. Decision: do not route either candidate through `auto`; keep
+`pcr_soa_nomask` as a benchmark-only neutral probe and close/standby
+`pcr_soa_shift`.
+
 ---
 
 ## Phase 1C.1 — Batch-native Thomas baseline
@@ -1571,10 +1589,26 @@ vs pcr_soa: 3/9 wins, 1.313x geomean runtime, 0.76x speedup
 vs pcr_soa at B=4096: 3/3 wins, 0.792x geomean runtime, 1.26x speedup
 ```
 
+JAX 0.10.2 P100 retest:
+
+```text
+run: benchmark/results/kaggle/20260618_182820_linear_assoc_focus_NvidiaTeslaP100
+jax: 0.10.2
+jaxlib: 0.10.2
+max_abs_error_vs_thomas64 for assoc_backward: ~1.0e-07
+max_block_residual_norm for assoc_backward: ~1.3e-07
+vs thomas_batched: 9/9 wins, 0.722x geomean runtime, 1.385x speedup
+vs pcr_soa: 1/9 wins, 1.570x geomean runtime, 0.637x speedup
+only pcr_soa win: B=4096, Nx=96, 0.995x runtime, ~1.005x speedup
+```
+
 Decision: `assoc_backward` is a successful Thomas-family optimization, but it
-is not a better general exact backend than `pcr_soa`/`pcr_adaptive`. Keep it
-benchmark-only/standby. Revisit only if future workloads specifically require
-an exact large-batch fallback where `B≈4096` dominates.
+is not a better general exact backend than `pcr_soa`/`pcr_adaptive`. The JAX
+0.10.2 retest removed the earlier broad `B=4096` advantage and left only one
+tiny win at `B=4096`, `Nx=96`. Keep it benchmark-only/standby. Revisit only if
+future workloads specifically require a Thomas-family fallback or if a new
+trace shows PCR_SOA is blocked by a regime where associative backward is
+consistently faster.
 
 ---
 
@@ -2035,6 +2069,21 @@ patch. Plausible directions are much smaller block sizes, recomputing or
 streaming the backward coefficients to bound scratch, or moving directly to a
 PCR/hybrid Pallas kernel whose scratch scales with stages rather than
 `block_b * Nx`.
+
+Bounded-SMEM retry on 2026-06-18:
+
+```text
+candidate: pallas_thomas_16
+implementation: same exact Pallas Thomas kernel with BLOCK_B=16
+scratch estimate at Nx=96, float32: 16 * 96 * 6 * 4 = 36,864 bytes
+P100 max shared memory: 49,152 bytes
+local validation: B=16, Nx=8, float32, interpret=True, matches Thomas64
+```
+
+This candidate is still a Thomas-family baseline, not the desired PCR/hybrid
+kernel, but it is the cheapest way to obtain one real P100 Pallas timing after
+the `pallas_thomas_128` SMEM failure. The `linear_pallas_focus` preset now uses
+`pallas_thomas_16` instead of `pallas_thomas_128`.
 
 ---
 

@@ -80,6 +80,7 @@ SOLVER_CHOICES = (
     "pcr_adaptive",
     "assoc_backward",
     "assoc_transfer_dense",
+    "pallas_thomas_16",
     "pallas_thomas_128",
     "split_jacobi_4",
     "split_jacobi_8",
@@ -104,6 +105,7 @@ KERNEL_SOLVERS = (
     "pcr_soa_padded",
     "assoc_backward",
     "assoc_transfer_dense",
+    "pallas_thomas_16",
     "pallas_thomas_128",
     "split_jacobi_4",
     "split_jacobi_8",
@@ -118,6 +120,7 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "thomas_batched": "thomas",
     "assoc_backward": "thomas",
     "assoc_transfer_dense": "thomas",
+    "pallas_thomas_16": "thomas",
     "pallas_thomas_128": "thomas",
     "pcr_soa_hybrid_4": "pcr_soa",
     "pcr_soa_hybrid_8": "pcr_soa",
@@ -628,10 +631,11 @@ def _make_batched_solver(kernel_solver: str):
 
         return solve_assoc_transfer_dense
 
-    if kernel_solver == "pallas_thomas_128":
+    if kernel_solver in {"pallas_thomas_16", "pallas_thomas_128"}:
+        block_b = {"pallas_thomas_16": 16, "pallas_thomas_128": 128}[kernel_solver]
 
         @jax.jit
-        def solve_pallas_thomas_128(
+        def solve_pallas_thomas(
             a00,
             a01,
             a10,
@@ -650,11 +654,11 @@ def _make_batched_solver(kernel_solver: str):
                 off1,
                 rhs0,
                 rhs1,
-                block_b=128,
+                block_b=block_b,
             )
             return jnp.stack((x0, x1), axis=-1)
 
-        return solve_pallas_thomas_128
+        return solve_pallas_thomas
 
     if kernel_solver in {
         "pcr_soa",

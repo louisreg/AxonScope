@@ -9,7 +9,7 @@ from axonscope.solvers.pallas_kernels import (
 
 
 def test_pallas_thomas_matches_vmapped_thomas_in_interpret_mode():
-    batch_size = 128
+    batch_size = 16
     n = 8
     batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
     x = jnp.arange(n, dtype=jnp.float32)[None, :]
@@ -43,7 +43,7 @@ def test_pallas_thomas_matches_vmapped_thomas_in_interpret_mode():
         off1,
         rhs0,
         rhs1,
-        block_b=128,
+        block_b=16,
         interpret=True,
     )
 

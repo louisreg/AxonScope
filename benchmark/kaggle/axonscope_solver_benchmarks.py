@@ -323,7 +323,7 @@ def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:
         "thomas",
         "thomas_batched",
         "assoc_backward",
-        "pallas_thomas_128",
+        "pallas_thomas_16",
         "pcr_soa",
         "pcr_adaptive",
         "--warmups",

@@ -160,13 +160,20 @@ def test_planned_cases_allow_benchmark_only_pallas_thomas():
         batch_sizes=[1024],
         nx_values=[64],
         dtypes=["float32"],
-        solvers=["pallas_thomas_128"],
+        solvers=["pallas_thomas_16", "pallas_thomas_128"],
         platform="gpu",
     )
 
-    assert cases[0].requested_solver == "pallas_thomas_128"
-    assert cases[0].resolved_solver == "thomas"
-    assert cases[0].kernel_solver == "pallas_thomas_128"
+    assert [case.requested_solver for case in cases] == [
+        "pallas_thomas_16",
+        "pallas_thomas_128",
+    ]
+    assert [case.resolved_solver for case in cases] == ["thomas", "thomas"]
+    assert [case.kernel_solver for case in cases] == [
+        "pallas_thomas_16",
+        "pallas_thomas_128",
+    ]
+    assert resolve_kernel_solver("pallas_thomas_16", batch_size=1024) == "pallas_thomas_16"
     assert resolve_kernel_solver("pallas_thomas_128", batch_size=1024) == "pallas_thomas_128"
 
 

@@ -75,9 +75,16 @@ Work should start here unless the user asks otherwise.
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
   are `loop_select_subtract_fusion_*`, so prioritize reducing per-stage
   `where`/boundary-mask/gather work over more heuristic threshold tuning.
-- [ ] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
+- [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
-  `pcr_soa` on GPU.
+  `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral
+  (`2/4` wins, geomean `1.001x` runtime vs `pcr_soa`), while `pcr_soa_shift`
+  was slower in all cases (`1.786x` geomean runtime vs `pcr_soa`). Do not
+  route either candidate through `auto`; keep `shift` closed/standby.
+- [x] Re-run the exact Thomas-family/associative sweep on Kaggle P100 after
+  the JAX update. Result: `assoc_backward` still beats `thomas_batched`
+  cleanly, but only beats `pcr_soa` in `1/9` cases under JAX `0.10.2`; keep it
+  benchmark-only/standby rather than routing it through `auto`.
 - [x] Phase 1.5 split iterative solver: validate `split_gs_3` in an
   end-to-end/physiology harness, with `split_gs_4` as the stricter residual
   fallback, before considering any routing change. Result: fixed-K
@@ -176,6 +183,10 @@ Near-term tasks:
   needs validation. Local HLO smoke at `B=8`, `Nx=13` reduced
   `pcr_soa_shift` gather/select counts from `104/105` to `0/0`, replacing
   them with static slices/concats.
+- [x] Validate `pcr_soa_nomask` and `pcr_soa_shift` on Kaggle P100. Decision:
+  local HLO simplification did not translate to GPU speed. `pcr_soa_nomask`
+  is too neutral to justify production routing; `pcr_soa_shift` should not get
+  more time unless a future trace shows concat/slice fusion has changed.
 - [x] Add an end-to-end exact double-cable batch-kernel benchmark for
   recording/Iinj pressure before GPU reruns.
 - [ ] Decide whether to keep the current Literal-based solver option or promote
@@ -323,10 +334,25 @@ Near-term tasks:
     (`1.26x` geomean speedup vs `pcr_soa`). Decision: keep benchmark-only/
     standby; do not route into `auto` unless future workloads specifically
     need an exact large-batch Thomas-family fallback.
+  - [x] Kaggle P100 `20260618_182820_linear_assoc_focus_NvidiaTeslaP100`
+    retested the same exact candidates after the JAX upgrade. Kaggle installed
+    `jax==0.10.2`/`jaxlib==0.10.2`. `assoc_backward` still beat
+    `thomas_batched` in `9/9` cases (`1.385x` geomean speedup), but only beat
+    `pcr_soa` in `1/9` cases (`B=4096`, `Nx=96`, by about `1.005x`) and was
+    `1.570x` geomean runtime versus `pcr_soa`. Decision confirmed: no routing
+    change; PCR_SOA remains the best exact JAX backend for these P100 cases.
   - [x] Add Phase 3A Pallas spike `pallas_thomas_128` as a benchmark-only
     exact Thomas-family candidate. It runs one Pallas program per `128` fibers
     over the full `Nx`, requires `B` divisible by `128`, and stays out of
     `BatchOptions`/`auto`.
+  - [x] Add `pallas_thomas_16` as the bounded-SMEM Phase 3A retry. It uses the
+    same exact Pallas Thomas kernel with `BLOCK_B=16`, which keeps the
+    full-`Nx` scratch below P100 shared-memory limits for `Nx=96`. Local
+    `interpret=True` smoke passed for `B=16`, `Nx=8`, `float32`.
+  - [ ] Run Kaggle P100 `linear_pallas_focus` with `pallas_thomas_16` instead
+    of the known-failing `pallas_thomas_128`, then decide whether small-block
+    Pallas Thomas is worth pursuing or whether to move straight to Pallas
+    PCR/hybrid.
   - [x] Local Pallas smoke passed on 2026-06-17 for `B=128`, `Nx=16`,
     `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
     `pallas_thomas_128`, `pcr_soa`. `pallas_thomas_128` matched Thomas64 with
@@ -764,7 +790,9 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Kaggle Pallas scratch memory retry | P100 run `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` reached GPU benchmark execution and measured the non-Pallas first case, then Pallas lowering failed on scratch `MemorySpace.ANY`. Pallas scratch refs now prefer `MemorySpace.DEFAULT`; local Pallas smoke still passes (`11 passed`). |
 | 2026-06-17 | Kaggle Pallas SMEM scratch retry | P100 run `20260617_212605_linear_pallas_focus_NvidiaTeslaP100` showed `MemorySpace.DEFAULT` becomes unsupported `gmem` scratch under Mosaic GPU. GPU Pallas scratch now uses `mosaic_gpu.SMEM(...)`; local Pallas smoke still passes (`11 passed`). |
 | 2026-06-17 | Kaggle PCR_SOA JAX trace | P100 run `20260617_214032_linear_pcr_soa_trace_NvidiaTeslaP100` completed. `pcr_soa` beat matrix-layout `pcr` by `1.09x-1.38x` steady median on focused `B=2048/4096`, `Nx=51/96`, `float32` cases, reducing device fusion events from `31-48` to `7-13`. Remaining hot spots are `loop_select_subtract_fusion_*`, so next work should optimize PCR_SOA stage masking/gather behavior. |
+| 2026-06-17 | Kaggle PCR_SOA stage candidates | P100 run `20260617_220929_linear_pcr_soa_nomask_focus_NvidiaTeslaP100` completed. `pcr_soa_nomask` was neutral (`2/4` wins, geomean `1.001x` runtime vs `pcr_soa`); `pcr_soa_shift` was slower in all focused cases (`1.786x` geomean runtime). Do not route these candidates; close `shift` despite the local HLO gather/select reduction. |
 | 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
+| 2026-06-18 | Kaggle exact assoc retest | P100 run `20260618_182820_linear_assoc_focus_NvidiaTeslaP100` installed JAX `0.10.2` and completed. `assoc_backward` remains a good Thomas-family optimization (`1.385x` geomean speedup vs `thomas_batched`) but not a better general backend than `pcr_soa` (`1/9` wins, `1.570x` geomean runtime vs `pcr_soa`). No `auto` routing change. |
 
 ## Completed Roadmap Archive
 
