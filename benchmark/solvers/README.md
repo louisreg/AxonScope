@@ -105,8 +105,12 @@ Local `interpret=True` smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and
 non-power-of-two `Nx` cases such as `51` still satisfy Mosaic's 16-byte GMEM
 stride requirement. Official JAX docs currently list Mosaic GPU support only
 for Hopper and newer GPUs, but a user Colab T4 smoke notebook has successfully
-compiled/run Pallas. Do not spend more Kaggle P100 runs on this path; validate
-next on T4/Colab or Kaggle T4 before deciding whether to keep optimizing it.
+compiled/run Pallas on an older JAX `0.4.16.dev20230831` + `jax_triton` +
+`triton-nightly` stack that lowers to Triton IR. The current JAX `0.10.x`
+Mosaic GPU path fails on Kaggle T4 with `nvvm.cp.async.bulk.wait_group`
+unsupported on `sm_75`. Do not spend more Kaggle P100/T4 runs on the current
+Mosaic-Pallas path; revisit on Hopper+ or as a separate legacy Triton/Pallas
+notebook spike.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.

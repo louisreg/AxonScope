@@ -2263,6 +2263,28 @@ decision: pause Kaggle P100 Pallas runs. Keep `pallas_pcr_128` as a
           before deciding whether the Pallas PCR line is worth more work.
 ```
 
+T4 validation attempt and notebook comparison:
+
+```text
+run: 20260618_200242_linear_pallas_focus_NvidiaTeslaT4
+status: failed before Pallas timing at B=1024, Nx=51
+progress: Kaggle provisioned Tesla T4 devices and non-Pallas controls ran:
+          pcr_soa median 0.529 ms for B=1024, Nx=51, float32.
+cause: current JAX 0.10.x Mosaic GPU lowering emitted
+       `nvvm.cp.async.bulk.wait_group`, which NVVM reports as unsupported on
+       T4 `sm_75`.
+notebook check: `Copy of Pallas on GPU Demo.ipynb` is a real T4 Pallas smoke,
+                but it pins an older stack:
+                `jax==0.4.16.dev20230831`,
+                `jaxlib==0.4.16.dev20230831+cuda12.cudnn89`,
+                `jax_triton`, and `triton-nightly`.
+                Its debug IR is Triton (`tt.func`), not the current Mosaic GPU
+                lowering path used by this repo's JAX 0.10.x environment.
+decision: close current-stack P100/T4 Mosaic-Pallas benchmarking. Reopen only
+          for a Hopper+ Mosaic GPU, or as a separate legacy Triton/Pallas
+          notebook spike if T4 custom kernels remain attractive.
+```
+
 Use static buckets:
 
 ```text

@@ -67,13 +67,19 @@ Work should start here unless the user asks otherwise.
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
 - [ ] Phase 7.6.3 current Pallas work: keep `pallas_pcr_128` benchmark-only
-  and pause Kaggle P100 Pallas runs, but keep T4 open as an experimental target.
+  and pause Kaggle P100/T4 Mosaic-Pallas runs for this current JAX stack.
   Official JAX Pallas docs say Mosaic GPU is supported only on Hopper and newer
   GPUs, yet a user Colab T4 smoke notebook compiles/runs Pallas successfully.
+  That notebook uses an old JAX `0.4.16.dev20230831` + `jax_triton` +
+  `triton-nightly` stack and lowers to Triton IR (`tt.func`), not the current
+  JAX `0.10.x` Mosaic GPU path used by this repo. Kaggle T4
+  `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed in current
+  Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`.
   `BlockSpec` GPU blocks still need a minormost dimension that is a multiple of
   16 bytes; the current kernel uses `128 fibers x 4 cable columns`, so each
   float32 output block has a 16-byte minormost dimension. Next useful Pallas
-  validation is a focused T4 run, not another P100 run.
+  validation is either a Hopper+ Mosaic run or a deliberately separate legacy
+  Triton/Pallas notebook, not another Kaggle P100/T4 Mosaic run.
 - [ ] Phase 7.6.3 Pallas history: ran Kaggle P100 `linear_pallas_focus`
   with `pallas_pcr_128`. This first Phase 3B candidate uses one Pallas stage
   kernel per PCR stride and originally used programs shaped as
@@ -99,6 +105,9 @@ Work should start here unless the user asks otherwise.
   passed the row-stride fix but failed because a `(128, 1)` float32 output
   block copies only `32` bits along the minormost dimension; the kernel now
   emits four columns per program to make that dimension `128` bits.
+  Kaggle T4 attempt `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` reached
+  the first `pallas_pcr_128` compile and failed in the current Mosaic GPU path
+  because `nvvm.cp.async.bulk.wait_group` is unsupported on T4 `sm_75`.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
@@ -848,6 +857,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Pallas Thomas P100 closure | P100 run `20260618_185700_linear_pallas_focus_NvidiaTeslaP100` passed the iota fix but failed on the first strided SMEM column load (`a00_ref[:, 0]`): Mosaic requires a multiple of `128` elements and `BLOCK_B=4` gives `4`. `BLOCK_B=128` satisfies layout but exceeds SMEM, so Thomas-Pallas is closed/standby for P100; next custom-kernel work should be Phase 3B PCR/hybrid with layout constraints designed in. |
 | 2026-06-18 | Pallas PCR stride-padding retry | P100 run `20260618_193442_linear_pallas_focus_NvidiaTeslaP100` got past direct stores but failed Mosaic async-copy lowering because `Nx=51` gives output GMEM row stride `204` bytes, not a multiple of `16`. `pallas_pcr_128` now pads internal PCR work arrays to a four-column multiple with identity/zero padded columns and slices results back to real `Nx`; local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas. |
 | 2026-06-18 | Pallas PCR P100 pause / T4 reopened | P100 run `20260618_194249_linear_pallas_focus_NvidiaTeslaP100` passed the row-stride fix but failed because `(128, 1)` float32 output blocks copy only `32` bits along the minormost dimension. `pallas_pcr_128` now emits four columns per program (`128` minormost bits). Official JAX Pallas docs list Mosaic GPU support only on Hopper and newer GPUs, but a user Colab T4 smoke notebook compiles/runs Pallas successfully; stop spending Kaggle P100 runs on Pallas, but keep T4 as the next focused validation target. |
+| 2026-06-18 | Pallas T4 current-stack closure | Kaggle T4 run `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed during current JAX `0.10.x` Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`. The user notebook `Copy of Pallas on GPU Demo.ipynb` does run on T4, but it uses old JAX `0.4.16.dev20230831` plus `jax_triton`/`triton-nightly` and lowers to Triton IR (`tt.func`). Decision: no more Kaggle P100/T4 Mosaic-Pallas runs; only revisit Pallas on Hopper+ or as a separate legacy Triton/Pallas notebook spike. |
 
 ## Completed Roadmap Archive
 
