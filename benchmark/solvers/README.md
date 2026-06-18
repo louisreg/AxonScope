@@ -127,6 +127,10 @@ same JAX Advanced Guides pass. It keeps the exact SoA PCR algebra but stores
 the stage work arrays in internal `jax.new_ref` buffers, testing whether XLA can
 shorten live ranges or reuse buffers more effectively on GPU. It is not a
 public solver value.
+The 2026-06-18 Kaggle P100 `linear_pcr_soa_layout_focus` run closed both as
+non-routing candidates: `pcr_soa_layout_auto` won `2/6` cases but was `1.021x`
+geomean runtime versus `pcr_soa`, `pcr_soa_ref` won `0/6` and was `1.033x`,
+and compiled layouts were identical to the baseline.
 `split_jacobi_4`, `split_jacobi4_gs1`, `split_gs_2`, `split_gs_3`,
 `split_gs_4`, `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` are
 historical benchmark-only Phase 1.5 candidates. The 2026-06-17 E2E agreement

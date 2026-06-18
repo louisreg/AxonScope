@@ -351,6 +351,50 @@ def test_kaggle_linear_pallas_focus_is_bounded_to_exact_candidates(tmp_path, mon
     ]
 
 
+def test_kaggle_linear_triton_focus_runs_jax_baseline_and_triton(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear_triton_focus(tmp_path)
+
+    baseline, triton = commands
+    assert baseline[baseline.index("--prefix") + 1] == "linear_triton_jax_baseline"
+    assert baseline[baseline.index("--batch-sizes") + 1 : baseline.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert baseline[baseline.index("--nx") + 1 : baseline.index("--dtypes")] == [
+        "51",
+        "96",
+    ]
+    solvers_start = baseline.index("--solvers") + 1
+    solvers_end = baseline.index("--warmups")
+    assert baseline[solvers_start:solvers_end] == ["pcr_soa"]
+
+    assert triton[1] == "benchmark/triton_solver/bench_double_cable_triton.py"
+    assert triton[triton.index("--prefix") + 1] == "linear_triton_focus"
+    assert triton[triton.index("--batch-sizes") + 1 : triton.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert triton[triton.index("--nx") + 1 : triton.index("--dtypes")] == [
+        "51",
+        "96",
+    ]
+
+
+def test_kaggle_runner_accepts_linear_triton_focus_choice():
+    args = parse_args(["--username", "owner", "--benchmark", "linear_triton_focus"])
+
+    assert args.benchmark == "linear_triton_focus"
+
+
 def test_kaggle_checkout_stays_out_of_persisted_working_dir():
     assert kaggle_bench.CHECKOUT_DIR == Path("/tmp/AxonScope")
 

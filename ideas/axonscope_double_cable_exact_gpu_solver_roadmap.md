@@ -733,6 +733,32 @@ fragility or numerical error. If they only change compile time or are neutral,
 close them as JAX-layout/memory diagnostics and move on to deeper solver-body
 changes.
 
+P100 result on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100
+B=1024, Nx=51: layout_auto 1.050x runtime vs pcr_soa; ref 1.006x
+B=1024, Nx=96: layout_auto 1.012x runtime vs pcr_soa; ref 1.043x
+B=2048, Nx=51: layout_auto 1.099x runtime vs pcr_soa; ref 1.093x
+B=2048, Nx=96: layout_auto 0.963x runtime vs pcr_soa; ref 1.008x
+B=4096, Nx=51: layout_auto 0.989x runtime vs pcr_soa; ref 1.034x
+B=4096, Nx=96: layout_auto 1.020x runtime vs pcr_soa; ref 1.018x
+```
+
+Summary:
+
+```text
+pcr_soa_layout_auto: 2/6 wins, 1.021x geomean runtime vs pcr_soa
+pcr_soa_ref:         0/6 wins, 1.033x geomean runtime vs pcr_soa
+compiled layouts:    identical to baseline, inputs [0, 1], output [0, 1, 2]
+```
+
+Decision: no routing change. Keep both candidates benchmark-only for
+reproducibility, but do not spend more Kaggle runs on JAX layout/ref controls
+unless a future JAX/XLA release changes layout inference. The next useful work
+should change the PCR_SOA stage body itself rather than only its compilation
+contract or buffer representation.
+
 ---
 
 ## Phase 1C.1 — Batch-native Thomas baseline
@@ -2325,6 +2351,83 @@ decision: close current-stack P100/T4 Mosaic-Pallas benchmarking. Reopen only
           for a Hopper+ Mosaic GPU, or as a separate legacy Triton/Pallas
           notebook spike if T4 custom kernels remain attractive.
 ```
+
+## Phase 3B.1 — CuTe DSL / CUTLASS JAX custom-call scout
+
+Status on 2026-06-18: reviewed the official JAX CuTe DSL guide and added a
+standalone smoke harness:
+
+```text
+benchmark/cute_dsl/run_cute_dsl_smoke.py
+benchmark/cute_dsl/cute_dsl_jax_kernels.py
+```
+
+The smoke follows the guide's vector-add `@cute.kernel` +
+`cutlass.jax.cutlass_call` pattern and checks dependencies plus GPU compute
+capability before importing the CuTe kernel module. It exits with
+`status=skipped` by default when the runtime is incompatible, so it can be used
+as a first gate on future GPU runtimes without breaking local CPU checks.
+
+Hardware decision:
+
+```text
+CuTe DSL documented minimum: SM 8.0+ (Ampere)
+Kaggle P100:                 SM 6.0 -> unsupported
+Kaggle T4:                   SM 7.5 -> unsupported
+Potential targets:           L4, A100, H100, or newer
+```
+
+Local result:
+
+```text
+command: python benchmark/cute_dsl/run_cute_dsl_smoke.py --n 512
+status:  skipped
+reason:  JAX backend is 'cpu', expected 'gpu'
+```
+
+Decision: do not spend Kaggle P100/T4 runs on CuTe DSL. Reopen only on an
+Ampere-or-newer runtime, first by passing the standalone vector-add smoke, then
+by attempting a single PCR-stage custom call. CuTe remains more plausible than
+current-stack Mosaic-Pallas for non-Hopper custom kernels, but it is a separate
+hardware/toolchain spike rather than the next P100 solver optimization.
+
+## Phase 3B.2 — Triton standalone double-cable scout
+
+Status on 2026-06-18: added a standalone Triton exact block-Thomas benchmark:
+
+```text
+benchmark/triton_solver/bench_double_cable_triton.py
+benchmark/triton_solver/triton_double_cable_kernels.py
+```
+
+The candidate is intentionally simple:
+
+```text
+solver: triton_block_thomas
+layout: row-major [B, Nx] SoA tensors
+forward: one Triton program per fiber, sequential block-Thomas elimination
+backward: one Triton program per fiber, sequential substitution
+scratch: modified 2x2 upper block + modified RHS, stored globally
+```
+
+This is not yet a JAX custom call. The point is to test whether a small
+hand-written Triton double-cable kernel is even in the right performance
+neighborhood. The Kaggle preset runs a same-GPU JAX baseline first:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_triton_focus \
+  --machine-shape NvidiaTeslaT4 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
+
+Decision rule: if `triton_block_thomas` does not clearly beat `pcr_soa` on
+steady-state median kernel time, close the Triton line. If it does beat
+`pcr_soa`, the next step is either a JAX custom-call integration path or a
+Triton PCR-stage kernel that better matches the current exact solver policy.
 
 Use static buckets:
 

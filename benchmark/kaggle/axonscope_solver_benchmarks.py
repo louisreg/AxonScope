@@ -86,6 +86,8 @@ def main() -> None:
         run_linear_pcr_soa_nomask_focus(out_dir)
     elif BENCHMARK == "linear_pallas_focus":
         run_linear_pallas_focus(out_dir)
+    elif BENCHMARK == "linear_triton_focus":
+        run_linear_triton_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
     elif BENCHMARK == "e2e_full":
@@ -98,7 +100,7 @@ def main() -> None:
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
             "linear_assoc_focus, linear_pcr_soa_trace, "
             "linear_pcr_soa_layout_focus, linear_pcr_soa_nomask_focus, "
-            "linear_pallas_focus, e2e, e2e_full, or both."
+            "linear_pallas_focus, linear_triton_focus, e2e, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -366,6 +368,57 @@ def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear_pallas_focus" / "summary.csv", mode="linear")
+
+
+def run_linear_triton_focus(out_dir: pathlib.Path) -> None:
+    baseline_command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_linear_solvers.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_triton_jax_baseline",
+        "--batch-sizes",
+        "1024",
+        "2048",
+        "4096",
+        "--nx",
+        "51",
+        "96",
+        "--dtypes",
+        "float32",
+        "--solvers",
+        "pcr_soa",
+        "--warmups",
+        "1",
+        "--repeats",
+        "5",
+    ]
+    run(baseline_command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "linear_triton_jax_baseline" / "summary.csv", mode="linear")
+
+    triton_command = [
+        sys.executable,
+        "benchmark/triton_solver/bench_double_cable_triton.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "linear_triton_focus",
+        "--batch-sizes",
+        "1024",
+        "2048",
+        "4096",
+        "--nx",
+        "51",
+        "96",
+        "--dtypes",
+        "float32",
+        "--warmups",
+        "1",
+        "--repeats",
+        "5",
+    ]
+    run(triton_command, cwd=CHECKOUT_DIR)
 
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:

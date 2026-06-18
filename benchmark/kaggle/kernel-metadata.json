@@ -9,7 +9,7 @@
   "kernel_sources": [],
   "kernel_type": "script",
   "language": "python",
-  "machine_shape": "NvidiaTeslaT4",
+  "machine_shape": "NvidiaTeslaP100",
   "model_sources": [],
   "title": "AxonScope Double-Cable Solver Benchmarks"
 }

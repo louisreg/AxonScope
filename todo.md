@@ -113,13 +113,32 @@ Work should start here unless the user asks otherwise.
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
   are `loop_select_subtract_fusion_*`, so prioritize reducing per-stage
   `where`/boundary-mask/gather work over more heuristic threshold tuning.
-- [ ] Phase 7.6.3 JAX advanced-guide spike: validate benchmark-only
+- [x] Phase 7.6.3 JAX advanced-guide spike: validate benchmark-only
   `pcr_soa_layout_auto` and `pcr_soa_ref` on Kaggle P100. Both keep the exact
   batch-native SoA PCR algebra: `layout_auto` compiles the benchmark wrapper
   with `jax.experimental.layout.Format(Layout.AUTO)` for input/output layouts
   and records inferred `major_to_minor` layouts; `ref` stores stage work arrays
-  in internal `jax.new_ref` buffers to test memory/lifetime control. Evidence
-  gate: `linear_pcr_soa_layout_focus` versus baseline `pcr_soa`.
+  in internal `jax.new_ref` buffers to test memory/lifetime control. Result:
+  Kaggle P100 `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100`
+  found no useful speedup. `layout_auto` won `2/6` cases but was `1.021x`
+  geomean runtime versus `pcr_soa`; `ref` won `0/6` and was `1.033x`
+  geomean runtime. The inferred layouts stayed identical to baseline
+  (`[0, 1]` inputs, `[0, 1, 2]` output), so do not route either candidate.
+- [x] Phase 7.6.3 CuTe DSL/JAX spike: added a standalone
+  `benchmark/cute_dsl/run_cute_dsl_smoke.py` vector-add custom-call harness
+  following the official JAX CuTe DSL guide. Local run skips cleanly on the
+  Mac CPU env because `cutlass`/CUDA bindings are absent. The guide documents
+  SM 8.0+ as the minimum GPU, so current Kaggle P100 (`sm_60`) and T4
+  (`sm_75`) should not be used for CuTe DSL solver runs. Reopen this line only
+  on L4/A100/H100-class runtimes, with the smoke as the first gate before any
+  PCR stage kernel.
+- [ ] Phase 7.6.3 Triton spike: validate standalone exact
+  `triton_block_thomas` against the JAX `pcr_soa` baseline using Kaggle
+  `linear_triton_focus`. This is intentionally a small two-kernel custom
+  double-cable solve (forward/backward block Thomas, one Triton program per
+  fiber), not a full JAX integration. Decision rule: if it does not clearly
+  beat `pcr_soa` on the same GPU, close Triton and return to pure-JAX PCR_SOA
+  solver-body optimization.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral
@@ -866,6 +885,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Pallas PCR P100 pause / T4 reopened | P100 run `20260618_194249_linear_pallas_focus_NvidiaTeslaP100` passed the row-stride fix but failed because `(128, 1)` float32 output blocks copy only `32` bits along the minormost dimension. `pallas_pcr_128` now emits four columns per program (`128` minormost bits). Official JAX Pallas docs list Mosaic GPU support only on Hopper and newer GPUs, but a user Colab T4 smoke notebook compiles/runs Pallas successfully; stop spending Kaggle P100 runs on Pallas, but keep T4 as the next focused validation target. |
 | 2026-06-18 | Pallas T4 current-stack closure | Kaggle T4 run `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed during current JAX `0.10.x` Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`. The user notebook `Copy of Pallas on GPU Demo.ipynb` does run on T4, but it uses old JAX `0.4.16.dev20230831` plus `jax_triton`/`triton-nightly` and lowers to Triton IR (`tt.func`). Decision: no more Kaggle P100/T4 Mosaic-Pallas runs; only revisit Pallas on Hopper+ or as a separate legacy Triton/Pallas notebook spike. |
 | 2026-06-18 | JAX layout/ref PCR_SOA spike | Added benchmark-only `pcr_soa_layout_auto` and `pcr_soa_ref` from the JAX Advanced Guides pass. They keep the exact `pcr_soa` solver algebra; `layout_auto` asks XLA for automatic device-local layouts and records inferred `major_to_minor` layouts, while `ref` uses internal `jax.new_ref` stage work buffers. Next evidence gate: Kaggle P100 `linear_pcr_soa_layout_focus`. |
+| 2026-06-18 | Kaggle JAX layout/ref PCR_SOA result | P100 run `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100` completed. `pcr_soa_layout_auto` was not useful overall (`2/6` wins, `1.021x` geomean runtime vs `pcr_soa`) and `pcr_soa_ref` was slower in all cases (`1.033x` geomean runtime). Layout summaries were identical to baseline (`[0, 1]` inputs, `[0, 1, 2]` output), so close this line as diagnostic and do not route either candidate. |
 
 ## Completed Roadmap Archive
 
