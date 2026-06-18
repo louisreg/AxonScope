@@ -1,31 +1,24 @@
-# Solver-Focused Benchmarks
+# Solver Benchmarks
 
-This folder isolates numerical solver kernels from AxonScope model building,
-dispatch, input materialization, and result packaging.
+This folder contains the active AxonScope double-cable solver benchmarks. It is
+kept intentionally small after the June 2026 optimization campaign:
 
-The first benchmark targets the exact double-cable 2x2 block-tridiagonal
-linear solve used inside each implicit myelinated time step.
+- retained public solver routes: `auto`, `thomas`, `pcr`, `pcr_soa`,
+  `pcr_adaptive`
+- active linear benchmark: public solver comparison and optional JAX trace for
+  the retained PCR/SoA path
+- active E2E benchmark: real double-cable time-step loop with bounded and full
+  matrices
+- archived solver spikes: split iterative, associative-Thomas variants, Pallas,
+  Triton, JAX-Triton, and CUDA FFI
 
-## Double-Cable Linear Solvers
+The campaign summary and decision table live in:
 
-Colab notebook:
+- `benchmark/reports/double_cable_solver_optimization_2026_06.md`
 
-- `benchmark/solvers/colab_double_cable_linear_solvers.ipynb`
-- `benchmark/solvers/colab_double_cable_end_to_end.ipynb`
+## Linear Solver Benchmark
 
-Before opening it in Colab, publish the committed local revision:
-
-```bash
-git add -A
-git commit -m "Benchmark double-cable linear solvers"
-make bench-colab-push
-```
-
-The notebook clones `bench-colab`, installs `.[benchmark]`, runs one selectable
-case (`smoke`, `gpu_matrix`, `gpu_full`, or `trace_pcr_adaptive`), and downloads
-a zipped `benchmark/results/solvers/<run_id>/` folder.
-
-Dry-run the default matrix:
+Dry-run the default retained-solver matrix:
 
 ```bash
 python benchmark/solvers/bench_double_cable_linear_solvers.py --dry-run
@@ -43,124 +36,29 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --repeats 3
 ```
 
-Run the GPU-oriented sweep from the exact double-cable roadmap:
+Run the GPU-oriented retained matrix:
 
 ```bash
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
-  --batch-sizes 1 8 128 512 1024 2048 4096 \
-  --nx 16 32 51 64 96 100 128 \
+  --batch-sizes 128 512 1024 2048 4096 \
+  --nx 32 51 64 96 \
   --solvers thomas pcr pcr_soa pcr_adaptive \
-  --dtypes float32 float64 \
-  --warmups 1 \
-  --repeats 5
-```
-
-Each row records compile time, first compiled run time, steady-state min/median/
-p95 time, `B * Nx` node-solves per second, and max error versus a Thomas
-float64 reference unless `--skip-reference` is used. It also records max and
-median relative block residual norms for the solved linear system.
-
-`pcr_soa` is measured with the batch-native
-`solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
-that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
-`pcr_soa_nomask` is a benchmark-only Phase 1C candidate that removes explicit
-per-stage boundary `where` masks from the batch-native SoA PCR update, relying
-on zero boundary-coupling invariants instead. It was neutral on the 2026-06-17
-P100 `linear_pcr_soa_nomask_focus` run and should not be routed by `auto`.
-`pcr_soa_shift` is a benchmark-only Phase 1C candidate that also replaces
-clamped neighbor gathers with static slice/concat shifts at each PCR stride.
-It was slower in all focused P100 cases and is standby/closed unless future
-XLA lowering changes.
-`thomas_batched` is a benchmark-only exact candidate that runs block Thomas as
-one batch-first scan instead of an outer `vmap` over fibers.
-`pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and `pcr_soa_hybrid_16` are
-benchmark-only Phase 1E candidates that run partial PCR, then exact block
-Thomas on the independent residual chains.
-`pcr_soa_transposed` is a benchmark-only exact candidate that keeps the public
-RHS shape as `[B, Nx]` but runs PCR internally as `[Nx, B]`.
-`assoc_backward` is a benchmark-only Phase 2A exact candidate that keeps the
-Thomas forward elimination and replaces the reverse substitution scan with an
-associative affine scan.
-`assoc_transfer_dense` is a benchmark-only Phase 2B prototype that uses dense
-5x5 transfer matrices and an associative prefix product; it is a
-stability/performance probe, not an optimized backend. It is numerically
-fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
-unless a stabilized formulation is added.
-`pallas_thomas_4`, `pallas_thomas_8`, `pallas_thomas_16`, and
-`pallas_thomas_128` are benchmark-only Phase 3A spikes that run exact block
-Thomas in a Pallas kernel. `pallas_thomas_128` is the historical full-block
-spike; it exceeded P100 SMEM and remains standby. `pallas_thomas_4/8/16` are
-the bounded-SMEM retries that were used to map Mosaic GPU lowering constraints.
-The P100 retries ultimately closed the Thomas-Pallas line: `BLOCK_B=128`
-matches Mosaic's 128-element strided-load preference but exceeds SMEM, while
-small `BLOCK_B` variants fit SMEM but fail strided-load lowering. Keep these
-variants out of routing and avoid more Kaggle runs until a Phase 3B PCR/hybrid
-Pallas layout replaces the Thomas spike.
-`pallas_pcr_128` is the first Phase 3B benchmark-only Pallas PCR spike. It
-runs one Pallas stage kernel per PCR stride with programs shaped as
-`128 fibers x 4 cable columns`, keeping the 128-element batch width that Mosaic
-GPU wants while giving float32 output blocks a 16-byte minormost dimension.
-Local `interpret=True` smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and
-`Nx=51`. Internal PCR work arrays are padded to a four-column multiple so
-non-power-of-two `Nx` cases such as `51` still satisfy Mosaic's 16-byte GMEM
-stride requirement. Official JAX docs currently list Mosaic GPU support only
-for Hopper and newer GPUs, but a user Colab T4 smoke notebook has successfully
-compiled/run Pallas on an older JAX `0.4.16.dev20230831` + `jax_triton` +
-`triton-nightly` stack that lowers to Triton IR. The current JAX `0.10.x`
-Mosaic GPU path fails on Kaggle T4 with `nvvm.cp.async.bulk.wait_group`
-unsupported on `sm_75`. Do not spend more Kaggle P100/T4 runs on the current
-Mosaic-Pallas path; revisit on Hopper+ or as a separate legacy Triton/Pallas
-notebook spike.
-`pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
-32/64/128 identity rows before the batch-native SoA solve; it is not a
-`BatchOptions.double_cable_block_solver` value.
-`pcr_soa_layout_auto` is a benchmark-only Phase 1C layout-control candidate
-from the JAX Advanced Guides pass. It runs the same batch-native SoA PCR solver
-as `pcr_soa`, but compiles the benchmark wrapper with
-`jax.experimental.layout.Format(Layout.AUTO)` for inputs and outputs so the GPU
-compiler can choose device-local array layouts. It also records compact
-`major_to_minor` layout summaries in the benchmark CSV/JSON output. It is not
-a public solver value and should only be considered for routing after P100
-evidence.
-`pcr_soa_ref` is a benchmark-only Phase 1C memory-control candidate from the
-same JAX Advanced Guides pass. It keeps the exact SoA PCR algebra but stores
-the stage work arrays in internal `jax.new_ref` buffers, testing whether XLA can
-shorten live ranges or reuse buffers more effectively on GPU. It is not a
-public solver value.
-The 2026-06-18 Kaggle P100 `linear_pcr_soa_layout_focus` run closed both as
-non-routing candidates: `pcr_soa_layout_auto` won `2/6` cases but was `1.021x`
-geomean runtime versus `pcr_soa`, `pcr_soa_ref` won `0/6` and was `1.033x`,
-and compiled layouts were identical to the baseline.
-`split_jacobi_4`, `split_jacobi4_gs1`, `split_gs_2`, `split_gs_3`,
-`split_gs_4`, `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` are
-historical benchmark-only Phase 1.5 candidates. The 2026-06-17 E2E agreement
-smoke failed for the best split candidates, so split iterative approaches are
-abandoned for the current optimization pass and should not be included in new
-Kaggle runs except to reproduce old evidence.
-`jax_triton_thomas` is a benchmark-only Phase 2B custom-kernel bridge that
-runs the exact block-Thomas solve through `jax-triton` inside the real
-double-cable batch-native time loop. It is not a public solver value or an
-`auto` route; exercise it with array recording (`center` or `full`) so the
-custom kernel is not wrapped by observer-only `vmap`.
-
-Run the focused Phase 2A associative-backward comparison:
-
-```bash
-python benchmark/solvers/bench_double_cable_linear_solvers.py \
-  --batch-sizes 1024 2048 4096 \
-  --nx 51 64 96 \
-  --solvers thomas thomas_batched assoc_backward pcr_soa pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5
 ```
 
-Latest P100 retest: `20260618_182820_linear_assoc_focus_NvidiaTeslaP100`
-installed JAX `0.10.2`. `assoc_backward` remained faster than
-`thomas_batched`, but did not beat `pcr_soa` generally (`1/9` wins), so it
-stays benchmark-only/standby.
+Each row records compile time, first compiled run time, steady-state
+min/median/p95, node-solves per second, max error versus a Thomas float64
+reference unless `--skip-reference` is used, and block residual norms.
 
-Capture a focused GPU JAX trace for PCR/SoA work:
+`pcr_soa` uses the batch-native
+`solve_block_tridiagonal_2x2_pcr_soa_batched(...)` path. `pcr_adaptive` uses
+that same SoA path through `B <= 4096`, then falls back to matrix-layout `pcr`.
+
+## JAX Trace
+
+Capture a focused GPU trace for retained PCR/SoA work:
 
 ```bash
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
@@ -174,7 +72,7 @@ python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --jax-trace
 ```
 
-On Kaggle, use the same matrix through the dedicated preset:
+On Kaggle, use the dedicated active preset:
 
 ```bash
 python benchmark/kaggle/run_kernel.py \
@@ -186,124 +84,96 @@ python benchmark/kaggle/run_kernel.py \
   --max-status-fetch-failures 20
 ```
 
-Downloaded outputs include the zipped `jax_traces/` folder under the
-`linear_pcr_soa_trace` result directory. Open it with TensorBoard's profile
-viewer or the generated Perfetto trace when `--jax-trace-create-perfetto` is
-used locally.
+Downloaded outputs include `jax_traces/` under the
+`linear_pcr_soa_trace` result directory. Open the trace with TensorBoard's
+profile viewer or a generated Perfetto trace when
+`--jax-trace-create-perfetto` is used locally.
 
-Run the focused Phase 1C PCR_SOA no-mask candidate on Kaggle:
+## End-To-End Benchmark
 
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username louisregnacq \
-  --benchmark linear_pcr_soa_nomask_focus \
-  --machine-shape NvidiaTeslaP100 \
-  --poll-interval 60 \
-  --wait-timeout 7200 \
-  --max-status-fetch-failures 20
-```
-
-Run the focused JAX `Layout.AUTO`/`Ref` candidates on Kaggle:
+Run the bounded E2E double-cable batch-kernel matrix:
 
 ```bash
-python benchmark/kaggle/run_kernel.py \
-  --username louisregnacq \
-  --benchmark linear_pcr_soa_layout_focus \
-  --machine-shape NvidiaTeslaP100 \
-  --poll-interval 60 \
-  --wait-timeout 7200 \
-  --max-status-fetch-failures 20
-```
-
-Run the focused Phase 3B Pallas-PCR spike:
-
-```bash
-python benchmark/solvers/bench_double_cable_linear_solvers.py \
-  --batch-sizes 1024 2048 4096 \
-  --nx 51 64 96 \
-  --solvers thomas thomas_batched assoc_backward pcr pcr_soa pallas_pcr_128 pcr_adaptive \
-  --dtypes float32 \
+python benchmark/solvers/bench_double_cable_end_to_end.py \
+  --batch-sizes 512 2048 \
+  --nx 51 96 \
+  --nt 500 \
+  --dt 0.01 \
+  --recordings none center \
+  --iinj-modes none dense_zero \
+  --solvers auto thomas pcr_adaptive \
   --warmups 1 \
-  --repeats 5
+  --repeats 2
 ```
 
-Summarize one or more downloaded `summary.csv` files:
-
-```bash
-python benchmark/solvers/summarize_double_cable_linear_solvers.py \
-  benchmark/results/solvers/<run_id>/gpu/summary.csv \
-  --out benchmark/results/solvers/<run_id>/crossover_summary.csv
-```
-
-Run the end-to-end double-cable batch-kernel matrix:
+Run the larger matrix:
 
 ```bash
 python benchmark/solvers/bench_double_cable_end_to_end.py \
   --batch-sizes 512 1024 2048 \
-  --nx 32 51 64 \
+  --nx 51 64 96 \
   --nt 500 1000 \
+  --dt 0.01 \
   --recordings none center full \
-  --iinj-modes none dense_zero nonzero \
+  --iinj-modes none dense_zero \
   --solvers auto thomas pcr_adaptive \
   --warmups 1 \
   --repeats 3
 ```
 
-Historical closed Phase 1.5 split E2E comparison:
+Kaggle equivalents:
 
 ```bash
-python benchmark/solvers/bench_double_cable_end_to_end.py \
-  --batch-sizes 1024 2048 4096 \
-  --nx 51 96 \
-  --nt 500 \
-  --dt 0.01 \
-  --recordings center \
-  --iinj-modes none \
-  --solvers pcr_adaptive jax_triton_thomas \
-  --warmups 1 \
-  --repeats 2
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark e2e \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 120 \
+  --wait-timeout 21600
 ```
 
-Historical split trace validation that closed the split line:
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark e2e_full \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 120 \
+  --wait-timeout 21600
+```
+
+## Solver Agreement
+
+The validation harness remains useful for reproducing historical physiology
+checks or testing future candidates:
 
 ```bash
 python benchmark/solvers/validate_double_cable_solver_agreement.py \
-  --batch-sizes 2 \
-  --nx 51 \
-  --nt 3 \
-  --dt 0.05 \
-  --recordings center \
-  --iinj-modes none \
-  --reference-solvers pcr_adaptive \
-  --candidate-solvers split_gs_3 split_gs_4 \
-  --warmups 0
+  --batch-sizes 128 512 \
+  --nx 51 96 \
+  --nt 300 \
+  --dt 0.01 \
+  --recordings center full \
+  --iinj-modes none dense_zero \
+  --reference-solvers thomas \
+  --candidate-solvers pcr_adaptive \
+  --warmups 1
 ```
 
-The 2026-06-17 local smoke failed for `split_gs_3` and `split_gs_4`
-(`~77 mV` center-trace error and false activations versus `pcr_adaptive`), so
-split iterative approaches are abandoned for the current optimization pass
-despite their timing wins. Keep the validation runner for future non-split
-candidates; do not use the split timing benchmark alone as acceptance evidence.
+Split iterative candidates are abandoned for production routing and are no
+longer active benchmark choices. Use the archived results/report to reproduce
+that decision rather than adding them back to the standard runner.
 
-This runner builds MRG-like double-cable batches, materializes dense `Vext`,
-optionally materializes dense `Iinj`, and records setup/runtime/input/kernel/
-output byte metrics. It is the Phase 0.2 complement to the isolated linear
-solver benchmark.
+## Archived Spikes
 
-Capture a JAX profiler trace for one case:
+The code for non-retained candidates is intentionally outside the active solver
+package:
 
-```bash
-python benchmark/solvers/profile_double_cable_linear_solvers.py \
-  --solver pcr_adaptive \
-  --batch-size 1024 \
-  --nx 64 \
-  --dtype float32
-```
+- `benchmark/archived_solver_spikes/`: Pallas kernels and archived unit checks
+- `benchmark/triton_solver/`: standalone Torch/Triton block-Thomas and bridge
+  experiments
+- `benchmark/jax_triton_solver/`: JAX-Triton block-Thomas experiment
+- `benchmark/cuda_ffi_solver/`: CUDA FFI prototype
+- `tests/archive/solver_spikes/`: archived tests for those experiments
 
-On some local environments JAX may print
-`Can't import tensorflow.python.profiler.trace` while still writing the
-`plugins/profile/...` trace files. Treat the exit code and generated files as
-the source of truth.
-
-Outputs are written under `benchmark/results/solvers/`, which is intentionally
-ignored by git.
+These spikes are useful evidence, but they are not active `BatchOptions` solver
+routes and are not accepted by the standard Kaggle wrapper.

@@ -289,7 +289,9 @@ def solver_function(solver: str):
 
 
 def solve_triton_block_thomas_jax_bridge(a00, a01, a10, a11, off0, off1, rhs0, rhs1):
-    from axonscope.solvers.triton_thomas import solve_block_tridiagonal_2x2_triton_thomas_jax
+    from benchmark.triton_solver.triton_thomas import (
+        solve_block_tridiagonal_2x2_triton_thomas_jax,
+    )
 
     return solve_block_tridiagonal_2x2_triton_thomas_jax(
         a00,

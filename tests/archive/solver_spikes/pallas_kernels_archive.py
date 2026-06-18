@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from axonscope.solvers.common import solve_block_tridiagonal_2x2_scalar
-from axonscope.solvers.pallas_kernels import (
+from benchmark.archived_solver_spikes.pallas_kernels import (
     solve_block_tridiagonal_2x2_pallas_pcr_batched,
     solve_block_tridiagonal_2x2_pallas_thomas_batched,
 )

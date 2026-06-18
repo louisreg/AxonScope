@@ -1,7 +1,6 @@
 import json
 import py_compile
 import subprocess
-import sys
 from pathlib import Path
 
 from benchmark.kaggle import axonscope_solver_benchmarks as kaggle_bench
@@ -10,8 +9,8 @@ from benchmark.kaggle import stream_logs as kaggle_stream_logs
 from benchmark.kaggle.prepare_kernel_metadata import main as prepare_metadata
 from benchmark.kaggle.run_kernel import (
     default_publish_branch,
-    parse_kernel_status,
     parse_args,
+    parse_kernel_status,
     poll_status,
     run_kernel,
     status_kind,
@@ -98,7 +97,7 @@ def test_kaggle_gpu_jax_extra_matches_installed_jax_version(monkeypatch):
 
     assert commands == [
         [
-            sys.executable,
+            kaggle_bench.sys.executable,
             "-m",
             "pip",
             "install",
@@ -106,20 +105,6 @@ def test_kaggle_gpu_jax_extra_matches_installed_jax_version(monkeypatch):
             "jax[cuda12]==0.10.1",
         ]
     ]
-
-
-def test_kaggle_jax_triton_install_is_scoped(monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-    monkeypatch.setattr(kaggle_bench, "JAX_TRITON_PACKAGE", "jax-triton==0.3.1")
-
-    kaggle_bench.install_jax_triton()
-
-    assert commands == [[sys.executable, "-m", "pip", "install", "jax-triton==0.3.1"]]
 
 
 def test_kaggle_smoke_commands_are_small(tmp_path, monkeypatch):
@@ -170,7 +155,7 @@ def test_kaggle_standard_e2e_is_bounded(tmp_path, monkeypatch):
     assert "1000" not in command
 
 
-def test_kaggle_linear_excludes_abandoned_split_iterative_candidates(tmp_path, monkeypatch):
+def test_kaggle_linear_excludes_archived_solver_spikes(tmp_path, monkeypatch):
     commands = []
 
     def fake_run(command, *, cwd=None):
@@ -186,38 +171,6 @@ def test_kaggle_linear_excludes_abandoned_split_iterative_candidates(tmp_path, m
     assert command[solvers_start:solvers_end] == [
         "thomas",
         "pcr",
-        "pcr_soa",
-        "pcr_adaptive",
-    ]
-
-
-def test_kaggle_linear_assoc_focus_is_bounded_to_exact_candidates(tmp_path, monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_linear_assoc_focus(tmp_path)
-
-    (command,) = commands
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
-        "51",
-        "64",
-        "96",
-    ]
-    solvers_start = command.index("--solvers") + 1
-    solvers_end = command.index("--warmups")
-    assert command[solvers_start:solvers_end] == [
-        "thomas",
-        "thomas_batched",
-        "assoc_backward",
         "pcr_soa",
         "pcr_adaptive",
     ]
@@ -252,13 +205,22 @@ def test_kaggle_linear_pcr_soa_trace_profiles_focused_gpu_cases(tmp_path, monkey
     )
 
 
-def test_kaggle_runner_accepts_linear_pcr_soa_trace_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "linear_pcr_soa_trace"])
+def test_kaggle_runner_accepts_active_benchmark_choices():
+    for benchmark in [
+        "smoke",
+        "linear",
+        "linear_pcr_soa_trace",
+        "e2e",
+        "e2e_full",
+        "realistic_smoke",
+        "realistic",
+        "both",
+    ]:
+        args = parse_args(["--username", "owner", "--benchmark", benchmark])
+        assert args.benchmark == benchmark
 
-    assert args.benchmark == "linear_pcr_soa_trace"
 
-
-def test_kaggle_linear_pcr_soa_layout_focus_compares_auto_layout(tmp_path, monkeypatch):
+def test_kaggle_realistic_smoke_runs_small_workflow_matrix(tmp_path, monkeypatch):
     commands = []
 
     def fake_run(command, *, cwd=None):
@@ -266,36 +228,16 @@ def test_kaggle_linear_pcr_soa_layout_focus_compares_auto_layout(tmp_path, monke
 
     monkeypatch.setattr(kaggle_bench, "run", fake_run)
 
-    kaggle_bench.run_linear_pcr_soa_layout_focus(tmp_path)
+    kaggle_bench.run_realistic_examples(tmp_path, smoke=True)
 
     (command,) = commands
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
-        "51",
-        "96",
-    ]
-    solvers_start = command.index("--solvers") + 1
-    solvers_end = command.index("--warmups")
-    assert command[solvers_start:solvers_end] == [
-        "pcr_soa",
-        "pcr_soa_layout_auto",
-        "pcr_soa_ref",
-    ]
+    assert command[1] == "benchmark/realistic_examples/bench_basic_examples.py"
+    assert command[command.index("--preset") + 1] == "smoke"
+    assert command[command.index("--repeats") + 1] == "1"
+    assert command[command.index("--platform-label") + 1] == "kaggle_gpu"
 
 
-def test_kaggle_runner_accepts_linear_pcr_soa_layout_focus_choice():
-    args = parse_args(
-        ["--username", "owner", "--benchmark", "linear_pcr_soa_layout_focus"]
-    )
-
-    assert args.benchmark == "linear_pcr_soa_layout_focus"
-
-
-def test_kaggle_linear_pcr_soa_nomask_focus_compares_exact_candidates(tmp_path, monkeypatch):
+def test_kaggle_realistic_standard_is_bounded(tmp_path, monkeypatch):
     commands = []
 
     def fake_run(command, *, cwd=None):
@@ -303,289 +245,36 @@ def test_kaggle_linear_pcr_soa_nomask_focus_compares_exact_candidates(tmp_path, 
 
     monkeypatch.setattr(kaggle_bench, "run", fake_run)
 
-    kaggle_bench.run_linear_pcr_soa_nomask_focus(tmp_path)
+    kaggle_bench.run_realistic_examples(tmp_path, smoke=False)
 
     (command,) = commands
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "2048",
-        "4096",
+    assert command[command.index("--run-counts") + 1 : command.index("--family-counts")] == [
+        "2",
+        "5",
     ]
-    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
-        "51",
-        "96",
+    assert command[command.index("--family-counts") + 1 : command.index("--example07-max-iterations")] == [
+        "5",
+        "25",
     ]
-    solvers_start = command.index("--solvers") + 1
-    solvers_end = command.index("--warmups")
-    assert command[solvers_start:solvers_end] == [
-        "pcr_soa",
-        "pcr_soa_nomask",
-        "pcr_soa_shift",
-    ]
+    assert command[command.index("--example07-max-iterations") + 1] == "8"
+    assert command[command.index("--example08-amplitude-count") + 1] == "4"
 
 
-def test_kaggle_runner_accepts_linear_pcr_soa_nomask_focus_choice():
-    args = parse_args(
-        ["--username", "owner", "--benchmark", "linear_pcr_soa_nomask_focus"]
-    )
-
-    assert args.benchmark == "linear_pcr_soa_nomask_focus"
-
-
-def test_kaggle_linear_pallas_focus_is_bounded_to_exact_candidates(tmp_path, monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_linear_pallas_focus(tmp_path)
-
-    (command,) = commands
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert command[command.index("--nx") + 1 : command.index("--dtypes")] == [
-        "51",
-        "64",
-        "96",
-    ]
-    solvers_start = command.index("--solvers") + 1
-    solvers_end = command.index("--warmups")
-    assert command[solvers_start:solvers_end] == [
-        "thomas",
-        "thomas_batched",
-        "assoc_backward",
-        "pcr",
-        "pcr_soa",
-        "pallas_pcr_128",
-        "pcr_adaptive",
-    ]
-
-
-def test_kaggle_linear_triton_focus_runs_jax_baseline_and_triton(tmp_path, monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_linear_triton_focus(tmp_path)
-
-    baseline, triton = commands
-    assert baseline[baseline.index("--prefix") + 1] == "linear_triton_jax_baseline"
-    assert baseline[baseline.index("--batch-sizes") + 1 : baseline.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert baseline[baseline.index("--nx") + 1 : baseline.index("--dtypes")] == [
-        "51",
-        "96",
-    ]
-    solvers_start = baseline.index("--solvers") + 1
-    solvers_end = baseline.index("--warmups")
-    assert baseline[solvers_start:solvers_end] == ["pcr_soa"]
-
-    assert triton[1] == "benchmark/triton_solver/bench_double_cable_triton.py"
-    assert triton[triton.index("--prefix") + 1] == "linear_triton_focus"
-    assert triton[triton.index("--batch-sizes") + 1 : triton.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert triton[triton.index("--nx") + 1 : triton.index("--dtypes")] == [
-        "51",
-        "96",
-    ]
-    solvers_start = triton.index("--solvers") + 1
-    solvers_end = triton.index("--warmups")
-    assert triton[solvers_start:solvers_end] == [
-        "triton_block_thomas",
-        "triton_block_thomas_jax_bridge",
-    ]
-
-
-def test_kaggle_linear_jax_triton_focus_runs_jax_baseline_and_jax_triton(
-    tmp_path, monkeypatch
-):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_linear_jax_triton_focus(tmp_path)
-
-    baseline, jax_triton = commands
-    assert baseline[baseline.index("--prefix") + 1] == "linear_jax_triton_jax_baseline"
-    assert baseline[baseline.index("--batch-sizes") + 1 : baseline.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert baseline[baseline.index("--nx") + 1 : baseline.index("--dtypes")] == [
-        "51",
-        "96",
-        "128",
-    ]
-    solvers_start = baseline.index("--solvers") + 1
-    solvers_end = baseline.index("--warmups")
-    assert baseline[solvers_start:solvers_end] == ["pcr_soa"]
-
-    assert jax_triton[1] == "benchmark/jax_triton_solver/bench_double_cable_jax_triton.py"
-    assert jax_triton[jax_triton.index("--prefix") + 1] == "linear_jax_triton_focus"
-    assert jax_triton[jax_triton.index("--batch-sizes") + 1 : jax_triton.index("--nx")] == [
-        "1024",
-        "2048",
-        "4096",
-    ]
-    assert jax_triton[jax_triton.index("--nx") + 1 : jax_triton.index("--dtypes")] == [
-        "51",
-        "96",
-        "128",
-    ]
-    solvers_start = jax_triton.index("--solvers") + 1
-    solvers_end = jax_triton.index("--warmups")
-    assert jax_triton[solvers_start:solvers_end] == ["jax_triton_block_thomas"]
-
-
-def test_kaggle_e2e_jax_triton_focus_runs_center_cases(tmp_path, monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_e2e_jax_triton_focus(tmp_path)
-
-    (command,) = commands
-    assert command[1] == "benchmark/solvers/bench_double_cable_end_to_end.py"
-    assert command[command.index("--prefix") + 1] == "e2e_jax_triton_focus"
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "512",
-        "2048",
-    ]
-    assert command[command.index("--nx") + 1 : command.index("--nt")] == [
-        "51",
-        "96",
-    ]
-    assert command[command.index("--recordings") + 1 : command.index("--iinj-modes")] == [
-        "center",
-    ]
-    solvers_start = command.index("--solvers") + 1
-    solvers_end = command.index("--warmups")
-    assert command[solvers_start:solvers_end] == [
-        "pcr_adaptive",
-        "jax_triton_thomas",
-    ]
-
-
-def test_kaggle_validate_jax_triton_focus_runs_agreement_cases(tmp_path, monkeypatch):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_validate_jax_triton_focus(tmp_path)
-
-    (command,) = commands
-    assert command[1] == "benchmark/solvers/validate_double_cable_solver_agreement.py"
-    assert command[command.index("--prefix") + 1] == "validate_jax_triton_focus"
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
-        "128",
-        "512",
-    ]
-    assert command[command.index("--nx") + 1 : command.index("--nt")] == [
-        "51",
-        "96",
-    ]
-    assert command[command.index("--recordings") + 1 : command.index("--iinj-modes")] == [
-        "center",
-        "full",
-    ]
-    references_start = command.index("--reference-solvers") + 1
-    references_end = command.index("--candidate-solvers")
-    assert command[references_start:references_end] == ["pcr_adaptive"]
-    candidates_start = command.index("--candidate-solvers") + 1
-    candidates_end = command.index("--warmups")
-    assert command[candidates_start:candidates_end] == ["jax_triton_thomas"]
-
-
-def test_kaggle_validate_jax_triton_thomas_focus_uses_thomas_reference(
-    tmp_path, monkeypatch
-):
-    commands = []
-
-    def fake_run(command, *, cwd=None):
-        commands.append(command)
-
-    monkeypatch.setattr(kaggle_bench, "run", fake_run)
-
-    kaggle_bench.run_validate_jax_triton_thomas_focus(tmp_path)
-
-    (command,) = commands
-    assert command[1] == "benchmark/solvers/validate_double_cable_solver_agreement.py"
-    assert command[command.index("--prefix") + 1] == "validate_jax_triton_thomas_focus"
-    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == ["512"]
-    assert command[command.index("--nx") + 1 : command.index("--nt")] == [
-        "51",
-        "96",
-    ]
-    references_start = command.index("--reference-solvers") + 1
-    references_end = command.index("--candidate-solvers")
-    assert command[references_start:references_end] == ["thomas"]
-    candidates_start = command.index("--candidate-solvers") + 1
-    candidates_end = command.index("--warmups")
-    assert command[candidates_start:candidates_end] == [
-        "pcr_adaptive",
-        "jax_triton_thomas",
-    ]
-
-
-def test_kaggle_runner_accepts_linear_triton_focus_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "linear_triton_focus"])
-
-    assert args.benchmark == "linear_triton_focus"
-
-
-def test_kaggle_runner_accepts_linear_jax_triton_focus_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "linear_jax_triton_focus"])
-
-    assert args.benchmark == "linear_jax_triton_focus"
-
-
-def test_kaggle_runner_accepts_e2e_jax_triton_focus_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "e2e_jax_triton_focus"])
-
-    assert args.benchmark == "e2e_jax_triton_focus"
-
-
-def test_kaggle_runner_accepts_validate_jax_triton_focus_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "validate_jax_triton_focus"])
-
-    assert args.benchmark == "validate_jax_triton_focus"
-
-
-def test_kaggle_runner_accepts_validate_jax_triton_thomas_focus_choice():
-    args = parse_args(
-        ["--username", "owner", "--benchmark", "validate_jax_triton_thomas_focus"]
-    )
-
-    assert args.benchmark == "validate_jax_triton_thomas_focus"
-
-
-def test_kaggle_runner_accepts_linear_cuda_ffi_focus_choice():
-    args = parse_args(["--username", "owner", "--benchmark", "linear_cuda_ffi_focus"])
-
-    assert args.benchmark == "linear_cuda_ffi_focus"
+def test_kaggle_runner_rejects_archived_benchmark_choices():
+    for benchmark in [
+        "linear_pallas_focus",
+        "linear_triton_focus",
+        "linear_jax_triton_focus",
+        "linear_cuda_ffi_focus",
+        "e2e_jax_triton_focus",
+        "validate_jax_triton_focus",
+    ]:
+        try:
+            parse_args(["--username", "owner", "--benchmark", benchmark])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError(f"{benchmark} should not be an active Kaggle choice")
 
 
 def test_kaggle_checkout_stays_out_of_persisted_working_dir():

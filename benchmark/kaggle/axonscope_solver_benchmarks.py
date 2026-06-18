@@ -56,9 +56,6 @@ BRANCH = string_setting("AXONSCOPE_BRANCH", "branch", "bench-colab")
 BENCHMARK = string_setting("AXONSCOPE_KAGGLE_BENCHMARK", "benchmark", "smoke")
 REQUIRE_GPU = bool_setting("AXONSCOPE_REQUIRE_GPU", "require_gpu", True)
 JAX_CUDA_EXTRA = string_setting("AXONSCOPE_JAX_CUDA_EXTRA", "jax_cuda_extra", "cuda12")
-JAX_TRITON_PACKAGE = string_setting(
-    "AXONSCOPE_JAX_TRITON_PACKAGE", "jax_triton_package", "jax-triton==0.3.1"
-)
 
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
 CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
@@ -79,44 +76,24 @@ def main() -> None:
         run_e2e(out_dir, smoke=True)
     elif BENCHMARK == "linear":
         run_linear(out_dir, smoke=False)
-    elif BENCHMARK == "linear_assoc_focus":
-        run_linear_assoc_focus(out_dir)
     elif BENCHMARK == "linear_pcr_soa_trace":
         run_linear_pcr_soa_trace(out_dir)
-    elif BENCHMARK == "linear_pcr_soa_layout_focus":
-        run_linear_pcr_soa_layout_focus(out_dir)
-    elif BENCHMARK == "linear_pcr_soa_nomask_focus":
-        run_linear_pcr_soa_nomask_focus(out_dir)
-    elif BENCHMARK == "linear_pallas_focus":
-        run_linear_pallas_focus(out_dir)
-    elif BENCHMARK == "linear_triton_focus":
-        run_linear_triton_focus(out_dir)
-    elif BENCHMARK == "linear_jax_triton_focus":
-        run_linear_jax_triton_focus(out_dir)
-    elif BENCHMARK == "linear_cuda_ffi_focus":
-        run_linear_cuda_ffi_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
-    elif BENCHMARK == "e2e_jax_triton_focus":
-        run_e2e_jax_triton_focus(out_dir)
-    elif BENCHMARK == "validate_jax_triton_focus":
-        run_validate_jax_triton_focus(out_dir)
-    elif BENCHMARK == "validate_jax_triton_thomas_focus":
-        run_validate_jax_triton_thomas_focus(out_dir)
     elif BENCHMARK == "e2e_full":
         run_e2e(out_dir, mode="full")
+    elif BENCHMARK == "realistic_smoke":
+        run_realistic_examples(out_dir, smoke=True)
+    elif BENCHMARK == "realistic":
+        run_realistic_examples(out_dir, smoke=False)
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
     else:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
-            "linear_assoc_focus, linear_pcr_soa_trace, "
-            "linear_pcr_soa_layout_focus, linear_pcr_soa_nomask_focus, "
-            "linear_pallas_focus, linear_triton_focus, linear_jax_triton_focus, "
-            "linear_cuda_ffi_focus, "
-            "e2e, e2e_jax_triton_focus, validate_jax_triton_focus, "
-            "validate_jax_triton_thomas_focus, e2e_full, or both."
+            "linear_pcr_soa_trace, e2e, e2e_full, realistic_smoke, "
+            "realistic, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -133,13 +110,6 @@ def setup_repo() -> None:
     run([sys.executable, "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
     if REQUIRE_GPU and JAX_CUDA_EXTRA:
         install_jax_gpu_extra()
-    if BENCHMARK in {
-        "linear_jax_triton_focus",
-        "e2e_jax_triton_focus",
-        "validate_jax_triton_focus",
-        "validate_jax_triton_thomas_focus",
-    }:
-        install_jax_triton()
 
 
 def install_jax_gpu_extra() -> None:
@@ -159,10 +129,6 @@ def installed_package_version(package_name: str) -> str:
     ]
     print("\n$", " ".join(str(part) for part in command), flush=True)
     return subprocess.check_output(command, cwd=CHECKOUT_DIR, text=True).strip()
-
-
-def install_jax_triton() -> None:
-    run([sys.executable, "-m", "pip", "install", JAX_TRITON_PACKAGE], cwd=CHECKOUT_DIR)
 
 
 def verify_backend() -> None:
@@ -236,39 +202,6 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
     print_summary(out_dir / "linear" / "summary.csv", mode="linear")
 
 
-def run_linear_assoc_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_assoc_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "64",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "thomas",
-        "thomas_batched",
-        "assoc_backward",
-        "pcr_soa",
-        "pcr_adaptive",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_assoc_focus" / "summary.csv", mode="linear")
-
-
 def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
     trace_dir = out_dir / "linear_pcr_soa_trace" / "jax_traces"
     command = [
@@ -301,374 +234,6 @@ def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "linear_pcr_soa_trace" / "summary.csv", mode="linear")
-
-
-def run_linear_pcr_soa_nomask_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_pcr_soa_nomask_focus",
-        "--batch-sizes",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "pcr_soa_nomask",
-        "pcr_soa_shift",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_pcr_soa_nomask_focus" / "summary.csv", mode="linear")
-
-
-def run_linear_pcr_soa_layout_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_pcr_soa_layout_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "pcr_soa_layout_auto",
-        "pcr_soa_ref",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_pcr_soa_layout_focus" / "summary.csv", mode="linear")
-
-
-def run_linear_pallas_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_pallas_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "64",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "thomas",
-        "thomas_batched",
-        "assoc_backward",
-        "pcr",
-        "pcr_soa",
-        "pallas_pcr_128",
-        "pcr_adaptive",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_pallas_focus" / "summary.csv", mode="linear")
-
-
-def run_linear_triton_focus(out_dir: pathlib.Path) -> None:
-    baseline_command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_triton_jax_baseline",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(baseline_command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_triton_jax_baseline" / "summary.csv", mode="linear")
-
-    triton_command = [
-        sys.executable,
-        "benchmark/triton_solver/bench_double_cable_triton.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_triton_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "triton_block_thomas",
-        "triton_block_thomas_jax_bridge",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(triton_command, cwd=CHECKOUT_DIR)
-
-
-def run_linear_cuda_ffi_focus(out_dir: pathlib.Path) -> None:
-    baseline_command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_cuda_ffi_jax_baseline",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "128",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(baseline_command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_cuda_ffi_jax_baseline" / "summary.csv", mode="linear")
-
-    ffi_command = [
-        sys.executable,
-        "benchmark/cuda_ffi_solver/bench_double_cable_cuda_ffi.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_cuda_ffi_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "128",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "cuda_ffi_block_thomas",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(ffi_command, cwd=CHECKOUT_DIR)
-
-
-def run_linear_jax_triton_focus(out_dir: pathlib.Path) -> None:
-    baseline_command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_linear_solvers.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_jax_triton_jax_baseline",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "128",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "pcr_soa",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(baseline_command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "linear_jax_triton_jax_baseline" / "summary.csv", mode="linear")
-
-    jax_triton_command = [
-        sys.executable,
-        "benchmark/jax_triton_solver/bench_double_cable_jax_triton.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "linear_jax_triton_focus",
-        "--batch-sizes",
-        "1024",
-        "2048",
-        "4096",
-        "--nx",
-        "51",
-        "96",
-        "128",
-        "--dtypes",
-        "float32",
-        "--solvers",
-        "jax_triton_block_thomas",
-        "--warmups",
-        "1",
-        "--repeats",
-        "5",
-    ]
-    run(jax_triton_command, cwd=CHECKOUT_DIR)
-
-
-def run_e2e_jax_triton_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/bench_double_cable_end_to_end.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "e2e_jax_triton_focus",
-        "--batch-sizes",
-        "512",
-        "2048",
-        "--nx",
-        "51",
-        "96",
-        "--nt",
-        "500",
-        "--dt",
-        "0.01",
-        "--recordings",
-        "center",
-        "--iinj-modes",
-        "none",
-        "dense_zero",
-        "--solvers",
-        "pcr_adaptive",
-        "jax_triton_thomas",
-        "--warmups",
-        "1",
-        "--repeats",
-        "2",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(out_dir / "e2e_jax_triton_focus" / "summary.csv", mode="e2e")
-
-
-def run_validate_jax_triton_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/validate_double_cable_solver_agreement.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "validate_jax_triton_focus",
-        "--batch-sizes",
-        "128",
-        "512",
-        "--nx",
-        "51",
-        "96",
-        "--nt",
-        "300",
-        "--dt",
-        "0.01",
-        "--recordings",
-        "center",
-        "full",
-        "--iinj-modes",
-        "none",
-        "dense_zero",
-        "--reference-solvers",
-        "pcr_adaptive",
-        "--candidate-solvers",
-        "jax_triton_thomas",
-        "--warmups",
-        "1",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(
-        out_dir / "validate_jax_triton_focus" / "summary.csv",
-        mode="validation",
-    )
-
-
-def run_validate_jax_triton_thomas_focus(out_dir: pathlib.Path) -> None:
-    command = [
-        sys.executable,
-        "benchmark/solvers/validate_double_cable_solver_agreement.py",
-        "--out-dir",
-        str(out_dir),
-        "--prefix",
-        "validate_jax_triton_thomas_focus",
-        "--batch-sizes",
-        "512",
-        "--nx",
-        "51",
-        "96",
-        "--nt",
-        "300",
-        "--dt",
-        "0.01",
-        "--recordings",
-        "center",
-        "full",
-        "--iinj-modes",
-        "none",
-        "--reference-solvers",
-        "thomas",
-        "--candidate-solvers",
-        "pcr_adaptive",
-        "jax_triton_thomas",
-        "--warmups",
-        "1",
-    ]
-    run(command, cwd=CHECKOUT_DIR)
-    print_summary(
-        out_dir / "validate_jax_triton_thomas_focus" / "summary.csv",
-        mode="validation",
-    )
 
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:
@@ -769,6 +334,54 @@ def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard
         raise ValueError(f"unknown e2e mode: {mode!r}")
     run(command, cwd=CHECKOUT_DIR)
     print_summary(out_dir / "e2e" / "summary.csv", mode="e2e")
+
+
+def run_realistic_examples(out_dir: pathlib.Path, *, smoke: bool) -> None:
+    command = [
+        sys.executable,
+        "benchmark/realistic_examples/bench_basic_examples.py",
+        "--out-dir",
+        str(out_dir / "realistic_examples"),
+        "--prefix",
+        "realistic_examples",
+        "--platforms",
+        "current",
+        "--platform-label",
+        "kaggle_gpu",
+    ]
+    if smoke:
+        command.extend(
+            [
+                "--preset",
+                "smoke",
+                "--repeats",
+                "1",
+                "--warmups",
+                "0",
+            ]
+        )
+    else:
+        command.extend(
+            [
+                "--preset",
+                "standard",
+                "--run-counts",
+                "2",
+                "5",
+                "--family-counts",
+                "5",
+                "25",
+                "--example07-max-iterations",
+                "8",
+                "--example08-amplitude-count",
+                "4",
+                "--repeats",
+                "2",
+                "--warmups",
+                "1",
+            ]
+        )
+    run(command, cwd=CHECKOUT_DIR)
 
 
 def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:

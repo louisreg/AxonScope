@@ -112,27 +112,32 @@ The wrapper also accepts:
 
 ```text
 --benchmark smoke
+--benchmark linear
+--benchmark linear_pcr_soa_trace
+--benchmark e2e
+--benchmark realistic_smoke
+--benchmark realistic
 --benchmark both
---benchmark linear_pcr_soa_layout_focus
---benchmark linear_triton_focus
---benchmark linear_jax_triton_focus
---benchmark linear_cuda_ffi_focus
---benchmark e2e_jax_triton_focus
---benchmark validate_jax_triton_focus
---benchmark validate_jax_triton_thomas_focus
 --benchmark e2e_full
 --branch bench-colab
 --repo-url https://github.com/louisreg/AxonScope.git
 --no-require-gpu
 ```
 
-`e2e` is the bounded production matrix. `e2e_jax_triton_focus` compares
-`pcr_adaptive` with the benchmark-only `jax_triton_thomas` candidate inside the
-real double-cable loop. `validate_jax_triton_focus` compares recorded Vm traces
-from `jax_triton_thomas` against `pcr_adaptive`.
-`validate_jax_triton_thomas_focus` compares both `pcr_adaptive` and
-`jax_triton_thomas` against the public Thomas reference on the sensitivity cases.
+`linear` measures the retained public solver routes: `thomas`, `pcr`,
+`pcr_soa`, and `pcr_adaptive`. `linear_pcr_soa_trace` is the only focused
+diagnostic preset kept in the active wrapper; it records JAX traces for the
+retained PCR/SoA route. `e2e` is the bounded production matrix, while
 `e2e_full` runs the exhaustive matrix and can take a long time on Kaggle.
+`realistic_smoke` and `realistic` run workflow-level benchmarks based on basic
+examples 06/07/08, using the current Kaggle GPU backend.
+
+Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
+`linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and
+`e2e_jax_triton_focus` are intentionally no longer accepted by this wrapper.
+Their code and historical evidence live under `benchmark/archived_solver_spikes/`,
+`benchmark/triton_solver/`, `benchmark/jax_triton_solver/`, and
+`benchmark/cuda_ffi_solver/`.
 
 These values are written to `benchmark/kaggle/kaggle_config.json`, which is
 uploaded with the kernel. The corresponding `AXONSCOPE_*` environment variables

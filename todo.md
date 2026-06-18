@@ -1,1013 +1,156 @@
 # AxonScope TODO
 
 Living operational roadmap for AxonScope documentation, API cleanup, examples,
-benchmarks, solver/backend work, and Phase 8+ study APIs.
+benchmarks, solver/backend work, and study APIs.
 
-Read this file at the start of cleanup/API/performance work. Add newly
-discovered mismatches here, and check items only after code, docs, examples,
-and relevant tests have been verified.
+Read this file at the start of cleanup/API/performance work. Keep it actionable,
+chronological, and free of long benchmark prose. Detailed evidence belongs in
+dedicated reports under `benchmark/reports/` or focused roadmap files under
+`ideas/`.
 
 ## How To Use This File
 
 - `GUIDELINES.md` is the master architecture and product-boundary reference.
-  Update it only when the target philosophy, product boundary, or architecture
-  changes.
-- `agent.md` captures project working rules for future agents. Keep it aligned
-  when the workflow or standing policy changes.
-- `todo.md` is the chronological execution plan. Keep it actionable, mostly
-  flat, and free of long benchmark prose.
+- `agent.md` captures project working rules for future agents.
+- `todo.md` is the current execution plan, not the full historical log.
 - Source, tests, and runnable examples remain the truth for current behavior.
 - AxonScope is pre-release: prefer clean breaking changes over compatibility
   shims, and delete superseded paths once replacements are in use.
 
 ## Current Snapshot
 
-Updated on 2026-06-16 after re-reading `agent.md`, checking `GUIDELINES.md`,
-and auditing the current solver/pseudo-double code paths.
+Updated on 2026-06-18 after closing the double-cable GPU solver optimization
+campaign and cleaning the benchmark surface.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Phases 0-7.5 | Done | Guardrails, object model, typed contracts, preparation, JAX boundary, canonical pool results, analysis layer, performance estimates, and solver-side observers are implemented for the current public layer. |
+| Phases 0-7.5 | Done | Guardrails, object model, typed contracts, JAX boundary, pool results, analysis layer, performance estimates, and solver-side observers are implemented for the current public layer. |
 | Phase 7.6.1 | Done | Benchmark evidence matrix exists under `benchmark/hotpaths/`. |
-| Phase 7.6.2 | Done | Memory-transfer and long-run cleanup has landed for current hotpaths. |
-| Phase 7.6.3 | Active | Exact double-cable GPU solver optimization. See `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`. |
-| Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not a public solver path and not part of `auto`. |
+| Phase 7.6.2 | Done | Memory-transfer and long-run cleanup landed for current hotpaths. |
+| Phase 7.6.3 | Closed | Exact double-cable GPU solver optimization pass is complete. No new public solver route; see `benchmark/reports/double_cable_solver_optimization_2026_06.md`. |
+| Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
+| Phase 7.6.5 | Next | `Vext` materialization and realistic workflow performance. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
-| Phase 7.8 | Next | Examples learning-path cleanup after API cleanup and solver-option docs. |
-| Phase 8 | Not started | Callable studies, reuse policies, retention policies, and study results. |
-| Phase 9 | Not started | Final serialization schemas and NumPy/reference backend validation. |
+| Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
+| Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
+| Phase 9 | Later | Serialization schemas and reference backend validation. |
 
-Latest verified non-NRV unit run:
-
-- [x] 2026-06-15 after compact dispatch cohort cleanup:
-  `314 passed, 1 skipped`.
-
-Current code audit:
+Current solver surface:
 
 - `BatchOptions.double_cable_block_solver` accepts exactly `auto`, `thomas`,
   `pcr`, `pcr_soa`, and `pcr_adaptive`.
-- `auto` resolves in `resolve_double_cable_block_solver(...)`: CPU/default
-  backends use `thomas`; GPU-like backends use `pcr_adaptive`.
-- `pcr_adaptive` is resolved inside batch kernels: `B <= 4096` uses `pcr_soa`,
-  larger batches use `pcr`. The array-output `pcr_soa` path currently uses the
-  batch-native scan for larger batches and keeps the previous per-fiber route
-  for smaller batches until more device evidence exists.
-- Pseudo-double modes are benchmark harness candidates only:
-  `mrg_single_cable_surrogate`, `pseudo_double_effective`,
-  `pseudo_double_single_myelinated_chain`, `pseudo_double_series`,
-  `pseudo_double_split`, `pseudo_double_schur_local`, and planned
-  `pseudo_double_modal`.
+- `auto` resolves on CPU/default backends to `thomas`; GPU-like backends use
+  `pcr_adaptive`.
+- `pcr_adaptive` uses `pcr_soa` for `B <= 4096`, then matrix-layout `pcr`.
+- Pallas, Triton, JAX-Triton, CUDA FFI, split iterative, associative-transfer,
+  and pseudo-double candidates are archived/standby evidence, not active solver
+  routes.
 
 ## Immediate Queue
 
 Work should start here unless the user asks otherwise.
 
-- [ ] Phase 7.6.3: finish the exact double-cable GPU solver optimization pass.
-- [ ] During Phase 7.6.3, prioritize substantive solver implementations
-  from the exact-GPU roadmap over small heuristic retuning. Record heuristic
-  thresholds as benchmark-backed follow-up calibration, not as the main work.
-- [ ] Phase 7.6.3 current Pallas work: keep `pallas_pcr_128` benchmark-only
-  and pause Kaggle P100/T4 Mosaic-Pallas runs for this current JAX stack.
-  Official JAX Pallas docs say Mosaic GPU is supported only on Hopper and newer
-  GPUs, yet a user Colab T4 smoke notebook compiles/runs Pallas successfully.
-  That notebook uses an old JAX `0.4.16.dev20230831` + `jax_triton` +
-  `triton-nightly` stack and lowers to Triton IR (`tt.func`), not the current
-  JAX `0.10.x` Mosaic GPU path used by this repo. Kaggle T4
-  `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed in current
-  Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`.
-  `BlockSpec` GPU blocks still need a minormost dimension that is a multiple of
-  16 bytes; the current kernel uses `128 fibers x 4 cable columns`, so each
-  float32 output block has a 16-byte minormost dimension. Next useful Pallas
-  validation is either a Hopper+ Mosaic run or a deliberately separate legacy
-  Triton/Pallas notebook, not another Kaggle P100/T4 Mosaic run.
-- [ ] Phase 7.6.3 Pallas history: ran Kaggle P100 `linear_pallas_focus`
-  with `pallas_pcr_128`. This first Phase 3B candidate uses one Pallas stage
-  kernel per PCR stride and originally used programs shaped as
-  `128 fibers x 1 cable column`,
-  preserving Mosaic's 128-element batch width without full-cable SMEM. Local
-  `interpret=True` smokes passed at `B=128`, `Nx=8/51`; GPU compile/timing is
-  still unknown on T4/Hopper-class practical targets. First P100 attempt
-  `20260618_192128_linear_pallas_focus_NvidiaTeslaP100` failed before timing
-  because explicit GMEM is only accepted for full-array trivial block mappings;
-  keep explicit GMEM on full input refs only and use standard blocked outputs.
-  Second P100 attempt `20260618_192526_linear_pallas_focus_NvidiaTeslaP100`
-  then failed because `_pallas_load` on dynamic GMEM refs lowered to Mosaic
-  `masked_load`; stage input reads now use direct `ref[index]` indexing.
-  Third P100 attempt `20260618_193013_linear_pallas_focus_NvidiaTeslaP100`
-  failed on output `value[:, None]` broadcast for `WGStridedFragLayout(128)`;
-  stage output writes now use direct `ref[:, 0] = value` assignment.
-  Fourth P100 attempt `20260618_193442_linear_pallas_focus_NvidiaTeslaP100`
-  reached output lowering and failed because `Nx=51` gives a non-16-byte GMEM
-  row stride. Pallas PCR work arrays are now padded to a multiple of four
-  columns with identity/zero sentinel columns, then sliced back to real `Nx`;
-  local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas.
-  Fifth P100 attempt `20260618_194249_linear_pallas_focus_NvidiaTeslaP100`
-  passed the row-stride fix but failed because a `(128, 1)` float32 output
-  block copies only `32` bits along the minormost dimension; the kernel now
-  emits four columns per program to make that dimension `128` bits.
-  Kaggle T4 attempt `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` reached
-  the first `pallas_pcr_128` compile and failed in the current Mosaic GPU path
-  because `nvvm.cp.async.bulk.wait_group` is unsupported on T4 `sm_75`.
-- [ ] Phase 7.6.3 next implementation target: optimize the existing
-  batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
-  matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
-  are `loop_select_subtract_fusion_*`, so prioritize reducing per-stage
-  `where`/boundary-mask/gather work over more heuristic threshold tuning.
-- [x] Phase 7.6.3 JAX advanced-guide spike: validate benchmark-only
-  `pcr_soa_layout_auto` and `pcr_soa_ref` on Kaggle P100. Both keep the exact
-  batch-native SoA PCR algebra: `layout_auto` compiles the benchmark wrapper
-  with `jax.experimental.layout.Format(Layout.AUTO)` for input/output layouts
-  and records inferred `major_to_minor` layouts; `ref` stores stage work arrays
-  in internal `jax.new_ref` buffers to test memory/lifetime control. Result:
-  Kaggle P100 `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100`
-  found no useful speedup. `layout_auto` won `2/6` cases but was `1.021x`
-  geomean runtime versus `pcr_soa`; `ref` won `0/6` and was `1.033x`
-  geomean runtime. The inferred layouts stayed identical to baseline
-  (`[0, 1]` inputs, `[0, 1, 2]` output), so do not route either candidate.
-- [x] Phase 7.6.3 CuTe DSL/JAX spike: added a standalone
-  `benchmark/cute_dsl/run_cute_dsl_smoke.py` vector-add custom-call harness
-  following the official JAX CuTe DSL guide. Local run skips cleanly on the
-  Mac CPU env because `cutlass`/CUDA bindings are absent. The guide documents
-  SM 8.0+ as the minimum GPU, so current Kaggle P100 (`sm_60`) and T4
-  (`sm_75`) should not be used for CuTe DSL solver runs. Reopen this line only
-  on L4/A100/H100-class runtimes, with the smoke as the first gate before any
-  PCR stage kernel.
-- [x] Phase 7.6.3 Triton spike: validate standalone exact
-  `triton_block_thomas` against the JAX `pcr_soa` baseline using Kaggle
-  `linear_triton_focus`. This is intentionally a small two-kernel custom
-  double-cable solve (forward/backward block Thomas, one Triton program per
-  fiber), not a full JAX integration. Kaggle T4 run
-  `20260618_205135_linear_triton_focus_NvidiaTeslaT4` was numerically clean
-  and beat JAX `pcr_soa` in all six focused cases: `2.684x` geomean speedup,
-  range `2.199x-2.892x`, with max dense64-smoke error about `4.0e-08` and
-  max block residual about `3.6e-07`. This is now a real custom-kernel
-  candidate, but the next gate is integration cost: avoid CPU copies and
-  decide whether to expose it through a JAX custom-call path, DLPack bridge,
-  or a narrower benchmark-only E2E prototype before any public routing.
-- [x] Phase 7.6.3 Triton PCR_SOA quick scout: run updated
-  `linear_triton_focus`, now comparing JAX `pcr_soa`,
-  `triton_block_thomas`, and the new benchmark-only `triton_pcr_soa`
-  global-memory PCR prototype. Kaggle T4 run
-  `20260618_210243_linear_triton_focus_NvidiaTeslaT4` completed. Result:
-  `triton_pcr_soa` is numerically clean and faster than JAX `pcr_soa`
-  (`1.619x` geomean speedup), but it is still slower than
-  `triton_block_thomas` in all focused cases (`1.697x` geomean runtime,
-  range `1.521x-2.364x`). Decision: keep `triton_pcr_soa` benchmark-only/
-  standby and focus Triton work on the block-Thomas integration path.
-- [x] Phase 7.6.3 Triton block-Thomas integration gate: benchmark the new
-  experimental `triton_block_thomas_jax_bridge` path. It accepts eager JAX
-  arrays, converts them to Torch through DLPack, runs the same Triton
-  block-Thomas kernels, and converts outputs back to JAX. This is not
-  `jax.jit`-compatible and must not be public routing yet; it is an overhead
-  measurement. Updated `linear_triton_focus` now runs JAX `pcr_soa`,
-  pure Torch/Triton `triton_block_thomas`, and
-  `triton_block_thomas_jax_bridge`. First T4 attempt
-  `20260618_213014_linear_triton_focus_NvidiaTeslaT4` measured the pure
-  Torch/Triton Thomas cases successfully, then failed before bridge timing
-  because the new `src/axonscope/solvers/triton_thomas.py` module was not
-  tracked in Git and therefore was absent from Kaggle's clone. Fix: track and
-  commit that module, then rerun. Second T4 attempt
-  `20260618_214520_linear_triton_focus_NvidiaTeslaT4` completed. Result:
-  pure `triton_block_thomas` stayed strong (`2.673x` geomean speedup vs JAX
-  `pcr_soa`), but the eager JAX/DLPack/Torch bridge preserved only `1.060x`
-  geomean speedup, won `4/6` cases, and was `2.522x` geomean slower than the
-  pure Triton path. Decision: do not use Python/DLPack bridge as production
-  routing inside the time loop; pursue deeper integration or a coarser E2E
-  boundary if continuing Triton.
-- [x] Phase 7.6.3 jax-triton integration gate: run Kaggle T4
-  `linear_jax_triton_focus`. This uses benchmark-only
-  `jax_triton_block_thomas` via `jax-ml/jax-triton`, with two Triton custom
-  calls inside `jax.jit`, and compares against JAX `pcr_soa` for
-  `B=1024/2048/4096`, `Nx=51/96/128`. Treat `Nx=51/96` as the optimized
-  regime and `Nx=128` as a guard, not as a hard solver boundary. Result:
-  Kaggle T4 `20260618_221506_linear_jax_triton_focus_NvidiaTeslaT4` completed.
-  `jax_triton_block_thomas` beat JAX `pcr_soa` in all 9 focused cases:
-  `1.991x` geomean speedup, range `1.271x-2.354x`, max dense64-smoke error
-  about `4.99e-08`, max block residual about `3.97e-07`. Compared with the
-  earlier pure Torch/Triton Thomas result on the overlapping 6 cases, the
-  jax-triton bridge is still `1.425x` geomean slower, but it preserves enough
-  speedup to become the preferred integration path for the next work item.
-- [x] Phase 7.6.3 jax-triton E2E integration gate: benchmark-only
-  `jax_triton_thomas` is wired into the real double-cable batch-native
-  time-step loop through `src/axonscope/solvers/jax_triton_thomas.py`, without
-  adding a public `BatchOptions` value or changing `auto`. It requires
-  array-output recording (`center`/`full`) so the custom kernel is not wrapped
-  by observer-only `vmap`. Kaggle T4 `e2e_jax_triton_focus`
-  comparing `pcr_adaptive` vs `jax_triton_thomas` at `B=512/2048`,
-  target `Nx=51/96`, `Nt=500`, `Iinj=none/dense_zero` completed:
-  `20260618_223213_e2e_jax_triton_focus_NvidiaTeslaT4`. Result:
-  `jax_triton_thomas` won `7/8` kernel-median E2E cases versus
-  `pcr_adaptive`, with `1.595x` geomean speedup and range
-  `0.818x-2.632x`. Keep it as the leading custom-kernel candidate, but do
-  not route publicly before agreement validation.
-- [x] Phase 7.6.3 jax-triton agreement gate: run
-  `validate_double_cable_solver_agreement.py` for `jax_triton_thomas` versus
-  `pcr_adaptive` on a small held-out E2E matrix (`center` and ideally `full`,
-  `Iinj=none/dense_zero`). T4 run
-  `20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4` completed but
-  failed current strict thresholds (`0/16` pass). `actualNx=45` kept activation
-  identical with small trace errors (`max_abs ~0.041-0.190 mV`), while
-  `actualNx=89` showed large spike-timing trace deviations (`max_abs
-  ~82.7-102.6 mV`) and `2` extra activations versus `pcr_adaptive` at `B=512`.
-- [x] Phase 7.6.3 Thomas-reference diagnostic: T4 run
-  `20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4` compared
-  both `pcr_adaptive` and `jax_triton_thomas` against `thomas` at `B=512`.
-  It also failed current strict thresholds (`0/8` pass), but
-  `jax_triton_thomas` was closer than `pcr_adaptive` to Thomas on all reported
-  max_abs/RMS groups and preserved activation count at `actualNx=89`, while
-  `pcr_adaptive` missed `2` activations. Conclusion: no public route yet; the
-  current validation case is threshold-sensitive enough that public PCR also
-  diverges from Thomas under strict trace tolerances.
-- [ ] Phase 7.6.3 validation-protocol cleanup: add a cleaner agreement gate
-  that separates numerical solver error from threshold sensitivity. Prefer
-  held-out subthreshold/suprathreshold-margin cases and threshold/activation
-  outcome comparisons before using strict raw-trace tolerances as a routing
-  gate for `jax_triton_thomas`.
-- [ ] Phase 7.6.3 CUDA FFI fallback gate: keep Kaggle T4
-  `linear_cuda_ffi_focus` in standby. Run it only if `jax-triton` becomes
-  blocked in end-to-end integration or loses too much speed once wired into the
-  real time-step loop. This uses benchmark-only
-  `cuda_ffi_block_thomas`, a JAX FFI custom call launching a simple CUDA
-  block-Thomas kernel on the XLA CUDA stream.
-- [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
-  benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
-  `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral
-  (`2/4` wins, geomean `1.001x` runtime vs `pcr_soa`), while `pcr_soa_shift`
-  was slower in all cases (`1.786x` geomean runtime vs `pcr_soa`). Do not
-  route either candidate through `auto`; keep `shift` closed/standby.
-- [x] Re-run the exact Thomas-family/associative sweep on Kaggle P100 after
-  the JAX update. Result: `assoc_backward` still beats `thomas_batched`
-  cleanly, but only beats `pcr_soa` in `1/9` cases under JAX `0.10.2`; keep it
-  benchmark-only/standby rather than routing it through `auto`.
-- [x] Phase 1.5 split iterative solver: validate `split_gs_3` in an
-  end-to-end/physiology harness, with `split_gs_4` as the stricter residual
-  fallback, before considering any routing change. Result: fixed-K
-  `split_gs_3`/`split_gs_4` failed local E2E trace agreement and are in
-  abandoned/closed status.
-- [x] Abandon split iterative double-cable solver approaches for the current
-  optimization pass. Do not spend more Kaggle runs or implementation time on
-  split Jacobi/Gauss-Seidel/Richardson variants unless the user explicitly
-  reopens the line.
-- [x] Keep pseudo-double/pseudo-MRG on standby until exact-solver work exposes a
-  clear need for approximate screening again.
-- [ ] Phase 7.7: clean stimulation and placement APIs before Phase 8.
-- [ ] Phase 7.8: clean examples after API cleanup and add a solver-options
-  example only once the public contract is stable.
-- [ ] Phase 8: add callable studies, reuse policies, retention policies, and
-  study result containers.
-- [ ] Phase 9: finalize serialization schemas and add reference-backend
-  validation.
-- [ ] Keep current Phase 5-7.6 changes uncommitted until the user asks for a
-  commit or an explicit checkpoint requires it.
+- [x] Close Phase 7.6.3 solver optimization campaign.
+- [x] Clean active solver package and move non-retained custom-kernel tests/code
+  to benchmark/archive locations.
+- [x] Add a clean solver-campaign summary report with a small speedup plot.
+- [x] Add workflow-level benchmark based on basic examples 06/07/08:
+  `benchmark/realistic_examples/bench_basic_examples.py`.
+- [ ] Run `benchmark/realistic_examples/bench_basic_examples.py` on CPU and GPU
+  for the bounded `standard` matrix, then add the resulting CSV/JSON paths to
+  the solver/Vext report.
+- [ ] Phase 7.6.5: profile and optimize `Vext` materialization for realistic
+  threshold, activation, recruitment, and conduction workflows.
+- [ ] Phase 7.7: clean stimulation and placement APIs after the first Vext pass.
 
-## Guidelines Comparison
+## Phase 7.6.5 Vext Plan
 
-The active roadmap should keep matching these `GUIDELINES.md` constraints:
+Goal: reduce complete workflow time now that solver-only custom-kernel work is
+closed. The working hypothesis from E2E benchmarks is that dense `Vext`
+materialization, transfer, and repeated input construction dominate many
+realistic GPU cases.
 
-- AxonScope owns 1D axon dynamics, stimulation along axons, execution,
-  recording, analyses, validation, and performance.
-- External field/geometry packages should provide spatial extracellular
-  footprints; AxonScope combines footprints with temporal stimuli.
-- Solver options are execution knobs, not new public biological models.
-- Exact double-cable remains the reference for MRG-like behavior.
-- Pseudo-double work must not create a parallel public architecture, silently
-  reinterpret `double`, or become part of `auto`.
-- Avoid legacy shims: once an API is replaced, update tests/docs/examples and
-  remove the superseded path.
+1. Baseline realistic workflows.
+   - Run example 06 velocity, example 07 threshold, and example 08 recruitment
+     with `benchmark/realistic_examples/bench_basic_examples.py`.
+   - Compare CPU vs GPU by workflow, fiber type, run count, and population size.
+   - Record build time, first run, warm run, backend, and devices.
 
-## Phase 7.6 Completed Evidence
+2. Add `Vext` timing visibility.
+   - Separate public object construction, extracellular footprint evaluation,
+     dense `Vext` array materialization, host-to-device movement, solver time,
+     and result packaging.
+   - Keep measurements available in CSV/JSON, not only profiler traces.
 
-Detailed evidence lives in `benchmark/results/`, hotpath manifests, tests, and
-git history. Keep this section compact.
+3. Reduce avoidable dense inputs.
+   - Preserve the current public API while testing internal representations for
+     shared point-source/electrode drives.
+   - Avoid materializing dense zero `Iinj`.
+   - Reuse or cache `Vext` when protocols sweep only current amplitude.
+   - Explore on-device/lazy `Vext` generation for analytical point sources.
 
-- [x] Phase 7.6.1: added path comparison, typed footprint/drive, solver-only,
-  recording-policy, observer-policy, cold/warm, and JAX compile/profiler
-  benchmark coverage.
-- [x] Phase 7.6.2: reduced retained-output pressure with sparse current clamp,
-  zero-field and zero-Iinj paths, compact observer results, runtime caches,
-  shared double-cable coefficients, chunked runs, and prepared-input timing.
-- [x] Double-cable observer-only batch runs now return compact observations for
-  homogeneous MRG-like groups with `Recording.none()`.
-- [x] PCR and SoA PCR variants match Thomas in current unit tests and are
-  available behind explicit solver options.
+4. Validate behavior.
+   - Re-run unit tests for stimulation, dispatcher, protocols, and solvers.
+   - Re-run relevant NRV comparisons if `Vext` semantics change.
+   - Keep `pcr_adaptive` as the GPU solver baseline during Vext work.
 
-## Phase 7.6.3 Exact Double-Cable GPU Solver Optimization
+5. Decide next branch.
+   - If `Vext` dominates after easy wins, continue with representation/API work.
+   - If solver time becomes dominant again, reopen custom kernels only with a
+     clear validation gate and a target device that supports the required stack.
 
-Status: active.
+## Solver Campaign References
 
-Goal: improve exact double-cable GPU performance without replacing the model
-with pseudo-single-cable approximations.
+- Summary report: `benchmark/reports/double_cable_solver_optimization_2026_06.md`
+- Plot: `benchmark/reports/double_cable_solver_optimization_2026_06_speedups.svg`
+- Active solver README: `benchmark/solvers/README.md`
+- Kaggle runner README: `benchmark/kaggle/README.md`
+- Solver roadmap archive: `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`
 
-Primary roadmap:
+Archived experiment locations:
 
-- `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`
-
-Current solver option contract:
-
-| Option | Current role | Intended use |
-| --- | --- | --- |
-| `auto` | Backend-aware default. CPU/default -> `thomas`; GPU -> `pcr_adaptive`. | Normal benchmark and production-oriented default for current code. |
-| `thomas` | Exact block-Thomas scan. | CPU/default fallback and correctness reference. |
-| `pcr` | Exact matrix-layout PCR variant. | GPU diagnostic and larger-batch fallback inside adaptive PCR. |
-| `pcr_soa` | Exact struct-of-arrays PCR variant. | GPU diagnostic for small/medium batches. |
-| `pcr_adaptive` | Current GPU policy: SoA up to `B=4096`, matrix-layout PCR above. | Explicit reproduction of current GPU `auto` behavior. |
-
-Near-term tasks:
-
-- [x] Confirm the current code only exposes the five solver choices above.
-- [x] Keep planned names from the GPU roadmap out of user-facing docs until
-  they are implemented and tested.
-- [ ] Re-run Colab `kernel_double_cable_observer_auto_long` after
-  `pcr_adaptive` to confirm the combined target: keep the SoA gains through
-  `n=600` without the `n=2000` regression.
-- [x] Add a solver-only exact double-cable benchmark focused on linear-solver
-  throughput, separate from dispatch/input/result packaging.
-- [x] Add a small JAX trace script or hotpath preset for exact double-cable
-  linear solvers, with Thomas, `pcr`, `pcr_soa`, and `pcr_adaptive`.
-- [x] Add Kaggle P100 `linear_pcr_soa_trace` preset for focused GPU
-  `jax.profiler` traces of `pcr`, `pcr_soa`, and `pcr_adaptive`.
-- [x] Run Kaggle P100 `linear_pcr_soa_trace` and inspect GPU trace output.
-  Result: `pcr_soa` is `1.09x-1.38x` faster than matrix-layout `pcr` on the
-  focused `B=2048/4096`, `Nx=51/96`, `float32` cases; trace evidence says the
-  useful optimization target is inside PCR_SOA stage fusion/masking.
-- [x] Add benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates for
-  PCR_SOA stage optimization. `pcr_soa_nomask` removes explicit boundary
-  `where` masks; `pcr_soa_shift` also replaces clamped neighbor gathers with
-  static slice/concat shifts. Local targeted tests passed; P100 timing still
-  needs validation. Local HLO smoke at `B=8`, `Nx=13` reduced
-  `pcr_soa_shift` gather/select counts from `104/105` to `0/0`, replacing
-  them with static slices/concats.
-- [x] Validate `pcr_soa_nomask` and `pcr_soa_shift` on Kaggle P100. Decision:
-  local HLO simplification did not translate to GPU speed. `pcr_soa_nomask`
-  is too neutral to justify production routing; `pcr_soa_shift` should not get
-  more time unless a future trace shows concat/slice fusion has changed.
-- [x] Add an end-to-end exact double-cable batch-kernel benchmark for
-  recording/Iinj pressure before GPU reruns.
-- [ ] Decide whether to keep the current Literal-based solver option or promote
-  it to a typed enum after the option set stabilizes.
-- [x] Add batch-native PCR_SOA and route it through array-output
-  `DoubleCableBatchKernel` chunks where current evidence supports it.
-- [ ] Add and benchmark `Nx` padding buckets as a real solver candidate before
-  further threshold/heuristic tuning.
-  - [x] Add exact identity-row padding helpers and a benchmark-only
-    `pcr_soa_padded` candidate.
-  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
-    `pcr_soa_padded` matched the Thomas64 reference with max absolute error
-    about `7.8e-08`. Local CPU timing was slower at this tiny batch and is not
-    used as GPU performance evidence.
-  - [x] Kaggle P100 `20260616_220653_linear_NvidiaTeslaP100`: padded matched
-    Thomas64 within `~1.4e-07` max abs error but was not a general speed win
-    versus unpadded `pcr_soa` (`6/20` wins, geomean `1.086x` slower). Keep it
-    benchmark-only/standby; do not route it into `auto`.
-- [ ] Add and benchmark batch-native exact Thomas as a real solver candidate.
-  - [x] Add `solve_block_tridiagonal_2x2_scalar_batched(...)` and
-    benchmark-only `thomas_batched`.
-  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
-    `thomas_batched` matched the Thomas64 reference with max absolute error
-    about `4.6e-08`. Local CPU timing was slightly faster but is not GPU
-    performance evidence.
-  - [x] Kaggle P100 `20260616_222231_linear_NvidiaTeslaP100`: numerically
-    matched Thomas64 within `~1.4e-07` max abs error, but was not a steady-state
-    GPU win versus current vmapped `thomas` (`8/20` wins, geomean `1.009x`
-    slower). Compile time improved (`0.885x` geomean), but runtime does not
-    justify routing it into `auto`; keep benchmark-only/standby.
-- [ ] Add and benchmark transposed-layout exact PCR_SOA as a real solver
-  candidate.
-  - [x] Add `solve_block_tridiagonal_2x2_pcr_soa_batched_transposed(...)` and
-    benchmark-only `pcr_soa_transposed`.
-  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
-    `pcr_soa_transposed` matched the Thomas64 reference with max absolute error
-    about `7.8e-08`. Local CPU timing was faster than batch-first `pcr_soa`,
-    but the routing decision needs P100 evidence.
-  - [x] Kaggle P100 recovered output under `benchmark/results/kaggle/linear`
-    from the `20260616_223754_linear_NvidiaTeslaP100` run: transposed matched
-    Thomas64 within `~1.4e-07` max abs error but was not a general speed win
-    versus batch-first `pcr_soa` (`8/20` wins, geomean `1.047x` slower).
-    Keep it benchmark-only/standby; do not route it into `auto`.
-- [x] Phase 1E: add and benchmark exact hybrid PCR/Thomas candidates.
-  - [x] Add `solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(...)` and
-    benchmark-only `pcr_soa_hybrid_4`, `pcr_soa_hybrid_8`, and
-    `pcr_soa_hybrid_16`.
-  - [x] Local smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`, `float32`;
-    all hybrid variants matched the Thomas64 reference with max absolute error
-    about `7.8e-08`. CPU/local timing was mixed (`hybrid_4` faster at `Nx=89`,
-    slower at `Nx=45`); use P100 evidence for go/no-go.
-  - [x] Kaggle P100 `20260616_225915_linear_NvidiaTeslaP100`: all hybrid
-    variants matched Thomas64 within `~1.4e-07` max abs error but were much
-    slower than batch-native `pcr_soa`. `hybrid_4` won `0/20` cases and was
-    `3.405x` slower geomean; `hybrid_8` was `3.828x` slower; `hybrid_16` was
-    `4.274x` slower. Decision: keep all hybrid variants benchmark-only/standby;
-    do not route them into `auto`.
-- [ ] Evaluate optimized Thomas, PCR hybrid, associative scans, split iterative,
-  and Pallas only in the sequence described by the exact-GPU roadmap.
-  - [x] Add Phase 1.5 split-system helpers, scalar batched tridiagonal solve,
-    fixed-K Jacobi/Gauss-Seidel/Richardson candidates, and residual metric.
-  - [x] Keep split candidates benchmark-only as `split_jacobi_4`,
-    `split_jacobi_8`, `split_gs_4`, `split_gs_8`, and `split_richardson_4`.
-  - [x] Local split smoke passed on 2026-06-16 for `B=2`, `Nx=45/89`,
-    `float32`. `split_jacobi_8`, `split_gs_4`, and `split_gs_8` reached
-    residual/error near the exact `pcr_soa` baseline (`~1e-7`); `split_jacobi_4`
-    stayed around `~6e-6` residual; `split_richardson_4` was not acceptable
-    locally (`~1e-3` residual). Treat local timing as CPU-only smoke, not GPU
-    evidence.
-  - [x] Kaggle P100 `20260616_233228_linear_NvidiaTeslaP100`: `split_gs_4`
-    matched exact-solver residual/error levels (`max_residual ~2.1e-7`), won
-    `13/20` cases versus `pcr_soa`, and was `0.893x` geomean runtime overall
-    (`0.687x` for `B>=2048`, winning `8/8`). Decision: keep `split_gs_4` as
-    the only clean Phase 1.5 performance candidate for E2E/physiology
-    validation.
-  - [x] Kaggle P100 `20260616_233228_linear_NvidiaTeslaP100`: `split_jacobi_4`
-    was faster (`16/20` wins, `0.818x` geomean runtime vs `pcr_soa`) but
-    remained approximate (`max_residual ~7.1e-6`, max_abs error `~2.5e-6`).
-    Keep it benchmark-only as a possible approximate/physiology experiment,
-    not an exact-solver routing candidate.
-  - [x] Kaggle P100 `20260616_233228_linear_NvidiaTeslaP100`: `split_jacobi_8`
-    and `split_gs_8` matched exact residual/error levels but were slower than
-    `pcr_soa` geomean; `split_richardson_4` was faster in some cases but
-    failed the residual/error bar (`max_residual ~1.1e-3`). Keep these in
-    standby.
-  - [x] Add benchmark-only follow-up candidates `split_gs_2`, `split_gs_3`,
-    and `split_jacobi4_gs1` to test lower-K Gauss-Seidel and a Jacobi-plus-GS
-    cleanup pass before moving to E2E.
-  - [x] Local split follow-up smoke passed on 2026-06-16 for `B=2`,
-    `Nx=45/89`, `float32`. `split_gs_3` and `split_jacobi4_gs1` reached
-    residual/error near the exact baseline (`~4e-7`) while running faster than
-    local `split_gs_4`; `split_gs_2` was too approximate locally
-    (`~5e-5` residual). Treat local timing as smoke only.
-  - [x] Kaggle P100 `20260616_235328_linear_split_focus_NvidiaTeslaP100`:
-    `split_gs_3` was the best clean follow-up candidate. It kept
-    `max_residual ~6.5e-7` and `max_abs_error ~3.1e-7`, won `11/12` cases
-    versus `pcr_soa`, and was `0.648x` geomean runtime versus `pcr_soa`.
-    It also beat `split_gs_4` in `12/12` cases (`0.818x` geomean runtime).
-  - [x] Kaggle P100 `20260616_235328_linear_split_focus_NvidiaTeslaP100`:
-    `split_jacobi4_gs1` had the same residual/error level as `split_gs_3` but
-    was slower (`0.839x` geomean runtime vs `pcr_soa`, `1.060x` vs
-    `split_gs_4`). `split_gs_2` and `split_jacobi_4` were faster but too
-    approximate (`~6e-5` and `~7e-6` max residual). Keep them benchmark-only
-    and out of exact-routing decisions.
-  - [x] Add a benchmark-only E2E path for `split_gs_3`, with `split_gs_4` as
-    the stricter residual fallback. This is wired through an internal kernel
-    override and does not expose split solvers through `BatchOptions` or `auto`.
-  - [x] Local E2E smoke passed on 2026-06-17 for `B=2`, actual `Nx=45`,
-    `Nt=3`, `recording=center`, `Iinj=none`, and solvers `pcr_adaptive`,
-    `split_gs_3`, `split_gs_4`. Local CPU/JIT timing is not performance
-    evidence.
-  - [x] Kaggle P100 `20260617_105250_e2e_split_focus_NvidiaTeslaP100`:
-    `split_gs_3` kept the solver-only signal in the real array-output E2E
-    kernel. Versus `pcr_adaptive`, it won `5/6` cases on median kernel time
-    (`1.39x` geomean speedup), `4/4` for `B>=2048` (`1.66x`), and `2/2` for
-    `B>=2048` with actual `Nx=89` (`1.94x`). `split_gs_3` also beat
-    `split_gs_4` in `6/6` kernel cases (`1.26x` geomean speedup).
-  - [x] Kaggle P100 `20260617_105250_e2e_split_focus_NvidiaTeslaP100`:
-    full total-with-input gains were much smaller for large batches because
-    dense `Vext` materialization dominated. For `B>=2048`, `split_gs_3`
-    improved `total_with_inputs_ms` only `~1.05x` geomean overall, and
-    `~1.09x` for actual `Nx=89`. Decision at this point: the solver timing
-    win was real, but it still needed output/physiology agreement proof before
-    any routing change.
-  - [x] Add Phase 2A benchmark-only exact `assoc_backward`: same Thomas forward
-    elimination as `thomas_batched`, with associative affine scan for backward
-    substitution. Keep it out of `BatchOptions` and `auto` until P100 evidence
-    exists.
-  - [x] Local Phase 2A smoke passed on 2026-06-17 for `B=2`, `Nx=45/89`,
-    `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
-    `pcr_soa`. `assoc_backward` matched Thomas64 with max absolute error
-    about `5.0e-08` and max residual about `9.3e-08`. Local CPU timing is not
-    GPU performance evidence.
-  - [x] Add Phase 2B dense-transfer associative prototype as
-    `assoc_transfer_dense` for diagnostics only. It matches Thomas on
-    well-conditioned artificial systems, but benchmark-like float32 systems are
-    numerically unstable due transfer-matrix amplification. Keep it out of the
-    Kaggle focus and standby unless a stabilized formulation is derived.
-  - [x] Kaggle P100 `20260617_112515_linear_assoc_focus_NvidiaTeslaP100`:
-    `assoc_backward` matched Thomas64 cleanly (`max_abs_error ~1.0e-7`,
-    `max_residual ~1.3e-7`) and beat `thomas` in `9/9` cases (`1.42x`
-    geomean speedup), so the associative backward pass works as a Thomas
-    optimization. It did not beat current exact `pcr_soa` overall (`3/9` wins,
-    `1.313x` geomean runtime vs `pcr_soa`), although it won all `B=4096` cases
-    (`1.26x` geomean speedup vs `pcr_soa`). Decision: keep benchmark-only/
-    standby; do not route into `auto` unless future workloads specifically
-    need an exact large-batch Thomas-family fallback.
-  - [x] Kaggle P100 `20260618_182820_linear_assoc_focus_NvidiaTeslaP100`
-    retested the same exact candidates after the JAX upgrade. Kaggle installed
-    `jax==0.10.2`/`jaxlib==0.10.2`. `assoc_backward` still beat
-    `thomas_batched` in `9/9` cases (`1.385x` geomean speedup), but only beat
-    `pcr_soa` in `1/9` cases (`B=4096`, `Nx=96`, by about `1.005x`) and was
-    `1.570x` geomean runtime versus `pcr_soa`. Decision confirmed: no routing
-    change; PCR_SOA remains the best exact JAX backend for these P100 cases.
-  - [x] Add Phase 3A Pallas spike `pallas_thomas_128` as a benchmark-only
-    exact Thomas-family candidate. It runs one Pallas program per `128` fibers
-    over the full `Nx`, requires `B` divisible by `128`, and stays out of
-    `BatchOptions`/`auto`.
-  - [x] Add `pallas_thomas_16` as a bounded-SMEM Phase 3A retry. Local
-    `interpret=True` smoke passed for `B=16`, `Nx=8`, `float32`, but the P100
-    run `20260618_183720_linear_pallas_focus_NvidiaTeslaP100` failed during
-    Mosaic GPU lowering at `B=1024`, `Nx=51` with `smem_bytes=60424 >
-    max_smem_bytes=49152`. Decision: keep `pallas_thomas_16` in standby.
-  - [x] Run Kaggle P100 `linear_pallas_focus` with `pallas_thomas_4`.
-    `pallas_thomas_8` was added as an intermediate probe, but the final
-    strided-load constraint makes more Thomas block-size testing unhelpful for
-    P100. Local smoke
-    `local_pallas_blocks_smoke` passed for `pallas_thomas_4/8/16` at `B=16`,
-    `Nx=8`, with max error `4.575e-08` vs Thomas64. First P100 attempt
-    `20260618_184529_linear_pallas_focus_NvidiaTeslaP100` passed the SMEM
-    limit but failed on Mosaic's 128-byte gmem-to-smem transfer alignment
-    requirement (`4 * 51 * 4 = 816` bytes). Internal Pallas block specs now pad
-    storage lengths to multiples of 8 and slice outputs back to real `Nx`;
-    local padded smoke `local_pallas_padded_smoke` matched Thomas64 for
-    `pallas_thomas_4/8/16` at `B=16`, `Nx=51` with max error `6.493e-08`.
-    Second P100 attempt `20260618_185101_linear_pallas_focus_NvidiaTeslaP100`
-    then failed on Mosaic layout inference for the artificial
-    `jnp.arange`/iota used as batch indices. The kernel now uses explicit
-    `pl.ds(row, 1)` / `pl.ds(component, 1)` slices for scratch/output
-    load-store helpers; local `local_pallas_ds_smoke` still matches Thomas64.
-    Third P100 attempt `20260618_185700_linear_pallas_focus_NvidiaTeslaP100`
-    failed earlier in the math path because `a00_ref[:, 0]` is a strided SMEM
-    load of only `4` elements, while Mosaic requires multiples of `128`
-    elements for that lowering path. Decision: close/standby
-    `pallas_thomas_4/8/16/128` for P100 and move to Pallas PCR/hybrid if we
-    continue custom kernels.
-  - [x] Local Pallas smoke passed on 2026-06-17 for `B=128`, `Nx=16`,
-    `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
-    `pallas_thomas_128`, `pcr_soa`. `pallas_thomas_128` matched Thomas64 with
-    max absolute error about `5.9e-08` and max residual about `1.2e-07`.
-    Local execution used Pallas `interpret=True` on CPU, so timing is not GPU
-    performance evidence.
-  - [x] Run Kaggle P100 `linear_pallas_focus` and decide whether Pallas Thomas
-    justifies any Phase 3B PCR/hybrid work.
-    - [x] First Kaggle P100 attempt
-      `20260617_114922_linear_pallas_focus_NvidiaTeslaP100` failed before
-      measuring Pallas because Kaggle uses `jax 0.7.2`, where
-      `jax.experimental.pallas.MemoryRef` is no longer public. Add a small
-      compatibility shim that falls back to `jax._src.pallas.core.MemoryRef`;
-      rerun required.
-    - [x] Second Kaggle P100 attempt
-      `20260617_115323_linear_pallas_focus_NvidiaTeslaP100` reached the
-      fallback `MemoryRef`, but JAX `0.7.2` uses a two-argument
-      `(shape, dtype)` signature instead of the older three-argument
-      `(shape, dtype, memory_space)` form. Make the shim accept both
-      signatures; rerun required.
-    - [x] Third Kaggle P100 attempt
-      `20260617_115814_linear_pallas_focus_NvidiaTeslaP100` reached scratch
-      creation, then failed because Kaggle/JAX `0.7.2` exposes
-      `jax.experimental.pallas.triton.CompilerParams` rather than the older
-      `TritonCompilerParams`. Remove explicit Triton compiler params for this
-      spike and let Pallas choose defaults; rerun required.
-    - [x] Fourth Kaggle P100 attempt
-      `20260617_120625_linear_pallas_focus_NvidiaTeslaP100` reached Pallas
-      kernel tracing, then failed on direct scratch writes
-      `scratch_ref[:, row, k] = ...` with a `swap.abstract_eval` error in
-      JAX `0.7.2`. Replace scratch/output direct indexing with explicit
-      `pl.store`/`pl.load`; rerun required.
-    - [x] Fifth Kaggle P100 attempt
-      `20260617_121201_linear_pallas_focus_NvidiaTeslaP100` still failed
-      during Pallas tracing because scratch refs in JAX `0.7.2` do not expose
-      `.shape`. Stop deriving vector indices from `scratch_ref.shape`; compute
-      batch indices once from the input block shape and reuse them for
-      `pl.store`/`pl.load`. This is the last compatibility patch before
-      putting the Pallas spike in standby if Kaggle still fails.
-    - [x] Sixth Kaggle P100 attempt
-      `20260617_121708_linear_pallas_focus_NvidiaTeslaP100` still failed before
-      measuring Pallas. It reached explicit `pl.store`, then failed inside
-      Pallas `swap` abstract evaluation with `IndexError: tuple index out of
-      range`. Decision: put Phase 3A `pallas_thomas_128` in standby and do not
-      spend more Kaggle runs on Pallas until the kernel is rewritten against
-      the current JAX/Pallas indexing API in a controlled environment.
-    - [x] Local JAX upgrade retest on 2026-06-17: environment is Python
-      `3.12.13`, `jax==0.10.1`, `jaxlib==0.10.1`, CPU backend. Updated the
-      Pallas shim for the current API: `pl.load`/`pl.store` are no longer
-      public exports, and `MemoryRef` now needs a shaped abstract value through
-      `MemorySpace.ANY(shape, dtype)`/`ShapedArray`. Local `interpret=True`
-      Pallas smoke passes against Thomas with max error about `6e-08`; the
-      small solver benchmark passes for `B=128`, `Nx=16`, `float32`.
-      Non-interpreted Pallas still requires a real GPU backend; CPU reports
-      `Only interpret mode is supported on CPU backend`.
-    - [x] Seventh Kaggle P100 attempt
-      `20260617_211635_linear_pallas_focus_NvidiaTeslaP100` reached a real
-      P100 backend with Python 3.12 and `jax/jaxlib==0.10.1`, then failed
-      before benchmarking because Kaggle kept a preinstalled
-      `jax_cuda12_plugin==0.7.2` incompatible with `jaxlib==0.10.1`
-      (`PJRT_FFI_UserData_Add_Args size` mismatch). Fix the Kaggle wrapper to
-      install the matching JAX CUDA 12 extra after project install:
-      `jax[cuda12]==<installed jax version>`.
-    - [x] Eighth Kaggle P100 attempt
-      `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` confirmed the CUDA
-      plugin fix: Kaggle installed `jax-cuda12-plugin==0.10.1`, selected the
-      P100 GPU backend, and measured `thomas`, `thomas_batched`, and
-      `assoc_backward` for the first case. It then failed during Pallas
-      lowering with `Unsupported memory space: any`. Fix the Pallas scratch ref
-      helper to prefer `MemorySpace.DEFAULT` and keep `ANY` only as fallback.
-    - [x] Ninth Kaggle P100 attempt
-      `20260617_212605_linear_pallas_focus_NvidiaTeslaP100` showed
-      `MemorySpace.DEFAULT` lowers to `gmem`, which Mosaic GPU also rejects for
-      scratch allocation. Fix the GPU path to allocate scratch with
-      `jax.experimental.pallas.mosaic_gpu.SMEM(...)`, while keeping the generic
-      Pallas memory-ref fallback for local `interpret=True` and older APIs.
-    - [x] Tenth Kaggle P100 attempt
-      `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` confirmed SMEM is
-      the right Mosaic GPU scratch memory space, but the current
-      `pallas_thomas_128` design exceeds P100 shared memory
-      (`smem_bytes=419848 > max_smem_bytes=49152`) before any Pallas timing is
-      recorded. Decision: keep `pallas_thomas_128` benchmark-only/standby; do
-      not spend more Kaggle runs on this full-`Nx` scratch design. A future
-      Pallas attempt needs a different design, e.g. much smaller block size,
-      streaming/recomputed backward coefficients, or a PCR-style kernel with
-      bounded scratch.
-  - [x] Add output-agreement/physiology validation for `split_gs_3` against
-    `pcr_adaptive`/Thomas on held-out double-cable workloads before any public
-    solver-option exposure or `auto` routing.
-  - [x] Local E2E agreement validation on 2026-06-17 failed fixed-K
-    `split_gs_3` and `split_gs_4`: `B=2`, target `Nx=51`, actual `Nx=45`,
-    `Nt=3`, `dt=0.05 ms`, `recording=center`, `Iinj=none` diverged from
-    `pcr_adaptive` by about `77 mV` and produced false activations at
-    `-20 mV`. Exact controls in the same harness (`pcr_soa`/`pcr_adaptive`
-    versus `thomas`) were close at about `0.0014 mV` max absolute error.
-    Decision: split iterative approaches are abandoned/closed for this
-    optimization pass; keep the existing code benchmark-only for historical
-    reproducibility until a later cleanup removes failed candidates.
-- [ ] Update `auto` only from benchmark evidence; keep resolved choices recorded
-  in manifests.
-- [ ] Add a didactic advanced solver-options example after the API is stable.
-  It should show how to use `auto` and how to force variants for diagnostics,
-  not turn examples into timing stress tests.
-
-Example diagnostic command:
-
-```bash
-python benchmark/hotpaths/run.py \
-  --workload double_cable_observer \
-  --sizes 100 300 600 2000 \
-  --duration 10.0 \
-  --dt 0.01 \
-  --compartments 51 \
-  --warmups 1 \
-  --double-cable-block-solver auto
-```
-
-Solver-only diagnostic command:
-
-```bash
-python benchmark/solvers/bench_double_cable_linear_solvers.py \
-  --batch-sizes 128 512 1024 \
-  --nx 32 51 64 \
-  --solvers thomas pcr pcr_soa pcr_adaptive split_jacobi_4 split_jacobi_8 split_gs_4 split_gs_8 split_richardson_4 \
-  --dtypes float32 \
-  --warmups 1 \
-  --repeats 5
-```
-
-Local smoke on 2026-06-16 passed with `B=2`, `Nx=5`, `float32`, `thomas` and
-`pcr_soa`; the profiler wrapper produced JAX trace files under
-`jax_traces/.../plugins/profile/...`.
-
-Kaggle P100 E2E evidence on 2026-06-16:
-
-- `20260616_205416_e2e_NvidiaTeslaP100`: baseline bounded E2E matrix.
-- `20260616_214351_e2e_NvidiaTeslaP100`: batch-native PCR_SOA array-output
-  scan. Direct `pcr_adaptive` kernel improved at `B=2048` (`~1.46x` median for
-  `Nx=51`, `~1.09x` for `Nx=96`) but regressed at `B=512`; notebook wall time
-  improved from about `377s` to `346s`. E2E total remained dominated by
-  Vext/setup materialization.
-
-## Phase 7.6.4 Pseudo-Double / Pseudo-MRG Standby
-
-Status: standby.
-
-Decision: the first pseudo-double pass was useful as a validation harness, but
-current candidates are not accepted as double-cable replacements. Exact
-double-cable optimization now has priority.
-
-Keep:
-
-- [x] `benchmark/pseudo_double/` as an experimental validation harness.
-- [x] Exact double-cable reference runs in every pseudo validation workflow.
-- [x] JSON/CSV summaries and optional plots for future comparison.
-- [x] Unit tests that protect mode parsing, experimental status, output writing,
-  plotting, reductions, and validation-only runners.
-
-Do not do now:
-
-- [x] Do not add pseudo-double to `BatchOptions.double_cable_block_solver`.
-- [x] Do not make pseudo-double part of `auto`.
-- [x] Do not add a public pseudo-double example yet.
-- [x] Do not optimize pseudo modes for GPU until a held-out physiology set
-  shows credible threshold, activation, propagation, and recruitment behavior.
-
-Resume only if one of these becomes true:
-
-- exact double-cable GPU optimization is insufficient for a real target study;
-- pseudo modes are explicitly needed as a high-recall pre-filter before exact
-  refinement;
-- a new reduction produces substantially better physiology on held-out
-  workloads, not only calibrated smoke cases.
-
-When resumed:
-
-- [ ] Start from `pseudo_double_series` and `pseudo_double_schur_local`, because
-  they are coefficient-derived rather than pure stimulus-scale probes.
-- [ ] Use small deterministic cases plus held-out MRG-like workloads before any
-  performance claim.
-- [ ] Track activation boolean, threshold amplitude, activation time/location,
-  conduction velocity, recruitment ordering, peak Vm, RMS/probe trace error,
-  and subthreshold response.
-- [ ] Near-threshold or ambiguous pseudo results must be rerun with exact
-  double-cable.
+- `benchmark/archived_solver_spikes/`
+- `benchmark/triton_solver/`
+- `benchmark/jax_triton_solver/`
+- `benchmark/cuda_ffi_solver/`
+- `tests/archive/solver_spikes/`
 
 ## Phase 7.7 Stimulation And Placement API Cleanup
 
 Goal: make the public API match the product boundary before Phase 8 studies.
 
-- [ ] Re-read `GUIDELINES.md` before implementing Phase 7.7 and extract the
-  concrete target boundary for stimulation, placement, populations, and study
-  inputs.
-- [ ] Compare `GUIDELINES.md` against current source, tests, examples, and docs
-  before editing public APIs; write the rename/delete checklist here or in a
-  short implementation note.
-- [ ] If the intended implementation differs from `GUIDELINES.md`, update
-  `GUIDELINES.md` first, then align `todo.md` and `agent.md`.
-- [ ] Remove remaining public `y` / `z` placement parameters from axon model
-  constructors. An `Axon` describes cable, membrane, length, diameter, and
-  layout only.
-- [ ] Move physical placement to instance, population, or study layers where it
-  is still needed.
-- [ ] Remove public `intracellular_context` and `extracellular_context`
-  terminology from user-facing APIs and examples.
-- [ ] Replace generic context methods with explicit domain commands: current
-  clamps, point-source electrodes, extracellular drives, footprints,
-  stimulation collections, and study inputs.
-- [ ] Keep PointSource/electrode/footprint concepts, but make them first-class
-  stimulation objects rather than hidden context plumbing.
-- [ ] Decide which lower-level internal objects may keep `context` as an
-  implementation detail; keep them out of the public facade and examples.
-- [ ] Update tests, docs, examples, benchmark workload builders, public API
-  tests, `tests/unit/test_examples.py`, and `CHANGELOG.md` in the same pass.
-- [ ] Add or update guardrails so removed names do not return as compatibility
-  aliases.
+- [ ] Re-read `GUIDELINES.md` before implementation.
+- [ ] Audit public stimulation/context API names after Vext work clarifies the
+  internal representation.
+- [ ] Keep user-facing examples simple: clamps, point-source electrodes,
+  extracellular drives, footprints, stimulation protocols, and populations.
+- [ ] Avoid exposing solver/backend implementation details in public examples.
 
 ## Phase 7.8 Examples Learning Path
 
-Goal: keep examples didactic, runnable, plot-rich where helpful, and aligned
-with the cleaned public API.
-
-- [ ] Update examples after the stimulation/placement API cleanup.
-- [ ] Add an advanced solver-options example after Phase 7.6.3 stabilizes the
-  public contract.
-- [ ] Add a pseudo-double example only if Phase 7.6.4 leaves standby with a
-  validated physiology harness.
-- [ ] Keep examples verbose, line-by-line, and commented near the code being
-  taught.
-- [ ] Add useful plots for signals, metrics, activation, recruitment, velocity,
-  observer outputs, dispatch layouts, or memory comparisons.
-- [ ] Avoid turning examples into stress tests; benchmark-heavy evidence stays
-  under `benchmark/`.
-- [ ] Re-run `tests/unit/test_examples.py` after example edits.
+- [ ] Update basic examples after Vext/API cleanup.
+- [ ] Add a solver-options example only for retained public options:
+  `auto`, `thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`.
+- [ ] Do not add pseudo-double or custom-kernel examples unless a candidate
+  leaves standby and becomes public.
 
 ## Phase 8 Studies
 
-Goal: add the public workflow for sweeps, thresholds, recruitment, reuse, and
-compact study outputs.
-
-- [ ] Define callable update contract:
-  `update(base_simulation: AxonSimulation, condition: Condition) -> AxonSimulation`.
-- [ ] Require updates to avoid mutating the base simulation and to make the
-  condition explicit.
-- [ ] Add sweep API.
-- [ ] Add threshold-search API.
-- [ ] Add recruitment-sweep API.
-- [ ] Add reuse policies for prepared cohorts, compiled kernels, footprints,
-  and stimulus-only updates: `AUTO`, `REQUIRE`, `NONE`.
-- [ ] Add retention policies so threshold/recruitment studies do not retain
-  every trace by default.
-- [ ] Add study result containers with compact per-row/per-condition outputs
-  and optional retained traces.
-- [ ] Document callable reproducibility limits; do not claim arbitrary lambdas
-  are serializable.
-- [ ] Add didactic advanced examples for each new public study concept.
+- [ ] Add callable study objects for threshold curves, recruitment curves,
+  conduction validation, and parameter sweeps.
+- [ ] Define reuse policies for prepared populations and stimulation contexts.
+- [ ] Define retention policies for recordings and derived analysis outputs.
 
 ## Phase 9 Serialization And Reference Backend
 
-Goal: stabilize schemas only after object/result/analysis/study models settle.
+- [ ] Finalize serialization schemas for public objects.
+- [ ] Add NumPy/reference backend validation where it improves trust in JAX
+  lowering or custom kernels.
 
-- [ ] Define final schemas for simulations, results, and study results.
-- [ ] Serialize typed values, identifiers, recording manifests, analysis
-  definitions, backend/device/precision, and environment metadata.
-- [ ] Do not add readers for prototype formats.
-- [ ] Add NumPy reference backend validation for small deterministic cases.
-- [ ] Add cross-backend validation before treating serialization as stable.
-- [ ] Add final docs only after schemas and reference validation are stable.
+## Recent Verification
 
-## Open Architecture Decisions
+- 2026-06-15: non-NRV unit run after dispatch cleanup: `314 passed, 1 skipped`.
+- 2026-06-18: solver optimization campaign closed; active solver surface cleaned.
 
-- [ ] Decide whether scalar public `simulate(...)` eventually returns
-  `AxonSimulationResult` instead of `SimResult`.
-- [ ] Replace direct `Recording.to_batch_options()` solver coupling with:
-  `Recording -> RecordingPlan -> validation -> backend lowering`.
-- [ ] Add backend-neutral axon structure descriptors and cable capability
-  descriptors.
-- [ ] Extend semantic signals beyond Vm/gates/currents/conductances/states:
-  intracellular potential, periaxonal potential, ionic current, and
-  cable/role-aware signal availability.
-- [ ] Decide whether latency/block-style analyses become direct solver
-  observers or thin views over activation observer state.
-- [ ] Decide logging policy: Python logging, benchmark traces, warnings,
-  result diagnostics, and user-facing summaries.
-- [ ] Decide print/Rich/progress policy: defaults, opt-in progress, notebook
-  behavior, and CI degradation.
-- [x] Decide when Sphinx docs are stable enough to generate after the docs/code
-  audit: only after Phase 7.7 API cleanup, `/docs` audit, and public docstring
-  coverage are done.
-
-## Documentation Audit
-
-- [ ] Audit `/docs` against current code before writing Sphinx docs.
-- [x] Refresh `docs/solver_organization.md` whenever solver options change.
-- [x] Split `docs/api_public_draft.md` into implemented API versus proposal if
-  it remains part of user-facing docs.
-- [x] Refresh `docs/results_recording_analysis.md` for solver-side observer
-  execution and trace-free `Recording.none()` results.
-- [ ] Re-run NRV validation only in an NRV-ready environment; record dated
-  validation notes after a fresh run.
-- [x] Keep proposal/roadmap docs clearly labelled so users do not run future
-  API snippets as current API.
-- [ ] Provide extensive public docstrings before generating API docs.
-- [x] Decide what belongs in Sphinx pages versus README versus examples.
-
-Documentation placement decision:
-
-- `README.md`: installation, public API shape, quickstarts, links to canonical
-  learning paths, and pre-release status.
-- `examples/basic/` and `examples/advanced/`: runnable user workflows and
-  didactic concepts; examples stay the executable docs for new public behavior.
-- `docs/`: design explanations, current architecture notes, validation notes,
-  and proposal/roadmap documents that are clearly labelled.
-- Future Sphinx pages: generated API reference and curated stable user guides
-  after Phase 7.7 API cleanup, `/docs` audit, and public docstrings.
-
-Current page snapshot:
-
-| Page | Status | Next action |
-| --- | --- | --- |
-| `docs/axon_model_organization.md` | Partially current | Re-check examples against `src/axonscope/axons/`. |
-| `docs/solver_organization.md` | Current for solver options after 2026-06-16 cleanup | Re-check after any new solver mode lands. |
-| `docs/membranes.md` | Mostly current | Verify `Composite`, `SectionLayout`, and examples. |
-| `docs/stimulation.md` | Mostly current | Re-check after Phase 7.7 API cleanup. |
-| `docs/pool_dispatch.md` | Mostly current | Review for overlap with README and API drift. |
-| `docs/results_recording_analysis.md` | Current for Phase 7.5+ observer-only behavior | Re-check after new observer kinds or recording lowering changes. |
-| `docs/recorders_observers_activation_strategy.md` | Proposal plus current status note | Re-check after Phase 8 study APIs or new observer kinds. |
-| `docs/api_public_draft.md` | Proposal with current API snapshot | Re-check after Phase 7.7 API cleanup. |
-| `docs/validation.md` | Mostly current | Add dated NRV result only after a fresh NRV-ready run. |
-
-## Benchmark Workstream
-
-Canonical lightweight evidence loop:
-
-- `benchmark/hotpaths/`
-- `benchmark/hotpaths/run.py --list`
-- `benchmark/hotpaths/README.md`
-- `benchmark/hotpaths/COLAB.md`
-- `benchmark/hotpaths/colab_gpu_hotpaths.ipynb`
-
-Open benchmark-agent tasks:
-
-- [x] Implement opt-in JAX profiler traces for hotpath runs; traces are
-  recorded under `jax_traces/<workload>_n<size>/` and linked from manifests.
-- [x] Add explicit cold-start/first-call signature labels.
-- [ ] Audit scalar `simulate(...)` instrumentation against pool
-  instrumentation and ensure both expose consistent root spans.
-- [x] Decide whether `level="minimal"` and `level="detailed"` are worth
-  implementing, or keep only `level="hotpaths"` and document that choice.
-- [ ] Improve benchmark summaries with percentages of root time, median/p95
-  columns, parent names, and enough dimensions to compare runs without
-  reopening every `events.jsonl`.
-- [x] Add or refresh docs for asynchronous GPU timing, `kernel.enqueue`,
-  `kernel.wait`, first-call classification, output files, and JAX trace
-  limitations.
-- [ ] Add skipped GPU integration tests that verify device metadata and
-  `kernel.wait` behavior when a GPU is available.
-- [x] Separate correctness validation from performance benchmarking in docs and
-  scripts.
-- [ ] Clean legacy benchmark assets only after benchmark-agent and bottleneck
-  leftovers are closed.
-
-Legacy benchmark areas to classify later:
-
-- `benchmark/runtime/`
-- `benchmark/results/runtime/`
-- `benchmark/reports/runtime/`
-- old standalone runtime scripts
-- generated caches
-- dated exploratory output files
-
-## API And Units Backlog
-
-- [ ] Stabilize the public API before adding Sphinx.
-- [ ] Prefer clean user-facing interfaces over backward compatibility shims.
-- [ ] Remove temporary compatibility aliases and old argument names once
-  examples/tests/docs use the clean API.
-- [ ] When removing or renaming public API, update affected examples in the
-  same change and keep `tests/unit/test_examples.py` aligned.
-- [ ] Pass units everywhere at public boundaries, including membranes, axons,
-  stimulation, protocols, recording, and solver wrappers.
-- [ ] Audit membrane constructors for plain-number ambiguity and decide where
-  units should be required versus normalized.
-- [x] Preserve `SimResult.Vm` as a stable notebook-friendly convenience, with
-  explicit errors when observer-only runs do not carry Vm.
-
-Locked compatibility decisions:
-
-- [x] `axs.analysis` is a real package; old forwarding aliases are removed.
-- [x] `axs.visualization` remains absent; plotting stays under
-  `axs.results.visualization`.
-- [x] `axs.run_batch(...)` is removed; use `simulate_pool(...)`.
-- [x] Public wrappers use `duration` / `dt` with Pint quantities.
-- [x] Direct solvers use solver-level `tsim` / `dt` only.
-- [x] Public recording uses `sample_dt` and `positions` with units.
-- [x] Public point-source electrodes use quantity-oriented `x`, `y`, `z`, and
-  `min_distance`.
-- [x] Activation protocol currents require current units.
-- [x] Explicit `Stimulus` time inputs require units.
-- [x] `clear_extracellular_context(...)` is singular.
-
-## Recording, Observables, And Analysis Backlog
-
-- [ ] Verify single-axon and pool recording behavior for Vm, gates, currents,
-  conductances, and state variables across supported groups.
-- [x] Keep post-hoc `ActivationCriterion` and `Activation` semantics aligned
-  with current solver-side activation observers.
-- [ ] Add plotting helpers for batch groups and retained recording layouts.
-- [x] Lock current public `Recording` contract with tests: scalar runs require
-  Vm and may include observable groups; pool runs support Vm spatial modes only;
-  unsupported position/temporal/pool-observable filters raise explicit errors.
-- [x] Make batch diagnostics discoverable from per-axon public result views.
-
-## Evidence Ledger
-
-Use this section for compact dated evidence that affects current decisions.
-Keep long narrative in benchmark artifacts, not here.
-
-| Date | Evidence | Result / Decision |
-| --- | --- | --- |
-| 2026-06-14 | Phase 2 final unit + NRV | Unit `263 passed, 1 skipped`; NRV `116 passed, 516 warnings`. |
-| 2026-06-14 | Phase 4 final validation | Compileall passed; targeted backend/guardrail run `70 passed`; full unit `286 passed, 1 skipped`; full NRV `116 passed, 516 warnings`; hotpath smoke passed. |
-| 2026-06-15 | Compact dispatch cohort cleanup | Full unit `314 passed, 1 skipped`. |
-| 2026-06-15 | Single-cable observer hotpath | GPU observer-only `n=1000`, `duration=10 ms`, `dt=0.01 ms`, `Nx=51` improved from `673.4 ms` to `176.8 ms` after sparse current-clamp, zero-field, compact-cohort, and pulse-vectorization cleanups. |
-| 2026-06-15 | Double-cable baseline | Matching single-cable GPU scaling was much better than double-cable, showing the bottleneck is kernel-specific rather than generic extracellular preprocessing. |
-| 2026-06-15 | Double-cable PCR | `pcr` produced strong GPU wins but severe CPU regressions, so `auto` keeps Thomas on CPU/default and PCR-family solvers on GPU. |
-| 2026-06-15 | Double-cable observer-only | Homogeneous double-cable observer-only batch runs returned compact observations with `Vm=None` and greatly reduced result packaging. |
-| 2026-06-15 | Double-cable PCR SoA/adaptive | `pcr_soa` improved smaller GPU batches but regressed at `n=2000`; `pcr_adaptive` now selects SoA up to `B=1024` and matrix-layout PCR beyond that. |
-| 2026-06-15 | Pseudo-double validation | Harness and candidate modes exist, but candidates remain rough screening probes with trace errors too large for production acceptance. Pseudo-double is standby. |
-| 2026-06-16 | Local CPU solver-only baseline | `benchmark/solvers/bench_double_cable_linear_solvers.py` local CPU matrix at `B=8/128/512`, `Nx=32/51/64`, `float32` confirms Thomas is the CPU/default path; PCR variants are slower for production CPU use, with only tiny `B=8,Nx=32` noise favoring matrix PCR. |
-| 2026-06-16 | End-to-end double-cable benchmark smoke | `benchmark/solvers/bench_double_cable_end_to_end.py` local smokes passed for center/no-Iinj, observer-only/dense-zero-Iinj, and full/nonzero-Iinj at `B=2`, target `Nx=51`, `Nt=3`; Colab notebook is ready for GPU runs. |
-| 2026-06-17 | Split E2E agreement validation | Added `benchmark/solvers/validate_double_cable_solver_agreement.py`; local held-out smoke failed `split_gs_3`/`split_gs_4` with `~77 mV` center-trace error and false activations versus `pcr_adaptive`, while exact PCR controls stayed close to Thomas. Split iterative approaches are abandoned/closed for this optimization pass despite timing wins. |
-| 2026-06-17 | JAX 0.10.1 local validation | Environment now uses Python `3.12.13`, `jax==0.10.1`, `jaxlib==0.10.1`; full unit `424 passed, 1 skipped`. Updated Pallas compatibility for JAX 0.10.1 and local `interpret=True` Pallas smoke passes, but GPU lowering still needs Kaggle/Colab validation. |
-| 2026-06-17 | Kaggle JAX 0.10.1 Pallas retry setup | P100 run `20260617_211635_linear_pallas_focus_NvidiaTeslaP100` reached GPU backend, then failed before benchmark due stale Kaggle `jax_cuda12_plugin==0.7.2` against `jaxlib==0.10.1`. Kaggle wrapper now installs matching `jax[cuda12]==<installed jax version>` for P100 runs. |
-| 2026-06-17 | Kaggle Pallas scratch memory retry | P100 run `20260617_212151_linear_pallas_focus_NvidiaTeslaP100` reached GPU benchmark execution and measured the non-Pallas first case, then Pallas lowering failed on scratch `MemorySpace.ANY`. Pallas scratch refs now prefer `MemorySpace.DEFAULT`; local Pallas smoke still passes (`11 passed`). |
-| 2026-06-17 | Kaggle Pallas SMEM scratch retry | P100 run `20260617_212605_linear_pallas_focus_NvidiaTeslaP100` showed `MemorySpace.DEFAULT` becomes unsupported `gmem` scratch under Mosaic GPU. GPU Pallas scratch now uses `mosaic_gpu.SMEM(...)`; local Pallas smoke still passes (`11 passed`). |
-| 2026-06-17 | Kaggle PCR_SOA JAX trace | P100 run `20260617_214032_linear_pcr_soa_trace_NvidiaTeslaP100` completed. `pcr_soa` beat matrix-layout `pcr` by `1.09x-1.38x` steady median on focused `B=2048/4096`, `Nx=51/96`, `float32` cases, reducing device fusion events from `31-48` to `7-13`. Remaining hot spots are `loop_select_subtract_fusion_*`, so next work should optimize PCR_SOA stage masking/gather behavior. |
-| 2026-06-17 | Kaggle PCR_SOA stage candidates | P100 run `20260617_220929_linear_pcr_soa_nomask_focus_NvidiaTeslaP100` completed. `pcr_soa_nomask` was neutral (`2/4` wins, geomean `1.001x` runtime vs `pcr_soa`); `pcr_soa_shift` was slower in all focused cases (`1.786x` geomean runtime). Do not route these candidates; close `shift` despite the local HLO gather/select reduction. |
-| 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
-| 2026-06-18 | Kaggle exact assoc retest | P100 run `20260618_182820_linear_assoc_focus_NvidiaTeslaP100` installed JAX `0.10.2` and completed. `assoc_backward` remains a good Thomas-family optimization (`1.385x` geomean speedup vs `thomas_batched`) but not a better general backend than `pcr_soa` (`1/9` wins, `1.570x` geomean runtime vs `pcr_soa`). No `auto` routing change. |
-| 2026-06-18 | Pallas Thomas bounded-SMEM retry | P100 run `20260618_183720_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU lowering with JAX `0.10.2` but `pallas_thomas_16` still exceeded shared memory (`60424 > 49152` bytes) before timing. Added benchmark-only `pallas_thomas_4/8`; local smoke `local_pallas_blocks_smoke` matched Thomas64 for `4/8/16`, and the next Kaggle focus uses `pallas_thomas_4`. |
-| 2026-06-18 | Pallas Thomas transfer-alignment retry | P100 run `20260618_184529_linear_pallas_focus_NvidiaTeslaP100` showed `pallas_thomas_4` clears the previous SMEM limit but fails Mosaic's gmem-to-smem copy alignment (`816` bytes not divisible by `128`) at `B=1024`, `Nx=51`. Pallas internal block specs now pad main/edge/rhs/output storage lengths to multiples of 8 while preserving real-`Nx` Thomas loops; local padded smoke matched Thomas64 for `pallas_thomas_4/8/16`. |
-| 2026-06-18 | Pallas Thomas iota-layout retry | P100 run `20260618_185101_linear_pallas_focus_NvidiaTeslaP100` passed the transfer-alignment fix but failed Mosaic layout inference for the `jnp.arange` batch-index iota. Scratch/output helpers now use `pl.ds(row, 1)` / `pl.ds(component, 1)` slices instead of vectorized batch indices; local `local_pallas_ds_smoke` still matches Thomas64 for `pallas_thomas_4/8/16`. |
-| 2026-06-18 | Pallas Thomas P100 closure | P100 run `20260618_185700_linear_pallas_focus_NvidiaTeslaP100` passed the iota fix but failed on the first strided SMEM column load (`a00_ref[:, 0]`): Mosaic requires a multiple of `128` elements and `BLOCK_B=4` gives `4`. `BLOCK_B=128` satisfies layout but exceeds SMEM, so Thomas-Pallas is closed/standby for P100; next custom-kernel work should be Phase 3B PCR/hybrid with layout constraints designed in. |
-| 2026-06-18 | Pallas PCR stride-padding retry | P100 run `20260618_193442_linear_pallas_focus_NvidiaTeslaP100` got past direct stores but failed Mosaic async-copy lowering because `Nx=51` gives output GMEM row stride `204` bytes, not a multiple of `16`. `pallas_pcr_128` now pads internal PCR work arrays to a four-column multiple with identity/zero padded columns and slices results back to real `Nx`; local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas. |
-| 2026-06-18 | Pallas PCR P100 pause / T4 reopened | P100 run `20260618_194249_linear_pallas_focus_NvidiaTeslaP100` passed the row-stride fix but failed because `(128, 1)` float32 output blocks copy only `32` bits along the minormost dimension. `pallas_pcr_128` now emits four columns per program (`128` minormost bits). Official JAX Pallas docs list Mosaic GPU support only on Hopper and newer GPUs, but a user Colab T4 smoke notebook compiles/runs Pallas successfully; stop spending Kaggle P100 runs on Pallas, but keep T4 as the next focused validation target. |
-| 2026-06-18 | Pallas T4 current-stack closure | Kaggle T4 run `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed during current JAX `0.10.x` Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`. The user notebook `Copy of Pallas on GPU Demo.ipynb` does run on T4, but it uses old JAX `0.4.16.dev20230831` plus `jax_triton`/`triton-nightly` and lowers to Triton IR (`tt.func`). Decision: no more Kaggle P100/T4 Mosaic-Pallas runs; only revisit Pallas on Hopper+ or as a separate legacy Triton/Pallas notebook spike. |
-| 2026-06-18 | JAX layout/ref PCR_SOA spike | Added benchmark-only `pcr_soa_layout_auto` and `pcr_soa_ref` from the JAX Advanced Guides pass. They keep the exact `pcr_soa` solver algebra; `layout_auto` asks XLA for automatic device-local layouts and records inferred `major_to_minor` layouts, while `ref` uses internal `jax.new_ref` stage work buffers. Next evidence gate: Kaggle P100 `linear_pcr_soa_layout_focus`. |
-| 2026-06-18 | Kaggle JAX layout/ref PCR_SOA result | P100 run `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100` completed. `pcr_soa_layout_auto` was not useful overall (`2/6` wins, `1.021x` geomean runtime vs `pcr_soa`) and `pcr_soa_ref` was slower in all cases (`1.033x` geomean runtime). Layout summaries were identical to baseline (`[0, 1]` inputs, `[0, 1, 2]` output), so close this line as diagnostic and do not route either candidate. |
-| 2026-06-18 | Triton block-Thomas scout result | T4 run `20260618_205135_linear_triton_focus_NvidiaTeslaT4` completed. Standalone exact `triton_block_thomas` beat JAX `pcr_soa` on every focused case (`B=1024/2048/4096`, `Nx=51/96`, `float32`): `2.684x` geomean speedup, `2.199x-2.892x` range, max dense64-smoke error about `4.0e-08`, max block residual about `3.6e-07`. Keep Triton alive as the first custom-kernel candidate with clear solver-only speedup; next risk is JAX/E2E integration overhead. |
-| 2026-06-18 | Triton PCR_SOA scout result | T4 run `20260618_210243_linear_triton_focus_NvidiaTeslaT4` completed. `triton_pcr_soa` was correct and faster than JAX `pcr_soa` (`1.619x` geomean speedup), but slower than `triton_block_thomas` in every focused case (`1.697x` geomean runtime, `1.521x-2.364x` range). Close PCR_SOA tuning for now; concentrate on block-Thomas integration. |
-| 2026-06-18 | JAX-Triton Thomas E2E result | T4 run `20260618_223213_e2e_jax_triton_focus_NvidiaTeslaT4` completed after commit `0c62543`. Benchmark-only `jax_triton_thomas` is wired into the real double-cable batch-native loop and won `7/8` kernel-median E2E cases versus `pcr_adaptive` (`1.595x` geomean speedup, `0.818x-2.632x` range). Keep it as the leading custom-kernel candidate, but require agreement validation before public routing. |
-| 2026-06-18 | JAX-Triton agreement vs PCR | T4 run `20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4` completed. `jax_triton_thomas` versus `pcr_adaptive` failed current strict trace thresholds in all `16` cases. `actualNx=45` kept activation agreement with small trace error; `actualNx=89` had large spike-timing deviations and `2` extra activations at `B=512`. No public routing. |
-| 2026-06-18 | JAX-Triton agreement vs Thomas | T4 run `20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4` completed. Both `pcr_adaptive` and `jax_triton_thomas` failed current strict thresholds versus Thomas, but `jax_triton_thomas` was closer on max_abs/RMS and preserved activation count at `actualNx=89` while `pcr_adaptive` missed `2` activations. Next step is validation-protocol cleanup, not routing. |
-
-## Completed Roadmap Archive
-
-Keep this as a compact map of what has landed. Detailed history lives in git,
-tests, examples, and benchmark result folders.
-
-- [x] Phase 0: guardrails, public API cleanup checks, import-boundary checks,
-  obsolete benchmark inventory, and non-NRV baseline.
-- [x] Phase 1: `AxonInstance`, root `AxonSimulation`, `AxonPopulation`, and
-  one/population lifecycle.
-- [x] Phase 2: typed public contracts, opaque identifiers, extracellular
-  footprints/drives/stimulation, and analytical footprint builders.
-- [x] Phase 2.5: opt-in benchmark spans, hotpath workload catalog, and Colab
-  GPU workflow.
-- [x] Phase 3: preparation signatures and reusable prepared cohorts.
-- [x] Phase 4: JAX execution enters through `axonscope.backends.jax`.
-- [x] Phase 5: canonical pool results and recording manifests.
-- [x] Phase 6: public analysis layer, reports, statuses, and online observers.
-- [x] Phase 7: performance estimates and hotpath memory metadata.
-- [x] Phase 7.5: solver-side observers for current scalar/batch workflows.
-
-## Cleanup And Sync
-
-- [ ] Do a general cleanup pass after docs, examples, recordings, observers,
-  and benchmarks are aligned.
-- [ ] Remove stale aliases, removed file references, duplicate docs, and dead
-  benchmark/example paths.
-- [x] Keep `agent.md` and `todo.md` synchronized after each cleanup step.
-- [x] Keep this TODO flat: when a section starts accumulating long narrative,
-  move details into docs, benchmark manifests, or a compact evidence-ledger row.
+Update this section only with high-signal final checks, not every exploratory
+benchmark run.

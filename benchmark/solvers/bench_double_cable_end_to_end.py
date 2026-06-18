@@ -50,8 +50,7 @@ from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 
 DEFAULT_OUT_DIR = Path("benchmark/results/solvers")
 PUBLIC_SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive")
-BENCHMARK_ONLY_SOLVER_CHOICES = ("split_gs_3", "split_gs_4", "jax_triton_thomas")
-SOLVER_CHOICES = PUBLIC_SOLVER_CHOICES + BENCHMARK_ONLY_SOLVER_CHOICES
+SOLVER_CHOICES = PUBLIC_SOLVER_CHOICES
 RECORDING_CHOICES = ("none", "center", "full")
 IINJ_CHOICES = ("none", "dense_zero", "nonzero")
 
@@ -111,15 +110,6 @@ def planned_cases(
                         for solver in solvers:
                             if solver not in SOLVER_CHOICES:
                                 raise ValueError(f"unknown solver choice: {solver!r}.")
-                            if (
-                                solver in BENCHMARK_ONLY_SOLVER_CHOICES
-                                and recording == "none"
-                            ):
-                                raise ValueError(
-                                    "benchmark-only E2E solvers require "
-                                    "recording='center' or 'full' so the "
-                                    "batch-native array kernel is exercised."
-                                )
                             cases.append(
                                 EndToEndCase(
                                     batch_size=int(batch_size),
@@ -135,10 +125,6 @@ def planned_cases(
 
 
 def resolve_e2e_solver(solver: str, *, platform: str) -> str:
-    if solver.startswith("split_"):
-        return "split_iterative"
-    if solver == "jax_triton_thomas":
-        return "jax_triton_thomas"
     return resolve_double_cable_block_solver(solver, platform=platform)
 
 
@@ -317,18 +303,9 @@ def run_case(
     options = BatchOptions(
         recording=_batch_recording(case.recording),
         time_chunk_steps=time_chunk_steps,
-        double_cable_block_solver=(
-            "pcr_soa"
-            if case.requested_solver in BENCHMARK_ONLY_SOLVER_CHOICES
-            else case.requested_solver
-        ),
+        double_cable_block_solver=case.requested_solver,
     )
     resolved_solver = resolve_e2e_solver(case.requested_solver, platform=platform)
-    benchmark_solver_override = (
-        case.requested_solver
-        if case.requested_solver in BENCHMARK_ONLY_SOLVER_CHOICES
-        else None
-    )
     kernel = DoubleCableBatchKernel(
         runtime=runtime,
         Veinit_mV=float(getattr(representative.axon, "Veinit", 0.0)),
@@ -341,7 +318,6 @@ def run_case(
             intracellular_current_density_mid=iinj,
             options=options,
             observers=observers,
-            benchmark_double_cable_block_solver=benchmark_solver_override,
         )
         _block_until_ready(warm)
 
@@ -361,7 +337,6 @@ def run_case(
                 intracellular_current_density_mid=iinj,
                 options=options,
                 observers=observers,
-                benchmark_double_cable_block_solver=benchmark_solver_override,
             )
             enqueue_times.append((time.perf_counter() - enqueue_start) * 1e3)
             wait_start = time.perf_counter()

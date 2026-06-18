@@ -1,5 +1,29 @@
 # AxonScope Double-Cable GPU Solver Roadmap
 
+## Status, 2026-06-18
+
+This roadmap is now an archive of the June 2026 exact double-cable GPU solver
+optimization campaign, not the active next-action list.
+
+Final decision:
+
+- keep public solver routes unchanged: `auto`, `thomas`, `pcr`, `pcr_soa`,
+  `pcr_adaptive`
+- keep `pcr_adaptive` as the GPU default route for now
+- archive split iterative, associative-transfer, Pallas, Triton, JAX-Triton,
+  and CUDA FFI candidates outside the active solver package
+- do not spend more Kaggle runs on small solver retuning until `Vext`
+  materialization and realistic workflow costs have been profiled
+
+Detailed results and decisions are summarized in:
+
+```text
+benchmark/reports/double_cable_solver_optimization_2026_06.md
+```
+
+The active follow-up is Phase 7.6.5 in `todo.md`: profile and optimize `Vext`
+materialization using workflow-level benchmarks based on basic examples 06/07/08.
+
 ## Objective
 
 Make the **exact double-cable solver** scale better on GPU for the target regime:

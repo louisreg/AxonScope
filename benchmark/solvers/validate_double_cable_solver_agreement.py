@@ -1,8 +1,8 @@
 """Validate E2E double-cable solver-output agreement.
 
-This runner compares recorded ``Vm`` traces from benchmark-only solver
-candidates against exact public double-cable solvers on held-out batch-kernel
-workloads. It is a correctness/physiology harness, not a timing benchmark.
+This runner compares recorded ``Vm`` traces from candidate solver routes against
+public exact double-cable solvers on held-out batch-kernel workloads. It is a
+correctness/physiology harness, not a timing benchmark.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from axonscope.backends.jax.input_batches import (
 from axonscope.solvers import BatchOptions, DoubleCableBatchKernel, prepare_solver_runtime
 from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 from benchmark.solvers.bench_double_cable_end_to_end import (
-    BENCHMARK_ONLY_SOLVER_CHOICES,
     IINJ_CHOICES,
     PUBLIC_SOLVER_CHOICES,
     SOLVER_CHOICES,
@@ -177,13 +176,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--reference-solvers",
         nargs="+",
         choices=PUBLIC_SOLVER_CHOICES,
-        default=["pcr_adaptive"],
+        default=["thomas"],
     )
     parser.add_argument(
         "--candidate-solvers",
         nargs="+",
         choices=SOLVER_CHOICES,
-        default=["split_gs_3", "split_gs_4"],
+        default=["pcr_adaptive"],
     )
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--time-chunk-steps", type=int, default=None)
@@ -404,11 +403,8 @@ def run_solver_output(
     options = BatchOptions(
         recording=_batch_recording(recording),
         time_chunk_steps=time_chunk_steps,
-        double_cable_block_solver=(
-            "pcr_soa" if solver in BENCHMARK_ONLY_SOLVER_CHOICES else solver
-        ),
+        double_cable_block_solver=solver,
     )
-    benchmark_solver_override = solver if solver in BENCHMARK_ONLY_SOLVER_CHOICES else None
     output = None
     for _ in range(int(warmups)):
         output = prepared.kernel.run(
@@ -416,7 +412,6 @@ def run_solver_output(
             extracellular_potential_initial_previous_mV=prepared.vext_previous,
             intracellular_current_density_mid=prepared.iinj,
             options=options,
-            benchmark_double_cable_block_solver=benchmark_solver_override,
         )
         _block_vm_output(output)
     output = prepared.kernel.run(
@@ -424,7 +419,6 @@ def run_solver_output(
         extracellular_potential_initial_previous_mV=prepared.vext_previous,
         intracellular_current_density_mid=prepared.iinj,
         options=options,
-        benchmark_double_cable_block_solver=benchmark_solver_override,
     )
     _block_vm_output(output)
     if output.Vm is None:

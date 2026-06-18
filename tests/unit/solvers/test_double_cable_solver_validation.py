@@ -16,17 +16,16 @@ def test_validation_planned_cases_expand_dimensions():
         dt_ms=0.05,
         recordings=["center", "full"],
         iinj_modes=["none"],
-        reference_solvers=["pcr_adaptive"],
-        candidate_solvers=["split_gs_3", "split_gs_4", "jax_triton_thomas"],
+        reference_solvers=["thomas"],
+        candidate_solvers=["pcr", "pcr_adaptive"],
     )
 
-    assert len(cases) == 6
+    assert len(cases) == 4
     assert cases[0].duration_ms == 3 * 0.05
     assert {case.recording for case in cases} == {"center", "full"}
     assert {case.candidate_solver for case in cases} == {
-        "split_gs_3",
-        "split_gs_4",
-        "jax_triton_thomas",
+        "pcr",
+        "pcr_adaptive",
     }
 
 
@@ -39,8 +38,8 @@ def test_validation_rejects_observer_only_recording():
             dt_ms=0.05,
             recordings=["none"],
             iinj_modes=["none"],
-            reference_solvers=["pcr_adaptive"],
-            candidate_solvers=["split_gs_3"],
+            reference_solvers=["thomas"],
+            candidate_solvers=["pcr_adaptive"],
         )
 
 
@@ -108,9 +107,9 @@ def test_validation_dry_run(capsys, tmp_path):
             "--iinj-modes",
             "none",
             "--reference-solvers",
-            "pcr_adaptive",
+            "thomas",
             "--candidate-solvers",
-            "split_gs_3",
+            "pcr_adaptive",
             "--out-dir",
             str(tmp_path),
             "--dry-run",
@@ -118,5 +117,5 @@ def test_validation_dry_run(capsys, tmp_path):
     )
 
     assert capsys.readouterr().out.splitlines() == [
-        "split_gs_3 vs pcr_adaptive B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
+        "pcr_adaptive vs thomas B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
     ]

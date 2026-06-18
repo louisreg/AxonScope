@@ -6,7 +6,7 @@ from benchmark.triton_solver.bench_double_cable_triton import (
     percentile,
     solver_function,
 )
-from axonscope.solvers.triton_thomas import triton_thomas_dependency_skip_reason
+from benchmark.triton_solver.triton_thomas import triton_thomas_dependency_skip_reason
 
 
 def test_triton_case_label_fields():

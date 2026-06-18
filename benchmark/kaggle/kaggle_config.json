@@ -1,6 +1,6 @@
 {
-  "benchmark": "linear_triton_focus",
-  "branch": "kaggle-bench/1384b40",
+  "benchmark": "smoke",
+  "branch": "bench-colab",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }
