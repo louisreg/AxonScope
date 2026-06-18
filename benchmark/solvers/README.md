@@ -88,11 +88,14 @@ fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
 unless a stabilized formulation is added.
 `pallas_thomas_4`, `pallas_thomas_8`, `pallas_thomas_16`, and
 `pallas_thomas_128` are benchmark-only Phase 3A spikes that run exact block
-Thomas in a Pallas kernel. `pallas_thomas_4` is the current P100 focus because
-`BLOCK_B=16` still exceeded Mosaic GPU shared memory before timing, and
-`BLOCK_B=8` is likely too close to the P100 limit at `Nx=96`.
-`pallas_thomas_128` is the historical full-block spike; it exceeded P100 SMEM
-and remains standby.
+Thomas in a Pallas kernel. `pallas_thomas_128` is the historical full-block
+spike; it exceeded P100 SMEM and remains standby. `pallas_thomas_4/8/16` are
+the bounded-SMEM retries that were used to map Mosaic GPU lowering constraints.
+The P100 retries ultimately closed the Thomas-Pallas line: `BLOCK_B=128`
+matches Mosaic's 128-element strided-load preference but exceeds SMEM, while
+small `BLOCK_B` variants fit SMEM but fail strided-load lowering. Keep these
+variants out of routing and avoid more Kaggle runs until a Phase 3B PCR/hybrid
+Pallas layout replaces the Thomas spike.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.

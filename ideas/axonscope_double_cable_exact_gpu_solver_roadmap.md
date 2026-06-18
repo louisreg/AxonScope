@@ -2135,6 +2135,25 @@ local validation: local_pallas_ds_smoke at B=16, Nx=51, float32 matched
                   Thomas64 for pallas_thomas_4/8/16 with max_abs_err 6.493e-08
 ```
 
+Third `pallas_thomas_4` P100 attempt after replacing vectorized batch indices:
+
+```text
+run: 20260618_185700_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: the first coefficient access, `a00_ref[:, 0]`, lowers to a strided SMEM
+       load with only 4 elements for BLOCK_B=4. Mosaic GPU requires this
+       `load_strided` path to have a number of elements that is a multiple of
+       128.
+constraint: BLOCK_B=128 satisfies the strided-load width but exceeds P100 SMEM
+            for the full-Nx Thomas scratch/input-block design; small BLOCK_B
+            satisfies SMEM but violates the strided-load layout.
+decision: close/standby pallas_thomas_4/8/16/128 for P100. Do not spend more
+          Kaggle runs on Thomas-Pallas unless the kernel is redesigned around
+          global-memory streaming or a non-columnar layout. If we continue
+          Pallas, move to Phase 3B PCR/hybrid with these layout constraints
+          designed in from the start.
+```
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
