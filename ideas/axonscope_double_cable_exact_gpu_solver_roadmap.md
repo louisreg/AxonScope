@@ -2225,6 +2225,21 @@ local validation: local_pallas_pcr128_direct_store_smoke at B=128, Nx=51,
                   float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
 ```
 
+Fourth P100 attempt:
+
+```text
+run: 20260618_193442_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: Mosaic async-copy lowering requires every non-last GMEM stride to be a
+       multiple of 16 bytes. The stage output buffers had shape
+       (batch_size, 51), so the batch-row stride was 51 * 4 = 204 bytes.
+fix: pad internal Pallas PCR work arrays to a four-column multiple. Padded
+     columns are kept as identity diagonal / zero off-diagonal / zero RHS
+     sentinels in every stage, and final outputs are sliced back to real Nx.
+local validation: local_pallas_pcr128_padded_stride_smoke at B=128, Nx=51,
+                  float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
+```
+
 Use static buckets:
 
 ```text

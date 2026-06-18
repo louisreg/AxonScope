@@ -100,8 +100,10 @@ Pallas layout replaces the Thomas spike.
 runs one Pallas stage kernel per PCR stride with programs shaped as
 `128 fibers x 1 cable column`, keeping the 128-element batch width that Mosaic
 GPU wants while avoiding full-cable SMEM residency. Local `interpret=True`
-smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and `Nx=51`; GPU timing
-still requires Kaggle/Colab.
+smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and `Nx=51`. Internal PCR
+work arrays are padded to a four-column multiple so non-power-of-two `Nx` cases
+such as `51` still satisfy Mosaic's 16-byte GMEM stride requirement; GPU timing
+still requires Kaggle/Colab after that padding fix.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.

@@ -204,10 +204,27 @@ def solve_block_tridiagonal_2x2_pallas_pcr_batched(
         interpret = jax.default_backend() != "gpu"
 
     block_b = int(block_b)
+    n_storage = _round_up_to_multiple(n, 4)
+    lower00 = _pad_trailing_axis(lower00, n_storage)
+    lower01 = _pad_trailing_axis(lower01, n_storage)
+    lower10 = _pad_trailing_axis(lower10, n_storage)
+    lower11 = _pad_trailing_axis(lower11, n_storage)
+    upper00 = _pad_trailing_axis(upper00, n_storage)
+    upper01 = _pad_trailing_axis(upper01, n_storage)
+    upper10 = _pad_trailing_axis(upper10, n_storage)
+    upper11 = _pad_trailing_axis(upper11, n_storage)
+    diag00 = _pad_trailing_axis(diag00, n_storage, constant_values=1)
+    diag01 = _pad_trailing_axis(diag01, n_storage)
+    diag10 = _pad_trailing_axis(diag10, n_storage)
+    diag11 = _pad_trailing_axis(diag11, n_storage, constant_values=1)
+    r0 = _pad_trailing_axis(r0, n_storage)
+    r1 = _pad_trailing_axis(r1, n_storage)
+
     stage = functools.partial(
         _pallas_pcr_2x2_stage,
         batch_size=batch_size,
         n=n,
+        n_storage=n_storage,
         block_b=block_b,
         interpret=bool(interpret),
     )
@@ -247,6 +264,12 @@ def solve_block_tridiagonal_2x2_pallas_pcr_batched(
         )
         stride *= 2
 
+    diag00 = diag00[:, :n]
+    diag01 = diag01[:, :n]
+    diag10 = diag10[:, :n]
+    diag11 = diag11[:, :n]
+    r0 = r0[:, :n]
+    r1 = r1[:, :n]
     inv00, inv01, inv10, inv11 = _inv2_components(diag00, diag01, diag10, diag11)
     return _matvec2_components(inv00, inv01, inv10, inv11, r0, r1)
 
@@ -321,11 +344,16 @@ def _round_up_to_multiple(value: int, multiple: int) -> int:
     return ((int(value) + int(multiple) - 1) // int(multiple)) * int(multiple)
 
 
-def _pad_trailing_axis(values: Array, target_length: int) -> Array:
+def _pad_trailing_axis(
+    values: Array,
+    target_length: int,
+    *,
+    constant_values: float = 0,
+) -> Array:
     pad = int(target_length) - int(values.shape[-1])
     if pad <= 0:
         return values
-    return jnp.pad(values, ((0, 0), (0, pad)))
+    return jnp.pad(values, ((0, 0), (0, pad)), constant_values=constant_values)
 
 
 def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype, *, gpu_smem: bool = False):
@@ -384,6 +412,7 @@ def _pallas_pcr_2x2_stage(
     stride: int,
     batch_size: int,
     n: int,
+    n_storage: int,
     block_b: int,
     interpret: bool,
 ) -> tuple[Array, ...]:
@@ -392,12 +421,13 @@ def _pallas_pcr_2x2_stage(
     out_spec = _block_spec_column(block_b)
     out_specs = (out_spec,) * 14
     out_shape = tuple(
-        jax.ShapeDtypeStruct((batch_size, n), lower00.dtype) for _ in range(14)
+        jax.ShapeDtypeStruct((batch_size, n_storage), lower00.dtype)
+        for _ in range(14)
     )
     stage = pl.pallas_call(
         functools.partial(_pallas_pcr_2x2_stage_kernel, stride=int(stride), n=int(n)),
         out_shape=out_shape,
-        grid=(batch_size // block_b, n),
+        grid=(batch_size // block_b, n_storage),
         in_specs=in_specs,
         out_specs=out_specs,
         interpret=bool(interpret),
@@ -491,6 +521,8 @@ def _pallas_pcr_2x2_stage_kernel(
     rf00, rf01, rf10, rf11 = _matmul2_components(u00, u01, u10, u11, *right_inv)
 
     zero = jnp.zeros_like(lf00)
+    one = jnp.ones_like(lf00)
+    is_padding = col >= int(n)
     has_left = col >= int(stride)
     has_right = col + int(stride) < int(n)
     lf00 = jnp.where(has_left, lf00, zero)
@@ -562,20 +594,26 @@ def _pallas_pcr_2x2_stage_kernel(
     def store(ref, value):
         ref[:, 0] = value
 
-    store(out_lower00_ref, -nl00)
-    store(out_lower01_ref, -nl01)
-    store(out_lower10_ref, -nl10)
-    store(out_lower11_ref, -nl11)
-    store(out_upper00_ref, -nu00)
-    store(out_upper01_ref, -nu01)
-    store(out_upper10_ref, -nu10)
-    store(out_upper11_ref, -nu11)
-    store(out_diag00_ref, load(diag00_ref, current) - ldu00 - rdl00)
-    store(out_diag01_ref, load(diag01_ref, current) - ldu01 - rdl01)
-    store(out_diag10_ref, load(diag10_ref, current) - ldu10 - rdl10)
-    store(out_diag11_ref, load(diag11_ref, current) - ldu11 - rdl11)
-    store(out_r0_ref, load(r0_ref, current) - lr0 - rr0)
-    store(out_r1_ref, load(r1_ref, current) - lr1 - rr1)
+    store(out_lower00_ref, jnp.where(is_padding, zero, -nl00))
+    store(out_lower01_ref, jnp.where(is_padding, zero, -nl01))
+    store(out_lower10_ref, jnp.where(is_padding, zero, -nl10))
+    store(out_lower11_ref, jnp.where(is_padding, zero, -nl11))
+    store(out_upper00_ref, jnp.where(is_padding, zero, -nu00))
+    store(out_upper01_ref, jnp.where(is_padding, zero, -nu01))
+    store(out_upper10_ref, jnp.where(is_padding, zero, -nu10))
+    store(out_upper11_ref, jnp.where(is_padding, zero, -nu11))
+    new_diag00 = load(diag00_ref, current) - ldu00 - rdl00
+    new_diag01 = load(diag01_ref, current) - ldu01 - rdl01
+    new_diag10 = load(diag10_ref, current) - ldu10 - rdl10
+    new_diag11 = load(diag11_ref, current) - ldu11 - rdl11
+    new_r0 = load(r0_ref, current) - lr0 - rr0
+    new_r1 = load(r1_ref, current) - lr1 - rr1
+    store(out_diag00_ref, jnp.where(is_padding, one, new_diag00))
+    store(out_diag01_ref, jnp.where(is_padding, zero, new_diag01))
+    store(out_diag10_ref, jnp.where(is_padding, zero, new_diag10))
+    store(out_diag11_ref, jnp.where(is_padding, one, new_diag11))
+    store(out_r0_ref, jnp.where(is_padding, zero, new_r0))
+    store(out_r1_ref, jnp.where(is_padding, zero, new_r1))
 
 
 def _pallas_thomas_2x2_kernel(

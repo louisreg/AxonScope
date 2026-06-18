@@ -81,6 +81,11 @@ Work should start here unless the user asks otherwise.
   Third P100 attempt `20260618_193013_linear_pallas_focus_NvidiaTeslaP100`
   failed on output `value[:, None]` broadcast for `WGStridedFragLayout(128)`;
   stage output writes now use direct `ref[:, 0] = value` assignment.
+  Fourth P100 attempt `20260618_193442_linear_pallas_focus_NvidiaTeslaP100`
+  reached output lowering and failed because `Nx=51` gives a non-16-byte GMEM
+  row stride. Pallas PCR work arrays are now padded to a multiple of four
+  columns with identity/zero sentinel columns, then sliced back to real `Nx`;
+  local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
@@ -828,6 +833,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Pallas Thomas transfer-alignment retry | P100 run `20260618_184529_linear_pallas_focus_NvidiaTeslaP100` showed `pallas_thomas_4` clears the previous SMEM limit but fails Mosaic's gmem-to-smem copy alignment (`816` bytes not divisible by `128`) at `B=1024`, `Nx=51`. Pallas internal block specs now pad main/edge/rhs/output storage lengths to multiples of 8 while preserving real-`Nx` Thomas loops; local padded smoke matched Thomas64 for `pallas_thomas_4/8/16`. |
 | 2026-06-18 | Pallas Thomas iota-layout retry | P100 run `20260618_185101_linear_pallas_focus_NvidiaTeslaP100` passed the transfer-alignment fix but failed Mosaic layout inference for the `jnp.arange` batch-index iota. Scratch/output helpers now use `pl.ds(row, 1)` / `pl.ds(component, 1)` slices instead of vectorized batch indices; local `local_pallas_ds_smoke` still matches Thomas64 for `pallas_thomas_4/8/16`. |
 | 2026-06-18 | Pallas Thomas P100 closure | P100 run `20260618_185700_linear_pallas_focus_NvidiaTeslaP100` passed the iota fix but failed on the first strided SMEM column load (`a00_ref[:, 0]`): Mosaic requires a multiple of `128` elements and `BLOCK_B=4` gives `4`. `BLOCK_B=128` satisfies layout but exceeds SMEM, so Thomas-Pallas is closed/standby for P100; next custom-kernel work should be Phase 3B PCR/hybrid with layout constraints designed in. |
+| 2026-06-18 | Pallas PCR stride-padding retry | P100 run `20260618_193442_linear_pallas_focus_NvidiaTeslaP100` got past direct stores but failed Mosaic async-copy lowering because `Nx=51` gives output GMEM row stride `204` bytes, not a multiple of `16`. `pallas_pcr_128` now pads internal PCR work arrays to a four-column multiple with identity/zero padded columns and slices results back to real `Nx`; local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas. |
 
 ## Completed Roadmap Archive
 
