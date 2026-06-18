@@ -47,6 +47,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "e2e",
             "e2e_jax_triton_focus",
             "validate_jax_triton_focus",
+            "validate_jax_triton_thomas_focus",
             "e2e_full",
             "both",
         ),

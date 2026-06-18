@@ -519,6 +519,37 @@ def test_kaggle_validate_jax_triton_focus_runs_agreement_cases(tmp_path, monkeyp
     assert command[candidates_start:candidates_end] == ["jax_triton_thomas"]
 
 
+def test_kaggle_validate_jax_triton_thomas_focus_uses_thomas_reference(
+    tmp_path, monkeypatch
+):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_validate_jax_triton_thomas_focus(tmp_path)
+
+    (command,) = commands
+    assert command[1] == "benchmark/solvers/validate_double_cable_solver_agreement.py"
+    assert command[command.index("--prefix") + 1] == "validate_jax_triton_thomas_focus"
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == ["512"]
+    assert command[command.index("--nx") + 1 : command.index("--nt")] == [
+        "51",
+        "96",
+    ]
+    references_start = command.index("--reference-solvers") + 1
+    references_end = command.index("--candidate-solvers")
+    assert command[references_start:references_end] == ["thomas"]
+    candidates_start = command.index("--candidate-solvers") + 1
+    candidates_end = command.index("--warmups")
+    assert command[candidates_start:candidates_end] == [
+        "pcr_adaptive",
+        "jax_triton_thomas",
+    ]
+
+
 def test_kaggle_runner_accepts_linear_triton_focus_choice():
     args = parse_args(["--username", "owner", "--benchmark", "linear_triton_focus"])
 
@@ -541,6 +572,14 @@ def test_kaggle_runner_accepts_validate_jax_triton_focus_choice():
     args = parse_args(["--username", "owner", "--benchmark", "validate_jax_triton_focus"])
 
     assert args.benchmark == "validate_jax_triton_focus"
+
+
+def test_kaggle_runner_accepts_validate_jax_triton_thomas_focus_choice():
+    args = parse_args(
+        ["--username", "owner", "--benchmark", "validate_jax_triton_thomas_focus"]
+    )
+
+    assert args.benchmark == "validate_jax_triton_thomas_focus"
 
 
 def test_kaggle_runner_accepts_linear_cuda_ffi_focus_choice():

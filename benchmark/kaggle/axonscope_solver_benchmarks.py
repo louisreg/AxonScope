@@ -101,6 +101,8 @@ def main() -> None:
         run_e2e_jax_triton_focus(out_dir)
     elif BENCHMARK == "validate_jax_triton_focus":
         run_validate_jax_triton_focus(out_dir)
+    elif BENCHMARK == "validate_jax_triton_thomas_focus":
+        run_validate_jax_triton_thomas_focus(out_dir)
     elif BENCHMARK == "e2e_full":
         run_e2e(out_dir, mode="full")
     elif BENCHMARK == "both":
@@ -114,7 +116,7 @@ def main() -> None:
             "linear_pallas_focus, linear_triton_focus, linear_jax_triton_focus, "
             "linear_cuda_ffi_focus, "
             "e2e, e2e_jax_triton_focus, validate_jax_triton_focus, "
-            "e2e_full, or both."
+            "validate_jax_triton_thomas_focus, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -135,6 +137,7 @@ def setup_repo() -> None:
         "linear_jax_triton_focus",
         "e2e_jax_triton_focus",
         "validate_jax_triton_focus",
+        "validate_jax_triton_thomas_focus",
     }:
         install_jax_triton()
 
@@ -627,6 +630,43 @@ def run_validate_jax_triton_focus(out_dir: pathlib.Path) -> None:
     run(command, cwd=CHECKOUT_DIR)
     print_summary(
         out_dir / "validate_jax_triton_focus" / "summary.csv",
+        mode="validation",
+    )
+
+
+def run_validate_jax_triton_thomas_focus(out_dir: pathlib.Path) -> None:
+    command = [
+        sys.executable,
+        "benchmark/solvers/validate_double_cable_solver_agreement.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "validate_jax_triton_thomas_focus",
+        "--batch-sizes",
+        "512",
+        "--nx",
+        "51",
+        "96",
+        "--nt",
+        "300",
+        "--dt",
+        "0.01",
+        "--recordings",
+        "center",
+        "full",
+        "--iinj-modes",
+        "none",
+        "--reference-solvers",
+        "thomas",
+        "--candidate-solvers",
+        "pcr_adaptive",
+        "jax_triton_thomas",
+        "--warmups",
+        "1",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(
+        out_dir / "validate_jax_triton_thomas_focus" / "summary.csv",
         mode="validation",
     )
 
