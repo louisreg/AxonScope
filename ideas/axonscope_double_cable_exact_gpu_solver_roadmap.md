@@ -2121,6 +2121,20 @@ local validation: local_pallas_padded_smoke at B=16, Nx=51, float32 matched
                   Thomas64 for pallas_thomas_4/8/16 with max_abs_err 6.493e-08
 ```
 
+Second `pallas_thomas_4` P100 attempt after padding:
+
+```text
+run: 20260618_185101_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: Mosaic GPU could not infer the layout of the `jnp.arange` iota used to
+       build vectorized batch indices for scratch/output stores.
+fix: remove the artificial batch-index iota and use explicit Pallas
+     `pl.ds(row, 1)` / `pl.ds(component, 1)` slices for scratch and output
+     load/store helpers.
+local validation: local_pallas_ds_smoke at B=16, Nx=51, float32 matched
+                  Thomas64 for pallas_thomas_4/8/16 with max_abs_err 6.493e-08
+```
+
 ---
 
 ## Phase 3B — Pallas hybrid PCR/Thomas
