@@ -75,6 +75,9 @@ Work should start here unless the user asks otherwise.
   `20260618_192128_linear_pallas_focus_NvidiaTeslaP100` failed before timing
   because explicit GMEM is only accepted for full-array trivial block mappings;
   keep explicit GMEM on full input refs only and use standard blocked outputs.
+  Second P100 attempt `20260618_192526_linear_pallas_focus_NvidiaTeslaP100`
+  then failed because `_pallas_load` on dynamic GMEM refs lowered to Mosaic
+  `masked_load`; stage input reads now use direct `ref[index]` indexing.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels

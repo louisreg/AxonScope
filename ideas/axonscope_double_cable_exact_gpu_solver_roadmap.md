@@ -2198,6 +2198,19 @@ fix: keep explicit GMEM only for full-array input refs; let blocked outputs use
      the standard Pallas output block specs.
 ```
 
+Second P100 attempt:
+
+```text
+run: 20260618_192526_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: `pl.load(...)` on dynamic GMEM refs lowered to Mosaic `masked_load`,
+       which is not implemented for this Pallas GPU path.
+fix: use direct ref indexing (`ref[index]`) for stage input loads instead of
+     the compatibility `_pallas_load` helper.
+local validation: local_pallas_pcr128_direct_index_smoke at B=128, Nx=51,
+                  float32 matched pcr_soa/Thomas with max_abs_err 1.021e-07
+```
+
 Use static buckets:
 
 ```text

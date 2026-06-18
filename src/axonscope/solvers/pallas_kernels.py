@@ -464,7 +464,7 @@ def _pallas_pcr_2x2_stage_kernel(
     right = (rows, pl.ds(right_col, 1))
 
     def load(ref, index):
-        return _pallas_load(ref, index)[:, 0]
+        return ref[index][:, 0]
 
     l00 = load(lower00_ref, current)
     l01 = load(lower01_ref, current)
