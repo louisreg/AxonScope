@@ -138,7 +138,12 @@ Work should start here unless the user asks otherwise.
   double-cable solve (forward/backward block Thomas, one Triton program per
   fiber), not a full JAX integration. Decision rule: if it does not clearly
   beat `pcr_soa` on the same GPU, close Triton and return to pure-JAX PCR_SOA
-  solver-body optimization.
+  solver-body optimization. First T4 attempt
+  `20260618_204657_linear_triton_focus_NvidiaTeslaT4` ran the JAX `pcr_soa`
+  baseline successfully, then failed before Triton timing because
+  `bench_double_cable_triton.py` could not import `benchmark.triton_solver`
+  when executed directly from Kaggle's checkout. Added the repo-root `sys.path`
+  bootstrap used by the other benchmark scripts; rerun required.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral

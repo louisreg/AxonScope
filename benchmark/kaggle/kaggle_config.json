@@ -1,6 +1,6 @@
 {
-  "benchmark": "linear_pcr_soa_layout_focus",
-  "branch": "kaggle-bench/ced6b29",
+  "benchmark": "linear_triton_focus",
+  "branch": "kaggle-bench/1384b40",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }

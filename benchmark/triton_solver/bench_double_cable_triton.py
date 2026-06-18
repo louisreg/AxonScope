@@ -17,6 +17,11 @@ from typing import Any, Sequence
 
 DEFAULT_OUT_DIR = Path("benchmark/results/triton_solver")
 
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(repo_root / "src"))
+
 
 @dataclass(frozen=True)
 class TritonCase:

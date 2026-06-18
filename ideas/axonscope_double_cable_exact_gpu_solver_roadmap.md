@@ -2429,6 +2429,25 @@ steady-state median kernel time, close the Triton line. If it does beat
 `pcr_soa`, the next step is either a JAX custom-call integration path or a
 Triton PCR-stage kernel that better matches the current exact solver policy.
 
+First T4 attempt on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_204657_linear_triton_focus_NvidiaTeslaT4
+status: failed before Triton timing
+baseline: JAX pcr_soa completed on Tesla T4
+B=1024, Nx=51: 0.463 ms
+B=1024, Nx=96: 1.045 ms
+B=2048, Nx=51: 0.993 ms
+B=2048, Nx=96: 1.693 ms
+B=4096, Nx=51: 1.734 ms
+B=4096, Nx=96: 2.990 ms
+cause: `bench_double_cable_triton.py` was executed as a file from Kaggle's
+       checkout, so `benchmark.triton_solver` was not importable.
+fix: add repo-root/src `sys.path` bootstrap, matching the other benchmark
+     entry points.
+decision: rerun required; no Triton performance evidence yet.
+```
+
 Use static buckets:
 
 ```text
