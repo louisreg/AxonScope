@@ -389,7 +389,7 @@ def _pallas_pcr_2x2_stage(
 ) -> tuple[Array, ...]:
     gmem = _gpu_memory_space("GMEM", enabled=not bool(interpret))
     in_specs = (_whole_array_spec(memory_space=gmem),) * 14
-    out_spec = _block_spec_column(block_b, memory_space=gmem)
+    out_spec = _block_spec_column(block_b)
     out_specs = (out_spec,) * 14
     out_shape = tuple(
         jax.ShapeDtypeStruct((batch_size, n), lower00.dtype) for _ in range(14)

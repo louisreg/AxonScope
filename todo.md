@@ -71,7 +71,10 @@ Work should start here unless the user asks otherwise.
   kernel per PCR stride and programs shaped as `128 fibers x 1 cable column`,
   preserving Mosaic's 128-element batch width without full-cable SMEM. Local
   `interpret=True` smokes passed at `B=128`, `Nx=8/51`; GPU compile/timing is
-  still unknown.
+  still unknown. First P100 attempt
+  `20260618_192128_linear_pallas_focus_NvidiaTeslaP100` failed before timing
+  because explicit GMEM is only accepted for full-array trivial block mappings;
+  keep explicit GMEM on full input refs only and use standard blocked outputs.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels

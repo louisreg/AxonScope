@@ -2186,6 +2186,18 @@ local validation:
 status: ready for first Kaggle P100 compile/timing via linear_pallas_focus
 ```
 
+First P100 attempt:
+
+```text
+run: 20260618_192128_linear_pallas_focus_NvidiaTeslaP100
+status: failed before Pallas timing at B=1024, Nx=51
+cause: Mosaic GPU allows explicit GMEM block specs only for full-array trivial
+       mappings. `pallas_pcr_128` used explicit GMEM for blocked outputs
+       shaped (128, 1), which is rejected.
+fix: keep explicit GMEM only for full-array input refs; let blocked outputs use
+     the standard Pallas output block specs.
+```
+
 Use static buckets:
 
 ```text
