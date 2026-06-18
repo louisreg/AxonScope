@@ -154,6 +154,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "linear_cuda_ffi_focus",
             "e2e",
             "e2e_jax_triton_focus",
+            "validate_jax_triton_focus",
             "e2e_full",
             "both",
         ),

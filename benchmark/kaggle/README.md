@@ -118,6 +118,7 @@ The wrapper also accepts:
 --benchmark linear_jax_triton_focus
 --benchmark linear_cuda_ffi_focus
 --benchmark e2e_jax_triton_focus
+--benchmark validate_jax_triton_focus
 --benchmark e2e_full
 --branch bench-colab
 --repo-url https://github.com/louisreg/AxonScope.git
@@ -126,8 +127,9 @@ The wrapper also accepts:
 
 `e2e` is the bounded production matrix. `e2e_jax_triton_focus` compares
 `pcr_adaptive` with the benchmark-only `jax_triton_thomas` candidate inside the
-real double-cable loop. `e2e_full` runs the exhaustive matrix and can take a
-long time on Kaggle.
+real double-cable loop. `validate_jax_triton_focus` compares recorded Vm traces
+from `jax_triton_thomas` against `pcr_adaptive`. `e2e_full` runs the exhaustive
+matrix and can take a long time on Kaggle.
 
 These values are written to `benchmark/kaggle/kaggle_config.json`, which is
 uploaded with the kernel. The corresponding `AXONSCOPE_*` environment variables
