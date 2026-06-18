@@ -161,7 +161,12 @@ Work should start here unless the user asks otherwise.
   `jax.jit`-compatible and must not be public routing yet; it is an overhead
   measurement. Updated `linear_triton_focus` now runs JAX `pcr_soa`,
   pure Torch/Triton `triton_block_thomas`, and
-  `triton_block_thomas_jax_bridge`.
+  `triton_block_thomas_jax_bridge`. First T4 attempt
+  `20260618_213014_linear_triton_focus_NvidiaTeslaT4` measured the pure
+  Torch/Triton Thomas cases successfully, then failed before bridge timing
+  because the new `src/axonscope/solvers/triton_thomas.py` module was not
+  tracked in Git and therefore was absent from Kaggle's clone. Fix: track and
+  commit that module, then rerun.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral

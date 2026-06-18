@@ -2541,6 +2541,26 @@ decision rule: if the bridge preserves most of the pure Triton speedup, build
                a deeper integration path before touching production dispatch.
 ```
 
+First bridge attempt on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_213014_linear_triton_focus_NvidiaTeslaT4
+status: failed before bridge timing
+cause: `src/axonscope/solvers/triton_thomas.py` was not tracked in Git, so
+       Kaggle cloned commit `ac9f9c3` without the bridge module.
+
+pure Triton Thomas still ran before the failure:
+B=1024, Nx=51: 0.203 ms
+B=1024, Nx=96: 0.344 ms
+B=2048, Nx=51: 0.359 ms
+B=2048, Nx=96: 0.619 ms
+B=4096, Nx=51: 0.610 ms
+B=4096, Nx=96: 1.105 ms
+
+fix: track and commit `src/axonscope/solvers/triton_thomas.py`, then rerun the
+     same `linear_triton_focus` preset.
+```
+
 Use static buckets:
 
 ```text
