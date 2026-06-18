@@ -2168,6 +2168,24 @@ Candidate:
 pallas_hybrid_pcr_thomas_2x2
 ```
 
+Initial Phase 3B spike implemented on 2026-06-18:
+
+```text
+candidate: pallas_pcr_128
+implementation: benchmark-only Pallas PCR stage kernel
+program shape: 128 fibers x 1 cable column
+grid per stage: (batch_size / 128, Nx)
+reason: preserve Mosaic GPU's 128-element strided-load width while avoiding
+        the full-cable SMEM footprint that closed Thomas-Pallas.
+solver flow: initialize SoA PCR arrays in JAX, run one Pallas stage kernel per
+             PCR stride, then finish with the independent 2x2 solve.
+local validation:
+  - tests/unit/solvers/test_pallas_kernels.py passes in interpret=True
+  - local_pallas_pcr128_smoke at B=128, Nx=8 matched pcr_soa/Thomas
+  - local_pallas_pcr128_nx51_smoke at B=128, Nx=51 matched pcr_soa/Thomas
+status: ready for first Kaggle P100 compile/timing via linear_pallas_focus
+```
+
 Use static buckets:
 
 ```text

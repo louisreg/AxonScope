@@ -125,8 +125,196 @@ def solve_block_tridiagonal_2x2_pallas_thomas_batched(
     return out[:, :n, 0], out[:, :n, 1]
 
 
+def solve_block_tridiagonal_2x2_pallas_pcr_batched(
+    a00: Array,
+    a01: Array,
+    a10: Array,
+    a11: Array,
+    off0: Array,
+    off1: Array,
+    rhs0: Array,
+    rhs1: Array,
+    *,
+    block_b: int = 128,
+    interpret: bool | None = None,
+) -> tuple[Array, Array]:
+    """Benchmark-only Pallas PCR solve for batch-first 2x2 systems.
+
+    This Phase 3B spike keeps each Pallas program at ``block_b`` fibers and one
+    cable column. That shape is deliberate: Mosaic GPU strided loads want 128
+    elements, while full-cable Thomas blocks exceeded P100 SMEM.
+    """
+
+    a00 = jnp.asarray(a00)
+    a01 = jnp.asarray(a01)
+    a10 = jnp.asarray(a10)
+    a11 = jnp.asarray(a11)
+    off0 = jnp.asarray(off0)
+    off1 = jnp.asarray(off1)
+    rhs0 = jnp.asarray(rhs0)
+    rhs1 = jnp.asarray(rhs1)
+
+    if rhs0.ndim != 2 or rhs1.ndim != 2:
+        raise ValueError("rhs0 and rhs1 must have shape (batch_size, Nx).")
+    if rhs0.shape != rhs1.shape:
+        raise ValueError(
+            f"rhs0 and rhs1 must have the same shape, got {rhs0.shape} and {rhs1.shape}."
+        )
+    batch_size, n = rhs0.shape
+    if n < 2:
+        raise ValueError("pallas_pcr requires Nx >= 2.")
+    if batch_size % int(block_b) != 0:
+        raise ValueError(
+            f"batch_size must be divisible by block_b={int(block_b)}, got {batch_size}."
+        )
+
+    def as_batched(values: Array, *, length: int, name: str) -> Array:
+        arr = jnp.asarray(values)
+        if arr.shape[-1] != length:
+            raise ValueError(f"{name} must have trailing length {length}, got {arr.shape}.")
+        if arr.ndim == 1:
+            return jnp.broadcast_to(arr[None, :], (batch_size, length))
+        if arr.ndim == 2 and arr.shape[0] == batch_size:
+            return arr
+        raise ValueError(
+            f"{name} must have shape ({length},) or ({batch_size}, {length}), got {arr.shape}."
+        )
+
+    diag00 = as_batched(a00, length=n, name="a00")
+    diag01 = as_batched(a01, length=n, name="a01")
+    diag10 = as_batched(a10, length=n, name="a10")
+    diag11 = as_batched(a11, length=n, name="a11")
+    off0_b = as_batched(off0, length=n - 1, name="off0")
+    off1_b = as_batched(off1, length=n - 1, name="off1")
+
+    zero_col = jnp.zeros((batch_size, 1), dtype=rhs0.dtype)
+    zeros = jnp.zeros((batch_size, n), dtype=rhs0.dtype)
+    lower00 = jnp.concatenate([zero_col, off0_b], axis=1)
+    lower01 = zeros
+    lower10 = zeros
+    lower11 = jnp.concatenate([zero_col, off1_b], axis=1)
+    upper00 = jnp.concatenate([off0_b, zero_col], axis=1)
+    upper01 = zeros
+    upper10 = zeros
+    upper11 = jnp.concatenate([off1_b, zero_col], axis=1)
+    r0 = rhs0
+    r1 = rhs1
+
+    if interpret is None:
+        interpret = jax.default_backend() != "gpu"
+
+    block_b = int(block_b)
+    stage = functools.partial(
+        _pallas_pcr_2x2_stage,
+        batch_size=batch_size,
+        n=n,
+        block_b=block_b,
+        interpret=bool(interpret),
+    )
+    stride = 1
+    while stride < n:
+        (
+            lower00,
+            lower01,
+            lower10,
+            lower11,
+            upper00,
+            upper01,
+            upper10,
+            upper11,
+            diag00,
+            diag01,
+            diag10,
+            diag11,
+            r0,
+            r1,
+        ) = stage(
+            lower00,
+            lower01,
+            lower10,
+            lower11,
+            upper00,
+            upper01,
+            upper10,
+            upper11,
+            diag00,
+            diag01,
+            diag10,
+            diag11,
+            r0,
+            r1,
+            stride=stride,
+        )
+        stride *= 2
+
+    inv00, inv01, inv10, inv11 = _inv2_components(diag00, diag01, diag10, diag11)
+    return _matvec2_components(inv00, inv01, inv10, inv11, r0, r1)
+
+
 def _block_spec_2d(block_b: int, n: int) -> pl.BlockSpec:
     return pl.BlockSpec((block_b, n), lambda block_id: (block_id, 0))
+
+
+def _block_spec_column(block_b: int, *, memory_space=None) -> pl.BlockSpec:
+    return pl.BlockSpec(
+        (block_b, 1),
+        lambda batch_block, column: (batch_block, column),
+        memory_space=memory_space,
+    )
+
+
+def _whole_array_spec(*, memory_space=None) -> pl.BlockSpec:
+    return pl.BlockSpec(memory_space=memory_space)
+
+
+def _gpu_memory_space(name: str, *, enabled: bool):
+    if not enabled:
+        return None
+    try:
+        from jax.experimental.pallas import mosaic_gpu as plgpu
+
+        return getattr(plgpu, name)
+    except (ImportError, AttributeError, ModuleNotFoundError):
+        return None
+
+
+def _inv2_components(
+    m00: Array,
+    m01: Array,
+    m10: Array,
+    m11: Array,
+) -> tuple[Array, Array, Array, Array]:
+    det = m00 * m11 - m01 * m10
+    return m11 / det, -m01 / det, -m10 / det, m00 / det
+
+
+def _matmul2_components(
+    l00: Array,
+    l01: Array,
+    l10: Array,
+    l11: Array,
+    r00: Array,
+    r01: Array,
+    r10: Array,
+    r11: Array,
+) -> tuple[Array, Array, Array, Array]:
+    return (
+        l00 * r00 + l01 * r10,
+        l00 * r01 + l01 * r11,
+        l10 * r00 + l11 * r10,
+        l10 * r01 + l11 * r11,
+    )
+
+
+def _matvec2_components(
+    m00: Array,
+    m01: Array,
+    m10: Array,
+    m11: Array,
+    v0: Array,
+    v1: Array,
+) -> tuple[Array, Array]:
+    return m00 * v0 + m01 * v1, m10 * v0 + m11 * v1
 
 
 def _round_up_to_multiple(value: int, multiple: int) -> int:
@@ -175,6 +363,219 @@ def _memory_ref(shape: tuple[int, ...], dtype: jnp.dtype, *, gpu_smem: bool = Fa
         except TypeError:
             pass
     return memory_ref(shape, dtype)
+
+
+def _pallas_pcr_2x2_stage(
+    lower00: Array,
+    lower01: Array,
+    lower10: Array,
+    lower11: Array,
+    upper00: Array,
+    upper01: Array,
+    upper10: Array,
+    upper11: Array,
+    diag00: Array,
+    diag01: Array,
+    diag10: Array,
+    diag11: Array,
+    r0: Array,
+    r1: Array,
+    *,
+    stride: int,
+    batch_size: int,
+    n: int,
+    block_b: int,
+    interpret: bool,
+) -> tuple[Array, ...]:
+    gmem = _gpu_memory_space("GMEM", enabled=not bool(interpret))
+    in_specs = (_whole_array_spec(memory_space=gmem),) * 14
+    out_spec = _block_spec_column(block_b, memory_space=gmem)
+    out_specs = (out_spec,) * 14
+    out_shape = tuple(
+        jax.ShapeDtypeStruct((batch_size, n), lower00.dtype) for _ in range(14)
+    )
+    stage = pl.pallas_call(
+        functools.partial(_pallas_pcr_2x2_stage_kernel, stride=int(stride), n=int(n)),
+        out_shape=out_shape,
+        grid=(batch_size // block_b, n),
+        in_specs=in_specs,
+        out_specs=out_specs,
+        interpret=bool(interpret),
+        name=f"double_cable_pallas_pcr_s{int(stride)}",
+    )
+    return stage(
+        lower00,
+        lower01,
+        lower10,
+        lower11,
+        upper00,
+        upper01,
+        upper10,
+        upper11,
+        diag00,
+        diag01,
+        diag10,
+        diag11,
+        r0,
+        r1,
+    )
+
+
+def _pallas_pcr_2x2_stage_kernel(
+    lower00_ref,
+    lower01_ref,
+    lower10_ref,
+    lower11_ref,
+    upper00_ref,
+    upper01_ref,
+    upper10_ref,
+    upper11_ref,
+    diag00_ref,
+    diag01_ref,
+    diag10_ref,
+    diag11_ref,
+    r0_ref,
+    r1_ref,
+    out_lower00_ref,
+    out_lower01_ref,
+    out_lower10_ref,
+    out_lower11_ref,
+    out_upper00_ref,
+    out_upper01_ref,
+    out_upper10_ref,
+    out_upper11_ref,
+    out_diag00_ref,
+    out_diag01_ref,
+    out_diag10_ref,
+    out_diag11_ref,
+    out_r0_ref,
+    out_r1_ref,
+    *,
+    stride: int,
+    n: int,
+) -> None:
+    batch_block = pl.program_id(0)
+    col = pl.program_id(1)
+    rows = pl.ds(batch_block * out_lower00_ref.shape[0], out_lower00_ref.shape[0])
+    current = (rows, pl.ds(col, 1))
+    left_col = jnp.maximum(col - int(stride), 0)
+    right_col = jnp.minimum(col + int(stride), int(n) - 1)
+    left = (rows, pl.ds(left_col, 1))
+    right = (rows, pl.ds(right_col, 1))
+
+    def load(ref, index):
+        return _pallas_load(ref, index)[:, 0]
+
+    l00 = load(lower00_ref, current)
+    l01 = load(lower01_ref, current)
+    l10 = load(lower10_ref, current)
+    l11 = load(lower11_ref, current)
+    u00 = load(upper00_ref, current)
+    u01 = load(upper01_ref, current)
+    u10 = load(upper10_ref, current)
+    u11 = load(upper11_ref, current)
+
+    left_inv = _inv2_components(
+        load(diag00_ref, left),
+        load(diag01_ref, left),
+        load(diag10_ref, left),
+        load(diag11_ref, left),
+    )
+    right_inv = _inv2_components(
+        load(diag00_ref, right),
+        load(diag01_ref, right),
+        load(diag10_ref, right),
+        load(diag11_ref, right),
+    )
+    lf00, lf01, lf10, lf11 = _matmul2_components(l00, l01, l10, l11, *left_inv)
+    rf00, rf01, rf10, rf11 = _matmul2_components(u00, u01, u10, u11, *right_inv)
+
+    zero = jnp.zeros_like(lf00)
+    has_left = col >= int(stride)
+    has_right = col + int(stride) < int(n)
+    lf00 = jnp.where(has_left, lf00, zero)
+    lf01 = jnp.where(has_left, lf01, zero)
+    lf10 = jnp.where(has_left, lf10, zero)
+    lf11 = jnp.where(has_left, lf11, zero)
+    rf00 = jnp.where(has_right, rf00, zero)
+    rf01 = jnp.where(has_right, rf01, zero)
+    rf10 = jnp.where(has_right, rf10, zero)
+    rf11 = jnp.where(has_right, rf11, zero)
+
+    nl00, nl01, nl10, nl11 = _matmul2_components(
+        lf00,
+        lf01,
+        lf10,
+        lf11,
+        load(lower00_ref, left),
+        load(lower01_ref, left),
+        load(lower10_ref, left),
+        load(lower11_ref, left),
+    )
+    nu00, nu01, nu10, nu11 = _matmul2_components(
+        rf00,
+        rf01,
+        rf10,
+        rf11,
+        load(upper00_ref, right),
+        load(upper01_ref, right),
+        load(upper10_ref, right),
+        load(upper11_ref, right),
+    )
+    ldu00, ldu01, ldu10, ldu11 = _matmul2_components(
+        lf00,
+        lf01,
+        lf10,
+        lf11,
+        load(upper00_ref, left),
+        load(upper01_ref, left),
+        load(upper10_ref, left),
+        load(upper11_ref, left),
+    )
+    rdl00, rdl01, rdl10, rdl11 = _matmul2_components(
+        rf00,
+        rf01,
+        rf10,
+        rf11,
+        load(lower00_ref, right),
+        load(lower01_ref, right),
+        load(lower10_ref, right),
+        load(lower11_ref, right),
+    )
+    lr0, lr1 = _matvec2_components(
+        lf00,
+        lf01,
+        lf10,
+        lf11,
+        load(r0_ref, left),
+        load(r1_ref, left),
+    )
+    rr0, rr1 = _matvec2_components(
+        rf00,
+        rf01,
+        rf10,
+        rf11,
+        load(r0_ref, right),
+        load(r1_ref, right),
+    )
+
+    def store(ref, value):
+        _pallas_store(ref, (slice(None), pl.ds(0, 1)), value[:, None])
+
+    store(out_lower00_ref, -nl00)
+    store(out_lower01_ref, -nl01)
+    store(out_lower10_ref, -nl10)
+    store(out_lower11_ref, -nl11)
+    store(out_upper00_ref, -nu00)
+    store(out_upper01_ref, -nu01)
+    store(out_upper10_ref, -nu10)
+    store(out_upper11_ref, -nu11)
+    store(out_diag00_ref, load(diag00_ref, current) - ldu00 - rdl00)
+    store(out_diag01_ref, load(diag01_ref, current) - ldu01 - rdl01)
+    store(out_diag10_ref, load(diag10_ref, current) - ldu10 - rdl10)
+    store(out_diag11_ref, load(diag11_ref, current) - ldu11 - rdl11)
+    store(out_r0_ref, load(r0_ref, current) - lr0 - rr0)
+    store(out_r1_ref, load(r1_ref, current) - lr1 - rr1)
 
 
 def _pallas_thomas_2x2_kernel(

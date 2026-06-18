@@ -66,12 +66,12 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
-- [ ] Phase 7.6.3 next Pallas work: stop the Thomas-Pallas baseline line and
-  move to a Phase 3B PCR/hybrid Pallas design if we continue Pallas. The P100
-  retries showed the useful constraints: `BLOCK_B=128` is SMEM-impossible,
-  small `BLOCK_B` clears SMEM but Mosaic rejects strided column loads with fewer
-  than `128` elements. The next Pallas kernel must be designed around those
-  layout constraints from the start, not as another Thomas block-size tweak.
+- [ ] Phase 7.6.3 current Pallas work: run Kaggle P100 `linear_pallas_focus`
+  with `pallas_pcr_128`. This first Phase 3B candidate uses one Pallas stage
+  kernel per PCR stride and programs shaped as `128 fibers x 1 cable column`,
+  preserving Mosaic's 128-element batch width without full-cable SMEM. Local
+  `interpret=True` smokes passed at `B=128`, `Nx=8/51`; GPU compile/timing is
+  still unknown.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels

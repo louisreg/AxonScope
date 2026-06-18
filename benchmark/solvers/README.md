@@ -96,6 +96,12 @@ matches Mosaic's 128-element strided-load preference but exceeds SMEM, while
 small `BLOCK_B` variants fit SMEM but fail strided-load lowering. Keep these
 variants out of routing and avoid more Kaggle runs until a Phase 3B PCR/hybrid
 Pallas layout replaces the Thomas spike.
+`pallas_pcr_128` is the first Phase 3B benchmark-only Pallas PCR spike. It
+runs one Pallas stage kernel per PCR stride with programs shaped as
+`128 fibers x 1 cable column`, keeping the 128-element batch width that Mosaic
+GPU wants while avoiding full-cable SMEM residency. Local `interpret=True`
+smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and `Nx=51`; GPU timing
+still requires Kaggle/Colab.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
@@ -166,13 +172,13 @@ python benchmark/kaggle/run_kernel.py \
   --max-status-fetch-failures 20
 ```
 
-Run the focused Phase 3A Pallas-Thomas spike:
+Run the focused Phase 3B Pallas-PCR spike:
 
 ```bash
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1024 2048 4096 \
   --nx 51 64 96 \
-  --solvers thomas thomas_batched assoc_backward pallas_thomas_4 pcr_soa pcr_adaptive \
+  --solvers thomas thomas_batched assoc_backward pcr pcr_soa pallas_pcr_128 pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

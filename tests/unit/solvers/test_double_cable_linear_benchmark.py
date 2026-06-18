@@ -193,6 +193,22 @@ def test_planned_cases_allow_benchmark_only_pallas_thomas():
     assert resolve_kernel_solver("pallas_thomas_128", batch_size=1024) == "pallas_thomas_128"
 
 
+def test_planned_cases_allow_benchmark_only_pallas_pcr():
+    cases = planned_cases(
+        batch_sizes=[1024],
+        nx_values=[64],
+        dtypes=["float32"],
+        solvers=["pallas_pcr_128"],
+        platform="gpu",
+    )
+
+    (case,) = cases
+    assert case.requested_solver == "pallas_pcr_128"
+    assert case.resolved_solver == "pcr_soa"
+    assert case.kernel_solver == "pallas_pcr_128"
+    assert resolve_kernel_solver("pallas_pcr_128", batch_size=1024) == "pallas_pcr_128"
+
+
 def test_planned_cases_allow_benchmark_only_split_iterative_variants():
     solvers = [
         "split_jacobi_4",
