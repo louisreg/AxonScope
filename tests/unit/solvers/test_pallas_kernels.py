@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from axonscope.solvers.common import solve_block_tridiagonal_2x2_scalar
 from axonscope.solvers.pallas_kernels import (
@@ -8,7 +9,8 @@ from axonscope.solvers.pallas_kernels import (
 )
 
 
-def test_pallas_thomas_matches_vmapped_thomas_in_interpret_mode():
+@pytest.mark.parametrize("block_b", [4, 8, 16])
+def test_pallas_thomas_matches_vmapped_thomas_in_interpret_mode(block_b):
     batch_size = 16
     n = 8
     batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
@@ -43,7 +45,7 @@ def test_pallas_thomas_matches_vmapped_thomas_in_interpret_mode():
         off1,
         rhs0,
         rhs1,
-        block_b=16,
+        block_b=block_b,
         interpret=True,
     )
 

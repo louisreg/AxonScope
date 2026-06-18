@@ -2078,12 +2078,33 @@ implementation: same exact Pallas Thomas kernel with BLOCK_B=16
 scratch estimate at Nx=96, float32: 16 * 96 * 6 * 4 = 36,864 bytes
 P100 max shared memory: 49,152 bytes
 local validation: B=16, Nx=8, float32, interpret=True, matches Thomas64
+Kaggle P100 run: 20260618_183720_linear_pallas_focus_NvidiaTeslaP100
+result: failed before Pallas timing at B=1024, Nx=51
+Mosaic GPU lowering: smem_bytes=60424 > max_smem_bytes=49152
 ```
 
-This candidate is still a Thomas-family baseline, not the desired PCR/hybrid
-kernel, but it is the cheapest way to obtain one real P100 Pallas timing after
-the `pallas_thomas_128` SMEM failure. The `linear_pallas_focus` preset now uses
-`pallas_thomas_16` instead of `pallas_thomas_128`.
+The naive explicit scratch estimate was too optimistic because Mosaic GPU adds
+substantial implicit shared-memory use during lowering. `pallas_thomas_16`
+therefore joins `pallas_thomas_128` in standby.
+
+Last Thomas-family Pallas retry before moving to PCR/hybrid:
+
+```text
+candidate: pallas_thomas_4
+implementation: same exact Pallas Thomas kernel with BLOCK_B=4
+scratch estimate at Nx=96, float32: 4 * 96 * 6 * 4 = 9,216 bytes
+P100 max shared memory: 49,152 bytes
+local validation: B=16, Nx=8, float32, interpret=True, matches Thomas64
+local smoke: local_pallas_blocks_smoke, pallas_thomas_4/8/16 all max_abs_err
+             4.575e-08 vs Thomas64
+```
+
+`pallas_thomas_8` is also exposed as a benchmark-only intermediate probe, but
+linear extrapolation from the `128` and `16` failures suggests it may still be
+too close to the P100 SMEM ceiling at `Nx=96`. The `linear_pallas_focus` preset
+therefore uses `pallas_thomas_4` first to get a complete timing sweep. If `4`
+is correct but obviously dominated by launch/program overhead, skip further
+Thomas block-size tuning and move to Phase 3B Pallas PCR/hybrid.
 
 ---
 

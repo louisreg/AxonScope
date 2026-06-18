@@ -86,9 +86,11 @@ associative affine scan.
 stability/performance probe, not an optimized backend. It is numerically
 fragile on benchmark-like float32 systems, so do not spend Kaggle runs on it
 unless a stabilized formulation is added.
-`pallas_thomas_16` and `pallas_thomas_128` are benchmark-only Phase 3A spikes
-that run exact block Thomas in a Pallas kernel. `pallas_thomas_16` uses
-`BLOCK_B=16` to stay under P100 shared-memory limits at `Nx=96`.
+`pallas_thomas_4`, `pallas_thomas_8`, `pallas_thomas_16`, and
+`pallas_thomas_128` are benchmark-only Phase 3A spikes that run exact block
+Thomas in a Pallas kernel. `pallas_thomas_4` is the current P100 focus because
+`BLOCK_B=16` still exceeded Mosaic GPU shared memory before timing, and
+`BLOCK_B=8` is likely too close to the P100 limit at `Nx=96`.
 `pallas_thomas_128` is the historical full-block spike; it exceeded P100 SMEM
 and remains standby.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
@@ -167,7 +169,7 @@ Run the focused Phase 3A Pallas-Thomas spike:
 python benchmark/solvers/bench_double_cable_linear_solvers.py \
   --batch-sizes 1024 2048 4096 \
   --nx 51 64 96 \
-  --solvers thomas thomas_batched assoc_backward pallas_thomas_16 pcr_soa pcr_adaptive \
+  --solvers thomas thomas_batched assoc_backward pallas_thomas_4 pcr_soa pcr_adaptive \
   --dtypes float32 \
   --warmups 1 \
   --repeats 5

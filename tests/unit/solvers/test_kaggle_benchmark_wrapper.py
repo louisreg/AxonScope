@@ -307,7 +307,7 @@ def test_kaggle_linear_pallas_focus_is_bounded_to_exact_candidates(tmp_path, mon
         "thomas",
         "thomas_batched",
         "assoc_backward",
-        "pallas_thomas_16",
+        "pallas_thomas_4",
         "pcr_soa",
         "pcr_adaptive",
     ]

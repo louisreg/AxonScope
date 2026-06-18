@@ -66,10 +66,13 @@ Work should start here unless the user asks otherwise.
 - [ ] During Phase 7.6.3, prioritize substantive solver implementations
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
-- [ ] Phase 7.6.3 next: optimize exact `pcr_soa`/`pcr_adaptive` rather than
-  continuing Pallas-Thomas. Start with the Kaggle P100
-  `linear_pcr_soa_trace` profiler preset to identify gather/scatter,
-  temporary-array, or kernel-count bottlenecks before changing solver code.
+- [ ] Phase 7.6.3 current Pallas retry: run the bounded-SMEM
+  `pallas_thomas_4` Kaggle P100 focus once committed. `pallas_thomas_16`
+  failed during Mosaic GPU lowering with `smem_bytes=60424 >
+  max_smem_bytes=49152` before timing, so keep `16` and `128` in standby.
+  After this retry, return to Pallas PCR/hybrid or exact `pcr_soa`
+  optimization rather than more Thomas block-size tuning unless the timing is
+  surprisingly strong.
 - [ ] Phase 7.6.3 next implementation target: optimize the existing
   batch-native `pcr_soa` stage body. The 2026-06-17 P100 trace shows SoA cuts
   matrix-PCR device kernel events from `31-48` to `7-13`; remaining hot kernels
@@ -345,14 +348,17 @@ Near-term tasks:
     exact Thomas-family candidate. It runs one Pallas program per `128` fibers
     over the full `Nx`, requires `B` divisible by `128`, and stays out of
     `BatchOptions`/`auto`.
-  - [x] Add `pallas_thomas_16` as the bounded-SMEM Phase 3A retry. It uses the
-    same exact Pallas Thomas kernel with `BLOCK_B=16`, which keeps the
-    full-`Nx` scratch below P100 shared-memory limits for `Nx=96`. Local
-    `interpret=True` smoke passed for `B=16`, `Nx=8`, `float32`.
-  - [ ] Run Kaggle P100 `linear_pallas_focus` with `pallas_thomas_16` instead
-    of the known-failing `pallas_thomas_128`, then decide whether small-block
-    Pallas Thomas is worth pursuing or whether to move straight to Pallas
-    PCR/hybrid.
+  - [x] Add `pallas_thomas_16` as a bounded-SMEM Phase 3A retry. Local
+    `interpret=True` smoke passed for `B=16`, `Nx=8`, `float32`, but the P100
+    run `20260618_183720_linear_pallas_focus_NvidiaTeslaP100` failed during
+    Mosaic GPU lowering at `B=1024`, `Nx=51` with `smem_bytes=60424 >
+    max_smem_bytes=49152`. Decision: keep `pallas_thomas_16` in standby.
+  - [ ] Run Kaggle P100 `linear_pallas_focus` with `pallas_thomas_4`.
+    `pallas_thomas_8` is available as an intermediate probe, but it is likely
+    too close to the P100 SMEM ceiling at `Nx=96`; use it only if `4` is
+    correct but too slow to be informative. Local smoke
+    `local_pallas_blocks_smoke` passed for `pallas_thomas_4/8/16` at `B=16`,
+    `Nx=8`, with max error `4.575e-08` vs Thomas64.
   - [x] Local Pallas smoke passed on 2026-06-17 for `B=128`, `Nx=16`,
     `float32`, and solvers `thomas`, `thomas_batched`, `assoc_backward`,
     `pallas_thomas_128`, `pcr_soa`. `pallas_thomas_128` matched Thomas64 with
@@ -793,6 +799,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-17 | Kaggle PCR_SOA stage candidates | P100 run `20260617_220929_linear_pcr_soa_nomask_focus_NvidiaTeslaP100` completed. `pcr_soa_nomask` was neutral (`2/4` wins, geomean `1.001x` runtime vs `pcr_soa`); `pcr_soa_shift` was slower in all focused cases (`1.786x` geomean runtime). Do not route these candidates; close `shift` despite the local HLO gather/select reduction. |
 | 2026-06-17 | Pallas Thomas 128 standby decision | P100 run `20260617_213002_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU SMEM lowering but exceeded P100 shared memory (`419848 > 49152` bytes). `pallas_thomas_128` remains benchmark-only/standby; future Pallas work needs bounded-scratch redesign rather than more compatibility patches. |
 | 2026-06-18 | Kaggle exact assoc retest | P100 run `20260618_182820_linear_assoc_focus_NvidiaTeslaP100` installed JAX `0.10.2` and completed. `assoc_backward` remains a good Thomas-family optimization (`1.385x` geomean speedup vs `thomas_batched`) but not a better general backend than `pcr_soa` (`1/9` wins, `1.570x` geomean runtime vs `pcr_soa`). No `auto` routing change. |
+| 2026-06-18 | Pallas Thomas bounded-SMEM retry | P100 run `20260618_183720_linear_pallas_focus_NvidiaTeslaP100` reached Mosaic GPU lowering with JAX `0.10.2` but `pallas_thomas_16` still exceeded shared memory (`60424 > 49152` bytes) before timing. Added benchmark-only `pallas_thomas_4/8`; local smoke `local_pallas_blocks_smoke` matched Thomas64 for `4/8/16`, and the next Kaggle focus uses `pallas_thomas_4`. |
 
 ## Completed Roadmap Archive
 

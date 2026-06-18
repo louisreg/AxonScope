@@ -80,6 +80,8 @@ SOLVER_CHOICES = (
     "pcr_adaptive",
     "assoc_backward",
     "assoc_transfer_dense",
+    "pallas_thomas_4",
+    "pallas_thomas_8",
     "pallas_thomas_16",
     "pallas_thomas_128",
     "split_jacobi_4",
@@ -105,6 +107,8 @@ KERNEL_SOLVERS = (
     "pcr_soa_padded",
     "assoc_backward",
     "assoc_transfer_dense",
+    "pallas_thomas_4",
+    "pallas_thomas_8",
     "pallas_thomas_16",
     "pallas_thomas_128",
     "split_jacobi_4",
@@ -120,6 +124,8 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "thomas_batched": "thomas",
     "assoc_backward": "thomas",
     "assoc_transfer_dense": "thomas",
+    "pallas_thomas_4": "thomas",
+    "pallas_thomas_8": "thomas",
     "pallas_thomas_16": "thomas",
     "pallas_thomas_128": "thomas",
     "pcr_soa_hybrid_4": "pcr_soa",
@@ -137,6 +143,12 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "split_gs_4": "split_iterative",
     "split_gs_8": "split_iterative",
     "split_richardson_4": "split_iterative",
+}
+PALLAS_THOMAS_BLOCK_SIZES = {
+    "pallas_thomas_4": 4,
+    "pallas_thomas_8": 8,
+    "pallas_thomas_16": 16,
+    "pallas_thomas_128": 128,
 }
 PCR_SOA_MAX_BATCH = 4096
 
@@ -631,8 +643,8 @@ def _make_batched_solver(kernel_solver: str):
 
         return solve_assoc_transfer_dense
 
-    if kernel_solver in {"pallas_thomas_16", "pallas_thomas_128"}:
-        block_b = {"pallas_thomas_16": 16, "pallas_thomas_128": 128}[kernel_solver]
+    if kernel_solver in PALLAS_THOMAS_BLOCK_SIZES:
+        block_b = PALLAS_THOMAS_BLOCK_SIZES[kernel_solver]
 
         @jax.jit
         def solve_pallas_thomas(
