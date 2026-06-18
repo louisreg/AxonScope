@@ -692,6 +692,47 @@ GPU optimization. Decision: do not route either candidate through `auto`; keep
 `pcr_soa_nomask` as a benchmark-only neutral probe and close/standby
 `pcr_soa_shift`.
 
+Status on 2026-06-18: after reviewing the official JAX Advanced Guides, added
+two benchmark-only candidates for JAX-level layout/memory control:
+
+```text
+pcr_soa_layout_auto
+pcr_soa_ref
+```
+
+`pcr_soa_layout_auto` keeps the exact same batch-native SoA PCR algebra as
+`pcr_soa` and changes only the compilation contract of the benchmark wrapper:
+`jax.jit(..., in_shardings=Format(Layout.AUTO),
+out_shardings=Format(Layout.AUTO))`. The goal is to let XLA choose device-local
+layouts for the focused GPU solve without changing solver numerics or public
+routing. Benchmark rows now also record compact input/output `major_to_minor`
+layout summaries from the compiled executable, so the P100 run can tell us
+whether the compiler requested anything different from the default batch-first
+layout.
+
+`pcr_soa_ref` keeps the same exact SoA PCR stage algebra but stores the main
+PCR work arrays in internal `jax.new_ref` buffers and mutates them stage by
+stage. The goal is to test whether XLA can shorten live ranges or reuse buffers
+more effectively on GPU without changing the solver policy.
+
+Evidence gate:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_layout_focus \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
+
+Decision rule: keep both candidates benchmark-only unless one gives a clear
+P100 steady-state speedup versus baseline `pcr_soa` without increasing compile
+fragility or numerical error. If they only change compile time or are neutral,
+close them as JAX-layout/memory diagnostics and move on to deeper solver-body
+changes.
+
 ---
 
 ## Phase 1C.1 — Batch-native Thomas baseline

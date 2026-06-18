@@ -113,6 +113,7 @@ The wrapper also accepts:
 ```text
 --benchmark smoke
 --benchmark both
+--benchmark linear_pcr_soa_layout_focus
 --benchmark e2e_full
 --branch bench-colab
 --repo-url https://github.com/louisreg/AxonScope.git

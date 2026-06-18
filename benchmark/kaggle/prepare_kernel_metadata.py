@@ -38,6 +38,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "linear",
             "linear_assoc_focus",
             "linear_pcr_soa_trace",
+            "linear_pcr_soa_layout_focus",
             "linear_pcr_soa_nomask_focus",
             "linear_pallas_focus",
             "e2e",

@@ -53,6 +53,39 @@ def test_planned_cases_allow_benchmark_only_padded_pcr_soa():
     assert resolve_kernel_solver("pcr_soa_padded", batch_size=512) == "pcr_soa_padded"
 
 
+def test_planned_cases_allow_benchmark_only_auto_layout_pcr_soa():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_layout_auto"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pcr_soa_layout_auto"
+    assert cases[0].resolved_solver == "pcr_soa"
+    assert cases[0].kernel_solver == "pcr_soa_layout_auto"
+    assert (
+        resolve_kernel_solver("pcr_soa_layout_auto", batch_size=512)
+        == "pcr_soa_layout_auto"
+    )
+
+
+def test_planned_cases_allow_benchmark_only_ref_pcr_soa():
+    cases = planned_cases(
+        batch_sizes=[512],
+        nx_values=[51],
+        dtypes=["float32"],
+        solvers=["pcr_soa_ref"],
+        platform="gpu",
+    )
+
+    assert cases[0].requested_solver == "pcr_soa_ref"
+    assert cases[0].resolved_solver == "pcr_soa"
+    assert cases[0].kernel_solver == "pcr_soa_ref"
+    assert resolve_kernel_solver("pcr_soa_ref", batch_size=512) == "pcr_soa_ref"
+
+
 def test_planned_cases_allow_benchmark_only_transposed_pcr_soa():
     cases = planned_cases(
         batch_sizes=[512],

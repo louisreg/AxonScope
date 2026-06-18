@@ -55,6 +55,7 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_ref,
     solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_scalar_batched,
@@ -80,6 +81,8 @@ SOLVER_CHOICES = (
     "pcr_soa_shift",
     "pcr_soa_transposed",
     "pcr_soa_padded",
+    "pcr_soa_layout_auto",
+    "pcr_soa_ref",
     "pcr_adaptive",
     "assoc_backward",
     "assoc_transfer_dense",
@@ -109,6 +112,8 @@ KERNEL_SOLVERS = (
     "pcr_soa_shift",
     "pcr_soa_transposed",
     "pcr_soa_padded",
+    "pcr_soa_layout_auto",
+    "pcr_soa_ref",
     "assoc_backward",
     "assoc_transfer_dense",
     "pallas_pcr_128",
@@ -141,6 +146,8 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "pcr_soa_shift": "pcr_soa",
     "pcr_soa_transposed": "pcr_soa",
     "pcr_soa_padded": "pcr_soa",
+    "pcr_soa_layout_auto": "pcr_soa",
+    "pcr_soa_ref": "pcr_soa",
     "split_jacobi_4": "split_iterative",
     "split_jacobi_8": "split_iterative",
     "split_jacobi4_gs1": "split_iterative",
@@ -419,6 +426,8 @@ def run_case(
     compile_start = time.perf_counter()
     compiled = solve.lower(*args).compile()
     compile_seconds = time.perf_counter() - compile_start
+    input_layouts = _compiled_layout_summary(compiled, "input_formats")
+    output_layouts = _compiled_layout_summary(compiled, "output_formats")
 
     first_start = time.perf_counter()
     first_output = _block_until_ready(compiled(*args))
@@ -479,6 +488,8 @@ def run_case(
         "max_block_residual_norm": float(np.max(residual_np)),
         "median_block_residual_norm": float(np.median(residual_np)),
         "trace_dir": None if trace_dir is None else str(trace_dir),
+        "compiled_input_layouts": input_layouts,
+        "compiled_output_layouts": output_layouts,
     }
 
 
@@ -715,6 +726,8 @@ def _make_batched_solver(kernel_solver: str):
         "pcr_soa_shift",
         "pcr_soa_transposed",
         "pcr_soa_padded",
+        "pcr_soa_layout_auto",
+        "pcr_soa_ref",
     }:
         solve_pcr_soa_batch = {
             "pcr_soa": solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -734,9 +747,20 @@ def _make_batched_solver(kernel_solver: str):
             "pcr_soa_shift": solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
             "pcr_soa_transposed": solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
             "pcr_soa_padded": solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+            "pcr_soa_layout_auto": solve_block_tridiagonal_2x2_pcr_soa_batched,
+            "pcr_soa_ref": solve_block_tridiagonal_2x2_pcr_soa_batched_ref,
         }[kernel_solver]
 
-        @jax.jit
+        jit_kwargs: dict[str, Any] = {}
+        if kernel_solver == "pcr_soa_layout_auto":
+            from jax.experimental.layout import Format, Layout
+
+            jit_kwargs = {
+                "in_shardings": Format(Layout.AUTO),
+                "out_shardings": Format(Layout.AUTO),
+            }
+
+        @jax.jit(**jit_kwargs)
         def solve_batch_native(
             a00,
             a01,
@@ -824,6 +848,28 @@ def _make_run_root(out_dir: Path, *, prefix: str | None) -> Path:
     return root
 
 
+def _compiled_layout_summary(compiled: Any, attr_name: str) -> str | None:
+    formats = getattr(compiled, attr_name, None)
+    if formats is None:
+        return None
+    return json.dumps(_layout_major_to_minor_tree(formats), sort_keys=True)
+
+
+def _layout_major_to_minor_tree(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [_layout_major_to_minor_tree(item) for item in value]
+    if isinstance(value, list):
+        return [_layout_major_to_minor_tree(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _layout_major_to_minor_tree(item) for key, item in value.items()}
+
+    layout = getattr(value, "layout", None)
+    major_to_minor = getattr(layout, "major_to_minor", None)
+    if major_to_minor is None:
+        return None
+    return [int(dim) for dim in major_to_minor]
+
+
 def _write_outputs(
     run_root: Path,
     *,
@@ -853,6 +899,8 @@ def _write_outputs(
         "max_block_residual_norm",
         "median_block_residual_norm",
         "trace_dir",
+        "compiled_input_layouts",
+        "compiled_output_layouts",
     )
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)

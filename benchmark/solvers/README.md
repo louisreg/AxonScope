@@ -114,6 +114,19 @@ notebook spike.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
+`pcr_soa_layout_auto` is a benchmark-only Phase 1C layout-control candidate
+from the JAX Advanced Guides pass. It runs the same batch-native SoA PCR solver
+as `pcr_soa`, but compiles the benchmark wrapper with
+`jax.experimental.layout.Format(Layout.AUTO)` for inputs and outputs so the GPU
+compiler can choose device-local array layouts. It also records compact
+`major_to_minor` layout summaries in the benchmark CSV/JSON output. It is not
+a public solver value and should only be considered for routing after P100
+evidence.
+`pcr_soa_ref` is a benchmark-only Phase 1C memory-control candidate from the
+same JAX Advanced Guides pass. It keeps the exact SoA PCR algebra but stores
+the stage work arrays in internal `jax.new_ref` buffers, testing whether XLA can
+shorten live ranges or reuse buffers more effectively on GPU. It is not a
+public solver value.
 `split_jacobi_4`, `split_jacobi4_gs1`, `split_gs_2`, `split_gs_3`,
 `split_gs_4`, `split_jacobi_8`, `split_gs_8`, and `split_richardson_4` are
 historical benchmark-only Phase 1.5 candidates. The 2026-06-17 E2E agreement
@@ -175,6 +188,18 @@ Run the focused Phase 1C PCR_SOA no-mask candidate on Kaggle:
 python benchmark/kaggle/run_kernel.py \
   --username louisregnacq \
   --benchmark linear_pcr_soa_nomask_focus \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200 \
+  --max-status-fetch-failures 20
+```
+
+Run the focused JAX `Layout.AUTO`/`Ref` candidates on Kaggle:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --benchmark linear_pcr_soa_layout_focus \
   --machine-shape NvidiaTeslaP100 \
   --poll-interval 60 \
   --wait-timeout 7200 \
