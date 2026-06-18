@@ -174,6 +174,18 @@ Work should start here unless the user asks otherwise.
   pure Triton path. Decision: do not use Python/DLPack bridge as production
   routing inside the time loop; pursue deeper integration or a coarser E2E
   boundary if continuing Triton.
+- [ ] Phase 7.6.3 jax-triton integration gate: run Kaggle T4
+  `linear_jax_triton_focus`. This uses benchmark-only
+  `jax_triton_block_thomas` via `jax-ml/jax-triton`, with two Triton custom
+  calls inside `jax.jit`, and compares against JAX `pcr_soa` for
+  `B=1024/2048/4096`, `Nx=51/96/128`. Treat `Nx=51/96` as the optimized
+  regime and `Nx=128` as a guard, not as a hard solver boundary. If this keeps
+  most of the pure Triton speedup, prefer this bridge over lower-level CUDA FFI.
+- [ ] Phase 7.6.3 CUDA FFI fallback gate: run Kaggle T4
+  `linear_cuda_ffi_focus` only if `linear_jax_triton_focus` fails to install/
+  compile or loses most of the pure Triton gain. This uses benchmark-only
+  `cuda_ffi_block_thomas`, a JAX FFI custom call launching a simple CUDA
+  block-Thomas kernel on the XLA CUDA stream.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral

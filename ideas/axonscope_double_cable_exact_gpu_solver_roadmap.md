@@ -11,6 +11,11 @@ Nt = many time steps
 main use cases = threshold, activation, recruitment, conduction validation
 ```
 
+`Nx=30-100` is the expected high-value regime to optimize first, not a hard
+solver capability limit. Experimental custom-kernel backends may specialize or
+bucket by `Nx` for performance, but public routing should keep a JAX exact
+fallback for shapes outside the optimized buckets.
+
 This roadmap focuses on rewriting the **linear solve** used inside each implicit double-cable time step. It does **not** replace the double-cable model with a pseudo-single-cable approximation.
 
 The scientific reason to keep an exact double-cable path is that recent work by Abdollahi & Prescott (2024) shows that axial, submyelin, transmyelin, and extramyelin current pathways materially affect conduction velocity, conduction reliability, energy efficiency, demyelination sensitivity, and ephaptic effects. In particular, extracellular boundary conditions change how much current reaches the next node versus how much leaks through myelin/extracellular pathways.
@@ -2591,6 +2596,58 @@ decision: the DLPack/Python bridge is correct but too expensive as a direct
           pursue a deeper integration path or move the boundary to a much
           coarser E2E/chunk-level prototype so Python/DLPack overhead is
           amortized outside the per-step block solve.
+```
+
+## Phase 3B.3 — JAX-integrated custom-kernel bridge scouts
+
+Status on 2026-06-18: added two benchmark-only bridge candidates after the
+standalone Triton Thomas result and the failed DLPack bridge gate:
+
+```text
+benchmark/jax_triton_solver/bench_double_cable_jax_triton.py
+benchmark/cuda_ffi_solver/bench_double_cable_cuda_ffi.py
+```
+
+`jax_triton_block_thomas` uses `jax-ml/jax-triton` and calls two Triton kernels
+from inside `jax.jit`: forward block-Thomas produces the six work arrays, then
+backward substitution produces `(x0, x1)`. This is the most direct bridge to the
+standalone Triton implementation. It is dependency-scoped to the Kaggle preset
+`linear_jax_triton_focus`, which installs `jax-triton==0.3.1` only for that run.
+The official project README describes `jax_triton.triton_call` as the main API
+for applying Triton functions to JAX arrays, including inside `jax.jit`.
+
+`cuda_ffi_block_thomas` is a lower-level fallback using JAX FFI and a custom
+CUDA C++ kernel launched on the JAX/XLA CUDA stream. It currently uses a simple
+one-thread-per-fiber Thomas kernel with dynamic shared-memory scratch. This is
+not expected to be the final optimized CUDA kernel, but it tests whether a typed
+FFI bridge removes DLPack/Python overhead. The first target is correctness and
+ballpark performance, not final occupancy tuning.
+
+Kaggle presets:
+
+```text
+linear_jax_triton_focus:
+    baseline: JAX pcr_soa
+    candidate: jax_triton_block_thomas
+    B: 1024, 2048, 4096
+    Nx: 51, 96, 128
+
+linear_cuda_ffi_focus:
+    baseline: JAX pcr_soa
+    candidate: cuda_ffi_block_thomas
+    B: 1024, 2048, 4096
+    Nx: 51, 96, 128
+```
+
+Decision order:
+
+```text
+1. Run linear_jax_triton_focus first on T4.
+2. If jax-triton installs/compiles and keeps most of the pure Triton speedup,
+   prefer it over hand-written FFI for near-term integration.
+3. If jax-triton fails or loses the speedup, run linear_cuda_ffi_focus.
+4. If both bridges lose most of the pure Triton gain, stop custom bridge work
+   for now and return to JAX-native solver work or a coarser E2E boundary.
 ```
 
 Use static buckets:

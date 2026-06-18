@@ -108,6 +108,20 @@ def test_kaggle_gpu_jax_extra_matches_installed_jax_version(monkeypatch):
     ]
 
 
+def test_kaggle_jax_triton_install_is_scoped(monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+    monkeypatch.setattr(kaggle_bench, "JAX_TRITON_PACKAGE", "jax-triton==0.3.1")
+
+    kaggle_bench.install_jax_triton()
+
+    assert commands == [[sys.executable, "-m", "pip", "install", "jax-triton==0.3.1"]]
+
+
 def test_kaggle_smoke_commands_are_small(tmp_path, monkeypatch):
     commands = []
 
@@ -395,10 +409,67 @@ def test_kaggle_linear_triton_focus_runs_jax_baseline_and_triton(tmp_path, monke
     ]
 
 
+def test_kaggle_linear_jax_triton_focus_runs_jax_baseline_and_jax_triton(
+    tmp_path, monkeypatch
+):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_linear_jax_triton_focus(tmp_path)
+
+    baseline, jax_triton = commands
+    assert baseline[baseline.index("--prefix") + 1] == "linear_jax_triton_jax_baseline"
+    assert baseline[baseline.index("--batch-sizes") + 1 : baseline.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert baseline[baseline.index("--nx") + 1 : baseline.index("--dtypes")] == [
+        "51",
+        "96",
+        "128",
+    ]
+    solvers_start = baseline.index("--solvers") + 1
+    solvers_end = baseline.index("--warmups")
+    assert baseline[solvers_start:solvers_end] == ["pcr_soa"]
+
+    assert jax_triton[1] == "benchmark/jax_triton_solver/bench_double_cable_jax_triton.py"
+    assert jax_triton[jax_triton.index("--prefix") + 1] == "linear_jax_triton_focus"
+    assert jax_triton[jax_triton.index("--batch-sizes") + 1 : jax_triton.index("--nx")] == [
+        "1024",
+        "2048",
+        "4096",
+    ]
+    assert jax_triton[jax_triton.index("--nx") + 1 : jax_triton.index("--dtypes")] == [
+        "51",
+        "96",
+        "128",
+    ]
+    solvers_start = jax_triton.index("--solvers") + 1
+    solvers_end = jax_triton.index("--warmups")
+    assert jax_triton[solvers_start:solvers_end] == ["jax_triton_block_thomas"]
+
+
 def test_kaggle_runner_accepts_linear_triton_focus_choice():
     args = parse_args(["--username", "owner", "--benchmark", "linear_triton_focus"])
 
     assert args.benchmark == "linear_triton_focus"
+
+
+def test_kaggle_runner_accepts_linear_jax_triton_focus_choice():
+    args = parse_args(["--username", "owner", "--benchmark", "linear_jax_triton_focus"])
+
+    assert args.benchmark == "linear_jax_triton_focus"
+
+
+def test_kaggle_runner_accepts_linear_cuda_ffi_focus_choice():
+    args = parse_args(["--username", "owner", "--benchmark", "linear_cuda_ffi_focus"])
+
+    assert args.benchmark == "linear_cuda_ffi_focus"
 
 
 def test_kaggle_checkout_stays_out_of_persisted_working_dir():
