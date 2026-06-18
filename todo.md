@@ -144,12 +144,24 @@ Work should start here unless the user asks otherwise.
   candidate, but the next gate is integration cost: avoid CPU copies and
   decide whether to expose it through a JAX custom-call path, DLPack bridge,
   or a narrower benchmark-only E2E prototype before any public routing.
-- [ ] Phase 7.6.3 Triton PCR_SOA quick scout: run updated
+- [x] Phase 7.6.3 Triton PCR_SOA quick scout: run updated
   `linear_triton_focus`, now comparing JAX `pcr_soa`,
   `triton_block_thomas`, and the new benchmark-only `triton_pcr_soa`
-  global-memory PCR prototype. Decision rule: if `triton_pcr_soa` is not
-  close to or faster than `triton_block_thomas`, focus Triton work on the
-  block-Thomas integration path instead of tuning PCR kernels.
+  global-memory PCR prototype. Kaggle T4 run
+  `20260618_210243_linear_triton_focus_NvidiaTeslaT4` completed. Result:
+  `triton_pcr_soa` is numerically clean and faster than JAX `pcr_soa`
+  (`1.619x` geomean speedup), but it is still slower than
+  `triton_block_thomas` in all focused cases (`1.697x` geomean runtime,
+  range `1.521x-2.364x`). Decision: keep `triton_pcr_soa` benchmark-only/
+  standby and focus Triton work on the block-Thomas integration path.
+- [ ] Phase 7.6.3 Triton block-Thomas integration gate: benchmark the new
+  experimental `triton_block_thomas_jax_bridge` path. It accepts eager JAX
+  arrays, converts them to Torch through DLPack, runs the same Triton
+  block-Thomas kernels, and converts outputs back to JAX. This is not
+  `jax.jit`-compatible and must not be public routing yet; it is an overhead
+  measurement. Updated `linear_triton_focus` now runs JAX `pcr_soa`,
+  pure Torch/Triton `triton_block_thomas`, and
+  `triton_block_thomas_jax_bridge`.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral
@@ -898,6 +910,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | JAX layout/ref PCR_SOA spike | Added benchmark-only `pcr_soa_layout_auto` and `pcr_soa_ref` from the JAX Advanced Guides pass. They keep the exact `pcr_soa` solver algebra; `layout_auto` asks XLA for automatic device-local layouts and records inferred `major_to_minor` layouts, while `ref` uses internal `jax.new_ref` stage work buffers. Next evidence gate: Kaggle P100 `linear_pcr_soa_layout_focus`. |
 | 2026-06-18 | Kaggle JAX layout/ref PCR_SOA result | P100 run `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100` completed. `pcr_soa_layout_auto` was not useful overall (`2/6` wins, `1.021x` geomean runtime vs `pcr_soa`) and `pcr_soa_ref` was slower in all cases (`1.033x` geomean runtime). Layout summaries were identical to baseline (`[0, 1]` inputs, `[0, 1, 2]` output), so close this line as diagnostic and do not route either candidate. |
 | 2026-06-18 | Triton block-Thomas scout result | T4 run `20260618_205135_linear_triton_focus_NvidiaTeslaT4` completed. Standalone exact `triton_block_thomas` beat JAX `pcr_soa` on every focused case (`B=1024/2048/4096`, `Nx=51/96`, `float32`): `2.684x` geomean speedup, `2.199x-2.892x` range, max dense64-smoke error about `4.0e-08`, max block residual about `3.6e-07`. Keep Triton alive as the first custom-kernel candidate with clear solver-only speedup; next risk is JAX/E2E integration overhead. |
+| 2026-06-18 | Triton PCR_SOA scout result | T4 run `20260618_210243_linear_triton_focus_NvidiaTeslaT4` completed. `triton_pcr_soa` was correct and faster than JAX `pcr_soa` (`1.619x` geomean speedup), but slower than `triton_block_thomas` in every focused case (`1.697x` geomean runtime, `1.521x-2.364x` range). Close PCR_SOA tuning for now; concentrate on block-Thomas integration. |
 
 ## Completed Roadmap Archive
 

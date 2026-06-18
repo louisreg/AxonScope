@@ -415,7 +415,7 @@ def run_linear_triton_focus(out_dir: pathlib.Path) -> None:
         "float32",
         "--solvers",
         "triton_block_thomas",
-        "triton_pcr_soa",
+        "triton_block_thomas_jax_bridge",
         "--warmups",
         "1",
         "--repeats",

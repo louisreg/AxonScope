@@ -18,9 +18,17 @@ The second candidate is a quick exact PCR_SOA-style Triton scout:
 - same compact double-cable inputs and same residual/reference checks;
 - intentionally not tuned until it shows a clear signal.
 
+The current integration candidate is `triton_block_thomas_jax_bridge`:
+
+- accepts eager JAX arrays;
+- converts inputs to Torch via DLPack;
+- launches the same Triton block-Thomas kernels;
+- converts outputs back to JAX via DLPack;
+- cannot be called from inside `jax.jit`.
+
 The point is deliberately modest: find out whether a small hand-written Triton
-kernel is even in the right performance ballpark. If it does not clearly beat
-the JAX `pcr_soa` baseline on the same GPU, close the Triton line.
+kernel is even in the right performance ballpark, then measure whether the
+JAX/Triton bridge preserves enough of that gain to justify deeper integration.
 
 Run locally on a CUDA machine with PyTorch and Triton:
 
@@ -28,7 +36,7 @@ Run locally on a CUDA machine with PyTorch and Triton:
 python benchmark/triton_solver/bench_double_cable_triton.py \
   --batch-sizes 1024 2048 4096 \
   --nx 51 96 \
-  --solvers triton_block_thomas triton_pcr_soa \
+  --solvers triton_block_thomas triton_block_thomas_jax_bridge \
   --repeats 5
 ```
 

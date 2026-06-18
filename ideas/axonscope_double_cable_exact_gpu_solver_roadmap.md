@@ -2482,7 +2482,7 @@ PCR_SOA quick scout added before committing to Thomas-only Triton work:
 
 ```text
 candidate: triton_pcr_soa
-status: implemented benchmark-only, awaiting Kaggle timing
+status: completed benchmark-only on Kaggle T4
 implementation: global-memory SoA PCR with init/stage/final Triton kernels
 stage count: ceil(log2(Nx)), one kernel launch per stride
 purpose: answer whether a Triton PCR_SOA-style implementation is immediately
@@ -2490,10 +2490,55 @@ purpose: answer whether a Triton PCR_SOA-style implementation is immediately
 expected risk: more launches and much larger global-memory work arrays than
                block Thomas; useful only if parallelism across Nx offsets that
                overhead on T4/P100-like GPUs.
-decision rule: if triton_pcr_soa is not close to or faster than
-               triton_block_thomas on the same `linear_triton_focus` cases,
-               focus Triton work on block-Thomas integration rather than PCR
-               kernel tuning.
+
+run: benchmark/results/kaggle/20260618_210243_linear_triton_focus_NvidiaTeslaT4
+status: completed
+gpu: 2x Tesla T4 provisioned by Kaggle; benchmark used default visible device
+jax baseline: pcr_soa, JAX 0.10.2 CUDA backend
+
+B=1024, Nx=51: pcr_soa 0.534 ms, triton_block_thomas 0.209 ms, triton_pcr_soa 0.494 ms
+B=1024, Nx=96: pcr_soa 0.903 ms, triton_block_thomas 0.351 ms, triton_pcr_soa 0.604 ms
+B=2048, Nx=51: pcr_soa 1.035 ms, triton_block_thomas 0.369 ms, triton_pcr_soa 0.561 ms
+B=2048, Nx=96: pcr_soa 1.833 ms, triton_block_thomas 0.621 ms, triton_pcr_soa 0.970 ms
+B=4096, Nx=51: pcr_soa 1.794 ms, triton_block_thomas 0.624 ms, triton_pcr_soa 0.949 ms
+B=4096, Nx=96: pcr_soa 3.091 ms, triton_block_thomas 1.127 ms, triton_pcr_soa 1.828 ms
+
+triton_block_thomas geomean speedup vs JAX pcr_soa: 2.747x
+triton_pcr_soa geomean speedup vs JAX pcr_soa: 1.619x
+triton_pcr_soa runtime vs triton_block_thomas: 1.697x geomean slower
+triton_pcr_soa runtime range vs triton_block_thomas: 1.521x-2.364x slower
+triton_pcr_soa max dense64-smoke abs error: ~7.62e-08
+triton_pcr_soa max block residual norm: ~5.79e-07
+
+decision: keep triton_pcr_soa benchmark-only/standby. It proves that Triton can
+          beat JAX pcr_soa for the PCR algebra too, but it is not competitive
+          with the simpler block-Thomas Triton kernel on the focused full-batch
+          cases. Focus Triton work on block-Thomas integration rather than PCR
+          kernel tuning.
+```
+
+Block-Thomas integration gate added after the PCR_SOA scout:
+
+```text
+candidate: triton_block_thomas_jax_bridge
+status: implemented experimental bridge, awaiting Kaggle timing
+implementation:
+  - accepts eager JAX arrays
+  - converts inputs to Torch tensors through DLPack
+  - runs the same exact Triton block-Thomas kernels
+  - converts outputs back to JAX through DLPack
+scope: benchmark/integration measurement only; not usable inside jax.jit
+      and not public solver routing.
+
+Updated `linear_triton_focus` now compares:
+  1. JAX pcr_soa baseline
+  2. pure Torch/Triton triton_block_thomas
+  3. eager JAX -> DLPack/Torch -> Triton -> DLPack/JAX bridge
+
+decision rule: if the bridge preserves most of the pure Triton speedup, build
+               a narrow E2E prototype around this data boundary. If the bridge
+               loses too much time, skip DLPack/Python routing and investigate
+               a deeper integration path before touching production dispatch.
 ```
 
 Use static buckets:

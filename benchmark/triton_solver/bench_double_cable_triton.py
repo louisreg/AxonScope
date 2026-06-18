@@ -39,7 +39,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--solvers",
         nargs="+",
-        choices=("triton_block_thomas", "triton_pcr_soa"),
+        choices=(
+            "triton_block_thomas",
+            "triton_block_thomas_jax_bridge",
+            "triton_pcr_soa",
+        ),
         default=["triton_block_thomas"],
     )
     parser.add_argument("--warmups", type=int, default=1)
@@ -105,6 +109,9 @@ def dependency_skip_reason() -> str | None:
 
 
 def run_case(case: TritonCase, *, warmups: int, repeats: int) -> dict[str, Any]:
+    if case.solver == "triton_block_thomas_jax_bridge":
+        return run_case_jax_bridge(case, warmups=warmups, repeats=repeats)
+
     import torch
 
     tensors = generate_system_torch(
@@ -154,6 +161,54 @@ def run_case(case: TritonCase, *, warmups: int, repeats: int) -> dict[str, Any]:
     }
 
 
+def run_case_jax_bridge(case: TritonCase, *, warmups: int, repeats: int) -> dict[str, Any]:
+    import jax
+
+    tensors = generate_system_jax(
+        batch_size=case.batch_size,
+        nx=case.nx,
+        dtype=case.dtype,
+    )
+
+    compile_start = time.perf_counter()
+    out0, out1 = solve_triton_block_thomas_jax_bridge(*tensors)
+    out0.block_until_ready()
+    out1.block_until_ready()
+    compile_ms = (time.perf_counter() - compile_start) * 1e3
+
+    for _ in range(warmups):
+        out0, out1 = solve_triton_block_thomas_jax_bridge(*tensors)
+        out0.block_until_ready()
+        out1.block_until_ready()
+
+    times_ms: list[float] = []
+    for _ in range(repeats):
+        start = time.perf_counter()
+        out0, out1 = solve_triton_block_thomas_jax_bridge(*tensors)
+        out0.block_until_ready()
+        out1.block_until_ready()
+        times_ms.append((time.perf_counter() - start) * 1e3)
+
+    max_residual, median_residual = residual_stats_jax(*tensors, out0, out1)
+    reference_error = dense_reference_error_jax(*tensors, out0, out1)
+    median_ms = float(statistics.median(times_ms))
+    node_solves = int(case.batch_size) * int(case.nx)
+    return {
+        "solver": case.solver,
+        "batch_size": case.batch_size,
+        "nx": case.nx,
+        "dtype": case.dtype,
+        "compile_first_ms": compile_ms,
+        "steady_min_ms": min(times_ms),
+        "steady_median_ms": median_ms,
+        "steady_p95_ms": percentile(times_ms, 95.0),
+        "node_solves_per_s": node_solves / (median_ms * 1e-3),
+        "max_abs_error_vs_dense64_smoke": reference_error,
+        "max_block_residual_norm": max_residual,
+        "median_block_residual_norm": median_residual,
+    }
+
+
 def generate_system_torch(*, batch_size: int, nx: int, dtype: str, device):
     import torch
 
@@ -184,12 +239,68 @@ def generate_system_torch(*, batch_size: int, nx: int, dtype: str, device):
     )
 
 
+def generate_system_jax(*, batch_size: int, nx: int, dtype: str):
+    import jax.numpy as jnp
+
+    jax_dtype = jnp.float32 if dtype == "float32" else None
+    if jax_dtype is None:
+        raise ValueError(f"unsupported dtype: {dtype!r}.")
+    c = lambda value: jnp.asarray(value, dtype=jax_dtype)
+
+    batch = jnp.arange(batch_size, dtype=jax_dtype)[:, None]
+    x = jnp.arange(nx, dtype=jax_dtype)[None, :]
+    edge = jnp.arange(nx - 1, dtype=jax_dtype)[None, :]
+
+    phase = c(0.17) * x + c(0.013) * batch
+    a00 = (
+        c(4.0)
+        + c(0.04) * jnp.remainder(x, c(5.0))
+        + c(0.0007) * jnp.remainder(batch, c(17.0))
+    )
+    a11 = (
+        c(5.0)
+        + c(0.03) * jnp.remainder(x, c(7.0))
+        + c(0.0005) * jnp.remainder(batch, c(19.0))
+    )
+    a01 = -c(0.42) - c(0.025) * jnp.sin(phase)
+    a10 = -c(0.36) + c(0.020) * jnp.cos(c(1.3) * phase)
+
+    edge_phase = c(0.11) * edge + c(0.019) * batch
+    off0 = -c(0.055) - c(0.008) * jnp.sin(edge_phase)
+    off1 = -c(0.040) - c(0.006) * jnp.cos(c(1.7) * edge_phase)
+
+    rhs0 = jnp.sin(c(0.07) * x + c(0.031) * batch)
+    rhs1 = jnp.cos(c(0.05) * x - c(0.023) * batch)
+
+    return tuple(
+        jnp.asarray(tensor, dtype=jax_dtype)
+        for tensor in (a00, a01, a10, a11, off0, off1, rhs0, rhs1)
+    )
+
+
 def solver_function(solver: str):
     if solver == "triton_block_thomas":
         return solve_triton_block_thomas
+    if solver == "triton_block_thomas_jax_bridge":
+        return solve_triton_block_thomas_jax_bridge
     if solver == "triton_pcr_soa":
         return solve_triton_pcr_soa
     raise ValueError(f"unsupported Triton solver: {solver!r}.")
+
+
+def solve_triton_block_thomas_jax_bridge(a00, a01, a10, a11, off0, off1, rhs0, rhs1):
+    from axonscope.solvers.triton_thomas import solve_block_tridiagonal_2x2_triton_thomas_jax
+
+    return solve_block_tridiagonal_2x2_triton_thomas_jax(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
 
 
 def solve_triton_block_thomas(a00, a01, a10, a11, off0, off1, rhs0, rhs1):
@@ -401,6 +512,23 @@ def residual_stats(a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1):
     return float(torch.max(norm).item()), float(torch.median(norm).item())
 
 
+def residual_stats_jax(a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1):
+    import jax
+    import jax.numpy as jnp
+
+    res0 = a00 * x0 + a01 * x1 - rhs0
+    res1 = a10 * x0 + a11 * x1 - rhs1
+    res0 = res0.at[:, 1:].add(off0 * x0[:, :-1])
+    res1 = res1.at[:, 1:].add(off1 * x1[:, :-1])
+    res0 = res0.at[:, :-1].add(off0 * x0[:, 1:])
+    res1 = res1.at[:, :-1].add(off1 * x1[:, 1:])
+    norm = jnp.maximum(jnp.abs(res0), jnp.abs(res1))
+    return (
+        float(jax.device_get(jnp.max(norm))),
+        float(jax.device_get(jnp.median(norm))),
+    )
+
+
 def dense_reference_error(a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1) -> float:
     import numpy as np
 
@@ -419,6 +547,44 @@ def dense_reference_error(a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1) ->
         x0,
         x1,
     )]
+    ha00, ha01, ha10, ha11, hoff0, hoff1, hrhs0, hrhs1, hx0, hx1 = host
+    for batch in range(batch_limit):
+        matrix = np.zeros((2 * nx, 2 * nx), dtype=np.float64)
+        rhs = np.empty((2 * nx,), dtype=np.float64)
+        for i in range(nx):
+            row0 = 2 * i
+            row1 = row0 + 1
+            matrix[row0, row0] = ha00[batch, i]
+            matrix[row0, row1] = ha01[batch, i]
+            matrix[row1, row0] = ha10[batch, i]
+            matrix[row1, row1] = ha11[batch, i]
+            rhs[row0] = hrhs0[batch, i]
+            rhs[row1] = hrhs1[batch, i]
+            if i > 0:
+                matrix[row0, row0 - 2] = hoff0[batch, i - 1]
+                matrix[row1, row1 - 2] = hoff1[batch, i - 1]
+            if i < nx - 1:
+                matrix[row0, row0 + 2] = hoff0[batch, i]
+                matrix[row1, row1 + 2] = hoff1[batch, i]
+        ref = np.linalg.solve(matrix, rhs)
+        got = np.empty_like(ref)
+        got[0::2] = hx0[batch]
+        got[1::2] = hx1[batch]
+        max_error = max(max_error, float(np.max(np.abs(got - ref))))
+    return max_error
+
+
+def dense_reference_error_jax(a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1) -> float:
+    import jax
+    import numpy as np
+
+    batch_limit = min(2, int(rhs0.shape[0]))
+    nx = int(rhs0.shape[1])
+    max_error = 0.0
+    host = [
+        np.asarray(jax.device_get(tensor[:batch_limit])).astype(np.float64)
+        for tensor in (a00, a01, a10, a11, off0, off1, rhs0, rhs1, x0, x1)
+    ]
     ha00, ha01, ha10, ha11, hoff0, hoff1, hrhs0, hrhs1, hx0, hx1 = host
     for batch in range(batch_limit):
         matrix = np.zeros((2 * nx, 2 * nx), dtype=np.float64)

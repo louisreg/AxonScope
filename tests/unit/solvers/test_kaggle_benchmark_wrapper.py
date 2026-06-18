@@ -391,7 +391,7 @@ def test_kaggle_linear_triton_focus_runs_jax_baseline_and_triton(tmp_path, monke
     solvers_end = triton.index("--warmups")
     assert triton[solvers_start:solvers_end] == [
         "triton_block_thomas",
-        "triton_pcr_soa",
+        "triton_block_thomas_jax_bridge",
     ]
 
 
