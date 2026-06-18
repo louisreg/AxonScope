@@ -154,7 +154,7 @@ Work should start here unless the user asks otherwise.
   `triton_block_thomas` in all focused cases (`1.697x` geomean runtime,
   range `1.521x-2.364x`). Decision: keep `triton_pcr_soa` benchmark-only/
   standby and focus Triton work on the block-Thomas integration path.
-- [ ] Phase 7.6.3 Triton block-Thomas integration gate: benchmark the new
+- [x] Phase 7.6.3 Triton block-Thomas integration gate: benchmark the new
   experimental `triton_block_thomas_jax_bridge` path. It accepts eager JAX
   arrays, converts them to Torch through DLPack, runs the same Triton
   block-Thomas kernels, and converts outputs back to JAX. This is not
@@ -166,7 +166,14 @@ Work should start here unless the user asks otherwise.
   Torch/Triton Thomas cases successfully, then failed before bridge timing
   because the new `src/axonscope/solvers/triton_thomas.py` module was not
   tracked in Git and therefore was absent from Kaggle's clone. Fix: track and
-  commit that module, then rerun.
+  commit that module, then rerun. Second T4 attempt
+  `20260618_214520_linear_triton_focus_NvidiaTeslaT4` completed. Result:
+  pure `triton_block_thomas` stayed strong (`2.673x` geomean speedup vs JAX
+  `pcr_soa`), but the eager JAX/DLPack/Torch bridge preserved only `1.060x`
+  geomean speedup, won `4/6` cases, and was `2.522x` geomean slower than the
+  pure Triton path. Decision: do not use Python/DLPack bridge as production
+  routing inside the time loop; pursue deeper integration or a coarser E2E
+  boundary if continuing Triton.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral

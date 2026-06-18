@@ -2561,6 +2561,38 @@ fix: track and commit `src/axonscope/solvers/triton_thomas.py`, then rerun the
      same `linear_triton_focus` preset.
 ```
 
+Second bridge attempt on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_214520_linear_triton_focus_NvidiaTeslaT4
+status: completed
+gpu: 2x Tesla T4 provisioned by Kaggle; benchmark used default visible device
+jax baseline: pcr_soa, JAX 0.10.2 CUDA backend
+
+B=1024, Nx=51: pcr_soa 0.507 ms, pure Triton 0.211 ms, JAX bridge 1.153 ms
+B=1024, Nx=96: pcr_soa 0.897 ms, pure Triton 0.346 ms, JAX bridge 1.028 ms
+B=2048, Nx=51: pcr_soa 0.992 ms, pure Triton 0.361 ms, JAX bridge 0.971 ms
+B=2048, Nx=96: pcr_soa 1.701 ms, pure Triton 0.610 ms, JAX bridge 1.195 ms
+B=4096, Nx=51: pcr_soa 1.720 ms, pure Triton 0.610 ms, JAX bridge 1.221 ms
+B=4096, Nx=96: pcr_soa 2.995 ms, pure Triton 1.105 ms, JAX bridge 1.663 ms
+
+pure Triton geomean speedup vs JAX pcr_soa: 2.673x
+JAX bridge geomean speedup vs JAX pcr_soa: 1.060x
+JAX bridge wins vs JAX pcr_soa: 4/6
+JAX bridge runtime vs pure Triton: 2.522x geomean slower
+JAX bridge runtime range vs pure Triton: 1.505x-5.475x slower
+JAX bridge max dense64-smoke abs error: ~4.99e-08
+JAX bridge max block residual norm: ~3.95e-07
+
+decision: the DLPack/Python bridge is correct but too expensive as a direct
+          production routing strategy inside the time loop. It only barely
+          beats JAX pcr_soa overall and regresses at the smaller focused cases.
+          Keep the bridge as an integration diagnostic. If Triton continues,
+          pursue a deeper integration path or move the boundary to a much
+          coarser E2E/chunk-level prototype so Python/DLPack overhead is
+          amortized outside the per-step block solve.
+```
+
 Use static buckets:
 
 ```text
