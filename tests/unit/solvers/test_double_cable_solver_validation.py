@@ -17,13 +17,17 @@ def test_validation_planned_cases_expand_dimensions():
         recordings=["center", "full"],
         iinj_modes=["none"],
         reference_solvers=["pcr_adaptive"],
-        candidate_solvers=["split_gs_3", "split_gs_4"],
+        candidate_solvers=["split_gs_3", "split_gs_4", "jax_triton_thomas"],
     )
 
-    assert len(cases) == 4
+    assert len(cases) == 6
     assert cases[0].duration_ms == 3 * 0.05
     assert {case.recording for case in cases} == {"center", "full"}
-    assert {case.candidate_solver for case in cases} == {"split_gs_3", "split_gs_4"}
+    assert {case.candidate_solver for case in cases} == {
+        "split_gs_3",
+        "split_gs_4",
+        "jax_triton_thomas",
+    }
 
 
 def test_validation_rejects_observer_only_recording():

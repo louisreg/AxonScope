@@ -20,6 +20,9 @@ from .common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
+from .jax_triton_thomas import (
+    solve_block_tridiagonal_2x2_jax_triton_thomas_batched,
+)
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .observer_runtime import (
     ObserverState,
@@ -48,6 +51,9 @@ class BatchKernelResult:
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 2048
 _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS = frozenset({"split_gs_3", "split_gs_4"})
+_DOUBLE_CABLE_BENCHMARK_ONLY_BATCH_NATIVE_SOLVERS = (
+    _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS | frozenset({"jax_triton_thomas"})
+)
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -65,7 +71,7 @@ def _use_batch_native_double_cable_pcr_soa_solver(
     *,
     batch_size: int,
 ) -> bool:
-    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS:
+    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_BATCH_NATIVE_SOLVERS:
         return True
     return solver == "pcr_soa" and int(batch_size) >= _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH
 
@@ -75,7 +81,7 @@ def _resolve_double_cable_run_block_solver(
     *,
     platform: str,
 ) -> str:
-    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_SPLIT_SOLVERS:
+    if solver in _DOUBLE_CABLE_BENCHMARK_ONLY_BATCH_NATIVE_SOLVERS:
         return solver
     return resolve_double_cable_block_solver(solver, platform=platform)
 
@@ -1546,6 +1552,17 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
 
         if double_cable_block_solver == "pcr_soa":
             return solve_block_tridiagonal_2x2_pcr_soa_batched(
+                a00,
+                a01,
+                a10,
+                a11,
+                off_i,
+                off_e,
+                rhs0,
+                rhs1,
+            )
+        if double_cable_block_solver == "jax_triton_thomas":
+            return solve_block_tridiagonal_2x2_jax_triton_thomas_batched(
                 a00,
                 a01,
                 a10,

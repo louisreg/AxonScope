@@ -50,7 +50,22 @@ def test_end_to_end_allows_split_benchmark_solvers_for_array_recording():
     assert resolve_e2e_solver("split_gs_4", platform="gpu") == "split_iterative"
 
 
-def test_end_to_end_rejects_split_benchmark_solvers_for_observer_only_recording():
+def test_end_to_end_allows_jax_triton_benchmark_solver_for_array_recording():
+    cases = planned_cases(
+        batch_sizes=[2],
+        nx_values=[51],
+        nt_values=[3],
+        dt_ms=0.05,
+        recordings=["center"],
+        iinj_modes=["none"],
+        solvers=["jax_triton_thomas"],
+    )
+
+    assert [case.requested_solver for case in cases] == ["jax_triton_thomas"]
+    assert resolve_e2e_solver("jax_triton_thomas", platform="gpu") == "jax_triton_thomas"
+
+
+def test_end_to_end_rejects_benchmark_solvers_for_observer_only_recording():
     with pytest.raises(ValueError, match="batch-native array kernel"):
         planned_cases(
             batch_sizes=[2],
@@ -79,7 +94,7 @@ def test_end_to_end_benchmark_dry_run(capsys, tmp_path):
             "--iinj-modes",
             "none",
             "--solvers",
-            "split_gs_3",
+            "jax_triton_thomas",
             "--out-dir",
             str(tmp_path),
             "--dry-run",
@@ -87,5 +102,5 @@ def test_end_to_end_benchmark_dry_run(capsys, tmp_path):
     )
 
     assert capsys.readouterr().out.splitlines() == [
-        "split_gs_3->split_iterative B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
+        "jax_triton_thomas->jax_triton_thomas B=2 targetNx=51 Nt=3 dt=0.05 recording=center iinj=none"
     ]

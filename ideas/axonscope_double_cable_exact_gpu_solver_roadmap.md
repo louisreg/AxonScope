@@ -2684,6 +2684,34 @@ decision: prefer jax-triton over lower-level CUDA FFI for the next integration
           Kaggle run.
 ```
 
+E2E integration status on 2026-06-18:
+
+```text
+implemented:
+    src/axonscope/solvers/jax_triton_thomas.py
+    benchmark-only DoubleCableBatchKernel override: jax_triton_thomas
+    Kaggle preset: e2e_jax_triton_focus
+
+scope:
+    real double-cable batch-native time-step loop
+    array recording only (center/full), not observer-only recording
+    no public BatchOptions or auto-routing change yet
+
+first E2E evidence gate:
+    benchmark e2e_jax_triton_focus on Kaggle T4
+    compare pcr_adaptive vs jax_triton_thomas
+    B = 512, 2048
+    Nx target = 51, 96
+    Nt = 500
+    recording = center
+    Iinj = none, dense_zero
+```
+
+Decision rule: only consider a public or `auto` route if this E2E run preserves
+a meaningful fraction of the solver-only speedup and a follow-up agreement run
+matches `pcr_adaptive` traces. If E2E is neutral or slower, keep the kernel as
+a solver-only diagnostic and return to JAX-native or coarser-boundary work.
+
 Use static buckets:
 
 ```text

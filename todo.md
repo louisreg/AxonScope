@@ -187,6 +187,14 @@ Work should start here unless the user asks otherwise.
   earlier pure Torch/Triton Thomas result on the overlapping 6 cases, the
   jax-triton bridge is still `1.425x` geomean slower, but it preserves enough
   speedup to become the preferred integration path for the next work item.
+- [ ] Phase 7.6.3 jax-triton E2E integration gate: benchmark-only
+  `jax_triton_thomas` is wired into the real double-cable batch-native
+  time-step loop through `src/axonscope/solvers/jax_triton_thomas.py`, without
+  adding a public `BatchOptions` value or changing `auto`. It requires
+  array-output recording (`center`/`full`) so the custom kernel is not wrapped
+  by observer-only `vmap`. Next run: Kaggle T4 `e2e_jax_triton_focus`
+  comparing `pcr_adaptive` vs `jax_triton_thomas` at `B=512/2048`,
+  target `Nx=51/96`, `Nt=500`, `Iinj=none/dense_zero`.
 - [ ] Phase 7.6.3 CUDA FFI fallback gate: keep Kaggle T4
   `linear_cuda_ffi_focus` in standby. Run it only if `jax-triton` becomes
   blocked in end-to-end integration or loses too much speed once wired into the

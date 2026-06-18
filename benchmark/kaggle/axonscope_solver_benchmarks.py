@@ -97,6 +97,8 @@ def main() -> None:
         run_linear_cuda_ffi_focus(out_dir)
     elif BENCHMARK == "e2e":
         run_e2e(out_dir, mode="standard")
+    elif BENCHMARK == "e2e_jax_triton_focus":
+        run_e2e_jax_triton_focus(out_dir)
     elif BENCHMARK == "e2e_full":
         run_e2e(out_dir, mode="full")
     elif BENCHMARK == "both":
@@ -109,7 +111,7 @@ def main() -> None:
             "linear_pcr_soa_layout_focus, linear_pcr_soa_nomask_focus, "
             "linear_pallas_focus, linear_triton_focus, linear_jax_triton_focus, "
             "linear_cuda_ffi_focus, "
-            "e2e, e2e_full, or both."
+            "e2e, e2e_jax_triton_focus, e2e_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -126,7 +128,7 @@ def setup_repo() -> None:
     run([sys.executable, "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
     if REQUIRE_GPU and JAX_CUDA_EXTRA:
         install_jax_gpu_extra()
-    if BENCHMARK == "linear_jax_triton_focus":
+    if BENCHMARK in {"linear_jax_triton_focus", "e2e_jax_triton_focus"}:
         install_jax_triton()
 
 
@@ -547,6 +549,41 @@ def run_linear_jax_triton_focus(out_dir: pathlib.Path) -> None:
         "5",
     ]
     run(jax_triton_command, cwd=CHECKOUT_DIR)
+
+
+def run_e2e_jax_triton_focus(out_dir: pathlib.Path) -> None:
+    command = [
+        sys.executable,
+        "benchmark/solvers/bench_double_cable_end_to_end.py",
+        "--out-dir",
+        str(out_dir),
+        "--prefix",
+        "e2e_jax_triton_focus",
+        "--batch-sizes",
+        "512",
+        "2048",
+        "--nx",
+        "51",
+        "96",
+        "--nt",
+        "500",
+        "--dt",
+        "0.01",
+        "--recordings",
+        "center",
+        "--iinj-modes",
+        "none",
+        "dense_zero",
+        "--solvers",
+        "pcr_adaptive",
+        "jax_triton_thomas",
+        "--warmups",
+        "1",
+        "--repeats",
+        "2",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_summary(out_dir / "e2e_jax_triton_focus" / "summary.csv", mode="e2e")
 
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:

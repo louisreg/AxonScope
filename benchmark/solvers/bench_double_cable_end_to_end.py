@@ -50,7 +50,7 @@ from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 
 DEFAULT_OUT_DIR = Path("benchmark/results/solvers")
 PUBLIC_SOLVER_CHOICES = ("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive")
-BENCHMARK_ONLY_SOLVER_CHOICES = ("split_gs_3", "split_gs_4")
+BENCHMARK_ONLY_SOLVER_CHOICES = ("split_gs_3", "split_gs_4", "jax_triton_thomas")
 SOLVER_CHOICES = PUBLIC_SOLVER_CHOICES + BENCHMARK_ONLY_SOLVER_CHOICES
 RECORDING_CHOICES = ("none", "center", "full")
 IINJ_CHOICES = ("none", "dense_zero", "nonzero")
@@ -116,7 +116,7 @@ def planned_cases(
                                 and recording == "none"
                             ):
                                 raise ValueError(
-                                    "split benchmark-only E2E solvers require "
+                                    "benchmark-only E2E solvers require "
                                     "recording='center' or 'full' so the "
                                     "batch-native array kernel is exercised."
                                 )
@@ -135,8 +135,10 @@ def planned_cases(
 
 
 def resolve_e2e_solver(solver: str, *, platform: str) -> str:
-    if solver in BENCHMARK_ONLY_SOLVER_CHOICES:
+    if solver.startswith("split_"):
         return "split_iterative"
+    if solver == "jax_triton_thomas":
+        return "jax_triton_thomas"
     return resolve_double_cable_block_solver(solver, platform=platform)
 
 

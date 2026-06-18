@@ -454,6 +454,38 @@ def test_kaggle_linear_jax_triton_focus_runs_jax_baseline_and_jax_triton(
     assert jax_triton[solvers_start:solvers_end] == ["jax_triton_block_thomas"]
 
 
+def test_kaggle_e2e_jax_triton_focus_runs_center_cases(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_e2e_jax_triton_focus(tmp_path)
+
+    (command,) = commands
+    assert command[1] == "benchmark/solvers/bench_double_cable_end_to_end.py"
+    assert command[command.index("--prefix") + 1] == "e2e_jax_triton_focus"
+    assert command[command.index("--batch-sizes") + 1 : command.index("--nx")] == [
+        "512",
+        "2048",
+    ]
+    assert command[command.index("--nx") + 1 : command.index("--nt")] == [
+        "51",
+        "96",
+    ]
+    assert command[command.index("--recordings") + 1 : command.index("--iinj-modes")] == [
+        "center",
+    ]
+    solvers_start = command.index("--solvers") + 1
+    solvers_end = command.index("--warmups")
+    assert command[solvers_start:solvers_end] == [
+        "pcr_adaptive",
+        "jax_triton_thomas",
+    ]
+
+
 def test_kaggle_runner_accepts_linear_triton_focus_choice():
     args = parse_args(["--username", "owner", "--benchmark", "linear_triton_focus"])
 
@@ -464,6 +496,12 @@ def test_kaggle_runner_accepts_linear_jax_triton_focus_choice():
     args = parse_args(["--username", "owner", "--benchmark", "linear_jax_triton_focus"])
 
     assert args.benchmark == "linear_jax_triton_focus"
+
+
+def test_kaggle_runner_accepts_e2e_jax_triton_focus_choice():
+    args = parse_args(["--username", "owner", "--benchmark", "e2e_jax_triton_focus"])
+
+    assert args.benchmark == "e2e_jax_triton_focus"
 
 
 def test_kaggle_runner_accepts_linear_cuda_ffi_focus_choice():

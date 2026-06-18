@@ -137,6 +137,11 @@ historical benchmark-only Phase 1.5 candidates. The 2026-06-17 E2E agreement
 smoke failed for the best split candidates, so split iterative approaches are
 abandoned for the current optimization pass and should not be included in new
 Kaggle runs except to reproduce old evidence.
+`jax_triton_thomas` is a benchmark-only Phase 2B custom-kernel bridge that
+runs the exact block-Thomas solve through `jax-triton` inside the real
+double-cable batch-native time loop. It is not a public solver value or an
+`auto` route; exercise it with array recording (`center` or `full`) so the
+custom kernel is not wrapped by observer-only `vmap`.
 
 Run the focused Phase 2A associative-backward comparison:
 
@@ -254,7 +259,7 @@ python benchmark/solvers/bench_double_cable_end_to_end.py \
   --dt 0.01 \
   --recordings center \
   --iinj-modes none \
-  --solvers pcr_adaptive split_gs_3 split_gs_4 \
+  --solvers pcr_adaptive jax_triton_thomas \
   --warmups 1 \
   --repeats 2
 ```

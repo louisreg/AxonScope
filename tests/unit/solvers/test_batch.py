@@ -30,6 +30,7 @@ from axonscope.solvers import (
     resolve_double_cable_block_solver,
 )
 from axonscope.solvers.batch_kernels import (
+    _resolve_double_cable_run_block_solver,
     _resolve_double_cable_kernel_block_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
@@ -110,6 +111,17 @@ def test_pcr_soa_batch_native_route_is_reserved_for_large_batches():
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=512)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=2048)
+
+
+def test_jax_triton_thomas_is_benchmark_only_batch_native_route():
+    assert _use_batch_native_double_cable_pcr_soa_solver(
+        "jax_triton_thomas",
+        batch_size=512,
+    )
+    assert (
+        _resolve_double_cable_run_block_solver("jax_triton_thomas", platform="gpu")
+        == "jax_triton_thomas"
+    )
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
