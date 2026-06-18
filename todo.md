@@ -200,11 +200,29 @@ Work should start here unless the user asks otherwise.
   `pcr_adaptive`, with `1.595x` geomean speedup and range
   `0.818x-2.632x`. Keep it as the leading custom-kernel candidate, but do
   not route publicly before agreement validation.
-- [ ] Phase 7.6.3 jax-triton agreement gate: run
+- [x] Phase 7.6.3 jax-triton agreement gate: run
   `validate_double_cable_solver_agreement.py` for `jax_triton_thomas` versus
   `pcr_adaptive` on a small held-out E2E matrix (`center` and ideally `full`,
-  `Iinj=none/dense_zero`). If it passes, run a broader E2E matrix before any
-  `auto` or public solver-option discussion.
+  `Iinj=none/dense_zero`). T4 run
+  `20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4` completed but
+  failed current strict thresholds (`0/16` pass). `actualNx=45` kept activation
+  identical with small trace errors (`max_abs ~0.041-0.190 mV`), while
+  `actualNx=89` showed large spike-timing trace deviations (`max_abs
+  ~82.7-102.6 mV`) and `2` extra activations versus `pcr_adaptive` at `B=512`.
+- [x] Phase 7.6.3 Thomas-reference diagnostic: T4 run
+  `20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4` compared
+  both `pcr_adaptive` and `jax_triton_thomas` against `thomas` at `B=512`.
+  It also failed current strict thresholds (`0/8` pass), but
+  `jax_triton_thomas` was closer than `pcr_adaptive` to Thomas on all reported
+  max_abs/RMS groups and preserved activation count at `actualNx=89`, while
+  `pcr_adaptive` missed `2` activations. Conclusion: no public route yet; the
+  current validation case is threshold-sensitive enough that public PCR also
+  diverges from Thomas under strict trace tolerances.
+- [ ] Phase 7.6.3 validation-protocol cleanup: add a cleaner agreement gate
+  that separates numerical solver error from threshold sensitivity. Prefer
+  held-out subthreshold/suprathreshold-margin cases and threshold/activation
+  outcome comparisons before using strict raw-trace tolerances as a routing
+  gate for `jax_triton_thomas`.
 - [ ] Phase 7.6.3 CUDA FFI fallback gate: keep Kaggle T4
   `linear_cuda_ffi_focus` in standby. Run it only if `jax-triton` becomes
   blocked in end-to-end integration or loses too much speed once wired into the
@@ -961,6 +979,8 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Triton block-Thomas scout result | T4 run `20260618_205135_linear_triton_focus_NvidiaTeslaT4` completed. Standalone exact `triton_block_thomas` beat JAX `pcr_soa` on every focused case (`B=1024/2048/4096`, `Nx=51/96`, `float32`): `2.684x` geomean speedup, `2.199x-2.892x` range, max dense64-smoke error about `4.0e-08`, max block residual about `3.6e-07`. Keep Triton alive as the first custom-kernel candidate with clear solver-only speedup; next risk is JAX/E2E integration overhead. |
 | 2026-06-18 | Triton PCR_SOA scout result | T4 run `20260618_210243_linear_triton_focus_NvidiaTeslaT4` completed. `triton_pcr_soa` was correct and faster than JAX `pcr_soa` (`1.619x` geomean speedup), but slower than `triton_block_thomas` in every focused case (`1.697x` geomean runtime, `1.521x-2.364x` range). Close PCR_SOA tuning for now; concentrate on block-Thomas integration. |
 | 2026-06-18 | JAX-Triton Thomas E2E result | T4 run `20260618_223213_e2e_jax_triton_focus_NvidiaTeslaT4` completed after commit `0c62543`. Benchmark-only `jax_triton_thomas` is wired into the real double-cable batch-native loop and won `7/8` kernel-median E2E cases versus `pcr_adaptive` (`1.595x` geomean speedup, `0.818x-2.632x` range). Keep it as the leading custom-kernel candidate, but require agreement validation before public routing. |
+| 2026-06-18 | JAX-Triton agreement vs PCR | T4 run `20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4` completed. `jax_triton_thomas` versus `pcr_adaptive` failed current strict trace thresholds in all `16` cases. `actualNx=45` kept activation agreement with small trace error; `actualNx=89` had large spike-timing deviations and `2` extra activations at `B=512`. No public routing. |
+| 2026-06-18 | JAX-Triton agreement vs Thomas | T4 run `20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4` completed. Both `pcr_adaptive` and `jax_triton_thomas` failed current strict thresholds versus Thomas, but `jax_triton_thomas` was closer on max_abs/RMS and preserved activation count at `actualNx=89` while `pcr_adaptive` missed `2` activations. Next step is validation-protocol cleanup, not routing. |
 
 ## Completed Roadmap Archive
 

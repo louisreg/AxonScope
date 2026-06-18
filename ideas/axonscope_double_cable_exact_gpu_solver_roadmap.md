@@ -2739,9 +2739,48 @@ kernel speedup range: 0.818x-2.632x
 
 Decision: keep `jax_triton_thomas` alive as the first custom-kernel candidate
 that preserved a meaningful E2E win inside the real time-step loop. Do not
-route publicly yet. Next gate is correctness/physiology agreement against
-`pcr_adaptive`; if that passes, run a broader E2E matrix before considering
-`auto` or any public solver option.
+route publicly yet.
+
+T4 agreement results on 2026-06-18:
+
+```text
+run 1: benchmark/results/kaggle/20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4
+reference: pcr_adaptive
+candidate: jax_triton_thomas
+matrix: B=128/512, targetNx=51/96, Nt=300, recording=center/full,
+        Iinj=none/dense_zero
+result: 0/16 passed current strict thresholds
+
+actualNx=45:
+    activation matched, no missed/extra activations
+    max_abs range: ~0.041-0.190 mV
+actualNx=89:
+    large trace deviations near spikes
+    max_abs range: ~82.7-102.6 mV
+    B=512 activation agreement: 0.996, with 2 extra activations vs pcr_adaptive
+
+run 2: benchmark/results/kaggle/20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4
+reference: thomas
+candidates: pcr_adaptive, jax_triton_thomas
+matrix: B=512, targetNx=51/96, Nt=300, recording=center/full, Iinj=none
+result: 0/8 passed current strict thresholds
+
+Against Thomas at actualNx=45:
+    jax_triton_thomas was closer than pcr_adaptive
+    max_abs: 0.024 mV for jax_triton_thomas vs 0.068-0.176 mV for pcr_adaptive
+Against Thomas at actualNx=89:
+    both candidates diverged around spike timing
+    jax_triton_thomas had lower RMS and preserved activation count
+    pcr_adaptive missed 2 activations; jax_triton_thomas missed/added 0
+```
+
+Decision: agreement is not validated, so no public routing and no `auto`
+change. The validation gate also shows the current threshold-sensitive E2E
+scenario is not a clean bitwise-style oracle: public `pcr_adaptive` diverges
+from Thomas under the same strict trace tolerances. Next validation work should
+separate numerical solver agreement from threshold-sensitivity by adding
+subthreshold/suprathreshold-margin cases or comparing threshold/activation
+outcomes before using these strict trace tolerances as a routing gate.
 
 Use static buckets:
 
