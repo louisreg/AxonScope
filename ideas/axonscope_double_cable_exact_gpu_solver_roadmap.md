@@ -2712,6 +2712,37 @@ a meaningful fraction of the solver-only speedup and a follow-up agreement run
 matches `pcr_adaptive` traces. If E2E is neutral or slower, keep the kernel as
 a solver-only diagnostic and return to JAX-native or coarser-boundary work.
 
+T4 E2E result on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_223213_e2e_jax_triton_focus_NvidiaTeslaT4
+status: COMPLETE
+jax version: 0.10.2 CUDA backend
+jax-triton: 0.3.1
+gpu: 2x Tesla T4 provisioned by Kaggle; benchmark used default visible device
+baseline: pcr_adaptive
+candidate: jax_triton_thomas
+
+B=512,  actualNx=45, Iinj=none:       pcr 63.008 ms, jt 77.052 ms, speedup 0.818x
+B=512,  actualNx=45, Iinj=dense_zero: pcr 79.610 ms, jt 41.050 ms, speedup 1.939x
+B=512,  actualNx=89, Iinj=none:       pcr 117.828 ms, jt 94.790 ms, speedup 1.243x
+B=512,  actualNx=89, Iinj=dense_zero: pcr 157.972 ms, jt 108.388 ms, speedup 1.457x
+B=2048, actualNx=45, Iinj=none:       pcr 207.564 ms, jt 143.397 ms, speedup 1.447x
+B=2048, actualNx=45, Iinj=dense_zero: pcr 276.919 ms, jt 143.473 ms, speedup 1.930x
+B=2048, actualNx=89, Iinj=none:       pcr 539.621 ms, jt 271.579 ms, speedup 1.987x
+B=2048, actualNx=89, Iinj=dense_zero: pcr 719.120 ms, jt 273.227 ms, speedup 2.632x
+
+kernel median geomean speedup: 1.595x
+kernel wins: 7/8
+kernel speedup range: 0.818x-2.632x
+```
+
+Decision: keep `jax_triton_thomas` alive as the first custom-kernel candidate
+that preserved a meaningful E2E win inside the real time-step loop. Do not
+route publicly yet. Next gate is correctness/physiology agreement against
+`pcr_adaptive`; if that passes, run a broader E2E matrix before considering
+`auto` or any public solver option.
+
 Use static buckets:
 
 ```text
