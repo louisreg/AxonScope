@@ -2448,6 +2448,54 @@ fix: add repo-root/src `sys.path` bootstrap, matching the other benchmark
 decision: rerun required; no Triton performance evidence yet.
 ```
 
+Second T4 attempt on 2026-06-18:
+
+```text
+run: benchmark/results/kaggle/20260618_205135_linear_triton_focus_NvidiaTeslaT4
+status: completed
+gpu: 2x Tesla T4 provisioned by Kaggle; benchmark used default visible device
+jax baseline: pcr_soa, JAX 0.10.2 CUDA backend
+candidate: standalone Triton exact block-Thomas, two kernels plus global scratch
+
+B=1024, Nx=51: pcr_soa 0.477 ms, triton_block_thomas 0.217 ms, speedup 2.199x
+B=1024, Nx=96: pcr_soa 0.920 ms, triton_block_thomas 0.338 ms, speedup 2.720x
+B=2048, Nx=51: pcr_soa 1.030 ms, triton_block_thomas 0.356 ms, speedup 2.892x
+B=2048, Nx=96: pcr_soa 1.719 ms, triton_block_thomas 0.627 ms, speedup 2.743x
+B=4096, Nx=51: pcr_soa 1.738 ms, triton_block_thomas 0.622 ms, speedup 2.795x
+B=4096, Nx=96: pcr_soa 3.112 ms, triton_block_thomas 1.104 ms, speedup 2.820x
+
+geomean speedup vs pcr_soa: 2.684x
+speedup range: 2.199x-2.892x
+max dense64-smoke abs error: ~3.97e-08
+max block residual norm: ~3.60e-07
+
+decision: keep Triton alive. This is the first custom-kernel candidate with a
+          clear solver-only win over JAX pcr_soa on the focused full-batch
+          linear systems. Do not route it publicly yet: this is a standalone
+          Torch/Triton benchmark, not a JAX-integrated solver. The next gate is
+          integration overhead and data ownership: a JAX custom-call path,
+          DLPack zero-copy bridge, or narrow E2E prototype must preserve most
+          of the solver-only gain without CPU copies.
+```
+
+PCR_SOA quick scout added before committing to Thomas-only Triton work:
+
+```text
+candidate: triton_pcr_soa
+status: implemented benchmark-only, awaiting Kaggle timing
+implementation: global-memory SoA PCR with init/stage/final Triton kernels
+stage count: ceil(log2(Nx)), one kernel launch per stride
+purpose: answer whether a Triton PCR_SOA-style implementation is immediately
+         competitive with triton_block_thomas before investing in integration.
+expected risk: more launches and much larger global-memory work arrays than
+               block Thomas; useful only if parallelism across Nx offsets that
+               overhead on T4/P100-like GPUs.
+decision rule: if triton_pcr_soa is not close to or faster than
+               triton_block_thomas on the same `linear_triton_focus` cases,
+               focus Triton work on block-Thomas integration rather than PCR
+               kernel tuning.
+```
+
 Use static buckets:
 
 ```text

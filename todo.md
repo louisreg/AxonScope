@@ -132,18 +132,24 @@ Work should start here unless the user asks otherwise.
   (`sm_75`) should not be used for CuTe DSL solver runs. Reopen this line only
   on L4/A100/H100-class runtimes, with the smoke as the first gate before any
   PCR stage kernel.
-- [ ] Phase 7.6.3 Triton spike: validate standalone exact
+- [x] Phase 7.6.3 Triton spike: validate standalone exact
   `triton_block_thomas` against the JAX `pcr_soa` baseline using Kaggle
   `linear_triton_focus`. This is intentionally a small two-kernel custom
   double-cable solve (forward/backward block Thomas, one Triton program per
-  fiber), not a full JAX integration. Decision rule: if it does not clearly
-  beat `pcr_soa` on the same GPU, close Triton and return to pure-JAX PCR_SOA
-  solver-body optimization. First T4 attempt
-  `20260618_204657_linear_triton_focus_NvidiaTeslaT4` ran the JAX `pcr_soa`
-  baseline successfully, then failed before Triton timing because
-  `bench_double_cable_triton.py` could not import `benchmark.triton_solver`
-  when executed directly from Kaggle's checkout. Added the repo-root `sys.path`
-  bootstrap used by the other benchmark scripts; rerun required.
+  fiber), not a full JAX integration. Kaggle T4 run
+  `20260618_205135_linear_triton_focus_NvidiaTeslaT4` was numerically clean
+  and beat JAX `pcr_soa` in all six focused cases: `2.684x` geomean speedup,
+  range `2.199x-2.892x`, with max dense64-smoke error about `4.0e-08` and
+  max block residual about `3.6e-07`. This is now a real custom-kernel
+  candidate, but the next gate is integration cost: avoid CPU copies and
+  decide whether to expose it through a JAX custom-call path, DLPack bridge,
+  or a narrower benchmark-only E2E prototype before any public routing.
+- [ ] Phase 7.6.3 Triton PCR_SOA quick scout: run updated
+  `linear_triton_focus`, now comparing JAX `pcr_soa`,
+  `triton_block_thomas`, and the new benchmark-only `triton_pcr_soa`
+  global-memory PCR prototype. Decision rule: if `triton_pcr_soa` is not
+  close to or faster than `triton_block_thomas`, focus Triton work on the
+  block-Thomas integration path instead of tuning PCR kernels.
 - [x] Run Kaggle P100 `linear_pcr_soa_nomask_focus` to validate the
   benchmark-only `pcr_soa_nomask` and `pcr_soa_shift` candidates against
   `pcr_soa` on GPU. Result: `pcr_soa_nomask` was effectively neutral
@@ -891,6 +897,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Pallas T4 current-stack closure | Kaggle T4 run `20260618_200242_linear_pallas_focus_NvidiaTeslaT4` failed during current JAX `0.10.x` Mosaic lowering with `nvvm.cp.async.bulk.wait_group` unsupported on `sm_75`. The user notebook `Copy of Pallas on GPU Demo.ipynb` does run on T4, but it uses old JAX `0.4.16.dev20230831` plus `jax_triton`/`triton-nightly` and lowers to Triton IR (`tt.func`). Decision: no more Kaggle P100/T4 Mosaic-Pallas runs; only revisit Pallas on Hopper+ or as a separate legacy Triton/Pallas notebook spike. |
 | 2026-06-18 | JAX layout/ref PCR_SOA spike | Added benchmark-only `pcr_soa_layout_auto` and `pcr_soa_ref` from the JAX Advanced Guides pass. They keep the exact `pcr_soa` solver algebra; `layout_auto` asks XLA for automatic device-local layouts and records inferred `major_to_minor` layouts, while `ref` uses internal `jax.new_ref` stage work buffers. Next evidence gate: Kaggle P100 `linear_pcr_soa_layout_focus`. |
 | 2026-06-18 | Kaggle JAX layout/ref PCR_SOA result | P100 run `20260618_202917_linear_pcr_soa_layout_focus_NvidiaTeslaP100` completed. `pcr_soa_layout_auto` was not useful overall (`2/6` wins, `1.021x` geomean runtime vs `pcr_soa`) and `pcr_soa_ref` was slower in all cases (`1.033x` geomean runtime). Layout summaries were identical to baseline (`[0, 1]` inputs, `[0, 1, 2]` output), so close this line as diagnostic and do not route either candidate. |
+| 2026-06-18 | Triton block-Thomas scout result | T4 run `20260618_205135_linear_triton_focus_NvidiaTeslaT4` completed. Standalone exact `triton_block_thomas` beat JAX `pcr_soa` on every focused case (`B=1024/2048/4096`, `Nx=51/96`, `float32`): `2.684x` geomean speedup, `2.199x-2.892x` range, max dense64-smoke error about `4.0e-08`, max block residual about `3.6e-07`. Keep Triton alive as the first custom-kernel candidate with clear solver-only speedup; next risk is JAX/E2E integration overhead. |
 
 ## Completed Roadmap Archive
 

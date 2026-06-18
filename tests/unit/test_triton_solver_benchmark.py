@@ -7,8 +7,9 @@ from benchmark.triton_solver.bench_double_cable_triton import (
 
 
 def test_triton_case_label_fields():
-    case = TritonCase(batch_size=1024, nx=51, dtype="float32")
+    case = TritonCase(solver="triton_block_thomas", batch_size=1024, nx=51, dtype="float32")
 
+    assert case.solver == "triton_block_thomas"
     assert case.batch_size == 1024
     assert case.nx == 51
     assert case.dtype == "float32"

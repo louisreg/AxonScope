@@ -387,6 +387,12 @@ def test_kaggle_linear_triton_focus_runs_jax_baseline_and_triton(tmp_path, monke
         "51",
         "96",
     ]
+    solvers_start = triton.index("--solvers") + 1
+    solvers_end = triton.index("--warmups")
+    assert triton[solvers_start:solvers_end] == [
+        "triton_block_thomas",
+        "triton_pcr_soa",
+    ]
 
 
 def test_kaggle_runner_accepts_linear_triton_focus_choice():
