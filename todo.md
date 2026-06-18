@@ -67,19 +67,20 @@ Work should start here unless the user asks otherwise.
   from the exact-GPU roadmap over small heuristic retuning. Record heuristic
   thresholds as benchmark-backed follow-up calibration, not as the main work.
 - [ ] Phase 7.6.3 current Pallas work: keep `pallas_pcr_128` benchmark-only
-  and pause Kaggle P100 Pallas runs unless a Hopper-or-newer GPU is available.
+  and pause Kaggle P100 Pallas runs, but keep T4 open as an experimental target.
   Official JAX Pallas docs say Mosaic GPU is supported only on Hopper and newer
-  GPUs, and `BlockSpec` GPU blocks need a minormost dimension that is a multiple
-  of 16 bytes. The current kernel now uses `128 fibers x 4 cable columns`, so
-  each float32 output block has a 16-byte minormost dimension, but P100 remains
-  outside the documented Mosaic GPU target.
+  GPUs, yet a user Colab T4 smoke notebook compiles/runs Pallas successfully.
+  `BlockSpec` GPU blocks still need a minormost dimension that is a multiple of
+  16 bytes; the current kernel uses `128 fibers x 4 cable columns`, so each
+  float32 output block has a 16-byte minormost dimension. Next useful Pallas
+  validation is a focused T4 run, not another P100 run.
 - [ ] Phase 7.6.3 Pallas history: ran Kaggle P100 `linear_pallas_focus`
   with `pallas_pcr_128`. This first Phase 3B candidate uses one Pallas stage
   kernel per PCR stride and originally used programs shaped as
   `128 fibers x 1 cable column`,
   preserving Mosaic's 128-element batch width without full-cable SMEM. Local
   `interpret=True` smokes passed at `B=128`, `Nx=8/51`; GPU compile/timing is
-  still unknown on a supported Hopper+ GPU. First P100 attempt
+  still unknown on T4/Hopper-class practical targets. First P100 attempt
   `20260618_192128_linear_pallas_focus_NvidiaTeslaP100` failed before timing
   because explicit GMEM is only accepted for full-array trivial block mappings;
   keep explicit GMEM on full input refs only and use standard blocked outputs.
@@ -846,7 +847,7 @@ Keep long narrative in benchmark artifacts, not here.
 | 2026-06-18 | Pallas Thomas iota-layout retry | P100 run `20260618_185101_linear_pallas_focus_NvidiaTeslaP100` passed the transfer-alignment fix but failed Mosaic layout inference for the `jnp.arange` batch-index iota. Scratch/output helpers now use `pl.ds(row, 1)` / `pl.ds(component, 1)` slices instead of vectorized batch indices; local `local_pallas_ds_smoke` still matches Thomas64 for `pallas_thomas_4/8/16`. |
 | 2026-06-18 | Pallas Thomas P100 closure | P100 run `20260618_185700_linear_pallas_focus_NvidiaTeslaP100` passed the iota fix but failed on the first strided SMEM column load (`a00_ref[:, 0]`): Mosaic requires a multiple of `128` elements and `BLOCK_B=4` gives `4`. `BLOCK_B=128` satisfies layout but exceeds SMEM, so Thomas-Pallas is closed/standby for P100; next custom-kernel work should be Phase 3B PCR/hybrid with layout constraints designed in. |
 | 2026-06-18 | Pallas PCR stride-padding retry | P100 run `20260618_193442_linear_pallas_focus_NvidiaTeslaP100` got past direct stores but failed Mosaic async-copy lowering because `Nx=51` gives output GMEM row stride `204` bytes, not a multiple of `16`. `pallas_pcr_128` now pads internal PCR work arrays to a four-column multiple with identity/zero padded columns and slices results back to real `Nx`; local `local_pallas_pcr128_padded_stride_smoke` matches `pcr_soa`/Thomas. |
-| 2026-06-18 | Pallas PCR P100 pause | P100 run `20260618_194249_linear_pallas_focus_NvidiaTeslaP100` passed the row-stride fix but failed because `(128, 1)` float32 output blocks copy only `32` bits along the minormost dimension. `pallas_pcr_128` now emits four columns per program (`128` minormost bits), but official JAX Pallas docs say Mosaic GPU is supported only on Hopper and newer GPUs, so stop spending Kaggle P100/T4 runs on Pallas and resume this branch only on a supported Hopper+ GPU. |
+| 2026-06-18 | Pallas PCR P100 pause / T4 reopened | P100 run `20260618_194249_linear_pallas_focus_NvidiaTeslaP100` passed the row-stride fix but failed because `(128, 1)` float32 output blocks copy only `32` bits along the minormost dimension. `pallas_pcr_128` now emits four columns per program (`128` minormost bits). Official JAX Pallas docs list Mosaic GPU support only on Hopper and newer GPUs, but a user Colab T4 smoke notebook compiles/runs Pallas successfully; stop spending Kaggle P100 runs on Pallas, but keep T4 as the next focused validation target. |
 
 ## Completed Roadmap Archive
 

@@ -2254,13 +2254,13 @@ fix: group four cable columns per Pallas program. The stage now uses
 local validation: local_pallas_pcr128_block4_smoke at B=128, Nx=51, float32
                   matched pcr_soa/Thomas with max_abs_err 1.021e-07
 doc check: official JAX Pallas docs state that Mosaic GPU support is only for
-           Hopper and newer GPUs. Kaggle P100 is Pascal, and Kaggle T4 is
-           Turing, so neither is a documented Mosaic GPU target. Treat the
-           repeated P100 failures as compatibility/lowering barriers, not as
-           performance evidence.
-decision: pause Kaggle P100/T4 Pallas runs. Keep `pallas_pcr_128` as a
-          benchmark-only Hopper+ candidate, and return to pure-JAX exact solver
-          optimizations for the current accessible GPU pool.
+           Hopper and newer GPUs. Kaggle P100 is Pascal, so it remains outside
+           the documented target. However, a user Colab T4 smoke notebook
+           compiles/runs Pallas successfully, so T4 should be treated as an
+           empirical target rather than ruled out by the docs alone.
+decision: pause Kaggle P100 Pallas runs. Keep `pallas_pcr_128` as a
+          benchmark-only candidate and validate next on T4/Colab or Kaggle T4
+          before deciding whether the Pallas PCR line is worth more work.
 ```
 
 Use static buckets:

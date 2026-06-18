@@ -104,8 +104,9 @@ Local `interpret=True` smokes matched `pcr_soa`/Thomas at `B=128`, `Nx=8` and
 `Nx=51`. Internal PCR work arrays are padded to a four-column multiple so
 non-power-of-two `Nx` cases such as `51` still satisfy Mosaic's 16-byte GMEM
 stride requirement. Official JAX docs currently list Mosaic GPU support only
-for Hopper and newer GPUs, so do not spend Kaggle P100/T4 runs on this path;
-time it only on a supported Hopper+ GPU.
+for Hopper and newer GPUs, but a user Colab T4 smoke notebook has successfully
+compiled/run Pallas. Do not spend more Kaggle P100 runs on this path; validate
+next on T4/Colab or Kaggle T4 before deciding whether to keep optimizing it.
 `pcr_soa_padded` is a benchmark-only Phase 1D candidate that pads `Nx` to
 32/64/128 identity rows before the batch-native SoA solve; it is not a
 `BatchOptions.double_cable_block_solver` value.
