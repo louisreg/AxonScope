@@ -36,6 +36,17 @@ if __package__ in (None, ""):
 
 WORKFLOWS = ("example06_velocity", "example07_threshold", "example08_recruitment")
 PLATFORMS = ("current", "cpu", "gpu")
+CPU_OBSERVER_LOW_MEMORY_XLA_FLAGS = (
+    "--xla_cpu_parallel_codegen_split_count=1",
+    "--xla_cpu_multi_thread_eigen=false",
+    "intra_op_parallelism_threads=1",
+)
+CPU_OBSERVER_LOW_MEMORY_ENV = {
+    "OMP_NUM_THREADS": "1",
+    "TF_NUM_INTRAOP_THREADS": "1",
+    "TF_NUM_INTEROP_THREADS": "1",
+    "AXONSCOPE_CPU_OBSERVER_LOW_MEMORY_XLA": "1",
+}
 
 
 @dataclass(frozen=True)
@@ -169,6 +180,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Number of amplitude samples for recruitment sweeps.",
     )
     parser.add_argument(
+        "--example08-recording",
+        choices=("full", "observer_only"),
+        default="full",
+        help=(
+            "Recording policy for example 08 recruitment. Use observer_only to "
+            "benchmark compact solver-side activation decisions instead of full Vm."
+        ),
+    )
+    parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path("benchmark/results/realistic_examples"),
@@ -246,6 +266,8 @@ def spawn_platform_runs(args: argparse.Namespace) -> int:
         env = dict(os.environ)
         if platform != "current":
             env["JAX_PLATFORM_NAME"] = platform
+        if _should_use_low_memory_cpu_observer_env(args, platform):
+            _apply_low_memory_cpu_observer_env(env)
         command = child_command(args, platform_label=platform)
         print("\n$", " ".join(command), flush=True)
         completed = subprocess.run(command, env=env, check=False)
@@ -270,6 +292,21 @@ def spawn_platform_runs(args: argparse.Namespace) -> int:
             if profile_comparison_path is not None:
                 print(f"profile_comparison_csv: {profile_comparison_path}")
     return 0
+
+
+def _should_use_low_memory_cpu_observer_env(
+    args: argparse.Namespace,
+    platform: str,
+) -> bool:
+    return platform == "cpu" and args.example08_recording == "observer_only"
+
+
+def _apply_low_memory_cpu_observer_env(env: dict[str, str]) -> None:
+    existing = env.get("XLA_FLAGS", "").strip()
+    extra = " ".join(CPU_OBSERVER_LOW_MEMORY_XLA_FLAGS)
+    env["XLA_FLAGS"] = f"{existing} {extra}".strip()
+    for key, value in CPU_OBSERVER_LOW_MEMORY_ENV.items():
+        env.setdefault(key, value)
 
 
 def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]:
@@ -303,6 +340,7 @@ def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]
         command.extend(["--example07-max-iterations", str(args.example07_max_iterations)])
     if args.example08_amplitude_count is not None:
         command.extend(["--example08-amplitude-count", str(args.example08_amplitude_count)])
+    command.extend(["--example08-recording", str(args.example08_recording)])
     if not args.plots:
         command.append("--no-plots")
     if args.profile:
@@ -359,6 +397,10 @@ def run_current_platform(args: argparse.Namespace) -> int:
             "family_counts": preset_family_counts(args),
             "example07_max_iterations": example07_max_iterations(args),
             "example08_amplitude_count": example08_amplitude_count(args),
+            "example08_recording": args.example08_recording,
+            "cpu_observer_low_memory_xla": (
+                os.environ.get("AXONSCOPE_CPU_OBSERVER_LOW_MEMORY_XLA") == "1"
+            ),
             "repeats": int(args.repeats),
             "warmups": int(args.warmups),
             "profile": bool(args.profile),
@@ -487,7 +529,7 @@ def planned_cases(args: argparse.Namespace) -> list[WorkflowCase]:
                     run_count=2 * family_count,
                     duration_ms=4.0,
                     dt_ms=0.025,
-                    recording="observer_only" if args.platform_label == "gpu" else "full",
+                    recording=args.example08_recording,
                     protocol_steps=amplitudes,
                 )
             )
@@ -799,14 +841,13 @@ def run_example08(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     import axonscope as axs
-    import jax
     import numpy as np
     from examples.basic import example_08_recruitment_curve_population as ex08
 
     pool, families, amplitudes, criterion = built
     recording = (
         axs.Recording.none()
-        if str(jax.default_backend()) == "gpu"
+        if args.example08_recording == "observer_only"
         else axs.Recording.voltage()
     )
     curve = axs.protocols.recruitment_sweep(

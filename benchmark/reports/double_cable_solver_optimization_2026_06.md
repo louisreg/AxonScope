@@ -230,10 +230,15 @@ Implemented follow-up:
 - `find_activation_threshold_curve` and `recruitment_sweep` now route compatible
   `ActivationCriterion` evaluations through solver-side `Activation` observers
   when `recording` is `None` or `Recording.none()`.
-- The realistic example 08 benchmark now labels GPU recruitment as
-  `observer_only` and calls `recruitment_sweep(..., recording=Recording.none())`
-  on GPU. CPU stress runs keep full voltage recording because the observer-only
-  CPU XLA path can exceed Kaggle's LLVM compile memory during the stress case.
+- The realistic example 08 benchmark now exposes an explicit
+  `--example08-recording full|observer_only` switch. The default `full` mode
+  keeps CPU/GPU comparisons fair, while `observer_only` measures the compact
+  solver-side activation path on both backends.
+- Kaggle now has a separate `realistic_stress_observer` target. Early evidence
+  shows the CPU observer-only stress path can exceed Kaggle's LLVM compile
+  memory at `example08_recruitment`; the Kaggle target therefore applies
+  low-memory CPU XLA/LLVM codegen flags before falling back to smaller CPU
+  equivalence tests.
 - Explicit user recording requests such as probe recordings still keep the old
   post-hoc path, so probe-limited semantics are preserved.
 

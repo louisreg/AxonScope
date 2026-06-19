@@ -77,10 +77,12 @@ Work should start here unless the user asks otherwise.
   sweeps through solver-side `Activation` observers when `Recording.none()` is
   used, so recruitment can return compact bool arrays instead of moving full
   `Vm` traces back to host.
-- [ ] Validate the observer-only recruitment path on Kaggle P100
-  `realistic_stress` and compare `example08_recruitment`, `kernel.enqueue`,
-  `results.split_batch`, and memory estimates against
-  `20260619_195351_realistic_stress_NvidiaTeslaP100`.
+- [ ] Validate the observer-only recruitment path separately from the fair
+  full-output CPU/GPU matrix. Use Kaggle `realistic_stress` for full/full
+  comparison, and Kaggle `realistic_stress_observer` for observer/observer
+  stress. The observer target applies low-memory CPU XLA/LLVM codegen flags
+  because the first CPU observer-only stress attempt exceeded Kaggle compile
+  memory.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

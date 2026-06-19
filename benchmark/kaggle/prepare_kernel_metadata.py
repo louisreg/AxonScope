@@ -42,6 +42,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "realistic_smoke",
             "realistic",
             "realistic_stress",
+            "realistic_stress_observer",
             "both",
         ),
         help="Benchmark suite to run inside the Kaggle kernel.",

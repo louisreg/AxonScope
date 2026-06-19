@@ -88,6 +88,13 @@ def main() -> None:
         run_realistic_examples(out_dir, smoke=False)
     elif BENCHMARK == "realistic_stress":
         run_realistic_examples(out_dir, smoke=False, stress=True)
+    elif BENCHMARK == "realistic_stress_observer":
+        run_realistic_examples(
+            out_dir,
+            smoke=False,
+            stress=True,
+            example08_recording="observer_only",
+        )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -95,7 +102,7 @@ def main() -> None:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
             "linear_pcr_soa_trace, e2e, e2e_full, realistic_smoke, "
-            "realistic, realistic_stress, or both."
+            "realistic, realistic_stress, realistic_stress_observer, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -343,6 +350,7 @@ def run_realistic_examples(
     *,
     smoke: bool,
     stress: bool = False,
+    example08_recording: str = "full",
 ) -> None:
     command = [
         sys.executable,
@@ -354,6 +362,8 @@ def run_realistic_examples(
         "--platforms",
         "cpu",
         "gpu",
+        "--example08-recording",
+        example08_recording,
     ]
     if smoke:
         command.extend(
