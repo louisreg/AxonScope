@@ -39,8 +39,31 @@ python benchmark/realistic_examples/bench_basic_examples.py \
   --warmups 1
 ```
 
+Run the longer stress preset used for a realistic Kaggle pass:
+
+```bash
+python benchmark/realistic_examples/bench_basic_examples.py \
+  --preset stress \
+  --platforms cpu gpu \
+  --run-counts 5 10 20 \
+  --family-counts 25 50 \
+  --example07-max-iterations 20 \
+  --example08-amplitude-count 8 \
+  --repeats 3 \
+  --warmups 1
+```
+
 Outputs are written under `benchmark/results/realistic_examples/` as JSON and
-CSV. Important columns:
+CSV. With `--platforms cpu gpu`, the parent process also writes
+`<prefix>_cpu_vs_gpu.csv` with first-run, total-first, and warm-run speedups.
+Plots are enabled by default:
+
+- `<prefix>_cpu_timings.svg/png`
+- `<prefix>_gpu_timings.svg/png`
+- `<prefix>_cpu_vs_gpu_speedup.svg/png`
+
+Use `--no-plots` for CSV-only dry benchmark runs.
+Important columns:
 
 - `workflow`: `example06_velocity`, `example07_threshold`, or
   `example08_recruitment`

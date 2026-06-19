@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -25,7 +26,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[2]
@@ -100,7 +101,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--preset",
-        choices=("smoke", "standard"),
+        choices=("smoke", "standard", "stress"),
         default="smoke",
         help="Default case sizes. Explicit size flags override this.",
     )
@@ -165,6 +166,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Output directory.",
     )
     parser.add_argument("--prefix", default=None, help="Output filename prefix.")
+    parser.add_argument(
+        "--plots",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write SVG/PNG timing plots next to the CSV outputs.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned cases only.")
     args = parser.parse_args(argv)
 
@@ -182,13 +189,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def preset_run_counts(args: argparse.Namespace) -> list[int]:
     if args.run_counts is not None:
         return [int(value) for value in args.run_counts]
-    return [2] if args.preset == "smoke" else [2, 5, 10]
+    if args.preset == "smoke":
+        return [2]
+    if args.preset == "stress":
+        return [5, 10, 20]
+    return [2, 5, 10]
 
 
 def preset_family_counts(args: argparse.Namespace) -> list[int]:
     if args.family_counts is not None:
         return [int(value) for value in args.family_counts]
-    return [2] if args.preset == "smoke" else [5, 25, 50]
+    if args.preset == "smoke":
+        return [2]
+    if args.preset == "stress":
+        return [25, 50]
+    return [5, 25, 50]
 
 
 def example07_max_iterations(args: argparse.Namespace) -> int:
@@ -206,6 +221,8 @@ def example08_amplitude_count(args: argparse.Namespace) -> int:
 def spawn_platform_runs(args: argparse.Namespace) -> int:
     if "current" in args.platforms and len(args.platforms) > 1:
         raise ValueError("--platforms current cannot be combined with cpu/gpu.")
+    if args.prefix is None:
+        args.prefix = datetime.now().strftime("basic_examples_%Y%m%d_%H%M%S")
 
     for platform in args.platforms:
         env = dict(os.environ)
@@ -216,6 +233,17 @@ def spawn_platform_runs(args: argparse.Namespace) -> int:
         completed = subprocess.run(command, env=env, check=False)
         if completed.returncode != 0:
             return int(completed.returncode)
+    if not args.dry_run and len(args.platforms) > 1:
+        comparison_path = write_platform_comparison(
+            out_dir=args.out_dir,
+            prefix=str(args.prefix),
+            platforms=args.platforms,
+        )
+        if comparison_path is not None:
+            print(f"comparison_csv: {comparison_path}")
+            if args.plots:
+                for plot_path in write_comparison_plots(comparison_path):
+                    print(f"plot: {plot_path}")
     return 0
 
 
@@ -250,6 +278,8 @@ def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]
         command.extend(["--example07-max-iterations", str(args.example07_max_iterations)])
     if args.example08_amplitude_count is not None:
         command.extend(["--example08-amplitude-count", str(args.example08_amplitude_count)])
+    if not args.plots:
+        command.append("--no-plots")
     if args.dry_run:
         command.append("--dry-run")
     return command
@@ -263,6 +293,8 @@ def run_current_platform(args: argparse.Namespace) -> int:
         return 0
 
     import jax
+
+    preload_workflow_modules(args.workflows)
 
     rows: list[WorkflowBenchmarkRow] = []
     for index, case in enumerate(cases, start=1):
@@ -290,7 +322,23 @@ def run_current_platform(args: argparse.Namespace) -> int:
     )
     print(f"json: {json_path}")
     print(f"csv : {csv_path}")
+    if args.plots:
+        for plot_path in write_platform_timing_plots(csv_path):
+            print(f"plot: {plot_path}")
     return 0
+
+
+def preload_workflow_modules(workflows: Sequence[str]) -> None:
+    """Import public workflow modules outside the measured case timings."""
+
+    import axonscope  # noqa: F401
+
+    if "example06_velocity" in workflows:
+        from examples.basic import example_06_velocity_vs_diameter  # noqa: F401
+    if "example07_threshold" in workflows:
+        from examples.basic import example_07_threshold_vs_diameter  # noqa: F401
+    if "example08_recruitment" in workflows:
+        from examples.basic import example_08_recruitment_curve_population  # noqa: F401
 
 
 def planned_cases(args: argparse.Namespace) -> list[WorkflowCase]:
@@ -721,6 +769,213 @@ def write_outputs(
         writer.writeheader()
         writer.writerows(flat_rows)
     return json_path, csv_path
+
+
+def write_platform_comparison(
+    *,
+    out_dir: Path,
+    prefix: str,
+    platforms: Sequence[str],
+) -> Path | None:
+    rows_by_platform: dict[str, dict[tuple[str, str, str, str, str, str, str], dict[str, str]]] = {}
+    for platform in platforms:
+        csv_path = out_dir / f"{prefix}_{sanitize_label(platform)}.csv"
+        if not csv_path.exists():
+            continue
+        with csv_path.open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        rows_by_platform[platform] = {comparison_key(row): row for row in rows}
+
+    if "cpu" not in rows_by_platform or "gpu" not in rows_by_platform:
+        return None
+
+    comparison_rows = []
+    common_keys = sorted(set(rows_by_platform["cpu"]) & set(rows_by_platform["gpu"]))
+    for key in common_keys:
+        cpu = rows_by_platform["cpu"][key]
+        gpu = rows_by_platform["gpu"][key]
+        comparison_rows.append(
+            {
+                "workflow": cpu["workflow"],
+                "fiber_type": cpu["fiber_type"],
+                "run_count": cpu["run_count"],
+                "duration_ms": cpu["duration_ms"],
+                "dt_ms": cpu["dt_ms"],
+                "recording": cpu["recording"],
+                "protocol_steps": cpu["protocol_steps"],
+                "cpu_first_run_s": cpu["first_run_s"],
+                "gpu_first_run_s": gpu["first_run_s"],
+                "first_run_speedup_cpu_over_gpu": speedup(cpu["first_run_s"], gpu["first_run_s"]),
+                "cpu_total_first_s": cpu["total_first_s"],
+                "gpu_total_first_s": gpu["total_first_s"],
+                "total_first_speedup_cpu_over_gpu": speedup(
+                    cpu["total_first_s"],
+                    gpu["total_first_s"],
+                ),
+                "cpu_warm_mean_s": cpu["warm.mean_s"],
+                "gpu_warm_mean_s": gpu["warm.mean_s"],
+                "warm_speedup_cpu_over_gpu": speedup(cpu["warm.mean_s"], gpu["warm.mean_s"]),
+                "cpu_backend": cpu["jax_backend"],
+                "gpu_backend": gpu["jax_backend"],
+            }
+        )
+
+    if not comparison_rows:
+        return None
+    comparison_path = out_dir / f"{prefix}_cpu_vs_gpu.csv"
+    fieldnames = list(comparison_rows[0])
+    with comparison_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(comparison_rows)
+    return comparison_path
+
+
+def write_platform_timing_plots(csv_path: Path) -> list[Path]:
+    rows = read_csv_rows(csv_path)
+    if not rows:
+        return []
+    pyplot = import_pyplot()
+    if pyplot is None:
+        return []
+
+    labels = [plot_label(row) for row in rows]
+    first_run_s = sanitize_plot_values(row["first_run_s"] for row in rows)
+    warm_mean_s = sanitize_plot_values(row["warm.mean_s"] for row in rows)
+    x_values = list(range(len(rows)))
+    width = 0.38
+
+    fig, ax = pyplot.subplots(
+        figsize=(plot_width(len(rows)), 4.8),
+        constrained_layout=True,
+    )
+    ax.bar([x - width / 2 for x in x_values], first_run_s, width, label="first run")
+    ax.bar([x + width / 2 for x in x_values], warm_mean_s, width, label="warm mean")
+    ax.set_yscale("log")
+    ax.set_ylabel("seconds (log)")
+    ax.set_title(f"Workflow timings: {csv_path.stem}")
+    ax.set_xticks(x_values, labels, rotation=35, ha="right")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    return save_plot(fig, pyplot, csv_path.with_name(f"{csv_path.stem}_timings"))
+
+
+def write_comparison_plots(comparison_path: Path) -> list[Path]:
+    rows = read_csv_rows(comparison_path)
+    if not rows:
+        return []
+    pyplot = import_pyplot()
+    if pyplot is None:
+        return []
+
+    labels = [plot_label(row) for row in rows]
+    first_run_speedup = sanitize_plot_values(
+        row["first_run_speedup_cpu_over_gpu"] for row in rows
+    )
+    warm_speedup = sanitize_plot_values(row["warm_speedup_cpu_over_gpu"] for row in rows)
+    x_values = list(range(len(rows)))
+    width = 0.38
+
+    fig, ax = pyplot.subplots(
+        figsize=(plot_width(len(rows)), 4.8),
+        constrained_layout=True,
+    )
+    ax.axhline(1.0, color="0.25", linewidth=1.0, linestyle="--", label="parity")
+    ax.bar(
+        [x - width / 2 for x in x_values],
+        first_run_speedup,
+        width,
+        label="first run",
+    )
+    ax.bar(
+        [x + width / 2 for x in x_values],
+        warm_speedup,
+        width,
+        label="warm mean",
+    )
+    ax.set_yscale("log")
+    ax.set_ylabel("CPU/GPU speedup (log)")
+    ax.set_title(f"CPU vs GPU speedup: {comparison_path.stem}")
+    ax.set_xticks(x_values, labels, rotation=35, ha="right")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    return save_plot(
+        fig,
+        pyplot,
+        comparison_path.with_name(f"{comparison_path.stem}_speedup"),
+    )
+
+
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def import_pyplot() -> Any | None:
+    try:
+        cache_root = Path(os.environ.get("TMPDIR", "/tmp")) / "axonscope_matplotlib"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("MPLCONFIGDIR", str(cache_root))
+        os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as pyplot
+    except Exception as exc:
+        print(f"plot skipped: {exc}", flush=True)
+        return None
+    return pyplot
+
+
+def sanitize_plot_values(values: Iterable[str]) -> list[float]:
+    clean_values = []
+    for value in values:
+        parsed = float(value)
+        if parsed > 0.0 and math.isfinite(parsed):
+            clean_values.append(parsed)
+        else:
+            clean_values.append(float("nan"))
+    return clean_values
+
+
+def plot_width(row_count: int) -> float:
+    return min(22.0, max(8.0, 0.75 * row_count + 2.5))
+
+
+def save_plot(fig: Any, pyplot: Any, stem: Path) -> list[Path]:
+    outputs = [stem.with_suffix(".svg"), stem.with_suffix(".png")]
+    for output in outputs:
+        fig.savefig(output, dpi=160)
+    pyplot.close(fig)
+    return outputs
+
+
+def plot_label(row: dict[str, str]) -> str:
+    workflow = row["workflow"].removeprefix("example").replace("_", " ")
+    return (
+        f"{workflow}\n"
+        f"{row['fiber_type']} B={row['run_count']} P={row['protocol_steps']}"
+    )
+
+
+def comparison_key(row: dict[str, str]) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        row["workflow"],
+        row["fiber_type"],
+        row["run_count"],
+        row["duration_ms"],
+        row["dt_ms"],
+        row["recording"],
+        row["protocol_steps"],
+    )
+
+
+def speedup(numerator: str, denominator: str) -> str:
+    den = float(denominator)
+    if den == 0.0:
+        return "inf"
+    return f"{float(numerator) / den:.6g}"
 
 
 def row_to_dict(row: WorkflowBenchmarkRow) -> dict[str, Any]:

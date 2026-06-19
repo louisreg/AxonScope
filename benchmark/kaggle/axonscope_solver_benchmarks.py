@@ -86,6 +86,8 @@ def main() -> None:
         run_realistic_examples(out_dir, smoke=True)
     elif BENCHMARK == "realistic":
         run_realistic_examples(out_dir, smoke=False)
+    elif BENCHMARK == "realistic_stress":
+        run_realistic_examples(out_dir, smoke=False, stress=True)
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -93,7 +95,7 @@ def main() -> None:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
             "linear_pcr_soa_trace, e2e, e2e_full, realistic_smoke, "
-            "realistic, or both."
+            "realistic, realistic_stress, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -336,7 +338,12 @@ def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard
     print_summary(out_dir / "e2e" / "summary.csv", mode="e2e")
 
 
-def run_realistic_examples(out_dir: pathlib.Path, *, smoke: bool) -> None:
+def run_realistic_examples(
+    out_dir: pathlib.Path,
+    *,
+    smoke: bool,
+    stress: bool = False,
+) -> None:
     command = [
         sys.executable,
         "benchmark/realistic_examples/bench_basic_examples.py",
@@ -345,9 +352,8 @@ def run_realistic_examples(out_dir: pathlib.Path, *, smoke: bool) -> None:
         "--prefix",
         "realistic_examples",
         "--platforms",
-        "current",
-        "--platform-label",
-        "kaggle_gpu",
+        "cpu",
+        "gpu",
     ]
     if smoke:
         command.extend(
@@ -358,6 +364,28 @@ def run_realistic_examples(out_dir: pathlib.Path, *, smoke: bool) -> None:
                 "1",
                 "--warmups",
                 "0",
+            ]
+        )
+    elif stress:
+        command.extend(
+            [
+                "--preset",
+                "stress",
+                "--run-counts",
+                "5",
+                "10",
+                "20",
+                "--family-counts",
+                "25",
+                "50",
+                "--example07-max-iterations",
+                "20",
+                "--example08-amplitude-count",
+                "8",
+                "--repeats",
+                "3",
+                "--warmups",
+                "1",
             ]
         )
     else:

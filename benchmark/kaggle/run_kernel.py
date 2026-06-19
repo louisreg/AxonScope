@@ -149,6 +149,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "e2e_full",
             "realistic_smoke",
             "realistic",
+            "realistic_stress",
             "both",
         ),
         help="Benchmark suite to run.",

@@ -214,6 +214,7 @@ def test_kaggle_runner_accepts_active_benchmark_choices():
         "e2e_full",
         "realistic_smoke",
         "realistic",
+        "realistic_stress",
         "both",
     ]:
         args = parse_args(["--username", "owner", "--benchmark", benchmark])
@@ -234,7 +235,10 @@ def test_kaggle_realistic_smoke_runs_small_workflow_matrix(tmp_path, monkeypatch
     assert command[1] == "benchmark/realistic_examples/bench_basic_examples.py"
     assert command[command.index("--preset") + 1] == "smoke"
     assert command[command.index("--repeats") + 1] == "1"
-    assert command[command.index("--platform-label") + 1] == "kaggle_gpu"
+    assert command[command.index("--platforms") + 1 : command.index("--preset")] == [
+        "cpu",
+        "gpu",
+    ]
 
 
 def test_kaggle_realistic_standard_is_bounded(tmp_path, monkeypatch):
@@ -258,6 +262,34 @@ def test_kaggle_realistic_standard_is_bounded(tmp_path, monkeypatch):
     ]
     assert command[command.index("--example07-max-iterations") + 1] == "8"
     assert command[command.index("--example08-amplitude-count") + 1] == "4"
+
+
+def test_kaggle_realistic_stress_uses_larger_matrix(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_realistic_examples(tmp_path, smoke=False, stress=True)
+
+    (command,) = commands
+    assert command[command.index("--preset") + 1] == "stress"
+    assert command[command.index("--run-counts") + 1 : command.index("--family-counts")] == [
+        "5",
+        "10",
+        "20",
+    ]
+    assert command[
+        command.index("--family-counts") + 1 : command.index("--example07-max-iterations")
+    ] == [
+        "25",
+        "50",
+    ]
+    assert command[command.index("--example07-max-iterations") + 1] == "20"
+    assert command[command.index("--example08-amplitude-count") + 1] == "8"
+    assert command[command.index("--repeats") + 1] == "3"
 
 
 def test_kaggle_runner_rejects_archived_benchmark_choices():

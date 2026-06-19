@@ -117,6 +117,7 @@ The wrapper also accepts:
 --benchmark e2e
 --benchmark realistic_smoke
 --benchmark realistic
+--benchmark realistic_stress
 --benchmark both
 --benchmark e2e_full
 --branch bench-colab
@@ -130,7 +131,13 @@ diagnostic preset kept in the active wrapper; it records JAX traces for the
 retained PCR/SoA route. `e2e` is the bounded production matrix, while
 `e2e_full` runs the exhaustive matrix and can take a long time on Kaggle.
 `realistic_smoke` and `realistic` run workflow-level benchmarks based on basic
-examples 06/07/08, using the current Kaggle GPU backend.
+examples 06/07/08 twice inside the same GPU-enabled Kaggle kernel: once with
+`JAX_PLATFORM_NAME=cpu`, once with `JAX_PLATFORM_NAME=gpu`. The output includes
+per-platform CSV/JSON files plus a `realistic_examples_cpu_vs_gpu.csv`
+comparison table and SVG/PNG timing plots. `realistic_stress` is the longer
+CPU-vs-GPU workflow pass for Vext-oriented decisions: examples 06/07 run 5, 10,
+and 20 diameters/fibers, example 08 runs mixed populations of 50 and 100 fibers,
+and each case records warm-run repeats.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and
