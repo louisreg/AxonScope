@@ -83,10 +83,15 @@ Work should start here unless the user asks otherwise.
   stress case, despite a small estimated functional array footprint. Treat CPU
   observer-only as standby until the CPU XLA compilation shape is reduced or
   isolated by process.
-- [ ] Run Kaggle `realistic_stress_single_vm` to compare CPU vs GPU with
-  example 08 retaining one center Vm column instead of full spatial `Vm`; run
-  Kaggle `realistic_stress_observer_gpu` separately to test whether GPU-side
-  solver observers improve recruitment when CPU observer-only is excluded.
+- [x] Run Kaggle `realistic_stress_single_vm` to compare CPU vs GPU with
+  example 08 retaining one center Vm column instead of full spatial `Vm`.
+  Completed at
+  `benchmark/results/kaggle/20260619_232746_realistic_stress_single_vm_NvidiaTeslaP100`.
+- [x] Try Kaggle `realistic_stress_observer_gpu` separately after excluding CPU
+  observer-only. Decision: standby/not retained for realistic stress; the GPU
+  observer-only run was stopped and deleted after `example08_recruitment`
+  `runs=50` had already reached about 427 s on Kaggle, making it slower than
+  the compact `center` Vm path for the immediate workflow benchmark.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
