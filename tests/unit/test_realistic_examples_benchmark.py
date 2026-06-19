@@ -70,6 +70,23 @@ def test_realistic_examples_child_command_for_platform_spawn(tmp_path):
     assert "--profile" in command
 
 
+def test_realistic_examples_accepts_center_vm_recruitment_recording():
+    args = parse_args(
+        [
+            "--preset",
+            "stress",
+            "--workflows",
+            "example08_recruitment",
+            "--example08-recording",
+            "center",
+        ]
+    )
+
+    cases = planned_cases(args)
+
+    assert {case.recording for case in cases} == {"center"}
+
+
 def test_realistic_examples_writes_cpu_gpu_comparison(tmp_path):
     fieldnames = [
         "workflow",

@@ -118,6 +118,7 @@ The wrapper also accepts:
 --benchmark realistic_smoke
 --benchmark realistic
 --benchmark realistic_stress
+--benchmark realistic_stress_single_vm
 --benchmark realistic_stress_observer
 --benchmark realistic_stress_observer_cpu
 --benchmark realistic_stress_observer_gpu
@@ -150,10 +151,14 @@ matrix with example 08 recruitment in observer-only mode on both CPU and GPU.
 The CPU child uses low-memory XLA/LLVM codegen flags and chunks example 08 into
 single-fiber CPU sub-batches for this preset because larger observer-only CPU
 batches exceed Kaggle's LLVM compile memory.
-Use `realistic_stress_observer_cpu` with `--machine-shape cpu --no-require-gpu`
-to test the same CPU observer-only batch path on a CPU-only Kaggle kernel, and
-`realistic_stress_observer_gpu` with a GPU accelerator to run the GPU side
-separately. Use different slugs if both are submitted at the same time.
+`realistic_stress_single_vm` is the fairer CPU/GPU comparison when recruitment
+does not need full spatial traces: example 08 records a single center Vm column
+instead of full `Vm`, while examples 06/07 keep their established recordings.
+Use `realistic_stress_observer_gpu` with a GPU accelerator to run the compact
+solver-side observer path on GPU only. CPU observer-only stress is currently
+standby: Kaggle CPU-only and GPU-host attempts hit LLVM compile-memory errors
+at the 50-fiber recruitment case. Use different slugs if submitting comparison
+runs at the same time.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and

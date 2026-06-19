@@ -215,6 +215,10 @@ def test_kaggle_runner_accepts_active_benchmark_choices():
         "realistic_smoke",
         "realistic",
         "realistic_stress",
+        "realistic_stress_single_vm",
+        "realistic_stress_observer",
+        "realistic_stress_observer_cpu",
+        "realistic_stress_observer_gpu",
         "both",
     ]:
         args = parse_args(["--username", "owner", "--benchmark", benchmark])
@@ -235,7 +239,9 @@ def test_kaggle_realistic_smoke_runs_small_workflow_matrix(tmp_path, monkeypatch
     assert command[1] == "benchmark/realistic_examples/bench_basic_examples.py"
     assert command[command.index("--preset") + 1] == "smoke"
     assert command[command.index("--repeats") + 1] == "1"
-    assert command[command.index("--platforms") + 1 : command.index("--preset")] == [
+    assert command[
+        command.index("--platforms") + 1 : command.index("--example08-recording")
+    ] == [
         "cpu",
         "gpu",
     ]
@@ -290,6 +296,32 @@ def test_kaggle_realistic_stress_uses_larger_matrix(tmp_path, monkeypatch):
     assert command[command.index("--example07-max-iterations") + 1] == "20"
     assert command[command.index("--example08-amplitude-count") + 1] == "8"
     assert command[command.index("--repeats") + 1] == "3"
+    assert "--profile" in command
+
+
+def test_kaggle_realistic_single_vm_stress_uses_center_recording(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_realistic_examples(
+        tmp_path,
+        smoke=False,
+        stress=True,
+        example08_recording="center",
+    )
+
+    (command,) = commands
+    assert command[command.index("--example08-recording") + 1] == "center"
+    assert command[
+        command.index("--platforms") + 1 : command.index("--example08-recording")
+    ] == [
+        "cpu",
+        "gpu",
+    ]
     assert "--profile" in command
 
 

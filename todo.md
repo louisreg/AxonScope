@@ -77,15 +77,16 @@ Work should start here unless the user asks otherwise.
   sweeps through solver-side `Activation` observers when `Recording.none()` is
   used, so recruitment can return compact bool arrays instead of moving full
   `Vm` traces back to host.
-- [ ] Validate the observer-only recruitment path separately from the fair
-  full-output CPU/GPU matrix. Use Kaggle `realistic_stress` for full/full
-  comparison, and Kaggle `realistic_stress_observer` for observer/observer
-  stress. The observer target applies low-memory CPU XLA/LLVM codegen flags
-  and chunks CPU example 08 because the first CPU observer-only stress attempt
-  exceeded Kaggle compile memory.
-- [ ] Run `realistic_stress_observer_cpu` on a CPU-only Kaggle kernel and
-  `realistic_stress_observer_gpu` on a P100/T4 kernel with separate slugs to
-  distinguish CPU-only host memory limits from GPU runtime performance.
+- [ ] Validate compact recruitment outputs without relying on CPU observer-only
+  stress. Current evidence: CPU observer-only `example08_recruitment` hits LLVM
+  compile-memory errors on Kaggle GPU-host and CPU-only kernels at the 50-fiber
+  stress case, despite a small estimated functional array footprint. Treat CPU
+  observer-only as standby until the CPU XLA compilation shape is reduced or
+  isolated by process.
+- [ ] Run Kaggle `realistic_stress_single_vm` to compare CPU vs GPU with
+  example 08 retaining one center Vm column instead of full spatial `Vm`; run
+  Kaggle `realistic_stress_observer_gpu` separately to test whether GPU-side
+  solver observers improve recruitment when CPU observer-only is excluded.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

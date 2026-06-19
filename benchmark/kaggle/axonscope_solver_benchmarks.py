@@ -88,6 +88,13 @@ def main() -> None:
         run_realistic_examples(out_dir, smoke=False)
     elif BENCHMARK == "realistic_stress":
         run_realistic_examples(out_dir, smoke=False, stress=True)
+    elif BENCHMARK == "realistic_stress_single_vm":
+        run_realistic_examples(
+            out_dir,
+            smoke=False,
+            stress=True,
+            example08_recording="center",
+        )
     elif BENCHMARK == "realistic_stress_observer":
         run_realistic_examples(
             out_dir,
@@ -119,7 +126,8 @@ def main() -> None:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
             "linear_pcr_soa_trace, e2e, e2e_full, realistic_smoke, "
-            "realistic, realistic_stress, realistic_stress_observer, "
+            "realistic, realistic_stress, realistic_stress_single_vm, "
+            "realistic_stress_observer, "
             "realistic_stress_observer_cpu, realistic_stress_observer_gpu, or both."
         )
 

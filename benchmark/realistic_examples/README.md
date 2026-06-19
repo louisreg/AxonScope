@@ -54,6 +54,22 @@ python benchmark/realistic_examples/bench_basic_examples.py \
   --profile
 ```
 
+Compare CPU/GPU while retaining only one Vm column for example 08 recruitment:
+
+```bash
+python benchmark/realistic_examples/bench_basic_examples.py \
+  --preset stress \
+  --platforms cpu gpu \
+  --example08-recording center \
+  --run-counts 5 10 20 \
+  --family-counts 25 50 \
+  --example07-max-iterations 20 \
+  --example08-amplitude-count 8 \
+  --repeats 3 \
+  --warmups 1 \
+  --profile
+```
+
 Outputs are written under `benchmark/results/realistic_examples/` as JSON and
 CSV. With `--platforms cpu gpu`, the parent process also writes
 `<prefix>_cpu_vs_gpu.csv` with first-run, total-first, and warm-run speedups.
@@ -83,6 +99,7 @@ Important columns:
   `example08_recruitment`
 - `fiber_type`: `hh`, `rattay`, `mrg`, or `mixed`
 - `run_count`: number of simulated fibers/rows
+- `recording`: `full`, `probes9`, `center`, or `observer_only`
 - `platform_label`, `jax_backend`, `jax_devices`: backend information
 - `build_s`: public object construction time
 - `first_run_s`: first workflow execution time

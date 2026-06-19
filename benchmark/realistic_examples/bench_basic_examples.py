@@ -181,11 +181,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--example08-recording",
-        choices=("full", "observer_only"),
+        choices=("full", "center", "observer_only"),
         default="full",
         help=(
-            "Recording policy for example 08 recruitment. Use observer_only to "
-            "benchmark compact solver-side activation decisions instead of full Vm."
+            "Recording policy for example 08 recruitment. Use center to retain a "
+            "single Vm column, or observer_only to benchmark compact solver-side "
+            "activation decisions instead of stored Vm."
         ),
     )
     parser.add_argument(
@@ -884,7 +885,11 @@ def run_example08(
     recording = (
         axs.Recording.none()
         if args.example08_recording == "observer_only"
-        else axs.Recording.voltage()
+        else (
+            axs.Recording.center(axs.signals.Vm)
+            if args.example08_recording == "center"
+            else axs.Recording.voltage()
+        )
     )
     chunk_size = example08_observer_cpu_chunk_size(args)
     if chunk_size > 0:

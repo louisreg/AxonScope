@@ -42,6 +42,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "realistic_smoke",
             "realistic",
             "realistic_stress",
+            "realistic_stress_single_vm",
             "realistic_stress_observer",
             "realistic_stress_observer_cpu",
             "realistic_stress_observer_gpu",
