@@ -487,7 +487,7 @@ def planned_cases(args: argparse.Namespace) -> list[WorkflowCase]:
                     run_count=2 * family_count,
                     duration_ms=4.0,
                     dt_ms=0.025,
-                    recording="full",
+                    recording="observer_only",
                     protocol_steps=amplitudes,
                 )
             )
@@ -805,7 +805,7 @@ def run_example08(case: WorkflowCase, built: Any) -> dict[str, Any]:
         duration=case.duration_ms * axs.ms,
         dt=case.dt_ms * axs.ms,
         criterion=criterion,
-        recording=axs.Recording.voltage(),
+        recording=axs.Recording.none(),
         progress=False,
     )
     return {

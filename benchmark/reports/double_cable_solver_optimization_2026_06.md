@@ -217,6 +217,39 @@ platform, and the largest per-group memory estimate was about `1146.8 MiB`
 (`~9.4%` of the JAX-reported device memory limit for HH B=20), still below
 memory pressure for the P100 stress matrix.
 
+## Observer-Only Recruitment Pass
+
+The `20260619_195351` profile showed that the remaining GPU issue is not device
+solve time: `kernel.wait` is small, while repeated protocol enqueue, runtime
+preparation, and result materialization dominate. For activation/recruitment
+protocols that only need a boolean activation decision, moving full `Vm` traces
+back to host is unnecessary.
+
+Implemented follow-up:
+
+- `find_activation_threshold_curve` and `recruitment_sweep` now route compatible
+  `ActivationCriterion` evaluations through solver-side `Activation` observers
+  when `recording` is `None` or `Recording.none()`.
+- The realistic example 08 benchmark now labels recruitment as
+  `observer_only` and calls `recruitment_sweep(..., recording=Recording.none())`.
+- Explicit user recording requests such as probe recordings still keep the old
+  post-hoc path, so probe-limited semantics are preserved.
+
+Local validation:
+
+- `pytest -q tests/unit/test_protocols.py tests/unit/test_public_api_facade.py tests/unit/test_realistic_examples_benchmark.py`
+  passed with `47` tests.
+- Local recruitment smoke:
+  `benchmark/results/realistic_examples/local_observer_recruitment_smoke_local_observer_smoke_profile.csv`.
+  On the mini CPU smoke, the per-group memory estimate for recruitment is about
+  `0.075 MiB`, confirming that the full `Vm` tensor is no longer the retained
+  protocol output.
+
+Next evidence run: Kaggle P100 `realistic_stress`, compared against
+`20260619_195351_realistic_stress_NvidiaTeslaP100`, especially
+`example08_recruitment`, `results.split_batch`, memory estimates, and
+`kernel.enqueue`.
+
 ## Result Folders
 
 Key source folders used for this report:
@@ -234,3 +267,4 @@ Key source folders used for this report:
 - `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`
 - `benchmark/results/kaggle/20260619_195351_realistic_stress_NvidiaTeslaP100`
 - `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`
+- `benchmark/results/realistic_examples/local_observer_recruitment_smoke_local_observer_smoke_profile.csv`

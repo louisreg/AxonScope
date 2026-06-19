@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+from axonscope.protocols import activation as activation_protocols
 
 
 class _DummyLayout:
@@ -107,6 +108,61 @@ def test_recruitment_sweep_accepts_pool_update():
     np.testing.assert_allclose(curve.fraction, [0.0, 0.5, 1.0])
     np.testing.assert_allclose(curve.threshold_like_uA * 1000.0, [1.0, 2.0])
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+
+
+def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = (_DummyAxon(), _DummyAxon())
+    thresholds_nA = (0.5, 1.5)
+    calls = []
+
+    class _ObservedView:
+        def __init__(self, activated):
+            self.observations = {
+                "activation": type(
+                    "_Observation",
+                    (),
+                    {"values": np.asarray([activated], dtype=bool)},
+                )()
+            }
+
+    def update(row, tested_current):
+        row_index = pool.index(row)
+        return row_index, float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        calls.append(kwargs)
+        return tuple(
+            _ObservedView(amplitude_nA >= thresholds_nA[row_index])
+            for row_index, amplitude_nA in updated_pool
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        amplitudes=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+    )
+
+    assert len(calls) == 3
+    for call in calls:
+        assert isinstance(call["recording"], axs.Recording)
+        assert not call["recording"].voltage
+        assert call["observers"][0].name == "activation"
+        assert call["observers"][0].target is axs.positions.DISTAL
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [True, False], [True, True]],
+    )
 
 
 def test_recruitment_sweep_requires_current_units():

@@ -18,6 +18,7 @@ from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.recording import Recording
 from axonscope.analysis import ActivationCriterion, ActivationEvent
+from axonscope.analysis.definitions import Activation
 from axonscope.results import SimResult
 from axonscope.simulation import simulate, simulate_pool
 from axonscope.utils import units
@@ -626,6 +627,21 @@ def recruitment_sweep(
     amplitudes_uA = _require_current_array_uA(amplitudes, name="amplitudes")
     if amplitudes_uA.ndim != 1:
         raise ValueError("amplitudes must be a 1D array.")
+    if _can_use_activation_observer(recording, criterion):
+        sweep = _activation_pool_sweep(
+            pool,
+            update=update,
+            values=units.Q_(amplitudes_uA, "microampere"),
+            duration=duration,
+            dt=dt,
+            criterion=criterion,
+            progress=progress,
+            solver_progress=solver_progress,
+        )
+        return RecruitmentCurve(
+            amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
+            activated=np.asarray(sweep.observations, dtype=bool),
+        )
     sweep = pool_sweep(
         pool,
         update=update,
@@ -641,6 +657,75 @@ def recruitment_sweep(
     return RecruitmentCurve(
         amplitudes_uA=np.asarray(amplitudes_uA, dtype=float),
         activated=np.asarray(sweep.observations, dtype=bool),
+    )
+
+
+def _activation_pool_sweep(
+    pool: Sequence[SimulationCandidate],
+    *,
+    update: PoolUpdate,
+    values: Sequence[Any],
+    duration: Any,
+    dt: Any,
+    criterion: ActivationCriterion,
+    progress: bool | str = False,
+    solver_progress: bool | str = False,
+) -> PoolSweepResult:
+    """Sweep activation with solver-side observers instead of stored Vm traces."""
+
+    base_pool = tuple(pool)
+    value_tuple = _normalize_sweep_values(values)
+    if len(base_pool) == 0:
+        return PoolSweepResult(
+            values=value_tuple,
+            observations=np.zeros((len(value_tuple), 0), dtype=bool),
+        )
+
+    progress_display = _SweepProgress(progress)
+    observation_rows: list[np.ndarray] = []
+    try:
+        for index, value in enumerate(value_tuple):
+            updated_pool = tuple(
+                _apply_pool_update(row, update, value) for row in base_pool
+            )
+            if all(isinstance(item, SimResult) for item in updated_pool):
+                observations = np.asarray(
+                    [
+                        criterion.evaluate(result).activated
+                        for result in updated_pool  # type: ignore[arg-type]
+                    ],
+                    dtype=bool,
+                )
+            else:
+                observations = _evaluate_activation_observer_pool(
+                    updated_pool,  # type: ignore[arg-type]
+                    criterion=criterion,
+                    duration=duration,
+                    dt=dt,
+                    progress=solver_progress,
+                )
+            observation_rows.append(observations)
+            progress_display.update(
+                label="Pool sweep",
+                current_index=index,
+                values=value_tuple,
+                completed_rows=observation_rows,
+                progress_summary=_activation_progress_summary,
+            )
+    finally:
+        progress_display.close()
+
+    if not observation_rows:
+        return PoolSweepResult(
+            values=value_tuple,
+            observations=np.zeros((0, len(base_pool)), dtype=bool),
+        )
+    width = observation_rows[0].shape[0]
+    if any(row.shape[0] != width for row in observation_rows):
+        raise ValueError("pool/update must keep the same number of rows each time.")
+    return PoolSweepResult(
+        values=value_tuple,
+        observations=np.stack(observation_rows, axis=0),
     )
 
 
@@ -861,6 +946,14 @@ def _evaluate_activation_updated_pool(
     )
     if all(isinstance(item, SimResult) for item in updated_pool):
         results = tuple(updated_pool)  # type: ignore[assignment]
+    elif _can_use_activation_observer(recording, criterion):
+        return _evaluate_activation_observer_pool(
+            updated_pool,  # type: ignore[arg-type]
+            criterion=criterion,
+            duration=duration,
+            dt=dt,
+            progress=progress,
+        )
     else:
         pool_result = simulate_pool(
             updated_pool,  # type: ignore[arg-type]
@@ -904,6 +997,62 @@ def _run_updated_pool(
         progress=progress,
     )
     return tuple(view.to_sim_result() for view in pool_result)
+
+
+def _evaluate_activation_observer_pool(
+    pool: tuple[SimulationCandidate, ...],
+    *,
+    criterion: ActivationCriterion,
+    duration: Any,
+    dt: Any,
+    progress: bool | str,
+) -> np.ndarray:
+    """Evaluate activation through compact solver-side observers."""
+
+    activation = _activation_observer_definition(criterion)
+    pool_result = simulate_pool(
+        pool,  # type: ignore[arg-type]
+        duration=duration,
+        dt=dt,
+        recording=Recording.none(),
+        observers=(activation,),
+        progress=progress,
+    )
+    return np.asarray(
+        [
+            bool(np.asarray(_activation_observation(view, activation.name).values)[0])
+            for view in pool_result
+        ],
+        dtype=bool,
+    )
+
+
+def _activation_observation(result: Any, name: str) -> Any:
+    observations = getattr(result, "observations", None)
+    if observations is None or name not in observations:
+        raise RuntimeError("activation observer result is missing from solver output.")
+    return observations[name]
+
+
+def _can_use_activation_observer(
+    recording: Recording | None,
+    criterion: ActivationCriterion,
+) -> bool:
+    if bool(getattr(criterion, "require_propagation", False)):
+        return False
+    return recording is None or (
+        isinstance(recording, Recording)
+        and not recording.voltage
+        and not recording.wants_observables
+    )
+
+
+def _activation_observer_definition(criterion: ActivationCriterion) -> Activation:
+    return Activation(
+        threshold=criterion.threshold,
+        blanking=criterion.blanking,
+        target=criterion.target,
+    )
 
 
 def _apply_threshold_update(

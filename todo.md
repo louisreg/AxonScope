@@ -73,8 +73,17 @@ Work should start here unless the user asks otherwise.
 - [ ] Propagate optional memory/cache metadata into
   `realistic_examples_profile_cpu_vs_gpu.csv`; current run writes them in the
   per-platform profile CSVs and raw events.
-- [ ] Phase 7.6.5 next optimization: profile and optimize `Vext` materialization for realistic
-  threshold, activation, recruitment, and conduction workflows.
+- [x] Phase 7.6.5 observer-only protocol pass: route activation/recruitment
+  sweeps through solver-side `Activation` observers when `Recording.none()` is
+  used, so recruitment can return compact bool arrays instead of moving full
+  `Vm` traces back to host.
+- [ ] Validate the observer-only recruitment path on Kaggle P100
+  `realistic_stress` and compare `example08_recruitment`, `kernel.enqueue`,
+  `results.split_batch`, and memory estimates against
+  `20260619_195351_realistic_stress_NvidiaTeslaP100`.
+- [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
+  materialization for realistic threshold, activation, recruitment, and
+  conduction workflows.
 - [ ] Phase 7.6.6: evaluate GPU dispatch scheduling as a separate phase after
   realistic profiling shows whether group count, kernel waits, or result
   splitting are material bottlenecks.
@@ -120,6 +129,9 @@ realistic GPU cases.
      shared point-source/electrode drives.
    - Avoid materializing dense zero `Iinj`.
    - Reuse or cache `Vext` when protocols sweep only current amplitude.
+   - Prefer observer-only outputs for activation/recruitment protocols when the
+     user only needs compact decisions, reducing GPU-to-CPU movement and
+     avoiding per-row `Vm` materialization.
    - Explore on-device/lazy `Vext` generation for analytical point sources.
 
 4. Validate behavior.
