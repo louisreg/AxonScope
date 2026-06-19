@@ -94,6 +94,7 @@ def main() -> None:
             smoke=False,
             stress=True,
             example08_recording="observer_only",
+            example08_observer_cpu_chunk_size=10,
         )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
@@ -351,6 +352,7 @@ def run_realistic_examples(
     smoke: bool,
     stress: bool = False,
     example08_recording: str = "full",
+    example08_observer_cpu_chunk_size: int = 0,
 ) -> None:
     command = [
         sys.executable,
@@ -365,6 +367,13 @@ def run_realistic_examples(
         "--example08-recording",
         example08_recording,
     ]
+    if example08_observer_cpu_chunk_size:
+        command.extend(
+            [
+                "--example08-observer-cpu-chunk-size",
+                str(example08_observer_cpu_chunk_size),
+            ]
+        )
     if smoke:
         command.extend(
             [

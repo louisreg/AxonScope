@@ -189,6 +189,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--example08-observer-cpu-chunk-size",
+        type=int,
+        default=0,
+        help=(
+            "If >0, split example 08 CPU observer-only recruitment into chunks of "
+            "this many fibers to reduce CPU XLA/LLVM compile memory."
+        ),
+    )
+    parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path("benchmark/results/realistic_examples"),
@@ -217,6 +226,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         raise ValueError("--repeats must be >= 1.")
     if args.warmups < 0:
         raise ValueError("--warmups must be >= 0.")
+    if args.example08_observer_cpu_chunk_size < 0:
+        raise ValueError("--example08-observer-cpu-chunk-size must be >= 0.")
     if any(count < 1 for count in preset_run_counts(args)):
         raise ValueError("run counts must be >= 1.")
     if any(count < 1 for count in preset_family_counts(args)):
@@ -254,6 +265,21 @@ def example08_amplitude_count(args: argparse.Namespace) -> int:
     if args.example08_amplitude_count is not None:
         return int(args.example08_amplitude_count)
     return 2 if args.preset == "smoke" else 8
+
+
+def example08_observer_cpu_chunk_size(args: argparse.Namespace) -> int:
+    if args.platform_label != "cpu":
+        return 0
+    if args.example08_recording != "observer_only":
+        return 0
+    return int(args.example08_observer_cpu_chunk_size)
+
+
+def example08_recording_label(args: argparse.Namespace) -> str:
+    chunk_size = example08_observer_cpu_chunk_size(args)
+    if chunk_size > 0:
+        return f"observer_only_cpu_chunk{chunk_size}"
+    return str(args.example08_recording)
 
 
 def spawn_platform_runs(args: argparse.Namespace) -> int:
@@ -341,6 +367,13 @@ def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]
     if args.example08_amplitude_count is not None:
         command.extend(["--example08-amplitude-count", str(args.example08_amplitude_count)])
     command.extend(["--example08-recording", str(args.example08_recording)])
+    if args.example08_observer_cpu_chunk_size:
+        command.extend(
+            [
+                "--example08-observer-cpu-chunk-size",
+                str(args.example08_observer_cpu_chunk_size),
+            ]
+        )
     if not args.plots:
         command.append("--no-plots")
     if args.profile:
@@ -398,6 +431,9 @@ def run_current_platform(args: argparse.Namespace) -> int:
             "example07_max_iterations": example07_max_iterations(args),
             "example08_amplitude_count": example08_amplitude_count(args),
             "example08_recording": args.example08_recording,
+            "example08_observer_cpu_chunk_size": int(
+                args.example08_observer_cpu_chunk_size
+            ),
             "cpu_observer_low_memory_xla": (
                 os.environ.get("AXONSCOPE_CPU_OBSERVER_LOW_MEMORY_XLA") == "1"
             ),
@@ -529,7 +565,7 @@ def planned_cases(args: argparse.Namespace) -> list[WorkflowCase]:
                     run_count=2 * family_count,
                     duration_ms=4.0,
                     dt_ms=0.025,
-                    recording=args.example08_recording,
+                    recording=example08_recording_label(args),
                     protocol_steps=amplitudes,
                 )
             )
@@ -850,21 +886,46 @@ def run_example08(
         if args.example08_recording == "observer_only"
         else axs.Recording.voltage()
     )
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=ex08.update_point_source_current,
-        amplitudes=amplitudes,
-        duration=case.duration_ms * axs.ms,
-        dt=case.dt_ms * axs.ms,
-        criterion=criterion,
-        recording=recording,
-        progress=False,
-    )
+    chunk_size = example08_observer_cpu_chunk_size(args)
+    if chunk_size > 0:
+        activated_chunks = []
+        for start in range(0, len(pool), chunk_size):
+            stop = min(start + chunk_size, len(pool))
+            chunk_curve = axs.protocols.recruitment_sweep(
+                pool[start:stop],
+                update=ex08.update_point_source_current,
+                amplitudes=amplitudes,
+                duration=case.duration_ms * axs.ms,
+                dt=case.dt_ms * axs.ms,
+                criterion=criterion,
+                recording=recording,
+                progress=False,
+            )
+            activated_chunks.append(np.asarray(chunk_curve.activated, dtype=bool))
+        activated = (
+            np.concatenate(activated_chunks, axis=1)
+            if activated_chunks
+            else np.zeros((len(amplitudes), 0), dtype=bool)
+        )
+    else:
+        curve = axs.protocols.recruitment_sweep(
+            pool,
+            update=ex08.update_point_source_current,
+            amplitudes=amplitudes,
+            duration=case.duration_ms * axs.ms,
+            dt=case.dt_ms * axs.ms,
+            criterion=criterion,
+            recording=recording,
+            progress=False,
+        )
+        activated = np.asarray(curve.activated, dtype=bool)
+    fraction = np.mean(activated, axis=1) if activated.shape[1] else np.zeros(len(amplitudes))
     return {
-        "final_fraction": float(curve.fraction[-1]) if len(curve.fraction) else 0.0,
+        "final_fraction": float(fraction[-1]) if len(fraction) else 0.0,
         "amplitude_count": int(len(amplitudes)),
-        "unmyelinated_final": float(np.mean(curve.activated[-1, families == "unmyelinated"])),
-        "myelinated_final": float(np.mean(curve.activated[-1, families == "myelinated"])),
+        "observer_cpu_chunk_size": int(chunk_size),
+        "unmyelinated_final": float(np.mean(activated[-1, families == "unmyelinated"])),
+        "myelinated_final": float(np.mean(activated[-1, families == "myelinated"])),
     }
 
 

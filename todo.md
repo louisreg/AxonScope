@@ -81,8 +81,8 @@ Work should start here unless the user asks otherwise.
   full-output CPU/GPU matrix. Use Kaggle `realistic_stress` for full/full
   comparison, and Kaggle `realistic_stress_observer` for observer/observer
   stress. The observer target applies low-memory CPU XLA/LLVM codegen flags
-  because the first CPU observer-only stress attempt exceeded Kaggle compile
-  memory.
+  and chunks CPU example 08 because the first CPU observer-only stress attempt
+  exceeded Kaggle compile memory.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

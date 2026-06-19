@@ -237,8 +237,8 @@ Implemented follow-up:
 - Kaggle now has a separate `realistic_stress_observer` target. Early evidence
   shows the CPU observer-only stress path can exceed Kaggle's LLVM compile
   memory at `example08_recruitment`; the Kaggle target therefore applies
-  low-memory CPU XLA/LLVM codegen flags before falling back to smaller CPU
-  equivalence tests.
+  low-memory CPU XLA/LLVM codegen flags and chunks CPU example 08 observer-only
+  runs into smaller sub-batches.
 - Explicit user recording requests such as probe recordings still keep the old
   post-hoc path, so probe-limited semantics are preserved.
 

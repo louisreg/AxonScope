@@ -145,8 +145,9 @@ profiling, so the output includes `realistic_examples_cpu_profile.csv`,
 runtime preparation, input materialization, kernel enqueue/wait, batch splitting,
 and public result packaging. `realistic_stress_observer` runs the same stress
 matrix with example 08 recruitment in observer-only mode on both CPU and GPU.
-The CPU child uses low-memory XLA/LLVM codegen flags for this preset because the
-observer-only CPU stress path can otherwise exceed Kaggle's compile memory.
+The CPU child uses low-memory XLA/LLVM codegen flags and chunks example 08 into
+smaller CPU sub-batches for this preset because the observer-only CPU stress
+path can otherwise exceed Kaggle's compile memory.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and
