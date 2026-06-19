@@ -65,8 +65,14 @@ Work should start here unless the user asks otherwise.
 - [x] Phase 7.6.5 first pass: reuse batch-safe solver runtimes, cache shared
   point-source footprints, and expose per-group memory estimates in realistic
   profile CSV/events.
-- [ ] Phase 7.6.5 next validation: run Kaggle `realistic_stress` CPU vs GPU
-  after runtime/Vext cache changes.
+- [x] Phase 7.6.5 validation: Kaggle P100 `realistic_stress` CPU vs GPU
+  completed at
+  `benchmark/results/kaggle/20260619_195351_realistic_stress_NvidiaTeslaP100`;
+  warm totals improved from `72.58 -> 60.31 s` CPU and `43.04 -> 36.99 s`
+  GPU versus the previous stress run.
+- [ ] Propagate optional memory/cache metadata into
+  `realistic_examples_profile_cpu_vs_gpu.csv`; current run writes them in the
+  per-platform profile CSVs and raw events.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext` materialization for realistic
   threshold, activation, recruitment, and conduction workflows.
 - [ ] Phase 7.6.6: evaluate GPU dispatch scheduling as a separate phase after

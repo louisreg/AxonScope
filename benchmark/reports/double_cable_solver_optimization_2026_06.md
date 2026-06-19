@@ -195,6 +195,28 @@ profile again, comparing `runtime.prepare`, `inputs.extracellular`,
 `kernel.enqueue`, and warm wall time against
 `20260619_093205_realistic_stress_NvidiaTeslaP100`.
 
+Kaggle P100 validation run
+`20260619_195351_realistic_stress_NvidiaTeslaP100` used commit `084d8d4` and
+completed successfully. Compared with the previous P100 stress run:
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| CPU warm total | `72.58 s` | `60.31 s` | `-16.9%` |
+| GPU warm total | `43.04 s` | `36.99 s` | `-14.1%` |
+| CPU first-run total | `213.27 s` | `176.99 s` | `-17.0%` |
+| GPU first-run total | `285.74 s` | `241.79 s` | `-15.4%` |
+| GPU `runtime.prepare` warm total | `36.54 s` | `29.54 s` | `-19.1%` |
+| GPU `inputs.extracellular` warm total | `2.07 s` | `1.63 s` | `-21.3%` |
+| GPU `kernel.enqueue` warm total | `44.34 s` | `41.08 s` | `-7.4%` |
+
+The profile CSVs now expose memory/cache columns in
+`realistic_examples_cpu_profile.csv` and `realistic_examples_gpu_profile.csv`.
+The CPU/GPU comparison CSV still keeps the compact timing-only schema. In the
+new run, the point-source footprint cache recorded `124` hits and `4` misses per
+platform, and the largest per-group memory estimate was about `1146.8 MiB`
+(`~9.4%` of the JAX-reported device memory limit for HH B=20), still below
+memory pressure for the P100 stress matrix.
+
 ## Result Folders
 
 Key source folders used for this report:
@@ -210,4 +232,5 @@ Key source folders used for this report:
 - `benchmark/results/kaggle/20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4`
 - `benchmark/results/kaggle/20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4`
 - `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`
+- `benchmark/results/kaggle/20260619_195351_realistic_stress_NvidiaTeslaP100`
 - `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`
