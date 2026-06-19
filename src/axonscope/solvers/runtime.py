@@ -131,6 +131,7 @@ _BACKEND_CACHE: dict[tuple[Any, ...], ICMBackend] = {}
 _MEMBRANE_RUNTIME_CACHE: dict[tuple[Any, ...], MembraneRuntime] = {}
 _CABLE_RUNTIME_CACHE: dict[tuple[Any, ...], CableRuntime] = {}
 _EXTRACELLULAR_RUNTIME_CACHE: dict[tuple[Any, ...], ExtracellularRuntime] = {}
+_SOLVER_RUNTIME_CACHE: dict[tuple[Any, ...], SolverRuntime] = {}
 
 
 def _with_rate_tables(
@@ -213,6 +214,46 @@ def _extracellular_runtime_cache_key(
         _array_cache_key(axon.xraxial_MOhm_per_cm),
         _array_cache_key(axon.xg_S_cm2),
         _array_cache_key(axon.xc_uF_cm2),
+    )
+
+
+def _solver_runtime_cache_key(
+    axon: Axon,
+    solver_axon: SolverAxon,
+    options: SolverOptions,
+    membrane: MembraneRuntime,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    include_extracellular: bool,
+    include_area: bool,
+) -> tuple[Any, ...]:
+    return (
+        "solver_runtime",
+        _membrane_runtime_cache_key(axon, solver_axon, options),
+        _solver_cable_cache_key(solver_axon),
+        float(tsim_ms),
+        float(dt_ms),
+        np.dtype(membrane.dtype).str,
+        bool(include_extracellular),
+        bool(include_area),
+        bool(getattr(axon, "use_extracellular", False)),
+        bool(getattr(axon, "extracellular_contexts", ())),
+    )
+
+
+def _can_cache_solver_runtime(
+    *,
+    compile_stimulation: bool,
+    precompute_intracellular: bool,
+    precompute_extracellular: bool,
+) -> bool:
+    """Return whether the whole runtime is independent of drive amplitudes."""
+
+    return (
+        not bool(compile_stimulation)
+        and not bool(precompute_intracellular)
+        and not bool(precompute_extracellular)
     )
 
 
@@ -542,13 +583,34 @@ def prepare_solver_runtime(
         solver_axon=solver_axon,
         solver_options=solver_options,
     )
-    grid = prepare_simulation_grid(tsim_ms, dt_ms, membrane.dtype)
     if include_extracellular is None:
         include_extracellular = bool(getattr(axon, "use_extracellular", False))
     if precompute_extracellular is None:
         precompute_extracellular = include_extracellular
     if include_area is None:
         include_area = True
+    options = _resolve_solver_options(solver_options)
+    cache_key = None
+    if _can_cache_solver_runtime(
+        compile_stimulation=compile_stimulation,
+        precompute_intracellular=precompute_intracellular,
+        precompute_extracellular=precompute_extracellular,
+    ):
+        cache_key = _solver_runtime_cache_key(
+            axon,
+            solver_axon,
+            options,
+            membrane,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            include_extracellular=include_extracellular,
+            include_area=include_area,
+        )
+        cached = _SOLVER_RUNTIME_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+    grid = prepare_simulation_grid(tsim_ms, dt_ms, membrane.dtype)
     cable = prepare_cable_runtime(solver_axon, membrane.dtype, include_area=include_area)
     stimulation = prepare_stimulation_runtime(
         axon,
@@ -564,7 +626,7 @@ def prepare_solver_runtime(
         if include_extracellular
         else None
     )
-    return SolverRuntime(
+    runtime = SolverRuntime(
         axon=solver_axon,
         grid=grid,
         membrane=membrane,
@@ -572,6 +634,9 @@ def prepare_solver_runtime(
         stimulation=stimulation,
         extracellular=extracellular,
     )
+    if cache_key is not None:
+        _SOLVER_RUNTIME_CACHE[cache_key] = runtime
+    return runtime
 
 
 def precompute_extracellular_potential_mV(

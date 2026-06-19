@@ -7,12 +7,14 @@ backend arrays for batch execution.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Literal, Sequence, cast
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope.benchmarking.hotpaths import record_benchmark_metadata
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (
@@ -36,6 +38,8 @@ Array = Any
 AxonLike = Axon | AxonInstance
 ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
 FootprintEngine = Literal["numpy", "jax"]
+
+_POINT_SOURCE_FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 
 
 def build_vstim_midpoint_batch(
@@ -749,14 +753,32 @@ def _try_build_shared_point_source_vstim_batch(
         return None
 
     current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
-    x_rel_m = x_rows - float(electrode.x0_m)
-    y_rel_m = (float(electrode.y_um) - axon_y_um)[:, None] * 1e-6
-    z_rel_m = (float(electrode.z_um) - axon_z_um)[:, None] * 1e-6
-    radius_m = np.sqrt(x_rel_m**2 + y_rel_m**2 + z_rel_m**2)
-    radius_m = np.maximum(radius_m, float(electrode.min_distance_m))
-    footprint = np.asarray(
-        1.0 / (4.0 * np.pi * float(first_context.sigma_S_m) * radius_m),
-        dtype=np_dtype,
+    cache_key = _point_source_footprint_cache_key(
+        first_context,
+        electrode,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype=np_dtype,
+    )
+    footprint = _POINT_SOURCE_FOOTPRINT_CACHE.get(cache_key)
+    if footprint is None:
+        x_rel_m = x_rows - float(electrode.x0_m)
+        y_rel_m = (float(electrode.y_um) - axon_y_um)[:, None] * 1e-6
+        z_rel_m = (float(electrode.z_um) - axon_z_um)[:, None] * 1e-6
+        radius_m = np.sqrt(x_rel_m**2 + y_rel_m**2 + z_rel_m**2)
+        radius_m = np.maximum(radius_m, float(electrode.min_distance_m))
+        footprint = np.asarray(
+            1.0 / (4.0 * np.pi * float(first_context.sigma_S_m) * radius_m),
+            dtype=np_dtype,
+        )
+        _POINT_SOURCE_FOOTPRINT_CACHE[cache_key] = footprint
+        footprint_cache_status = "miss"
+    else:
+        footprint_cache_status = "hit"
+    record_benchmark_metadata(
+        vstim_footprint_cache=footprint_cache_status,
+        vstim_footprint_cache_nbytes=int(footprint.nbytes),
     )
     values = (
         current_A[None, :, None]
@@ -764,6 +786,35 @@ def _try_build_shared_point_source_vstim_batch(
         * np.asarray(1e3, dtype=np_dtype)
     )
     return jnp.asarray(values, dtype=dtype_local)
+
+
+def _point_source_footprint_cache_key(
+    context: AnalyticalExtracellularContext,
+    electrode: PointSourceElectrode,
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+) -> tuple[Any, ...]:
+    return (
+        "point_source_footprint",
+        str(np_dtype),
+        float(context.sigma_S_m),
+        float(electrode.x0_m),
+        float(electrode.y_um),
+        float(electrode.z_um),
+        float(electrode.min_distance_m),
+        _array_content_key(x_rows),
+        _array_content_key(axon_y_um),
+        _array_content_key(axon_z_um),
+    )
+
+
+def _array_content_key(values: np.ndarray) -> tuple[tuple[int, ...], str, str]:
+    arr = np.ascontiguousarray(np.asarray(values))
+    digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
+    return tuple(int(dim) for dim in arr.shape), arr.dtype.str, digest
 
 
 def _build_vstim_row(

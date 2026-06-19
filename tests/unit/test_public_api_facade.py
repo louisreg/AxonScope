@@ -317,6 +317,12 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
     assert metadata["input_format"] == "zero_no_intracellular_context"
     assert "iinj_mid" not in metadata
     assert metadata["skipped_dense_iinj_shape"] == [2, 2, 11]
+    group_events = [event for event in report.events if event.name == "dispatch.group.total"]
+    assert len(group_events) == 1
+    group_metadata = group_events[0].metadata
+    assert group_metadata["memory_estimate_total_nbytes"] > 0
+    assert group_metadata["memory_estimate_components_nbytes"]["vstim_mid"] > 0
+    assert group_metadata["memory_estimate_components_nbytes"]["iinj_dense"] == 0
 
 
 def test_public_recording_signals_filter_single_result():

@@ -9,6 +9,7 @@ from axonscope import AxonInstance
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import HodgkinHuxley
+from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
 from axonscope.channel_models.passive import PassiveICM
 from axonscope.stimulation import AnalyticalElectrode, AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.stimulation import Stimulus
@@ -127,6 +128,47 @@ def test_extracellular_context_accumulates_multiple_electrodes():
     got_mV = np.asarray(ax.extracellular_potential_mV(t_probe))
 
     assert np.allclose(got_mV, expected_mV, rtol=1e-6, atol=1e-6)
+
+
+def test_point_source_vstim_footprint_cache_keeps_stimulus_amplitude_live():
+    ax = AxonInstance(
+        HodgkinHuxley(length=100.0 * axs.um, diameter=0.5 * axs.um, compartments=11)
+    )
+    electrode = PointSourceElectrode(
+        x=50.0 * axs.um,
+        z=100.0 * axs.um,
+    )
+    electrode.set_stimulus(
+        Stimulus.pulse(start=0.0 * axs.ms, duration=0.1 * axs.ms, amplitude=10.0 * axs.uA)
+    )
+    context = AnalyticalExtracellularContext(
+        electrodes=[electrode],
+        sigma=0.3 * axs.S_per_m,
+    )
+
+    first = np.asarray(
+        build_vstim_midpoint_batch(
+            ax,
+            [(context,), (context,)],
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            dtype_local=np.float32,
+        )
+    )
+    electrode.set_stimulus(
+        Stimulus.pulse(start=0.0 * axs.ms, duration=0.1 * axs.ms, amplitude=20.0 * axs.uA)
+    )
+    second = np.asarray(
+        build_vstim_midpoint_batch(
+            ax,
+            [(context,), (context,)],
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            dtype_local=np.float32,
+        )
+    )
+
+    np.testing.assert_allclose(second, 2.0 * first, rtol=1e-6, atol=1e-6)
 
 
 def test_add_extracellular_context_rejects_second_context_without_replace():

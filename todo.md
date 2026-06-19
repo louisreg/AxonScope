@@ -19,8 +19,8 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 
 ## Current Snapshot
 
-Updated on 2026-06-18 after closing the double-cable GPU solver optimization
-campaign and cleaning the benchmark surface.
+Updated on 2026-06-19 after adding realistic CPU/GPU stress profiling for
+examples 06/07/08.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -29,7 +29,8 @@ campaign and cleaning the benchmark surface.
 | Phase 7.6.2 | Done | Memory-transfer and long-run cleanup landed for current hotpaths. |
 | Phase 7.6.3 | Closed | Exact double-cable GPU solver optimization pass is complete. No new public solver route; see `benchmark/reports/double_cable_solver_optimization_2026_06.md`. |
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
-| Phase 7.6.5 | Next | `Vext` materialization and realistic workflow performance. |
+| Phase 7.6.5 | In progress | `Vext` materialization and realistic workflow performance. |
+| Phase 7.6.6 | Planned | GPU dispatch scheduling: bucket/coalesce compatible groups, then test optional async group enqueue. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
 | Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
@@ -56,11 +57,21 @@ Work should start here unless the user asks otherwise.
 - [x] Add a clean solver-campaign summary report with a small speedup plot.
 - [x] Add workflow-level benchmark based on basic examples 06/07/08:
   `benchmark/realistic_examples/bench_basic_examples.py`.
-- [ ] Run `benchmark/realistic_examples/bench_basic_examples.py` on CPU and GPU
-  for the bounded `standard` matrix, then add the resulting CSV/JSON paths to
-  the solver/Vext report.
-- [ ] Phase 7.6.5: profile and optimize `Vext` materialization for realistic
+- [x] Run Kaggle P100 `realistic_stress` CPU vs GPU with solver/workflow
+  profiling; summarized in
+  `benchmark/reports/double_cable_solver_optimization_2026_06.md`.
+- [ ] Keep the bounded `standard` matrix as an optional cheaper regression run
+  once the next Vext/runtime changes land.
+- [x] Phase 7.6.5 first pass: reuse batch-safe solver runtimes, cache shared
+  point-source footprints, and expose per-group memory estimates in realistic
+  profile CSV/events.
+- [ ] Phase 7.6.5 next validation: run Kaggle `realistic_stress` CPU vs GPU
+  after runtime/Vext cache changes.
+- [ ] Phase 7.6.5 next optimization: profile and optimize `Vext` materialization for realistic
   threshold, activation, recruitment, and conduction workflows.
+- [ ] Phase 7.6.6: evaluate GPU dispatch scheduling as a separate phase after
+  realistic profiling shows whether group count, kernel waits, or result
+  splitting are material bottlenecks.
 - [ ] Phase 7.7: clean stimulation and placement APIs after the first Vext pass.
 
 ## Phase 7.6.5 Vext Plan
@@ -75,12 +86,28 @@ realistic GPU cases.
      with `benchmark/realistic_examples/bench_basic_examples.py`.
    - Compare CPU vs GPU by workflow, fiber type, run count, and population size.
    - Record build time, first run, warm run, backend, and devices.
+   - Current Kaggle P100 stress evidence:
+     `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`.
 
 2. Add `Vext` timing visibility.
    - Separate public object construction, extracellular footprint evaluation,
      dense `Vext` array materialization, host-to-device movement, solver time,
      and result packaging.
    - Keep measurements available in CSV/JSON, not only profiler traces.
+   - Treat `runtime.prepare` and GPU dispatch/launch overhead as first-class
+     timings too; the stress profile shows these dominate recruitment before
+     raw solver time does.
+   - First pass implemented:
+     - reuse the `solver_axon` already built by dispatch planning when preparing
+       batch runtimes;
+     - cache whole solver runtimes only for batch-safe paths where stimulation
+       callables/precomputed drive tensors are not embedded in the runtime;
+     - cache shared point-source spatial footprints while keeping stimulus
+       amplitudes live;
+     - add `memory_estimate_*` and footprint-cache columns to realistic profile
+       CSVs.
+   - Local validation:
+     `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 
 3. Reduce avoidable dense inputs.
    - Preserve the current public API while testing internal representations for
@@ -99,6 +126,74 @@ realistic GPU cases.
    - If solver time becomes dominant again, reopen custom kernels only with a
      clear validation gate and a target device that supports the required stack.
 
+## Phase 7.6.6 GPU Dispatch Scheduling
+
+Reference note: `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
+
+Goal: improve GPU throughput by launching fewer, larger compatible JAX calls
+and, only after that, testing optional async enqueue/wait scheduling for
+remaining independent groups. This is a dispatch/planning phase, not a solver
+replacement.
+
+Entry gate:
+
+- [ ] Use `realistic_examples_*_profile.csv` and hotpath traces to confirm that
+  dispatch group count, repeated `kernel.wait`, input preparation, or
+  `results.split_batch` are meaningful bottlenecks.
+- [ ] Compare available hardware capacity, especially GPU memory, against the
+  estimated memory cost of each simulation/bucket before enabling coalescing or
+  async scheduling.
+- [ ] Re-check this gate on larger heterogeneous pools: current P100
+  `realistic_stress` evidence mostly has one dispatch group per simulation call,
+  with mixed recruitment at two groups, so scheduling is not yet the immediate
+  bottleneck.
+- [ ] Keep Phase 7.6.5 `Vext` profiling as the immediate source of truth before
+  changing dispatch architecture.
+
+Implementation plan:
+
+1. Add conservative execution bucket keys.
+   - Start with `mode`, resolved solver/backend, `Nx` bucket, dtype,
+     recording mode, and geometry compatibility.
+   - Keep scalar fallback groups out of bucket coalescing.
+
+2. Add `Nx` bucketing and padding as an explicit scheduling policy.
+   - Target buckets: `32`, `64`, `128`, then `256` only if profiling demands it.
+   - Slice padded outputs back to original rows and keep observers blind to
+     padded compartments.
+
+3. Coalesce compatible groups before considering concurrency.
+   - Prefer one larger JAX call over many small calls when safety rules match.
+   - Track original group count, bucket count, coalesced group count, effective
+     batch size, available device memory, estimated simulation memory, and
+     estimated output bytes.
+
+4. Prototype optional async group scheduling behind an explicit option.
+   - Split batch execution into prepare/enqueue/wait/finalize steps.
+   - Add `PendingGroup` plus memory-pressure flushing.
+   - Do not enable async by default until benchmarks show stable wins.
+
+5. Add a dedicated scheduler benchmark.
+   - Create `benchmark/dispatcher/bench_group_scheduling.py`.
+   - Compare `sync_current`, `async_groups`, `coalesce_buckets`, and
+     `coalesce_buckets_async`.
+   - Cover many small compatible groups, semi-compatible `Nx` groups, mixed
+     single/double groups, full recording, center recording, and observer-only
+     output.
+   - Report memory budget versus estimated memory cost per bucket, including
+     inputs, outputs, padded rows, retained traces, and pending async groups.
+
+Success criteria:
+
+- [ ] Keep bucket coalescing if it improves total wall time by at least about
+  20% or materially reduces JIT call count without memory regressions.
+- [ ] Keep async scheduling only if it improves total wall time by at least
+  about 10% on relevant GPU workloads and peak memory remains acceptable.
+- [ ] Reject or downshift any scheduling policy when estimated memory pressure is
+  too close to the available hardware budget.
+- [ ] Keep all changes internal to dispatch/runtime options until the public
+  API story is clear.
+
 ## Solver Campaign References
 
 - Summary report: `benchmark/reports/double_cable_solver_optimization_2026_06.md`
@@ -106,6 +201,7 @@ realistic GPU cases.
 - Active solver README: `benchmark/solvers/README.md`
 - Kaggle runner README: `benchmark/kaggle/README.md`
 - Solver roadmap archive: `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`
+- Dispatch scheduling note: `ideas/axonscope_dispatch_scheduling_gpu_note.md`
 
 Archived experiment locations:
 

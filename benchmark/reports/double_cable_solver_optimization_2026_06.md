@@ -79,6 +79,9 @@ The active Kaggle wrapper accepts only:
 - `e2e`
 - `e2e_full`
 - `both`
+- `realistic_smoke`
+- `realistic`
+- `realistic_stress`
 
 ## Recommended Next Performance Target
 
@@ -109,6 +112,89 @@ Suggested next phases:
 4. Re-run E2E only after `Vext` changes, using `pcr_adaptive` as the retained
    GPU solver baseline.
 
+## Realistic Stress Profiling Update
+
+Kaggle P100 run
+`20260619_093205_realistic_stress_NvidiaTeslaP100` adds CPU-vs-GPU profiling for
+examples 06/07/08 with the stress preset and `--profile` enabled. It writes the
+main timing tables plus event-level profile comparisons under:
+
+- `realistic_examples_cpu_vs_gpu.csv`
+- `realistic_examples_cpu_profile.csv`
+- `realistic_examples_gpu_profile.csv`
+- `realistic_examples_profile_cpu_vs_gpu.csv`
+- `realistic_examples_cpu_vs_gpu_speedup.svg/png`
+
+Aggregate warm-run wall time across the 14 stress cases was `72.58 s` on CPU and
+`43.04 s` on GPU, a `1.69x` GPU speedup. First-run time still favored CPU
+overall because GPU setup/compile/dispatch costs were larger: `213.27 s` CPU vs
+`285.74 s` GPU.
+
+Warm-run speedups by workflow:
+
+- Example 06 velocity: strong GPU wins, `2.37x-3.02x` for HH and
+  `3.18x-3.64x` for MRG.
+- Example 07 threshold: small to moderate wins, from near parity to `1.76x`.
+- Example 08 recruitment: GPU is slower, `0.72x-0.78x`.
+
+The detailed profile makes the bottleneck clearer than the wall-time table:
+
+| Warm event | CPU total | GPU total | CPU/GPU |
+|---|---:|---:|---:|
+| `kernel.wait` | `151.01 s` | `2.27 s` | `66.40x` |
+| `kernel.enqueue` | `10.78 s` | `44.34 s` | `0.24x` |
+| `runtime.prepare` | `12.48 s` | `36.54 s` | `0.34x` |
+| `inputs.extracellular` | `2.97 s` | `2.07 s` | `1.44x` |
+| `results.split_batch` | `0.23 s` | `1.65 s` | `0.14x` |
+
+This shifts the immediate interpretation: for this stress matrix, dense
+extracellular input generation is visible but not the dominant measured cost.
+The GPU wins the actual solve/wait path, while `runtime.prepare` and
+`kernel.enqueue` dominate the remaining GPU overhead, especially for repeated
+protocol workflows such as recruitment.
+
+Dispatch scheduling should therefore stay as a separate later phase. The stress
+run mostly shows one dispatch group per simulation call, except mixed
+recruitment cases with two groups (`single` and `double`). Current evidence
+points first to reusing prepared runtimes and protocol-level batching/caching;
+group coalescing and async scheduling become attractive once benchmarks show
+many small compatible groups or memory-bound scheduling pressure.
+
+The memory signal is also modest at this scale. For example, recruitment
+`B=100` uses two groups of `50` fibers with `Nx=61` and `Nx=22`; the recorded
+`Vstim` and `Vm` arrays are only a few MiB per protocol step on a P100 16 GB.
+The planned scheduler phase should still include explicit hardware-memory
+capacity checks, but this run is not yet capacity-limited.
+
+## Runtime/Vext First Pass
+
+The first Phase 7.6.5 implementation pass adds conservative runtime and Vext
+reuse without changing the public API:
+
+- Batch execution now passes the `solver_axon` already built by the dispatcher
+  into `prepare_solver_runtime`, avoiding duplicate solver-axon construction.
+- `prepare_solver_runtime` caches whole runtimes only for batch-safe calls where
+  stimulation callables and precomputed drive tensors are deliberately excluded.
+  This keeps amplitude sweeps correct while making repeated protocol runs
+  cheaper.
+- The shared analytical point-source path caches the spatial footprint and
+  still recomputes the temporal current waveform for the current amplitude.
+- Realistic profile CSVs now include selected raw-event metadata columns:
+  `memory_estimate_total_nbytes_max`, `memory_estimate_total_mib_max`,
+  `device_memory_capacity_bytes_max`, `memory_estimate_device_fraction_max`,
+  `vstim_footprint_cache_hits`, and `vstim_footprint_cache_misses`.
+
+Local smoke evidence:
+
+- `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`
+- Targeted unit coverage: runtime cache reuse, live stimulus amplitudes with the
+  footprint cache, and per-group memory metadata in benchmark events.
+
+The next useful evidence run is the Kaggle P100 `realistic_stress` CPU-vs-GPU
+profile again, comparing `runtime.prepare`, `inputs.extracellular`,
+`kernel.enqueue`, and warm wall time against
+`20260619_093205_realistic_stress_NvidiaTeslaP100`.
+
 ## Result Folders
 
 Key source folders used for this report:
@@ -123,3 +209,5 @@ Key source folders used for this report:
 - `benchmark/results/kaggle/20260618_223213_e2e_jax_triton_focus_NvidiaTeslaT4`
 - `benchmark/results/kaggle/20260618_224225_validate_jax_triton_focus_NvidiaTeslaT4`
 - `benchmark/results/kaggle/20260618_224837_validate_jax_triton_thomas_focus_NvidiaTeslaT4`
+- `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`
+- `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`

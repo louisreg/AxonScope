@@ -175,6 +175,86 @@ def _record_zero_intracellular_metadata(
     )
 
 
+def _record_group_memory_estimate(
+    *,
+    group: DispatchGroup,
+    runtime: SolverRuntime,
+    cohort: PreparedCohort,
+    kernel_options: BatchOptions,
+    intracellular_format: str,
+    extracellular_format: str,
+    include_vstim_previous: bool,
+) -> None:
+    """Attach a conservative per-group memory estimate to the group span."""
+
+    dtype = np.dtype(runtime.membrane.dtype)
+    batch_size = int(group.size)
+    nt = int(runtime.grid.Nt)
+    nx = int(group.nx)
+    itemsize = int(dtype.itemsize)
+    positions_nbytes = int(np.asarray(cohort.x_positions_m).nbytes)
+    dense_shape = (batch_size, nt, nx)
+    dense_nbytes = int(np.prod(dense_shape, dtype=np.int64)) * itemsize
+    vstim_mid_nbytes = 0 if extracellular_format == "zero_no_context" else dense_nbytes
+    vstim_previous_nbytes = batch_size * nx * itemsize if include_vstim_previous else 0
+    iinj_dense_nbytes = dense_nbytes if intracellular_format == "dense" else 0
+    output_width = int(kernel_options.recording.width_for(nx))
+    vm_output_nbytes = batch_size * nt * output_width * itemsize
+    components = {
+        "positions": positions_nbytes,
+        "vstim_mid": vstim_mid_nbytes,
+        "vstim_previous": vstim_previous_nbytes,
+        "iinj_dense": iinj_dense_nbytes,
+        "vm_output": vm_output_nbytes,
+    }
+    total_nbytes = int(sum(components.values()))
+    capacity_bytes = _default_device_memory_capacity_bytes()
+    metadata: dict[str, Any] = {
+        "memory_estimate_components_nbytes": components,
+        "memory_estimate_total_nbytes": total_nbytes,
+        "memory_estimate_total_mib": total_nbytes / (1024**2),
+        "memory_estimate_dtype": str(dtype),
+        "memory_estimate_shape": {
+            "batch_size": batch_size,
+            "nt": nt,
+            "nx": nx,
+            "recording_width": output_width,
+        },
+        "memory_estimate_intracellular_format": intracellular_format,
+        "memory_estimate_extracellular_format": extracellular_format,
+    }
+    if capacity_bytes is not None and capacity_bytes > 0:
+        metadata["device_memory_capacity_bytes"] = int(capacity_bytes)
+        metadata["memory_estimate_device_fraction"] = total_nbytes / float(capacity_bytes)
+    record_benchmark_metadata(**metadata)
+
+
+def _default_device_memory_capacity_bytes() -> int | None:
+    """Best-effort capacity for the first JAX device, when the backend exposes it."""
+
+    try:
+        import jax
+
+        devices = jax.devices()
+        if not devices:
+            return None
+        stats_fn = getattr(devices[0], "memory_stats", None)
+        if callable(stats_fn):
+            stats = stats_fn() or {}
+            for key in (
+                "bytes_limit",
+                "device_memory_capacity",
+                "memory_limit",
+                "bytes_reserved",
+            ):
+                value = stats.get(key)
+                if value is not None:
+                    return int(value)
+    except Exception:
+        return None
+    return None
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -187,7 +267,8 @@ def _run_single_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
-    representative = _representative_item(group).simulation
+    representative_item = _representative_item(group)
+    representative = representative_item.simulation
     with benchmark_span(
         "runtime.prepare",
         group_id=group.group_id,
@@ -201,6 +282,7 @@ def _run_single_cable_batch_group(
             cast(Any, representative),
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
+            solver_axon=representative_item.solver_axon,
             include_extracellular=False,
             include_area=False,
             precompute_intracellular=False,
@@ -246,6 +328,23 @@ def _run_single_cable_batch_group(
         not use_sparse_intracellular and not _has_intracellular_contexts(cohort)
     )
     use_zero_extracellular = use_sparse_intracellular and cohort.context_count == 0
+    intracellular_format = (
+        "sparse_current_clamp"
+        if use_sparse_intracellular
+        else "zero_no_intracellular_context"
+        if use_zero_intracellular
+        else "dense"
+    )
+    extracellular_format = "zero_no_context" if use_zero_extracellular else "dense"
+    _record_group_memory_estimate(
+        group=group,
+        runtime=runtime,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        intracellular_format=intracellular_format,
+        extracellular_format=extracellular_format,
+        include_vstim_previous=False,
+    )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -379,7 +478,8 @@ def _run_double_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
 
-    representative = _representative_item(group).simulation
+    representative_item = _representative_item(group)
+    representative = representative_item.simulation
     with benchmark_span(
         "runtime.prepare",
         group_id=group.group_id,
@@ -393,6 +493,7 @@ def _run_double_cable_batch_group(
             cast(Any, representative),
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
+            solver_axon=representative_item.solver_axon,
             include_extracellular=True,
             include_area=True,
             precompute_intracellular=False,
@@ -431,6 +532,17 @@ def _run_double_cable_batch_group(
         observers,
         cohort=cohort,
         dtype=runtime.membrane.dtype,
+    )
+    _record_group_memory_estimate(
+        group=group,
+        runtime=runtime,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        intracellular_format=(
+            "dense" if _has_intracellular_contexts(cohort) else "zero_no_intracellular_context"
+        ),
+        extracellular_format="dense",
+        include_vstim_previous=True,
     )
     with benchmark_span(
         "inputs.intracellular",

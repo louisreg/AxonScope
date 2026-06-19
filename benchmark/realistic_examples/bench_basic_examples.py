@@ -917,7 +917,9 @@ def profile_summary_rows(
     if report is None:
         return []
     rows = []
+    event_metadata = profile_event_metadata_by_name(report)
     for summary in report.summary:
+        extra = event_metadata.get(summary.name, {})
         rows.append(
             {
                 **metadata,
@@ -929,9 +931,67 @@ def profile_summary_rows(
                 "max_ms": float(summary.max_ms),
                 "run_elapsed_s": float(elapsed_s),
                 "profile_dir": str(profile_dir),
+                "memory_estimate_total_nbytes_max": extra.get(
+                    "memory_estimate_total_nbytes_max",
+                    "",
+                ),
+                "memory_estimate_total_mib_max": extra.get(
+                    "memory_estimate_total_mib_max",
+                    "",
+                ),
+                "device_memory_capacity_bytes_max": extra.get(
+                    "device_memory_capacity_bytes_max",
+                    "",
+                ),
+                "memory_estimate_device_fraction_max": extra.get(
+                    "memory_estimate_device_fraction_max",
+                    "",
+                ),
+                "vstim_footprint_cache_hits": extra.get(
+                    "vstim_footprint_cache_hits",
+                    "",
+                ),
+                "vstim_footprint_cache_misses": extra.get(
+                    "vstim_footprint_cache_misses",
+                    "",
+                ),
             }
         )
     return rows
+
+
+def profile_event_metadata_by_name(report: Any) -> dict[str, dict[str, Any]]:
+    """Aggregate selected raw event metadata into profile summary CSV columns."""
+
+    values: dict[str, dict[str, Any]] = {}
+    for event in getattr(report, "events", ()):
+        name = str(getattr(event, "name", ""))
+        metadata = dict(getattr(event, "metadata", {}) or {})
+        row = values.setdefault(name, {})
+        _max_metadata(row, "memory_estimate_total_nbytes", metadata)
+        _max_metadata(row, "memory_estimate_total_mib", metadata)
+        _max_metadata(row, "device_memory_capacity_bytes", metadata)
+        _max_metadata(row, "memory_estimate_device_fraction", metadata)
+        cache_status = metadata.get("vstim_footprint_cache")
+        if cache_status == "hit":
+            row["vstim_footprint_cache_hits"] = (
+                int(row.get("vstim_footprint_cache_hits", 0)) + 1
+            )
+        elif cache_status == "miss":
+            row["vstim_footprint_cache_misses"] = (
+                int(row.get("vstim_footprint_cache_misses", 0)) + 1
+            )
+    return values
+
+
+def _max_metadata(target: dict[str, Any], key: str, metadata: dict[str, Any]) -> None:
+    value = metadata.get(key)
+    if value in (None, ""):
+        return
+    out_key = f"{key}_max"
+    previous = target.get(out_key)
+    if previous in (None, "") or float(value) > float(previous):
+        target[out_key] = value
 
 
 def block_until_ready(value: Any) -> None:

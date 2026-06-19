@@ -90,6 +90,69 @@ def test_prepare_membrane_runtime_reuses_static_runtime_for_same_signature():
     assert second is first
 
 
+def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_axon():
+    axon = AxonInstance(
+        HodgkinHuxley(
+            length=300.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=11,
+            celsius=6.3 * axs.degC,
+        )
+    )
+    electrode = PointSourceElectrode(x=150.0 * axs.um, z=100.0 * axs.um)
+    electrode.set_stimulus(
+        Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10.0 * axs.uA)
+    )
+    axon.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode],
+            sigma=0.3 * axs.S_per_m,
+        ),
+        replace=True,
+    )
+    solver_axon = build_solver_axon(axon)
+
+    first = prepare_solver_runtime(
+        axon,
+        tsim_ms=1.0,
+        dt_ms=0.1,
+        solver_axon=solver_axon,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_stimulation=False,
+    )
+    electrode.set_stimulus(
+        Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=20.0 * axs.uA)
+    )
+    second = prepare_solver_runtime(
+        axon,
+        tsim_ms=1.0,
+        dt_ms=0.1,
+        solver_axon=solver_axon,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_stimulation=False,
+    )
+    different_grid = prepare_solver_runtime(
+        axon,
+        tsim_ms=1.1,
+        dt_ms=0.1,
+        solver_axon=solver_axon,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_stimulation=False,
+    )
+
+    assert second is first
+    assert different_grid is not first
+
+
 def test_prepare_membrane_runtime_keeps_initial_voltage_in_cache_key():
     axon_a = HodgkinHuxley(
         length=300.0 * axs.um,
