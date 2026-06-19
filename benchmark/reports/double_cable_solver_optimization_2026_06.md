@@ -238,7 +238,12 @@ Implemented follow-up:
   shows the CPU observer-only stress path can exceed Kaggle's LLVM compile
   memory at `example08_recruitment`; the Kaggle target therefore applies
   low-memory CPU XLA/LLVM codegen flags and chunks CPU example 08 observer-only
-  runs into smaller sub-batches.
+  runs into single-fiber sub-batches.
+- Separate `realistic_stress_observer_cpu` and `realistic_stress_observer_gpu`
+  targets allow testing CPU-only Kaggle host memory separately from P100/T4 GPU
+  kernels. This is important because the GPU Kaggle image may not have enough
+  host memory for heavy CPU XLA compilation even when the same batch compiles
+  locally.
 - Explicit user recording requests such as probe recordings still keep the old
   post-hoc path, so probe-limited semantics are preserved.
 

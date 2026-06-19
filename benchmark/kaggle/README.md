@@ -119,6 +119,8 @@ The wrapper also accepts:
 --benchmark realistic
 --benchmark realistic_stress
 --benchmark realistic_stress_observer
+--benchmark realistic_stress_observer_cpu
+--benchmark realistic_stress_observer_gpu
 --benchmark both
 --benchmark e2e_full
 --branch bench-colab
@@ -146,8 +148,12 @@ runtime preparation, input materialization, kernel enqueue/wait, batch splitting
 and public result packaging. `realistic_stress_observer` runs the same stress
 matrix with example 08 recruitment in observer-only mode on both CPU and GPU.
 The CPU child uses low-memory XLA/LLVM codegen flags and chunks example 08 into
-smaller CPU sub-batches for this preset because the observer-only CPU stress
-path can otherwise exceed Kaggle's compile memory.
+single-fiber CPU sub-batches for this preset because larger observer-only CPU
+batches exceed Kaggle's LLVM compile memory.
+Use `realistic_stress_observer_cpu` with `--machine-shape cpu --no-require-gpu`
+to test the same CPU observer-only batch path on a CPU-only Kaggle kernel, and
+`realistic_stress_observer_gpu` with a GPU accelerator to run the GPU side
+separately. Use different slugs if both are submitted at the same time.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and

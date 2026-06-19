@@ -43,6 +43,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             "realistic",
             "realistic_stress",
             "realistic_stress_observer",
+            "realistic_stress_observer_cpu",
+            "realistic_stress_observer_gpu",
             "both",
         ),
         help="Benchmark suite to run inside the Kaggle kernel.",
@@ -83,6 +85,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     args.path.mkdir(parents=True, exist_ok=True)
 
+    cpu_only = _is_cpu_machine_shape(args.machine_shape)
     metadata = {
         "id": f"{args.username}/{args.slug}",
         "title": args.title,
@@ -90,19 +93,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         "language": "python",
         "kernel_type": "script",
         "is_private": "true",
-        "enable_gpu": "true",
+        "enable_gpu": "false" if cpu_only else "true",
         "enable_internet": "true",
-        "machine_shape": args.machine_shape,
         "dataset_sources": [],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": [],
     }
+    if not cpu_only:
+        metadata["machine_shape"] = args.machine_shape
     config = {
         "repo_url": args.repo_url,
         "branch": args.branch,
         "benchmark": args.benchmark,
-        "require_gpu": args.require_gpu,
+        "require_gpu": bool(args.require_gpu and not cpu_only),
     }
 
     metadata_output = args.path / "kernel-metadata.json"
@@ -118,6 +122,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(metadata_output)
     print(config_output)
     print(code_output)
+
+
+def _is_cpu_machine_shape(value: str) -> bool:
+    return str(value).strip().lower() in {"cpu", "none", "no_accelerator", "no-accelerator"}
 
 
 def write_embedded_script(*, template: Path, output: Path, config: dict[str, object]) -> None:

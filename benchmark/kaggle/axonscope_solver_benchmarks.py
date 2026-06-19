@@ -94,7 +94,23 @@ def main() -> None:
             smoke=False,
             stress=True,
             example08_recording="observer_only",
-            example08_observer_cpu_chunk_size=10,
+            example08_observer_cpu_chunk_size=1,
+        )
+    elif BENCHMARK == "realistic_stress_observer_cpu":
+        run_realistic_examples(
+            out_dir,
+            smoke=False,
+            stress=True,
+            platforms=("cpu",),
+            example08_recording="observer_only",
+        )
+    elif BENCHMARK == "realistic_stress_observer_gpu":
+        run_realistic_examples(
+            out_dir,
+            smoke=False,
+            stress=True,
+            platforms=("gpu",),
+            example08_recording="observer_only",
         )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
@@ -103,7 +119,8 @@ def main() -> None:
         raise ValueError(
             "AXONSCOPE_KAGGLE_BENCHMARK must be smoke, linear, "
             "linear_pcr_soa_trace, e2e, e2e_full, realistic_smoke, "
-            "realistic, realistic_stress, realistic_stress_observer, or both."
+            "realistic, realistic_stress, realistic_stress_observer, "
+            "realistic_stress_observer_cpu, realistic_stress_observer_gpu, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -351,6 +368,7 @@ def run_realistic_examples(
     *,
     smoke: bool,
     stress: bool = False,
+    platforms: tuple[str, ...] = ("cpu", "gpu"),
     example08_recording: str = "full",
     example08_observer_cpu_chunk_size: int = 0,
 ) -> None:
@@ -362,8 +380,7 @@ def run_realistic_examples(
         "--prefix",
         "realistic_examples",
         "--platforms",
-        "cpu",
-        "gpu",
+        *platforms,
         "--example08-recording",
         example08_recording,
     ]

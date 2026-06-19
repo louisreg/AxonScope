@@ -63,21 +63,18 @@ def run_kernel(
 
     prepare_metadata(args)
 
-    push = run(
-        [
-            kaggle_bin,
-            "kernels",
-            "push",
-            "-p",
-            str(args.kernel_dir),
-            "--accelerator",
-            args.machine_shape,
-            "--timeout",
-            str(args.timeout),
-        ],
-        capture=True,
-        check=False,
-    )
+    push_command = [
+        kaggle_bin,
+        "kernels",
+        "push",
+        "-p",
+        str(args.kernel_dir),
+        "--timeout",
+        str(args.timeout),
+    ]
+    if not is_cpu_machine_shape(args.machine_shape):
+        push_command.extend(["--accelerator", args.machine_shape])
+    push = run(push_command, capture=True, check=False)
     write_text(run_dir / "push.log", command_output(push))
     if push.returncode != 0:
         print(f"Kaggle push failed. See {run_dir / 'push.log'}")
@@ -151,6 +148,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "realistic",
             "realistic_stress",
             "realistic_stress_observer",
+            "realistic_stress_observer_cpu",
+            "realistic_stress_observer_gpu",
             "both",
         ),
         help="Benchmark suite to run.",
@@ -268,7 +267,11 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         action="store_true",
         help="On Ctrl+C, delete the remote Kaggle kernel. Destructive.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if is_cpu_machine_shape(args.machine_shape):
+        args.machine_shape = "cpu"
+        args.require_gpu = False
+    return args
 
 
 def resolve_kaggle_bin(kaggle_bin: str | None) -> str:
@@ -287,6 +290,10 @@ def make_run_dir(args: argparse.Namespace) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     machine = re.sub(r"[^A-Za-z0-9_.-]+", "-", args.machine_shape)
     return args.output_root / f"{timestamp}_{args.benchmark}_{machine}"
+
+
+def is_cpu_machine_shape(value: str) -> bool:
+    return str(value).strip().lower() in {"cpu", "none", "no_accelerator", "no-accelerator"}
 
 
 def publish_git_branch(args: argparse.Namespace, run_dir: Path) -> str | None:

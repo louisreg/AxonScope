@@ -83,6 +83,9 @@ Work should start here unless the user asks otherwise.
   stress. The observer target applies low-memory CPU XLA/LLVM codegen flags
   and chunks CPU example 08 because the first CPU observer-only stress attempt
   exceeded Kaggle compile memory.
+- [ ] Run `realistic_stress_observer_cpu` on a CPU-only Kaggle kernel and
+  `realistic_stress_observer_gpu` on a P100/T4 kernel with separate slugs to
+  distinguish CPU-only host memory limits from GPU runtime performance.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
