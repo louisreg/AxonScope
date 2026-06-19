@@ -50,7 +50,8 @@ python benchmark/realistic_examples/bench_basic_examples.py \
   --example07-max-iterations 20 \
   --example08-amplitude-count 8 \
   --repeats 3 \
-  --warmups 1
+  --warmups 1 \
+  --profile
 ```
 
 Outputs are written under `benchmark/results/realistic_examples/` as JSON and
@@ -63,6 +64,19 @@ Plots are enabled by default:
 - `<prefix>_cpu_vs_gpu_speedup.svg/png`
 
 Use `--no-plots` for CSV-only dry benchmark runs.
+
+Use `--profile` when you need solver/workflow breakdowns for the same cases.
+This writes:
+
+- `<prefix>_cpu_profile.csv` and `<prefix>_gpu_profile.csv`
+- `<prefix>_profile_cpu_vs_gpu.csv`
+- `<prefix>_cpu_profiles/` and `<prefix>_gpu_profiles/` with raw
+  `events.jsonl`, per-run `summary.csv`, and metadata
+
+Important profile events include `runtime.prepare`, `inputs.intracellular`,
+`inputs.extracellular`, `kernel.enqueue`, `kernel.wait`,
+`results.split_batch`, and `results.to_public`.
+
 Important columns:
 
 - `workflow`: `example06_velocity`, `example07_threshold`, or

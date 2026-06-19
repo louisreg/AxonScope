@@ -3,6 +3,7 @@ from benchmark.realistic_examples.bench_basic_examples import (
     parse_args,
     planned_cases,
     write_platform_comparison,
+    write_profile_comparison,
 )
 
 
@@ -54,6 +55,7 @@ def test_realistic_examples_child_command_for_platform_spawn(tmp_path):
             "--prefix",
             "workflow",
             "--no-plots",
+            "--profile",
         ]
     )
 
@@ -65,6 +67,7 @@ def test_realistic_examples_child_command_for_platform_spawn(tmp_path):
     assert command[command.index("--family-counts") + 1] == "5"
     assert command[command.index("--prefix") + 1] == "workflow"
     assert "--no-plots" in command
+    assert "--profile" in command
 
 
 def test_realistic_examples_writes_cpu_gpu_comparison(tmp_path):
@@ -103,4 +106,43 @@ def test_realistic_examples_writes_cpu_gpu_comparison(tmp_path):
     assert comparison == tmp_path / "workflow_cpu_vs_gpu.csv"
     text = comparison.read_text(encoding="utf-8")
     assert "first_run_speedup_cpu_over_gpu" in text
+    assert "4" in text
+
+
+def test_realistic_examples_writes_profile_cpu_gpu_comparison(tmp_path):
+    fieldnames = [
+        "workflow",
+        "fiber_type",
+        "run_count",
+        "duration_ms",
+        "dt_ms",
+        "recording",
+        "protocol_steps",
+        "phase",
+        "repeat_index",
+        "event_name",
+        "event_count",
+        "total_ms",
+        "self_ms",
+        "profile_dir",
+    ]
+    cpu = tmp_path / "workflow_cpu_profile.csv"
+    gpu = tmp_path / "workflow_gpu_profile.csv"
+    cpu.write_text(
+        ",".join(fieldnames)
+        + "\nexample06_velocity,hh,2,10.0,0.001,full,1,warm_repeat,1,kernel.wait,1,8.0,8.0,/tmp/cpu\n",
+        encoding="utf-8",
+    )
+    gpu.write_text(
+        ",".join(fieldnames)
+        + "\nexample06_velocity,hh,2,10.0,0.001,full,1,warm_repeat,1,kernel.wait,1,2.0,2.0,/tmp/gpu\n",
+        encoding="utf-8",
+    )
+
+    comparison = write_profile_comparison(out_dir=tmp_path, prefix="workflow")
+
+    assert comparison == tmp_path / "workflow_profile_cpu_vs_gpu.csv"
+    text = comparison.read_text(encoding="utf-8")
+    assert "total_speedup_cpu_over_gpu" in text
+    assert "kernel.wait" in text
     assert "4" in text

@@ -137,7 +137,12 @@ per-platform CSV/JSON files plus a `realistic_examples_cpu_vs_gpu.csv`
 comparison table and SVG/PNG timing plots. `realistic_stress` is the longer
 CPU-vs-GPU workflow pass for Vext-oriented decisions: examples 06/07 run 5, 10,
 and 20 diameters/fibers, example 08 runs mixed populations of 50 and 100 fibers,
-and each case records warm-run repeats.
+and each case records warm-run repeats. It also enables realistic hotpath
+profiling, so the output includes `realistic_examples_cpu_profile.csv`,
+`realistic_examples_gpu_profile.csv`, and
+`realistic_examples_profile_cpu_vs_gpu.csv` with event-level timings for
+runtime preparation, input materialization, kernel enqueue/wait, batch splitting,
+and public result packaging.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and

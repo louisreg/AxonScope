@@ -386,6 +386,7 @@ def run_realistic_examples(
                 "3",
                 "--warmups",
                 "1",
+                "--profile",
             ]
         )
     else:

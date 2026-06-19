@@ -90,6 +90,15 @@ class WorkflowBenchmarkRow:
     summary: str
 
 
+@dataclass(frozen=True)
+class ProfileRunSpec:
+    root: Path
+    platform_label: str
+    jax_backend: str
+    double_cable_solver_requested: str
+    double_cable_solver_resolved: str
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.platforms != ["current"]:
@@ -172,6 +181,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=True,
         help="Write SVG/PNG timing plots next to the CSV outputs.",
     )
+    parser.add_argument(
+        "--profile",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Record AxonScope hotpath/solver timing spans for first and measured "
+            "warm runs."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned cases only.")
     args = parser.parse_args(argv)
 
@@ -244,6 +262,13 @@ def spawn_platform_runs(args: argparse.Namespace) -> int:
             if args.plots:
                 for plot_path in write_comparison_plots(comparison_path):
                     print(f"plot: {plot_path}")
+        if args.profile:
+            profile_comparison_path = write_profile_comparison(
+                out_dir=args.out_dir,
+                prefix=str(args.prefix),
+            )
+            if profile_comparison_path is not None:
+                print(f"profile_comparison_csv: {profile_comparison_path}")
     return 0
 
 
@@ -280,6 +305,8 @@ def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]
         command.extend(["--example08-amplitude-count", str(args.example08_amplitude_count)])
     if not args.plots:
         command.append("--no-plots")
+    if args.profile:
+        command.append("--profile")
     if args.dry_run:
         command.append("--dry-run")
     return command
@@ -294,15 +321,31 @@ def run_current_platform(args: argparse.Namespace) -> int:
 
     import jax
 
+    configure_matplotlib_cache()
     preload_workflow_modules(args.workflows)
-
-    rows: list[WorkflowBenchmarkRow] = []
-    for index, case in enumerate(cases, start=1):
-        print(f"[{index}/{len(cases)}] {format_case(case)}", flush=True)
-        rows.append(benchmark_case(case, args=args, jax_module=jax))
 
     prefix = args.prefix or datetime.now().strftime("basic_examples_%Y%m%d_%H%M%S")
     platform_suffix = sanitize_label(args.platform_label)
+    profile_spec = profile_run_spec(
+        args=args,
+        prefix=prefix,
+        platform_suffix=platform_suffix,
+        jax_module=jax,
+    )
+
+    rows: list[WorkflowBenchmarkRow] = []
+    profile_rows: list[dict[str, Any]] = []
+    for index, case in enumerate(cases, start=1):
+        print(f"[{index}/{len(cases)}] {format_case(case)}", flush=True)
+        row, case_profile_rows = benchmark_case(
+            case,
+            args=args,
+            jax_module=jax,
+            profile_spec=profile_spec,
+        )
+        rows.append(row)
+        profile_rows.extend(case_profile_rows)
+
     json_path, csv_path = write_outputs(
         rows,
         args.out_dir,
@@ -318,14 +361,46 @@ def run_current_platform(args: argparse.Namespace) -> int:
             "example08_amplitude_count": example08_amplitude_count(args),
             "repeats": int(args.repeats),
             "warmups": int(args.warmups),
+            "profile": bool(args.profile),
         },
     )
     print(f"json: {json_path}")
     print(f"csv : {csv_path}")
+    if profile_rows:
+        profile_csv = write_profile_summary(
+            profile_rows,
+            args.out_dir,
+            prefix=f"{prefix}_{platform_suffix}_profile",
+        )
+        print(f"profile_csv: {profile_csv}")
     if args.plots:
         for plot_path in write_platform_timing_plots(csv_path):
             print(f"plot: {plot_path}")
     return 0
+
+
+def profile_run_spec(
+    *,
+    args: argparse.Namespace,
+    prefix: str,
+    platform_suffix: str,
+    jax_module: Any,
+) -> ProfileRunSpec | None:
+    if not args.profile:
+        return None
+    from axonscope.solvers import resolve_double_cable_block_solver
+
+    backend = str(jax_module.default_backend())
+    return ProfileRunSpec(
+        root=args.out_dir / f"{prefix}_{platform_suffix}_profiles",
+        platform_label=args.platform_label,
+        jax_backend=backend,
+        double_cable_solver_requested="auto",
+        double_cable_solver_resolved=resolve_double_cable_block_solver(
+            "auto",
+            platform=backend,
+        ),
+    )
 
 
 def preload_workflow_modules(workflows: Sequence[str]) -> None:
@@ -424,9 +499,18 @@ def benchmark_case(
     *,
     args: argparse.Namespace,
     jax_module: Any,
-) -> WorkflowBenchmarkRow:
+    profile_spec: ProfileRunSpec | None = None,
+) -> tuple[WorkflowBenchmarkRow, list[dict[str, Any]]]:
     build_s, built = time_call(lambda: build_case(case, args=args))
-    first_run_s, first_summary = time_call(lambda: run_built_case(case, built, args=args))
+    profile_rows: list[dict[str, Any]] = []
+    first_run_s, first_summary, first_profile = time_profiled_run(
+        lambda: run_built_case(case, built, args=args),
+        case=case,
+        phase="first",
+        repeat_index=0,
+        profile_spec=profile_spec,
+    )
+    profile_rows.extend(first_profile)
 
     for _ in range(args.warmups):
         _, warm_built = time_call(lambda: build_case(case, args=args))
@@ -434,30 +518,38 @@ def benchmark_case(
 
     samples = []
     last_summary = first_summary
-    for _ in range(args.repeats):
+    for repeat_index in range(args.repeats):
         _, repeat_built = time_call(lambda: build_case(case, args=args))
-        elapsed_s, last_summary = time_call(
-            lambda: run_built_case(case, repeat_built, args=args)
+        elapsed_s, last_summary, repeat_profile = time_profiled_run(
+            lambda: run_built_case(case, repeat_built, args=args),
+            case=case,
+            phase="warm_repeat",
+            repeat_index=repeat_index + 1,
+            profile_spec=profile_spec,
         )
         samples.append(elapsed_s)
+        profile_rows.extend(repeat_profile)
 
     devices = ",".join(str(device) for device in jax_module.devices())
-    return WorkflowBenchmarkRow(
-        workflow=case.workflow,
-        fiber_type=case.fiber_type,
-        run_count=case.run_count,
-        platform_label=args.platform_label,
-        jax_backend=str(jax_module.default_backend()),
-        jax_devices=devices,
-        duration_ms=case.duration_ms,
-        dt_ms=case.dt_ms,
-        recording=case.recording,
-        protocol_steps=case.protocol_steps,
-        build_s=build_s,
-        first_run_s=first_run_s,
-        total_first_s=build_s + first_run_s,
-        warm=TimingStats.from_samples(samples),
-        summary=json.dumps(last_summary, sort_keys=True),
+    return (
+        WorkflowBenchmarkRow(
+            workflow=case.workflow,
+            fiber_type=case.fiber_type,
+            run_count=case.run_count,
+            platform_label=args.platform_label,
+            jax_backend=str(jax_module.default_backend()),
+            jax_devices=devices,
+            duration_ms=case.duration_ms,
+            dt_ms=case.dt_ms,
+            recording=case.recording,
+            protocol_steps=case.protocol_steps,
+            build_s=build_s,
+            first_run_s=first_run_s,
+            total_first_s=build_s + first_run_s,
+            warm=TimingStats.from_samples(samples),
+            summary=json.dumps(last_summary, sort_keys=True),
+        ),
+        profile_rows,
     )
 
 
@@ -731,6 +823,117 @@ def time_call(fn: Callable[[], Any]) -> tuple[float, Any]:
     return time.perf_counter() - start, value
 
 
+def time_profiled_run(
+    fn: Callable[[], Any],
+    *,
+    case: WorkflowCase,
+    phase: str,
+    repeat_index: int,
+    profile_spec: ProfileRunSpec | None,
+) -> tuple[float, Any, list[dict[str, Any]]]:
+    if profile_spec is None:
+        elapsed_s, value = time_call(fn)
+        return elapsed_s, value, []
+
+    import axonscope as axs
+
+    run_dir = profile_spec.root / profile_run_label(case, phase=phase, repeat_index=repeat_index)
+    metadata = profile_run_metadata(
+        case,
+        phase=phase,
+        repeat_index=repeat_index,
+        profile_spec=profile_spec,
+    )
+    start = time.perf_counter()
+    report = None
+    session_started = False
+    try:
+        session = axs.enable_benchmark(
+            run_dir,
+            print_summary=False,
+            save=True,
+            sync_device=True,
+            record_shapes=True,
+            record_memory=True,
+        )
+        session_started = True
+        session.metadata.update(metadata)
+        value = fn()
+        block_until_ready(value)
+    finally:
+        elapsed_s = time.perf_counter() - start
+        if session_started:
+            report = axs.disable_benchmark(print_summary=False, save=True)
+    return (
+        elapsed_s,
+        value,
+        profile_summary_rows(
+            report,
+            metadata=metadata,
+            elapsed_s=elapsed_s,
+            profile_dir=run_dir,
+        ),
+    )
+
+
+def profile_run_label(case: WorkflowCase, *, phase: str, repeat_index: int) -> str:
+    return sanitize_label(
+        f"{case.workflow}_{case.fiber_type}_B{case.run_count}_P{case.protocol_steps}"
+        f"_{phase}_{repeat_index}"
+    )
+
+
+def profile_run_metadata(
+    case: WorkflowCase,
+    *,
+    phase: str,
+    repeat_index: int,
+    profile_spec: ProfileRunSpec,
+) -> dict[str, Any]:
+    return {
+        "workflow": case.workflow,
+        "fiber_type": case.fiber_type,
+        "run_count": int(case.run_count),
+        "duration_ms": float(case.duration_ms),
+        "dt_ms": float(case.dt_ms),
+        "recording": case.recording,
+        "protocol_steps": int(case.protocol_steps),
+        "phase": phase,
+        "repeat_index": int(repeat_index),
+        "platform_label": profile_spec.platform_label,
+        "jax_backend": profile_spec.jax_backend,
+        "double_cable_solver_requested": profile_spec.double_cable_solver_requested,
+        "double_cable_solver_resolved": profile_spec.double_cable_solver_resolved,
+    }
+
+
+def profile_summary_rows(
+    report: Any,
+    *,
+    metadata: dict[str, Any],
+    elapsed_s: float,
+    profile_dir: Path,
+) -> list[dict[str, Any]]:
+    if report is None:
+        return []
+    rows = []
+    for summary in report.summary:
+        rows.append(
+            {
+                **metadata,
+                "event_name": summary.name,
+                "event_count": int(summary.count),
+                "total_ms": float(summary.total_ms),
+                "self_ms": float(summary.self_ms),
+                "mean_ms": float(summary.mean_ms),
+                "max_ms": float(summary.max_ms),
+                "run_elapsed_s": float(elapsed_s),
+                "profile_dir": str(profile_dir),
+            }
+        )
+    return rows
+
+
 def block_until_ready(value: Any) -> None:
     if hasattr(value, "block_until_ready"):
         value.block_until_ready()
@@ -831,6 +1034,70 @@ def write_platform_comparison(
     return comparison_path
 
 
+def write_profile_summary(
+    rows: Sequence[dict[str, Any]],
+    out_dir: Path,
+    *,
+    prefix: str,
+) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / f"{prefix}.csv"
+    fieldnames = list(rows[0]) if rows else []
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return csv_path
+
+
+def write_profile_comparison(*, out_dir: Path, prefix: str) -> Path | None:
+    cpu_path = out_dir / f"{prefix}_cpu_profile.csv"
+    gpu_path = out_dir / f"{prefix}_gpu_profile.csv"
+    if not cpu_path.exists() or not gpu_path.exists():
+        return None
+    cpu_rows = {profile_comparison_key(row): row for row in read_csv_rows(cpu_path)}
+    gpu_rows = {profile_comparison_key(row): row for row in read_csv_rows(gpu_path)}
+
+    comparison_rows = []
+    for key in sorted(set(cpu_rows) & set(gpu_rows)):
+        cpu = cpu_rows[key]
+        gpu = gpu_rows[key]
+        comparison_rows.append(
+            {
+                "workflow": cpu["workflow"],
+                "fiber_type": cpu["fiber_type"],
+                "run_count": cpu["run_count"],
+                "duration_ms": cpu["duration_ms"],
+                "dt_ms": cpu["dt_ms"],
+                "recording": cpu["recording"],
+                "protocol_steps": cpu["protocol_steps"],
+                "phase": cpu["phase"],
+                "repeat_index": cpu["repeat_index"],
+                "event_name": cpu["event_name"],
+                "cpu_total_ms": cpu["total_ms"],
+                "gpu_total_ms": gpu["total_ms"],
+                "total_speedup_cpu_over_gpu": speedup(cpu["total_ms"], gpu["total_ms"]),
+                "cpu_self_ms": cpu["self_ms"],
+                "gpu_self_ms": gpu["self_ms"],
+                "self_speedup_cpu_over_gpu": speedup(cpu["self_ms"], gpu["self_ms"]),
+                "cpu_event_count": cpu["event_count"],
+                "gpu_event_count": gpu["event_count"],
+                "cpu_profile_dir": cpu["profile_dir"],
+                "gpu_profile_dir": gpu["profile_dir"],
+            }
+        )
+
+    if not comparison_rows:
+        return None
+    comparison_path = out_dir / f"{prefix}_profile_cpu_vs_gpu.csv"
+    fieldnames = list(comparison_rows[0])
+    with comparison_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(comparison_rows)
+    return comparison_path
+
+
 def write_platform_timing_plots(csv_path: Path) -> list[Path]:
     rows = read_csv_rows(csv_path)
     if not rows:
@@ -913,10 +1180,7 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
 
 def import_pyplot() -> Any | None:
     try:
-        cache_root = Path(os.environ.get("TMPDIR", "/tmp")) / "axonscope_matplotlib"
-        cache_root.mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("MPLCONFIGDIR", str(cache_root))
-        os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+        configure_matplotlib_cache()
 
         import matplotlib
 
@@ -926,6 +1190,13 @@ def import_pyplot() -> Any | None:
         print(f"plot skipped: {exc}", flush=True)
         return None
     return pyplot
+
+
+def configure_matplotlib_cache() -> None:
+    cache_root = Path(os.environ.get("TMPDIR", "/tmp")) / "axonscope_matplotlib"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MPLCONFIGDIR", str(cache_root))
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
 
 
 def sanitize_plot_values(values: Iterable[str]) -> list[float]:
@@ -968,6 +1239,21 @@ def comparison_key(row: dict[str, str]) -> tuple[str, str, str, str, str, str, s
         row["dt_ms"],
         row["recording"],
         row["protocol_steps"],
+    )
+
+
+def profile_comparison_key(row: dict[str, str]) -> tuple[str, str, str, str, str, str, str, str, str, str]:
+    return (
+        row["workflow"],
+        row["fiber_type"],
+        row["run_count"],
+        row["duration_ms"],
+        row["dt_ms"],
+        row["recording"],
+        row["protocol_steps"],
+        row["phase"],
+        row["repeat_index"],
+        row["event_name"],
     )
 
 

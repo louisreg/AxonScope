@@ -290,6 +290,7 @@ def test_kaggle_realistic_stress_uses_larger_matrix(tmp_path, monkeypatch):
     assert command[command.index("--example07-max-iterations") + 1] == "20"
     assert command[command.index("--example08-amplitude-count") + 1] == "8"
     assert command[command.index("--repeats") + 1] == "3"
+    assert "--profile" in command
 
 
 def test_kaggle_runner_rejects_archived_benchmark_choices():
