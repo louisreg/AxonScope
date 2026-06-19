@@ -487,7 +487,7 @@ def planned_cases(args: argparse.Namespace) -> list[WorkflowCase]:
                     run_count=2 * family_count,
                     duration_ms=4.0,
                     dt_ms=0.025,
-                    recording="observer_only",
+                    recording="observer_only" if args.platform_label == "gpu" else "full",
                     protocol_steps=amplitudes,
                 )
             )
@@ -569,7 +569,7 @@ def run_built_case(case: WorkflowCase, built: Any, *, args: argparse.Namespace) 
     if case.workflow == "example07_threshold":
         return run_example07(case, built, args=args)
     if case.workflow == "example08_recruitment":
-        return run_example08(case, built)
+        return run_example08(case, built, args=args)
     raise ValueError(f"unknown workflow: {case.workflow!r}")
 
 
@@ -792,12 +792,23 @@ def build_example08(case: WorkflowCase, *, args: argparse.Namespace) -> tuple[An
     return tuple(simulations), families, amplitudes, criterion
 
 
-def run_example08(case: WorkflowCase, built: Any) -> dict[str, Any]:
+def run_example08(
+    case: WorkflowCase,
+    built: Any,
+    *,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     import axonscope as axs
+    import jax
     import numpy as np
     from examples.basic import example_08_recruitment_curve_population as ex08
 
     pool, families, amplitudes, criterion = built
+    recording = (
+        axs.Recording.none()
+        if str(jax.default_backend()) == "gpu"
+        else axs.Recording.voltage()
+    )
     curve = axs.protocols.recruitment_sweep(
         pool,
         update=ex08.update_point_source_current,
@@ -805,7 +816,7 @@ def run_example08(case: WorkflowCase, built: Any) -> dict[str, Any]:
         duration=case.duration_ms * axs.ms,
         dt=case.dt_ms * axs.ms,
         criterion=criterion,
-        recording=axs.Recording.none(),
+        recording=recording,
         progress=False,
     )
     return {
