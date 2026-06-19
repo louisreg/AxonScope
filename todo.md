@@ -92,6 +92,10 @@ Work should start here unless the user asks otherwise.
   observer-only run was stopped and deleted after `example08_recruitment`
   `runs=50` had already reached about 427 s on Kaggle, making it slower than
   the compact `center` Vm path for the immediate workflow benchmark.
+  Root-cause hypothesis from code inspection: the double-cable observer branch
+  bypasses the batch-native `pcr_soa` scan used by the retained Vm path and
+  updates observer state inside a per-row `vmap`/scalar scan. Revisit only if
+  we implement a batch-native observer scan using `update_observer_state_batch`.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

@@ -104,6 +104,9 @@ Important columns:
 - `build_s`: public object construction time
 - `first_run_s`: first workflow execution time
 - `warm.mean_s`, `warm.median_s`: measured repeat times after warmup
+- `first_run_peak_rss_mib`, `warm_peak_rss_mib`, `process_peak_rss_mib`:
+  measured host-process RSS, sampled during each case; `process_peak_rss_mib`
+  is the OS high-water mark for the benchmark process
 
 Use this benchmark as the next performance gate for `Vext` work. The solver
 baseline should remain `pcr_adaptive` on GPU until a future candidate passes

@@ -19,14 +19,18 @@ import csv
 import json
 import math
 import os
+import resource
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
+
+import psutil
 
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[2]
@@ -72,6 +76,15 @@ class TimingStats:
 
 
 @dataclass(frozen=True)
+class MemoryStats:
+    rss_start_mib: float
+    rss_end_mib: float
+    rss_peak_mib: float
+    rss_delta_mib: float
+    ru_maxrss_mib: float
+
+
+@dataclass(frozen=True)
 class WorkflowCase:
     workflow: str
     fiber_type: str
@@ -95,8 +108,16 @@ class WorkflowBenchmarkRow:
     recording: str
     protocol_steps: int
     build_s: float
+    build_peak_rss_mib: float
+    build_rss_delta_mib: float
     first_run_s: float
+    first_run_peak_rss_mib: float
+    first_run_rss_delta_mib: float
     total_first_s: float
+    warm_peak_rss_mib: float
+    warm_mean_peak_rss_mib: float
+    warm_max_rss_delta_mib: float
+    process_peak_rss_mib: float
     warm: TimingStats
     summary: str
 
@@ -580,9 +601,9 @@ def benchmark_case(
     jax_module: Any,
     profile_spec: ProfileRunSpec | None = None,
 ) -> tuple[WorkflowBenchmarkRow, list[dict[str, Any]]]:
-    build_s, built = time_call(lambda: build_case(case, args=args))
+    build_s, built, build_memory = measure_call(lambda: build_case(case, args=args))
     profile_rows: list[dict[str, Any]] = []
-    first_run_s, first_summary, first_profile = time_profiled_run(
+    first_run_s, first_summary, first_profile, first_memory = time_profiled_run(
         lambda: run_built_case(case, built, args=args),
         case=case,
         phase="first",
@@ -596,10 +617,11 @@ def benchmark_case(
         time_call(lambda: run_built_case(case, warm_built, args=args))
 
     samples = []
+    warm_memory_samples: list[MemoryStats] = []
     last_summary = first_summary
     for repeat_index in range(args.repeats):
         _, repeat_built = time_call(lambda: build_case(case, args=args))
-        elapsed_s, last_summary, repeat_profile = time_profiled_run(
+        elapsed_s, last_summary, repeat_profile, repeat_memory = time_profiled_run(
             lambda: run_built_case(case, repeat_built, args=args),
             case=case,
             phase="warm_repeat",
@@ -607,9 +629,23 @@ def benchmark_case(
             profile_spec=profile_spec,
         )
         samples.append(elapsed_s)
+        warm_memory_samples.append(repeat_memory)
         profile_rows.extend(repeat_profile)
 
     devices = ",".join(str(device) for device in jax_module.devices())
+    warm_peak_rss_mib = max(
+        (memory.rss_peak_mib for memory in warm_memory_samples),
+        default=first_memory.rss_peak_mib,
+    )
+    warm_mean_peak_rss_mib = (
+        float(statistics.fmean(memory.rss_peak_mib for memory in warm_memory_samples))
+        if warm_memory_samples
+        else first_memory.rss_peak_mib
+    )
+    warm_max_rss_delta_mib = max(
+        (memory.rss_delta_mib for memory in warm_memory_samples),
+        default=0.0,
+    )
     return (
         WorkflowBenchmarkRow(
             workflow=case.workflow,
@@ -623,8 +659,16 @@ def benchmark_case(
             recording=case.recording,
             protocol_steps=case.protocol_steps,
             build_s=build_s,
+            build_peak_rss_mib=build_memory.rss_peak_mib,
+            build_rss_delta_mib=build_memory.rss_delta_mib,
             first_run_s=first_run_s,
+            first_run_peak_rss_mib=first_memory.rss_peak_mib,
+            first_run_rss_delta_mib=first_memory.rss_delta_mib,
             total_first_s=build_s + first_run_s,
+            warm_peak_rss_mib=warm_peak_rss_mib,
+            warm_mean_peak_rss_mib=warm_mean_peak_rss_mib,
+            warm_max_rss_delta_mib=warm_max_rss_delta_mib,
+            process_peak_rss_mib=process_peak_rss_mib(),
             warm=TimingStats.from_samples(samples),
             summary=json.dumps(last_summary, sort_keys=True),
         ),
@@ -934,11 +978,77 @@ def run_example08(
     }
 
 
+class RssMonitor:
+    """Sample process RSS while a benchmark phase runs."""
+
+    def __init__(self, *, interval_s: float = 0.02) -> None:
+        self.interval_s = float(interval_s)
+        self._process = psutil.Process(os.getpid())
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._start_bytes = current_rss_bytes(self._process)
+        self._end_bytes = self._start_bytes
+        self._peak_bytes = self._start_bytes
+
+    def __enter__(self) -> "RssMonitor":
+        self._start_bytes = current_rss_bytes(self._process)
+        self._end_bytes = self._start_bytes
+        self._peak_bytes = self._start_bytes
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        self._end_bytes = current_rss_bytes(self._process)
+        self._peak_bytes = max(self._peak_bytes, self._end_bytes)
+
+    @property
+    def stats(self) -> MemoryStats:
+        return MemoryStats(
+            rss_start_mib=bytes_to_mib(self._start_bytes),
+            rss_end_mib=bytes_to_mib(self._end_bytes),
+            rss_peak_mib=bytes_to_mib(self._peak_bytes),
+            rss_delta_mib=bytes_to_mib(self._end_bytes - self._start_bytes),
+            ru_maxrss_mib=process_peak_rss_mib(),
+        )
+
+    def _sample_loop(self) -> None:
+        while not self._stop.wait(self.interval_s):
+            self._peak_bytes = max(self._peak_bytes, current_rss_bytes(self._process))
+
+
+def current_rss_bytes(process: psutil.Process | None = None) -> int:
+    active_process = psutil.Process(os.getpid()) if process is None else process
+    return int(active_process.memory_info().rss)
+
+
+def bytes_to_mib(value: int | float) -> float:
+    return float(value) / float(1024**2)
+
+
+def process_peak_rss_mib() -> float:
+    maxrss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return bytes_to_mib(maxrss)
+    return maxrss / 1024.0
+
+
 def time_call(fn: Callable[[], Any]) -> tuple[float, Any]:
+    elapsed_s, value, _ = measure_call(fn)
+    return elapsed_s, value
+
+
+def measure_call(fn: Callable[[], Any]) -> tuple[float, Any, MemoryStats]:
+    monitor = RssMonitor()
     start = time.perf_counter()
-    value = fn()
-    block_until_ready(value)
-    return time.perf_counter() - start, value
+    with monitor:
+        value = fn()
+        block_until_ready(value)
+    return time.perf_counter() - start, value, monitor.stats
 
 
 def time_profiled_run(
@@ -948,10 +1058,10 @@ def time_profiled_run(
     phase: str,
     repeat_index: int,
     profile_spec: ProfileRunSpec | None,
-) -> tuple[float, Any, list[dict[str, Any]]]:
+) -> tuple[float, Any, list[dict[str, Any]], MemoryStats]:
     if profile_spec is None:
-        elapsed_s, value = time_call(fn)
-        return elapsed_s, value, []
+        elapsed_s, value, memory = measure_call(fn)
+        return elapsed_s, value, [], memory
 
     import axonscope as axs
 
@@ -965,19 +1075,21 @@ def time_profiled_run(
     start = time.perf_counter()
     report = None
     session_started = False
+    monitor = RssMonitor()
     try:
-        session = axs.enable_benchmark(
-            run_dir,
-            print_summary=False,
-            save=True,
-            sync_device=True,
-            record_shapes=True,
-            record_memory=True,
-        )
-        session_started = True
-        session.metadata.update(metadata)
-        value = fn()
-        block_until_ready(value)
+        with monitor:
+            session = axs.enable_benchmark(
+                run_dir,
+                print_summary=False,
+                save=True,
+                sync_device=True,
+                record_shapes=True,
+                record_memory=True,
+            )
+            session_started = True
+            session.metadata.update(metadata)
+            value = fn()
+            block_until_ready(value)
     finally:
         elapsed_s = time.perf_counter() - start
         if session_started:
@@ -991,6 +1103,7 @@ def time_profiled_run(
             elapsed_s=elapsed_s,
             profile_dir=run_dir,
         ),
+        monitor.stats,
     )
 
 
@@ -1196,6 +1309,12 @@ def write_platform_comparison(
                 "cpu_warm_mean_s": cpu["warm.mean_s"],
                 "gpu_warm_mean_s": gpu["warm.mean_s"],
                 "warm_speedup_cpu_over_gpu": speedup(cpu["warm.mean_s"], gpu["warm.mean_s"]),
+                "cpu_first_run_peak_rss_mib": cpu.get("first_run_peak_rss_mib", ""),
+                "gpu_first_run_peak_rss_mib": gpu.get("first_run_peak_rss_mib", ""),
+                "cpu_warm_peak_rss_mib": cpu.get("warm_peak_rss_mib", ""),
+                "gpu_warm_peak_rss_mib": gpu.get("warm_peak_rss_mib", ""),
+                "cpu_process_peak_rss_mib": cpu.get("process_peak_rss_mib", ""),
+                "gpu_process_peak_rss_mib": gpu.get("process_peak_rss_mib", ""),
                 "cpu_backend": cpu["jax_backend"],
                 "gpu_backend": gpu["jax_backend"],
             }
