@@ -95,11 +95,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--full", type=Path, help="Kaggle artifact dir for full Vm.")
+    parser.add_argument("--full-cpu", type=Path, help="Kaggle artifact dir for CPU full Vm.")
     parser.add_argument("--center", type=Path, help="Kaggle artifact dir for center Vm.")
+    parser.add_argument("--center-cpu", type=Path, help="Kaggle artifact dir for CPU center Vm.")
     parser.add_argument(
         "--observer",
         type=Path,
         help="Kaggle artifact dir for VmRaster observer-only.",
+    )
+    parser.add_argument(
+        "--observer-cpu",
+        type=Path,
+        help="Kaggle artifact dir for CPU VmRaster observer-only.",
     )
     parser.add_argument(
         "--run",
@@ -128,8 +135,11 @@ def collect_run_inputs(args: argparse.Namespace) -> list[RunInput]:
     runs: list[RunInput] = []
     for mode, path in (
         ("full", args.full),
+        ("full_cpu", args.full_cpu),
         ("center", args.center),
+        ("center_cpu", args.center_cpu),
         ("observer", args.observer),
+        ("observer_cpu", args.observer_cpu),
     ):
         if path is not None:
             runs.append(RunInput(mode=mode, artifact=path))
@@ -158,27 +168,43 @@ def sanitize_mode(value: str) -> str:
 
 
 def find_summary_csv(path: Path) -> Path:
-    return find_single_csv(path, suffix="realistic_examples_gpu.csv")
+    return find_single_csv(
+        path,
+        suffixes=(
+            "realistic_examples_gpu.csv",
+            "realistic_examples_cpu.csv",
+        ),
+    )
 
 
 def find_profile_csv(path: Path) -> Path:
-    return find_single_csv(path, suffix="realistic_examples_gpu_profile.csv")
+    return find_single_csv(
+        path,
+        suffixes=(
+            "realistic_examples_gpu_profile.csv",
+            "realistic_examples_cpu_profile.csv",
+        ),
+    )
 
 
-def find_single_csv(path: Path, *, suffix: str) -> Path:
+def find_single_csv(path: Path, *, suffixes: Sequence[str]) -> Path:
     if path.is_file():
-        if path.name == suffix:
+        if path.name in suffixes:
             return path
-        if path.name.endswith("_profile.csv") and suffix.endswith("_profile.csv"):
+        if path.name.endswith("_profile.csv") and any(
+            suffix.endswith("_profile.csv") for suffix in suffixes
+        ):
             return path
-        raise FileNotFoundError(f"{path} is not a {suffix} file.")
+        raise FileNotFoundError(f"{path} is not one of {', '.join(suffixes)}.")
 
-    candidates = sorted(path.glob(f"**/{suffix}"))
-    if not candidates:
-        raise FileNotFoundError(f"Could not find {suffix} under {path}.")
-    if len(candidates) == 1:
-        return candidates[0]
-    return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+    for suffix in suffixes:
+        candidates = sorted(path.glob(f"**/{suffix}"))
+        if not candidates:
+            continue
+        if len(candidates) == 1:
+            return candidates[0]
+        return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+    raise FileNotFoundError(f"Could not find any of {', '.join(suffixes)} under {path}.")
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -194,10 +220,20 @@ def add_mode_columns(
 ) -> dict[str, str]:
     output = dict(row)
     output["mode"] = run.mode
+    output["platform_suffix"] = platform_suffix(summary_path)
     output["artifact_dir"] = str(run.artifact)
     output["summary_csv"] = str(summary_path)
     output["profile_csv"] = str(profile_path)
     return output
+
+
+def platform_suffix(path: Path) -> str:
+    name = path.name
+    if "_cpu" in name:
+        return "cpu"
+    if "_gpu" in name:
+        return "gpu"
+    return "unknown"
 
 
 def aggregate_profile_events(
