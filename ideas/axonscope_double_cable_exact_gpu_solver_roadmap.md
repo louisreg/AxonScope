@@ -24,6 +24,16 @@ benchmark/reports/double_cable_solver_optimization_2026_06.md
 The active follow-up is Phase 7.6.5 in `todo.md`: profile and optimize `Vext`
 materialization using workflow-level benchmarks based on basic examples 06/07/08.
 
+Observer-related follow-up, 2026-06-20: the realistic recruitment runs exposed
+that solver-side observer output must be treated as a separate architecture
+topic, not as a small recording toggle. The active plan is now Phase 7.6.7 in
+`todo.md`: keep one simple public activation/analysis concept, but make the
+first hot-path implementation deliberately strict, compact, static-shaped, and
+batch-first. Do not add implementation-specific public observer modes while the
+API is pre-release. If this strict JAX observer remains too expensive after
+proper memory/timing validation, evaluate a dedicated activation observer kernel
+as a separate backend experiment.
+
 ## Objective
 
 Make the **exact double-cable solver** scale better on GPU for the target regime:
@@ -584,7 +594,7 @@ Status on 2026-06-16: implemented as
 batch-first right-hand sides `[B, Nx]`. The solver-focused benchmark uses this
 batch-native path for `pcr_soa` / `pcr_adaptive` when they resolve to SoA, and
 `DoubleCableBatchKernel` uses it for array-output double-cable chunks when the
-resolved kernel solver is `pcr_soa` and `B >= 32`. The route is intentionally
+resolved kernel solver is `pcr_soa` and `B >= 16`. The route is intentionally
 independent of recording mode: full, center, and observer-only output should
 exercise the same solver implementation for the same batch size.
 
@@ -594,8 +604,9 @@ solve used by retained Vm output and updates compact observer state with
 `update_observer_state_batch`, so observer-only output no longer has to break
 the large-batch fast path. A P100 stress attempt at `926a8ce` showed
 `runs=50/100` falling back to the old per-row observer path when the previous
-`B >= 2048` threshold was reused; the shared route threshold now starts at
-`B >= 32`.
+`B >= 2048` threshold was reused. A later mixed-population diagnostic showed
+`runs=50` splitting into a double-cable subgroup of `B=25`, so the shared route
+threshold now starts at `B >= 16`.
 
 ## Problem
 

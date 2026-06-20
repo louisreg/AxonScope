@@ -28,7 +28,7 @@ code.
 
 ## Current implementation status
 
-Snapshot updated on 2026-06-16.
+Snapshot updated on 2026-06-20.
 
 This document defines the target architecture. The codebase has implemented the
 roadmap through Phase 7.5 and the first Phase 7.6 hotpath/memory passes for the
@@ -49,8 +49,11 @@ Phases 8-9 are still roadmap work.
 | Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Estimates surface dense `Vstim` and retained-`Vm` pressure so observer-only runs can be chosen deliberately. | `examples/advanced/example_14_hotpath_benchmarking.py` |
 | Phase 7.5 — Solver-side observers | Done for the current scalar and homogeneous batch observer-only runs | Public `axs.analysis.PeakVoltage` and `axs.analysis.Activation` definitions lower to compact solver observer state; scalar kernels, homogeneous single-cable batch kernels, and homogeneous double-cable batch kernels update compact observer state at every `dt`; `Recording.none()` returns trace-free `result.observations`. | `examples/advanced/example_18_solver_side_observers.py` |
 | Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
-| Phase 7.6.3 — Exact double-cable GPU solver optimization | In progress | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Planned solver names from roadmaps should stay out of public docs until implemented and tested. | Benchmark-focused phase; no public example until solver option semantics stabilize. |
+| Phase 7.6.3 — Exact double-cable GPU solver optimization | Closed | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Pallas, Triton, JAX-Triton, CUDA FFI, split, associative, and pseudo-double candidates are archived/standby evidence, not public solver routes. | Benchmark report in `benchmark/reports/double_cable_solver_optimization_2026_06.md`; no public example required. |
 | Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
+| Phase 7.6.5 — Vext and realistic workflow performance | In progress | Current focus is workflow-level profiling and reducing dense `Vext` materialization, transfer, preparation, and recording costs for examples 06/07/08. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
+| Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue after profiling confirms dispatch group count or waits are material bottlenecks. | Internal benchmark phase first; no public example yet. |
+| Phase 7.6.7 — Compact activation observer redesign | Planned | Keep one simple public observer/analysis concept, but make the first solver-side implementation deliberately strict: activation threshold only, static-shaped, batch-first, and optimized for massive recruitment/threshold workloads. Do not add public implementation-specific observer modes. | Update `example_18_solver_side_observers.py` only after the compact implementation and docs are stable. |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
 | Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
 
@@ -71,6 +74,10 @@ Known implementation gaps against the final target:
   single-cable/double-cable batch kernels. Heterogeneous observer-only
   execution, richer semantic signals, and final backend-neutral recording
   lowering remain future work.
+- The final observer API should remain simple and analysis-oriented. Avoid
+  exposing implementation-specific observer modes before real user needs exist.
+  The current performance target is one strict compact activation observer
+  implementation for massive threshold/recruitment runs.
 
 ---
 
@@ -2116,6 +2123,45 @@ axs.analysis.Activation(
 )
 ```
 
+### 24.2.1 Solver-side activation observer
+
+The public concept should stay analysis-oriented:
+
+```python
+axs.analysis.Activation(...)
+```
+
+or a future thin observer spelling that means the same scientific request.
+Do not expose backend/detail variants as public observer modes while the API is
+still pre-release.
+
+For now, solver-side observer execution should be deliberately narrow and
+optimized for massive threshold/recruitment workloads:
+
+```text
+input per solver step: Vm[B, Nx]
+state:                activated[B] bool
+optional later state: first_time_ms[B]
+output:               compact per-axon activation values
+```
+
+The supported first implementation is activation-threshold detection on
+membrane voltage. It should use static-shaped, batch-first arrays and simple
+reductions over a fixed target:
+
+```text
+center / one probe: Vm[:, idx] >= threshold
+probes:             max(Vm[:, probe_indices], axis=1) >= threshold
+any compartment:    max(Vm, axis=1) >= threshold
+```
+
+This strict implementation is intentional. It keeps the API simple for users,
+keeps the backend JAX-friendly, and avoids allocating or transferring
+`Vm[time, position, axon]` when recruitment only needs compact boolean
+activation decisions. More generic multi-kind observer plans, arbitrary output
+tables, and rich per-position metadata may be added only after benchmark
+evidence shows they are needed and can stay off the hot path.
+
 ## 24.3 Conduction velocity
 
 Unmyelinated strategy:
@@ -3268,8 +3314,13 @@ voltage, spike counts, or block summaries.
   observer-only run;
 - future optimization: move double-cable batch observer-only execution off
   scalar fallback once the compact state is wired and validated;
+- future redesign: collapse the current generic observer runtime into one strict
+  compact activation observer implementation first. Keep the public API
+  analysis-oriented and simple; do not expose backend implementation variants
+  as user choices.
 - future analysis design: decide whether latency/block-style analyses become
-  direct solver observers or thin views over activation observer state.
+  thin views over activation observer state after the compact activation path is
+  demonstrably fast and memory-stable.
 
 ## Phase 8 — Studies
 

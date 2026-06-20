@@ -19,8 +19,8 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 
 ## Current Snapshot
 
-Updated on 2026-06-19 after adding realistic CPU/GPU stress profiling for
-examples 06/07/08.
+Updated on 2026-06-20 after adding the compact activation observer redesign as
+a separate planned phase.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -31,6 +31,7 @@ examples 06/07/08.
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
 | Phase 7.6.5 | In progress | `Vext` materialization and realistic workflow performance. |
 | Phase 7.6.6 | Planned | GPU dispatch scheduling: bucket/coalesce compatible groups, then test optional async group enqueue. |
+| Phase 7.6.7 | Planned | Compact activation observer redesign: one simple public observer/analysis concept, one strict compact implementation for massive threshold/recruitment. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
 | Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
@@ -100,7 +101,7 @@ Work should start here unless the user asks otherwise.
   19 min before `runs=100` because observer-only reused the retained-Vm
   `B >= 2048` threshold and therefore did not activate the new batch-native
   path for `B=50/100`. The batch-native `pcr_soa` route now uses one shared
-  `B >= 32` threshold for full, center, and observer-only recording modes.
+  low batch threshold for full, center, and observer-only recording modes.
 - [x] Add progress diagnostics for long realistic observer GPU runs. The
   `d64fb77` Kaggle run was cancelled while `example08_recruitment runs=50` was
   still silent, so `realistic_stress_observer_gpu` now prints solver route,
@@ -110,6 +111,22 @@ Work should start here unless the user asks otherwise.
   `double-cable B=25`, so the previous `B >= 32` shared threshold still missed
   the double-cable subgroup. The shared route threshold is now `B >= 16`, and
   realistic benchmark logs print solver routing per dispatch group.
+- [ ] Analyze the completed observer-only Kaggle artifacts against
+  `realistic_stress` and `realistic_stress_single_vm`. Use case-specific memory
+  fields such as RSS deltas and first/warm run peaks, not only process
+  high-water `peak_rss`, before concluding whether observer-only is intrinsically
+  expensive or just exposing JAX/XLA/cache pressure.
+- [ ] Phase 7.6.7 design pass: replace the current generic hot-path observer
+  runtime with one compact activation observer implementation. Keep the user
+  concept simple (`axs.analysis.Activation(...)` / trace-free recording), avoid
+  public implementation-specific observer modes, and make the backend strict:
+  threshold-only, static-shaped, batch-first, and optimized for massive
+  recruitment/threshold sweeps.
+- [ ] Phase 7.6.7 validation: compare full Vm, single-probe Vm, and compact
+  activation observer outputs on realistic example 06/07/08 workloads,
+  especially large-`Naxon` recruitment. Keep the compact observer only if it
+  reduces memory pressure without slowing the solver fast path; if strict JAX
+  remains too heavy, evaluate a dedicated activation observer kernel separately.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
@@ -240,6 +257,65 @@ Success criteria:
   too close to the available hardware budget.
 - [ ] Keep all changes internal to dispatch/runtime options until the public
   API story is clear.
+
+## Phase 7.6.7 Compact Activation Observer Redesign
+
+Goal: keep the public observer/analysis story simple while making the first
+solver-side observer implementation deliberately optimized for the workflows
+AxonScope needs most: threshold, activation, and recruitment over many axons.
+
+User-facing rule:
+
+- [ ] Keep one analysis-oriented concept, centered on
+  `axs.analysis.Activation(...)` and trace-free simulation output when the user
+  does not request Vm traces.
+- [ ] Do not introduce public implementation-specific observer modes while the
+  API is still pre-release. A user should ask for the scientific result, not
+  choose an internal kernel family.
+- [ ] Document that the first observer is intentionally strict: membrane-voltage
+  threshold activation only, with fixed target positions/probes.
+
+Implementation direction:
+
+1. Define the compact activation state.
+   - Minimal state: `activated[B]` boolean.
+   - Optional later state: first activation time per axon, if it can stay
+     static-shaped and cheap.
+   - Per-step input: `Vm[B, Nx]`.
+   - Output: compact per-axon activation arrays, not `Vm[Nt, Nx, Naxon]`.
+
+2. Keep reductions fixed and JAX-friendly.
+   - Center/probe mode: `Vm[:, idx] >= threshold`.
+   - Small fixed probe set: reduce over `Vm[:, probe_indices]`.
+   - Whole-axon activation: reduce over `Nx`.
+   - Avoid arbitrary Python callbacks, dynamic output tables, or rich metadata
+     in the solver loop.
+
+3. Preserve solver fast paths.
+   - The observer update must not force double-cable batches back to scalar or
+     per-row routes.
+   - It must be independent of recording mode selection in dispatch routing.
+   - It must work with `pcr_soa` batch-native paths for mixed recruitment
+     subgroups such as `B=25`.
+
+4. Benchmark as a memory feature first.
+   - Compare full Vm, single-probe Vm, and compact activation observer on the
+     realistic examples.
+   - Track real process RSS deltas, device memory estimates, output bytes, and
+     solver/profile timings.
+   - Stress large axon counts and diameter sweeps, because memory savings should
+     matter most there.
+
+Success criteria:
+
+- [ ] Observer-only recruitment is clearly lighter than full Vm output for
+  large `Naxon` workloads.
+- [ ] Observer-only execution does not materially slow the retained-Vm fast
+  path for the same solver route.
+- [ ] The public API remains one clean analysis concept with documented
+  constraints.
+- [ ] Any broader observer system stays out of the hot path until there is
+  benchmark evidence and a concrete user need.
 
 ## Solver Campaign References
 

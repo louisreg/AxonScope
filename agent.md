@@ -199,6 +199,9 @@ instructions: |
   - Audit `/docs` against current code before building Sphinx documentation.
   - Keep proposal/roadmap pages clearly labelled so users do not run future API
     snippets as current behavior.
+  - Solver-side observer direction: keep the public concept
+    analysis-oriented, avoid public implementation-specific observer modes, and
+    optimize one strict compact activation-threshold implementation first.
   - Record NRV validation notes only after a fresh run in an NRV-ready
     environment.
   
