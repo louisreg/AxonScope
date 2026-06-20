@@ -80,7 +80,10 @@ class DispatchProgress:
                 if self._mode == "rich":
                     raise
         self._use_plain = True
-        print(f"Dispatch progress: {len(self.plan.items)} rows, {len(self.plan.groups)} groups")
+        print(
+            f"Dispatch progress: {len(self.plan.items)} rows, {len(self.plan.groups)} groups",
+            flush=True,
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
@@ -108,7 +111,7 @@ class DispatchProgress:
                 visible=True,
             )
         elif self._use_plain:
-            print(f"[{self._group_index}/{len(self.plan.groups)}] {label}")
+            print(f"[{self._group_index}/{len(self.plan.groups)}] {label}", flush=True)
 
     def finish_group(self, group: Any) -> None:
         """Mark one dispatch group as complete."""
@@ -119,7 +122,7 @@ class DispatchProgress:
             self._rich.advance(self._group_task, 1)
             self._rich.update(self._kernel_task, visible=False)
         elif self._use_plain:
-            print(f"done group {group.group_id}")
+            print(f"done group {group.group_id}", flush=True)
 
     def kernel_callback(self, group: Any) -> KernelProgressCallback | None:
         """Return a callback for chunked solver kernels."""
@@ -139,7 +142,7 @@ class DispatchProgress:
                     visible=True,
                 )
             elif self._use_plain and total > 1:
-                print(f"  kernel chunks {done}/{total}")
+                print(f"  kernel chunks {done}/{total}", flush=True)
 
         return _callback
 

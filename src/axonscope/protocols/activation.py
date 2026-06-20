@@ -1342,8 +1342,8 @@ class _SweepProgress:
         completed_rows: list[np.ndarray],
         progress_summary: ProgressSummary | None,
     ) -> None:
-        print("\033[2J\033[H", end="")
-        print(f"{label}, current={_format_sweep_value(values[current_index])}")
+        print("\033[2J\033[H", end="", flush=True)
+        print(f"{label}, current={_format_sweep_value(values[current_index])}", flush=True)
         completed = len(completed_rows)
         for index, value in enumerate(values):
             if index < completed:
@@ -1353,9 +1353,9 @@ class _SweepProgress:
                     if progress_summary is not None
                     else f"{int(row.shape[0])} rows"
                 )
-                print(f"{_format_sweep_value(value):>12s}: {summary} done")
+                print(f"{_format_sweep_value(value):>12s}: {summary} done", flush=True)
             else:
-                print(f"{_format_sweep_value(value):>12s}: pending")
+                print(f"{_format_sweep_value(value):>12s}: pending", flush=True)
 
 
 def _validate_pool_width(values: np.ndarray, expected: int) -> None:
