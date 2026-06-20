@@ -3046,6 +3046,16 @@ row-specific `current_mid_A`. Required next validation: P100
 on example 08 JAX call count, `kernel.dispatch_jax`, `kernel.finalize_observer`,
 and warm end-to-end time.
 
+P100 validation `20260620_225920`: the batched-amplitude path works, but full
+flattening is too aggressive as a default. Example 08 drops from `8 x 2` dispatch
+groups to `1 x 2` dispatch groups by running B50 as two B200 groups and B100 as
+two B400 groups. Warm B50 improves `0.835 -> 0.698 s`; warm B100 improves versus
+`20260620_212926` (`1.572 -> 1.340 s`) but not versus the cleaner precommit run
+`20260620_222226` (`1.321 s`). The cost is unacceptable for cold/memory-sensitive
+usage: B100 first run `22.1 -> 235.0 s`, peak RSS `5.6 -> 9.9 GiB`. Treat this
+as evidence for chunked protocol-step batching plus memory-aware gating, not as
+a final double-cable solver optimization.
+
 ## 4. Static shapes
 
 For repeated GPU calls, bucket:

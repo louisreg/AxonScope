@@ -125,6 +125,17 @@ confirmed `shared_current=False`, `current_mid_A.shape == (40, 16)`, and one
 validation on the mixed example 08 stress case; compare call count and
 `kernel.dispatch_jax/finalize_observer/self_ms` against run `20260620_212926`.
 
+P100 follow-up `20260620_225920` validates the mechanism but not the unlimited
+policy. Example 08 call counts drop from `8` pool calls / `16` dispatch groups
+to `1` / `2`, with row-specific factorized inputs (`current_mid_A` `[200,160]`
+at B50 and `[400,160]` at B100). Warm B50 improves `0.835 -> 0.698 s`, and B100
+improves versus the `212926` baseline `1.572 -> 1.340 s`, but is not better than
+the cleaner precommit control (`1.321 s`). Cold/RSS regress heavily: B100 first
+run `22.1 -> 235.0 s`, peak RSS `5.6 -> 9.9 GiB`. Conclusion: batch
+non-iterative protocol steps in chunks, not as one unlimited flattened batch.
+The batching policy should use the hardware-memory estimate already called out
+in this note.
+
 The useful parts of this note remain:
 
 ```text

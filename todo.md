@@ -332,14 +332,25 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   `tests/unit/test_protocols.py::test_recruitment_sweep_batches_observer_only_independent_values`,
   and an active-pulse local smoke showing one flattened observer-only pool call
   with `shared_current=False` and `current_mid_A.shape == (40, 16)`.
-- [ ] Phase 7.6.5C Kaggle validation: rerun
-  `realistic_stress_observer_gpu` and compare example 08 call count,
-  `kernel.dispatch_jax`, `kernel.finalize_observer`, `kernel.enqueue.self_ms`,
-  peak/real memory, and recruitment summaries against
-  `20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100`. The target is
-  to reduce the current `8 amplitudes x 2 groups = 16` JAX calls per run toward
-  one single-cable plus one double-cable call for the non-iterative recruitment
-  sweep, without changing observer semantics.
+- [x] Phase 7.6.5C Kaggle validation:
+  `20260620_225920_realistic_stress_observer_gpu_NvidiaTeslaP100`, compared to
+  `20260620_212926` and the precommit control `20260620_222226`. The fast path
+  is active: example 08 warm repeat call counts drop from `8`
+  `simulation.pool.total` and `16` `dispatch.group.total` events to `1` and
+  `2`. The factorized inputs are row-specific (`shared_current=False`) with
+  `current_mid_A` shapes `[200,160]` at B50 and `[400,160]` at B100. Warm time
+  improves B50 `0.835 -> 0.698 s` (`1.20x`) and B100 `1.572 -> 1.340 s`
+  versus the `212926` baseline, but B100 is not better than the cleaner
+  precommit control (`1.321 s`). Cold compile/build and memory regress strongly:
+  B50 first run `20.9 -> 93.0 s`, B100 `22.1 -> 235.0 s`, and B100 peak RSS
+  `5.6 -> 9.9 GiB`. Decision: the idea is useful, but full amplitude flattening
+  must not be unconditional for large `pool_size * protocol_steps`; add
+  chunking or memory-aware gating before keeping it as the default.
+- [ ] Phase 7.6.5C follow-up: chunk non-iterative amplitude batching. Target
+  2-4 amplitudes per solver call first, then choose automatically from hardware
+  memory capacity and estimated simulation/output bytes. Success means keeping
+  most of the call-count/finalization win while avoiding B400-style cold/RSS
+  blow-ups.
 - [ ] Phase 7.6.5D: implement a stimulus/amplitude-only execution cache for
   point-source/extracellular sweeps. Reuse prepared spatial footprints and
   compiled executable; update only temporal stimulus/amplitude buffers where
