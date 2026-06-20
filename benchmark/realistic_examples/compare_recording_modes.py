@@ -67,22 +67,37 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     event_rows = aggregate_profile_events(profile_rows, events=args.events)
     memory_rows = build_memory_rows(summary_rows, event_rows)
+    ratio_rows = build_case_ratio_rows(summary_rows)
+    fraction_rows = build_event_fraction_rows(event_rows)
+    bottleneck_rows = build_bottleneck_rows(event_rows)
 
     summary_csv = out_dir / f"{prefix}_summary.csv"
     profile_csv = out_dir / f"{prefix}_profile_events.csv"
     memory_csv = out_dir / f"{prefix}_memory.csv"
+    ratio_csv = out_dir / f"{prefix}_case_ratios.csv"
+    fraction_csv = out_dir / f"{prefix}_event_fractions.csv"
+    bottleneck_csv = out_dir / f"{prefix}_bottlenecks.csv"
     write_csv(summary_csv, summary_rows)
     write_csv(profile_csv, event_rows)
     write_csv(memory_csv, memory_rows)
+    write_csv(ratio_csv, ratio_rows)
+    write_csv(fraction_csv, fraction_rows)
+    write_csv(bottleneck_csv, bottleneck_rows)
     print(f"summary_csv: {summary_csv}")
     print(f"profile_events_csv: {profile_csv}")
     print(f"memory_csv: {memory_csv}")
+    print(f"case_ratios_csv: {ratio_csv}")
+    print(f"event_fractions_csv: {fraction_csv}")
+    print(f"bottlenecks_csv: {bottleneck_csv}")
 
     if args.plots:
         for plot_path in write_plots(
             summary_rows=summary_rows,
             event_rows=event_rows,
             memory_rows=memory_rows,
+            ratio_rows=ratio_rows,
+            fraction_rows=fraction_rows,
+            bottleneck_rows=bottleneck_rows,
             out_dir=out_dir,
             prefix=prefix,
             events=args.events,
@@ -342,6 +357,121 @@ def build_memory_rows(
     return out_rows
 
 
+def build_case_ratio_rows(summary_rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    groups: dict[tuple[str, ...], dict[str, dict[str, str]]] = defaultdict(dict)
+    for row in summary_rows:
+        groups[case_key_without_mode(row)][row["mode"]] = row
+
+    out_rows = []
+    for key in sorted(groups):
+        rows_by_mode = groups[key]
+        first = next(iter(rows_by_mode.values()))
+        metrics = {
+            mode: parse_number(row.get("warm.mean_s"))
+            for mode, row in rows_by_mode.items()
+        }
+        out_rows.append(
+            {
+                "workflow": first["workflow"],
+                "fiber_type": first["fiber_type"],
+                "run_count": first["run_count"],
+                "duration_ms": first["duration_ms"],
+                "dt_ms": first["dt_ms"],
+                "protocol_steps": first["protocol_steps"],
+                "gpu_full_s": fmt(metrics.get("full", float("nan"))),
+                "gpu_center_s": fmt(metrics.get("center", float("nan"))),
+                "gpu_observer_s": fmt(metrics.get("observer", float("nan"))),
+                "cpu_full_s": fmt(metrics.get("full_cpu", float("nan"))),
+                "cpu_center_s": fmt(metrics.get("center_cpu", float("nan"))),
+                "cpu_observer_s": fmt(metrics.get("observer_cpu", float("nan"))),
+                "cpu_full_over_gpu_full": fmt_ratio(metrics.get("full_cpu"), metrics.get("full")),
+                "cpu_center_over_gpu_center": fmt_ratio(
+                    metrics.get("center_cpu"), metrics.get("center")
+                ),
+                "cpu_observer_over_gpu_observer": fmt_ratio(
+                    metrics.get("observer_cpu"), metrics.get("observer")
+                ),
+                "gpu_center_over_full": fmt_ratio(metrics.get("center"), metrics.get("full")),
+                "gpu_observer_over_full": fmt_ratio(metrics.get("observer"), metrics.get("full")),
+                "gpu_observer_over_center": fmt_ratio(
+                    metrics.get("observer"), metrics.get("center")
+                ),
+                "cpu_center_over_full": fmt_ratio(
+                    metrics.get("center_cpu"), metrics.get("full_cpu")
+                ),
+                "cpu_observer_over_full": fmt_ratio(
+                    metrics.get("observer_cpu"), metrics.get("full_cpu")
+                ),
+                "cpu_observer_over_center": fmt_ratio(
+                    metrics.get("observer_cpu"), metrics.get("center_cpu")
+                ),
+            }
+        )
+    return out_rows
+
+
+def build_event_fraction_rows(event_rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    totals: dict[tuple[str, ...], float] = {}
+    for row in event_rows:
+        if row["event_name"] == "simulation.pool.total":
+            totals[event_case_key(row)] = parse_number(row.get("total_ms_mean"))
+
+    out_rows = []
+    for row in event_rows:
+        total_ms = parse_number(row.get("total_ms_mean"))
+        simulation_ms = totals.get(event_case_key(row), float("nan"))
+        fraction = total_ms / simulation_ms if valid_denominator(simulation_ms) else float("nan")
+        output = dict(row)
+        output["total_s_mean"] = fmt(total_ms / 1000.0)
+        output["fraction_of_simulation_total"] = fmt(fraction)
+        output["percent_of_simulation_total"] = fmt(fraction * 100.0)
+        out_rows.append(output)
+    return out_rows
+
+
+def build_bottleneck_rows(event_rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    groups: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
+    totals: dict[tuple[str, ...], float] = {}
+    for row in event_rows:
+        key = event_case_key(row)
+        if row["event_name"] == "simulation.pool.total":
+            totals[key] = parse_number(row.get("total_ms_mean"))
+        else:
+            groups[key].append(row)
+
+    out_rows = []
+    for key in sorted(groups):
+        total_ms = totals.get(key, float("nan"))
+        ranked = sorted(
+            groups[key],
+            key=lambda row: parse_number(row.get("total_ms_mean")),
+            reverse=True,
+        )
+        for rank, row in enumerate(ranked, start=1):
+            event_ms = parse_number(row.get("total_ms_mean"))
+            fraction = event_ms / total_ms if valid_denominator(total_ms) else float("nan")
+            out_rows.append(
+                {
+                    "rank": str(rank),
+                    "mode": row["mode"],
+                    "workflow": row["workflow"],
+                    "fiber_type": row["fiber_type"],
+                    "run_count": row["run_count"],
+                    "duration_ms": row["duration_ms"],
+                    "dt_ms": row["dt_ms"],
+                    "recording": row["recording"],
+                    "protocol_steps": row["protocol_steps"],
+                    "event_name": row["event_name"],
+                    "event_total_s_mean": fmt(event_ms / 1000.0),
+                    "event_self_s_mean": fmt(parse_number(row.get("self_ms_mean")) / 1000.0),
+                    "event_count_mean": row.get("event_count_mean", ""),
+                    "percent_of_simulation_total": fmt(fraction * 100.0),
+                    "investigation_hint": investigation_hint(row["event_name"]),
+                }
+            )
+    return out_rows
+
+
 def case_key(row: dict[str, str]) -> tuple[str, ...]:
     return (
         row["mode"],
@@ -353,6 +483,50 @@ def case_key(row: dict[str, str]) -> tuple[str, ...]:
         row["recording"],
         row["protocol_steps"],
     )
+
+
+def case_key_without_mode(row: dict[str, str]) -> tuple[str, ...]:
+    return (
+        row["workflow"],
+        row["fiber_type"],
+        row["run_count"],
+        row["duration_ms"],
+        row["dt_ms"],
+        row["protocol_steps"],
+    )
+
+
+def event_case_key(row: dict[str, str]) -> tuple[str, ...]:
+    return (
+        row["mode"],
+        row["workflow"],
+        row["fiber_type"],
+        row["run_count"],
+        row["duration_ms"],
+        row["dt_ms"],
+        row["recording"],
+        row["protocol_steps"],
+    )
+
+
+def investigation_hint(event_name: str) -> str:
+    if event_name == "runtime.prepare":
+        return "cache/reuse static solver runtimes and materialized inputs"
+    if event_name == "dispatch.build_plan":
+        return "cache dispatch groups/probe plans for iterative protocols"
+    if event_name == "kernel.wait":
+        return "device execution or CPU backend solve time"
+    if event_name == "kernel.enqueue":
+        return "JIT launch/enqueue overhead and executable reuse"
+    if event_name == "results.split_batch":
+        return "result slicing/concatenation and host packaging"
+    if event_name == "inputs.extracellular":
+        return "Vext/stimulation materialization and footprint cache"
+    if event_name == "inputs.intracellular":
+        return "Iinj materialization; avoid dense zeros"
+    if event_name == "results.to_public":
+        return "public result conversion and host transfer"
+    return "inspect span owner"
 
 
 def write_csv(path: Path, rows: Sequence[dict[str, str]]) -> None:
@@ -373,6 +547,9 @@ def write_plots(
     summary_rows: Sequence[dict[str, str]],
     event_rows: Sequence[dict[str, str]],
     memory_rows: Sequence[dict[str, str]],
+    ratio_rows: Sequence[dict[str, str]],
+    fraction_rows: Sequence[dict[str, str]],
+    bottleneck_rows: Sequence[dict[str, str]],
     out_dir: Path,
     prefix: str,
     events: Sequence[str],
@@ -385,6 +562,13 @@ def write_plots(
     outputs.extend(plot_event_timings(pyplot, event_rows, out_dir, prefix, events))
     outputs.extend(plot_memory(pyplot, memory_rows, out_dir, prefix))
     outputs.extend(plot_example08_breakdown(pyplot, event_rows, out_dir, prefix, events))
+    outputs.extend(plot_workflow_totals(pyplot, summary_rows, out_dir, prefix))
+    outputs.extend(plot_cpu_gpu_speedups(pyplot, ratio_rows, out_dir, prefix))
+    outputs.extend(plot_recording_mode_ratios(pyplot, ratio_rows, out_dir, prefix))
+    outputs.extend(plot_event_heatmaps(pyplot, event_rows, out_dir, prefix, events))
+    outputs.extend(plot_event_fraction_heatmaps(pyplot, fraction_rows, out_dir, prefix, events))
+    outputs.extend(plot_bottleneck_pareto(pyplot, bottleneck_rows, out_dir, prefix))
+    outputs.extend(plot_memory_scatter(pyplot, summary_rows, memory_rows, out_dir, prefix))
     return outputs
 
 
@@ -552,6 +736,319 @@ def plot_example08_breakdown(
     return save_plot(fig, pyplot, out_dir / f"{prefix}_example08_breakdown")
 
 
+def plot_workflow_totals(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+) -> list[Path]:
+    if not rows:
+        return []
+    workflows = sorted({row["workflow"] for row in rows})
+    modes = sorted_modes(row["mode"] for row in rows)
+    values: dict[tuple[str, str], float] = defaultdict(float)
+    for row in rows:
+        values[(row["mode"], row["workflow"])] += parse_number(row.get("warm.mean_s"))
+
+    fig, ax = pyplot.subplots(figsize=(max(8.0, 1.2 * len(workflows) + 4.0), 4.8), constrained_layout=True)
+    xs = list(range(len(workflows)))
+    width = min(0.16, 0.75 / max(1, len(modes)))
+    for offset, mode in enumerate(modes):
+        shift = (offset - (len(modes) - 1) / 2.0) * width
+        ax.bar(
+            [x + shift for x in xs],
+            [values.get((mode, workflow), float("nan")) for workflow in workflows],
+            width,
+            label=mode,
+        )
+    ax.set_yscale("log")
+    ax.set_ylabel("warm total by workflow (s, log)")
+    ax.set_title("Workflow totals by platform/recording mode")
+    ax.set_xticks(xs, [workflow.replace("_", "\n") for workflow in workflows])
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend(frameon=False, ncols=3)
+    return save_plot(fig, pyplot, out_dir / f"{prefix}_workflow_totals")
+
+
+def plot_cpu_gpu_speedups(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+) -> list[Path]:
+    if not rows:
+        return []
+    cases = [case_plot_key(row) for row in rows]
+    metrics = [
+        ("cpu_full_over_gpu_full", "full"),
+        ("cpu_center_over_gpu_center", "center"),
+        ("cpu_observer_over_gpu_observer", "observer"),
+    ]
+    fig, ax = pyplot.subplots(figsize=(plot_width(len(cases)), 5.0), constrained_layout=True)
+    xs = list(range(len(cases)))
+    width = 0.22
+    for offset, (metric, label) in enumerate(metrics):
+        shift = (offset - (len(metrics) - 1) / 2.0) * width
+        ax.bar(
+            [x + shift for x in xs],
+            [parse_number(row.get(metric)) for row in rows],
+            width,
+            label=label,
+        )
+    ax.axhline(1.0, color="0.2", linestyle="--", linewidth=1.0, label="parity")
+    ax.set_yscale("log")
+    ax.set_ylabel("CPU / GPU warm ratio (log)")
+    ax.set_title("CPU vs GPU warm ratio by recording mode")
+    ax.set_xticks(xs, [compact_case_label(case) for case in cases], rotation=35, ha="right")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend(frameon=False)
+    return save_plot(fig, pyplot, out_dir / f"{prefix}_cpu_gpu_ratios")
+
+
+def plot_recording_mode_ratios(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+) -> list[Path]:
+    if not rows:
+        return []
+    cases = [case_plot_key(row) for row in rows]
+    panels = [
+        (
+            "GPU recording ratios",
+            [
+                ("gpu_center_over_full", "center/full"),
+                ("gpu_observer_over_full", "observer/full"),
+                ("gpu_observer_over_center", "observer/center"),
+            ],
+        ),
+        (
+            "CPU recording ratios",
+            [
+                ("cpu_center_over_full", "center/full"),
+                ("cpu_observer_over_full", "observer/full"),
+                ("cpu_observer_over_center", "observer/center"),
+            ],
+        ),
+    ]
+    fig, axes = pyplot.subplots(2, 1, figsize=(plot_width(len(cases)), 8.0), constrained_layout=True)
+    xs = list(range(len(cases)))
+    width = 0.22
+    for ax, (title, metrics) in zip(axes, panels):
+        for offset, (metric, label) in enumerate(metrics):
+            shift = (offset - (len(metrics) - 1) / 2.0) * width
+            ax.bar(
+                [x + shift for x in xs],
+                [parse_number(row.get(metric)) for row in rows],
+                width,
+                label=label,
+            )
+        ax.axhline(1.0, color="0.2", linestyle="--", linewidth=1.0)
+        ax.set_yscale("log")
+        ax.set_ylabel("warm ratio (log)")
+        ax.set_title(title)
+        ax.grid(axis="y", alpha=0.25)
+        ax.set_xticks(xs, [compact_case_label(case) for case in cases], rotation=35, ha="right")
+        ax.legend(frameon=False)
+    return save_plot(fig, pyplot, out_dir / f"{prefix}_recording_mode_ratios")
+
+
+def plot_event_heatmaps(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+    events: Sequence[str],
+) -> list[Path]:
+    outputs: list[Path] = []
+    for workflow in sorted({row["workflow"] for row in rows}):
+        selected = [row for row in rows if row["workflow"] == workflow]
+        if not selected:
+            continue
+        outputs.extend(
+            plot_event_heatmap(
+                pyplot,
+                selected,
+                out_dir,
+                f"{prefix}_event_heatmap_{sanitize_label(workflow)}",
+                events,
+                title=f"{workflow}: profile span totals",
+                value_key="total_ms_mean",
+                transform=lambda value: math.log10(max(value / 1000.0, 1e-6)),
+                colorbar_label="log10(seconds)",
+            )
+        )
+    return outputs
+
+
+def plot_event_fraction_heatmaps(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+    events: Sequence[str],
+) -> list[Path]:
+    outputs: list[Path] = []
+    for workflow in sorted({row["workflow"] for row in rows}):
+        selected = [row for row in rows if row["workflow"] == workflow]
+        if not selected:
+            continue
+        outputs.extend(
+            plot_event_heatmap(
+                pyplot,
+                selected,
+                out_dir,
+                f"{prefix}_event_fraction_heatmap_{sanitize_label(workflow)}",
+                events,
+                title=f"{workflow}: span share of simulation.pool.total",
+                value_key="percent_of_simulation_total",
+                transform=lambda value: value,
+                colorbar_label="% of simulation.pool.total",
+                vmin=0.0,
+                vmax=100.0,
+            )
+        )
+    return outputs
+
+
+def plot_event_heatmap(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    stem: str,
+    events: Sequence[str],
+    *,
+    title: str,
+    value_key: str,
+    transform: object,
+    colorbar_label: str,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> list[Path]:
+    event_names = [event for event in events if any(row["event_name"] == event for row in rows)]
+    row_keys = sorted(
+        {event_case_label_key(row) for row in rows},
+        key=lambda item: (mode_sort_key(item[0]), item[1], item[2], item[3]),
+    )
+    if not event_names or not row_keys:
+        return []
+    values = {
+        (event_case_label_key(row), row["event_name"]): parse_number(row.get(value_key))
+        for row in rows
+    }
+    matrix = []
+    for row_key in row_keys:
+        matrix_row = []
+        for event_name in event_names:
+            value = values.get((row_key, event_name), float("nan"))
+            matrix_row.append(transform(value) if math.isfinite(value) else float("nan"))
+        matrix.append(matrix_row)
+
+    fig_height = max(4.8, 0.32 * len(row_keys) + 2.2)
+    fig, ax = pyplot.subplots(figsize=(max(9.5, 0.72 * len(event_names) + 3.0), fig_height), constrained_layout=True)
+    image = ax.imshow(matrix, aspect="auto", interpolation="nearest", vmin=vmin, vmax=vmax)
+    ax.set_title(title)
+    ax.set_xticks(range(len(event_names)), event_names, rotation=35, ha="right")
+    ax.set_yticks(range(len(row_keys)), [event_case_label(row_key) for row_key in row_keys])
+    colorbar = fig.colorbar(image, ax=ax)
+    colorbar.set_label(colorbar_label)
+    return save_plot(fig, pyplot, out_dir / stem)
+
+
+def plot_bottleneck_pareto(
+    pyplot: object,
+    rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+) -> list[Path]:
+    if not rows:
+        return []
+    modes = sorted_modes(row["mode"] for row in rows)
+    event_totals: dict[tuple[str, str], float] = defaultdict(float)
+    for row in rows:
+        event_totals[(row["mode"], row["event_name"])] += parse_number(
+            row.get("event_total_s_mean")
+        )
+
+    fig, axes = pyplot.subplots(
+        len(modes),
+        1,
+        figsize=(9.5, max(4.0, 2.0 * len(modes))),
+        constrained_layout=True,
+    )
+    if len(modes) == 1:
+        axes = [axes]
+    for ax, mode in zip(axes, modes):
+        pairs = [
+            (event_name, value)
+            for (pair_mode, event_name), value in event_totals.items()
+            if pair_mode == mode and value > 0.0
+        ]
+        pairs = sorted(pairs, key=lambda item: item[1], reverse=True)[:8]
+        labels = [event_name for event_name, _value in reversed(pairs)]
+        values = [value for _event_name, value in reversed(pairs)]
+        ax.barh(range(len(labels)), values)
+        ax.set_yticks(range(len(labels)), labels)
+        ax.set_xlabel("summed warm event total across cases (s)")
+        ax.set_title(f"Top bottlenecks: {mode}")
+        ax.grid(axis="x", alpha=0.25)
+    return save_plot(fig, pyplot, out_dir / f"{prefix}_bottleneck_pareto")
+
+
+def plot_memory_scatter(
+    pyplot: object,
+    summary_rows: Sequence[dict[str, str]],
+    memory_rows: Sequence[dict[str, str]],
+    out_dir: Path,
+    prefix: str,
+) -> list[Path]:
+    if not summary_rows or not memory_rows:
+        return []
+    warm_by_case = {
+        case_key(row): parse_number(row.get("warm.mean_s"))
+        for row in summary_rows
+    }
+    rows = []
+    for row in memory_rows:
+        warm_s = warm_by_case.get(case_key(row), float("nan"))
+        if math.isfinite(warm_s):
+            rows.append((row, warm_s))
+    if not rows:
+        return []
+
+    metrics = [
+        ("warm_mean_peak_rss_mib", "warm RSS peak mean (MiB)"),
+        ("memory_estimate_total_mib_max", "device estimate max (MiB)"),
+        ("process_peak_rss_mib", "process high-water RSS (MiB)"),
+    ]
+    fig, axes = pyplot.subplots(1, len(metrics), figsize=(5.6 * len(metrics), 4.8), constrained_layout=True)
+    if len(metrics) == 1:
+        axes = [axes]
+    modes = sorted_modes(row["mode"] for row, _warm_s in rows)
+    for ax, (metric, title) in zip(axes, metrics):
+        for mode in modes:
+            xs = [
+                parse_number(row.get(metric))
+                for row, _warm_s in rows
+                if row["mode"] == mode
+            ]
+            ys = [
+                warm_s
+                for row, warm_s in rows
+                if row["mode"] == mode
+            ]
+            ax.scatter(xs, ys, label=mode, s=30, alpha=0.8)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(title)
+        ax.set_ylabel("warm mean (s)")
+        ax.set_title(f"Warm time vs {title}")
+        ax.grid(alpha=0.25)
+    axes[0].legend(frameon=False, fontsize="small")
+    return save_plot(fig, pyplot, out_dir / f"{prefix}_memory_vs_time")
+
+
 def case_plot_key(row: dict[str, str]) -> tuple[str, str, int, int]:
     return (
         row["workflow"],
@@ -577,6 +1074,41 @@ def compact_case_label(case: tuple[str, str, int, int]) -> str:
         "example08_recruitment": "08 rec",
     }.get(workflow, workflow)
     return f"{workflow_short}\n{fiber_type} B={run_count} P={protocol_steps}"
+
+
+def event_case_label_key(row: dict[str, str]) -> tuple[str, str, int, int, str]:
+    return (
+        row["mode"],
+        row["fiber_type"],
+        int(float(row["run_count"])),
+        int(float(row["protocol_steps"])),
+        row["recording"],
+    )
+
+
+def event_case_label(key: tuple[str, str, int, int, str]) -> str:
+    mode, fiber_type, run_count, protocol_steps, recording = key
+    return f"{mode} | {fiber_type} B={run_count} P={protocol_steps} | {recording}"
+
+
+def sorted_modes(modes: Iterable[str]) -> list[str]:
+    return sorted(set(modes), key=mode_sort_key)
+
+
+def mode_sort_key(mode: str) -> tuple[int, str]:
+    order = {
+        "full_cpu": 0,
+        "center_cpu": 1,
+        "observer_cpu": 2,
+        "full": 3,
+        "center": 4,
+        "observer": 5,
+    }
+    return (order.get(mode, 100), mode)
+
+
+def sanitize_label(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in value).strip("_").lower()
 
 
 def import_pyplot() -> object | None:
@@ -641,10 +1173,24 @@ def parse_number(value: str | None) -> float:
         return float("nan")
 
 
+def valid_denominator(value: float) -> bool:
+    return math.isfinite(value) and abs(value) > 1e-12
+
+
 def fmt(value: float) -> str:
     if not math.isfinite(value):
         return ""
     return f"{value:.9g}"
+
+
+def fmt_ratio(numerator: float | None, denominator: float | None) -> str:
+    if numerator is None or denominator is None:
+        return ""
+    numerator_value = float(numerator)
+    denominator_value = float(denominator)
+    if not math.isfinite(numerator_value) or not valid_denominator(denominator_value):
+        return ""
+    return fmt(numerator_value / denominator_value)
 
 
 if __name__ == "__main__":
