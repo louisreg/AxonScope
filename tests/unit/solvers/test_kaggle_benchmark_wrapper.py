@@ -215,7 +215,9 @@ def test_kaggle_runner_accepts_active_benchmark_choices():
         "realistic_smoke",
         "realistic",
         "realistic_stress",
+        "realistic_stress_gpu",
         "realistic_stress_single_vm",
+        "realistic_stress_single_vm_gpu",
         "realistic_stress_observer",
         "realistic_stress_observer_cpu",
         "realistic_stress_observer_gpu",
@@ -322,6 +324,30 @@ def test_kaggle_realistic_single_vm_stress_uses_center_recording(tmp_path, monke
         "cpu",
         "gpu",
     ]
+    assert "--profile" in command
+
+
+def test_kaggle_realistic_stress_can_run_gpu_only(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_realistic_examples(
+        tmp_path,
+        smoke=False,
+        stress=True,
+        platforms=("gpu",),
+        progress=True,
+    )
+
+    (command,) = commands
+    assert command[
+        command.index("--platforms") + 1 : command.index("--example08-recording")
+    ] == ["gpu"]
+    assert "--progress" in command
     assert "--profile" in command
 
 

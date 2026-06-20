@@ -20,7 +20,7 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 ## Current Snapshot
 
 Updated on 2026-06-20 after replacing the old solver-side observer runtime with
-the first packed VmRaster implementation.
+the first packed VmRaster implementation and validating it on Kaggle P100.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ the first packed VmRaster implementation.
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
 | Phase 7.6.5 | In progress | `Vext` materialization and realistic workflow performance. |
 | Phase 7.6.6 | Planned | GPU dispatch scheduling: bucket/coalesce compatible groups, then test optional async group enqueue. |
-| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster; post-processing and realistic GPU validation remain. |
+| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster. P100 validation passed for `realistic_stress_observer_gpu`; remaining work is decoder breadth, reuse/caching, and larger memory-focused stress. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
 | Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
@@ -93,8 +93,8 @@ Work should start here unless the user asks otherwise.
   during `example08_recruitment` before a full timing row was produced. The
   `426.7s` Kaggle UI value was a log timestamp, not a case duration.
 - [x] Preserve the double-cable batch-native `pcr_soa` fast path for
-  observer-only output at realistic batch sizes. Observer-only now uses compact
-  Vm-event state rather than the removed generic observer state.
+  observer-only output at realistic batch sizes. Observer-only now uses packed
+  `VmRaster` state rather than the removed generic observer state.
 - [x] Fix the observer-only route threshold for realistic recruitment batches.
   The first post-fix Kaggle run at `926a8ce` showed `runs=50` taking about
   19 min before `runs=100` because observer-only reused the retained-Vm
@@ -117,6 +117,14 @@ Work should start here unless the user asks otherwise.
   path was not retained for the hot path exposed by `example08`: `B=100`
   warm mean is `503.184 s` versus `5.903 s` full Vm and `6.308 s` center Vm on
   P100.
+- [x] Validate the packed VmRaster replacement on Kaggle P100
+  `realistic_stress_observer_gpu`. Run:
+  `benchmark/results/kaggle/20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+  Result: `example08` observer-only warm mean is `3.532 s` at `B=50` and
+  `6.338 s` at `B=100`, versus `244.105 s` and `503.184 s` for the rejected
+  observer path. Whole stress warm total is `38.59 s`, close to center Vm
+  `39.09 s`; process peak is reduced from `20,906 MiB` to `5,325 MiB` at
+  `B=100`.
 - [x] Phase 7.6.7A implementation pass: add internal VmRaster lowering for
   threshold-style observer requests. The user concept stays simple:
   `observers=[Activation/Latency/ConductionBlock(...)]`; there are no public
@@ -127,21 +135,26 @@ Work should start here unless the user asks otherwise.
   (`Vm >= threshold`) and returns `observations["vm_raster"]`; activation,
   latency, velocity, threshold-search, and recruitment summaries are
   post-processing. `PeakVoltage` remains post-hoc on recorded Vm.
-- [ ] Phase 7.6.7C instrumentation pass: add child spans inside double-cable
-  observer execution so `runtime.prepare`, input materialization,
-  `kernel.enqueue`, `kernel.wait`, and result finalization are visible instead
-  of hidden under `dispatch.group.total` self time.
+- [x] Phase 7.6.7C instrumentation pass: VmRaster observer execution now exposes
+  `runtime.prepare`, input materialization, `kernel.enqueue`, `kernel.wait`,
+  and result finalization in the realistic profile CSV. The P100 validation run
+  shows warm `B=100` is dominated by `runtime.prepare` (`3.585 s`) and
+  `dispatch.build_plan` (`1.061 s`), not `kernel.wait` (`0.107 s`).
 - [x] Phase 7.6.7D padded-group probe pass: VmRaster observers use row-aware
   static probe indices/masks and `-1` padded original indices, so heterogeneous
   padded groups can stay trace-free.
-- [ ] Phase 7.6.7E post-processing pass: design a CPU-side decoder for
-  `VmRasterResult` that covers activation, first crossing/latency, conduction
-  velocity, threshold-search updates, and recruitment summaries without
-  changing the solver contract.
-- [ ] Phase 7.6.7 validation: compare full Vm, single-probe Vm, and VmRaster
-  observer outputs on realistic example 06/07/08 workloads. Keep VmRaster only
-  if it reduces memory pressure without slowing the solver fast path; if JAX
-  bit-packing remains too heavy, evaluate a dedicated kernel separately.
+- [ ] Phase 7.6.7E post-processing pass: finish CPU-side decoders for
+  `VmRasterResult`. Activation/recruitment decoding is now wired for the
+  realistic observer route; remaining decoder breadth is first crossing/latency,
+  conduction velocity, threshold-search updates, and public summary helpers
+  without changing the solver contract.
+- [x] Phase 7.6.7 validation, first P100 pass: compare full Vm, single-probe Vm,
+  and VmRaster observer outputs on the realistic `example08` stress workload.
+  VmRaster is retained: it is within center-Vm timing noise and removes the old
+  observer slowdown.
+- [ ] Phase 7.6.7 validation, broader pass: compare VmRaster decoders against
+  full Vm for example 06 velocity and example 07 threshold, then run larger
+  `Naxon`/diameter sweeps where output memory should matter most.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
@@ -273,7 +286,7 @@ Success criteria:
 - [ ] Keep all changes internal to dispatch/runtime options until the public
   API story is clear.
 
-## Phase 7.6.7 Compact Vm-Event Observer Redesign
+## Phase 7.6.7 VmRaster Observer Redesign
 
 Goal: keep the public observer/analysis story simple while making the first
 solver-side observer implementation deliberately optimized for the workflows
@@ -296,6 +309,12 @@ Evidence gate:
   output size. The observer run reached `20,906 MiB` process peak at `B=100`,
   but case-local deltas and profiler memory estimates point toward XLA/cache or
   hidden compile/execution pressure rather than raw `Vm` output arrays.
+- [x] Kaggle P100
+  `20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100` validates the
+  packed VmRaster replacement. `example08` observer-only warm mean is
+  `6.338 s` at `B=100`, close to center Vm `6.308 s` and far below the rejected
+  observer path `503.184 s`. The double-cable subgroup warm mean is `561.5 ms`,
+  about `1.1x` full Vm, and process peak falls to `5,325 MiB`.
 
 User-facing rule:
 
@@ -324,8 +343,9 @@ Implementation direction:
    - Done: minimal state is `words[B, R, P, W] uint32` for static raster count
      `R`, probe count `P`, and `W=ceil(Nt/32)`.
    - Done: one bit is written per solver step/probe when `Vm >= threshold`.
-   - Deferred: derive activation, latency, velocity, threshold-search, and
-     recruitment summaries from `VmRasterResult` in CPU post-processing.
+   - Started: activation/recruitment can decode from `VmRasterResult`.
+   - Remaining: derive latency, velocity, threshold-search, and public summary
+     helpers from `VmRasterResult` in CPU post-processing.
    - Per-step input: `Vm[B, Nx]`.
    - Output: `observations["vm_raster"]`, not `Vm[Nt, Nx, Naxon]`.
 
@@ -347,10 +367,9 @@ Implementation direction:
    - Done locally: it avoids the previous conservative center/probe padded-group behavior
      where `_kernel_batch_options(...)` forces `BatchRecording.full()` before
      the solver kernel and only slices back to the requested probe afterward.
-   - The initial P100 target is VmRaster observer-only warm time within `1.5x` center Vm
-     for the example 06/07/08 observer workloads, with double-cable subgroup
-     timing initially within `2x` retained-Vm subgroup timing and then
-     tightened after instrumentation confirms hidden compile cost is gone.
+   - Done for the first P100 stress validation: VmRaster observer-only warm time
+     is within center-Vm noise for `example08`, and double-cable subgroup timing
+     is about `1.1x` retained-Vm timing.
 
 5. Benchmark as a memory feature first.
    - Compare full Vm, single-probe Vm, and VmRaster observer on the
@@ -359,6 +378,9 @@ Implementation direction:
      solver/profile timings.
    - Stress large axon counts and diameter sweeps, because memory savings should
      matter most there.
+   - First P100 result: retained simulation arrays are estimated at `0.94 MiB`
+     for `B=50` and `1.88 MiB` for `B=100`; process RSS is now dominated by
+     runtime/JAX/cache overhead rather than the packed raster itself.
 
 6. Migrate the public learning surface in the same phase.
    - Done locally: observer runtime, solver, dispatcher, public facade,

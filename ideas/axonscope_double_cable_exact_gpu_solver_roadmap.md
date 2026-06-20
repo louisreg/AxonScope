@@ -26,16 +26,19 @@ materialization using workflow-level benchmarks based on basic examples 06/07/08
 
 Observer-related follow-up, 2026-06-20: the realistic observer runs exposed that
 solver-side observer output must be treated as a separate architecture topic,
-not as a small recording toggle. The active plan is now Phase 7.6.7 in
-`todo.md`: keep one simple public observer/analysis concept, but make the first
-hot-path implementation deliberately strict, packed, static-shaped, and
-batch-first. The target primitive is `VmRaster`: fixed membrane-voltage
-threshold probes packed into `uint32` words, with row-aware probe tables for
-padded groups, so velocity, threshold, and recruitment-style workflows can all
-share it through post-processing. Do not add
-implementation-specific public observer modes while the API is pre-release. If
-this strict JAX raster path remains too expensive after proper memory/timing
-validation, evaluate a dedicated raster kernel as a separate backend experiment.
+not as a small recording toggle. Phase 7.6.7 in `todo.md` replaced the rejected
+generic observer state with `VmRaster`: fixed membrane-voltage threshold probes
+packed into `uint32` words, with row-aware probe tables for padded groups. The
+first Kaggle P100 validation passed:
+`realistic_stress_observer_gpu` at
+`benchmark/results/kaggle/20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100`
+reduced `example08` `B=100` observer-only warm mean from `503.184 s` to
+`6.338 s`, close to center Vm `6.308 s`, and reduced process peak from
+`20,906 MiB` to `5,325 MiB`. The next observer work is CPU-side decoder breadth
+and iterative protocol reuse/caching; the current profile shows
+`runtime.prepare` and `dispatch.build_plan` dominate more than raw
+`kernel.wait`. Do not add implementation-specific public observer modes while
+the API is pre-release.
 
 ## Objective
 
