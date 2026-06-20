@@ -404,6 +404,76 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].observations[VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
+def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
+    monkeypatch,
+):
+    stimulus = Stimulus.pulse(
+        start=0.0 * axs.ms,
+        duration=0.05 * axs.ms,
+        amplitude=10e-6,
+    )
+    electrode = PointSourceElectrode(
+        x=50.0 * axs.um,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+    )
+    context = _context(electrode, stimulus)
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1),
+        _passive_double_cable_axon(amp_nA=0.2),
+    ]
+    for axon in axons:
+        axon.add_extracellular_context(context=context)
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    monkeypatch.setattr(
+        batch_kernels,
+        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+        1,
+    )
+
+    axs.enable_benchmark(
+        "/tmp/axonscope-double-factorized-vstim-test",
+        print_summary=False,
+        save=False,
+    )
+    try:
+        result = run_pool(
+            axons,
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+            observers=(activation,),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert isinstance(result[0], DispatchCohortResult)
+    assert result[0].Vm is None
+    assert report is not None
+    extracellular_events = [
+        event for event in report.events if event.name == "inputs.extracellular"
+    ]
+    assert len(extracellular_events) == 1
+    metadata = extracellular_events[0].metadata
+    assert metadata["input_format"] == "factorized_point_source"
+    assert metadata["dense_vstim_avoided"] is True
+    assert "vstim_mid" not in metadata
+    assert "vstim_previous" not in metadata
+
+    group_events = [event for event in report.events if event.name == "dispatch.group.total"]
+    assert len(group_events) == 1
+    group_metadata = group_events[0].metadata
+    components = group_metadata["memory_estimate_components_nbytes"]
+    assert group_metadata["memory_estimate_extracellular_format"] == "factorized_point_source"
+    assert components["vstim_mid"] < group_metadata["memory_estimate_vstim_dense_equivalent_nbytes"]
+    assert components["vstim_previous"] < 2 * 11 * 8
+
+
 def test_dispatch_plan_preserves_pool_indices():
     axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
     axon_b = _hh_axon(nx=11, amp_nA=0.2, y_um=56.0, z_um=78.0)

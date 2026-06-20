@@ -95,17 +95,23 @@ class FactorizedExtracellularPotentialBatch:
 
     ``current_mid_A`` stores the dynamic stimulus samples with shape ``(Nt,)``
     for a shared waveform or ``(B, Nt)`` for row-specific waveforms.
-    ``footprint_mV_per_A`` stores the static spatial footprint with shape
-    ``(B, Nx)``. The dense midpoint potential is their product:
+    ``current_initial_previous_A`` optionally stores the ``t=-dt/2`` sample
+    used by double-cable batches. ``footprint_mV_per_A`` stores the static
+    spatial footprint with shape ``(B, Nx)``. The dense midpoint potential is
+    their product:
     ``Vstim[B, Nt, Nx] = current_mid_A * footprint_mV_per_A``.
     """
 
     current_mid_A: Array
     footprint_mV_per_A: Array
     target_nx: int
+    current_initial_previous_A: Array | None = None
 
     def __post_init__(self) -> None:
         current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
+        previous_shape = tuple(
+            int(dim) for dim in getattr(self.current_initial_previous_A, "shape", ())
+        )
         footprint_shape = tuple(
             int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
         )
@@ -118,6 +124,14 @@ class FactorizedExtracellularPotentialBatch:
                 "current_mid_A batch size must match footprint_mV_per_A, "
                 f"got {current_shape} and {footprint_shape}."
             )
+        if self.current_initial_previous_A is not None:
+            if len(previous_shape) not in {0, 1}:
+                raise ValueError("current_initial_previous_A must be scalar or have shape (B,).")
+            if len(previous_shape) == 1 and previous_shape[0] != footprint_shape[0]:
+                raise ValueError(
+                    "current_initial_previous_A batch size must match footprint_mV_per_A, "
+                    f"got {previous_shape} and {footprint_shape}."
+                )
         if int(self.target_nx) != footprint_shape[1]:
             raise ValueError(
                 "target_nx must match footprint_mV_per_A width, "
@@ -161,9 +175,26 @@ def materialize_factorized_extracellular_potential_batch(
     return current * footprint[:, None, :]
 
 
+def materialize_factorized_extracellular_potential_initial_previous(
+    batch: FactorizedExtracellularPotentialBatch,
+) -> Array:
+    """Expand a factorized ``t=-dt/2`` extracellular sample to ``Vstim[B, Nx]``."""
+
+    if batch.current_initial_previous_A is None:
+        raise ValueError("current_initial_previous_A is required.")
+    current_previous_A = jnp.asarray(batch.current_initial_previous_A)
+    footprint = jnp.asarray(batch.footprint_mV_per_A)
+    if current_previous_A.ndim == 0:
+        current = current_previous_A
+    else:
+        current = current_previous_A[:, None]
+    return current * footprint
+
+
 __all__ = [
     "FactorizedExtracellularPotentialBatch",
     "SparseIntracellularCurrentDensityBatch",
+    "materialize_factorized_extracellular_potential_initial_previous",
     "materialize_factorized_extracellular_potential_batch",
     "materialize_sparse_intracellular_current_density_batch",
 ]

@@ -442,7 +442,12 @@ def _record_group_memory_estimate(
         vstim_mid_nbytes = (nt + batch_size * nx) * itemsize
     else:
         vstim_mid_nbytes = dense_nbytes
-    vstim_previous_nbytes = batch_size * nx * itemsize if include_vstim_previous else 0
+    if not include_vstim_previous:
+        vstim_previous_nbytes = 0
+    elif extracellular_format == "factorized_point_source":
+        vstim_previous_nbytes = itemsize
+    else:
+        vstim_previous_nbytes = batch_size * nx * itemsize
     iinj_dense_nbytes = dense_nbytes if intracellular_format == "dense" else 0
     output_width = int(kernel_options.recording.width_for(nx))
     vm_output_nbytes = batch_size * nt * output_width * itemsize
@@ -823,17 +828,10 @@ def _run_double_cable_batch_group(
             dtype=runtime.membrane.dtype,
             prefer_vm_raster=kernel_options.recording.mode == "none",
         )
-    _record_group_memory_estimate(
-        group=group,
-        runtime=runtime,
-        cohort=cohort,
-        kernel_options=kernel_options,
-        intracellular_format=(
-            "dense" if _has_intracellular_contexts(cohort) else "zero_no_intracellular_context"
-        ),
-        extracellular_format="dense",
-        include_vstim_previous=True,
+    intracellular_format = (
+        "dense" if _has_intracellular_contexts(cohort) else "zero_no_intracellular_context"
     )
+    extracellular_format = "dense"
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -862,24 +860,74 @@ def _run_double_cable_batch_group(
         nt=runtime.grid.Nt,
         nx=group.nx,
     ):
-        vstim_mid, vstim_previous = build_vstim_midpoint_and_initial_previous_batch(
-            cohort.representative,
-            cohort.contexts,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            x_positions_m=cohort.x_positions_m,
-            axon_y_um=cohort.axon_y_um,
-            axon_z_um=cohort.axon_z_um,
-            dtype_local=runtime.membrane.dtype,
-        )
-        record_benchmark_metadata(
-            **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input"),
-            **benchmark_array_metadata(
-                "vstim_previous",
-                vstim_previous,
-                role="kernel_input",
-            ),
-        )
+        if observer_plan is not None and kernel_options.recording.mode == "none":
+            vstim_mid = build_factorized_vstim_midpoint_batch(
+                cohort.representative,
+                cohort.contexts,
+                tsim_ms=tsim_ms,
+                dt_ms=dt_ms,
+                x_positions_m=cohort.x_positions_m,
+                axon_y_um=cohort.axon_y_um,
+                axon_z_um=cohort.axon_z_um,
+                dtype_local=runtime.membrane.dtype,
+                include_initial_previous=True,
+            )
+        else:
+            vstim_mid = None
+
+        if vstim_mid is None:
+            vstim_mid, vstim_previous = build_vstim_midpoint_and_initial_previous_batch(
+                cohort.representative,
+                cohort.contexts,
+                tsim_ms=tsim_ms,
+                dt_ms=dt_ms,
+                x_positions_m=cohort.x_positions_m,
+                axon_y_um=cohort.axon_y_um,
+                axon_z_um=cohort.axon_z_um,
+                dtype_local=runtime.membrane.dtype,
+            )
+            record_benchmark_metadata(
+                input_format="dense",
+                **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input"),
+                **benchmark_array_metadata(
+                    "vstim_previous",
+                    vstim_previous,
+                    role="kernel_input",
+                ),
+            )
+        else:
+            vstim_previous = None
+            extracellular_format = "factorized_point_source"
+            record_benchmark_metadata(
+                input_format="factorized_point_source",
+                target_nx=vstim_mid.target_nx,
+                shared_current=vstim_mid.shared_current,
+                dense_vstim_avoided=True,
+                **benchmark_array_metadata(
+                    "vstim_current_mid_A",
+                    vstim_mid.current_mid_A,
+                    role="kernel_input",
+                ),
+                **benchmark_array_metadata(
+                    "vstim_current_initial_previous_A",
+                    vstim_mid.current_initial_previous_A,
+                    role="kernel_input",
+                ),
+                **benchmark_array_metadata(
+                    "vstim_footprint_mV_per_A",
+                    vstim_mid.footprint_mV_per_A,
+                    role="kernel_input",
+                ),
+            )
+    _record_group_memory_estimate(
+        group=group,
+        runtime=runtime,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        intracellular_format=intracellular_format,
+        extracellular_format=extracellular_format,
+        include_vstim_previous=True,
+    )
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,

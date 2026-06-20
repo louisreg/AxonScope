@@ -746,6 +746,83 @@ def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_v
     )
 
 
+def test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa(
+    monkeypatch,
+):
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [base_contexts, base_contexts]
+    dense_mid = build_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    dense_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+    assert factorized.current_initial_previous_A is not None
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    monkeypatch.setattr(
+        batch_kernels,
+        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+        1,
+    )
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+
+    assert dense.Vm is None
+    assert compact.Vm is None
+    assert dense.observations is not None
+    assert compact.observations is not None
+    np.testing.assert_array_equal(
+        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
 def test_double_cable_batch_requires_extracellular_runtime():
     axon = _hh_extracellular_axon()
     runtime = prepare_solver_runtime(

@@ -237,11 +237,29 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   factorized `L(footprint)` transform into the same jitted VmRaster scan instead
   of building it as a separate eager JAX expression before enqueue. Local
   validation: `tests/unit/solvers/test_batch.py` passes.
-- [ ] Phase 7.6.5A Kaggle validation: rerun `realistic_stress_observer_gpu`
-  against `20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100` to
-  check whether the factorized single-cable `kernel.enqueue` regression is
-  reduced. If it remains flat/worse, gate factorized `Vext` by dense memory
-  pressure and keep the dense path for small cases.
+- [x] Phase 7.6.5A Kaggle validation of factorized enqueue mitigation:
+  `benchmark/results/kaggle/20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+  The mitigation removes most of the single-cable factorized enqueue regression:
+  example 08 warm total improves from `3.639 s -> 3.319 s` versus the pre-fix
+  factorized run, and from `3.636 s -> 3.319 s` versus dense/reuse (`~1.10x`).
+  Single-cable `Vstim` memory remains reduced by about `145-152x`. Comparison
+  artifacts:
+  `benchmark/results/realistic_examples/vext_factorization_mitigation_compare_20260620`.
+- [x] Phase 7.6.5A first double-cable factorized `Vext` pass: shared
+  point-source double-cable VmRaster observer-only groups can pass
+  `current_mid_A[Nt]`, `current_initial_previous_A`, and
+  `footprint_mV_per_A[B,Nx]` into the batch-native PCR/SoA observer kernel. The
+  kernel builds the double-cable extracellular RHS inside the time scan instead
+  of receiving dense `Vstim[B,Nt,Nx]` plus dense previous `Vstim[B,Nx]`.
+  Fallback remains dense for center/full recordings and unsupported context
+  shapes. Local validation: dense/factorized double-cable VmRaster outputs match
+  and dispatcher metadata records
+  `inputs.extracellular input_format=factorized_point_source`.
+- [ ] Phase 7.6.5A Kaggle validation of double-cable factorized `Vext`: rerun
+  `realistic_stress_observer_gpu` against
+  `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100` and check
+  example 08 double-cable group memory, `inputs.extracellular`,
+  `kernel.enqueue`, and `kernel.wait`.
 - [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
   Required visibility: planning, runtime construction/cache hit, footprint
   materialization/cache hit, stimulus sampling, dense/factorized `Vext`
@@ -367,8 +385,33 @@ Current benchmark diagnosis:
        compiled with the VmRaster scan instead of emitted as a separate eager JAX
        expression before the kernel call;
      - validation: `tests/unit/solvers/test_batch.py` passes;
+     - Kaggle P100 validation:
+       `benchmark/results/kaggle/20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`;
+     - example 08 warm total: `3.639 s -> 3.319 s` versus the pre-fix
+       factorized run, and `3.636 s -> 3.319 s` versus dense/reuse;
+     - warm-repeat `kernel.enqueue`: `1617.8 -> 1224.4 ms` at `B=50` and
+       `2285.7 -> 1868.4 ms` at `B=100`, now slightly below dense/reuse totals;
+     - decision: keep factorized single-cable point-source `Vext` enabled for
+       VmRaster observer-only groups. The next `Vext` pass should focus on
+       stimulus/amplitude-only reuse and double-cable RHS/input factorization,
+       not further micro-tuning this single-cable path.
+   - 2026-06-20 local double-cable factorized `Vext` pass:
+     - `FactorizedExtracellularPotentialBatch` now optionally carries
+       `current_initial_previous_A`, the `t=-dt/2` sample required by the
+       double-cable RHS;
+     - double-cable VmRaster observer-only groups use factorized point-source
+       inputs when all rows share one analytical point-source context;
+     - `_run_double_cable_batch_observer_pcr_soa_scan` computes
+       `((Cx/dt + Gx) * current_mid - (Cx/dt) * current_previous) * footprint`
+       inside the scan instead of receiving dense `Vstim[B,Nt,Nx]`;
+     - center/full recordings and unsupported context shapes still use the dense
+       path;
+     - validation:
+       `tests/unit/solvers/test_batch.py::test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa`
+       and
+       `tests/unit/test_dispatcher.py::test_run_pool_double_cable_observer_uses_factorized_point_source_vstim`;
      - next validation: Kaggle P100 `realistic_stress_observer_gpu` versus
-       `20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+       `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 

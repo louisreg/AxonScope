@@ -52,16 +52,22 @@ probe-plan reuse, footprint/Vext reuse, and launch/enqueue overhead. After that,
 use this scheduling note to test coalescing and async in a controlled benchmark.
 
 Follow-up validation from
-`benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`
-confirms that factorized point-source `Vext` is mainly a memory-scalability win
-for now. On example 08 single-cable observer-only groups, the `Vstim` estimate
-drops from `976000 -> 6740 bytes` at `B=50` and `1952000 -> 12840 bytes` at
-`B=100`, but warm time stays flat versus the dense/reuse baseline because
-factorized single-cable `kernel.enqueue` increases. Do not treat `Vext`
-factorization as a completed runtime optimization until the footprint forcing
-step is cached/jitted cleanly or selected only under memory pressure. A first
-local mitigation now computes `L(footprint)` inside the jitted VmRaster scan;
-it still needs Kaggle P100 validation before changing the scheduling priority.
+`benchmark/results/kaggle/20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`
+confirms that factorized point-source `Vext` is now both a memory win and a
+small runtime win for example 08 observer-only GPU stress. On single-cable
+observer-only groups, the `Vstim` estimate drops from `976000 -> 6740 bytes` at
+`B=50` and `1952000 -> 12840 bytes` at `B=100`. Moving `L(footprint)` into the
+jitted VmRaster scan reduced the factorized single-cable `kernel.enqueue`
+regression; example 08 warm total improved from `3.636 s` dense/reuse to
+`3.319 s` factorized post-fix. Keep dispatch priority on input/runtime reuse and
+launch/enqueue reduction before async scheduling.
+
+Local follow-up now applies the same representation to shared point-source
+double-cable VmRaster observer-only groups: the batch-native PCR/SoA observer
+kernel receives `current_mid_A`, `current_initial_previous_A`, and
+`footprint_mV_per_A`, then builds the extracellular RHS inside the time scan.
+This needs the same P100 validation before changing scheduling assumptions for
+mixed single/double groups.
 
 The useful parts of this note remain:
 

@@ -2969,10 +2969,18 @@ footprint[B, Nx] * waveform[Nt]
 Build the RHS inside the time scan from factorized inputs.
 
 Status, 2026-06-20: implemented and validated for shared point-source
-single-cable VmRaster groups. Kaggle P100 confirms a large memory reduction, but
-the current factorized path adds enqueue overhead, likely around the spatial
-forcing-footprint preparation. Next action is to precompute/cache that forcing
-footprint or gate factorization by estimated dense `Vstim` memory pressure.
+single-cable VmRaster groups. Kaggle P100 confirms a large memory reduction and,
+after moving `L(footprint)` into the jitted VmRaster scan, a small workflow
+speedup: example 08 observer-only warm total improved from `3.636 s` dense/reuse
+to `3.319 s` factorized post-fix. Keep this under the workflow/input phase; the
+next `Vext` target is reuse across stimulus/amplitude sweeps.
+
+Local double-cable status: shared point-source VmRaster observer-only groups now
+carry `current_mid_A`, `current_initial_previous_A`, and `footprint_mV_per_A`
+into the batch-native PCR/SoA observer kernel, which builds the double-cable RHS
+inside the time scan. Dense fallback remains for center/full recordings and
+unsupported context shapes. Kaggle P100 validation is still required before
+calling this a runtime win.
 
 ## 4. Static shapes
 

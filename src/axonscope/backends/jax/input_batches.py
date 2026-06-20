@@ -89,6 +89,7 @@ def build_factorized_vstim_midpoint_batch(
     axon_y_um: Array | None = None,
     axon_z_um: Array | None = None,
     dtype_local: jnp.dtype | None = None,
+    include_initial_previous: bool = False,
 ) -> FactorizedExtracellularPotentialBatch | None:
     """Build a factorized midpoint ``Vstim`` batch when the contexts allow it.
 
@@ -110,6 +111,9 @@ def build_factorized_vstim_midpoint_batch(
     t_mid_ms = (
         np.arange(nt, dtype=np_dtype) + np.asarray(0.5, dtype=np_dtype)
     ) * np.asarray(dt_ms, dtype=np_dtype)
+    t_initial_previous_ms = (
+        np.asarray([-0.5 * dt_ms], dtype=np_dtype) if include_initial_previous else None
+    )
     x_rows_np = _resolve_x_positions_m_numpy(
         axon,
         x_positions_m,
@@ -124,6 +128,7 @@ def build_factorized_vstim_midpoint_batch(
     return _try_build_shared_point_source_factorized_vstim_batch(
         rows,
         t_mid_ms,
+        t_initial_previous_ms=t_initial_previous_ms,
         x_rows=x_rows_np,
         axon_y_um=y_rows_np,
         axon_z_um=z_rows_np,
@@ -848,6 +853,7 @@ def _try_build_shared_point_source_factorized_vstim_batch(
     rows: Sequence[tuple[ExtracellularContext, ...]],
     t_ms: np.ndarray,
     *,
+    t_initial_previous_ms: np.ndarray | None = None,
     x_rows: np.ndarray,
     axon_y_um: np.ndarray,
     axon_z_um: np.ndarray,
@@ -871,6 +877,12 @@ def _try_build_shared_point_source_factorized_vstim_batch(
         return None
 
     current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+    current_initial_previous_A = None
+    if t_initial_previous_ms is not None:
+        current_initial_previous_A = np.asarray(
+            stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+            dtype=np_dtype,
+        ).reshape(-1)[0]
     cache_key = _point_source_footprint_cache_key(
         first_context,
         electrode,
@@ -899,12 +911,20 @@ def _try_build_shared_point_source_factorized_vstim_batch(
     dense_equivalent_nbytes = (
         int(len(rows)) * int(t_ms.shape[0]) * int(x_rows.shape[1]) * int(np_dtype.itemsize)
     )
-    factorized_nbytes = int(current_A.nbytes) + int(footprint_mV_per_A.nbytes)
+    previous_nbytes = (
+        0
+        if current_initial_previous_A is None
+        else int(np.asarray(current_initial_previous_A).nbytes)
+    )
+    factorized_nbytes = (
+        int(current_A.nbytes) + int(footprint_mV_per_A.nbytes) + previous_nbytes
+    )
     record_benchmark_metadata(
         vstim_footprint_cache=footprint_cache_status,
         vstim_footprint_cache_nbytes=int(footprint_V_per_A.nbytes),
         vstim_input_format="factorized_point_source",
         vstim_factorized_current_nbytes=int(current_A.nbytes),
+        vstim_factorized_initial_previous_nbytes=previous_nbytes,
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
@@ -918,6 +938,11 @@ def _try_build_shared_point_source_factorized_vstim_batch(
         current_mid_A=jnp.asarray(current_A, dtype=dtype_local),
         footprint_mV_per_A=jnp.asarray(footprint_mV_per_A, dtype=dtype_local),
         target_nx=int(x_rows.shape[1]),
+        current_initial_previous_A=(
+            None
+            if current_initial_previous_A is None
+            else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
+        ),
     )
 
 
