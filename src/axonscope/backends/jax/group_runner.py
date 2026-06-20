@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections import OrderedDict
 from dataclasses import replace
 from typing import Any, cast
 
@@ -43,6 +45,30 @@ from axonscope.solvers.runtime import (
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
+
+
+_BATCH_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
+_PREPARED_COHORT_CACHE: OrderedDict[tuple[Any, ...], PreparedCohort] = OrderedDict()
+_VM_RASTER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_GROUP_RUNNER_CACHE_MAX_SIZE = 64
+
+
+def _cache_get(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...]) -> Any | None:
+    value = cache.get(key)
+    if value is not None:
+        cache.move_to_end(key)
+    return value
+
+
+def _cache_store(
+    cache: OrderedDict[tuple[Any, ...], Any],
+    key: tuple[Any, ...],
+    value: Any,
+) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > _GROUP_RUNNER_CACHE_MAX_SIZE:
+        cache.popitem(last=False)
 
 
 def run_jax_batch_group(
@@ -115,13 +141,75 @@ def _observer_plan_for_cohort(
         return None
     if not prefer_vm_raster:
         return None
+    cache_key = _vm_raster_plan_cache_key(
+        observers,
+        cohort=cohort,
+        dtype=dtype,
+    )
+    cached = _cache_get(_VM_RASTER_PLAN_CACHE, cache_key)
+    if cached is not None:
+        record_benchmark_metadata(vm_raster_plan_cache="hit")
+        return cached
+
     row_positions_um = np.asarray(cohort.x_positions_m, dtype=float) * 1e6
-    return build_vm_raster_plan(
+    plan = build_vm_raster_plan(
         observers,
         positions_um=row_positions_um,
         original_indices=_cohort_original_indices(cohort),
         dtype=dtype,
     )
+    _cache_store(_VM_RASTER_PLAN_CACHE, cache_key, plan)
+    record_benchmark_metadata(
+        vm_raster_plan_cache="miss",
+        vm_raster_count=0 if plan is None else plan.raster_count,
+        vm_raster_probe_count=0 if plan is None else plan.probe_count,
+    )
+    return plan
+
+
+def _vm_raster_plan_cache_key(
+    observers: tuple[Any, ...],
+    *,
+    cohort: PreparedCohort,
+    dtype: Any,
+) -> tuple[Any, ...]:
+    return (
+        "vm_raster_plan_v1",
+        str(np.dtype(dtype)),
+        _prepared_cohort_signature(cohort),
+        tuple(_observer_definition_signature(observer) for observer in observers),
+    )
+
+
+def _observer_definition_signature(observer: Any) -> tuple[Any, ...]:
+    signal = getattr(observer, "signal", None)
+    signal_id = getattr(signal, "id", repr(signal))
+    target = getattr(observer, "target", None)
+    return (
+        type(observer).__module__,
+        type(observer).__qualname__,
+        str(getattr(observer, "name", "")),
+        str(signal_id),
+        repr(target),
+        _maybe_millivolt(getattr(observer, "threshold", None)),
+        _maybe_millisecond(getattr(observer, "blanking", None)),
+    )
+
+
+def _maybe_millivolt(value: Any) -> float | None:
+    if value is None:
+        return None
+    from axonscope.utils import units
+
+    return float(units.to_mV(value))
+
+
+def _maybe_millisecond(value: Any) -> float | None:
+    if value is None:
+        return None
+    from axonscope.utils import units
+
+    return float(units.to_ms(value))
 
 
 def _cohort_original_indices(cohort: PreparedCohort) -> np.ndarray:
@@ -141,6 +229,140 @@ def _representative_item(group: DispatchGroup) -> DispatchItem:
         if int(item.solver_axon.n_compartments) == int(group.nx):
             return item
     return group.items[0]
+
+
+def _group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    return (
+        "dispatch_group_v1",
+        group.mode,
+        int(group.nx),
+        bool(group.geometry_shared),
+        bool(group.has_padding),
+        tuple(
+            (
+                int(item.index),
+                id(item.simulation),
+                id(item.solver_axon),
+                item.signature,
+                item.membrane_signature,
+                item.cable_signature,
+            )
+            for item in group.items
+        ),
+    )
+
+
+def _group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    return (
+        _group_static_signature(group),
+        tuple(
+            (
+                float(getattr(item.simulation, "x_offset_um", 0.0)),
+                float(getattr(item.simulation, "y_um", 0.0)),
+                float(getattr(item.simulation, "z_um", 0.0)),
+                bool(getattr(item.simulation, "use_extracellular", False)),
+                tuple(
+                    id(context)
+                    for context in getattr(item.simulation, "extracellular_contexts", ())
+                ),
+            )
+            for item in group.items
+        ),
+    )
+
+
+def _prepared_cohort_signature(cohort: PreparedCohort) -> tuple[Any, ...]:
+    return (
+        "prepared_cohort_v1",
+        int(cohort.group_id),
+        str(cohort.mode),
+        int(cohort.size),
+        int(cohort.nx),
+        bool(cohort.geometry_shared),
+        bool(cohort.has_padding),
+        tuple(id(axon) for axon in cohort.axons),
+        tuple(id(solver_axon) for solver_axon in cohort.solver_axons),
+        tuple(tuple(id(context) for context in row) for row in cohort.contexts),
+        _array_shape_dtype_digest(cohort.x_positions_m),
+        _array_shape_dtype_digest(cohort.axon_y_um),
+        _array_shape_dtype_digest(cohort.axon_z_um),
+    )
+
+
+def _array_shape_dtype_digest(values: Any) -> tuple[Any, ...]:
+    arr = np.ascontiguousarray(np.asarray(values))
+    digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
+    return (
+        tuple(int(dim) for dim in arr.shape),
+        arr.dtype.str,
+        digest,
+    )
+
+
+def _prepare_batch_runtime(
+    group: DispatchGroup,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    solver_options: SolverOptions | None,
+    mode: str,
+    include_extracellular: bool,
+    include_area: bool,
+) -> SolverRuntime:
+    cache_key = (
+        "batch_runtime_v1",
+        mode,
+        _group_static_signature(group),
+        float(tsim_ms),
+        float(dt_ms),
+        repr(solver_options),
+        bool(include_extracellular),
+        bool(include_area),
+    )
+    cached = _cache_get(_BATCH_RUNTIME_CACHE, cache_key)
+    if cached is not None:
+        record_benchmark_metadata(batch_runtime_cache="hit")
+        return cached
+
+    representative_item = _representative_item(group)
+    runtime = prepare_solver_runtime(
+        cast(Any, representative_item.simulation),
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        solver_axon=representative_item.solver_axon,
+        include_extracellular=include_extracellular,
+        include_area=include_area,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_stimulation=False,
+        solver_options=solver_options,
+    )
+    if not group.geometry_shared:
+        if mode == "double":
+            runtime = _with_batched_double_cable_runtime(
+                runtime,
+                group,
+                solver_options=solver_options,
+            )
+        else:
+            runtime = _with_batched_single_cable_runtime(runtime, group)
+
+    _cache_store(_BATCH_RUNTIME_CACHE, cache_key, runtime)
+    record_benchmark_metadata(batch_runtime_cache="miss")
+    return runtime
+
+
+def _prepared_cohort_for_group(group: DispatchGroup) -> PreparedCohort:
+    cache_key = ("prepared_cohort_v1", _group_preparation_signature(group))
+    cached = _cache_get(_PREPARED_COHORT_CACHE, cache_key)
+    if cached is not None:
+        record_benchmark_metadata(prepared_cohort_cache="hit")
+        return cached
+
+    cohort = PreparedCohort.from_dispatch_group(group)
+    _cache_store(_PREPARED_COHORT_CACHE, cache_key, cohort)
+    record_benchmark_metadata(prepared_cohort_cache="miss")
+    return cohort
 
 
 def _kernel_batch_options(group: DispatchGroup, options: BatchOptions) -> BatchOptions:
@@ -285,8 +507,6 @@ def _run_single_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
-    representative_item = _representative_item(group)
-    representative = representative_item.simulation
     with benchmark_span(
         "runtime.prepare",
         group_id=group.group_id,
@@ -296,20 +516,15 @@ def _run_single_cable_batch_group(
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
     ):
-        runtime = prepare_solver_runtime(
-            cast(Any, representative),
+        runtime = _prepare_batch_runtime(
+            group,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
-            solver_axon=representative_item.solver_axon,
+            solver_options=solver_options,
+            mode="single",
             include_extracellular=False,
             include_area=False,
-            precompute_intracellular=False,
-            precompute_extracellular=False,
-            compile_stimulation=False,
-            solver_options=solver_options,
         )
-        if not group.geometry_shared:
-            runtime = _with_batched_single_cable_runtime(runtime, group)
         record_benchmark_metadata(
             nt=runtime.grid.Nt,
             nx=runtime.membrane.Nx,
@@ -321,7 +536,7 @@ def _run_single_cable_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = PreparedCohort.from_dispatch_group(group)
+        cohort = _prepared_cohort_for_group(group)
         record_benchmark_metadata(
             **benchmark_array_metadata(
                 "x_positions_m",
@@ -331,12 +546,18 @@ def _run_single_cable_batch_group(
             context_count=cohort.context_count,
         )
     kernel_options = _kernel_batch_options(group, batch_options)
-    observer_plan = _observer_plan_for_cohort(
-        observers,
-        cohort=cohort,
-        dtype=runtime.membrane.dtype,
-        prefer_vm_raster=kernel_options.recording.mode == "none",
-    )
+    with benchmark_span(
+        "observer.plan",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        observer_plan = _observer_plan_for_cohort(
+            observers,
+            cohort=cohort,
+            dtype=runtime.membrane.dtype,
+            prefer_vm_raster=kernel_options.recording.mode == "none",
+        )
     use_sparse_intracellular = _should_use_sparse_intracellular_batch(
         group=group,
         cohort=cohort,
@@ -508,24 +729,15 @@ def _run_double_cable_batch_group(
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
     ):
-        runtime = prepare_solver_runtime(
-            cast(Any, representative),
+        runtime = _prepare_batch_runtime(
+            group,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
-            solver_axon=representative_item.solver_axon,
+            solver_options=solver_options,
+            mode="double",
             include_extracellular=True,
             include_area=True,
-            precompute_intracellular=False,
-            precompute_extracellular=False,
-            compile_stimulation=False,
-            solver_options=solver_options,
         )
-        if not group.geometry_shared:
-            runtime = _with_batched_double_cable_runtime(
-                runtime,
-                group,
-                solver_options=solver_options,
-            )
         record_benchmark_metadata(
             nt=runtime.grid.Nt,
             nx=runtime.membrane.Nx,
@@ -537,7 +749,7 @@ def _run_double_cable_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = PreparedCohort.from_dispatch_group(group)
+        cohort = _prepared_cohort_for_group(group)
         record_benchmark_metadata(
             **benchmark_array_metadata(
                 "x_positions_m",
@@ -547,12 +759,18 @@ def _run_double_cable_batch_group(
             context_count=cohort.context_count,
         )
     kernel_options = _kernel_batch_options(group, batch_options)
-    observer_plan = _observer_plan_for_cohort(
-        observers,
-        cohort=cohort,
-        dtype=runtime.membrane.dtype,
-        prefer_vm_raster=kernel_options.recording.mode == "none",
-    )
+    with benchmark_span(
+        "observer.plan",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        observer_plan = _observer_plan_for_cohort(
+            observers,
+            cohort=cohort,
+            dtype=runtime.membrane.dtype,
+            prefer_vm_raster=kernel_options.recording.mode == "none",
+        )
     _record_group_memory_estimate(
         group=group,
         runtime=runtime,

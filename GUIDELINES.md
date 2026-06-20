@@ -32,9 +32,11 @@ Snapshot updated on 2026-06-20.
 
 This document defines the target architecture. The codebase has implemented the
 roadmap through Phase 7.5 and the first Phase 7.6 hotpath/memory passes for the
-current public layer. Phase 7.6.3 is the current exact double-cable GPU solver
-optimization pass before the Phase 7.7 API cleanup and Phase 8 study APIs.
-Phases 8-9 are still roadmap work.
+current public layer. Phase 7.6.3, the exact double-cable GPU solver
+optimization campaign, is closed. The current performance focus is now the
+execution envelope around the solver: stable runtime reuse, dispatch/probe-plan
+reuse, stimulus/Vext materialization, launch/enqueue overhead, and memory-aware
+recording/observer output. Phases 8-9 are still roadmap work.
 
 | Phase | Status | Implemented surface | Didactic example |
 | --- | --- | --- | --- |
@@ -51,9 +53,9 @@ Phases 8-9 are still roadmap work.
 | Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
 | Phase 7.6.3 — Exact double-cable GPU solver optimization | Closed | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Pallas, Triton, JAX-Triton, CUDA FFI, split, associative, and pseudo-double candidates are archived/standby evidence, not public solver routes. | Benchmark report in `benchmark/reports/double_cable_solver_optimization_2026_06.md`; no public example required. |
 | Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
-| Phase 7.6.5 — Vext and realistic workflow performance | In progress | Current focus is workflow-level profiling and reducing dense `Vext` materialization, transfer, preparation, and recording costs for examples 06/07/08. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
-| Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue after profiling confirms dispatch group count or waits are material bottlenecks. | Internal benchmark phase first; no public example yet. |
-| Phase 7.6.7 — VmRaster observer redesign | In progress | Keep one simple public observer/analysis concept, but make solver-side observer-only execution deliberately strict: threshold selected membrane-voltage probes at every `dt`, pack the boolean raster, and leave activation/latency/velocity/recruitment analyses to post-processing. No legacy generic observer fallback. | `examples/advanced/example_18_solver_side_observers.py` |
+| Phase 7.6.5 — Execution-envelope and Vext performance | In progress | Current focus is workflow-level profiling and reducing `runtime.prepare`, dispatch/probe-plan rebuilds, dense/factorized `Vext` materialization, transfer, launch/enqueue, and recording costs for examples 06/07/08. Latest P100 evidence says GPU `kernel.wait` is small compared with surrounding work. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
+| Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue. Coalescing/bucketing comes before async scheduling; async is optional and must respect hardware memory budgets. | Internal benchmark phase first; no public example yet. |
+| Phase 7.6.7 — VmRaster observer redesign | In progress | Keep one simple public observer/analysis concept, but make solver-side observer-only execution deliberately strict: threshold selected membrane-voltage probes at every `dt`, pack the boolean raster, and leave activation/latency/velocity/recruitment analyses to post-processing. P100 CPU/GPU validation passed; no legacy generic observer fallback. | `examples/advanced/example_18_solver_side_observers.py` |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
 | Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
 
@@ -80,6 +82,12 @@ Known implementation gaps against the final target:
   The current performance target is one strict `VmRaster` implementation that
   supports velocity, threshold, and recruitment-style workflows through fixed
   membrane-voltage threshold probes and CPU post-processing.
+- Latest realistic CPU/GPU recording-mode benchmarks show the solver kernel is
+  not the dominant GPU cost for the current example 06/07/08 stress matrix. The
+  next architecture work should preserve the lifecycle boundary below:
+  plan/prepare/compile static structures once, then execute repeated
+  stimulus-only updates without rebuilding runtimes, dispatch groups,
+  VmRaster probe plans, or spatial extracellular footprints.
 
 ---
 
@@ -1656,6 +1664,22 @@ result = compiled.run(
 ```
 
 Execution reuses all compatible static structures.
+
+For iterative protocols such as threshold search and recruitment sweeps,
+execution should be able to update only stimulus-dependent data when the static
+simulation shape is unchanged:
+
+```text
+same axon cohort / geometry / cable formulation
+same recording or VmRaster observer plan
+same dispatch group and padding signatures
+same compiled backend executable
+changed stimulus amplitude or waveform values only
+```
+
+In that case, execution should not rebuild solver runtimes, dispatch groups,
+probe tables, or spatial extracellular footprints. If reuse is impossible, the
+reason should be explainable from the planning/preparation signatures.
 
 ---
 
@@ -3298,7 +3322,8 @@ activation and peak-voltage definitions.
 
 ## Phase 7 — Performance
 
-Implementation status: done for the current evidence layer.
+Implementation status: done for the current evidence layer, with Phase 7.6.5
+continuing as the active execution-envelope optimization pass.
 
 Phase 7 adds public simulation memory estimates, typed runtime/device/precision
 planning values, hotpath manifest memory metadata, and a footprint/stimulus-only
@@ -3306,6 +3331,19 @@ reuse workload. It does not pretend that dense extracellular time-space arrays
 are gone: estimates explicitly surface current dense `Vstim[B,Nt,Nx]` memory
 risk and compare it with factorized footprint/stimulus sizes. Phase 7.5 owns
 the solver-side kernel changes that remove unnecessary trace/input retention.
+
+The latest realistic Kaggle P100 CPU/GPU recording-mode comparison changes the
+optimization priority. For the current example 06/07/08 stress matrix, GPU
+`kernel.wait` is small compared with `runtime.prepare`, `dispatch.build_plan`,
+`kernel.enqueue`, result splitting, and input/stimulus materialization. The next
+performance work should therefore target:
+
+- stable runtime reuse across repeated amplitude/stimulus updates;
+- dispatch group, padding, and VmRaster probe-plan reuse;
+- factorized/stimulus-only `Vext` updates without full dense rematerialization;
+- memory-aware output policy, especially full Vm versus VmRaster;
+- launch/enqueue and result packaging overhead;
+- only then, optional dispatch coalescing and async scheduling.
 
 - verify whether dense `Vext`/`Vstim` is currently materialized;
 - keep hotpath traces as the CPU/GPU evidence loop;
@@ -3338,8 +3376,12 @@ velocity, or recruitment summaries.
   tests;
 - done: add local hotpath/memory evidence showing no retained Vm output for an
   observer-only run;
-- next validation: compare VmRaster observer-only against full/center Vm
-  on realistic GPU workloads before claiming the memory feature is retained.
+- done: compare VmRaster observer-only against full/center Vm on realistic
+  P100 GPU and CPU workloads; VmRaster is retained and the old generic observer
+  path remains deleted;
+- remaining: finish decoder breadth for latency, velocity, threshold-search
+  updates, and public summary helpers, then stress larger retained-output cases
+  where memory savings should be visible in real RSS.
 
 ## Phase 8 — Studies
 

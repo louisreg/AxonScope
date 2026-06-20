@@ -1,6 +1,6 @@
 {
-  "benchmark": "realistic_stress_observer_gpu",
-  "branch": "kaggle-bench/35693e5",
+  "benchmark": "realistic_stress_single_vm_cpu",
+  "branch": "kaggle-bench/85a2e69",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
-  "require_gpu": true
+  "require_gpu": false
 }

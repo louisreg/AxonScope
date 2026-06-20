@@ -51,6 +51,18 @@ CPU_OBSERVER_LOW_MEMORY_ENV = {
     "TF_NUM_INTEROP_THREADS": "1",
     "AXONSCOPE_CPU_OBSERVER_LOW_MEMORY_XLA": "1",
 }
+CACHE_STATUS_METADATA_KEYS = (
+    "dispatch_plan_cache",
+    "batch_runtime_cache",
+    "prepared_cohort_cache",
+    "vm_raster_plan_cache",
+    "vstim_footprint_cache",
+)
+CACHE_STATUS_COLUMNS = tuple(
+    f"{key}_{suffix}"
+    for key in CACHE_STATUS_METADATA_KEYS
+    for suffix in ("hits", "misses")
+)
 
 
 @dataclass(frozen=True)
@@ -1248,14 +1260,10 @@ def profile_summary_rows(
                     "memory_estimate_device_fraction_max",
                     "",
                 ),
-                "vstim_footprint_cache_hits": extra.get(
-                    "vstim_footprint_cache_hits",
-                    "",
-                ),
-                "vstim_footprint_cache_misses": extra.get(
-                    "vstim_footprint_cache_misses",
-                    "",
-                ),
+                **{
+                    column: extra.get(column, "")
+                    for column in CACHE_STATUS_COLUMNS
+                },
             }
         )
     return rows
@@ -1273,16 +1281,20 @@ def profile_event_metadata_by_name(report: Any) -> dict[str, dict[str, Any]]:
         _max_metadata(row, "memory_estimate_total_mib", metadata)
         _max_metadata(row, "device_memory_capacity_bytes", metadata)
         _max_metadata(row, "memory_estimate_device_fraction", metadata)
-        cache_status = metadata.get("vstim_footprint_cache")
-        if cache_status == "hit":
-            row["vstim_footprint_cache_hits"] = (
-                int(row.get("vstim_footprint_cache_hits", 0)) + 1
-            )
-        elif cache_status == "miss":
-            row["vstim_footprint_cache_misses"] = (
-                int(row.get("vstim_footprint_cache_misses", 0)) + 1
-            )
+        _count_cache_status_metadata(row, metadata)
     return values
+
+
+def _count_cache_status_metadata(target: dict[str, Any], metadata: dict[str, Any]) -> None:
+    for key in CACHE_STATUS_METADATA_KEYS:
+        cache_status = metadata.get(key)
+        if cache_status == "hit":
+            column = f"{key}_hits"
+        elif cache_status == "miss":
+            column = f"{key}_misses"
+        else:
+            continue
+        target[column] = int(target.get(column, 0)) + 1
 
 
 def _max_metadata(target: dict[str, Any], key: str, metadata: dict[str, Any]) -> None:
@@ -1451,6 +1463,14 @@ def write_profile_comparison(*, out_dir: Path, prefix: str) -> Path | None:
                 "gpu_event_count": gpu["event_count"],
                 "cpu_profile_dir": cpu["profile_dir"],
                 "gpu_profile_dir": gpu["profile_dir"],
+                **{
+                    f"cpu_{column}": cpu.get(column, "")
+                    for column in CACHE_STATUS_COLUMNS
+                },
+                **{
+                    f"gpu_{column}": gpu.get(column, "")
+                    for column in CACHE_STATUS_COLUMNS
+                },
             }
         )
 

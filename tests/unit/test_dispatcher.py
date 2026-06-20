@@ -260,6 +260,23 @@ def test_dispatch_plan_groups_homogeneous_double_cable_rows_without_full_rescan(
     assert plan.groups[0].size == len(axons)
 
 
+def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
+        for index in range(3)
+    ]
+    first = dispatch_plan_module.build_dispatch_plan(axons)
+
+    def fail_solver_rebuild(_simulation):
+        raise AssertionError("stable pool should reuse the cached dispatch plan")
+
+    monkeypatch.setattr(dispatch_plan_module, "build_solver_axon", fail_solver_rebuild)
+
+    second = dispatch_plan_module.build_dispatch_plan(axons)
+
+    assert second is first
+
+
 def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():
     axons = [
         _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)

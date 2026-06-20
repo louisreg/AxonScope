@@ -19,8 +19,9 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 
 ## Current Snapshot
 
-Updated on 2026-06-20 after replacing the old solver-side observer runtime with
-the first packed VmRaster implementation and validating it on Kaggle P100.
+Updated on 2026-06-20 after the full/center/VmRaster CPU+GPU recording-mode
+comparison showed that the current GPU bottleneck is the execution envelope
+around the solver, not the solver kernel itself.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -29,9 +30,9 @@ the first packed VmRaster implementation and validating it on Kaggle P100.
 | Phase 7.6.2 | Done | Memory-transfer and long-run cleanup landed for current hotpaths. |
 | Phase 7.6.3 | Closed | Exact double-cable GPU solver optimization pass is complete. No new public solver route; see `benchmark/reports/double_cable_solver_optimization_2026_06.md`. |
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
-| Phase 7.6.5 | In progress | `Vext` materialization and realistic workflow performance. |
-| Phase 7.6.6 | Planned | GPU dispatch scheduling: bucket/coalesce compatible groups, then test optional async group enqueue. |
-| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster. P100 validation passed for `realistic_stress_observer_gpu`; remaining work is decoder breadth, reuse/caching, and larger memory-focused stress. |
+| Phase 7.6.5 | In progress | Execution-envelope optimization: runtime/input reuse, dispatch/probe-plan reuse, Vext/stimulus materialization, launch/enqueue overhead, and result packaging. |
+| Phase 7.6.6 | Planned | GPU dispatch scheduling after reuse work: memory-aware bucket/coalesce first, optional async enqueue second. |
+| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster. CPU/GPU P100 validation passed; remaining work is decoder breadth and larger memory-focused stress. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
 | Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
@@ -51,6 +52,41 @@ Current solver surface:
 ## Immediate Queue
 
 Work should start here unless the user asks otherwise.
+
+Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
+
+1. Stabilize the benchmark target.
+   - Keep the six-way full/center/VmRaster CPU+GPU comparison as the regression
+     harness.
+   - Preserve plots under
+     `benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620`
+     as the current reference.
+   - Track `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`,
+     `kernel.wait`, `results.split_batch`, RSS, and device memory estimates.
+
+2. Reduce repeated stable preparation.
+   - Identify what `runtime.prepare` rebuilds on every amplitude in
+     `example08_recruitment`.
+   - Split stable cohort/runtime/probe/footprint preparation from dynamic
+     stimulus/amplitude values.
+   - Add cache-hit/miss metadata and reuse-failure explanations.
+
+3. Reuse dispatch and observer plans.
+   - Cache dispatch groups, padding signatures, recording width, and VmRaster
+     row-aware probe tables when static shapes match.
+   - Confirm result order and padded-row masks remain identical.
+
+4. Reuse Vext/stimulus inputs.
+   - Keep spatial footprints stable and update only temporal stimulus/amplitude
+     buffers for sweeps.
+   - Avoid dense zero `Iinj` and avoid full dense `Vext` rematerialization when
+     a factorized representation is available.
+
+5. Re-benchmark before scheduler work.
+   - Re-run the six-way comparison and regenerate all plots.
+   - If `runtime.prepare + dispatch.build_plan` falls substantially and group
+     count/enqueue remains a bottleneck, start Phase 7.6.6 coalescing.
+   - Only test async groups after bucket/coalesce and memory-budget checks.
 
 - [x] Close Phase 7.6.3 solver optimization campaign.
 - [x] Clean active solver package and move non-retained custom-kernel tests/code
@@ -78,12 +114,10 @@ Work should start here unless the user asks otherwise.
   sweeps through solver-side `Activation` observers when `Recording.none()` is
   used, so recruitment can return compact bool arrays instead of moving full
   `Vm` traces back to host.
-- [ ] Validate compact recruitment outputs without relying on CPU observer-only
-  stress. Current evidence: CPU observer-only `example08_recruitment` hits LLVM
-  compile-memory errors on Kaggle GPU-host and CPU-only kernels at the 50-fiber
-  stress case, despite a small estimated functional array footprint. Treat CPU
-  observer-only as standby until the CPU XLA compilation shape is reduced or
-  isolated by process.
+- [x] Validate VmRaster observer-only on CPU stress. The old generic observer
+  path hit CPU LLVM compile-memory errors, but the VmRaster route completed on
+  Kaggle CPU-only at
+  `benchmark/results/kaggle/20260620_155134_realistic_stress_observer_cpu_cpu`.
 - [x] Run Kaggle `realistic_stress_single_vm` to compare CPU vs GPU with
   example 08 retaining one center Vm column instead of full spatial `Vm`.
   Completed at
@@ -155,20 +189,68 @@ Work should start here unless the user asks otherwise.
 - [ ] Phase 7.6.7 validation, broader pass: compare VmRaster decoders against
   full Vm for example 06 velocity and example 07 threshold, then run larger
   `Naxon`/diameter sweeps where output memory should matter most.
-- [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
-  materialization for realistic threshold, activation, recruitment, and
-  conduction workflows.
-- [ ] Phase 7.6.6: evaluate GPU dispatch scheduling as a separate phase after
-  realistic profiling shows whether group count, kernel waits, or result
-  splitting are material bottlenecks.
+- [x] Run full/center/VmRaster recording-mode comparison on CPU and GPU.
+  Artifacts:
+  `benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620`.
+  Warm totals: GPU `observer 37.08 s`, `center 38.44 s`, `full 38.49 s`;
+  CPU `full 68.83 s`, `observer 69.19 s`, `center 71.61 s`. Conclusion:
+  GPU `kernel.wait` is small; `runtime.prepare`, `dispatch.build_plan`,
+  `kernel.enqueue`, and result/input packaging dominate.
+- [x] Phase 7.6.5A first execution-reuse pass: cache stable dispatch plans,
+  batch solver runtimes, prepared cohorts, and VmRaster probe plans for repeated
+  runs over the same `AxonInstance` pool. The cache is intentionally tied to
+  stable simulation objects so stimulus amplitudes can change without freezing
+  the dynamic drive.
+- [ ] Phase 7.6.5A follow-up: add explicit input/Vext reuse for repeated
+  amplitude or stimulus-only updates. Entry target: `example08_recruitment`
+  should not rebuild spatial footprints or dense/factorized `Vext` structures
+  for every amplitude when static shapes are unchanged.
+- [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
+  Required visibility: planning, runtime construction/cache hit, footprint
+  materialization/cache hit, stimulus sampling, dense/factorized `Vext`
+  materialization, device transfer, enqueue, wait, and result packaging.
+- [ ] Phase 7.6.5C: implement a stimulus/amplitude-only execution cache for
+  point-source/extracellular sweeps. Reuse prepared spatial footprints and
+  compiled executable; update only temporal stimulus/amplitude buffers where
+  shapes match.
+- [ ] Phase 7.6.5D: benchmark reuse using full/center/VmRaster output modes on
+  CPU and GPU, then regenerate the recording-mode comparison plots. Success:
+  reduce `runtime.prepare + dispatch.build_plan` by at least 30% on
+  `example08` warm repeats without changing solver outputs.
+- [ ] Phase 7.6.6: evaluate GPU dispatch scheduling only after Phase 7.6.5
+  reuse work. Use `ideas/axonscope_dispatch_scheduling_gpu_note.md`: first test
+  memory-aware bucket/coalesce of compatible groups, then optional async
+  enqueue/wait. Do not rely on async for core speedups and do not enable it by
+  default without memory-budget checks.
 - [ ] Phase 7.7: clean stimulation and placement APIs after the first Vext pass.
 
-## Phase 7.6.5 Vext Plan
+## Phase 7.6.5 Execution-Envelope And Vext Plan
 
 Goal: reduce complete workflow time now that solver-only custom-kernel work is
-closed. The working hypothesis from E2E benchmarks is that dense `Vext`
-materialization, transfer, and repeated input construction dominate many
-realistic GPU cases.
+closed and VmRaster is validated. The working conclusion from the 2026-06-20
+recording-mode comparison is that the GPU solver kernel is not the current
+dominant cost. The dominant costs are the execution envelope around it:
+`runtime.prepare`, dispatch/probe-plan rebuilds, `kernel.enqueue`, Vext/stimulus
+materialization, result splitting, and public packaging.
+
+Evidence:
+
+```text
+benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620
+benchmark/results/realistic_examples/recording_mode_compare/kaggle_p100_cpu_gpu_recording_modes_20260620_allplots_*
+```
+
+Current benchmark diagnosis:
+
+- GPU total stress warm time is about `37-38 s` across full, center, and
+  VmRaster output modes.
+- CPU total stress warm time is about `69-72 s`.
+- For GPU, aggregate `kernel.wait` is less than `1 s`; `kernel.enqueue`,
+  `runtime.prepare`, and `dispatch.build_plan` are much larger.
+- For `example08 B=100`, GPU VmRaster spends about `3.44 s` in
+  `runtime.prepare`, `1.00 s` in `dispatch.build_plan`, `0.61 s` in
+  `kernel.enqueue`, and only `0.11 s` in `kernel.wait`.
+- Therefore, optimize reuse and preparation before reopening solver kernels.
 
 1. Baseline realistic workflows.
    - Run example 06 velocity, example 07 threshold, and example 08 recruitment
@@ -178,27 +260,52 @@ realistic GPU cases.
    - Current Kaggle P100 stress evidence:
      `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`.
 
-2. Add `Vext` timing visibility.
+2. Add execution-envelope and `Vext` timing visibility.
    - Separate public object construction, extracellular footprint evaluation,
      dense `Vext` array materialization, host-to-device movement, solver time,
      and result packaging.
    - Keep measurements available in CSV/JSON, not only profiler traces.
-   - Treat `runtime.prepare` and GPU dispatch/launch overhead as first-class
-     timings too; the stress profile shows these dominate recruitment before
-     raw solver time does.
+   - Treat `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`, result
+     splitting, and GPU/CPU `kernel.wait` as first-class timings too; the
+     recording-mode stress profile shows these dominate recruitment before raw
+     GPU solver time does.
    - First pass implemented:
      - reuse the `solver_axon` already built by dispatch planning when preparing
        batch runtimes;
      - cache whole solver runtimes only for batch-safe paths where stimulation
        callables/precomputed drive tensors are not embedded in the runtime;
+     - cache stable dispatch plans across repeated runs of the same
+       `AxonInstance` pool;
+     - cache prepared cohorts and VmRaster probe plans across amplitude sweeps,
+       while keeping context/stimulus objects live;
      - cache shared point-source spatial footprints while keeping stimulus
        amplitudes live;
      - add `memory_estimate_*` and footprint-cache columns to realistic profile
        CSVs.
+   - 2026-06-20 second pass implemented:
+     - `dispatch.build_plan` now records `dispatch_plan_cache=hit|miss`;
+     - `runtime.prepare` now records `batch_runtime_cache=hit|miss`;
+     - `inputs.positions` now records `prepared_cohort_cache=hit|miss`;
+     - new `observer.plan` span records `vm_raster_plan_cache=hit|miss`.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 
-3. Reduce avoidable dense inputs.
+3. Split stable and dynamic state.
+   - Static across amplitude/stimulus-only updates:
+     - axon cohort/grouping;
+     - cable/membrane runtime;
+     - dispatch group and padding plan;
+     - VmRaster probe tables;
+     - spatial extracellular footprints;
+     - compiled executable for the same static shapes.
+   - Dynamic across amplitude/stimulus-only updates:
+     - temporal stimulus samples;
+     - scalar amplitude/current values;
+     - any dense/factorized input buffer whose values change but shape does not.
+   - Make cache hits/misses explicit in benchmark metadata.
+   - Add a reuse-failure explanation when a condition forces reprepare/recompile.
+
+4. Reduce avoidable dense inputs.
    - Preserve the current public API while testing internal representations for
      shared point-source/electrode drives.
    - Avoid materializing dense zero `Iinj`.
@@ -208,13 +315,19 @@ realistic GPU cases.
      avoiding per-row `Vm` materialization.
    - Explore on-device/lazy `Vext` generation for analytical point sources.
 
-4. Validate behavior.
+5. Validate behavior.
    - Re-run unit tests for stimulation, dispatcher, protocols, and solvers.
    - Re-run relevant NRV comparisons if `Vext` semantics change.
    - Keep `pcr_adaptive` as the GPU solver baseline during Vext work.
+   - Re-run the six-way full/center/VmRaster CPU+GPU comparison and compare
+     `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`, `kernel.wait`,
+     and memory columns.
 
-5. Decide next branch.
-   - If `Vext` dominates after easy wins, continue with representation/API work.
+6. Decide next branch.
+   - If runtime/dispatch/Vext reuse improves the envelope, continue toward
+     study-level reuse policies.
+   - If dispatch group count or launch overhead remains high, move to Phase
+     7.6.6 bucket/coalesce scheduling.
    - If solver time becomes dominant again, reopen custom kernels only with a
      clear validation gate and a target device that supports the required stack.
 
@@ -227,20 +340,34 @@ and, only after that, testing optional async enqueue/wait scheduling for
 remaining independent groups. This is a dispatch/planning phase, not a solver
 replacement.
 
+Latest 2026-06-20 interpretation:
+
+- Do not start with async scheduling. JAX async enqueue may avoid host-side
+  bubbles, but the GPU may still serialize work and async keeps more inputs and
+  outputs alive.
+- Start with better reuse and, after that, conservative bucket/coalesce
+  scheduling.
+- Treat hardware memory capacity versus estimated simulation/output bytes as an
+  entry condition before coalescing or async pending groups.
+- Full Vm output should use stricter pending-memory limits than VmRaster
+  observer-only output.
+
 Entry gate:
 
-- [ ] Use `realistic_examples_*_profile.csv` and hotpath traces to confirm that
+- [x] Use `realistic_examples_*_profile.csv` and hotpath traces to confirm that
   dispatch group count, repeated `kernel.wait`, input preparation, or
-  `results.split_batch` are meaningful bottlenecks.
+  `results.split_batch` are meaningful bottlenecks. Current finding:
+  input/runtime preparation, dispatch plan rebuilds, and enqueue dominate GPU
+  more than raw `kernel.wait`; CPU `kernel.wait` still matters.
 - [ ] Compare available hardware capacity, especially GPU memory, against the
   estimated memory cost of each simulation/bucket before enabling coalescing or
   async scheduling.
-- [ ] Re-check this gate on larger heterogeneous pools: current P100
-  `realistic_stress` evidence mostly has one dispatch group per simulation call,
-  with mixed recruitment at two groups, so scheduling is not yet the immediate
-  bottleneck.
-- [ ] Keep Phase 7.6.5 `Vext` profiling as the immediate source of truth before
-  changing dispatch architecture.
+- [ ] Re-check this gate on larger heterogeneous pools after Phase 7.6.5 reuse:
+  current P100 `realistic_stress` evidence mostly has one dispatch group per
+  simulation call, with mixed recruitment at two groups, so scheduling is not
+  yet the immediate bottleneck.
+- [x] Keep Phase 7.6.5 execution-envelope profiling as the immediate source of
+  truth before changing dispatch architecture.
 
 Implementation plan:
 
@@ -251,6 +378,7 @@ Implementation plan:
 
 2. Add `Nx` bucketing and padding as an explicit scheduling policy.
    - Target buckets: `32`, `64`, `128`, then `256` only if profiling demands it.
+   - Consider a `96` bucket if padding from `65 -> 128` is too expensive.
    - Slice padded outputs back to original rows and keep observers blind to
      padded compartments.
 
@@ -263,6 +391,8 @@ Implementation plan:
 4. Prototype optional async group scheduling behind an explicit option.
    - Split batch execution into prepare/enqueue/wait/finalize steps.
    - Add `PendingGroup` plus memory-pressure flushing.
+   - Track `max_pending_groups`, `max_pending_output_bytes`,
+     `async_flush_count`, and `async_pending_max`.
    - Do not enable async by default until benchmarks show stable wins.
 
 5. Add a dedicated scheduler benchmark.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Sequence
 
@@ -118,11 +119,31 @@ class _SolverDispatchMetadata:
     cable_signature: tuple[Any, ...]
 
 
+_DISPATCH_PLAN_CACHE: OrderedDict[tuple[Any, ...], DispatchPlan] = OrderedDict()
+_DISPATCH_PLAN_CACHE_MAX_SIZE = 64
+
+
 def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
     """Normalize and group axon simulations before execution."""
 
-    with benchmark_span("dispatch.build_plan", pool_size=len(axons)):
-        items = _normalize_dispatch_items(axons)
+    simulations = tuple(as_axon_instance(axon) for axon in axons)
+    with benchmark_span("dispatch.build_plan", pool_size=len(simulations)):
+        cache_key = _dispatch_plan_cache_key(simulations)
+        cached = _DISPATCH_PLAN_CACHE.get(cache_key)
+        if cached is not None:
+            _DISPATCH_PLAN_CACHE.move_to_end(cache_key)
+            record_benchmark_metadata(
+                dispatch_plan_cache="hit",
+                item_count=len(cached.items),
+                group_count=len(cached.groups),
+                group_sizes=[group.size for group in cached.groups],
+                group_modes=[group.mode for group in cached.groups],
+                group_nx=[group.nx for group in cached.groups],
+            )
+            return cached
+
+        record_benchmark_metadata(dispatch_plan_cache="miss")
+        items = _normalize_dispatch_items(simulations)
         groups_by_signature: dict[tuple[Any, ...], list[_PendingDispatchGroup]] = {}
         for item in items:
             signature = item.signature
@@ -163,7 +184,43 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
             group_modes=[group.mode for group in groups],
             group_nx=[group.nx for group in groups],
         )
-        return DispatchPlan(items=items, groups=groups)
+        plan = DispatchPlan(items=items, groups=groups)
+        _store_dispatch_plan_cache(cache_key, plan)
+        return plan
+
+
+def _dispatch_plan_cache_key(
+    simulations: Sequence[AxonInstance],
+) -> tuple[Any, ...]:
+    """Return the stable execution-layout key for a pool.
+
+    The key is intentionally tied to `AxonInstance` identity. This makes the
+    cache useful for iterative protocols that mutate only stimuli on a stable
+    pool, while avoiding accidental reuse when callers pass fresh bare `Axon`
+    objects or rebuild simulation rows.
+    """
+
+    return (
+        "dispatch_plan_v1",
+        tuple(_dispatch_plan_row_cache_key(simulation) for simulation in simulations),
+    )
+
+
+def _dispatch_plan_row_cache_key(simulation: AxonInstance) -> tuple[Any, ...]:
+    return (
+        id(simulation),
+        _solver_axon_cache_key(simulation),
+        float(getattr(simulation, "v_init", 0.0)),
+        float(getattr(simulation, "Veinit", 0.0)),
+        float(getattr(simulation, "temperature", 0.0)),
+    )
+
+
+def _store_dispatch_plan_cache(key: tuple[Any, ...], plan: DispatchPlan) -> None:
+    _DISPATCH_PLAN_CACHE[key] = plan
+    _DISPATCH_PLAN_CACHE.move_to_end(key)
+    while len(_DISPATCH_PLAN_CACHE) > _DISPATCH_PLAN_CACHE_MAX_SIZE:
+        _DISPATCH_PLAN_CACHE.popitem(last=False)
 
 
 def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[DispatchItem, ...]:

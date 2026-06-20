@@ -23,6 +23,44 @@ The key idea is **not** to rely primarily on launching many small GPU jobs concu
 
 This is a scheduling / dispatch improvement. It does not replace the double-cable solver roadmap. It should complement PCR, split-iterative, associative scan, or Pallas backends.
 
+## Evidence update, 2026-06-20
+
+The full/center/VmRaster CPU+GPU realistic stress comparison changed the
+priority order for the next pass. Source artifacts:
+
+```text
+benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620
+benchmark/results/realistic_examples/recording_mode_compare/kaggle_p100_cpu_gpu_recording_modes_20260620_allplots_*
+```
+
+Key conclusions:
+
+```text
+GPU full/center/VmRaster warm totals: about 37-38 s
+CPU full/center/VmRaster warm totals: about 69-72 s
+GPU aggregate kernel.wait: less than 1 s
+GPU aggregate kernel.enqueue: about 14 s
+GPU aggregate runtime.prepare: about 10 s
+GPU aggregate dispatch.build_plan: about 3.6-4.0 s
+```
+
+For `example08 B=100` on GPU, `kernel.wait` is only about `0.10 s`, while
+`runtime.prepare` is about `3.4-3.6 s` and `dispatch.build_plan` is about
+`1.0 s`. Therefore, do not start by implementing async group execution. First
+reduce the repeated work around the solver: stable runtime reuse, dispatch and
+probe-plan reuse, footprint/Vext reuse, and launch/enqueue overhead. After that,
+use this scheduling note to test coalescing and async in a controlled benchmark.
+
+The useful parts of this note remain:
+
+```text
+1. bucket/coalesce compatible groups before async scheduling;
+2. keep bucket keys minimal to avoid recompilation;
+3. compare hardware memory capacity against estimated simulation/output bytes;
+4. use stricter pending-memory limits for full Vm than for VmRaster;
+5. treat async enqueue as optional evidence-gated scheduling, not a core speedup.
+```
+
 ---
 
 ## Current behavior summary

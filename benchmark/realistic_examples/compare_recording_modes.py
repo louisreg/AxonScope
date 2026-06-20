@@ -35,7 +35,20 @@ DEFAULT_EVENTS = (
     "inputs.extracellular",
     "inputs.intracellular",
     "inputs.positions",
+    "observer.plan",
     "results.to_public",
+)
+CACHE_STATUS_METADATA_KEYS = (
+    "dispatch_plan_cache",
+    "batch_runtime_cache",
+    "prepared_cohort_cache",
+    "vm_raster_plan_cache",
+    "vstim_footprint_cache",
+)
+CACHE_STATUS_COLUMNS = tuple(
+    f"{key}_{suffix}"
+    for key in CACHE_STATUS_METADATA_KEYS
+    for suffix in ("hits", "misses")
 )
 
 
@@ -294,12 +307,12 @@ def aggregate_profile_events(
                         row.get("memory_estimate_device_fraction_max") for row in group_rows
                     )
                 ),
-                "vstim_footprint_cache_hits_sum": fmt(
-                    sum_number(row.get("vstim_footprint_cache_hits") for row in group_rows)
-                ),
-                "vstim_footprint_cache_misses_sum": fmt(
-                    sum_number(row.get("vstim_footprint_cache_misses") for row in group_rows)
-                ),
+                **{
+                    f"{column}_sum": fmt(
+                        sum_number(row.get(column) for row in group_rows)
+                    )
+                    for column in CACHE_STATUS_COLUMNS
+                },
             }
         )
     return out_rows
