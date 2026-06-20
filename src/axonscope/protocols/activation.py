@@ -21,6 +21,7 @@ from axonscope.analysis import ActivationCriterion, ActivationEvent
 from axonscope.analysis.definitions import Activation
 from axonscope.results import SimResult
 from axonscope.simulation import simulate, simulate_pool
+from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY
 from axonscope.utils import units
 
 
@@ -1020,18 +1021,51 @@ def _evaluate_activation_observer_pool(
     )
     return np.asarray(
         [
-            bool(np.asarray(_activation_observation(view, activation.name).values)[0])
+            _activation_observation_activated(view, activation)
             for view in pool_result
         ],
         dtype=bool,
     )
 
 
-def _activation_observation(result: Any, name: str) -> Any:
+def _activation_observation_activated(result: Any, activation: Activation) -> bool:
     observations = getattr(result, "observations", None)
-    if observations is None or name not in observations:
+    if observations is None:
         raise RuntimeError("activation observer result is missing from solver output.")
-    return observations[name]
+    if activation.name in observations:
+        return bool(np.asarray(observations[activation.name].values)[0])
+    raster = observations.get(VM_RASTER_OBSERVATION_KEY)
+    if raster is not None:
+        return _activation_from_vm_raster(raster, activation)
+    raise RuntimeError("activation observer result is missing from solver output.")
+
+
+def _activation_from_vm_raster(raster: Any, activation: Activation) -> bool:
+    names = tuple(getattr(raster, "names", ()))
+    try:
+        raster_index = names.index(activation.name)
+    except ValueError as exc:
+        raise RuntimeError("activation observer result is missing from VmRaster output.") from exc
+
+    bits = np.asarray(raster.unpack(), dtype=bool)
+    if bits.ndim != 4:
+        raise RuntimeError(f"VmRaster output must unpack to (B, R, P, Nt), got {bits.shape}.")
+    row_bits = bits[0, raster_index]
+
+    mask = np.asarray(getattr(raster, "probe_mask", True), dtype=bool)
+    if mask.ndim == 3:
+        probe_mask = mask[0, raster_index]
+    elif mask.ndim == 2:
+        probe_mask = mask[raster_index]
+    else:
+        probe_mask = np.broadcast_to(mask, row_bits.shape[:1])
+
+    blanking_ms = units.to_ms(activation.blanking)
+    if blanking_ms > 0.0:
+        times_ms = (np.arange(int(raster.nt), dtype=float) + 1.0) * float(raster.dt_ms)
+        time_mask = times_ms >= blanking_ms
+        row_bits = row_bits[:, time_mask]
+    return bool(np.any(row_bits[np.asarray(probe_mask, dtype=bool)]))
 
 
 def _can_use_activation_observer(

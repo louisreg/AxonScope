@@ -3,6 +3,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.protocols import activation as activation_protocols
+from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY, VmRasterResult
 
 
 class _DummyLayout:
@@ -122,12 +123,20 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
 
     class _ObservedView:
         def __init__(self, activated):
+            words = np.asarray([[[[0b100 if activated else 0]]]], dtype=np.uint32)
             self.observations = {
-                "activation": type(
-                    "_Observation",
-                    (),
-                    {"values": np.asarray([activated], dtype=bool)},
-                )()
+                VM_RASTER_OBSERVATION_KEY: VmRasterResult(
+                    words=words,
+                    nt=3,
+                    dt_ms=1.0,
+                    definitions=(),
+                    names=("activation",),
+                    probe_indices=np.asarray([[1]], dtype=np.int32),
+                    probe_mask=np.asarray([[True]], dtype=bool),
+                    original_indices=np.asarray([[1]], dtype=np.int32),
+                    positions_um=np.asarray([[100.0]], dtype=float),
+                    thresholds_mV=np.asarray([0.0], dtype=float),
+                )
             }
 
     def update(row, tested_current):
