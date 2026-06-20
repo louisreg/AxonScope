@@ -88,14 +88,13 @@ Work should start here unless the user asks otherwise.
   Completed at
   `benchmark/results/kaggle/20260619_232746_realistic_stress_single_vm_NvidiaTeslaP100`.
 - [x] Try Kaggle `realistic_stress_observer_gpu` separately after excluding CPU
-  observer-only. Decision: standby/not retained for realistic stress; the GPU
-  observer-only run was stopped and deleted after `example08_recruitment`
-  `runs=50` had already reached about 427 s on Kaggle, making it slower than
-  the compact `center` Vm path for the immediate workflow benchmark.
-  Root-cause hypothesis from code inspection: the double-cable observer branch
-  bypasses the batch-native `pcr_soa` scan used by the retained Vm path and
-  updates observer state inside a per-row `vmap`/scalar scan. Revisit only if
-  we implement a batch-native observer scan using `update_observer_state_batch`.
+  observer-only. Decision: inconclusive, not rejected; the run was stopped
+  during `example08_recruitment` before a full timing row was produced. The
+  `426.7s` Kaggle UI value was a log timestamp, not a case duration.
+- [x] Preserve the double-cable batch-native `pcr_soa` fast path for
+  observer-only output at large batch sizes. Observer-only now has a
+  batch-native scan using `update_observer_state_batch` instead of always
+  falling back to per-row `vmap`/scalar observer updates.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

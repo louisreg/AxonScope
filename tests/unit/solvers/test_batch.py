@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
+import axonscope.solvers.batch_kernels as batch_kernels
 from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
 from axonscope.backends.jax.input_batches import (
@@ -33,6 +34,7 @@ from axonscope.solvers.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
+from axonscope.solvers.observer_runtime import build_solver_observer_plan
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
@@ -583,6 +585,67 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
         options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
     ).Vm
     assert pcr_soa_none.shape == (2, int(round(tsim / dt)), 0)
+
+
+def test_double_cable_observer_pcr_soa_batch_native_matches_fallback(monkeypatch):
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [
+        base_contexts,
+        scale_extracellular_contexts(base_contexts, 0.5),
+    ]
+    vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
+    vext_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    observer = build_solver_observer_plan(
+        (axs.analysis.PeakVoltage(target=axs.positions.CENTER),),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    )
+
+    fallback = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+    monkeypatch.setattr(batch_kernels, "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH", 1)
+    batch_native = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+
+    assert fallback.Vm is None
+    assert batch_native.Vm is None
+    assert fallback.observations is not None
+    assert batch_native.observations is not None
+    np.testing.assert_allclose(
+        batch_native.observations["peak_voltage"].values,
+        fallback.observations["peak_voltage"].values,
+        atol=1e-3,
+        rtol=0.0,
+    )
 
 
 def test_double_cable_batch_requires_extracellular_runtime():

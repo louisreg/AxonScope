@@ -588,9 +588,11 @@ resolved kernel solver is `pcr_soa` and `B >= 2048`. The P100 E2E run showed
 that the batch-native route improves large batches but regresses `B=512`, so
 small batches keep the previous per-fiber `vmap` route for now.
 
-Remaining work: thread the same batch-aware solve through the observer-only
-path. The observer scan still evaluates each fiber under `vmap` before calling
-the one-fiber block solver.
+Status update: the observer-only double-cable path now has a batch-native
+`pcr_soa` scan for large batches as well. It keeps the same batch-aware block
+solve used by retained Vm output and updates compact observer state with
+`update_observer_state_batch`, so observer-only output no longer has to break
+the large-batch fast path.
 
 ## Problem
 
