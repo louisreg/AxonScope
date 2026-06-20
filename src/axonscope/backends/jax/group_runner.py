@@ -366,10 +366,17 @@ def _prepared_cohort_for_group(group: DispatchGroup) -> PreparedCohort:
     return cohort
 
 
-def _kernel_batch_options(group: DispatchGroup, options: BatchOptions) -> BatchOptions:
+def _kernel_batch_options(
+    group: DispatchGroup,
+    options: BatchOptions,
+    *,
+    observers: tuple[Any, ...] | None,
+) -> BatchOptions:
     """Return solver-kernel options, recording full traces for padded groups."""
 
     if not group.has_padding:
+        return options
+    if options.recording.mode == "none" and observers is not None:
         return options
     return replace(
         options,
@@ -558,7 +565,7 @@ def _run_single_cable_batch_group(
             ),
             context_count=cohort.context_count,
         )
-    kernel_options = _kernel_batch_options(group, batch_options)
+    kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
     with benchmark_span(
         "observer.plan",
         group_id=group.group_id,
@@ -815,7 +822,7 @@ def _run_double_cable_batch_group(
             ),
             context_count=cohort.context_count,
         )
-    kernel_options = _kernel_batch_options(group, batch_options)
+    kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
     with benchmark_span(
         "observer.plan",
         group_id=group.group_id,

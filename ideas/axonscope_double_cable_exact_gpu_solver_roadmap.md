@@ -2979,8 +2979,12 @@ Local double-cable status: shared point-source VmRaster observer-only groups now
 carry `current_mid_A`, `current_initial_previous_A`, and `footprint_mV_per_A`
 into the batch-native PCR/SoA observer kernel, which builds the double-cable RHS
 inside the time scan. Dense fallback remains for center/full recordings and
-unsupported context shapes. Kaggle P100 validation is still required before
-calling this a runtime win.
+unsupported context shapes. Diagnostic P100 run
+`20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` revealed that
+the padded double-cable group was still forced to full/dense recording by the
+dispatcher padding fallback, so it did not validate this path. Local fix now
+preserves `recording=none` for padded VmRaster observer groups; Kaggle P100
+validation is still required before calling this a runtime win.
 
 ## 4. Static shapes
 

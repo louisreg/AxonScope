@@ -66,8 +66,12 @@ Local follow-up now applies the same representation to shared point-source
 double-cable VmRaster observer-only groups: the batch-native PCR/SoA observer
 kernel receives `current_mid_A`, `current_initial_previous_A`, and
 `footprint_mV_per_A`, then builds the extracellular RHS inside the time scan.
-This needs the same P100 validation before changing scheduling assumptions for
-mixed single/double groups.
+Diagnostic P100 run
+`20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` showed the
+single-cable group was factorized, but the padded double-cable group was still
+forced to full/dense recording by the padding fallback. Local fix preserves
+`recording=none` for padded VmRaster observer groups; rerun P100 before changing
+scheduling assumptions for mixed single/double groups.
 
 The useful parts of this note remain:
 

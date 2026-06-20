@@ -419,8 +419,8 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     )
     context = _context(electrode, stimulus)
     axons = [
-        _passive_double_cable_axon(amp_nA=0.1),
-        _passive_double_cable_axon(amp_nA=0.2),
+        _passive_double_cable_axon(amp_nA=0.1, compartments=11),
+        _passive_double_cable_axon(amp_nA=0.2, compartments=13),
     ]
     for axon in axons:
         axon.add_extracellular_context(context=context)
@@ -465,11 +465,19 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     assert "vstim_mid" not in metadata
     assert "vstim_previous" not in metadata
 
+    enqueue_events = [event for event in report.events if event.name == "kernel.enqueue"]
+    assert len(enqueue_events) == 1
+    enqueue_metadata = enqueue_events[0].metadata
+    assert enqueue_metadata["mode"] == "double"
+    assert enqueue_metadata["recording_mode"] == "none"
+
     group_events = [event for event in report.events if event.name == "dispatch.group.total"]
     assert len(group_events) == 1
     group_metadata = group_events[0].metadata
     components = group_metadata["memory_estimate_components_nbytes"]
+    assert group_metadata["has_padding"] is True
     assert group_metadata["memory_estimate_extracellular_format"] == "factorized_point_source"
+    assert components["vm_output"] == 0
     assert components["vstim_mid"] < group_metadata["memory_estimate_vstim_dense_equivalent_nbytes"]
     assert components["vstim_previous"] < 2 * 11 * 8
 

@@ -260,6 +260,14 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100` and check
   example 08 double-cable group memory, `inputs.extracellular`,
   `kernel.enqueue`, and `kernel.wait`.
+  - 2026-06-20 diagnostic run
+    `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100`: not a
+    valid double-cable factorized measurement. The single-cable group used
+    `factorized_point_source`, but the padded double-cable group was still
+    forced to `recording_mode=full` and dense `Vstim`. Local fix: preserve
+    `recording=none` for padded groups when a VmRaster observer is present, and
+    cover it with a padded double-cable factorized dispatcher test. Rerun still
+    required.
 - [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
   Required visibility: planning, runtime construction/cache hit, footprint
   materialization/cache hit, stimulus sampling, dense/factorized `Vext`
@@ -410,6 +418,11 @@ Current benchmark diagnosis:
        `tests/unit/solvers/test_batch.py::test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa`
        and
        `tests/unit/test_dispatcher.py::test_run_pool_double_cable_observer_uses_factorized_point_source_vstim`;
+     - Kaggle diagnostic
+       `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` showed
+       that padded double-cable cohorts were still routed as full/dense; fixed
+       locally by exempting observer-only padded groups from the full-recording
+       padding fallback;
      - next validation: Kaggle P100 `realistic_stress_observer_gpu` versus
        `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`.
    - Local validation:
