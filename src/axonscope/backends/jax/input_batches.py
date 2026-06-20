@@ -29,7 +29,10 @@ from axonscope.stimulation.runtime import (
     compile_intracellular_contexts,
     compile_stimulus,
 )
-from axonscope.solvers.batch_inputs import SparseIntracellularCurrentDensityBatch
+from axonscope.solvers.batch_inputs import (
+    FactorizedExtracellularPotentialBatch,
+    SparseIntracellularCurrentDensityBatch,
+)
 from axonscope.solvers.runtime import SolverRuntime
 from axonscope.solvers.axon_runtime import SolverAxon
 from axonscope.solvers.common import simulation_step_count
@@ -72,6 +75,59 @@ def build_vstim_midpoint_batch(
         x_positions_m=x_positions_m,
         axon_y_um=axon_y_um,
         axon_z_um=axon_z_um,
+        dtype_local=dtype,
+    )
+
+
+def build_factorized_vstim_midpoint_batch(
+    axon: object,
+    contexts_batch: Sequence[ContextBatchRow],
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    x_positions_m: Array | None = None,
+    axon_y_um: Array | None = None,
+    axon_z_um: Array | None = None,
+    dtype_local: jnp.dtype | None = None,
+) -> FactorizedExtracellularPotentialBatch | None:
+    """Build a factorized midpoint ``Vstim`` batch when the contexts allow it.
+
+    The first supported case is the common shared point-source extracellular
+    context. It keeps the static spatial footprint separate from the temporal
+    stimulus so observer-only kernels can avoid materializing
+    ``Vstim[B, Nt, Nx]``.
+    """
+
+    rows = tuple(_normalize_context_row(row) for row in contexts_batch)
+    if not rows or not any(rows):
+        return None
+    if not _can_build_context_rows_from_footprints(rows):
+        return None
+
+    dtype = _resolve_dtype(axon, dtype_local)
+    np_dtype = np.dtype(dtype)
+    nt = simulation_step_count(tsim_ms, dt_ms)
+    t_mid_ms = (
+        np.arange(nt, dtype=np_dtype) + np.asarray(0.5, dtype=np_dtype)
+    ) * np.asarray(dt_ms, dtype=np_dtype)
+    x_rows_np = _resolve_x_positions_m_numpy(
+        axon,
+        x_positions_m,
+        batch_size=len(rows),
+    )
+    y_rows_np, z_rows_np = _resolve_axon_transverse_um_numpy(
+        axon,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        batch_size=len(rows),
+    )
+    return _try_build_shared_point_source_factorized_vstim_batch(
+        rows,
+        t_mid_ms,
+        x_rows=x_rows_np,
+        axon_y_um=y_rows_np,
+        axon_z_um=z_rows_np,
+        np_dtype=np_dtype,
         dtype_local=dtype,
     )
 
@@ -786,6 +842,83 @@ def _try_build_shared_point_source_vstim_batch(
         * np.asarray(1e3, dtype=np_dtype)
     )
     return jnp.asarray(values, dtype=dtype_local)
+
+
+def _try_build_shared_point_source_factorized_vstim_batch(
+    rows: Sequence[tuple[ExtracellularContext, ...]],
+    t_ms: np.ndarray,
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+    dtype_local: jnp.dtype,
+) -> FactorizedExtracellularPotentialBatch | None:
+    if not rows or any(len(row) != 1 for row in rows):
+        return None
+    first_context = rows[0][0]
+    if not isinstance(first_context, AnalyticalExtracellularContext):
+        return None
+    if any(row[0] is not first_context for row in rows):
+        return None
+    if len(first_context.electrodes) != 1:
+        return None
+    electrode = first_context.electrodes[0]
+    if not isinstance(electrode, PointSourceElectrode):
+        return None
+    stimulus = getattr(electrode, "stimulus", None)
+    if stimulus is None:
+        return None
+
+    current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+    cache_key = _point_source_footprint_cache_key(
+        first_context,
+        electrode,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype=np_dtype,
+    )
+    footprint_V_per_A = _POINT_SOURCE_FOOTPRINT_CACHE.get(cache_key)
+    if footprint_V_per_A is None:
+        x_rel_m = x_rows - float(electrode.x0_m)
+        y_rel_m = (float(electrode.y_um) - axon_y_um)[:, None] * 1e-6
+        z_rel_m = (float(electrode.z_um) - axon_z_um)[:, None] * 1e-6
+        radius_m = np.sqrt(x_rel_m**2 + y_rel_m**2 + z_rel_m**2)
+        radius_m = np.maximum(radius_m, float(electrode.min_distance_m))
+        footprint_V_per_A = np.asarray(
+            1.0 / (4.0 * np.pi * float(first_context.sigma_S_m) * radius_m),
+            dtype=np_dtype,
+        )
+        _POINT_SOURCE_FOOTPRINT_CACHE[cache_key] = footprint_V_per_A
+        footprint_cache_status = "miss"
+    else:
+        footprint_cache_status = "hit"
+
+    footprint_mV_per_A = footprint_V_per_A * np.asarray(1e3, dtype=np_dtype)
+    dense_equivalent_nbytes = (
+        int(len(rows)) * int(t_ms.shape[0]) * int(x_rows.shape[1]) * int(np_dtype.itemsize)
+    )
+    factorized_nbytes = int(current_A.nbytes) + int(footprint_mV_per_A.nbytes)
+    record_benchmark_metadata(
+        vstim_footprint_cache=footprint_cache_status,
+        vstim_footprint_cache_nbytes=int(footprint_V_per_A.nbytes),
+        vstim_input_format="factorized_point_source",
+        vstim_factorized_current_nbytes=int(current_A.nbytes),
+        vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
+        vstim_factorized_total_nbytes=factorized_nbytes,
+        vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
+        vstim_factorized_dense_ratio=(
+            factorized_nbytes / float(dense_equivalent_nbytes)
+            if dense_equivalent_nbytes
+            else 0.0
+        ),
+    )
+    return FactorizedExtracellularPotentialBatch(
+        current_mid_A=jnp.asarray(current_A, dtype=dtype_local),
+        footprint_mV_per_A=jnp.asarray(footprint_mV_per_A, dtype=dtype_local),
+        target_nx=int(x_rows.shape[1]),
+    )
 
 
 def _point_source_footprint_cache_key(

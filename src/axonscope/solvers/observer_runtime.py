@@ -455,7 +455,8 @@ def _write_raster_bits(words: Any, hit: Any, step_index: Any) -> Any:
     bits = jnp.asarray(hit, dtype=jnp.uint32) * bit
     current = jnp.take(words, word_index, axis=-1)
     updated = current | bits
-    starts = (0,) * (words.ndim - 1) + (word_index,)
+    zero = jnp.asarray(0, dtype=word_index.dtype)
+    starts = (zero,) * (words.ndim - 1) + (word_index,)
     return jax.lax.dynamic_update_slice(words, updated[..., None], starts)
 
 

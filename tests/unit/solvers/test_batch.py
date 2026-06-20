@@ -11,8 +11,10 @@ import axonscope.solvers.batch_kernels as batch_kernels
 from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
 from axonscope.backends.jax.input_batches import (
+    build_factorized_vstim_midpoint_batch,
     build_footprint_vstim_initial_previous_batch,
     build_footprint_vstim_midpoint_batch,
+    build_sparse_intracellular_current_density_batch,
     build_vstim_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_and_initial_previous_batch,
@@ -33,6 +35,9 @@ from axonscope.solvers import (
 from axonscope.solvers.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
+)
+from axonscope.solvers.batch_inputs import (
+    materialize_factorized_extracellular_potential_batch,
 )
 from axonscope.solvers.observer_runtime import (
     VM_RASTER_OBSERVATION_KEY,
@@ -348,6 +353,87 @@ def test_build_vstim_batch_shared_point_source_matches_context_formula():
         axis=0,
     )
     np.testing.assert_allclose(np.asarray(vext_batch), expected, rtol=1e-6, atol=1e-6)
+
+
+def test_factorized_point_source_batch_matches_dense_builder_and_observer_raster():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    context = axon.extracellular_contexts[0]
+    contexts = [context, context]
+    dense = build_vstim_midpoint_batch(
+        axon,
+        contexts,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        contexts,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+
+    assert factorized is not None
+    materialized = materialize_factorized_extracellular_potential_batch(factorized)
+    np.testing.assert_allclose(
+        np.asarray(materialized),
+        np.asarray(dense),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+    sparse_iinj = build_sparse_intracellular_current_density_batch(
+        [axon, axon],
+        runtime,
+        solver_axons=[runtime.axon, runtime.axon],
+    )
+    activation = axs.analysis.Activation(
+        threshold=-20.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = SingleCableVStimBatchKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
+        has_driven_extracellular=True,
+    )
+
+    dense_out = kernel.run(
+        extracellular_potential_mid_mV=dense,
+        intracellular_current_density_mid=sparse_iinj,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+    factorized_out = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        intracellular_current_density_mid=sparse_iinj,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+
+    assert dense_out.Vm is None
+    assert factorized_out.Vm is None
+    assert dense_out.observations is not None
+    assert factorized_out.observations is not None
+    np.testing.assert_array_equal(
+        np.asarray(factorized_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
 
 
 def test_build_footprint_vstim_batch_matches_generic_context_builder():

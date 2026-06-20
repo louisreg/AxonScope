@@ -201,6 +201,24 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   runs over the same `AxonInstance` pool. The cache is intentionally tied to
   stable simulation objects so stimulus amplitudes can change without freezing
   the dynamic drive.
+- [x] Phase 7.6.5A Kaggle validation on P100 observer stress:
+  `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+  Against the previous observer GPU stress run
+  `20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100`, example 08
+  warm time dropped from `9.87 s` to `3.64 s` total (`2.71x`). `B=50` improved
+  `3.53 s -> 1.35 s`; `B=100` improved `6.34 s -> 2.29 s`.
+  Warm profile totals for example 08: `runtime.prepare`
+  `16.51 s -> 2.33 s`, `dispatch.build_plan` `4.95 s -> 0.43 s`,
+  `simulation.pool.total` `27.56 s -> 8.85 s`. Comparison plots:
+  `benchmark/results/realistic_examples/execution_reuse_compare_20260620`.
+- [x] Phase 7.6.5A Vext first factorization pass: shared point-source
+  single-cable observer-only groups can pass `current_mid_A[Nt]` plus
+  `footprint_mV_per_A[B,Nx]` into the VmRaster kernel instead of materializing
+  dense `Vstim[B,Nt,Nx]`. The specialized sparse-Iinj VmRaster kernel applies
+  the cable forcing operator once to the spatial footprint and scans only the
+  temporal current. Local validation: dense and factorized builders match;
+  dense and factorized VmRaster outputs match; dispatcher smoke confirms
+  `inputs.extracellular input_format=factorized_point_source`.
 - [ ] Phase 7.6.5A follow-up: add explicit input/Vext reuse for repeated
   amplitude or stimulus-only updates. Entry target: `example08_recruitment`
   should not rebuild spatial footprints or dense/factorized `Vext` structures
@@ -287,6 +305,25 @@ Current benchmark diagnosis:
      - `runtime.prepare` now records `batch_runtime_cache=hit|miss`;
      - `inputs.positions` now records `prepared_cohort_cache=hit|miss`;
      - new `observer.plan` span records `vm_raster_plan_cache=hit|miss`.
+   - 2026-06-20 Kaggle P100 validation:
+     - observer GPU stress run:
+       `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`;
+     - example 08 warm total: `9.87 s -> 3.64 s` versus the previous observer
+       GPU run (`2.71x`);
+     - example 08 `runtime.prepare`: `16.51 s -> 2.33 s`;
+     - example 08 `dispatch.build_plan`: `4.95 s -> 0.43 s`;
+     - generated comparison CSV/plots:
+       `benchmark/results/realistic_examples/execution_reuse_compare_20260620`.
+   - 2026-06-20 Vext factorization local pass:
+     - shared point-source single-cable observer-only batches now avoid dense
+       `Vstim[B,Nt,Nx]` and pass `current_mid_A[Nt]` plus
+       `footprint_mV_per_A[B,Nx]`;
+     - the VmRaster sparse-Iinj kernel uses a precomputed spatial forcing
+       footprint, then multiplies by the temporal current inside the scan;
+     - local dispatcher smoke recorded
+       `inputs.extracellular input_format=factorized_point_source`;
+     - remaining work: reuse dynamic current buffers across amplitude sweeps and
+       extend the same idea to double-cable RHS construction.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 
@@ -309,6 +346,8 @@ Current benchmark diagnosis:
    - Preserve the current public API while testing internal representations for
      shared point-source/electrode drives.
    - Avoid materializing dense zero `Iinj`.
+   - Use factorized point-source `Vext` on hot observer-only paths when the
+     spatial footprint is static and only the temporal current changes.
    - Reuse or cache `Vext` when protocols sweep only current amplitude.
    - Prefer observer-only outputs for activation/recruitment protocols when the
      user only needs compact decisions, reducing GPU-to-CPU movement and

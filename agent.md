@@ -211,6 +211,12 @@ instructions: |
   - Observer contract changes must migrate the full learning surface in the same
     work: unit tests, protocol tests, dispatcher/solver tests, examples,
     benchmark docs, `GUIDELINES.md`, and `todo.md`.
+  - Vext optimization direction: keep the public stimulation API stable, but
+    prefer internal factorized representations when a spatial footprint is
+    static and only the temporal stimulus/current changes. The current active
+    path is shared point-source single-cable VmRaster observer-only execution
+    with `current_mid_A[Nt] + footprint_mV_per_A[B,Nx]`; do not re-densify it
+    unless the caller needs retained Vm or a fallback condition is hit.
   - Record NRV validation notes only after a fresh run in an NRV-ready
     environment.
   

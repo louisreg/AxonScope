@@ -53,7 +53,7 @@ recording/observer output. Phases 8-9 are still roadmap work.
 | Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
 | Phase 7.6.3 — Exact double-cable GPU solver optimization | Closed | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Pallas, Triton, JAX-Triton, CUDA FFI, split, associative, and pseudo-double candidates are archived/standby evidence, not public solver routes. | Benchmark report in `benchmark/reports/double_cable_solver_optimization_2026_06.md`; no public example required. |
 | Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
-| Phase 7.6.5 — Execution-envelope and Vext performance | In progress | Current focus is workflow-level profiling and reducing `runtime.prepare`, dispatch/probe-plan rebuilds, dense/factorized `Vext` materialization, transfer, launch/enqueue, and recording costs for examples 06/07/08. Latest P100 evidence says GPU `kernel.wait` is small compared with surrounding work. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
+| Phase 7.6.5 — Execution-envelope and Vext performance | In progress | Current focus is workflow-level profiling and reducing `runtime.prepare`, dispatch/probe-plan rebuilds, dense/factorized `Vext` materialization, transfer, launch/enqueue, and recording costs for examples 06/07/08. Latest P100 evidence says GPU `kernel.wait` is small compared with surrounding work. First internal factorized point-source `Vext` path is active for single-cable VmRaster observer-only batches. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
 | Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue. Coalescing/bucketing comes before async scheduling; async is optional and must respect hardware memory budgets. | Internal benchmark phase first; no public example yet. |
 | Phase 7.6.7 — VmRaster observer redesign | In progress | Keep one simple public observer/analysis concept, but make solver-side observer-only execution deliberately strict: threshold selected membrane-voltage probes at every `dt`, pack the boolean raster, and leave activation/latency/velocity/recruitment analyses to post-processing. P100 CPU/GPU validation passed; no legacy generic observer fallback. | `examples/advanced/example_18_solver_side_observers.py` |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
@@ -88,6 +88,12 @@ Known implementation gaps against the final target:
   plan/prepare/compile static structures once, then execute repeated
   stimulus-only updates without rebuilding runtimes, dispatch groups,
   VmRaster probe plans, or spatial extracellular footprints.
+- The first factorized `Vext` implementation is internal and deliberately
+  narrow: shared point-source single-cable observer-only batches pass
+  `current_mid_A[Nt]` and `footprint_mV_per_A[B,Nx]` to the VmRaster kernel,
+  avoiding dense `Vstim[B,Nt,Nx]`. Keep this path invisible to the public API,
+  benchmark it before broadening it, and extend the same static-footprint /
+  dynamic-current split to double-cable only with solver-equivalence tests.
 
 ---
 

@@ -19,6 +19,7 @@ from axonscope.benchmarking.hotpaths import (
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
 from axonscope.backends.jax.input_batches import (
+    build_factorized_vstim_midpoint_batch,
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
     build_vstim_midpoint_and_initial_previous_batch,
@@ -435,7 +436,12 @@ def _record_group_memory_estimate(
     positions_nbytes = int(np.asarray(cohort.x_positions_m).nbytes)
     dense_shape = (batch_size, nt, nx)
     dense_nbytes = int(np.prod(dense_shape, dtype=np.int64)) * itemsize
-    vstim_mid_nbytes = 0 if extracellular_format == "zero_no_context" else dense_nbytes
+    if extracellular_format == "zero_no_context":
+        vstim_mid_nbytes = 0
+    elif extracellular_format == "factorized_point_source":
+        vstim_mid_nbytes = (nt + batch_size * nx) * itemsize
+    else:
+        vstim_mid_nbytes = dense_nbytes
     vstim_previous_nbytes = batch_size * nx * itemsize if include_vstim_previous else 0
     iinj_dense_nbytes = dense_nbytes if intracellular_format == "dense" else 0
     output_width = int(kernel_options.recording.width_for(nx))
@@ -463,6 +469,8 @@ def _record_group_memory_estimate(
         "memory_estimate_intracellular_format": intracellular_format,
         "memory_estimate_extracellular_format": extracellular_format,
     }
+    if extracellular_format == "factorized_point_source":
+        metadata["memory_estimate_vstim_dense_equivalent_nbytes"] = dense_nbytes
     if capacity_bytes is not None and capacity_bytes > 0:
         metadata["device_memory_capacity_bytes"] = int(capacity_bytes)
         metadata["memory_estimate_device_fraction"] = total_nbytes / float(capacity_bytes)
@@ -576,15 +584,6 @@ def _run_single_cable_batch_group(
         else "dense"
     )
     extracellular_format = "zero_no_context" if use_zero_extracellular else "dense"
-    _record_group_memory_estimate(
-        group=group,
-        runtime=runtime,
-        cohort=cohort,
-        kernel_options=kernel_options,
-        intracellular_format=intracellular_format,
-        extracellular_format=extracellular_format,
-        include_vstim_previous=False,
-    )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -645,6 +644,50 @@ def _run_single_cable_batch_group(
                 skipped_dense_vstim_shape=list(skipped_shape),
                 skipped_dense_vstim_nbytes=int(np.prod(skipped_shape)) * int(dtype.itemsize),
             )
+        elif use_sparse_intracellular and observer_plan is not None:
+            vstim_mid = build_factorized_vstim_midpoint_batch(
+                cohort.representative,
+                cohort.contexts,
+                tsim_ms=tsim_ms,
+                dt_ms=dt_ms,
+                x_positions_m=cohort.x_positions_m,
+                axon_y_um=cohort.axon_y_um,
+                axon_z_um=cohort.axon_z_um,
+                dtype_local=runtime.membrane.dtype,
+            )
+            if vstim_mid is None:
+                vstim_mid = build_vstim_midpoint_batch(
+                    cohort.representative,
+                    cohort.contexts,
+                    tsim_ms=tsim_ms,
+                    dt_ms=dt_ms,
+                    x_positions_m=cohort.x_positions_m,
+                    axon_y_um=cohort.axon_y_um,
+                    axon_z_um=cohort.axon_z_um,
+                    dtype_local=runtime.membrane.dtype,
+                )
+                record_benchmark_metadata(
+                    input_format="dense",
+                    **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input"),
+                )
+            else:
+                extracellular_format = "factorized_point_source"
+                record_benchmark_metadata(
+                    input_format="factorized_point_source",
+                    target_nx=vstim_mid.target_nx,
+                    shared_current=vstim_mid.shared_current,
+                    dense_vstim_avoided=True,
+                    **benchmark_array_metadata(
+                        "vstim_current_mid_A",
+                        vstim_mid.current_mid_A,
+                        role="kernel_input",
+                    ),
+                    **benchmark_array_metadata(
+                        "vstim_footprint_mV_per_A",
+                        vstim_mid.footprint_mV_per_A,
+                        role="kernel_input",
+                    ),
+                )
         else:
             vstim_mid = build_vstim_midpoint_batch(
                 cohort.representative,
@@ -659,6 +702,15 @@ def _run_single_cable_batch_group(
             record_benchmark_metadata(
                 **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
             )
+    _record_group_memory_estimate(
+        group=group,
+        runtime=runtime,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        intracellular_format=intracellular_format,
+        extracellular_format=extracellular_format,
+        include_vstim_previous=False,
+    )
     with benchmark_span(
         "kernel.enqueue",
         group_id=group.group_id,

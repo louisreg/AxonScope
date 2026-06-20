@@ -89,7 +89,81 @@ def materialize_sparse_intracellular_current_density_batch(
     return jax.vmap(one_row)(density_mid, indices, mask)
 
 
+@dataclass(frozen=True)
+class FactorizedExtracellularPotentialBatch:
+    """Point-source extracellular potential without the dense time-space tensor.
+
+    ``current_mid_A`` stores the dynamic stimulus samples with shape ``(Nt,)``
+    for a shared waveform or ``(B, Nt)`` for row-specific waveforms.
+    ``footprint_mV_per_A`` stores the static spatial footprint with shape
+    ``(B, Nx)``. The dense midpoint potential is their product:
+    ``Vstim[B, Nt, Nx] = current_mid_A * footprint_mV_per_A``.
+    """
+
+    current_mid_A: Array
+    footprint_mV_per_A: Array
+    target_nx: int
+
+    def __post_init__(self) -> None:
+        current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
+        footprint_shape = tuple(
+            int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
+        )
+        if len(current_shape) not in {1, 2}:
+            raise ValueError("current_mid_A must have shape (Nt,) or (B, Nt).")
+        if len(footprint_shape) != 2:
+            raise ValueError("footprint_mV_per_A must have shape (B, Nx).")
+        if len(current_shape) == 2 and current_shape[0] != footprint_shape[0]:
+            raise ValueError(
+                "current_mid_A batch size must match footprint_mV_per_A, "
+                f"got {current_shape} and {footprint_shape}."
+            )
+        if int(self.target_nx) != footprint_shape[1]:
+            raise ValueError(
+                "target_nx must match footprint_mV_per_A width, "
+                f"got target_nx={self.target_nx} and shape {footprint_shape}."
+            )
+        if int(self.target_nx) < 1:
+            raise ValueError("target_nx must be >= 1.")
+        object.__setattr__(self, "target_nx", int(self.target_nx))
+
+    @property
+    def batch_size(self) -> int:
+        """Number of independent rows."""
+
+        return int(self.footprint_mV_per_A.shape[0])
+
+    @property
+    def step_count(self) -> int:
+        """Number of midpoint time samples."""
+
+        current = self.current_mid_A
+        return int(current.shape[0] if len(current.shape) == 1 else current.shape[1])
+
+    @property
+    def shared_current(self) -> bool:
+        """Whether all rows share the same temporal waveform."""
+
+        return len(getattr(self.current_mid_A, "shape", ())) == 1
+
+
+def materialize_factorized_extracellular_potential_batch(
+    batch: FactorizedExtracellularPotentialBatch,
+) -> Array:
+    """Expand a factorized extracellular batch to ``Vstim[B, Nt, Nx]``."""
+
+    current_mid_A = jnp.asarray(batch.current_mid_A)
+    footprint = jnp.asarray(batch.footprint_mV_per_A)
+    if current_mid_A.ndim == 1:
+        current = current_mid_A[None, :, None]
+    else:
+        current = current_mid_A[:, :, None]
+    return current * footprint[:, None, :]
+
+
 __all__ = [
+    "FactorizedExtracellularPotentialBatch",
     "SparseIntracellularCurrentDensityBatch",
+    "materialize_factorized_extracellular_potential_batch",
     "materialize_sparse_intracellular_current_density_batch",
 ]
