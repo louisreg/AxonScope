@@ -1943,14 +1943,27 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
             raise ValueError("extracellular_current_initial_previous_A is required.")
         footprint_batch = batch_space(extracellular_footprint_mV_per_A)
         current_mid_A = jnp.asarray(extracellular_current_mid_A)
-        current_previous_A = jnp.concatenate(
-            [
-                jnp.asarray(extracellular_current_initial_previous_A).reshape((1,)),
-                current_mid_A[:-1],
-            ],
-            axis=0,
-        )
-        step_count = int(current_mid_A.shape[0])
+        current_initial_previous_A = jnp.asarray(extracellular_current_initial_previous_A)
+        if current_mid_A.ndim == 1:
+            current_previous_A = jnp.concatenate(
+                [
+                    current_initial_previous_A.reshape((1,)),
+                    current_mid_A[:-1],
+                ],
+                axis=0,
+            )
+            step_count = int(current_mid_A.shape[0])
+        elif current_mid_A.ndim == 2:
+            current_previous_A = jnp.concatenate(
+                [
+                    current_initial_previous_A.reshape((batch_size, 1)),
+                    current_mid_A[:, :-1],
+                ],
+                axis=1,
+            )
+            step_count = int(current_mid_A.shape[1])
+        else:
+            raise ValueError("extracellular_current_mid_A must have shape (Nt,) or (B, Nt).")
     else:
         if extracellular_potential_mid_mV is None:
             raise ValueError("extracellular_potential_mid_mV is required.")
@@ -2135,6 +2148,10 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
             f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
         )
 
+    def current_to_space(value: Array) -> Array:
+        value = jnp.asarray(value)
+        return value if value.ndim == 0 else value[:, None]
+
     def step(carry, step_inputs):
         if use_factorized_vext:
             if intracellular_current_abs_mid is None:
@@ -2144,8 +2161,8 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
                 Iinj_abs, current_A, previous_current_A, local_step = step_inputs
             extracellular_drive_abs = (
                 (
-                    (cx_over_dt + Gx_abs_batch) * current_A
-                    - cx_over_dt * previous_current_A
+                    (cx_over_dt + Gx_abs_batch) * current_to_space(current_A)
+                    - cx_over_dt * current_to_space(previous_current_A)
                 )
                 * footprint_batch
             )
@@ -2227,13 +2244,23 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         dtype=jnp.asarray(time_start_index).dtype,
     )
     if use_factorized_vext:
+        current_scan_A = (
+            current_mid_A
+            if current_mid_A.ndim == 1
+            else jnp.swapaxes(current_mid_A, 0, 1)
+        )
+        previous_scan_A = (
+            current_previous_A
+            if current_previous_A.ndim == 1
+            else jnp.swapaxes(current_previous_A, 0, 1)
+        )
         scan_inputs = (
-            (current_mid_A, current_previous_A, local_steps)
+            (current_scan_A, previous_scan_A, local_steps)
             if intracellular_current_abs_mid is None
             else (
                 jnp.swapaxes(intracellular_current_abs_mid, 0, 1),
-                current_mid_A,
-                current_previous_A,
+                current_scan_A,
+                previous_scan_A,
                 local_steps,
             )
         )
@@ -3479,11 +3506,16 @@ def _run_double_cable_batch_observer_chunks(
         else None
     )
     if factorized_vext is not None:
-        previous_is_scalar = (
-            factorized_vext.current_initial_previous_A is not None
-            and jnp.asarray(factorized_vext.current_initial_previous_A).ndim == 0
+        if factorized_vext.current_initial_previous_A is None:
+            raise ValueError(
+                "factorized double-cable observer batches require "
+                "current_initial_previous_A."
+            )
+        previous_current = jnp.asarray(factorized_vext.current_initial_previous_A)
+        previous_shape_ok = previous_current.ndim == 0 or previous_current.shape == (
+            factorized_vext.batch_size,
         )
-        if not factorized_vext.shared_current or not previous_is_scalar:
+        if not previous_shape_ok:
             dense_vext = materialize_factorized_extracellular_potential_batch(
                 factorized_vext
             )
@@ -3504,11 +3536,6 @@ def _run_double_cable_batch_observer_chunks(
                 extracellular_potential_initial_previous_mV=dense_previous,
                 time_chunk_steps=time_chunk_steps,
                 progress_callback=progress_callback,
-            )
-        if factorized_vext.current_initial_previous_A is None:
-            raise ValueError(
-                "factorized double-cable observer batches require "
-                "current_initial_previous_A."
             )
         batch_size = factorized_vext.batch_size
     else:
@@ -3666,7 +3693,11 @@ def _run_double_cable_batch_observer_chunks(
         else:
             assert factorized_current_mid_A is not None
             vext_chunk = None
-            current_chunk = factorized_current_mid_A[start:stop]
+            current_chunk = (
+                factorized_current_mid_A[start:stop]
+                if factorized_current_mid_A.ndim == 1
+                else factorized_current_mid_A[:, start:stop]
+            )
         iinj_chunk = (
             None
             if intracellular_current_density_mid is None
@@ -3730,7 +3761,11 @@ def _run_double_cable_batch_observer_chunks(
             previous = cast(Any, vext_chunk)[:, -1]
         else:
             assert current_chunk is not None
-            previous_current_A = current_chunk[-1]
+            previous_current_A = (
+                current_chunk[-1]
+                if current_chunk.ndim == 1
+                else current_chunk[:, -1]
+            )
         if progress_callback is not None:
             progress_callback(chunk_index, len(chunk_ranges))
 

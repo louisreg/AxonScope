@@ -3015,6 +3015,37 @@ defer/collapse raster host finalization, or remove repeated preparation work.
 Cold-run work follows only after warm enqueue is characterized, and must preserve
 warm-repeat performance.
 
+P100 follow-up:
+`20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms that
+the warm enqueue bottleneck is mainly the jitted call. For example 08 warm
+observer-only:
+
+```text
+B50  kernel.enqueue 515.0 ms = 291.7 dispatch_jax + 119.2 finalize_observer + 104.1 self/other
+B100 kernel.enqueue 742.1 ms = 465.8 dispatch_jax + 117.6 finalize_observer + 158.7 self/other
+```
+
+The extracted per-event metadata shows B100 warm `dispatch_jax` is mostly the
+double-cable PCR/SoA group: about `49.7 ms` per double-cable group versus
+`8.5 ms` per single-cable group. The next solver-facing candidate is not another
+Triton/Pallas attempt; it is row-specific factorized point-source input for the
+double-cable VmRaster observer path, so fixed amplitude sweeps can batch protocol
+steps into the solver row dimension without dense `Vstim`.
+
+Local implementation status: this candidate is implemented for the current
+VmRaster path. Factorized point-source batches can carry row-specific temporal
+currents (`current_mid_A[B,Nt]`) and row-specific previous currents
+(`current_initial_previous_A[B]`), and the double-cable PCR/SoA VmRaster kernel
+consumes those arrays directly instead of materializing dense
+`Vstim[B,Nt,Nx]`. The activation/recruitment observer-only sweep now flattens
+compatible non-iterative amplitude values into the pool row dimension. Local
+validation covers builder/dense equivalence, dense-vs-factorized double-cable
+VmRaster agreement, protocol batching, and an active-pulse smoke with
+row-specific `current_mid_A`. Required next validation: P100
+`realistic_stress_observer_gpu`, compared against `20260620_212926`, with focus
+on example 08 JAX call count, `kernel.dispatch_jax`, `kernel.finalize_observer`,
+and warm end-to-end time.
+
 ## 4. Static shapes
 
 For repeated GPU calls, bucket:

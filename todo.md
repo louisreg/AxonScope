@@ -305,11 +305,41 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   remaining Python/JAX preparation, `kernel.dispatch_jax` as the actual JIT
   dispatch/solve call, and `kernel.finalize_observer` as raster host
   finalization/copy.
+- [x] Phase 7.6.5B Kaggle validation:
+  `benchmark/results/kaggle/20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+  New plots and compact CSV are in
+  `benchmark/results/realistic_examples/enqueue_phase_compare_20260620_212926`.
+  `example08` warm `kernel.enqueue` splits as follows:
+  B50 `515.0 ms = 291.7 dispatch_jax + 119.2 finalize_observer + 104.1 self/other`;
+  B100 `742.1 ms = 465.8 dispatch_jax + 117.6 finalize_observer + 158.7 self/other`.
+  Extracted event metadata shows the B100 warm `dispatch_jax` is mostly
+  double-cable PCR/SoA: about `49.7 ms` per double-cable group versus `8.5 ms`
+  per single-cable group. `kernel.wait` remains near zero.
 - [ ] Phase 7.6.5C: reduce warm `kernel.enqueue` using the new split. If
   `kernel.finalize_observer` dominates, defer/collapse host finalization and
   avoid repeated static VmRaster metadata copies. If `kernel.dispatch_jax`
   dominates, inspect executable/input-buffer reuse. If `kernel.enqueue.self_ms`
   dominates, remove Python-side preparation and repeated shape/table work.
+- [x] Phase 7.6.5C first candidate implementation: row-specific factorized
+  point-source currents are supported on the double-cable VmRaster observer path
+  (`current_mid_A[B,Nt]`, `current_initial_previous_A[B]`) without dense
+  `Vstim`. The activation/recruitment observer-only sweep can now batch
+  independent amplitude values into the solver row dimension when the pool and
+  update function are compatible. Iterative threshold workflows keep the
+  existing CPU->GPU update loop. Local validation:
+  `tests/unit/solvers/test_batch.py::test_factorized_point_source_batch_supports_row_specific_currents`,
+  `tests/unit/solvers/test_batch.py::test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa`,
+  `tests/unit/test_protocols.py::test_recruitment_sweep_batches_observer_only_independent_values`,
+  and an active-pulse local smoke showing one flattened observer-only pool call
+  with `shared_current=False` and `current_mid_A.shape == (40, 16)`.
+- [ ] Phase 7.6.5C Kaggle validation: rerun
+  `realistic_stress_observer_gpu` and compare example 08 call count,
+  `kernel.dispatch_jax`, `kernel.finalize_observer`, `kernel.enqueue.self_ms`,
+  peak/real memory, and recruitment summaries against
+  `20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100`. The target is
+  to reduce the current `8 amplitudes x 2 groups = 16` JAX calls per run toward
+  one single-cable plus one double-cable call for the non-iterative recruitment
+  sweep, without changing observer semantics.
 - [ ] Phase 7.6.5D: implement a stimulus/amplitude-only execution cache for
   point-source/extracellular sweeps. Reuse prepared spatial footprints and
   compiled executable; update only temporal stimulus/amplitude buffers where

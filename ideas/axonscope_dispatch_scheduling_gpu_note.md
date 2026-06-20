@@ -97,14 +97,43 @@ remaining bottleneck is actual JAX dispatch/solve, raster host finalization, or
 the parent `kernel.enqueue.self_ms` preparation work. Cold-run optimization comes
 after this warm enqueue pass and must not regress warm-repeat timings.
 
+P100 validation:
+`20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100` shows that
+example 08 warm enqueue is dominated by the jitted call, not by explicit wait:
+
+```text
+B50  enqueue 515.0 ms = dispatch_jax 291.7 + finalize_observer 119.2 + self/other 104.1
+B100 enqueue 742.1 ms = dispatch_jax 465.8 + finalize_observer 117.6 + self/other 158.7
+```
+
+Event metadata splits B100 warm `dispatch_jax` into about `49.7 ms` per
+double-cable group versus `8.5 ms` per single-cable group. The useful scheduling
+target is therefore fewer/larger compatible calls before async: for non-iterative
+amplitude sweeps, batch protocol steps into the row dimension while keeping
+factorized point-source `Vext` row-specific. Iterative threshold protocols still
+need the CPU update loop.
+
+Local 2026-06-20 implementation follow-up: row-specific point-source currents
+are now accepted by the factorized `Vext` builder and by the double-cable
+VmRaster PCR/SoA path. Activation/recruitment observer-only sweeps try a
+conservative flattened-amplitude fast path when rows are pure `Axon` or
+`AxonInstance` values and the update mutates compatible clones. Local tests cover
+row-specific factorized materialization, dense-vs-factorized double-cable
+VmRaster agreement, and one-call protocol batching. A local active-pulse smoke
+confirmed `shared_current=False`, `current_mid_A.shape == (40, 16)`, and one
+`simulation.pool.total` for a single-cable subset. This still needs P100
+validation on the mixed example 08 stress case; compare call count and
+`kernel.dispatch_jax/finalize_observer/self_ms` against run `20260620_212926`.
+
 The useful parts of this note remain:
 
 ```text
 1. bucket/coalesce compatible groups before async scheduling;
 2. keep bucket keys minimal to avoid recompilation;
 3. compare hardware memory capacity against estimated simulation/output bytes;
-4. use stricter pending-memory limits for full Vm than for VmRaster;
-5. treat async enqueue as optional evidence-gated scheduling, not a core speedup.
+4. batch non-iterative amplitude/protocol steps before async pending groups;
+5. use stricter pending-memory limits for full Vm than for VmRaster;
+6. treat async enqueue as optional evidence-gated scheduling, not a core speedup.
 ```
 
 ---
