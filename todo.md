@@ -101,6 +101,10 @@ Work should start here unless the user asks otherwise.
   `B >= 2048` threshold and therefore did not activate the new batch-native
   path for `B=50/100`. The batch-native `pcr_soa` route now uses one shared
   `B >= 32` threshold for full, center, and observer-only recording modes.
+- [x] Add progress diagnostics for long realistic observer GPU runs. The
+  `d64fb77` Kaggle run was cancelled while `example08_recruitment runs=50` was
+  still silent, so `realistic_stress_observer_gpu` now prints solver route,
+  amplitude/dispatch progress, and per-case completion timing/RSS.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

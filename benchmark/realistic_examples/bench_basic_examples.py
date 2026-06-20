@@ -241,6 +241,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "warm runs."
         ),
     )
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Print plain progress for sweep amplitudes and dispatch groups. "
+            "Useful for long Kaggle stress cases."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned cases only.")
     args = parser.parse_args(argv)
 
@@ -400,6 +409,8 @@ def child_command(args: argparse.Namespace, *, platform_label: str) -> list[str]
         command.append("--no-plots")
     if args.profile:
         command.append("--profile")
+    if args.progress:
+        command.append("--progress")
     if args.dry_run:
         command.append("--dry-run")
     return command
@@ -438,6 +449,14 @@ def run_current_platform(args: argparse.Namespace) -> int:
         )
         rows.append(row)
         profile_rows.extend(case_profile_rows)
+        print(
+            "completed "
+            f"[{index}/{len(cases)}] {case.workflow} fiber={case.fiber_type} "
+            f"runs={case.run_count} first_run={row.first_run_s:.3f}s "
+            f"warm_mean={row.warm.mean_s:.3f}s "
+            f"peak_rss={row.process_peak_rss_mib:.1f}MiB",
+            flush=True,
+        )
 
     json_path, csv_path = write_outputs(
         rows,
@@ -462,6 +481,7 @@ def run_current_platform(args: argparse.Namespace) -> int:
             "repeats": int(args.repeats),
             "warmups": int(args.warmups),
             "profile": bool(args.profile),
+            "progress": bool(args.progress),
         },
     )
     print(f"json: {json_path}")
@@ -922,6 +942,7 @@ def run_example08(
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     import axonscope as axs
+    import jax
     import numpy as np
     from examples.basic import example_08_recruitment_curve_population as ex08
 
@@ -934,6 +955,11 @@ def run_example08(
             if args.example08_recording == "center"
             else axs.Recording.voltage()
         )
+    )
+    _print_example08_solver_route(
+        platform=str(jax.default_backend()),
+        batch_size=len(pool),
+        recording=str(args.example08_recording),
     )
     chunk_size = example08_observer_cpu_chunk_size(args)
     if chunk_size > 0:
@@ -948,7 +974,8 @@ def run_example08(
                 dt=case.dt_ms * axs.ms,
                 criterion=criterion,
                 recording=recording,
-                progress=False,
+                progress="plain" if args.progress else False,
+                solver_progress="plain" if args.progress else False,
             )
             activated_chunks.append(np.asarray(chunk_curve.activated, dtype=bool))
         activated = (
@@ -965,7 +992,8 @@ def run_example08(
             dt=case.dt_ms * axs.ms,
             criterion=criterion,
             recording=recording,
-            progress=False,
+            progress="plain" if args.progress else False,
+            solver_progress="plain" if args.progress else False,
         )
         activated = np.asarray(curve.activated, dtype=bool)
     fraction = np.mean(activated, axis=1) if activated.shape[1] else np.zeros(len(amplitudes))
@@ -976,6 +1004,36 @@ def run_example08(
         "unmyelinated_final": float(np.mean(activated[-1, families == "unmyelinated"])),
         "myelinated_final": float(np.mean(activated[-1, families == "myelinated"])),
     }
+
+
+def _print_example08_solver_route(
+    *,
+    platform: str,
+    batch_size: int,
+    recording: str,
+) -> None:
+    from axonscope.solvers import resolve_double_cable_block_solver
+    from axonscope.solvers.batch_kernels import (
+        _resolve_double_cable_kernel_block_solver,
+        _use_batch_native_double_cable_pcr_soa_solver,
+    )
+
+    run_solver = resolve_double_cable_block_solver("auto", platform=platform)
+    kernel_solver = _resolve_double_cable_kernel_block_solver(
+        run_solver,
+        batch_size=batch_size,
+    )
+    batch_native = _use_batch_native_double_cable_pcr_soa_solver(
+        kernel_solver,
+        batch_size=batch_size,
+    )
+    print(
+        "example08 solver_route: "
+        f"platform={platform} recording={recording} B={batch_size} "
+        f"auto={run_solver} kernel={kernel_solver} "
+        f"batch_native_pcr_soa={batch_native}",
+        flush=True,
+    )
 
 
 class RssMonitor:

@@ -118,6 +118,7 @@ def main() -> None:
             stress=True,
             platforms=("gpu",),
             example08_recording="observer_only",
+            progress=True,
         )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
@@ -379,6 +380,7 @@ def run_realistic_examples(
     platforms: tuple[str, ...] = ("cpu", "gpu"),
     example08_recording: str = "full",
     example08_observer_cpu_chunk_size: int = 0,
+    progress: bool = False,
 ) -> None:
     command = [
         sys.executable,
@@ -399,6 +401,8 @@ def run_realistic_examples(
                 str(example08_observer_cpu_chunk_size),
             ]
         )
+    if progress:
+        command.append("--progress")
     if smoke:
         command.extend(
             [
