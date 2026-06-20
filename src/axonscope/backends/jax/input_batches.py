@@ -860,29 +860,38 @@ def _try_build_shared_point_source_factorized_vstim_batch(
     np_dtype: np.dtype[Any],
     dtype_local: jnp.dtype,
 ) -> FactorizedExtracellularPotentialBatch | None:
-    if not rows or any(len(row) != 1 for row in rows):
+    source = _compatible_point_source_rows(rows)
+    if source is None:
         return None
-    first_context = rows[0][0]
-    if not isinstance(first_context, AnalyticalExtracellularContext):
-        return None
-    if any(row[0] is not first_context for row in rows):
-        return None
-    if len(first_context.electrodes) != 1:
-        return None
-    electrode = first_context.electrodes[0]
-    if not isinstance(electrode, PointSourceElectrode):
-        return None
-    stimulus = getattr(electrode, "stimulus", None)
-    if stimulus is None:
-        return None
-
-    current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
-    current_initial_previous_A = None
+    first_context, electrode, row_stimuli = source
+    current_rows_A = [
+        np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+        for stimulus in row_stimuli
+    ]
+    shared_mid_current = all(
+        np.array_equal(current_rows_A[0], row) for row in current_rows_A[1:]
+    )
+    previous_rows_A = None
     if t_initial_previous_ms is not None:
-        current_initial_previous_A = np.asarray(
-            stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
-            dtype=np_dtype,
-        ).reshape(-1)[0]
+        previous_rows_A = [
+            np.asarray(
+                stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+                dtype=np_dtype,
+            ).reshape(-1)[0]
+            for stimulus in row_stimuli
+        ]
+    shared_previous_current = previous_rows_A is None or all(
+        np.array_equal(previous_rows_A[0], row) for row in previous_rows_A[1:]
+    )
+    shared_current = shared_mid_current and shared_previous_current
+    current_A = current_rows_A[0] if shared_current else np.stack(current_rows_A, axis=0)
+    current_initial_previous_A = None
+    if previous_rows_A is not None:
+        current_initial_previous_A = (
+            np.asarray(previous_rows_A[0], dtype=np_dtype)
+            if shared_current
+            else np.asarray(previous_rows_A, dtype=np_dtype)
+        )
     cache_key = _point_source_footprint_cache_key(
         first_context,
         electrode,
@@ -928,6 +937,7 @@ def _try_build_shared_point_source_factorized_vstim_batch(
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
+        shared_current=bool(shared_current),
         vstim_factorized_dense_ratio=(
             factorized_nbytes / float(dense_equivalent_nbytes)
             if dense_equivalent_nbytes
@@ -943,6 +953,57 @@ def _try_build_shared_point_source_factorized_vstim_batch(
             if current_initial_previous_A is None
             else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
         ),
+    )
+
+
+def _compatible_point_source_rows(
+    rows: Sequence[tuple[ExtracellularContext, ...]],
+) -> tuple[
+    AnalyticalExtracellularContext,
+    PointSourceElectrode,
+    tuple[Stimulus, ...],
+] | None:
+    if not rows or any(len(row) != 1 for row in rows):
+        return None
+    first_context = rows[0][0]
+    if not isinstance(first_context, AnalyticalExtracellularContext):
+        return None
+    if len(first_context.electrodes) != 1:
+        return None
+    first_electrode = first_context.electrodes[0]
+    if not isinstance(first_electrode, PointSourceElectrode):
+        return None
+    stimuli = []
+    for row in rows:
+        context = row[0]
+        if not isinstance(context, AnalyticalExtracellularContext):
+            return None
+        if len(context.electrodes) != 1:
+            return None
+        electrode = context.electrodes[0]
+        if not isinstance(electrode, PointSourceElectrode):
+            return None
+        if not _same_point_source_geometry(first_context, first_electrode, context, electrode):
+            return None
+        stimulus = getattr(electrode, "stimulus", None)
+        if stimulus is None:
+            return None
+        stimuli.append(stimulus)
+    return first_context, first_electrode, tuple(stimuli)
+
+
+def _same_point_source_geometry(
+    lhs_context: AnalyticalExtracellularContext,
+    lhs_electrode: PointSourceElectrode,
+    rhs_context: AnalyticalExtracellularContext,
+    rhs_electrode: PointSourceElectrode,
+) -> bool:
+    return (
+        float(lhs_context.sigma_S_m) == float(rhs_context.sigma_S_m)
+        and float(lhs_electrode.x0_m) == float(rhs_electrode.x0_m)
+        and float(lhs_electrode.y_um) == float(rhs_electrode.y_um)
+        and float(lhs_electrode.z_um) == float(rhs_electrode.z_um)
+        and float(lhs_electrode.min_distance_m) == float(rhs_electrode.min_distance_m)
     )
 
 

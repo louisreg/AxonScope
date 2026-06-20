@@ -9,6 +9,7 @@ stimulus amplitude.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence, TypeAlias
 
@@ -685,6 +686,29 @@ def _activation_pool_sweep(
     progress_display = _SweepProgress(progress)
     observation_rows: list[np.ndarray] = []
     try:
+        batched_observations = _try_evaluate_activation_observer_pool_batched_values(
+            base_pool,
+            update=update,
+            values=value_tuple,
+            criterion=criterion,
+            duration=duration,
+            dt=dt,
+            progress=solver_progress,
+        )
+        if batched_observations is not None:
+            for index, observations in enumerate(batched_observations):
+                observation_rows.append(observations)
+                progress_display.update(
+                    label="Pool sweep",
+                    current_index=index,
+                    values=value_tuple,
+                    completed_rows=observation_rows,
+                    progress_summary=_activation_progress_summary,
+                )
+            return PoolSweepResult(
+                values=value_tuple,
+                observations=np.asarray(observation_rows, dtype=bool),
+            )
         for index, value in enumerate(value_tuple):
             updated_pool = tuple(
                 _apply_pool_update(row, update, value) for row in base_pool
@@ -728,6 +752,95 @@ def _activation_pool_sweep(
         values=value_tuple,
         observations=np.stack(observation_rows, axis=0),
     )
+
+
+def _try_evaluate_activation_observer_pool_batched_values(
+    pool: tuple[SimulationCandidate, ...],
+    *,
+    update: PoolUpdate,
+    values: tuple[Any, ...],
+    criterion: ActivationCriterion,
+    duration: Any,
+    dt: Any,
+    progress: bool | str,
+) -> np.ndarray | None:
+    """Evaluate independent activation sweep values in one observer-only pool run."""
+
+    if len(values) <= 1 or len(pool) == 0:
+        return None
+    if any(isinstance(row, SimResult) for row in pool):
+        return None
+    if any(not isinstance(row, (Axon, AxonInstance)) for row in pool):
+        return None
+    double_cable_count = sum(
+        1
+        for row in pool
+        if getattr(row, "resolved_formulation", None) == "double-cable"
+    )
+    if double_cable_count and double_cable_count * len(values) < 16:
+        return None
+
+    flat_pool: list[Axon | AxonInstance] = []
+    try:
+        for value in values:
+            for row in pool:
+                candidate = _clone_candidate_for_batched_update(row)
+                updated = _apply_pool_update(candidate, update, value)
+                if not isinstance(updated, (Axon, AxonInstance)):
+                    return None
+                flat_pool.append(updated)
+    except (AttributeError, KeyError, ValueError, TypeError):
+        return None
+
+    activation = _activation_observer_definition(criterion)
+    pool_result = simulate_pool(
+        flat_pool,
+        duration=duration,
+        dt=dt,
+        recording=Recording.none(),
+        observers=(activation,),
+        progress=progress,
+    )
+    flat_observations = np.asarray(
+        [
+            _activation_observation_activated(view, activation)
+            for view in pool_result
+        ],
+        dtype=bool,
+    )
+    return flat_observations.reshape((len(values), len(pool)))
+
+
+def _clone_candidate_for_batched_update(row: Axon | AxonInstance) -> Axon | AxonInstance:
+    if isinstance(row, AxonInstance):
+        clone = AxonInstance(
+            row.axon,
+            x_offset=units.Q_(row.x_offset_um, "micrometer"),
+            y=units.Q_(row.y_um, "micrometer"),
+            z=units.Q_(row.z_um, "micrometer"),
+        )
+        clone.intracellular_contexts = [
+            copy.copy(context) for context in row.intracellular_contexts
+        ]
+        clone.extracellular_context = _clone_extracellular_context(
+            row.extracellular_context
+        )
+        clone.Veinit = row.Veinit
+        clone._use_extracellular_override = row._use_extracellular_override
+        clone._xraxial_override = (
+            None if row._xraxial_override is None else row._xraxial_override.copy()
+        )
+        clone._xg_override = None if row._xg_override is None else row._xg_override.copy()
+        clone._xc_override = None if row._xc_override is None else row._xc_override.copy()
+        return clone
+    return copy.copy(row)
+
+
+def _clone_extracellular_context(context: Any) -> Any:
+    if context is None:
+        return None
+    electrodes = [copy.copy(electrode) for electrode in context.electrodes]
+    return context.with_electrodes(electrodes)
 
 
 def pool_sweep(

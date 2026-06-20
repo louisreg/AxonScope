@@ -174,6 +174,78 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
     )
 
 
+def test_recruitment_sweep_batches_observer_only_independent_values(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = tuple(
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=100.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        )
+        for _ in range(2)
+    )
+    thresholds_nA = (0.5, 1.5)
+    calls = []
+
+    class _ObservedView:
+        def __init__(self, activated):
+            words = np.asarray([[[[0b100 if activated else 0]]]], dtype=np.uint32)
+            self.observations = {
+                VM_RASTER_OBSERVATION_KEY: VmRasterResult(
+                    words=words,
+                    nt=3,
+                    dt_ms=1.0,
+                    definitions=(),
+                    names=("activation",),
+                    probe_indices=np.asarray([[1]], dtype=np.int32),
+                    probe_mask=np.asarray([[True]], dtype=bool),
+                    original_indices=np.asarray([[1]], dtype=np.int32),
+                    positions_um=np.asarray([[100.0]], dtype=float),
+                    thresholds_mV=np.asarray([0.0], dtype=float),
+                )
+            }
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        updated_pool = tuple(updated_pool)
+        calls.append((updated_pool, kwargs))
+        return tuple(
+            _ObservedView(row.tested_current_nA >= thresholds_nA[index % len(pool)])
+            for index, row in enumerate(updated_pool)
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        amplitudes=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+    )
+
+    assert len(calls) == 1
+    flat_pool, call = calls[0]
+    assert len(flat_pool) == 6
+    assert isinstance(call["recording"], axs.Recording)
+    assert not call["recording"].voltage
+    assert call["observers"][0].name == "activation"
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [True, False], [True, True]],
+    )
+
+
 def test_recruitment_sweep_requires_current_units():
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,

@@ -37,6 +37,8 @@ from axonscope.solvers.batch_kernels import (
     _use_batch_native_double_cable_pcr_soa_solver,
 )
 from axonscope.solvers.batch_inputs import (
+    FactorizedExtracellularPotentialBatch,
+    materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
 )
 from axonscope.solvers.observer_runtime import (
@@ -436,6 +438,44 @@ def test_factorized_point_source_batch_matches_dense_builder_and_observer_raster
     )
 
 
+def test_factorized_point_source_batch_supports_row_specific_currents():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    context = axon.extracellular_contexts[0]
+    electrode = context.electrodes[0]
+    contexts = [
+        context.with_electrodes([electrode.with_scaled_stimulus(1.0)]),
+        context.with_electrodes([electrode.with_scaled_stimulus(0.5)]),
+    ]
+    dense = build_vstim_midpoint_batch(
+        axon,
+        contexts,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        contexts,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+
+    assert factorized is not None
+    assert factorized.current_mid_A.shape == (2, int(tsim / dt))
+    assert factorized.current_initial_previous_A is not None
+    assert factorized.current_initial_previous_A.shape == (2,)
+    assert factorized.shared_current is False
+    materialized = materialize_factorized_extracellular_potential_batch(factorized)
+    np.testing.assert_allclose(
+        np.asarray(materialized),
+        np.asarray(dense),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
 def test_build_footprint_vstim_batch_matches_generic_context_builder():
     axon = _hh_extracellular_axon()
     base_context = axon.extracellular_contexts[0]
@@ -815,6 +855,81 @@ def test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa(
 
     assert dense.Vm is None
     assert compact.Vm is None
+    assert dense.observations is not None
+    assert compact.observations is not None
+    np.testing.assert_array_equal(
+        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
+def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa(
+    monkeypatch,
+):
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [base_contexts, base_contexts]
+    shared = build_factorized_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert shared is not None
+    assert shared.current_initial_previous_A is not None
+    scale = jnp.asarray([1.0, 0.5], dtype=runtime.membrane.dtype)
+    row_specific = FactorizedExtracellularPotentialBatch(
+        current_mid_A=scale[:, None] * shared.current_mid_A[None, :],
+        current_initial_previous_A=scale * shared.current_initial_previous_A,
+        footprint_mV_per_A=shared.footprint_mV_per_A,
+        target_nx=shared.target_nx,
+    )
+    dense_mid = materialize_factorized_extracellular_potential_batch(row_specific)
+    dense_previous = materialize_factorized_extracellular_potential_initial_previous(
+        row_specific
+    )
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    monkeypatch.setattr(
+        batch_kernels,
+        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+        1,
+    )
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=row_specific,
+        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=observer,
+    )
+
     assert dense.observations is not None
     assert compact.observations is not None
     np.testing.assert_array_equal(
