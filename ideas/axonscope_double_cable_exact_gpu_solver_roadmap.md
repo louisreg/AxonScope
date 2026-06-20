@@ -3056,6 +3056,13 @@ usage: B100 first run `22.1 -> 235.0 s`, peak RSS `5.6 -> 9.9 GiB`. Treat this
 as evidence for chunked protocol-step batching plus memory-aware gating, not as
 a final double-cable solver optimization.
 
+Optimization checkpoint: no additional double-cable solver candidate is obvious
+enough to pursue before cleanup. Future solver/backend optimization should be
+evidence-gated by both cold and warm timings, plus memory. The likely future
+directions are chunked protocol-step batching, stimulus-buffer reuse, and a
+small async scheduling concept benchmark; all are backlog items rather than the
+next default task.
+
 ## 4. Static shapes
 
 For repeated GPU calls, bucket:

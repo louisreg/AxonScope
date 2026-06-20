@@ -136,6 +136,14 @@ non-iterative protocol steps in chunks, not as one unlimited flattened batch.
 The batching policy should use the hardware-memory estimate already called out
 in this note.
 
+Current decision: pause further hot-path optimization and switch back to cleanup
+work. When optimization resumes, cold-run behavior is no longer optional
+evidence: every GPU change must compare first-run/compile time, warm time, RSS,
+device-memory estimate, and output equivalence. Async GPU scheduling remains a
+small concept test only if it can be isolated behind an explicit benchmark flag;
+do not make it a default path unless it beats the synchronous path without
+raising memory risk.
+
 The useful parts of this note remain:
 
 ```text

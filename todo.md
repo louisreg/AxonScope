@@ -20,8 +20,10 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 ## Current Snapshot
 
 Updated on 2026-06-20 after the full/center/VmRaster CPU+GPU recording-mode
-comparison showed that the current GPU bottleneck is the execution envelope
-around the solver, not the solver kernel itself.
+comparison and the observer amplitude-batching validation. The current
+hot-path optimization pass has reached a checkpoint: warm solver-side observer
+execution is acceptable for now, and the next default work is cleanup/API/docs
+rather than another solver tweak.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -30,8 +32,8 @@ around the solver, not the solver kernel itself.
 | Phase 7.6.2 | Done | Memory-transfer and long-run cleanup landed for current hotpaths. |
 | Phase 7.6.3 | Closed | Exact double-cable GPU solver optimization pass is complete. No new public solver route; see `benchmark/reports/double_cable_solver_optimization_2026_06.md`. |
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
-| Phase 7.6.5 | In progress | Execution-envelope optimization: runtime/input reuse, dispatch/probe-plan reuse, Vext/stimulus materialization, launch/enqueue overhead, and result packaging. |
-| Phase 7.6.6 | Planned | GPU dispatch scheduling after reuse work: memory-aware bucket/coalesce first, optional async enqueue second. |
+| Phase 7.6.5 | Checkpoint | Execution-envelope optimization is good enough for now. Future work must include cold-run, RSS/device-memory, and warm-repeat evidence. |
+| Phase 7.6.6 | Later | GPU dispatch scheduling remains a conceptual benchmark target only: memory-aware bucket/coalesce first, optional async enqueue second. |
 | Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster. CPU/GPU P100 validation passed; remaining work is decoder breadth and larger memory-focused stress. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
@@ -53,7 +55,29 @@ Current solver surface:
 
 Work should start here unless the user asks otherwise.
 
-Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
+Default next step after the 2026-06-20 optimization checkpoint:
+
+1. Clean solver/backend surface.
+   - Keep the active double-cable solver options limited to `auto`, `thomas`,
+     `pcr`, `pcr_soa`, and `pcr_adaptive`.
+   - Move failed/standby Pallas, Triton, JAX-Triton, split iterative,
+     associative, and pseudo-double evidence out of active solver code paths.
+   - Keep benchmark/research artifacts discoverable under `benchmark/` or
+     `ideas/`, not mixed into runtime dispatch.
+
+2. Clean observer/VmRaster API and docs.
+   - Document VmRaster as the strict solver-side observer output.
+   - Update examples/tests/docs to use the current observer path only.
+   - Remove or archive old generic observer entry points that could confuse the
+     public API.
+
+3. Clean Vext/stimulation and placement APIs against `GUIDELINES.md`.
+   - Prefer clear breaking changes over compatibility shims while AxonScope is
+     pre-release.
+   - Keep point-source factorized `Vext` as an internal optimization, not a new
+     user-facing mode.
+
+Performance backlog, only if optimization work resumes:
 
 1. Stabilize the benchmark target.
    - Keep the six-way full/center/VmRaster CPU+GPU comparison as the regression
@@ -346,27 +370,29 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   `5.6 -> 9.9 GiB`. Decision: the idea is useful, but full amplitude flattening
   must not be unconditional for large `pool_size * protocol_steps`; add
   chunking or memory-aware gating before keeping it as the default.
-- [ ] Phase 7.6.5C follow-up: chunk non-iterative amplitude batching. Target
-  2-4 amplitudes per solver call first, then choose automatically from hardware
-  memory capacity and estimated simulation/output bytes. Success means keeping
-  most of the call-count/finalization win while avoiding B400-style cold/RSS
-  blow-ups.
-- [ ] Phase 7.6.5D: implement a stimulus/amplitude-only execution cache for
-  point-source/extracellular sweeps. Reuse prepared spatial footprints and
-  compiled executable; update only temporal stimulus/amplitude buffers where
+- [ ] Future performance backlog: chunk non-iterative amplitude batching.
+  Target 2-4 amplitudes per solver call first, then choose automatically from
+  hardware memory capacity and estimated simulation/output bytes. Success means
+  keeping most of the call-count/finalization win while avoiding B400-style
+  cold/RSS blow-ups.
+- [ ] Future performance backlog: implement a stimulus/amplitude-only execution
+  cache for point-source/extracellular sweeps. Reuse prepared spatial footprints
+  and compiled executable; update only temporal stimulus/amplitude buffers where
   shapes match.
-- [ ] Phase 7.6.5E: benchmark reuse using full/center/VmRaster output modes on
-  CPU and GPU, then regenerate the recording-mode comparison plots. Success:
-  reduce `runtime.prepare + dispatch.build_plan` by at least 30% on
-  `example08` warm repeats without changing solver outputs.
-- [ ] Phase 7.6.5F: cold-run optimization pass, only after warm enqueue is
-  understood. Improve compile/first-call behavior without regressing warm-repeat
-  timings or changing the fast path.
-- [ ] Phase 7.6.6: evaluate GPU dispatch scheduling only after Phase 7.6.5
-  reuse work. Use `ideas/axonscope_dispatch_scheduling_gpu_note.md`: first test
-  memory-aware bucket/coalesce of compatible groups, then optional async
-  enqueue/wait. Do not rely on async for core speedups and do not enable it by
-  default without memory-budget checks.
+- [ ] Future performance backlog: benchmark reuse using full/center/VmRaster
+  output modes on CPU and GPU, then regenerate the recording-mode comparison
+  plots. Success: reduce `runtime.prepare + dispatch.build_plan` by at least
+  30% on `example08` warm repeats without changing solver outputs.
+- [ ] Future performance backlog: cold-run optimization pass. Every future GPU
+  optimization must report first-run/cold compile time, warm-repeat time,
+  process RSS, device-memory estimate, and output equivalence. Improve
+  compile/first-call behavior without regressing warm-repeat timings or changing
+  the fast path.
+- [ ] Future performance backlog: evaluate GPU dispatch scheduling only as a
+  bounded concept test. Use `ideas/axonscope_dispatch_scheduling_gpu_note.md`:
+  first test memory-aware bucket/coalesce of compatible groups, then optional
+  async enqueue/wait behind an explicit benchmark option. Do not rely on async
+  for core speedups and do not enable it by default without memory-budget checks.
 - [ ] Phase 7.7: clean stimulation and placement APIs after the first Vext pass.
 
 ## Phase 7.6.5 Execution-Envelope And Vext Plan
