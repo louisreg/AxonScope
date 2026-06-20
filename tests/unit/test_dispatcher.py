@@ -1,6 +1,7 @@
 import numpy as np
 
 import axonscope as axs
+import axonscope.backends.jax.group_runner as group_runner
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.solvers.batch_kernels as batch_kernels
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
@@ -480,6 +481,44 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     assert components["vm_output"] == 0
     assert components["vstim_mid"] < group_metadata["memory_estimate_vstim_dense_equivalent_nbytes"]
     assert components["vstim_previous"] < 2 * 11 * 8
+
+
+def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
+    def make_pool():
+        return [
+            _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0),
+            _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
+        ]
+
+    group_runner._BATCH_RUNTIME_CACHE.clear()
+    axs.enable_benchmark(
+        "/tmp/axonscope-structural-runtime-cache-test",
+        print_summary=False,
+        save=False,
+    )
+    try:
+        run_pool(
+            make_pool(),
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        run_pool(
+            make_pool(),
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert report is not None
+    runtime_events = [event for event in report.events if event.name == "runtime.prepare"]
+    runtime_cache_events = [
+        event.metadata.get("batch_runtime_cache") for event in runtime_events
+    ]
+    assert runtime_cache_events == ["miss", "hit"]
 
 
 def test_dispatch_plan_preserves_pool_indices():

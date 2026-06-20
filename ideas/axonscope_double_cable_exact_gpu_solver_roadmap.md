@@ -2983,8 +2983,25 @@ unsupported context shapes. Diagnostic P100 run
 `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` revealed that
 the padded double-cable group was still forced to full/dense recording by the
 dispatcher padding fallback, so it did not validate this path. Local fix now
-preserves `recording=none` for padded VmRaster observer groups; Kaggle P100
-validation is still required before calling this a runtime win.
+preserves `recording=none` for padded VmRaster observer groups.
+
+Validated P100 run
+`20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms the
+factorized double-cable VmRaster path is active for mixed/padded example 08
+groups. Warm end-to-end improves by about `1.2x` versus `194533` (`B=50`:
+`1.237 -> 1.042 s`, `B=100`: `2.082 -> 1.728 s`). The double-cable group memory
+estimate drops from dense `Vstim+Vm` (`0.678/1.355 MiB`) to compact factorized
+inputs (`0.0069/0.0132 MiB`). This is a real win, but not a solver-kernel
+breakthrough; the next high-leverage target remains stable runtime/input reuse
+across amplitude and threshold iterations.
+
+Local follow-up: `_prepare_batch_runtime` now uses a structural group signature
+for stimulation-independent runtime reuse, rather than simulation/solver object
+identity. This is intentionally narrower than a stimulus cache: it can reuse
+membrane/cable/extracellular runtime across equivalent rebuilt pools, while
+prepared cohorts and mutable contexts remain identity-bound. Validate on P100 by
+checking that rebuilt example 08 warm repeats lose their two
+`batch_runtime_cache_misses` and reduce `runtime.prepare`.
 
 ## 4. Static shapes
 

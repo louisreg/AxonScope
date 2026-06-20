@@ -70,8 +70,23 @@ Diagnostic P100 run
 `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` showed the
 single-cable group was factorized, but the padded double-cable group was still
 forced to full/dense recording by the padding fallback. Local fix preserves
-`recording=none` for padded VmRaster observer groups; rerun P100 before changing
-scheduling assumptions for mixed single/double groups.
+`recording=none` for padded VmRaster observer groups.
+
+Validated P100 run
+`20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms the
+padded double-cable group now uses `recording_mode=none` and
+`factorized_point_source`. Example 08 warm mean improves by about `1.2x`
+(`B=50`: `1.237 -> 1.042 s`, `B=100`: `2.082 -> 1.728 s`) and compact observer
+semantics match the full-Vm recruitment summary for myelinated fibers. The
+remaining profile is still dominated by runtime/dispatch preparation and
+launch/enqueue, so scheduling/reuse work remains the next higher-leverage phase.
+
+Local follow-up: batch runtime reuse now uses a structural group signature for
+stimulation-independent solver runtimes. This should remove the two
+`batch_runtime_cache_misses` that appear whenever the benchmark rebuilds an
+equivalent pool between repeats, without reusing mutable contexts or stimulus
+objects. Keep prepared cohort/context caches identity-bound until there is an
+explicit stimulus-update contract.
 
 The useful parts of this note remain:
 

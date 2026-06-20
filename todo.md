@@ -255,7 +255,7 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   shapes. Local validation: dense/factorized double-cable VmRaster outputs match
   and dispatcher metadata records
   `inputs.extracellular input_format=factorized_point_source`.
-- [ ] Phase 7.6.5A Kaggle validation of double-cable factorized `Vext`: rerun
+- [x] Phase 7.6.5A Kaggle validation of double-cable factorized `Vext`: rerun
   `realistic_stress_observer_gpu` against
   `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100` and check
   example 08 double-cable group memory, `inputs.extracellular`,
@@ -268,6 +268,27 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
     `recording=none` for padded groups when a VmRaster observer is present, and
     cover it with a padded double-cable factorized dispatcher test. Rerun still
     required.
+  - 2026-06-20 validation run
+    `20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100`: padded
+    double-cable groups now run `recording_mode=none` with
+    `input_format=factorized_point_source`, `vm_output=0`, and factorized
+    `Vstim`. Example 08 warm mean improves versus `194533` by `1.237 -> 1.042 s`
+    at `B=50` (`1.19x`) and `2.082 -> 1.728 s` at `B=100` (`1.20x`).
+    Double-cable group estimates drop from dense `Vstim+Vm` to compact raster
+    inputs: `0.678 -> 0.0069 MiB` at `B=50`, `1.355 -> 0.0132 MiB` at `B=100`.
+    Summary semantics also return to the full-Vm baseline:
+    `myelinated_final ~= 0.28/0.30` instead of the intermediate broken
+    observer-only `0.0`.
+- [x] Phase 7.6.5B0 structural runtime cache: the batch runtime cache now uses
+  a structural group signature for stimulation-independent solver runtimes
+  instead of `id(simulation)`/`id(solver_axon)`. This lets benchmark repeats or
+  protocol code that rebuild equivalent pools reuse the expensive membrane/cable
+  runtime while keeping cohort/context/stimulus caches identity-based. Local
+  validation:
+  `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`.
+  Next Kaggle validation should check that example 08 warm-repeat
+  `runtime.prepare` no longer reports two `batch_runtime_cache_misses` per
+  repeat.
 - [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
   Required visibility: planning, runtime construction/cache hit, footprint
   materialization/cache hit, stimulus sampling, dense/factorized `Vext`
@@ -423,8 +444,23 @@ Current benchmark diagnosis:
        that padded double-cable cohorts were still routed as full/dense; fixed
        locally by exempting observer-only padded groups from the full-recording
        padding fallback;
-     - next validation: Kaggle P100 `realistic_stress_observer_gpu` versus
-       `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+     - Kaggle validation
+       `20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms
+       the padded double-cable group now stays in `recording=none`,
+       factorizes `Vstim`, avoids dense `Vm` output, restores the full-Vm
+       myelinated recruitment summary, and gives about `1.2x` end-to-end warm
+       speedup on example 08.
+   - 2026-06-20 local structural runtime cache:
+     - `_prepare_batch_runtime` now keys runtime reuse on a structural group
+       signature instead of simulation/solver object identity;
+     - this targets the two `batch_runtime_cache_misses` visible at the start of
+       every rebuilt benchmark repeat, while leaving prepared cohorts and
+       contexts identity-bound to avoid stale stimulus reuse;
+     - validation:
+       `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`;
+     - local CPU benchmark smoke for mixed observer-only is not representative
+       because double-cable VmRaster requires the batch-native PCR/SoA path;
+       validate the timing impact on Kaggle/P100.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 

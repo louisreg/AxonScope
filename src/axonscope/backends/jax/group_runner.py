@@ -253,6 +253,27 @@ def _group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
     )
 
 
+def _group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    """Return a structural key for stimulation-independent solver runtimes."""
+
+    return (
+        "dispatch_group_runtime_v1",
+        group.mode,
+        int(group.nx),
+        bool(group.geometry_shared),
+        bool(group.has_padding),
+        tuple(
+            (
+                int(item.index),
+                item.signature,
+                item.membrane_signature,
+                item.cable_signature,
+            )
+            for item in group.items
+        ),
+    )
+
+
 def _group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
     return (
         _group_static_signature(group),
@@ -313,7 +334,7 @@ def _prepare_batch_runtime(
     cache_key = (
         "batch_runtime_v1",
         mode,
-        _group_static_signature(group),
+        _group_runtime_signature(group),
         float(tsim_ms),
         float(dt_ms),
         repr(solver_options),
