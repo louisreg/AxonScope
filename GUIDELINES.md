@@ -47,13 +47,13 @@ Phases 8-9 are still roadmap work.
 | Phase 5 — Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, extensible `Signal` descriptors, `SignalId`, `RecordingManifest`, `RecordedSignal`, no public `list[SimResult]` pool result. | `examples/advanced/example_16_canonical_pool_results.py` |
 | Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. | `examples/advanced/example_17_analysis_layer.py` |
 | Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Estimates surface dense `Vstim` and retained-`Vm` pressure so observer-only runs can be chosen deliberately. | `examples/advanced/example_14_hotpath_benchmarking.py` |
-| Phase 7.5 — Solver-side observers | Done for the current scalar and homogeneous batch observer-only runs | Public `axs.analysis.PeakVoltage` and `axs.analysis.Activation` definitions lower to compact solver observer state; scalar kernels, homogeneous single-cable batch kernels, and homogeneous double-cable batch kernels update compact observer state at every `dt`; `Recording.none()` returns trace-free `result.observations`. | `examples/advanced/example_18_solver_side_observers.py` |
+| Phase 7.5 — Solver-side observers | Superseded by Phase 7.6.7 | The first generic solver-side observer path proved too broad for the double-cable hot path. `PeakVoltage` remains a post-hoc analysis on recorded Vm, not a solver-side observer. | `examples/advanced/example_18_solver_side_observers.py` |
 | Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
 | Phase 7.6.3 — Exact double-cable GPU solver optimization | Closed | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Pallas, Triton, JAX-Triton, CUDA FFI, split, associative, and pseudo-double candidates are archived/standby evidence, not public solver routes. | Benchmark report in `benchmark/reports/double_cable_solver_optimization_2026_06.md`; no public example required. |
 | Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
 | Phase 7.6.5 — Vext and realistic workflow performance | In progress | Current focus is workflow-level profiling and reducing dense `Vext` materialization, transfer, preparation, and recording costs for examples 06/07/08. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
 | Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue after profiling confirms dispatch group count or waits are material bottlenecks. | Internal benchmark phase first; no public example yet. |
-| Phase 7.6.7 — Compact activation observer redesign | Planned | Keep one simple public observer/analysis concept, but make the first solver-side implementation deliberately strict: activation threshold only, static-shaped, batch-first, and optimized for massive recruitment/threshold workloads. Do not add public implementation-specific observer modes. | Update `example_18_solver_side_observers.py` only after the compact implementation and docs are stable. |
+| Phase 7.6.7 — VmRaster observer redesign | In progress | Keep one simple public observer/analysis concept, but make solver-side observer-only execution deliberately strict: threshold selected membrane-voltage probes at every `dt`, pack the boolean raster, and leave activation/latency/velocity/recruitment analyses to post-processing. No legacy generic observer fallback. | `examples/advanced/example_18_solver_side_observers.py` |
 | Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
 | Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
 
@@ -70,14 +70,16 @@ Known implementation gaps against the final target:
   `axs.results.analysis`.
 - Backend-neutral axon structure descriptors, cable capabilities, and richer
   semantic signals remain future work.
-- Solver-side observer execution exists for scalar kernels and homogeneous
-  single-cable/double-cable batch kernels. Heterogeneous observer-only
-  execution, richer semantic signals, and final backend-neutral recording
-  lowering remain future work.
+- Solver-side observer-only execution now uses the `VmRaster` route for scalar
+  kernels, single-cable batches, and double-cable PCR/SoA batch-native runs.
+  The solver output is `observations["vm_raster"]`, a packed `uint32` raster of
+  `Vm >= threshold` samples. Richer semantic signals, activation/latency
+  decoding, and final backend-neutral recording lowering remain future work.
 - The final observer API should remain simple and analysis-oriented. Avoid
   exposing implementation-specific observer modes before real user needs exist.
-  The current performance target is one strict compact activation observer
-  implementation for massive threshold/recruitment runs.
+  The current performance target is one strict `VmRaster` implementation that
+  supports velocity, threshold, and recruitment-style workflows through fixed
+  membrane-voltage threshold probes and CPU post-processing.
 
 ---
 
@@ -2123,7 +2125,7 @@ axs.analysis.Activation(
 )
 ```
 
-### 24.2.1 Solver-side activation observer
+### 24.2.1 Solver-side VmRaster observer
 
 The public concept should stay analysis-oriented:
 
@@ -2135,32 +2137,55 @@ or a future thin observer spelling that means the same scientific request.
 Do not expose backend/detail variants as public observer modes while the API is
 still pre-release.
 
-For now, solver-side observer execution should be deliberately narrow and
-optimized for massive threshold/recruitment workloads:
+For now, hot-path solver-side observer execution should be deliberately narrow:
+threshold selected membrane-voltage probes at each solver step and pack the
+boolean raster. This primitive is generic enough for the example 06/07/08
+workflows, while keeping analysis semantics out of the solver loop:
+
+```text
+velocity:    decode first crossing time from fixed-probe raster
+threshold:   decode activation status from tested-amplitude raster
+recruitment: decode activation status for many axons and amplitudes
+```
 
 ```text
 input per solver step: Vm[B, Nx]
-state:                activated[B] bool
-optional later state: first_time_ms[B]
-output:               compact per-axon activation values
+state:                words[B, R, P, W] uint32
+word count:           W = ceil(Nt / 32)
+output:               observations["vm_raster"]
 ```
 
-The supported first implementation is activation-threshold detection on
-membrane voltage. It should use static-shaped, batch-first arrays and simple
-reductions over a fixed target:
+`R` is the static number of lowered threshold/probe definitions and `P` is the
+static number of probe slots per definition. Bit `t % 32` in word `t // 32` is
+true when `Vm[t, probe] >= threshold`. Per-axon activation, latency, conduction
+velocity, and recruitment summaries are derived after the solver. The supported
+implementation is membrane-voltage threshold rasterization on fixed targets. It
+should use static-shaped, batch-first arrays and simple per-probe bit updates:
 
 ```text
-center / one probe: Vm[:, idx] >= threshold
-probes:             max(Vm[:, probe_indices], axis=1) >= threshold
-any compartment:    max(Vm, axis=1) >= threshold
+one probe:        set raster bit from Vm[:, idx] >= threshold
+fixed probes:     set raster bits from Vm[:, probe_indices] >= threshold
+many axons:       keep the batch axis leading and packed
 ```
+
+For padded or heterogeneous groups, the hot path must not fall back to full Vm
+recording just to recover row-specific targets afterward. Lower fixed probes to
+static row-aware tables instead:
+
+```text
+probe_indices[B, R, P]
+probe_mask[B, R, P]
+```
+
+Then update only valid probe slots inside the solver scan.
 
 This strict implementation is intentional. It keeps the API simple for users,
 keeps the backend JAX-friendly, and avoids allocating or transferring
-`Vm[time, position, axon]` when recruitment only needs compact boolean
-activation decisions. More generic multi-kind observer plans, arbitrary output
-tables, and rich per-position metadata may be added only after benchmark
-evidence shows they are needed and can stay off the hot path.
+`Vm[time, position, axon]` when the requested result is a threshold raster. The
+old generic solver-side observer runtime should not remain as a fallback.
+`PeakVoltage` and other rich analyses stay post-hoc on recorded Vm until
+benchmark evidence shows a specific solver-side implementation is needed and
+can stay off the hot path.
 
 ## 24.3 Conduction velocity
 
@@ -3291,36 +3316,30 @@ the solver-side kernel changes that remove unnecessary trace/input retention.
 
 ## Phase 7.5 — Solver-side observers
 
-Implementation status: done for the first public observer-only workflow.
+Implementation status: superseded by the stricter Phase 7.6.7 compact
+VmRaster observer route.
 
 Purpose: connect the public observer/analysis specifications to backend
-execution so compact observer state is updated at every solver `dt` inside the
-kernel or scan loop. The memory goal is to avoid retaining full
+execution so a packed threshold raster is updated at every solver `dt` inside
+the kernel or scan loop. The memory goal is to avoid retaining full
 `Vm[time, position]` traces, and to avoid GPU-to-CPU transfer of those traces,
-when the user only needs compact outputs such as activation, latency, peak
-voltage, spike counts, or block summaries.
+when the user only needs threshold-derived outputs such as activation, latency,
+velocity, or recruitment summaries.
 
-- done: lower public `axs.analysis.PeakVoltage` and `axs.analysis.Activation`
-  specs into compact backend observer state;
-- done: call observer updates inside scalar kernels and homogeneous single-cable
-  batch kernels at each `dt`;
-- done: keep single-cable batch observer state static-shaped and vectorized over
-  batch rows;
+- superseded: the old generic solver-side observer runtime and its `PeakVoltage`
+  path are deleted from active code;
+- done: lower public threshold-style specs into one `VmRaster` backend plan;
+- done: call VmRaster bit-packing updates inside scalar kernels, single-cable
+  batch kernels, and the double-cable PCR/SoA batch-native observer-only path;
+- done: keep raster state static-shaped and vectorized over batch rows;
 - done: support observer-only execution with `Recording.none()` and trace-free
   `result.observations`;
-- done: cross-validate solver-side peak voltage and activation against post-hoc
-  traces in unit tests;
+- done: cross-validate packed raster bits against retained-Vm traces in unit
+  tests;
 - done: add local hotpath/memory evidence showing no retained Vm output for an
   observer-only run;
-- future optimization: move double-cable batch observer-only execution off
-  scalar fallback once the compact state is wired and validated;
-- future redesign: collapse the current generic observer runtime into one strict
-  compact activation observer implementation first. Keep the public API
-  analysis-oriented and simple; do not expose backend implementation variants
-  as user choices.
-- future analysis design: decide whether latency/block-style analyses become
-  thin views over activation observer state after the compact activation path is
-  demonstrably fast and memory-stable.
+- next validation: compare VmRaster observer-only against full/center Vm
+  on realistic GPU workloads before claiming the memory feature is retained.
 
 ## Phase 8 — Studies
 

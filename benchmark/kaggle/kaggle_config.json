@@ -1,6 +1,6 @@
 {
-  "benchmark": "smoke",
-  "branch": "bench-colab",
+  "benchmark": "realistic_stress_observer_gpu",
+  "branch": "kaggle-bench/35693e5",
   "repo_url": "https://github.com/louisreg/AxonScope.git",
   "require_gpu": true
 }

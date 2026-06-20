@@ -653,8 +653,8 @@ def _estimate_guidance(
         )
     if observers:
         recommendations.append(
-            "Use Recording.none() with solver-side observers to keep compact "
-            "per-step reductions instead of retaining Vm[Nt,Nx]."
+            "Use Recording.none() with solver-side observers to keep packed "
+            "VmRaster output instead of retaining Vm[Nt,Nx]."
         )
     if memory_budget_bytes is not None:
         total = sum(item.bytes for item in items)

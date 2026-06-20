@@ -44,7 +44,7 @@ from axonscope.solvers import (
     prepare_solver_runtime,
     resolve_double_cable_block_solver,
 )
-from axonscope.solvers.observer_runtime import build_solver_observer_plan
+from axonscope.solvers.observer_runtime import build_vm_raster_plan
 from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 
 
@@ -423,10 +423,14 @@ def _observer_plan(instance: axs.AxonInstance, runtime: Any):
         instance.axon.layout.position_values(unit="micrometer"),
         dtype=float,
     )
-    return build_solver_observer_plan(
+    return build_vm_raster_plan(
         (
-            axs.analysis.PeakVoltage(target=axs.positions.CENTER),
             axs.analysis.Activation(threshold=-80.0 * axs.mV, target=axs.positions.CENTER),
+            axs.analysis.Latency(
+                threshold=-80.0 * axs.mV,
+                target=axs.positions.CENTER,
+                name="latency_center",
+            ),
         ),
         positions_um=positions_um,
         dtype=runtime.membrane.dtype,

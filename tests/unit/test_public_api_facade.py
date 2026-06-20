@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY
 
 
 def test_public_unmyelinated_template_and_simulate():
@@ -143,7 +144,6 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
             amplitude=0.5 * axs.nA,
         ),
     )
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
@@ -155,21 +155,41 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
-        observers=[peak, activation],
+        observers=[activation],
     )
 
     assert compact.recordings is None
     with pytest.raises(AttributeError, match="Vm recording"):
         _ = compact.Vm
     assert compact.observations is not None
-    assert compact.observations["peak_voltage"].value == pytest.approx(
-        recorded.analyze(peak).value
+    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    assert raster.names == ("activation",)
+    assert raster.words.shape == (1, 1, 1, 1)
+    probe_index = int(np.asarray(raster.original_indices)[0, 0])
+    np.testing.assert_array_equal(
+        raster.unpack()[0, 0, 0],
+        np.asarray(recorded.Vm)[:, probe_index] >= -80.0,
     )
-    assert compact.observations["activation"].value == recorded.analyze(activation).value
-    assert (
-        compact.observations["activation"].events[0].first_index
-        == recorded.analyze(activation).events[0].first_index
+
+
+def test_solver_side_peak_voltage_observer_is_not_supported():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
     )
+    sim = axs.AxonInstance(axon)
+    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+
+    with pytest.raises(NotImplementedError, match="threshold-style Vm"):
+        axs.simulate(
+            sim,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            recording=axs.Recording.none(),
+            observers=[peak],
+        )
 
 
 def test_pool_observer_only_run_returns_compact_observations_without_vm():
@@ -192,7 +212,10 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
         )
         axons.append(sim)
 
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
     recorded = axs.simulate_pool(
         axons,
         duration=0.1 * axs.ms,
@@ -204,22 +227,29 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
-        observers=[peak],
+        observers=[activation],
     )
 
     assert compact.recording_manifest.available == ()
     assert len(compact.cohorts) == 1
     assert compact.observations is not None
     assert compact.cohorts[0].observations is compact.observations
-    np.testing.assert_allclose(
-        compact.observations["peak_voltage"].values,
-        recorded.analyze(peak).values,
+    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    assert raster.words.shape == (2, 1, 1, 1)
+    expected = np.stack(
+        [
+            np.asarray(recorded[row].Vm)[:, 0] >= -80.0
+            for row in range(len(axons))
+        ],
+        axis=0,
+    )
+    np.testing.assert_array_equal(
+        raster.unpack()[:, 0, 0, :],
+        expected,
     )
     with pytest.raises(ValueError, match="Vm recording"):
         _ = compact[0].Vm
-    assert compact[0].observations["peak_voltage"].value == pytest.approx(
-        compact.observations["peak_voltage"].values[0]
-    )
+    assert compact[0].observations[VM_RASTER_OBSERVATION_KEY].words.shape == (1, 1, 1, 1)
 
 
 def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
@@ -242,7 +272,10 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
         )
         axons.append(sim)
 
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
     axs.enable_benchmark("/tmp/axonscope-zero-vstim-test", print_summary=False, save=False)
     try:
         compact = axs.simulate_pool(
@@ -250,7 +283,7 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
             recording=axs.Recording.none(),
-            observers=[peak],
+            observers=[activation],
         )
         report = axs.disable_benchmark(print_summary=False, save=False)
     finally:

@@ -170,8 +170,6 @@ def _can_run_batch_group(
 
     if group.size < 2:
         return False
-    if observers and group.has_padding:
-        return False
     return group.mode in {"single", "double"}
 
 

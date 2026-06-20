@@ -30,7 +30,9 @@ from axonscope.solvers.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
-from axonscope.solvers.observer_runtime import build_solver_observer_plan
+from axonscope.solvers.observer_runtime import (
+    build_vm_raster_plan,
+)
 from axonscope.solvers.options import BatchOptions, BatchRecording, SolverOptions
 from axonscope.solvers.runtime import (
     CableRuntime,
@@ -95,6 +97,8 @@ def _batch_wait_target(out: Any) -> Any:
     if not out.observations:
         raise RuntimeError("batch kernel produced neither Vm nor observations.")
     first = next(iter(out.observations.values()))
+    if hasattr(first, "words"):
+        return first.words
     return first.values
 
 
@@ -103,17 +107,31 @@ def _observer_plan_for_cohort(
     *,
     cohort: PreparedCohort,
     dtype: Any,
+    prefer_vm_raster: bool = False,
 ) -> Any:
     """Lower public observers for one compatible prepared cohort."""
 
     if observers is None:
         return None
-    positions_um = np.asarray(cohort.x_positions_m[0], dtype=float) * 1e6
-    return build_solver_observer_plan(
+    if not prefer_vm_raster:
+        return None
+    row_positions_um = np.asarray(cohort.x_positions_m, dtype=float) * 1e6
+    return build_vm_raster_plan(
         observers,
-        positions_um=positions_um,
+        positions_um=row_positions_um,
+        original_indices=_cohort_original_indices(cohort),
         dtype=dtype,
     )
+
+
+def _cohort_original_indices(cohort: PreparedCohort) -> np.ndarray:
+    """Return row-aware original compartment indices, with -1 for padding."""
+
+    rows = np.full((cohort.size, cohort.nx), -1, dtype=np.int32)
+    for row_index, solver_axon in enumerate(cohort.solver_axons):
+        original_nx = int(solver_axon.n_compartments)
+        rows[row_index, :original_nx] = np.arange(original_nx, dtype=np.int32)
+    return rows
 
 
 def _representative_item(group: DispatchGroup) -> DispatchItem:
@@ -317,6 +335,7 @@ def _run_single_cable_batch_group(
         observers,
         cohort=cohort,
         dtype=runtime.membrane.dtype,
+        prefer_vm_raster=kernel_options.recording.mode == "none",
     )
     use_sparse_intracellular = _should_use_sparse_intracellular_batch(
         group=group,
@@ -532,6 +551,7 @@ def _run_double_cable_batch_group(
         observers,
         cohort=cohort,
         dtype=runtime.membrane.dtype,
+        prefer_vm_raster=kernel_options.recording.mode == "none",
     )
     _record_group_memory_estimate(
         group=group,

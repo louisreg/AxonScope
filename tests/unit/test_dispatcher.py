@@ -2,6 +2,7 @@ import numpy as np
 
 import axonscope as axs
 import axonscope.dispatcher.plan as dispatch_plan_module
+import axonscope.solvers.batch_kernels as batch_kernels
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
@@ -19,6 +20,8 @@ from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers.batch_inputs import (
     materialize_sparse_intracellular_current_density_batch,
 )
+from axonscope.solvers import BatchOptions
+from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
@@ -329,14 +332,17 @@ def test_run_pool_observer_only_keeps_one_compact_cohort_record():
         _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0),
         _hh_axon(nx=11, amp_nA=0.5, y_um=12.0, z_um=34.0),
     ]
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
 
     result = run_pool(
         axons,
         tsim_ms=0.1,
         dt_ms=0.05,
         batch_options=axs.Recording.none().to_batch_options(),
-        observers=(peak,),
+        observers=(activation,),
     )
 
     assert len(result) == 1
@@ -344,22 +350,32 @@ def test_run_pool_observer_only_keeps_one_compact_cohort_record():
     assert result[0].indices == (0, 1)
     assert result[0].Vm is None
     assert result[0].observations is not None
-    assert result[0].observations["peak_voltage"].values.shape == (2,)
+    assert result[0].observations[VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
-def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record():
+def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
+    monkeypatch,
+):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1),
         _passive_double_cable_axon(amp_nA=0.2),
     ]
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    monkeypatch.setattr(
+        batch_kernels,
+        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+        1,
+    )
 
     result = run_pool(
         axons,
         tsim_ms=0.1,
         dt_ms=0.05,
-        batch_options=axs.Recording.none().to_batch_options(),
-        observers=(peak,),
+        batch_options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        observers=(activation,),
     )
 
     assert len(result) == 1
@@ -368,7 +384,7 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record():
     assert result[0].indices == (0, 1)
     assert result[0].Vm is None
     assert result[0].observations is not None
-    assert result[0].observations["peak_voltage"].values.shape == (2,)
+    assert result[0].observations[VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
 def test_dispatch_plan_preserves_pool_indices():

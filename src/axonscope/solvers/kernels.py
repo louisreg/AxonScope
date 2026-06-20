@@ -14,10 +14,10 @@ from .common import (
 )
 from .observables import observable_matrices, package_recordings
 from .observer_runtime import (
-    SolverObserverPlan,
-    finalize_observer_state,
-    init_observer_state,
-    update_observer_state_scalar,
+    VmRasterPlan,
+    finalize_vm_raster_state,
+    init_vm_raster_state,
+    update_vm_raster_state_batch,
 )
 from .runtime import SolverRuntime
 
@@ -499,7 +499,7 @@ class SingleCableKernel:
         record_diagnostics: bool = False,
         record_observables: bool = False,
         record_voltage: bool = True,
-        observers: SolverObserverPlan | None = None,
+        observers: VmRasterPlan | None = None,
     ) -> KernelResult:
         runtime = self.runtime
         membrane_runtime = runtime.membrane
@@ -679,17 +679,11 @@ class SingleCableKernel:
                     step_plan=step_plan,
                     dt=grid.dt_ms,
                 )
-                observer_state = update_observer_state_scalar(
+                observer_state = update_vm_raster_state_batch(
                     observer_state,
-                    vm_mV=Vm_new,
-                    time_ms=grid.t_vec_ms[n],
-                    kind_codes=observers.kind_codes,
-                    indices=observers.indices,
-                    mask=observers.mask,
-                    original_indices=observers.original_indices,
-                    positions_um=observers.positions_um,
-                    thresholds_mV=observers.thresholds_mV,
-                    blanking_ms=observers.blanking_ms,
+                    vm_mV=Vm_new[None, :],
+                    step_index=n,
+                    plan=observers,
                 )
                 output = Vm_new if record_voltage else jnp.empty((0,), dtype=dtype_local)
                 return (Vm_new, gates_new, observer_state, *state_new), output
@@ -697,7 +691,7 @@ class SingleCableKernel:
             init_carry = (
                 membrane_runtime.Vm0_mV,
                 membrane_runtime.gates0,
-                init_observer_state(observers),
+                init_vm_raster_state(observers, batch_size=1, nt=grid.Nt),
                 *state0,
             )
             final_carry, out = jax.lax.scan(
@@ -708,7 +702,12 @@ class SingleCableKernel:
             return KernelResult(
                 Vm=out if record_voltage else None,
                 t=runtime.grid.t_vec_ms,
-                observations=finalize_observer_state(observers, final_carry[2]),
+                observations=finalize_vm_raster_state(
+                    observers,
+                    final_carry[2],
+                    nt=grid.Nt,
+                    dt_ms=grid.dt_ms,
+                ),
             )
 
         def step(carry, n: int):
@@ -866,7 +865,7 @@ class DoubleCableKernel:
         record_diagnostics: bool = False,
         record_observables: bool = False,
         record_voltage: bool = True,
-        observers: SolverObserverPlan | None = None,
+        observers: VmRasterPlan | None = None,
     ) -> KernelResult:
         runtime = self.runtime
         membrane_runtime = runtime.membrane
@@ -1069,17 +1068,11 @@ class DoubleCableKernel:
                     step_plan=step_plan,
                     dt=grid.dt_ms,
                 )
-                observer_state = update_observer_state_scalar(
+                observer_state = update_vm_raster_state_batch(
                     observer_state,
-                    vm_mV=Vm_new,
-                    time_ms=grid.t_vec_ms[n],
-                    kind_codes=observers.kind_codes,
-                    indices=observers.indices,
-                    mask=observers.mask,
-                    original_indices=observers.original_indices,
-                    positions_um=observers.positions_um,
-                    thresholds_mV=observers.thresholds_mV,
-                    blanking_ms=observers.blanking_ms,
+                    vm_mV=Vm_new[None, :],
+                    step_index=n,
+                    plan=observers,
                 )
                 output = Vm_new if record_voltage else jnp.empty((0,), dtype=dtype_local)
                 return (Vi_new, Ve_new, gates_new, observer_state, *state_new), output
@@ -1088,7 +1081,7 @@ class DoubleCableKernel:
                 Vi0,
                 Ve0,
                 gates0,
-                init_observer_state(observers),
+                init_vm_raster_state(observers, batch_size=1, nt=grid.Nt),
                 *state0,
             )
             final_carry, out = jax.lax.scan(
@@ -1099,7 +1092,12 @@ class DoubleCableKernel:
             return KernelResult(
                 Vm=out if record_voltage else None,
                 t=runtime.grid.t_vec_ms,
-                observations=finalize_observer_state(observers, final_carry[3]),
+                observations=finalize_vm_raster_state(
+                    observers,
+                    final_carry[3],
+                    nt=grid.Nt,
+                    dt_ms=grid.dt_ms,
+                ),
             )
 
         def step(carry, n: int):

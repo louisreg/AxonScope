@@ -72,6 +72,17 @@ def _slice_analysis_result(result: AnalysisResult, row: int) -> AnalysisResult:
     )
 
 
+def _slice_observation_result(result: Any, row: int) -> Any:
+    """Return a one-row view for supported solver-side observation objects."""
+
+    if isinstance(result, AnalysisResult):
+        return _slice_analysis_result(result, row)
+    slice_batch = getattr(result, "slice_batch", None)
+    if callable(slice_batch):
+        return slice_batch(row)
+    raise TypeError(f"unsupported observation result type: {type(result).__name__}")
+
+
 def _merge_analysis_results(results: Sequence[AnalysisResult]) -> AnalysisResult:
     """Concatenate one-row analysis results along their population axis."""
 
@@ -94,6 +105,20 @@ def _merge_analysis_results(results: Sequence[AnalysisResult]) -> AnalysisResult
     )
 
 
+def _merge_observation_results(results: Sequence[Any]) -> Any:
+    """Merge one-row observation results along their population axis."""
+
+    if not results:
+        raise ValueError("at least one observation result is required.")
+    first = results[0]
+    if isinstance(first, AnalysisResult):
+        return _merge_analysis_results(cast(Sequence[AnalysisResult], results))
+    concat_batch = getattr(type(first), "concat_batch", None)
+    if callable(concat_batch):
+        return concat_batch(results)
+    raise TypeError(f"unsupported observation result type: {type(first).__name__}")
+
+
 def _merge_dispatch_observations(
     rows: Sequence[DispatchResult],
 ) -> ObservationDict | None:
@@ -113,7 +138,7 @@ def _merge_dispatch_observations(
     names = tuple(row_observations[0].keys())  # type: ignore[union-attr]
     merged: ObservationDict = {}
     for name in names:
-        merged[name] = _merge_analysis_results(
+        merged[name] = _merge_observation_results(
             [observation[name] for observation in row_observations if observation is not None]
         )
     return merged
@@ -337,13 +362,13 @@ class AxonResultView:
 
     @property
     def observations(self) -> ObservationDict | None:
-        """Compact solver-side observations for this row, if requested."""
+        """Solver-side observations for this row, if requested."""
 
         cohort, row = self._cohort_row
         if cohort.observations is None:
             return None
         return {
-            name: _slice_analysis_result(observation, row)
+            name: _slice_observation_result(observation, row)
             for name, observation in cohort.observations.items()
         }
 
@@ -532,7 +557,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 
     @property
     def observations(self) -> ObservationDict | None:
-        """Compact solver-side observations in input order, if requested."""
+        """Solver-side observations in input order, if requested."""
 
         if len(self.cohorts) == 1:
             cohort = self.cohorts[0]
@@ -546,7 +571,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
             raise ValueError("pool observation rows are incomplete.")
         names = tuple(row_observations[0].keys())  # type: ignore[union-attr]
         return {
-            name: _merge_analysis_results(
+            name: _merge_observation_results(
                 [observation[name] for observation in row_observations if observation is not None]
             )
             for name in names

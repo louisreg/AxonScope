@@ -24,15 +24,18 @@ benchmark/reports/double_cable_solver_optimization_2026_06.md
 The active follow-up is Phase 7.6.5 in `todo.md`: profile and optimize `Vext`
 materialization using workflow-level benchmarks based on basic examples 06/07/08.
 
-Observer-related follow-up, 2026-06-20: the realistic recruitment runs exposed
-that solver-side observer output must be treated as a separate architecture
-topic, not as a small recording toggle. The active plan is now Phase 7.6.7 in
-`todo.md`: keep one simple public activation/analysis concept, but make the
-first hot-path implementation deliberately strict, compact, static-shaped, and
-batch-first. Do not add implementation-specific public observer modes while the
-API is pre-release. If this strict JAX observer remains too expensive after
-proper memory/timing validation, evaluate a dedicated activation observer kernel
-as a separate backend experiment.
+Observer-related follow-up, 2026-06-20: the realistic observer runs exposed that
+solver-side observer output must be treated as a separate architecture topic,
+not as a small recording toggle. The active plan is now Phase 7.6.7 in
+`todo.md`: keep one simple public observer/analysis concept, but make the first
+hot-path implementation deliberately strict, packed, static-shaped, and
+batch-first. The target primitive is `VmRaster`: fixed membrane-voltage
+threshold probes packed into `uint32` words, with row-aware probe tables for
+padded groups, so velocity, threshold, and recruitment-style workflows can all
+share it through post-processing. Do not add
+implementation-specific public observer modes while the API is pre-release. If
+this strict JAX raster path remains too expensive after proper memory/timing
+validation, evaluate a dedicated raster kernel as a separate backend experiment.
 
 ## Objective
 
@@ -598,15 +601,16 @@ resolved kernel solver is `pcr_soa` and `B >= 16`. The route is intentionally
 independent of recording mode: full, center, and observer-only output should
 exercise the same solver implementation for the same batch size.
 
-Status update: the observer-only double-cable path now has a batch-native
-`pcr_soa` scan for large batches as well. It keeps the same batch-aware block
-solve used by retained Vm output and updates compact observer state with
-`update_observer_state_batch`, so observer-only output no longer has to break
-the large-batch fast path. A P100 stress attempt at `926a8ce` showed
-`runs=50/100` falling back to the old per-row observer path when the previous
-`B >= 2048` threshold was reused. A later mixed-population diagnostic showed
-`runs=50` splitting into a double-cable subgroup of `B=25`, so the shared route
-threshold now starts at `B >= 16`.
+Status update: the observer-only double-cable path now has a VmRaster
+`pcr_soa` scan for realistic batches as well. It keeps the same batch-aware
+block solve used by retained Vm output and updates packed
+`words[B, R, P, W] uint32` state, so observer-only output no longer has to break
+the large-batch fast path. The old generic solver-side observer runtime is no
+longer an active fallback; `PeakVoltage` stays post-hoc on recorded Vm. A P100
+stress attempt at `926a8ce` showed `runs=50/100` missing the batch-native route
+when the previous `B >= 2048` threshold was reused. A later mixed-population
+diagnostic showed `runs=50` splitting into a double-cable subgroup of `B=25`, so
+the shared route threshold starts at `B >= 16`.
 
 ## Problem
 

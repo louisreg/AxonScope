@@ -232,8 +232,9 @@ class Recording:
     def none(cls) -> "Recording":
         """Request no stored outputs.
 
-        Use this for observer-only runs when compact solver-side reductions are
-        enough and the full membrane-voltage trace should not be retained.
+        Use this for observer-only runs when solver-side payloads such as
+        ``VmRaster`` are enough and the full membrane-voltage trace should not
+        be retained.
         """
 
         return cls(voltage=False)

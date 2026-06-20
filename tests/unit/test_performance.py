@@ -51,13 +51,16 @@ def test_simulation_estimate_counts_center_recording_memory():
 
 def test_observer_only_population_estimate_uses_sparse_current_clamp_inputs():
     axon = _hh(compartments=5)
-    peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
     simulation = axs.AxonSimulation(
         axs.AxonPopulation([_clamped_instance(axon), _clamped_instance(axon)]),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
-        observers=[peak],
+        observers=[activation],
     )
 
     estimate = simulation.estimate()

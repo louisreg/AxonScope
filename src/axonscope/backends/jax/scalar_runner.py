@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from axonscope.axon_instance import AxonInstance
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers.kernels import DoubleCableKernel, SingleCableKernel
-from axonscope.solvers.observer_runtime import build_solver_observer_plan
+from axonscope.solvers.observer_runtime import build_vm_raster_plan
 from axonscope.solvers.options import SolverOptions
 from axonscope.solvers.runtime import prepare_solver_runtime
 
@@ -65,7 +65,7 @@ def run_jax_crank_nicholson(
             Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
         )
 
-    observer_plan = build_solver_observer_plan(
+    observer_plan = build_vm_raster_plan(
         observers,
         positions_um=solver_axon.x_um,
         dtype=runtime.membrane.dtype,

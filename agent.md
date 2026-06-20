@@ -201,7 +201,16 @@ instructions: |
     snippets as current behavior.
   - Solver-side observer direction: keep the public concept
     analysis-oriented, avoid public implementation-specific observer modes, and
-    optimize one strict compact activation-threshold implementation first.
+    optimize one strict VmRaster implementation first: fixed membrane-voltage
+    threshold probes, static shapes, and packed `uint32` raster output. The
+    solver should only produce `observations["vm_raster"]`; activation,
+    latency, velocity, threshold, and recruitment summaries are post-processing.
+    Do not reintroduce the old generic solver-side observer as a hidden
+    fallback; rich analyses such as peak voltage remain post-hoc on recorded Vm
+    unless a dedicated fast implementation is designed and benchmarked.
+  - Observer contract changes must migrate the full learning surface in the same
+    work: unit tests, protocol tests, dispatcher/solver tests, examples,
+    benchmark docs, `GUIDELINES.md`, and `todo.md`.
   - Record NRV validation notes only after a fresh run in an NRV-ready
     environment.
   

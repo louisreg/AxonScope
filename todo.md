@@ -19,8 +19,8 @@ dedicated reports under `benchmark/reports/` or focused roadmap files under
 
 ## Current Snapshot
 
-Updated on 2026-06-20 after adding the compact activation observer redesign as
-a separate planned phase.
+Updated on 2026-06-20 after replacing the old solver-side observer runtime with
+the first packed VmRaster implementation.
 
 | Area | Status | Notes |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ a separate planned phase.
 | Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
 | Phase 7.6.5 | In progress | `Vext` materialization and realistic workflow performance. |
 | Phase 7.6.6 | Planned | GPU dispatch scheduling: bucket/coalesce compatible groups, then test optional async group enqueue. |
-| Phase 7.6.7 | Planned | Compact activation observer redesign: one simple public observer/analysis concept, one strict compact implementation for massive threshold/recruitment. |
+| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster; post-processing and realistic GPU validation remain. |
 | Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
 | Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
 | Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
@@ -93,9 +93,8 @@ Work should start here unless the user asks otherwise.
   during `example08_recruitment` before a full timing row was produced. The
   `426.7s` Kaggle UI value was a log timestamp, not a case duration.
 - [x] Preserve the double-cable batch-native `pcr_soa` fast path for
-  observer-only output at large batch sizes. Observer-only now has a
-  batch-native scan using `update_observer_state_batch` instead of always
-  falling back to per-row `vmap`/scalar observer updates.
+  observer-only output at realistic batch sizes. Observer-only now uses compact
+  Vm-event state rather than the removed generic observer state.
 - [x] Fix the observer-only route threshold for realistic recruitment batches.
   The first post-fix Kaggle run at `926a8ce` showed `runs=50` taking about
   19 min before `runs=100` because observer-only reused the retained-Vm
@@ -111,22 +110,38 @@ Work should start here unless the user asks otherwise.
   `double-cable B=25`, so the previous `B >= 32` shared threshold still missed
   the double-cable subgroup. The shared route threshold is now `B >= 16`, and
   realistic benchmark logs print solver routing per dispatch group.
-- [ ] Analyze the completed observer-only Kaggle artifacts against
-  `realistic_stress` and `realistic_stress_single_vm`. Use case-specific memory
-  fields such as RSS deltas and first/warm run peaks, not only process
-  high-water `peak_rss`, before concluding whether observer-only is intrinsically
-  expensive or just exposing JAX/XLA/cache pressure.
-- [ ] Phase 7.6.7 design pass: replace the current generic hot-path observer
-  runtime with one compact activation observer implementation. Keep the user
-  concept simple (`axs.analysis.Activation(...)` / trace-free recording), avoid
-  public implementation-specific observer modes, and make the backend strict:
-  threshold-only, static-shaped, batch-first, and optimized for massive
-  recruitment/threshold sweeps.
-- [ ] Phase 7.6.7 validation: compare full Vm, single-probe Vm, and compact
-  activation observer outputs on realistic example 06/07/08 workloads,
-  especially large-`Naxon` recruitment. Keep the compact observer only if it
-  reduces memory pressure without slowing the solver fast path; if strict JAX
-  remains too heavy, evaluate a dedicated activation observer kernel separately.
+- [x] Analyze the completed observer-only Kaggle artifacts against
+  `realistic_stress` and `realistic_stress_single_vm`. Report:
+  `benchmark/reports/compact_activation_observer_2026_06_20.md`. Decision:
+  threshold/probes workflows are normal, but the generic double-cable observer
+  path was not retained for the hot path exposed by `example08`: `B=100`
+  warm mean is `503.184 s` versus `5.903 s` full Vm and `6.308 s` center Vm on
+  P100.
+- [x] Phase 7.6.7A implementation pass: add internal VmRaster lowering for
+  threshold-style observer requests. The user concept stays simple:
+  `observers=[Activation/Latency/ConductionBlock(...)]`; there are no public
+  implementation-specific observer modes.
+- [x] Phase 7.6.7B implementation pass: replace the active solver-side observer
+  state with packed VmRaster state, `words[B, R, P, W] uint32`, where
+  `W=ceil(Nt/32)`. The solver only writes threshold bits
+  (`Vm >= threshold`) and returns `observations["vm_raster"]`; activation,
+  latency, velocity, threshold-search, and recruitment summaries are
+  post-processing. `PeakVoltage` remains post-hoc on recorded Vm.
+- [ ] Phase 7.6.7C instrumentation pass: add child spans inside double-cable
+  observer execution so `runtime.prepare`, input materialization,
+  `kernel.enqueue`, `kernel.wait`, and result finalization are visible instead
+  of hidden under `dispatch.group.total` self time.
+- [x] Phase 7.6.7D padded-group probe pass: VmRaster observers use row-aware
+  static probe indices/masks and `-1` padded original indices, so heterogeneous
+  padded groups can stay trace-free.
+- [ ] Phase 7.6.7E post-processing pass: design a CPU-side decoder for
+  `VmRasterResult` that covers activation, first crossing/latency, conduction
+  velocity, threshold-search updates, and recruitment summaries without
+  changing the solver contract.
+- [ ] Phase 7.6.7 validation: compare full Vm, single-probe Vm, and VmRaster
+  observer outputs on realistic example 06/07/08 workloads. Keep VmRaster only
+  if it reduces memory pressure without slowing the solver fast path; if JAX
+  bit-packing remains too heavy, evaluate a dedicated kernel separately.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
@@ -258,62 +273,113 @@ Success criteria:
 - [ ] Keep all changes internal to dispatch/runtime options until the public
   API story is clear.
 
-## Phase 7.6.7 Compact Activation Observer Redesign
+## Phase 7.6.7 Compact Vm-Event Observer Redesign
 
 Goal: keep the public observer/analysis story simple while making the first
 solver-side observer implementation deliberately optimized for the workflows
-AxonScope needs most: threshold, activation, and recruitment over many axons.
+AxonScope needs most in examples 06/07/08: velocity, threshold, activation, and
+recruitment-style sweeps over many axons.
+
+Evidence gate:
+
+- [x] Kaggle P100
+  `20260620_111038_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms the
+  generic double-cable observer path is unsuitable for the hot path exposed by
+  the recruitment-style stress case. The mixed `B=100` case spends about
+  `62.7 s` per double-cable subgroup amplitude, while full/center Vm output
+  spends about `0.5 s` for the same double-cable subgroup shape.
+- [x] The slowdown is isolated to the double-cable observer path exercised by
+  observer-only `example08`. The single-cable observer subgroup stays around
+  `50 ms` per amplitude, and example 06/07 timings remain comparable to earlier
+  GPU stress runs.
+- [x] Treat process `peak_rss` as a high-water diagnostic, not a direct retained
+  output size. The observer run reached `20,906 MiB` process peak at `B=100`,
+  but case-local deltas and profiler memory estimates point toward XLA/cache or
+  hidden compile/execution pressure rather than raw `Vm` output arrays.
 
 User-facing rule:
 
-- [ ] Keep one analysis-oriented concept, centered on
-  `axs.analysis.Activation(...)` and trace-free simulation output when the user
-  does not request Vm traces.
-- [ ] Do not introduce public implementation-specific observer modes while the
+- [x] Keep one analysis-oriented concept for solver-side observations, centered
+  on scientific requests such as activation/first-crossing time, plus trace-free
+  simulation output when the user does not request Vm traces.
+- [x] Do not introduce public implementation-specific observer modes while the
   API is still pre-release. A user should ask for the scientific result, not
   choose an internal kernel family.
-- [ ] Document that the first observer is intentionally strict: membrane-voltage
-  threshold activation only, with fixed target positions/probes.
+- [x] Document that the first hot-path observer is intentionally strict:
+  membrane-voltage threshold events only, with fixed target positions/probes.
 
 Implementation direction:
 
-1. Define the compact activation state.
-   - Minimal state: `activated[B]` boolean.
-   - Optional later state: first activation time per axon, if it can stay
-     static-shaped and cheap.
-   - Per-step input: `Vm[B, Nx]`.
-   - Output: compact per-axon activation arrays, not `Vm[Nt, Nx, Naxon]`.
+1. Define VmRaster lowering.
+   - Done: lower simple membrane-voltage threshold definitions to an internal
+     VmRaster plan.
+   - Supported first shape: one or more threshold/probe definitions, scalar
+     thresholds, fixed target indices/probes, and static raster/probe slots.
+   - Done: padded/heterogeneous groups lower to row-aware static probe tables
+     and padded original indices are masked with `-1`.
+   - Done: broader `PeakVoltage` solver-side observer support was removed.
+     Peak voltage remains available as post-hoc analysis on recorded Vm.
 
-2. Keep reductions fixed and JAX-friendly.
-   - Center/probe mode: `Vm[:, idx] >= threshold`.
-   - Small fixed probe set: reduce over `Vm[:, probe_indices]`.
-   - Whole-axon activation: reduce over `Nx`.
+2. Define the packed raster state.
+   - Done: minimal state is `words[B, R, P, W] uint32` for static raster count
+     `R`, probe count `P`, and `W=ceil(Nt/32)`.
+   - Done: one bit is written per solver step/probe when `Vm >= threshold`.
+   - Deferred: derive activation, latency, velocity, threshold-search, and
+     recruitment summaries from `VmRasterResult` in CPU post-processing.
+   - Per-step input: `Vm[B, Nx]`.
+   - Output: `observations["vm_raster"]`, not `Vm[Nt, Nx, Naxon]`.
+
+3. Keep reductions fixed and JAX-friendly.
+   - Center/probe mode: set bit from `Vm[:, idx] >= threshold`.
+   - Small fixed probe set: set bits independently so velocity can decode
+     per-probe first crossing times afterward.
+   - Whole-axon activation should be represented by explicit fixed probes for
+     now; do not add broad reductions until benchmarked.
    - Avoid arbitrary Python callbacks, dynamic output tables, or rich metadata
      in the solver loop.
 
-3. Preserve solver fast paths.
-   - The observer update must not force double-cable batches back to scalar or
-     per-row routes.
+4. Preserve solver fast paths.
+   - Done locally: the active observer update no longer uses the old generic
+     observer state or the short-lived compact event state.
    - It must be independent of recording mode selection in dispatch routing.
-   - It must work with `pcr_soa` batch-native paths for mixed recruitment
-     subgroups such as `B=25`.
+   - Done locally: it works with `pcr_soa` batch-native paths for mixed groups
+     such as `B=25`; validate next on Kaggle.
+   - Done locally: it avoids the previous conservative center/probe padded-group behavior
+     where `_kernel_batch_options(...)` forces `BatchRecording.full()` before
+     the solver kernel and only slices back to the requested probe afterward.
+   - The initial P100 target is VmRaster observer-only warm time within `1.5x` center Vm
+     for the example 06/07/08 observer workloads, with double-cable subgroup
+     timing initially within `2x` retained-Vm subgroup timing and then
+     tightened after instrumentation confirms hidden compile cost is gone.
 
-4. Benchmark as a memory feature first.
-   - Compare full Vm, single-probe Vm, and compact activation observer on the
+5. Benchmark as a memory feature first.
+   - Compare full Vm, single-probe Vm, and VmRaster observer on the
      realistic examples.
    - Track real process RSS deltas, device memory estimates, output bytes, and
      solver/profile timings.
    - Stress large axon counts and diameter sweeps, because memory savings should
      matter most there.
 
+6. Migrate the public learning surface in the same phase.
+   - Done locally: observer runtime, solver, dispatcher, public facade,
+     performance, hotpath catalog, and analysis tests were updated.
+   - Done locally: `example_14_hotpath_benchmarking.py` and
+     `example_18_solver_side_observers.py` now use VmRaster observer-only output.
+   - Done locally: the old generic solver-side observer runtime was deleted
+     from active code; do not reintroduce it as a fallback.
+   - Remaining: update any longer-form benchmark docs after the next Kaggle
+     validation run.
+
 Success criteria:
 
-- [ ] Observer-only recruitment is clearly lighter than full Vm output for
-  large `Naxon` workloads.
+- [ ] Observer-only execution is clearly lighter than full Vm output for large
+  `Naxon` workloads that only need event outputs.
 - [ ] Observer-only execution does not materially slow the retained-Vm fast
   path for the same solver route.
 - [ ] The public API remains one clean analysis concept with documented
   constraints.
+- [ ] All observer-related tests, examples, benchmark docs, and roadmap notes
+  are updated in the same change set as the new observer contract.
 - [ ] Any broader observer system stays out of the hot path until there is
   benchmark evidence and a concrete user need.
 
@@ -321,6 +387,10 @@ Success criteria:
 
 - Summary report: `benchmark/reports/double_cable_solver_optimization_2026_06.md`
 - Plot: `benchmark/reports/double_cable_solver_optimization_2026_06_speedups.svg`
+- Compact Vm-event observer report:
+  `benchmark/reports/compact_activation_observer_2026_06_20.md`
+- Compact Vm-event observer plot:
+  `benchmark/reports/compact_activation_observer_2026_06_20.svg`
 - Active solver README: `benchmark/solvers/README.md`
 - Kaggle runner README: `benchmark/kaggle/README.md`
 - Solver roadmap archive: `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`

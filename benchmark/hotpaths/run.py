@@ -1162,10 +1162,14 @@ def build_simulations(
             size=size,
             compartments=compartments,
         )
-        peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
         activation = axs.analysis.Activation(
             threshold=-80.0 * axs.mV,
             target=axs.positions.CENTER,
+        )
+        latency = axs.analysis.Latency(
+            threshold=-80.0 * axs.mV,
+            target=axs.positions.CENTER,
+            name="latency_center",
         )
         return (
             axs.AxonSimulation(
@@ -1173,7 +1177,7 @@ def build_simulations(
                 duration=duration_ms * axs.ms,
                 dt=dt_ms * axs.ms,
                 recording=axs.Recording.none(),
-                observers=[peak_voltage, activation],
+                observers=[activation, latency],
             ),
         )
     elif workload == "footprint_reuse_sweep":
@@ -1199,10 +1203,14 @@ def build_simulations(
             compartments=compartments,
             length_um=length_um,
         )
-        peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
         activation = axs.analysis.Activation(
             threshold=-80.0 * axs.mV,
             target=axs.positions.CENTER,
+        )
+        latency = axs.analysis.Latency(
+            threshold=-80.0 * axs.mV,
+            target=axs.positions.CENTER,
+            name="latency_center",
         )
         return (
             axs.AxonSimulation(
@@ -1210,7 +1218,7 @@ def build_simulations(
                 duration=duration_ms * axs.ms,
                 dt=dt_ms * axs.ms,
                 recording=axs.Recording.none(),
-                observers=[peak_voltage, activation],
+                observers=[activation, latency],
             ),
         )
     elif workload == "realistic_mixed_population":
@@ -1323,10 +1331,14 @@ def build_hotpath_matrix(
 ) -> tuple[axs.AxonSimulation, ...]:
     """Return a compact matrix of representative Phase 7.6 hotpath scenarios."""
 
-    peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
+    )
+    latency = axs.analysis.Latency(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+        name="latency_center",
     )
     return (
         axs.AxonSimulation(
@@ -1364,7 +1376,7 @@ def build_hotpath_matrix(
             duration=duration_ms * axs.ms,
             dt=dt_ms * axs.ms,
             recording=axs.Recording.none(),
-            observers=[peak_voltage, activation],
+            observers=[activation, latency],
         ),
         axs.AxonSimulation(
             axs.AxonPopulation(
@@ -1403,10 +1415,14 @@ def build_path_comparison_matrix(
 ) -> tuple[axs.AxonSimulation, ...]:
     """Return controlled path comparisons for Phase 7.6.1 decisions."""
 
-    peak_voltage = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
+    )
+    latency = axs.analysis.Latency(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+        name="latency_center",
     )
 
     def simulation(
@@ -1455,7 +1471,7 @@ def build_path_comparison_matrix(
                 length_um=length_um,
             ),
             recording=axs.Recording.none(),
-            observers=[peak_voltage, activation],
+            observers=[activation, latency],
         ),
         simulation(
             build_point_source_pool(
@@ -1488,7 +1504,7 @@ def build_path_comparison_matrix(
                 length_um=length_um,
             ),
             recording=axs.Recording.none(),
-            observers=[peak_voltage, activation],
+            observers=[activation, latency],
         ),
         simulation(
             build_double_cable_extracellular_pool(

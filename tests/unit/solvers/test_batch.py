@@ -34,7 +34,10 @@ from axonscope.solvers.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
-from axonscope.solvers.observer_runtime import build_solver_observer_plan
+from axonscope.solvers.observer_runtime import (
+    VM_RASTER_OBSERVATION_KEY,
+    build_vm_raster_plan,
+)
 from axonscope.solvers.experimental import CrankNicholsonVStimForcing
 from axonscope.solvers.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
@@ -589,7 +592,9 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
     assert pcr_soa_none.shape == (2, int(round(tsim / dt)), 0)
 
 
-def test_double_cable_observer_pcr_soa_batch_native_matches_fallback(monkeypatch):
+def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_vm(
+    monkeypatch,
+):
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -613,8 +618,12 @@ def test_double_cable_observer_pcr_soa_batch_native_matches_fallback(monkeypatch
         context_batch,
         dt_ms=dt,
     )
-    observer = build_solver_observer_plan(
-        (axs.analysis.PeakVoltage(target=axs.positions.CENTER),),
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
     )
@@ -624,33 +633,30 @@ def test_double_cable_observer_pcr_soa_batch_native_matches_fallback(monkeypatch
         Veinit_mV=float(axon.Veinit),
     )
 
-    fallback = kernel.run(
-        extracellular_potential_mid_mV=vext_mid,
-        extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
-        observers=observer,
-    )
     monkeypatch.setattr(
         batch_kernels,
         "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
         1,
     )
-    batch_native = kernel.run(
+    compact = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
         options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
         observers=observer,
     )
+    full = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.full(double_cable_block_solver="pcr_soa"),
+    )
 
-    assert fallback.Vm is None
-    assert batch_native.Vm is None
-    assert fallback.observations is not None
-    assert batch_native.observations is not None
-    np.testing.assert_allclose(
-        batch_native.observations["peak_voltage"].values,
-        fallback.observations["peak_voltage"].values,
-        atol=1e-3,
-        rtol=0.0,
+    center = axon.n_compartments // 2
+    assert compact.Vm is None
+    assert compact.observations is not None
+    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    np.testing.assert_array_equal(
+        np.any(raster.unpack()[:, 0, 0, :], axis=1),
+        np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
     )
 
 

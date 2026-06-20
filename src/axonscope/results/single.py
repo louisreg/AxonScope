@@ -56,8 +56,8 @@ class SimResult:
 
     Recorded traces live in ``recordings``. ``recordings["Vm"]`` is the membrane
     voltage matrix indexed as ``(time, compartment)``. The ``Vm`` property is a
-    convenience alias for existing notebook and test code. Compact solver-side
-    reductions will live in ``observations``.
+    convenience alias for existing notebook and test code. Solver-side payloads
+    such as packed ``VmRaster`` output live in ``observations``.
     """
 
     axon: Axon
