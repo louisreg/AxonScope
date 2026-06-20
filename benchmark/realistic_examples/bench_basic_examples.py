@@ -958,7 +958,7 @@ def run_example08(
     )
     _print_example08_solver_route(
         platform=str(jax.default_backend()),
-        batch_size=len(pool),
+        pool=pool,
         recording=str(args.example08_recording),
     )
     chunk_size = example08_observer_cpu_chunk_size(args)
@@ -1009,9 +1009,10 @@ def run_example08(
 def _print_example08_solver_route(
     *,
     platform: str,
-    batch_size: int,
+    pool: Sequence[Any],
     recording: str,
 ) -> None:
+    from axonscope.dispatcher.plan import build_dispatch_plan
     from axonscope.solvers import resolve_double_cable_block_solver
     from axonscope.solvers.batch_kernels import (
         _resolve_double_cable_kernel_block_solver,
@@ -1019,21 +1020,32 @@ def _print_example08_solver_route(
     )
 
     run_solver = resolve_double_cable_block_solver("auto", platform=platform)
-    kernel_solver = _resolve_double_cable_kernel_block_solver(
-        run_solver,
-        batch_size=batch_size,
-    )
-    batch_native = _use_batch_native_double_cable_pcr_soa_solver(
-        kernel_solver,
-        batch_size=batch_size,
-    )
+    plan = build_dispatch_plan(pool)
     print(
         "example08 solver_route: "
-        f"platform={platform} recording={recording} B={batch_size} "
-        f"auto={run_solver} kernel={kernel_solver} "
-        f"batch_native_pcr_soa={batch_native}",
+        f"platform={platform} recording={recording} pool_B={len(pool)} "
+        f"auto={run_solver}",
         flush=True,
     )
+    for group in plan.groups:
+        kernel_solver = "-"
+        batch_native = False
+        if group.mode == "double":
+            kernel_solver = _resolve_double_cable_kernel_block_solver(
+                run_solver,
+                batch_size=group.size,
+            )
+            batch_native = _use_batch_native_double_cable_pcr_soa_solver(
+                kernel_solver,
+                batch_size=group.size,
+            )
+        print(
+            "example08 solver_route_group: "
+            f"group={group.group_id} mode={group.mode} B={group.size} "
+            f"Nx={group.nx} padded={group.has_padding} "
+            f"kernel={kernel_solver} batch_native_pcr_soa={batch_native}",
+            flush=True,
+        )
 
 
 class RssMonitor:

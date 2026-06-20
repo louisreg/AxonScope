@@ -105,6 +105,11 @@ Work should start here unless the user asks otherwise.
   `d64fb77` Kaggle run was cancelled while `example08_recruitment runs=50` was
   still silent, so `realistic_stress_observer_gpu` now prints solver route,
   amplitude/dispatch progress, and per-case completion timing/RSS.
+- [x] Fix realistic mixed-pool route diagnostics and threshold. The `35693e5`
+  Kaggle log confirmed `runs=50` is split into `single-cable B=25` and
+  `double-cable B=25`, so the previous `B >= 32` shared threshold still missed
+  the double-cable subgroup. The shared route threshold is now `B >= 16`, and
+  realistic benchmark logs print solver routing per dispatch group.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.

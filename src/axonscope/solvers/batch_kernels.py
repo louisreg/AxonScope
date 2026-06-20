@@ -46,7 +46,7 @@ class BatchKernelResult:
 
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
-_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 32
+_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 16
 
 
 def _resolve_double_cable_kernel_block_solver(

@@ -109,7 +109,8 @@ def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
 
 
 def test_pcr_soa_batch_native_route_starts_at_realistic_batches():
-    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=16)
+    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=15)
+    assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=25)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=50)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=50)
