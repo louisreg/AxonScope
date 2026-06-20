@@ -584,15 +584,18 @@ Status on 2026-06-16: implemented as
 batch-first right-hand sides `[B, Nx]`. The solver-focused benchmark uses this
 batch-native path for `pcr_soa` / `pcr_adaptive` when they resolve to SoA, and
 `DoubleCableBatchKernel` uses it for array-output double-cable chunks when the
-resolved kernel solver is `pcr_soa` and `B >= 2048`. The P100 E2E run showed
-that the batch-native route improves large batches but regresses `B=512`, so
-small batches keep the previous per-fiber `vmap` route for now.
+resolved kernel solver is `pcr_soa` and `B >= 32`. The route is intentionally
+independent of recording mode: full, center, and observer-only output should
+exercise the same solver implementation for the same batch size.
 
 Status update: the observer-only double-cable path now has a batch-native
 `pcr_soa` scan for large batches as well. It keeps the same batch-aware block
 solve used by retained Vm output and updates compact observer state with
 `update_observer_state_batch`, so observer-only output no longer has to break
-the large-batch fast path.
+the large-batch fast path. A P100 stress attempt at `926a8ce` showed
+`runs=50/100` falling back to the old per-row observer path when the previous
+`B >= 2048` threshold was reused; the shared route threshold now starts at
+`B >= 32`.
 
 ## Problem
 

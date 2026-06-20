@@ -108,10 +108,11 @@ def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
     assert _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4097) == "pcr"
 
 
-def test_pcr_soa_batch_native_route_is_reserved_for_large_batches():
-    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=512)
+def test_pcr_soa_batch_native_route_starts_at_realistic_batches():
+    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=16)
+    assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=50)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
-    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=2048)
+    assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=50)
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -628,7 +629,11 @@ def test_double_cable_observer_pcr_soa_batch_native_matches_fallback(monkeypatch
         options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
         observers=observer,
     )
-    monkeypatch.setattr(batch_kernels, "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH", 1)
+    monkeypatch.setattr(
+        batch_kernels,
+        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+        1,
+    )
     batch_native = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,

@@ -157,10 +157,15 @@ instead of full `Vm`, while examples 06/07 keep their established recordings.
 `realistic_stress_observer_gpu` runs the compact solver-side observer path on
 GPU only. The first P100 attempt was interrupted during the 50-fiber recruitment
 case before a timing row was produced; the Kaggle UI timestamp on that log line
-was not a case duration. CPU observer-only stress is currently standby: Kaggle
-CPU-only and GPU-host attempts hit LLVM compile-memory errors at the 50-fiber
-recruitment case. Use different slugs if submitting comparison runs at the same
-time.
+was not a case duration. A later attempt on `926a8ce` revealed that
+observer-only was still using the retained-Vm `B >= 2048` batch-native threshold,
+so `runs=50/100` silently fell back to the slow per-row observer route. Current
+solver code uses one shared lower threshold for full, center, and observer-only
+recording, so this preset now exercises the same batch-native route as retained
+Vm output for realistic recruitment batches. CPU
+observer-only stress is currently standby: Kaggle CPU-only and GPU-host attempts
+hit LLVM compile-memory errors at the 50-fiber recruitment case. Use different
+slugs if submitting comparison runs at the same time.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and

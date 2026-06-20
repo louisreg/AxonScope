@@ -95,6 +95,12 @@ Work should start here unless the user asks otherwise.
   observer-only output at large batch sizes. Observer-only now has a
   batch-native scan using `update_observer_state_batch` instead of always
   falling back to per-row `vmap`/scalar observer updates.
+- [x] Fix the observer-only route threshold for realistic recruitment batches.
+  The first post-fix Kaggle run at `926a8ce` showed `runs=50` taking about
+  19 min before `runs=100` because observer-only reused the retained-Vm
+  `B >= 2048` threshold and therefore did not activate the new batch-native
+  path for `B=50/100`. The batch-native `pcr_soa` route now uses one shared
+  `B >= 32` threshold for full, center, and observer-only recording modes.
 - [ ] Phase 7.6.5 next optimization: profile and optimize `Vext`
   materialization for realistic threshold, activation, recruitment, and
   conduction workflows.
