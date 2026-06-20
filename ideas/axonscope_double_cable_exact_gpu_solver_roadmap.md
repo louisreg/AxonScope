@@ -23,6 +23,12 @@ benchmark/reports/double_cable_solver_optimization_2026_06.md
 
 The active follow-up is Phase 7.6.5 in `todo.md`: profile and optimize `Vext`
 materialization using workflow-level benchmarks based on basic examples 06/07/08.
+The 2026-06-20 P100 validation of factorized single-cable point-source `Vext`
+(`benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`)
+shows the right memory direction but not a runtime win yet: example 08
+single-cable `Vstim` estimates drop by about `145-152x`, while total example 08
+warm time stays flat because factorized `kernel.enqueue` increases. Keep this
+work under the workflow/Vext phase rather than reopening solver micro-tuning.
 
 Observer-related follow-up, 2026-06-20: the realistic observer runs exposed that
 solver-side observer output must be treated as a separate architecture topic,
@@ -2961,6 +2967,12 @@ footprint[B, Nx] * waveform[Nt]
 ```
 
 Build the RHS inside the time scan from factorized inputs.
+
+Status, 2026-06-20: implemented and validated for shared point-source
+single-cable VmRaster groups. Kaggle P100 confirms a large memory reduction, but
+the current factorized path adds enqueue overhead, likely around the spatial
+forcing-footprint preparation. Next action is to precompute/cache that forcing
+footprint or gate factorization by estimated dense `Vstim` memory pressure.
 
 ## 4. Static shapes
 

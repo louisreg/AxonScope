@@ -219,10 +219,29 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   temporal current. Local validation: dense and factorized builders match;
   dense and factorized VmRaster outputs match; dispatcher smoke confirms
   `inputs.extracellular input_format=factorized_point_source`.
+- [x] Phase 7.6.5A Vext Kaggle validation on P100 observer stress:
+  `benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`.
+  Compared with the dense/reuse baseline
+  `20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`, example 08
+  warm time is effectively flat (`3.636 s -> 3.639 s`) while the single-cable
+  `Vstim` estimate drops from `976000 -> 6740 bytes` at `B=50` and
+  `1952000 -> 12840 bytes` at `B=100`. `inputs.extracellular` gets faster, but
+  the factorized single-cable path adds `kernel.enqueue` overhead. Treat this as
+  a memory-scalability win, not a runtime win yet. Comparison artifacts:
+  `benchmark/results/realistic_examples/vext_factorization_compare_20260620`.
 - [ ] Phase 7.6.5A follow-up: add explicit input/Vext reuse for repeated
   amplitude or stimulus-only updates. Entry target: `example08_recruitment`
   should not rebuild spatial footprints or dense/factorized `Vext` structures
   for every amplitude when static shapes are unchanged.
+- [x] Phase 7.6.5A first factorized enqueue mitigation: moved the single-cable
+  factorized `L(footprint)` transform into the same jitted VmRaster scan instead
+  of building it as a separate eager JAX expression before enqueue. Local
+  validation: `tests/unit/solvers/test_batch.py` passes.
+- [ ] Phase 7.6.5A Kaggle validation: rerun `realistic_stress_observer_gpu`
+  against `20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100` to
+  check whether the factorized single-cable `kernel.enqueue` regression is
+  reduced. If it remains flat/worse, gate factorized `Vext` by dense memory
+  pressure and keep the dense path for small cases.
 - [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
   Required visibility: planning, runtime construction/cache hit, footprint
   materialization/cache hit, stimulus sampling, dense/factorized `Vext`
@@ -324,6 +343,32 @@ Current benchmark diagnosis:
        `inputs.extracellular input_format=factorized_point_source`;
      - remaining work: reuse dynamic current buffers across amplitude sweeps and
        extend the same idea to double-cable RHS construction.
+   - 2026-06-20 Kaggle P100 Vext factorization validation:
+     - run:
+       `benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`;
+     - comparison baseline:
+       `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`;
+     - single-cable `Vstim` memory estimate drops by about `145-152x`
+       (`976000 -> 6740 bytes` at `B=50`, `1952000 -> 12840 bytes` at
+       `B=100`);
+     - `inputs.extracellular` warm-repeat time drops
+       (`200.4 -> 131.8 ms` at `B=50`, `217.7 -> 140.5 ms` at `B=100`);
+     - `kernel.enqueue` rises (`1282.2 -> 1617.8 ms` at `B=50`,
+       `1958.4 -> 2285.7 ms` at `B=100`), so example 08 warm total is unchanged
+       (`3.636 -> 3.639 s`);
+     - decision: keep factorized `Vext` as the memory-scalability path, but
+       either precompute/pass the forcing footprint without extra eager JAX
+       dispatch or gate the path by memory pressure before claiming speedup.
+     - generated comparison CSV/plots:
+       `benchmark/results/realistic_examples/vext_factorization_compare_20260620`.
+   - 2026-06-20 local factorized enqueue mitigation:
+     - moved the single-cable factorized `L(footprint)` transform into
+       `_run_single_cable_factorized_vstim_batch_sparse_observer_scan`, so it is
+       compiled with the VmRaster scan instead of emitted as a separate eager JAX
+       expression before the kernel call;
+     - validation: `tests/unit/solvers/test_batch.py` passes;
+     - next validation: Kaggle P100 `realistic_stress_observer_gpu` versus
+       `20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 

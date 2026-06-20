@@ -51,6 +51,18 @@ reduce the repeated work around the solver: stable runtime reuse, dispatch and
 probe-plan reuse, footprint/Vext reuse, and launch/enqueue overhead. After that,
 use this scheduling note to test coalescing and async in a controlled benchmark.
 
+Follow-up validation from
+`benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`
+confirms that factorized point-source `Vext` is mainly a memory-scalability win
+for now. On example 08 single-cable observer-only groups, the `Vstim` estimate
+drops from `976000 -> 6740 bytes` at `B=50` and `1952000 -> 12840 bytes` at
+`B=100`, but warm time stays flat versus the dense/reuse baseline because
+factorized single-cable `kernel.enqueue` increases. Do not treat `Vext`
+factorization as a completed runtime optimization until the footprint forcing
+step is cached/jitted cleanly or selected only under memory pressure. A first
+local mitigation now computes `L(footprint)` inside the jitted VmRaster scan;
+it still needs Kaggle P100 validation before changing the scheduling priority.
+
 The useful parts of this note remain:
 
 ```text

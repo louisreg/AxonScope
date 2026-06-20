@@ -832,7 +832,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     intracellular_current_density_indices: Array,
     intracellular_current_density_mask: Array,
     extracellular_current_mid_A: Array,
-    extracellular_forcing_footprint_mV_per_A: Array,
+    extracellular_footprint_mV_per_A: Array,
     time_start_index: Array,
     dt_ms: Array,
 ) -> tuple[Array, Array, tuple[Array, ...], VmRasterState]:
@@ -856,9 +856,15 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         Iinj_values_mid,
         Iinj_indices,
         Iinj_mask,
-        forcing_footprint_mV_per_A,
+        footprint_mV_per_A,
     ):
         safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
+        forcing_footprint_mV_per_A = apply_diffusion_operator(
+            footprint_mV_per_A,
+            lower_row,
+            diag_row,
+            upper_row,
+        )
 
         def step(carry, step_inputs):
             Iinj_values, current_A, local_step = step_inputs
@@ -1009,7 +1015,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         intracellular_current_density_values_mid,
         intracellular_current_density_indices,
         intracellular_current_density_mask,
-        extracellular_forcing_footprint_mV_per_A,
+        extracellular_footprint_mV_per_A,
     )
 
 
@@ -2947,20 +2953,6 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         observers,
         batch_size=batch_size,
     )
-    forcing_footprint_mV_per_A = jax.vmap(
-        lambda footprint, lower_row, diag_row, upper_row: apply_diffusion_operator(
-            footprint,
-            lower_row,
-            diag_row,
-            upper_row,
-        )
-    )(
-        extracellular_potential_mid_mV.footprint_mV_per_A,
-        lower,
-        diag,
-        upper,
-    )
-
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     current_mid_A = jnp.asarray(
         extracellular_potential_mid_mV.current_mid_A,
@@ -2993,7 +2985,9 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             intracellular_current_density_indices=intracellular_current_density_mid.indices,
             intracellular_current_density_mask=intracellular_current_density_mid.mask,
             extracellular_current_mid_A=current_mid_A[start:stop],
-            extracellular_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
+            extracellular_footprint_mV_per_A=(
+                extracellular_potential_mid_mV.footprint_mV_per_A
+            ),
             time_start_index=jnp.asarray(start, dtype=jnp.int32),
             dt_ms=dt,
         )
