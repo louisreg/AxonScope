@@ -2999,9 +2999,21 @@ Local follow-up: `_prepare_batch_runtime` now uses a structural group signature
 for stimulation-independent runtime reuse, rather than simulation/solver object
 identity. This is intentionally narrower than a stimulus cache: it can reuse
 membrane/cable/extracellular runtime across equivalent rebuilt pools, while
-prepared cohorts and mutable contexts remain identity-bound. Validate on P100 by
-checking that rebuilt example 08 warm repeats lose their two
-`batch_runtime_cache_misses` and reduce `runtime.prepare`.
+prepared cohorts and mutable contexts remain identity-bound. P100 validation run
+`20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms rebuilt
+example 08 warm repeats lose their two `batch_runtime_cache_misses`
+(`16 hits / 0 miss`) and reduces B100 warm-repeat 3 `runtime.prepare`
+`522.5 -> 86.0 ms`. End-to-end warm means improve to `0.977 s` at B50 and
+`1.562 s` at B100, while `kernel.enqueue` becomes the dominant remaining phase.
+
+Next local pass: split observer-only `kernel.enqueue` timing before doing
+another solver optimization. VmRaster observer kernels now expose nested
+`kernel.dispatch_jax` and `kernel.finalize_observer` spans; the parent
+`kernel.enqueue.self_ms` is the remaining Python/JAX preparation envelope. Use
+the next P100 run to decide whether to optimize dispatch/input-buffer reuse,
+defer/collapse raster host finalization, or remove repeated preparation work.
+Cold-run work follows only after warm enqueue is characterized, and must preserve
+warm-repeat performance.
 
 ## 4. Static shapes
 

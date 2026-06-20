@@ -7,6 +7,8 @@ from typing import Any, Callable, cast
 import jax
 import jax.numpy as jnp
 
+from axonscope.benchmarking.hotpaths import benchmark_span
+
 from .batch_inputs import (
     FactorizedExtracellularPotentialBatch,
     SparseIntracellularCurrentDensityBatch,
@@ -2440,10 +2442,13 @@ class SingleCableVStimBatchKernel:
                     time_chunk_steps=chunk_steps,
                     progress_callback=progress_callback,
                 )
-            return BatchKernelResult(
-                Vm=None,
-                t=grid.t_vec_ms,
-                observations=cast(
+            with benchmark_span(
+                "kernel.finalize_observer",
+                mode="single",
+                observer="vm_raster",
+                group_size=batch_size,
+            ):
+                observations = cast(
                     dict[str, object],
                     finalize_vm_raster_state(
                         observers,
@@ -2451,7 +2456,11 @@ class SingleCableVStimBatchKernel:
                         nt=grid.Nt,
                         dt_ms=grid.dt_ms,
                     ),
-                ),
+                )
+            return BatchKernelResult(
+                Vm=None,
+                t=grid.t_vec_ms,
+                observations=observations,
             )
         if factorized_vext is not None and vext_batch is None:
             vext_batch = materialize_factorized_extracellular_potential_batch(
@@ -2682,10 +2691,13 @@ class DoubleCableBatchKernel:
                     time_chunk_steps=chunk_steps,
                     progress_callback=progress_callback,
                 )
-            return BatchKernelResult(
-                Vm=None,
-                t=grid.t_vec_ms,
-                observations=cast(
+            with benchmark_span(
+                "kernel.finalize_observer",
+                mode="double",
+                observer="vm_raster",
+                group_size=batch_size,
+            ):
+                observations = cast(
                     dict[str, object],
                     finalize_vm_raster_state(
                         observers,
@@ -2693,7 +2705,11 @@ class DoubleCableBatchKernel:
                         nt=grid.Nt,
                         dt_ms=grid.dt_ms,
                     ),
-                ),
+                )
+            return BatchKernelResult(
+                Vm=None,
+                t=grid.t_vec_ms,
+                observations=observations,
             )
         if factorized_vext is not None:
             vext_batch = materialize_factorized_extracellular_potential_batch(
@@ -2884,31 +2900,40 @@ def _run_single_cable_vstim_batch_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
-        Vm, gates, state, observer_state = _run_single_cable_vstim_batch_observer_scan(
-            backend=membrane_runtime.backend,
-            membrane=membrane_runtime.membrane,
-            has_driven_extracellular=has_driven_extracellular,
-            stateless_vm_only=stateless_vm_only,
-            lower=lower,
-            diag=diag,
-            upper=upper,
-            dl=-dt * lower,
-            d_static=jnp.ones_like(diag) - dt * diag,
-            du=-dt * upper,
-            Cm_uF_cm2=cm,
-            I_background=background,
-            Vm0_mV=Vm,
-            gates0=gates,
-            state0=state,
-            observer_state0=observer_state,
-            raster_probe_indices=raster_probe_indices,
-            raster_probe_mask=raster_probe_mask,
-            raster_thresholds_mV=observers.thresholds_mV,
-            intracellular_current_density_mid=intracellular_current_density_mid[:, start:stop],
-            extracellular_potential_mid_mV=extracellular_potential_mid_mV[:, start:stop],
-            time_start_index=jnp.asarray(start, dtype=jnp.int32),
-            dt_ms=dt,
-        )
+        with benchmark_span(
+            "kernel.dispatch_jax",
+            mode="single",
+            observer="vm_raster",
+            variant="dense_vstim",
+            group_size=batch_size,
+            chunk_index=chunk_index,
+            chunk_count=len(chunk_ranges),
+        ):
+            Vm, gates, state, observer_state = _run_single_cable_vstim_batch_observer_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=-dt * lower,
+                d_static=jnp.ones_like(diag) - dt * diag,
+                du=-dt * upper,
+                Cm_uF_cm2=cm,
+                I_background=background,
+                Vm0_mV=Vm,
+                gates0=gates,
+                state0=state,
+                observer_state0=observer_state,
+                raster_probe_indices=raster_probe_indices,
+                raster_probe_mask=raster_probe_mask,
+                raster_thresholds_mV=observers.thresholds_mV,
+                intracellular_current_density_mid=intracellular_current_density_mid[:, start:stop],
+                extracellular_potential_mid_mV=extracellular_potential_mid_mV[:, start:stop],
+                time_start_index=jnp.asarray(start, dtype=jnp.int32),
+                dt_ms=dt,
+            )
         if progress_callback is not None:
             progress_callback(chunk_index, len(chunk_ranges))
 
@@ -2965,35 +2990,44 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
-        Vm, gates, state, observer_state = _run_single_cable_vstim_batch_sparse_observer_scan(
-            backend=membrane_runtime.backend,
-            membrane=membrane_runtime.membrane,
-            has_driven_extracellular=has_driven_extracellular,
-            stateless_vm_only=stateless_vm_only,
-            lower=lower,
-            diag=diag,
-            upper=upper,
-            dl=-dt * lower,
-            d_static=jnp.ones_like(diag) - dt * diag,
-            du=-dt * upper,
-            Cm_uF_cm2=cm,
-            I_background=background,
-            Vm0_mV=Vm,
-            gates0=gates,
-            state0=state,
-            observer_state0=observer_state,
-            raster_probe_indices=raster_probe_indices,
-            raster_probe_mask=raster_probe_mask,
-            raster_thresholds_mV=observers.thresholds_mV,
-            intracellular_current_density_values_mid=(
-                intracellular_current_density_mid.density_mid[:, start:stop]
-            ),
-            intracellular_current_density_indices=intracellular_current_density_mid.indices,
-            intracellular_current_density_mask=intracellular_current_density_mid.mask,
-            extracellular_potential_mid_mV=extracellular_potential_mid_mV[:, start:stop],
-            time_start_index=jnp.asarray(start, dtype=jnp.int32),
-            dt_ms=dt,
-        )
+        with benchmark_span(
+            "kernel.dispatch_jax",
+            mode="single",
+            observer="vm_raster",
+            variant="sparse_vstim",
+            group_size=batch_size,
+            chunk_index=chunk_index,
+            chunk_count=len(chunk_ranges),
+        ):
+            Vm, gates, state, observer_state = _run_single_cable_vstim_batch_sparse_observer_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=-dt * lower,
+                d_static=jnp.ones_like(diag) - dt * diag,
+                du=-dt * upper,
+                Cm_uF_cm2=cm,
+                I_background=background,
+                Vm0_mV=Vm,
+                gates0=gates,
+                state0=state,
+                observer_state0=observer_state,
+                raster_probe_indices=raster_probe_indices,
+                raster_probe_mask=raster_probe_mask,
+                raster_thresholds_mV=observers.thresholds_mV,
+                intracellular_current_density_values_mid=(
+                    intracellular_current_density_mid.density_mid[:, start:stop]
+                ),
+                intracellular_current_density_indices=intracellular_current_density_mid.indices,
+                intracellular_current_density_mask=intracellular_current_density_mid.mask,
+                extracellular_potential_mid_mV=extracellular_potential_mid_mV[:, start:stop],
+                time_start_index=jnp.asarray(start, dtype=jnp.int32),
+                dt_ms=dt,
+            )
         if progress_callback is not None:
             progress_callback(chunk_index, len(chunk_ranges))
 
@@ -3069,38 +3103,47 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         dtype=dtype_local,
     )
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
-        Vm, gates, state, observer_state = _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
-            backend=membrane_runtime.backend,
-            membrane=membrane_runtime.membrane,
-            has_driven_extracellular=has_driven_extracellular,
-            stateless_vm_only=stateless_vm_only,
-            lower=lower,
-            diag=diag,
-            upper=upper,
-            dl=-dt * lower,
-            d_static=jnp.ones_like(diag) - dt * diag,
-            du=-dt * upper,
-            Cm_uF_cm2=cm,
-            I_background=background,
-            Vm0_mV=Vm,
-            gates0=gates,
-            state0=state,
-            observer_state0=observer_state,
-            raster_probe_indices=raster_probe_indices,
-            raster_probe_mask=raster_probe_mask,
-            raster_thresholds_mV=observers.thresholds_mV,
-            intracellular_current_density_values_mid=(
-                intracellular_current_density_mid.density_mid[:, start:stop]
-            ),
-            intracellular_current_density_indices=intracellular_current_density_mid.indices,
-            intracellular_current_density_mask=intracellular_current_density_mid.mask,
-            extracellular_current_mid_A=current_mid_A[start:stop],
-            extracellular_footprint_mV_per_A=(
-                extracellular_potential_mid_mV.footprint_mV_per_A
-            ),
-            time_start_index=jnp.asarray(start, dtype=jnp.int32),
-            dt_ms=dt,
-        )
+        with benchmark_span(
+            "kernel.dispatch_jax",
+            mode="single",
+            observer="vm_raster",
+            variant="factorized_sparse_vstim",
+            group_size=batch_size,
+            chunk_index=chunk_index,
+            chunk_count=len(chunk_ranges),
+        ):
+            Vm, gates, state, observer_state = _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=-dt * lower,
+                d_static=jnp.ones_like(diag) - dt * diag,
+                du=-dt * upper,
+                Cm_uF_cm2=cm,
+                I_background=background,
+                Vm0_mV=Vm,
+                gates0=gates,
+                state0=state,
+                observer_state0=observer_state,
+                raster_probe_indices=raster_probe_indices,
+                raster_probe_mask=raster_probe_mask,
+                raster_thresholds_mV=observers.thresholds_mV,
+                intracellular_current_density_values_mid=(
+                    intracellular_current_density_mid.density_mid[:, start:stop]
+                ),
+                intracellular_current_density_indices=intracellular_current_density_mid.indices,
+                intracellular_current_density_mask=intracellular_current_density_mid.mask,
+                extracellular_current_mid_A=current_mid_A[start:stop],
+                extracellular_footprint_mV_per_A=(
+                    extracellular_potential_mid_mV.footprint_mV_per_A
+                ),
+                time_start_index=jnp.asarray(start, dtype=jnp.int32),
+                dt_ms=dt,
+            )
         if progress_callback is not None:
             progress_callback(chunk_index, len(chunk_ranges))
 
@@ -3155,33 +3198,42 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
-        Vm, gates, state, observer_state = _run_single_cable_zero_vstim_batch_sparse_observer_scan(
-            backend=membrane_runtime.backend,
-            membrane=membrane_runtime.membrane,
-            stateless_vm_only=stateless_vm_only,
-            lower=lower,
-            diag=diag,
-            upper=upper,
-            dl=-dt * lower,
-            d_static=jnp.ones_like(diag) - dt * diag,
-            du=-dt * upper,
-            Cm_uF_cm2=cm,
-            I_background=background,
-            Vm0_mV=Vm,
-            gates0=gates,
-            state0=state,
-            observer_state0=observer_state,
-            raster_probe_indices=raster_probe_indices,
-            raster_probe_mask=raster_probe_mask,
-            raster_thresholds_mV=observers.thresholds_mV,
-            intracellular_current_density_values_mid=(
-                intracellular_current_density_mid.density_mid[:, start:stop]
-            ),
-            intracellular_current_density_indices=intracellular_current_density_mid.indices,
-            intracellular_current_density_mask=intracellular_current_density_mid.mask,
-            time_start_index=jnp.asarray(start, dtype=jnp.int32),
-            dt_ms=dt,
-        )
+        with benchmark_span(
+            "kernel.dispatch_jax",
+            mode="single",
+            observer="vm_raster",
+            variant="zero_sparse_vstim",
+            group_size=batch_size,
+            chunk_index=chunk_index,
+            chunk_count=len(chunk_ranges),
+        ):
+            Vm, gates, state, observer_state = _run_single_cable_zero_vstim_batch_sparse_observer_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                stateless_vm_only=stateless_vm_only,
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=-dt * lower,
+                d_static=jnp.ones_like(diag) - dt * diag,
+                du=-dt * upper,
+                Cm_uF_cm2=cm,
+                I_background=background,
+                Vm0_mV=Vm,
+                gates0=gates,
+                state0=state,
+                observer_state0=observer_state,
+                raster_probe_indices=raster_probe_indices,
+                raster_probe_mask=raster_probe_mask,
+                raster_thresholds_mV=observers.thresholds_mV,
+                intracellular_current_density_values_mid=(
+                    intracellular_current_density_mid.density_mid[:, start:stop]
+                ),
+                intracellular_current_density_indices=intracellular_current_density_mid.indices,
+                intracellular_current_density_mask=intracellular_current_density_mid.mask,
+                time_start_index=jnp.asarray(start, dtype=jnp.int32),
+                dt_ms=dt,
+            )
         if progress_callback is not None:
             progress_callback(chunk_index, len(chunk_ranges))
 
@@ -3624,41 +3676,51 @@ def _run_double_cable_batch_observer_chunks(
             kernel_block_solver,
             batch_size=batch_size,
         ):
-            Vi, Ve, gates, state, observer_state = _run_double_cable_batch_observer_pcr_soa_scan(
-                backend=membrane_runtime.backend,
-                membrane=membrane_runtime.membrane,
-                has_driven_extracellular=has_driven_extracellular,
-                stateless_vm_only=stateless_vm_only,
-                double_cable_block_solver=kernel_block_solver,
-                Vi0_mV=Vi,
-                Ve0_mV=Ve,
-                gates0=gates,
-                state0=state,
-                observer_state0=observer_state,
-                raster_probe_indices=raster_probe_indices,
-                raster_probe_mask=raster_probe_mask,
-                raster_thresholds_mV=observers.thresholds_mV,
-                area_cm2=area_cm2,
-                Cm_abs=Cm_abs,
-                Cx_abs=Cx_abs,
-                Gx_abs=Gx_abs,
-                Gax_e=Gax_e,
-                Gax_i=Gax_i,
-                left_i=left_i,
-                right_i=right_i,
-                left_e=left_e,
-                right_e=right_e,
-                I_background=background,
-                intracellular_current_density_mid=iinj_chunk,
-                extracellular_potential_mid_mV=vext_chunk,
-                extracellular_potential_initial_previous_mV=previous,
-                row_indices=jnp.arange(batch_size, dtype=jnp.int32),
-                time_start_index=jnp.asarray(start, dtype=jnp.int32),
-                dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
-                extracellular_current_mid_A=current_chunk,
-                extracellular_current_initial_previous_A=previous_current_A,
-                extracellular_footprint_mV_per_A=factorized_footprint_mV_per_A,
-            )
+            with benchmark_span(
+                "kernel.dispatch_jax",
+                mode="double",
+                observer="vm_raster",
+                variant=kernel_block_solver,
+                factorized_vext=factorized_vext is not None,
+                group_size=batch_size,
+                chunk_index=chunk_index,
+                chunk_count=len(chunk_ranges),
+            ):
+                Vi, Ve, gates, state, observer_state = _run_double_cable_batch_observer_pcr_soa_scan(
+                    backend=membrane_runtime.backend,
+                    membrane=membrane_runtime.membrane,
+                    has_driven_extracellular=has_driven_extracellular,
+                    stateless_vm_only=stateless_vm_only,
+                    double_cable_block_solver=kernel_block_solver,
+                    Vi0_mV=Vi,
+                    Ve0_mV=Ve,
+                    gates0=gates,
+                    state0=state,
+                    observer_state0=observer_state,
+                    raster_probe_indices=raster_probe_indices,
+                    raster_probe_mask=raster_probe_mask,
+                    raster_thresholds_mV=observers.thresholds_mV,
+                    area_cm2=area_cm2,
+                    Cm_abs=Cm_abs,
+                    Cx_abs=Cx_abs,
+                    Gx_abs=Gx_abs,
+                    Gax_e=Gax_e,
+                    Gax_i=Gax_i,
+                    left_i=left_i,
+                    right_i=right_i,
+                    left_e=left_e,
+                    right_e=right_e,
+                    I_background=background,
+                    intracellular_current_density_mid=iinj_chunk,
+                    extracellular_potential_mid_mV=vext_chunk,
+                    extracellular_potential_initial_previous_mV=previous,
+                    row_indices=jnp.arange(batch_size, dtype=jnp.int32),
+                    time_start_index=jnp.asarray(start, dtype=jnp.int32),
+                    dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+                    extracellular_current_mid_A=current_chunk,
+                    extracellular_current_initial_previous_A=previous_current_A,
+                    extracellular_footprint_mV_per_A=factorized_footprint_mV_per_A,
+                )
         else:
             raise NotImplementedError(
                 "VmRaster double-cable observers currently require "

@@ -286,21 +286,41 @@ Attack plan from the 2026-06-20 CPU/GPU recording-mode comparison:
   runtime while keeping cohort/context/stimulus caches identity-based. Local
   validation:
   `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`.
-  Next Kaggle validation should check that example 08 warm-repeat
-  `runtime.prepare` no longer reports two `batch_runtime_cache_misses` per
-  repeat.
+  Kaggle validation:
+  `20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100`. Example 08
+  warm-repeat `runtime.prepare` now reports `16 hits / 0 miss` instead of
+  `14 hits / 2 misses`; `B=100` warm-repeat 3 `runtime.prepare` drops
+  `522.5 -> 86.0 ms`. End-to-end example 08 warm mean improves versus
+  `204138` by `1.042 -> 0.977 s` at `B=50` (`1.07x`) and `1.728 -> 1.562 s`
+  at `B=100` (`1.11x`). `kernel.enqueue` rises, so the next optimization should
+  investigate launch/enqueue and input-buffer reuse rather than more runtime
+  preparation caching.
 - [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
   Required visibility: planning, runtime construction/cache hit, footprint
   materialization/cache hit, stimulus sampling, dense/factorized `Vext`
   materialization, device transfer, enqueue, wait, and result packaging.
-- [ ] Phase 7.6.5C: implement a stimulus/amplitude-only execution cache for
+- [x] Phase 7.6.5B first enqueue visibility pass: VmRaster observer kernels now
+  record nested `kernel.dispatch_jax` and `kernel.finalize_observer` spans under
+  `kernel.enqueue`. The next GPU run should read `kernel.enqueue.self_ms` as
+  remaining Python/JAX preparation, `kernel.dispatch_jax` as the actual JIT
+  dispatch/solve call, and `kernel.finalize_observer` as raster host
+  finalization/copy.
+- [ ] Phase 7.6.5C: reduce warm `kernel.enqueue` using the new split. If
+  `kernel.finalize_observer` dominates, defer/collapse host finalization and
+  avoid repeated static VmRaster metadata copies. If `kernel.dispatch_jax`
+  dominates, inspect executable/input-buffer reuse. If `kernel.enqueue.self_ms`
+  dominates, remove Python-side preparation and repeated shape/table work.
+- [ ] Phase 7.6.5D: implement a stimulus/amplitude-only execution cache for
   point-source/extracellular sweeps. Reuse prepared spatial footprints and
   compiled executable; update only temporal stimulus/amplitude buffers where
   shapes match.
-- [ ] Phase 7.6.5D: benchmark reuse using full/center/VmRaster output modes on
+- [ ] Phase 7.6.5E: benchmark reuse using full/center/VmRaster output modes on
   CPU and GPU, then regenerate the recording-mode comparison plots. Success:
   reduce `runtime.prepare + dispatch.build_plan` by at least 30% on
   `example08` warm repeats without changing solver outputs.
+- [ ] Phase 7.6.5F: cold-run optimization pass, only after warm enqueue is
+  understood. Improve compile/first-call behavior without regressing warm-repeat
+  timings or changing the fast path.
 - [ ] Phase 7.6.6: evaluate GPU dispatch scheduling only after Phase 7.6.5
   reuse work. Use `ideas/axonscope_dispatch_scheduling_gpu_note.md`: first test
   memory-aware bucket/coalesce of compatible groups, then optional async
@@ -458,9 +478,13 @@ Current benchmark diagnosis:
        contexts identity-bound to avoid stale stimulus reuse;
      - validation:
        `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`;
+     - Kaggle validation:
+       `20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100` removes
+       warm-repeat runtime misses (`16 hits / 0 miss`) and lowers example 08
+       warm mean to `0.977 s` at `B=50`, `1.562 s` at `B=100`;
      - local CPU benchmark smoke for mixed observer-only is not representative
        because double-cable VmRaster requires the batch-native PCR/SoA path;
-       validate the timing impact on Kaggle/P100.
+       use Kaggle/P100 for this hot path.
    - Local validation:
      `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
 

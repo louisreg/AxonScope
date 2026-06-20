@@ -82,11 +82,20 @@ remaining profile is still dominated by runtime/dispatch preparation and
 launch/enqueue, so scheduling/reuse work remains the next higher-leverage phase.
 
 Local follow-up: batch runtime reuse now uses a structural group signature for
-stimulation-independent solver runtimes. This should remove the two
-`batch_runtime_cache_misses` that appear whenever the benchmark rebuilds an
-equivalent pool between repeats, without reusing mutable contexts or stimulus
-objects. Keep prepared cohort/context caches identity-bound until there is an
-explicit stimulus-update contract.
+stimulation-independent solver runtimes. P100 validation run
+`20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100` removes the two
+warm-repeat `batch_runtime_cache_misses` for rebuilt example 08 pools
+(`16 hits / 0 miss`) and drops B100 warm-repeat 3 `runtime.prepare` from
+`522.5 ms` to `86.0 ms`. End-to-end example 08 warm mean improves to
+`0.977 s` at B50 and `1.562 s` at B100. Keep prepared cohort/context caches
+identity-bound until there is an explicit stimulus-update contract.
+
+Immediate enqueue follow-up: before changing scheduling, the VmRaster observer
+solver path now splits `kernel.enqueue` into nested `kernel.dispatch_jax` and
+`kernel.finalize_observer` spans. Use the next GPU run to decide whether the
+remaining bottleneck is actual JAX dispatch/solve, raster host finalization, or
+the parent `kernel.enqueue.self_ms` preparation work. Cold-run optimization comes
+after this warm enqueue pass and must not regress warm-repeat timings.
 
 The useful parts of this note remain:
 
@@ -773,7 +782,17 @@ or integrate into existing `BatchOptions` if that is the preferred API.
 
 ## Step 2 — split enqueue/finalize
 
-Refactor batch execution functions so they can enqueue without waiting.
+First split timing attribution before changing behavior. Current VmRaster
+observer kernels expose:
+
+```text
+kernel.enqueue.self_ms     Python/JAX preparation left around the call
+kernel.dispatch_jax        actual jitted solver call
+kernel.finalize_observer   VmRaster host finalization/copy
+kernel.wait                explicit wait after group return
+```
+
+Then refactor batch execution functions so they can enqueue without waiting.
 
 Keep synchronous behavior identical by default.
 

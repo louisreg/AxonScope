@@ -30,6 +30,8 @@ DEFAULT_EVENTS = (
     "runtime.prepare",
     "dispatch.build_plan",
     "kernel.enqueue",
+    "kernel.dispatch_jax",
+    "kernel.finalize_observer",
     "kernel.wait",
     "results.split_batch",
     "inputs.extracellular",
@@ -531,6 +533,10 @@ def investigation_hint(event_name: str) -> str:
         return "device execution or CPU backend solve time"
     if event_name == "kernel.enqueue":
         return "JIT launch/enqueue overhead and executable reuse"
+    if event_name == "kernel.dispatch_jax":
+        return "device dispatch plus any implicit synchronization before public result packaging"
+    if event_name == "kernel.finalize_observer":
+        return "VmRaster host finalization/copy; keep tiny and avoid repeated static metadata work"
     if event_name == "results.split_batch":
         return "result slicing/concatenation and host packaging"
     if event_name == "inputs.extracellular":

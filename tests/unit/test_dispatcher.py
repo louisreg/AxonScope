@@ -472,6 +472,20 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     assert enqueue_metadata["mode"] == "double"
     assert enqueue_metadata["recording_mode"] == "none"
 
+    dispatch_events = [event for event in report.events if event.name == "kernel.dispatch_jax"]
+    assert len(dispatch_events) == 1
+    assert dispatch_events[0].parent_event_id == enqueue_events[0].event_id
+    dispatch_metadata = dispatch_events[0].metadata
+    assert dispatch_metadata["mode"] == "double"
+    assert dispatch_metadata["observer"] == "vm_raster"
+    assert dispatch_metadata["factorized_vext"] is True
+
+    finalize_events = [
+        event for event in report.events if event.name == "kernel.finalize_observer"
+    ]
+    assert len(finalize_events) == 1
+    assert finalize_events[0].parent_event_id == enqueue_events[0].event_id
+
     group_events = [event for event in report.events if event.name == "dispatch.group.total"]
     assert len(group_events) == 1
     group_metadata = group_events[0].metadata
