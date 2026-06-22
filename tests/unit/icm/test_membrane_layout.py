@@ -5,7 +5,7 @@ from axonscope import membranes
 from axonscope.channel_models.axnode import AxnodeICM
 from axonscope.channel_models.passive import PassiveICM
 from axonscope.icm import CompartmentMembraneLayout, HeterogeneousICMBackend
-from axonscope.solvers.runtime import compile_membrane_model
+from axonscope.backends.jax.runtime import compile_membrane_model
 from axonscope.utils import units
 
 

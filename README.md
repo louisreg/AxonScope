@@ -80,9 +80,10 @@ axs.stimulation    stimuli, electrodes, clamps, and contexts
 axs.results        SimResult, AxonSimulationResult, visualization, legacy helpers
 axs.analysis       structured analysis definitions, statuses, reports
 axs.performance    simulation memory estimates and runtime/device policies
+axs.inspection     printable planning, dispatch, lowering, kernel, and result reports
 axs.protocols      threshold, sweep, and recruitment workflows
 axs.dispatcher     pool dispatch inspection and advanced execution helpers
-axs.solvers        solver classes, options, kernels, and runtime builders
+axs.solvers        advanced solver facade and low-level runtime builders
 axs.signals        typed, extensible recording signal descriptors
 axs.positions      typed position selectors for analyses and criteria
 axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
@@ -133,15 +134,21 @@ simulation = axs.AxonSimulation(
 result = simulation.run()
 ```
 
-Direct solver calls remain available for advanced users and use solver-level
-time names:
+Runtime/device/precision requests use the typed public execution policy:
 
 ```python
-result = axs.solvers.CrankNicholson().solve(
-    sim,
-    tsim=5.0 * axs.ms,
-    dt=0.01 * axs.ms,
+policy = axs.ExecutionPolicy(
+    runtime=axs.Runtime.JAX,
+    device=axs.Device.cpu(),
+    precision=axs.PrecisionPolicy.float32(),
 )
+result = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, execution_policy=policy)
+```
+
+Pipeline planning can be printed before launching solver kernels:
+
+```python
+simulation.inspect(print_summary=True)
 ```
 
 ## Extracellular Stimulation
@@ -269,8 +276,9 @@ observer.update(result.time_values(unit=axs.ms) * axs.ms, result.Vm * axs.mV)
 activation = observer.finalize()
 ```
 
-For compact solver-side reductions, pass the same analysis definitions as
-simulation observers. `Recording.none()` keeps the result trace-free:
+For compact solver-side threshold reductions, pass compatible analysis
+definitions as simulation observers. `Recording.none()` keeps the result
+trace-free and returns packed VmRaster observations:
 
 ```python
 simulation = axs.AxonSimulation(
@@ -278,10 +286,15 @@ simulation = axs.AxonSimulation(
     duration=1.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.none(),
-    observers=[axs.analysis.PeakVoltage(target=axs.positions.CENTER)],
+    observers=[
+        axs.analysis.Activation(
+            threshold=-20.0 * axs.mV,
+            target=axs.positions.CENTER,
+        ),
+    ],
 )
 results = simulation.run()
-peak = results.observations["peak_voltage"]
+raster = results.observations[axs.VM_RASTER_OBSERVATION_KEY]
 ```
 
 Repeated stimulation workflows live in `axs.protocols`:
@@ -313,25 +326,27 @@ results = simulation.run()
 Examples are the executable learning path. Keep them in sync with API changes.
 
 ```bash
-python examples/basic/example_01_stimulus_waveforms.py
-python examples/basic/example_02_point_source_electrode.py
-python examples/basic/example_03_intracellular_hh.py
-python examples/basic/example_04_extracellular_mrg.py
-python examples/basic/example_05_pool_dispatch_basic.py
-python examples/basic/example_06_velocity_vs_diameter.py
-python examples/basic/example_07_threshold_vs_diameter.py
-python examples/basic/example_08_recruitment_curve_population.py
+python examples/basic/01_first_intracellular_simulation.py
+python examples/basic/02_stimuli_and_units.py
+python examples/basic/03_point_source_footprint.py
+python examples/basic/04_extracellular_mrg_simulation.py
+python examples/basic/05_population_pool_run.py
+python examples/basic/06_activation_velocity.py
+python examples/basic/07_threshold_vs_diameter.py
+python examples/basic/08_recruitment_curve_population.py
 ```
 
 Advanced workflow examples:
 
 ```bash
-python examples/advanced/example_01_pool_dispatch_nrv.py --fibers 8
-python examples/advanced/example_05_recording_options.py
-python examples/advanced/example_06_activation_criterion.py
-python examples/advanced/example_07_recruitment_curve.py
-python examples/advanced/example_08_root_axon_simulation.py
-python examples/advanced/example_09_axon_population.py
+python examples/advanced/object_model/01_axon_simulation_root.py
+python examples/advanced/recording_analysis/01_recording_options.py
+python examples/advanced/recording_analysis/05_vmraster_observer_only.py
+python examples/advanced/protocols/01_threshold_vs_parameters.py
+python examples/advanced/protocols/02_recruitment_waveforms.py
+python examples/advanced/runtime/01_runtime_policy.py
+python examples/advanced/runtime/03_pipeline_inspection.py
+python examples/with_nrv/01_nrv_pool_geometry.py --fibers 8
 ```
 
 See `examples/README.md` for the full learning path.

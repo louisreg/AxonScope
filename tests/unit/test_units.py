@@ -69,7 +69,7 @@ def test_units_convert_quantity_like_values():
 
 
 def test_direct_solver_time_values_accept_quantity_like_values():
-    from axonscope.solvers.common import resolve_time_args
+    from axonscope.timebase import resolve_time_args
 
     assert resolve_time_args(
         tsim=FakeQuantity(0.002, "second"),
@@ -104,6 +104,17 @@ def test_recording_normalizes_explicit_indices():
 
     assert recording.spatial is axs.RecordingSpatial.INDICES
     assert recording.record_indices == (0, 4)
+
+
+def test_recording_plan_is_backend_neutral_and_computes_retained_width():
+    plan = axs.Recording.probes(axs.signals.Vm, count=3).to_plan()
+
+    assert isinstance(plan, axs.RecordingPlan)
+    assert plan.signals == (axs.signals.Vm,)
+    assert plan.spatial is axs.RecordingSpatial.PROBES
+    assert plan.indices_for(5) == (0, 2, 4)
+    assert plan.width_for(5) == 3
+    assert axs.Recording.none().to_plan().indices_for(5) == ()
 
 
 def test_simulation_protocol_accepts_unit_quantities():

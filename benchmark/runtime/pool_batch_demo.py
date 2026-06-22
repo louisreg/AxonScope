@@ -34,15 +34,16 @@ from axonscope.backends.jax.input_batches import (
 from axonscope.benchmarking import jax_profile_trace, trace_annotation
 from axonscope.channel_models import enable_rate_tables
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.backends.jax.batch_kernels import (
+    DoubleCableBatchKernel,
+    SingleCableVStimBatchKernel,
+)
+from axonscope.backends.jax.kernels import DoubleCableKernel, SingleCableKernel
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
-    DoubleCableBatchKernel,
-    DoubleCableKernel,
-    SingleCableKernel,
-    SingleCableVStimBatchKernel,
-    prepare_solver_runtime,
 )
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import ExtracellularContext, Stimulus
 
 

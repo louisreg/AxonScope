@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
+from axonscope.backends.jax.execution_policy import JaxExecutionContext, jax_execution_context
+from axonscope.backends.jax.recording import batch_options_from_recording
 from axonscope.benchmarking.hotpaths import benchmark_span
+from axonscope.performance import ExecutionPolicy
 from axonscope.utils import units
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher import run_pool
@@ -14,7 +17,13 @@ from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording, RecordingSpatial
 from axonscope.results import AxonSimulationResult, SimResult
-from axonscope.solvers import BatchOptions, CrankNicholson, Solver, SolverOptions
+from axonscope.solvers import (
+    BatchOptions,
+    CrankNicholson,
+    Solver,
+    SolverOptions,
+    resolve_double_cable_block_solver,
+)
 
 if TYPE_CHECKING:
     from axonscope.dispatcher.results import DispatchRecord
@@ -66,6 +75,7 @@ class AxonSimulation:
         solver_options: SolverOptions | None = None,
         batch_options: BatchOptions | None = None,
         observers: Sequence[Any] | None = None,
+        execution_policy: ExecutionPolicy | None = None,
         progress: ProgressOption = False,
     ) -> None:
         population_lifecycle = not isinstance(axons, (Axon, AxonInstance))
@@ -79,6 +89,7 @@ class AxonSimulation:
         self.solver_options = solver_options
         self.batch_options = batch_options
         self.observers = tuple(observers) if observers is not None else None
+        self.execution_policy = execution_policy
         self.progress = progress
 
     @property
@@ -109,6 +120,7 @@ class AxonSimulation:
                 solver_options=self.solver_options,
                 recording=self.recording,
                 observers=self.observers,
+                execution_policy=self.execution_policy,
             )
 
         if self.solver is not None:
@@ -124,6 +136,7 @@ class AxonSimulation:
             batch_options=self.batch_options,
             recording=self.recording,
             observers=self.observers,
+            execution_policy=self.execution_policy,
             progress=self.progress,
         )
 
@@ -131,6 +144,14 @@ class AxonSimulation:
         """Estimate memory pressure for this simulation without running it."""
 
         from axonscope.performance import estimate_simulation
+
+        policy_kwargs: dict[str, Any] = {}
+        if self.execution_policy is not None:
+            policy_kwargs["runtime"] = self.execution_policy.runtime
+            policy_kwargs["device"] = self.execution_policy.device
+            if self.execution_policy.precision is not None:
+                policy_kwargs["precision"] = self.execution_policy.precision
+        policy_kwargs.update(kwargs)
 
         return estimate_simulation(
             self.population,
@@ -140,7 +161,23 @@ class AxonSimulation:
             batch_options=self.batch_options,
             observers=self.observers,
             population_lifecycle=self.is_population,
-            **kwargs,
+            **policy_kwargs,
+        )
+
+    def inspect(self, *, print_summary: bool = False):
+        """Inspect planning, dispatch/batch grouping, and preparation."""
+
+        from axonscope.inspection import inspect_simulation
+
+        return inspect_simulation(
+            self.population,
+            duration=self.duration,
+            dt=self.dt,
+            recording=self.recording,
+            batch_options=self.batch_options,
+            observers=self.observers,
+            execution_policy=self.execution_policy,
+            print_summary=print_summary,
         )
 
 
@@ -230,7 +267,7 @@ def _filter_pool_recording(
 
     if not recording.voltage:
         return tuple(results)
-    batch_options = recording.to_batch_options()
+    plan = recording.to_plan()
     filtered = []
     for axon_result in results:
         if hasattr(axon_result, "indices"):
@@ -239,7 +276,7 @@ def _filter_pool_recording(
         if axon_result.record_indices is not None:
             filtered.append(axon_result)
             continue
-        indices = batch_options.recording.indices_for(int(axon_result.axon.n_compartments))
+        indices = plan.indices_for(int(axon_result.axon.n_compartments))
         if indices is None:
             filtered.append(axon_result)
             continue
@@ -261,12 +298,27 @@ def _pool_batch_options_for_recording(
 ) -> BatchOptions | None:
     """Merge explicit public recording with lower-level batch execution knobs."""
 
-    if recording is None:
+    return batch_options_from_recording(recording, batch_options=batch_options)
+
+
+def _pool_batch_options_for_execution_context(
+    batch_options: BatchOptions | None,
+    context: JaxExecutionContext,
+) -> BatchOptions | None:
+    """Apply execution-policy device routing to batch-only solver options."""
+
+    if context.platform is None:
         return batch_options
-    recording_options = recording.to_batch_options()
-    if batch_options is None:
-        return recording_options
-    return replace(batch_options, recording=recording_options.recording)
+    options = BatchOptions.full() if batch_options is None else batch_options
+    if options.double_cable_block_solver != "auto":
+        return options
+    return replace(
+        options,
+        double_cable_block_solver=resolve_double_cable_block_solver(
+            "auto",
+            platform=context.platform,
+        ),
+    )
 
 
 def simulate(
@@ -278,6 +330,7 @@ def simulate(
     solver_options: SolverOptions | None = None,
     recording: Recording | None = None,
     observers: Sequence[Any] | None = None,
+    execution_policy: ExecutionPolicy | None = None,
 ) -> SimResult:
     """Run one axon simulation and return a ``SimResult``.
 
@@ -298,14 +351,15 @@ def simulate(
         tsim_ms=duration_ms,
         dt_ms=step_ms,
     ):
-        result = active_solver.solve(
-            simulation,
-            tsim=duration_ms,
-            dt=step_ms,
-            record_observables=rec.wants_observables,
-            record_voltage=rec.voltage,
-            observers=observer_defs,
-        )
+        with jax_execution_context(execution_policy, instances=(simulation,)):
+            result = active_solver.solve(
+                simulation,
+                tsim=duration_ms,
+                dt=step_ms,
+                record_observables=rec.wants_observables,
+                record_voltage=rec.voltage,
+                observers=observer_defs,
+            )
         with benchmark_span("results.to_public", pool_size=1):
             return _finalize_single_result(result, rec)
 
@@ -319,6 +373,7 @@ def simulate_pool(
     batch_options: BatchOptions | None = None,
     recording: Recording | None = None,
     observers: Sequence[Any] | None = None,
+    execution_policy: ExecutionPolicy | None = None,
     progress: ProgressOption = False,
 ) -> AxonSimulationResult:
     """Run a pool and return a cohort-backed ``AxonSimulationResult``.
@@ -346,15 +401,20 @@ def simulate_pool(
         recording=recording,
         batch_options=batch_options,
     )
-    results = run_pool(
-        population,
-        tsim_ms=duration_ms,
-        dt_ms=step_ms,
-        solver_options=solver_options,
-        batch_options=resolved_batch_options,
-        observers=observer_defs,
-        progress=progress,
-    )
+    with jax_execution_context(execution_policy, instances=population.instances) as context:
+        effective_batch_options = _pool_batch_options_for_execution_context(
+            resolved_batch_options,
+            context,
+        )
+        results = run_pool(
+            population,
+            tsim_ms=duration_ms,
+            dt_ms=step_ms,
+            solver_options=solver_options,
+            batch_options=effective_batch_options,
+            observers=observer_defs,
+            progress=progress,
+        )
     with benchmark_span("results.to_public", pool_size=len(population.instances)):
         if recording is not None:
             results = _filter_pool_recording(results, recording)

@@ -13,7 +13,7 @@ from axonscope.benchmarking import (
     run_solver_benchmark_case,
     write_benchmark_results,
 )
-from axonscope.solvers.common import simulation_step_count
+from axonscope.timebase import simulation_step_count
 from benchmark.runtime.visualize_results import flatten_benchmark_files, write_benchmark_report
 
 

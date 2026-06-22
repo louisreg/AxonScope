@@ -10,7 +10,7 @@ from axonscope.channel_models.composite_models import (
     Schild97CompositeICM,
 )
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.solvers.runtime import compile_membrane_model
+from axonscope.backends.jax.runtime import compile_membrane_model
 from axonscope.stimulation import Stimulus
 
 

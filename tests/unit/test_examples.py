@@ -1,74 +1,98 @@
-import importlib
+from __future__ import annotations
+
+import importlib.util
+import re
+import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
 
-def test_basic_stimulus_example_runs(monkeypatch):
-    module = importlib.import_module("examples.basic.example_01_stimulus_waveforms")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXAMPLES_ROOT = REPO_ROOT / "examples"
+PUBLIC_EXAMPLE_DIRS = (
+    EXAMPLES_ROOT / "basic",
+    EXAMPLES_ROOT / "advanced",
+    EXAMPLES_ROOT / "with_nrv",
+)
+
+
+def _example_paths() -> tuple[Path, ...]:
+    paths: list[Path] = []
+    for directory in PUBLIC_EXAMPLE_DIRS:
+        paths.extend(
+            path
+            for path in directory.rglob("*.py")
+            if "__pycache__" not in path.parts
+        )
+    return tuple(sorted(paths))
+
+
+def _load_script(path: Path):
+    relative = path.relative_to(REPO_ROOT)
+    safe_name = re.sub(r"[^0-9a-zA-Z_]", "_", str(relative))
+    module_name = f"_axonscope_example_{safe_name}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_public_example_scripts_are_importable_and_have_main():
+    paths = _example_paths()
+
+    assert paths
+    for path in paths:
+        module = _load_script(path)
+        assert callable(module.main), path
+
+
+def test_public_examples_do_not_import_axonscope_internals():
+    forbidden = (
+        "axonscope.backends",
+        "from axonscope.solvers",
+        "import axonscope.solvers",
+        "CrankNicholson",
+    )
+
+    for path in _example_paths():
+        text = path.read_text(encoding="utf-8")
+        leaked = [term for term in forbidden if term in text]
+        assert leaked == [], f"{path} imports internal API: {leaked}"
+
+
+def test_basic_stimuli_example_runs(monkeypatch):
+    module = _load_script(EXAMPLES_ROOT / "basic" / "02_stimuli_and_units.py")
     monkeypatch.setattr(plt, "show", lambda: None)
     module.main()
 
 
 def test_basic_point_source_example_runs(monkeypatch):
-    module = importlib.import_module("examples.basic.example_02_point_source_electrode")
+    module = _load_script(EXAMPLES_ROOT / "basic" / "03_point_source_footprint.py")
     monkeypatch.setattr(plt, "show", lambda: None)
     module.main()
 
 
-def test_solver_examples_are_importable():
-    intracellular = importlib.import_module("examples.basic.example_03_intracellular_hh")
-    extracellular = importlib.import_module("examples.basic.example_04_extracellular_mrg")
-    basic_pool = importlib.import_module("examples.basic.example_05_pool_dispatch_basic")
-    velocity_diameter = importlib.import_module("examples.basic.example_06_velocity_vs_diameter")
-    threshold_diameter = importlib.import_module("examples.basic.example_07_threshold_vs_diameter")
-    recruitment_population = importlib.import_module(
-        "examples.basic.example_08_recruitment_curve_population"
+def test_pipeline_inspection_example_runs(monkeypatch):
+    module = _load_script(
+        EXAMPLES_ROOT / "advanced" / "runtime" / "03_pipeline_inspection.py"
     )
-    dispatch = importlib.import_module("examples.advanced.example_01_pool_dispatch_nrv")
-    layout_options = importlib.import_module("examples.advanced.example_02_layout_options")
-    custom_axon = importlib.import_module("examples.advanced.example_03_custom_axon_from_scratch")
-    stimulation_contexts = importlib.import_module("examples.advanced.example_04_stimulation_contexts")
-    recording_options = importlib.import_module("examples.advanced.example_05_recording_options")
-    activation_criterion = importlib.import_module("examples.advanced.example_06_activation_criterion")
-    recruitment_curve = importlib.import_module("examples.advanced.example_07_recruitment_curve")
-    root_simulation = importlib.import_module("examples.advanced.example_08_root_axon_simulation")
-    axon_population = importlib.import_module("examples.advanced.example_09_axon_population")
-    typed_signals = importlib.import_module("examples.advanced.example_10_typed_recording_signals")
-    typed_positions = importlib.import_module("examples.advanced.example_11_typed_position_selectors")
-    cable_formulation = importlib.import_module("examples.advanced.example_12_cable_formulation")
-    footprint_drive = importlib.import_module("examples.advanced.example_13_extracellular_footprint_drive")
-    hotpath_benchmarking = importlib.import_module("examples.advanced.example_14_hotpath_benchmarking")
-    preparation_signatures = importlib.import_module("examples.advanced.example_15_preparation_signatures")
-    canonical_pool_results = importlib.import_module(
-        "examples.advanced.example_16_canonical_pool_results"
+    monkeypatch.setattr(plt, "show", lambda: None)
+
+    module.main()
+
+
+def test_benchmark_scripts_are_outside_examples_and_importable():
+    benchmark_examples = sorted((EXAMPLES_ROOT / "benchmarks").glob("*.py"))
+    assert benchmark_examples == []
+
+    hotpath = _load_script(REPO_ROOT / "benchmark" / "runtime" / "hotpath_observer_only_example.py")
+    simple_batching = _load_script(
+        REPO_ROOT / "benchmark" / "runtime" / "benchmark_001_simple_batching.py"
     )
-    analysis_layer = importlib.import_module("examples.advanced.example_17_analysis_layer")
-    solver_side_observers = importlib.import_module(
-        "examples.advanced.example_18_solver_side_observers"
-    )
-    pool_benchmark = importlib.import_module("benchmark.runtime.pool_batch_demo")
-    assert callable(intracellular.main)
-    assert callable(extracellular.main)
-    assert callable(basic_pool.main)
-    assert callable(velocity_diameter.main)
-    assert callable(threshold_diameter.main)
-    assert callable(recruitment_population.main)
-    assert callable(dispatch.main)
-    assert callable(layout_options.main)
-    assert callable(custom_axon.main)
-    assert callable(stimulation_contexts.main)
-    assert callable(recording_options.main)
-    assert callable(activation_criterion.main)
-    assert callable(recruitment_curve.main)
-    assert callable(root_simulation.main)
-    assert callable(axon_population.main)
-    assert callable(typed_signals.main)
-    assert callable(typed_positions.main)
-    assert callable(cable_formulation.main)
-    assert callable(footprint_drive.main)
-    assert callable(hotpath_benchmarking.main)
-    assert callable(preparation_signatures.main)
-    assert callable(canonical_pool_results.main)
-    assert callable(analysis_layer.main)
-    assert callable(solver_side_observers.main)
-    assert callable(pool_benchmark.main)
+
+    assert callable(hotpath.main)
+    assert callable(simple_batching.main)

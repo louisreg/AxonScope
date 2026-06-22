@@ -1,5 +1,4 @@
-"""
-Shared fixtures and constants for the NRV validation suite.
+"""Shared fixtures and constants for the NRV validation suite.
 
 The suite is organized around three model-validation families:
 - intracellular
@@ -8,6 +7,11 @@ The suite is organized around three model-validation families:
 
 Additional NRV-adjacent solver diagnostics live under `tests/nrv/numerics`.
 """
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -19,7 +23,40 @@ RTOL_THRESHOLD = 0.10       # 10 %    — activation threshold current
 ATOL_RATE_ms = 1e-3         # ms⁻¹   — gate kinetics rates
 
 
+def _make_path_writable(path: str | None) -> str | None:
+    if path is None:
+        return path
+
+    target = Path(path).expanduser()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch(exist_ok=True)
+        return str(target)
+    except OSError:
+        fallback_dir = Path(tempfile.gettempdir()) / "axonscope-nrv-tests"
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return str(fallback_dir / target.name)
+
+
+def _redirect_nrv_reporter_log() -> None:
+    """Keep NRV imports independent from write permissions in site-packages."""
+
+    try:
+        import pyswarms.utils as pyswarms_utils
+        from pyswarms.utils import Reporter
+    except Exception:
+        return
+
+    class TestReporter(Reporter):
+        def __init__(self, *args, **kwargs):
+            kwargs["log_path"] = _make_path_writable(kwargs.get("log_path"))
+            super().__init__(*args, **kwargs)
+
+    pyswarms_utils.Reporter = TestReporter
+
+
 def pytest_configure(config):
+    _redirect_nrv_reporter_log()
     config.addinivalue_line("markers", "nrv: requires NRV installed (slow)")
     config.addinivalue_line(
         "markers",

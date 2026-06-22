@@ -331,6 +331,14 @@ class Layout:
             dtype=float,
         )
 
+    def compartment_position(self, index: int, *, unit: Any = "micrometer") -> units.length_t:
+        """Return one compartment-center position as a unit-bearing quantity."""
+
+        positions = self.position_values(unit=unit)
+        resolved_index = _resolve_compartment_index(index, positions.shape[0])
+        unit_label = units.unit_label(unit) or "micrometer"
+        return units.Q_(float(positions[resolved_index]), unit_label)
+
     def diameter_values(self, *, unit: Any = "micrometer") -> np.ndarray:
         """Return compartment diameters as plain values in `unit`."""
 
@@ -357,6 +365,17 @@ class Layout:
         from axonscope.axons.plotting import plot_layout
 
         return plot_layout(self, ax=ax, **kwargs)
+
+
+def _resolve_compartment_index(index: int, count: int) -> int:
+    resolved = int(index)
+    if resolved < 0:
+        resolved += int(count)
+    if resolved < 0 or resolved >= int(count):
+        raise IndexError(
+            f"compartment index {index} is out of range for {count} compartments."
+        )
+    return resolved
 
 
 __all__ = ["Layout", "LayoutElement"]

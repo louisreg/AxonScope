@@ -1026,7 +1026,7 @@ def _print_example08_solver_route(
 ) -> None:
     from axonscope.dispatcher.plan import build_dispatch_plan
     from axonscope.solvers import resolve_double_cable_block_solver
-    from axonscope.solvers.batch_kernels import (
+    from axonscope.backends.jax.batch_kernels import (
         _resolve_double_cable_kernel_block_solver,
         _use_batch_native_double_cable_pcr_soa_solver,
     )

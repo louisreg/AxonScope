@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY
 
 
 def test_public_unmyelinated_template_and_simulate():
@@ -162,7 +161,7 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
     with pytest.raises(AttributeError, match="Vm recording"):
         _ = compact.Vm
     assert compact.observations is not None
-    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
     assert raster.names == ("activation",)
     assert raster.words.shape == (1, 1, 1, 1)
     probe_index = int(np.asarray(raster.original_indices)[0, 0])
@@ -234,7 +233,7 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     assert len(compact.cohorts) == 1
     assert compact.observations is not None
     assert compact.cohorts[0].observations is compact.observations
-    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
     assert raster.words.shape == (2, 1, 1, 1)
     expected = np.stack(
         [
@@ -249,7 +248,12 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     )
     with pytest.raises(ValueError, match="Vm recording"):
         _ = compact[0].Vm
-    assert compact[0].observations[VM_RASTER_OBSERVATION_KEY].words.shape == (1, 1, 1, 1)
+    assert compact[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (
+        1,
+        1,
+        1,
+        1,
+    )
 
 
 def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():

@@ -5,12 +5,11 @@ import pytest
 
 import axonscope as axs
 from axonscope.positions import ALL, CENTER, DISTAL, Indices
-from axonscope.solvers.observer_runtime import (
-    VM_RASTER_OBSERVATION_KEY,
+from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
+from axonscope.backends.jax.observer_runtime import (
     build_vm_raster_plan,
     finalize_vm_raster_state,
     init_vm_raster_state,
-    unpack_vm_raster_words,
     update_vm_raster_state_batch,
 )
 

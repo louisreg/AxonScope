@@ -5,43 +5,56 @@ from axonscope import (
     AnalysisResult,
     AnalysisStatus,
     AnalyticalExtracellularContext,
+    AssemblyDetailInspection,
     AxonInstance,
     AxonPopulation,
     AxonSimulation,
+    BatchOptions,
+    BatchRecording,
     BenchmarkReport,
     BenchmarkSession,
     Device,
+    DispatchGroupInspection,
+    ExecutionPolicy,
     IntracellularContext,
     IntracellularCurrentClamp,
+    KernelInspection,
+    LoweringInspection,
+    MemoryInspection,
     MemoryEstimateItem,
+    PaddingInspection,
     PointSourceElectrode,
     PeakVoltageObserver,
     PrecisionPolicy,
+    ProbeInspection,
+    RecordingPlan,
+    ResultAssemblyInspection,
+    SimulationInspection,
     RecordingSpatial,
     Runtime,
     Signal,
     SignalId,
     SimulationEstimate,
     Stimulus,
+    VM_RASTER_OBSERVATION_KEY,
+    VmRasterResult,
     benchmark,
     benchmark_report,
     disable_benchmark,
     enable_benchmark,
     estimate_simulation,
+    inspect_simulation,
     preparation,
     reset_benchmark,
     simulate_pool,
     um,
 )
-from axonscope import analysis, results, signals
+from axonscope import analysis, analytical, positions, results, signals
 from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, mrg_like_length_from_nodes
 from axonscope.channel_models import IonChannelModelBase, MembraneStateSpec, PassiveICM
 from axonscope.icm import CompartmentMembraneLayout, HeterogeneousICMBackend
 from axonscope.solvers import (
     CrankNicholson,
-    DoubleCableKernel,
-    SingleCableKernel,
-    prepare_solver_runtime,
 )
 
 
@@ -70,18 +83,36 @@ def test_public_package_imports_are_available():
     assert signals.MEMBRANE_VOLTAGE.result_key == "Vm"
     assert not hasattr(Signal, "VM")
     assert RecordingSpatial.CENTER is not None
+    assert RecordingPlan is not None
+    assert analytical.local_point_source_context is not None
+    assert positions.PROXIMAL is not None
     assert hasattr(__import__("axonscope").positions, "DISTAL")
     assert AxonInstance is not None
     assert AxonPopulation is not None
     assert AxonSimulation is not AxonInstance
+    assert BatchOptions.full().recording.is_full
+    assert BatchRecording.center().label == "center"
     assert BenchmarkReport is not None
     assert BenchmarkSession is not None
+    assert AssemblyDetailInspection is not None
+    assert DispatchGroupInspection is not None
+    assert KernelInspection is not None
+    assert LoweringInspection is not None
+    assert MemoryInspection is not None
+    assert PaddingInspection is not None
     assert Device.auto().kind == "auto"
+    assert ExecutionPolicy(device=Device.cpu()).device == Device.cpu()
     assert MemoryEstimateItem is not None
     assert PrecisionPolicy.float32().solver_dtype == "float32"
+    assert ProbeInspection is not None
+    assert ResultAssemblyInspection is not None
     assert Runtime.AUTO.value == "auto"
     assert SimulationEstimate is not None
+    assert SimulationInspection is not None
+    assert VM_RASTER_OBSERVATION_KEY == "vm_raster"
+    assert VmRasterResult is not None
     assert estimate_simulation is not None
+    assert inspect_simulation is not None
     assert benchmark is not None
     assert benchmark_report is not None
     assert disable_benchmark is not None
@@ -92,9 +123,6 @@ def test_public_package_imports_are_available():
     assert RattayAberham is not None
     assert MRG is not None
     assert CrankNicholson is not None
-    assert SingleCableKernel is not None
-    assert DoubleCableKernel is not None
-    assert prepare_solver_runtime is not None
     assert IonChannelModelBase is not None
     assert PassiveICM is not None
     assert MembraneStateSpec("x").name == "x"

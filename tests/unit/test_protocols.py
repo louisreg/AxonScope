@@ -3,7 +3,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.protocols import activation as activation_protocols
-from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY, VmRasterResult
+from axonscope.results import VM_RASTER_OBSERVATION_KEY, VmRasterResult
 
 
 class _DummyLayout:

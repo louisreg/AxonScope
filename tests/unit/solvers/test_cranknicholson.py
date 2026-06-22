@@ -9,13 +9,13 @@ from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
-from axonscope.solvers.experimental import (
+from axonscope.backends.jax.experimental import (
     CrankNicholson_unoptimized,
 )
-from axonscope.solvers.kernels import SingleCableKernel
-from axonscope.solvers.common import simulation_step_count
-from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.backends.jax.kernels import SingleCableKernel
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
+from axonscope.timebase import simulation_step_count
 
 
 def _hh_axon(Nx: int = 51) -> AxonInstance:

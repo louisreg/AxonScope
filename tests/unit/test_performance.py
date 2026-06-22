@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 import axonscope as axs
@@ -152,3 +153,81 @@ def test_runtime_device_and_precision_policy_are_typed_public_values():
 
     with pytest.raises(ValueError, match="Only GPU"):
         axs.Device("cpu", index=0)
+
+
+def test_execution_policy_runs_jax_cpu_float32_simulation():
+    axon = _hh(compartments=5)
+
+    result = axs.simulate(
+        axon,
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        execution_policy=axs.ExecutionPolicy(
+            runtime=axs.Runtime.JAX,
+            device=axs.Device.cpu(),
+            precision=axs.PrecisionPolicy.float32(),
+        ),
+    )
+
+    assert result.Vm.shape == (2, 5)
+
+
+def test_execution_policy_rejects_unsupported_runtime_for_simulation():
+    with pytest.raises(NotImplementedError, match="Runtime.NUMPY"):
+        axs.simulate(
+            _hh(compartments=5),
+            duration=0.10 * axs.ms,
+            dt=0.05 * axs.ms,
+            execution_policy=axs.ExecutionPolicy(runtime=axs.Runtime.NUMPY),
+        )
+
+
+def test_execution_policy_rejects_unavailable_or_mixed_precision_for_simulation():
+    with pytest.raises((RuntimeError, NotImplementedError), match="float64|Mixed"):
+        axs.simulate(
+            _hh(compartments=5),
+            duration=0.10 * axs.ms,
+            dt=0.05 * axs.ms,
+            execution_policy=axs.ExecutionPolicy(
+                runtime=axs.Runtime.JAX,
+                device=axs.Device.cpu(),
+                precision=axs.PrecisionPolicy.mixed(
+                    state_dtype="float32",
+                    solver_dtype="float32",
+                    accumulation_dtype="float64",
+                ),
+            ),
+        )
+
+
+def test_execution_policy_rejects_implicit_precision_casting():
+    membrane = axs.membranes.MembraneModel(
+        "passive",
+        {"Rm": 1e4, "EL": -70.0},
+        dtype=np.float64,
+    )
+    section = axs.axons.Section(
+        "axon",
+        membrane=membrane,
+        diameter=0.9 * axs.um,
+    )
+    axon = axs.axons.Axon(
+        layout=axs.axons.Layout.single_uniform(
+            section,
+            length=40.0 * axs.um,
+            compartments=5,
+        ),
+        formulation=axs.axons.CableFormulation.SINGLE_CABLE,
+    )
+
+    with pytest.raises(ValueError, match="does not cast"):
+        axs.simulate(
+            axon,
+            duration=0.10 * axs.ms,
+            dt=0.05 * axs.ms,
+            execution_policy=axs.ExecutionPolicy(
+                runtime=axs.Runtime.JAX,
+                device=axs.Device.cpu(),
+                precision=axs.PrecisionPolicy.float32(),
+            ),
+        )

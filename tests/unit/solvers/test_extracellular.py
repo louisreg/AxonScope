@@ -16,14 +16,14 @@ from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
-from axonscope.solvers.experimental import (
+from axonscope.backends.jax.experimental import (
     CrankNicholsonVStimForcing,
     CrankNicholson_unoptimized,
 )
 from axonscope.utils import units
-from axonscope.solvers.common import simulation_step_count
-from axonscope.solvers.kernels import DoubleCableKernel
-from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.backends.jax.kernels import DoubleCableKernel
+from axonscope.backends.jax.runtime import prepare_solver_runtime
+from axonscope.timebase import simulation_step_count
 
 
 ALL_SOLVERS = [

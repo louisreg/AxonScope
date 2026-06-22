@@ -45,7 +45,7 @@ instructions: |
   - **Pint**: Explicit unit management at public API boundaries
   - **SciPy/NumPy**: Numerical foundations
   - **pyproject.toml / poetry-core**: Packaging metadata; day-to-day docs use editable `pip install -e ...`
-  - **Reference/prototype solvers**: Python variants live in `axonscope.solvers.experimental`
+  - **Reference/prototype solvers**: JAX variants live in `axonscope.backends.jax.experimental`
   
   ## Code Organization & Conventions
   
@@ -147,7 +147,7 @@ instructions: |
   pytest -q tests/unit          # Unit tests (fast)
   pytest -q tests/nrv           # Validation (slow, requires NRV)
   mypy src/axonscope            # Type checking
-  python examples/basic/example_01_stimulus_waveforms.py  # Run example
+  python examples/basic/01_first_intracellular_simulation.py  # Run example
   ```
   
   ### Debugging
@@ -160,7 +160,15 @@ instructions: |
 
   - **Code**: Docstrings for public APIs, explain non-obvious internal logic
   - **Comments**: Clarify design decisions, numerical considerations, unit conversions
-  - **Examples**: Add a clear didactic example in `examples/advanced/` for every new feature or advanced concept; keep it runnable, focused on one user workflow, and aligned with the implemented API
+  - **Concept Introduction Rule**: Every newly introduced public feature,
+    advanced concept, runtime mode, inspection view, analysis workflow, or
+    solver-facing user concept must land with a didactic example in the same
+    change. If an existing example is the right home, update it; otherwise add
+    a focused example under the relevant `examples/advanced/<area>/` folder and
+    list it in `examples/README.md`.
+    Only skip the example when the concept is purely internal, and make that
+    explicit in the final notes.
+  - **Examples**: Add a clear didactic example in the relevant `examples/advanced/<area>/` folder for every new feature or advanced concept; keep it runnable, focused on one user workflow, and aligned with the implemented API. Keep introductory scripts in `examples/basic/`, NRV integration in `examples/with_nrv/`, notebook mini-courses in `examples/tutorials/`, and performance/profiling material under `benchmark/`.
   - **Example Style**: Write examples as tutorial material for users, not as minimal smoke snippets. Prefer a verbose, line-by-line didactic flow over extra helper functions; keep comments close to the code so each important step explains what the user is learning and why it exists.
   - **Example Plots**: Add plots whenever they help demonstrate the feature or connect signals to metrics, such as Vm traces, activation markers, peak-voltage markers, recruitment curves, velocity estimates, dispatch layouts, memory/recording comparisons, or observer-vs-recorded checks. Keep plots lightweight and relevant rather than decorative.
   - **Example Updates**: When changing a public API, workflow, argument name, result shape, or user-facing behavior, update the affected examples in the same change so examples remain executable documentation
@@ -217,6 +225,28 @@ instructions: |
     path is shared point-source single-cable VmRaster observer-only execution
     with `current_mid_A[Nt] + footprint_mV_per_A[B,Nx]`; do not re-densify it
     unless the caller needs retained Vm or a fallback condition is hit.
+  - Runtime/device/precision direction: use typed public values
+    `axs.Runtime`, `axs.Device`, `axs.PrecisionPolicy`, and
+    `axs.ExecutionPolicy` as the user-facing language. The JAX backend now
+    honors explicit CPU/GPU device requests and validates uniform precision for
+    real solves. Do not add string-primary APIs such as `"gpu"` or `"float32"`
+    for public runtime selection. Precision participates in membrane/runtime
+    cache identity; implicit casting and mixed precision still need a deliberate
+    design before broadening this.
+  - Solver pipeline inspection direction: planning, dispatch/batch, preparation,
+    input lowering, observer/recording lowering, kernel route selection, and
+    result assembly should each be explainable. `axs.inspect_simulation(...)`
+    and `AxonSimulation.inspect()` now cover printable host-side planning,
+    dispatch/batch, preparation, lowering, kernel, and result-assembly
+    summaries, plus opt-in plots for padding, memory estimates, VmRaster probes,
+    and result assembly. Printing and plotting inspection views must remain
+    opt-in, host-side when possible, and must not force device transfers or
+    change normal execution behavior by default.
+  - Examples are executable documentation. During cleanup, flatten the full
+    examples learning path against the current public API, remove imports of
+    solver/backend internals from public examples, and move benchmarking or
+    CPU/GPU measurement material under `benchmark/` rather than tutorial
+    examples.
   - Record NRV validation notes only after a fresh run in an NRV-ready
     environment.
   
@@ -236,7 +266,7 @@ instructions: |
   - [ ] Validation against NRV reference if numerical changes
   - [ ] Performance impact assessed (if optimization claims)
   - [ ] Documentation updated (docstrings + markdown if architecture affected)
-  - [ ] Clear didactic `examples/advanced/` example added or updated for each new feature or advanced concept
+  - [ ] Clear didactic `examples/advanced/<area>/` example added or updated for each new feature or advanced concept
   - [ ] New or updated examples favor a verbose line-by-line tutorial flow, avoiding helper-function overload unless it clearly improves readability
   - [ ] New or updated examples include useful plots when possible, especially for signals, metrics, dispatch, memory, or observer behavior
   - [ ] Affected examples updated when public API, workflow, argument names, or result behavior changed
@@ -361,9 +391,13 @@ helpfulLinks:
   - path: todo.md
     description: Living operational roadmap for documentation, API cleanup, benchmarks, examples, and Phase 8+ work
   - path: examples/basic
-    description: Didactic examples covering core concepts
+    description: Compact first-pass examples covering core concepts
   - path: examples/advanced
-    description: Complete workflow examples
+    description: Subsystem-organized advanced workflow examples
+  - path: examples/with_nrv
+    description: Optional NRV integration examples for complex geometry
+  - path: examples/tutorials
+    description: Notebook mini-course index and future tutorials
   - path: benchmark/runtime
     description: Performance benchmarking and profiling tools
   - path: tests/nrv

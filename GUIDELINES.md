@@ -1,118 +1,106 @@
-# AxonScope Master Architecture and Reorganization Plan
+# AxonScope Architecture Guidelines
 
-## Status
+Snapshot: 2026-06-21.
 
-This document is the consolidated architecture reference for AxonScope.
+This is the consolidated architecture reference for AxonScope. It is normative
+for project direction, refactors, public API shape, examples, and cleanup
+decisions. The source tree, tests, examples, and benchmark reports remain the
+implementation source of truth for current behavior.
 
-It defines:
+Use this document to answer three questions:
 
-- the product boundary of AxonScope;
-- the public object model;
-- the API for one axon and large populations;
-- intracellular and extracellular stimulation;
-- the representation of extracellular footprints;
-- planning, preparation, compilation, and execution;
-- recording and numerical results;
-- myelinated versus unmyelinated analysis semantics;
-- single-cable and double-cable signal capabilities;
-- callable-based sweeps, thresholds, and recruitment;
-- the target source organization;
-- the migration and deletion strategy;
-- the tests and acceptance criteria.
+1. What product is AxonScope?
+2. Which concepts are public and stable?
+3. Where must solver/runtime/backend code live?
 
-The source tree, runnable examples, and tests are the implementation sources of
-truth.
-
-README and documentation prose must not override the behavior expressed by the
-code.
-
-## Current implementation status
-
-Snapshot updated on 2026-06-20.
-
-This document defines the target architecture. The codebase has implemented the
-roadmap through Phase 7.5 and the first Phase 7.6 hotpath/memory passes for the
-current public layer. Phase 7.6.3, the exact double-cable GPU solver
-optimization campaign, is closed. The current performance focus is now the
-execution envelope around the solver: stable runtime reuse, dispatch/probe-plan
-reuse, stimulus/Vext materialization, launch/enqueue overhead, and memory-aware
-recording/observer output. Phases 8-9 are still roadmap work.
-
-| Phase | Status | Implemented surface | Didactic example |
-| --- | --- | --- | --- |
-| Phase 0 — Guardrails and baselines | Done | Architecture guardrails, public API cleanup checks, import-boundary checks, non-NRV baseline. | None; this is test/build infrastructure. |
-| Phase 1 — Object model | Done | `AxonInstance`, root `AxonSimulation`, `AxonPopulation`, direct public diameter inspection. | `examples/advanced/example_08_root_axon_simulation.py`, `examples/advanced/example_09_axon_population.py` |
-| Phase 2 — Typed and extracellular contracts | Done | Typed recording signals, position selectors, cable formulation, opaque identifiers, `ExtracellularFootprint`, `ExtracellularDrive`, `ExtracellularStimulation`, analytical footprint builders. | `examples/advanced/example_10_typed_recording_signals.py`, `examples/advanced/example_11_typed_position_selectors.py`, `examples/advanced/example_12_cable_formulation.py`, `examples/advanced/example_13_extracellular_footprint_drive.py` |
-| Phase 2.5 — Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. | `examples/advanced/example_14_hotpath_benchmarking.py` |
-| Phase 3 — Planning and preparation | Done | Preparation signatures, internal prepared cohorts, lower planning/input overhead, footprint-oriented preparation path. | `examples/advanced/example_15_preparation_signatures.py` |
-| Phase 4 — JAX isolation | Done for the current boundary | JAX batch and scalar execution now enter through `axonscope.backends.jax`; public/descriptive layers are guarded against direct JAX imports. Low-level numerical kernels still live under `solvers/` until a later kernel ownership cleanup. | None; this is an internal backend boundary. |
-| Phase 5 — Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, extensible `Signal` descriptors, `SignalId`, `RecordingManifest`, `RecordedSignal`, no public `list[SimResult]` pool result. | `examples/advanced/example_16_canonical_pool_results.py` |
-| Phase 6 — Analyses | Done for the current public layer | Real `axs.analysis` package, analysis definitions, low-level post-hoc helpers, structured input requirements, per-axon statuses, population denominators, `AnalysisReport`, `result.analyze(...)` / `result.report(...)`, and online Vm observers for activation/peak-voltage cross-validation. | `examples/advanced/example_17_analysis_layer.py` |
-| Phase 7 — Performance | Done for the current evidence layer | `axs.performance`, `AxonSimulation.estimate()`, simulation memory estimates, typed runtime/device/precision planning values, hotpath memory metadata, and `footprint_reuse_sweep`. Estimates surface dense `Vstim` and retained-`Vm` pressure so observer-only runs can be chosen deliberately. | `examples/advanced/example_14_hotpath_benchmarking.py` |
-| Phase 7.5 — Solver-side observers | Superseded by Phase 7.6.7 | The first generic solver-side observer path proved too broad for the double-cable hot path. `PeakVoltage` remains a post-hoc analysis on recorded Vm, not a solver-side observer. | `examples/advanced/example_18_solver_side_observers.py` |
-| Phase 7.6.1-7.6.2 — Hotpath evidence and memory cleanup | Done for the current evidence layer | `realistic_mixed_population`, path matrices, typed-drive evidence, compact observer-only outputs, sparse/zero input specializations, runtime caches, time chunking, profiler traces, and richer hotpath metadata. | Benchmark workloads documented in `benchmark/hotpaths/README.md`; no new public concept example required. |
-| Phase 7.6.3 — Exact double-cable GPU solver optimization | Closed | Current exact block-solver choices are `auto`, `thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. `auto` keeps Thomas for CPU/default backends and adaptive PCR for GPU-like backends. Pallas, Triton, JAX-Triton, CUDA FFI, split, associative, and pseudo-double candidates are archived/standby evidence, not public solver routes. | Benchmark report in `benchmark/reports/double_cable_solver_optimization_2026_06.md`; no public example required. |
-| Phase 7.6.4 — Pseudo-double validation | Standby | Validation harness exists under `benchmark/pseudo_double/`, but pseudo-double modes are not accepted as double-cable replacements, are not part of `auto`, and are not public solver options. Exact double-cable remains the reference. | No public example while standby. |
-| Phase 7.6.5 — Execution-envelope and Vext performance | In progress | Current focus is workflow-level profiling and reducing `runtime.prepare`, dispatch/probe-plan rebuilds, dense/factorized `Vext` materialization, transfer, launch/enqueue, and recording costs for examples 06/07/08. Latest P100 evidence says GPU `kernel.wait` is small compared with surrounding work. First internal factorized point-source `Vext` path is active for single-cable VmRaster observer-only batches. | Benchmark-focused phase; update public examples only when user-facing workflow guidance changes. |
-| Phase 7.6.6 — GPU dispatch scheduling | Planned | Separate dispatch phase for memory-aware bucket/coalesce scheduling and optional async enqueue. Coalescing/bucketing comes before async scheduling; async is optional and must respect hardware memory budgets. | Internal benchmark phase first; no public example yet. |
-| Phase 7.6.7 — VmRaster observer redesign | In progress | Keep one simple public observer/analysis concept, but make solver-side observer-only execution deliberately strict: threshold selected membrane-voltage probes at every `dt`, pack the boolean raster, and leave activation/latency/velocity/recruitment analyses to post-processing. P100 CPU/GPU validation passed; no legacy generic observer fallback. | `examples/advanced/example_18_solver_side_observers.py` |
-| Phase 8 — Studies | Not started | Target: callable studies, reuse policies, retention policies, study result containers. | To add when callable study APIs land. |
-| Phase 9 — Serialization and reference backend | Not started | Target: final schemas, typed serialization, NumPy reference backend validation. | To add after schemas are stable. |
-
-Known implementation gaps against the final target:
-
-- Public scalar `simulate(...)` still returns `SimResult`; pool runs return
-  `AxonSimulationResult`. Decide before final docs/serialization whether scalar
-  public runs also become `AxonSimulationResult`.
-- `Recording.to_batch_options()` still lowers directly to solver batch options.
-  The final boundary should be `Recording -> RecordingPlan -> validation ->
-  backend lowering`.
-- `axs.analysis` is now a real package, not a forwarding compatibility alias.
-  Low-level post-hoc helpers live under `axs.analysis`, not under
-  `axs.results.analysis`.
-- Backend-neutral axon structure descriptors, cable capabilities, and richer
-  semantic signals remain future work.
-- Solver-side observer-only execution now uses the `VmRaster` route for scalar
-  kernels, single-cable batches, and double-cable PCR/SoA batch-native runs.
-  The solver output is `observations["vm_raster"]`, a packed `uint32` raster of
-  `Vm >= threshold` samples. Richer semantic signals, activation/latency
-  decoding, and final backend-neutral recording lowering remain future work.
-- The final observer API should remain simple and analysis-oriented. Avoid
-  exposing implementation-specific observer modes before real user needs exist.
-  The current performance target is one strict `VmRaster` implementation that
-  supports velocity, threshold, and recruitment-style workflows through fixed
-  membrane-voltage threshold probes and CPU post-processing.
-- Latest realistic CPU/GPU recording-mode benchmarks show the solver kernel is
-  not the dominant GPU cost for the current example 06/07/08 stress matrix. The
-  next architecture work should preserve the lifecycle boundary below:
-  plan/prepare/compile static structures once, then execute repeated
-  stimulus-only updates without rebuilding runtimes, dispatch groups,
-  VmRaster probe plans, or spatial extracellular footprints.
-- The first factorized `Vext` implementation is internal and deliberately
-  narrow: shared point-source single-cable observer-only batches pass
-  `current_mid_A[Nt]` and `footprint_mV_per_A[B,Nx]` to the VmRaster kernel,
-  avoiding dense `Vstim[B,Nt,Nx]`. Keep this path invisible to the public API,
-  benchmark it before broadening it, and extend the same static-footprint /
-  dynamic-current split to double-cable only with solver-equivalence tests.
+Keep this file concise. Detailed experiment notes belong in `benchmark/`,
+`docs/`, or `ideas/`; active work belongs in `todo.md`; operational agent notes
+belong in `agent.md`.
 
 ---
 
-# 1. Development-stage breaking-change policy
+# 1. Current Status
 
-AxonScope has not yet been deployed as a stable public package.
+AxonScope is still pre-release. Prefer a clean final design over compatibility
+with prototype APIs. Delete superseded paths rather than preserving aliases.
 
-The architecture should therefore optimize for a clean final design rather than
-backward compatibility with prototype APIs.
+Current focus:
 
-The migration policy is:
+- keep only retained solver routes in active runtime code;
+- preserve the public/runtime/backend boundary;
+- flatten public examples against the public API;
+- make runtime/device/precision policy executable;
+- make planning, batch/dispatch, preparation, and later lowering/execution
+  inspectable;
+- keep benchmark/profiling experiments out of public tutorials.
 
-```text
-rename concepts directly
-rewrite examples and tests
-delete superseded modules
-delete obsolete schemas and formats
-keep one implementation path
-```
+## 1.1 Phase Snapshot
+
+| Phase | Status | Current surface |
+| --- | --- | --- |
+| 0 - Guardrails and baselines | Done | Architecture tests, public API cleanup checks, import-boundary checks, scientific baselines. |
+| 1 - Object model | Done | `AxonInstance`, root `AxonSimulation`, `AxonPopulation`, descriptive `Axon`. |
+| 2 - Typed and extracellular contracts | Done | Typed signals, position selectors, cable formulation, identifiers, footprint/drive/stimulation objects. |
+| 2.5 - Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. |
+| 3 - Planning and preparation | Done for current JAX path | Preparation signatures, prepared cohorts, footprint-oriented preparation. |
+| 4 - JAX isolation | Done for current boundary | Scalar and batch execution enter through `axonscope.backends.jax`; low-level kernels still need later ownership cleanup. |
+| 5 - Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`. |
+| 6 - Analyses | Done for current public layer | Real `axs.analysis`, definitions, requirements, statuses, reports, post-hoc helpers. |
+| 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
+| 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
+| 7.6.1-7.6.2 - Hotpath/memory cleanup | Done for evidence layer | Sparse/zero inputs, compact observer outputs, runtime caches, chunking, profiler traces. |
+| 7.6.3 - Exact double-cable GPU solver | Closed | Retained choices: `auto`, `thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`. |
+| 7.6.4 - Pseudo-double validation | Standby | Harness exists under `benchmark/pseudo_double/`; not a public solver replacement. |
+| 7.6.5 - Execution envelope and Vext | In progress | Reduce prepare/dispatch/probe-plan rebuilds, dense/factorized Vext materialization, enqueue/result overhead. |
+| 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
+| 7.6.7 - VmRaster redesign | In progress | One strict threshold raster primitive, packed in solver, decoded post-hoc. |
+| 7.7 - Solver surface stabilization | In progress | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
+| 7.8 - Runtime policy and inspection | In progress | `ExecutionPolicy` controls JAX device/runtime; `inspect_simulation()` prints planning, dispatch, prepare, lowering, kernel, and result assembly. |
+| 8 - Studies | Not started | Callable studies, reuse policies, retention policies, study results. |
+| 9 - Serialization and reference backend | Not started | Final schemas, NumPy reference backend, cross-backend validation. |
+
+## 1.2 Active Gaps
+
+- Scalar `simulate(...)` still returns `SimResult`; pool runs return
+  `AxonSimulationResult`. Decide before final docs/serialization whether scalar
+  runs also become `AxonSimulationResult`.
+- `Recording.to_plan()` now produces a backend-neutral `RecordingPlan`; the JAX
+  backend lowers that plan to batch-kernel options. The remaining work is to
+  broaden validation and move more result/observer boundaries out of solver
+  modules.
+- VmRaster output remains exposed as `observations["vm_raster"]`, with
+  `VmRasterResult` and CPU unpacking under `results`. Solver/backend code owns
+  only plan lowering and packed bit updates.
+- Fixed-step time-grid validation lives in backend-neutral `axonscope.timebase`.
+  Public planning, estimation, and inspection code must not import JAX-heavy
+  solver numerical helpers for this contract.
+- `ExecutionPolicy` now resolves JAX device requests and validates uniform
+  precision. Precision participates in membrane/runtime cache identity; runtime
+  execution still rejects implicit casting instead of rebuilding models.
+- `inspect_simulation(...)` covers host-side planning, dispatch/batch,
+  preparation, input/observer/recording lowering, kernel routing, and result
+  assembly. Richer memory/probe/result plots remain to add.
+- Factorized Vext is active only on a narrow internal point-source
+  single-cable VmRaster path. Keep it internal until double-cable equivalence
+  tests and benchmark evidence exist.
+
+---
+
+# 2. Core Principles
+
+## 2.1 Pre-release Cleanup Policy
+
+Because AxonScope is not a stable deployed package, migrations should optimize
+for a clean final architecture.
+
+Do:
+
+- rename concepts directly;
+- rewrite examples and tests;
+- delete superseded modules;
+- delete obsolete schemas and formats;
+- keep one implementation path per concept;
+- add guardrails before risky cleanup.
 
 Do not accumulate:
 
@@ -122,33 +110,67 @@ Do not accumulate:
 - `Legacy*` classes;
 - duplicate scalar and population APIs;
 - duplicate result models;
-- old and new meanings for the same class name;
 - obsolete benchmark readers;
-- obsolete serialization readers;
-- temporary modules that remain permanently.
+- temporary modules that become permanent.
 
-Scientific behavior must remain protected by:
+A migration is complete only when the replaced path is deleted.
 
-- reference tests;
-- convergence tests;
-- numerical regression tests;
-- analysis-equivalence tests;
-- cross-backend validation.
+## 2.2 Product Boundary
 
-The following may change deliberately:
+AxonScope owns:
 
-- import paths;
-- class names;
-- constructors;
-- function signatures;
-- internal array layouts;
-- result shapes;
-- benchmark formats;
-- prototype serialization formats.
+- one-dimensional axon models;
+- myelinated and unmyelinated axons;
+- membrane dynamics;
+- single-cable and double-cable formulations;
+- intracellular stimulation;
+- extracellular potentials already evaluated along axons;
+- one-axon and population execution;
+- recording and numerical results;
+- online and post-hoc scientific analyses;
+- threshold, recruitment, and sweep workflows;
+- validation, reproducibility, and performance evidence.
 
-A migration is complete only when the replaced code path is deleted.
+AxonScope must not own:
 
-The target repository should contain:
+- detailed nerve geometry;
+- fascicle geometry;
+- tissue segmentation;
+- three-dimensional axon trajectories;
+- anatomical coordinate systems;
+- electrode CAD;
+- finite-element meshing or field solving;
+- surgical placement models.
+
+External geometry or field packages should provide numerical extracellular
+footprints sampled along each axon. AxonScope combines those footprints with
+temporal stimuli and runs the cable/membrane dynamics.
+
+## 2.3 Intrinsic Versus World Geometry
+
+AxonScope needs intrinsic one-dimensional position along an axon:
+
+```text
+s = 0 ... axon length
+```
+
+Intrinsic position is required for discretization, section boundaries, node and
+internode selectors, clamp placement, recordings, extracellular footprints, and
+event locations.
+
+World position belongs outside the simulation core:
+
+```text
+x, y, z, orientation, trajectory, anatomical frame
+```
+
+`AxonInstance` may carry simple offsets needed by current analytical examples,
+but world geometry must not become a core solver dependency or required public
+property.
+
+## 2.4 One Concept, One Public Name
+
+The target repository should read as:
 
 ```text
 one concept
@@ -157,315 +179,147 @@ one execution path
 one result model
 ```
 
----
-
-# 2. Product boundary
-
-AxonScope is a simulation package for axons and axon populations.
-
-It should focus on:
-
-- one-dimensional axon models;
-- myelinated and unmyelinated axons;
-- membrane dynamics;
-- single-cable and double-cable formulations;
-- intracellular electrical stimulation;
-- extracellular potentials applied along axons;
-- one-axon educational and debugging workflows;
-- large population execution;
-- recording;
-- online and post-hoc scientific analyses;
-- threshold, recruitment, and sweep studies;
-- validation, reproducibility, and performance.
-
-AxonScope should not own:
-
-- detailed nerve geometry;
-- fascicle geometry;
-- tissue segmentation;
-- three-dimensional axon trajectories;
-- anatomical coordinate systems;
-- electrode CAD;
-- full volume-conductor modeling;
-- finite-element meshing;
-- finite-element field solving;
-- surgical placement models.
-
-Another package may own:
-
-```text
-nerve geometry
-axon trajectories in world coordinates
-electrode geometry
-conductivity models
-FEM or analytical field calculations
-```
-
-That package should provide AxonScope with an already-resolved extracellular
-representation along each axon.
-
-The core boundary is:
-
-```text
-external geometry / field package
-    computes spatial extracellular footprints
-
-AxonScope
-    combines footprints with temporal stimuli
-    runs membrane and cable dynamics
-    records numerical outputs
-    performs scientific analyses
-```
+If two names exist for the same public idea, choose one and delete the other.
 
 ---
 
-# 3. Intrinsic axon space versus world geometry
+# 3. Public Object Model
 
-AxonScope must know the intrinsic one-dimensional coordinate of each axon.
-
-AxonScope does not need to know the axon's world position.
-
-## 3.1 Intrinsic position
-
-Intrinsic position describes location along the axon:
-
-```text
-s = 0 ... axon length
-```
-
-It is required for:
-
-- compartment discretization;
-- section boundaries;
-- nodes and internodes;
-- intracellular clamp placement;
-- recording selectors;
-- conduction velocity;
-- applying extracellular footprints;
-- reporting events and block locations.
-
-Examples:
-
-```python
-axs.positions.At(2 * axs.mm)
-axs.positions.Node(3)
-axs.positions.Nodes()
-axs.positions.DISTAL
-axs.positions.Probes(count=16)
-```
-
-## 3.2 World position
-
-World position includes:
-
-```text
-x
-y
-z
-orientation
-trajectory in a nerve
-anatomical frame
-```
-
-These concepts belong outside the AxonScope simulation core.
-
-`AxonInstance` should not require:
-
-```text
-position
-orientation
-trajectory
-world coordinates
-```
-
-The only geometry entering AxonScope from the outside is the numerical
-extracellular coupling already evaluated along the axon.
-
----
-
-# 4. Public object model
-
-The target public hierarchy is:
+## 3.1 Main Public Concepts
 
 ```text
 Axon
     descriptive biological, membrane, layout, and cable model
 
 AxonInstance
-    one concrete parameterized occurrence of an Axon
+    one concrete occurrence of an Axon plus local stimulation/state overrides
 
 AxonPopulation
-    compact or heterogeneous collection of AxonInstance objects
-
-Stimulus
-    one temporal waveform
-
-ExtracellularFootprint
-    one static spatial extracellular transfer profile
-
-ExtracellularDrive
-    one footprint + one stimulus
-
-ExtracellularStimulation
-    aggregate of several ExtracellularDrive objects
+    ordered collection of AxonInstance objects
 
 AxonSimulation
-    complete executable definition for one or many axons
+    executable definition for one axon or a population
 
-AxonSimulationPlan
-    backend-neutral execution plan
+Stimulus
+    temporal waveform
 
-PreparedAxonSimulation
-    reusable prepared host-side structures
+ExtracellularFootprint
+    static spatial extracellular transfer profile
 
-CompiledAxonSimulation
-    backend-specific executable and dynamic input schema
+ExtracellularDrive
+    one footprint plus one stimulus
 
-AxonSimulationResult
-    canonical batch-backed numerical result
+ExtracellularStimulation
+    aggregate of drives
 
-AxonResultView
-    one-axon view
+Recording
+    public output request
 
-Analysis
-    versioned scientific interpretation algorithm
+AxonSimulationResult / AxonResultView
+    canonical population result and one-row view
 
-AnalysisResult
-    per-axon metrics, events, statuses, and population summaries
+Analysis / AnalysisResult / AnalysisReport
+    scientific interpretation of numerical outputs
 
-AxonStudy
-    related simulations generated through callable updates
-
-AxonStudyResult
-    condition-indexed results and summaries
+AxonStudy / AxonStudyResult
+    future callable simulation families
 ```
+
+## 3.2 Axon
+
+`Axon` is a reusable scientific description. It owns sections, layout,
+membrane models, cable formulation, myelination structure, initial conditions,
+temperature, and biophysical parameters.
+
+It does not own simulation duration, backend selection, recording, world
+geometry, electrode geometry, compiled arrays, or results.
+
+## 3.3 AxonInstance
+
+`AxonInstance` is one concrete occurrence of an `Axon`. It may contain an id,
+label, metadata, parameter overrides, initial-state overrides, and local
+intracellular or extracellular contexts.
+
+It should not contain trajectory, electrode definitions, field geometry, or
+extracellular footprint generation logic.
+
+## 3.4 AxonPopulation
+
+`AxonPopulation` normalizes one or many public axon inputs while preserving
+input order. Homogeneous and heterogeneous storage are internal optimization
+details; public semantics are the same.
+
+## 3.5 AxonSimulation
+
+`AxonSimulation` is the root executable object. It carries axons, duration,
+time step, recording, solver options, batch options, observers, execution
+policy, and progress settings.
+
+Accepted inputs normalize to a collection of `AxonInstance` rows:
+
+```text
+Axon
+AxonInstance
+Sequence[Axon]
+Sequence[AxonInstance]
+AxonPopulation
+```
+
+One axon and many axons share the lifecycle:
+
+```text
+describe
+validate
+plan
+prepare
+compile
+run
+analyze
+```
+
+A single axon is the smallest population, not a separate product.
 
 ---
 
-# 5. Typed public API and autocomplete policy
+# 4. Typed Public API
 
-The public Python API should use typed values instead of raw strings whenever
-the domain is known.
+Prefer typed values to raw strings whenever the domain is known.
 
-Goals:
-
-- IDE autocomplete;
-- static type checking;
-- discoverable documentation;
-- safer refactoring;
-- early validation;
-- fewer spelling errors;
-- separation between identifiers that serialize to the same primitive type.
-
-General rule:
+Use:
 
 ```text
-closed set
-    Enum
-
-extensible scientific concept
-    typed object or registered descriptor
-
-structured selection
-    dedicated selector class
-
-user-defined identity
-    opaque identifier type
-
-display text and free metadata
-    string
+closed set                  Enum
+extensible scientific value  typed descriptor or registered object
+structured selection         selector class
+user-defined identity        opaque identifier type
+display text / metadata      string
+serialization boundary       primitive value
 ```
 
-Do not turn every concept into an enum.
+Do not turn every concept into an enum. Signals, analyses, positions, devices,
+and precision policies are structured or extensible concepts.
 
-Signals, analyses, position selectors, devices, and precision policies are
-extensible or structured concepts and should remain objects.
+## 4.1 Closed Domains
 
-## 5.1 Closed enums
+Closed domains may use enums:
 
-Recommended enums:
+- myelination;
+- cable formulation;
+- applicability policy;
+- reuse policy;
+- retention policy;
+- analysis status;
+- runtime;
+- compartment role.
 
-```python
-class Myelination(Enum):
-    MYELINATED = "myelinated"
-    UNMYELINATED = "unmyelinated"
+Raw serialized values such as `"myelinated"` are acceptable at file and
+interchange boundaries, but they are not the preferred Python API.
 
+## 4.2 Signals
 
-class CableFormulation(Enum):
-    SINGLE = "single_cable"
-    DOUBLE = "double_cable"
+Signals are extensible descriptors, not a closed enum.
 
-
-class ApplicabilityPolicy(Enum):
-    REQUIRE_ALL = "require_all"
-    COMPATIBLE_ONLY = "compatible_only"
-    MARK_NOT_APPLICABLE = "mark_not_applicable"
-
-
-class ReusePolicy(Enum):
-    AUTO = "auto"
-    REQUIRE = "require"
-    NONE = "none"
-
-
-class RetentionPolicy(Enum):
-    ALL = "all"
-    RECORDINGS = "recordings"
-    ANALYSES = "analyses"
-    SUMMARY = "summary"
-
-
-class AnalysisStatus(Enum):
-    VALID = "valid"
-    NOT_APPLICABLE = "not_applicable"
-    MISSING_INPUT = "missing_input"
-    NUMERICAL_FAILURE = "numerical_failure"
-    UNDETERMINED = "undetermined"
-
-
-class Runtime(Enum):
-    AUTO = "auto"
-    NUMPY = "numpy"
-    JAX = "jax"
-
-
-class CompartmentRole(Enum):
-    NODE = "node"
-    MYSA = "MYSA"
-    FLUT = "FLUT"
-    STIN = "STIN"
-    CONTINUOUS_CABLE = "continuous_cable"
-```
-
-Preferred usage:
-
-```python
-result.select(
-    myelination=axs.Myelination.MYELINATED,
-)
-
-result.select(
-    formulation=axs.CableFormulation.DOUBLE,
-)
-```
-
-Raw serialized values such as `"myelinated"` remain acceptable at file and
-interoperability boundaries, but are not the preferred Python API.
-
-## 5.2 Typed signals
-
-Signals are extensible and should not be a closed enum.
-
-```python
-@dataclass(frozen=True)
-class Signal[T]:
-    id: SignalId
-    quantity_type: type[T]
-    unit: Unit
-    description: str
-```
-
-Built-in descriptors:
+Built-in examples:
 
 ```python
 axs.signals.MEMBRANE_VOLTAGE
@@ -479,36 +333,14 @@ axs.signals.STATE_VARIABLES
 Usage:
 
 ```python
-recording = axs.Recording.center(
-    axs.signals.MEMBRANE_VOLTAGE,
-)
-
-vm = result.signal(
-    axs.signals.MEMBRANE_VOLTAGE,
-)
+recording = axs.Recording.center(axs.signals.MEMBRANE_VOLTAGE)
+vm = result.signal(axs.signals.MEMBRANE_VOLTAGE)
 ```
 
-Custom signals remain possible:
+## 4.3 Position Selectors
 
-```python
-MY_CUSTOM_CURRENT = axs.Signal[CurrentDensity](
-    id=axs.SignalId("my_custom_current"),
-    quantity_type=CurrentDensity,
-    unit=axs.A_per_m2,
-    description="Custom transmembrane current density",
-)
-```
-
-## 5.3 Typed position selectors
-
-Do not use raw selector strings such as:
-
-```text
-"all"
-"distal"
-"nodes"
-"recorded"
-```
+Do not prefer raw selector strings such as `"all"`, `"distal"`, `"nodes"`, or
+`"recorded"`.
 
 Use typed selector objects:
 
@@ -517,92 +349,44 @@ axs.positions.ALL
 axs.positions.PROXIMAL
 axs.positions.DISTAL
 axs.positions.RECORDED
-
 axs.positions.At(2 * axs.mm)
 axs.positions.Node(3)
-axs.positions.Node(-1)
 axs.positions.Nodes()
 axs.positions.Internodes()
-axs.positions.SectionType(axs.CompartmentRole.FLUT)
+axs.positions.SectionType(...)
 axs.positions.Probes(count=16)
 ```
 
-Selectors implement a common protocol:
+Selectors resolve against axon structure, layout, and recording metadata.
 
-```python
-class PositionSelector(Protocol):
-    def resolve(
-        self,
-        structure: AxonStructure,
-        layout: AxonLayout,
-    ) -> ResolvedPositions:
-        ...
-```
-
-## 5.4 Opaque identifiers
+## 4.4 Opaque Identifiers
 
 Do not use one interchangeable string type for every identity.
 
-Recommended types:
+Recommended identity types:
 
-```python
-@dataclass(frozen=True, order=True)
-class AxonId:
-    value: str
-
-
-@dataclass(frozen=True, order=True)
-class DriveId:
-    value: str
-
-
-@dataclass(frozen=True, order=True)
-class SignalId:
-    value: str
-
-
-@dataclass(frozen=True, order=True)
-class CohortId:
-    value: str
-
-
-@dataclass(frozen=True, order=True)
-class ModelId:
-    value: str
+```text
+AxonId
+DriveId
+SignalId
+CohortId
+ModelId
 ```
 
-Example:
+This prevents accidental interchange between user-defined ids that serialize to
+strings.
+
+## 4.5 Runtime, Device, And Precision
+
+Runtime is a closed enum. Device and precision are structured values.
+
+Use:
 
 ```python
-CATHODE = axs.DriveId("cathode")
+axs.Runtime.AUTO
+axs.Runtime.JAX
+axs.Runtime.NUMPY
 
-drive = axs.ExtracellularDrive(
-    id=CATHODE,
-    footprint=footprint,
-    stimulus=stimulus,
-)
-```
-
-This prevents accidental interchange between `AxonId`, `DriveId`, `SignalId`,
-and other identifiers.
-
-## 5.5 Typed runtime, device, and precision
-
-Runtime is a closed enum.
-
-Device selection and precision are structured objects:
-
-```python
-compiled = prepared.compile(
-    runtime=axs.Runtime.JAX,
-    device=axs.Device.gpu(index=0),
-    precision=axs.PrecisionPolicy.float32(),
-)
-```
-
-Preferred constructors:
-
-```python
 axs.Device.auto()
 axs.Device.cpu()
 axs.Device.gpu(index=0)
@@ -614,29 +398,502 @@ axs.PrecisionPolicy.mixed(...)
 
 Do not make `"gpu"` or `"float32"` the primary public API.
 
-## 5.6 Strings that remain appropriate
-
-Strings remain appropriate for:
-
-- labels;
-- display names;
-- descriptions;
-- free-form user metadata;
-- paths;
-- serialized values;
-- external interchange formats.
+Executable policy:
 
 ```python
-instance = axs.AxonInstance(
-    axon=axon,
-    label="patient-A-fiber-42",
-    metadata={
-        "group": "large-diameter",
-    },
+policy = axs.ExecutionPolicy(
+    runtime=axs.Runtime.JAX,
+    device=axs.Device.cpu(),
+    precision=axs.PrecisionPolicy.float32(),
+)
+
+result = axs.simulate(
+    simulation,
+    duration=5 * axs.ms,
+    dt=0.01 * axs.ms,
+    execution_policy=policy,
 )
 ```
 
-## 5.7 Serialization
+Current behavior:
+
+- `Runtime.AUTO` and `Runtime.JAX` are valid for execution;
+- `Runtime.NUMPY` is reserved for a future reference backend;
+- `Device.cpu()` and `Device.gpu(index=...)` resolve through the JAX backend or
+  fail clearly;
+- uniform `float32` can execute when model dtypes match;
+- `float64` requests account for `jax_enable_x64` and require matching model
+  dtypes;
+- mixed precision is estimate-only until casting/rebuild semantics are
+  designed.
+
+Precision must participate in prepared/compiled identity. Device placement
+belongs to the backend execution context. Mutable global precision or device
+state must not silently change compiled program identity.
+
+---
+
+# 5. Extracellular Model
+
+## 5.1 Footprint/Drive Contract
+
+The preferred extracellular representation is:
+
+```text
+ExtracellularFootprint
+    static spatial transfer
+
+Stimulus
+    temporal waveform
+
+ExtracellularDrive
+    one footprint + one stimulus
+
+ExtracellularStimulation
+    sum of drives passed to a simulation
+```
+
+For one drive:
+
+```text
+Vdrive[axon, time, position] =
+    footprint[axon, position] * stimulus[time]
+```
+
+For many drives:
+
+```text
+Vext[a, t, x] =
+    sum_d footprint[d, a, x] * stimulus[d, t]
+```
+
+The solver or prepared forcing path performs the sum. The full tensor
+`Vext[axon, time, position]` must not be materialized by default when the
+footprint/drive structure is still available.
+
+## 5.2 ExtracellularFootprint
+
+`ExtracellularFootprint` is static and spatial. It contains no waveform and no
+time dimension.
+
+It should preserve:
+
+- axon identifiers or shared flag;
+- intrinsic position support;
+- units;
+- interpolation policy;
+- sampling provenance;
+- source identifier;
+- reference convention;
+- optional metadata.
+
+It should not contain electrode CAD, world coordinates, nerve geometry, time
+samples, or stimulus amplitude.
+
+## 5.3 ExtracellularDrive
+
+`ExtracellularDrive` groups one footprint, one stimulus, one id/name, and
+metadata. The name `drive` is intentionally more general than `electrode`.
+
+## 5.4 ExtracellularStimulation
+
+`ExtracellularStimulation` aggregates drives and validates unique ids,
+compatible units, footprint coverage, intrinsic support, stimulus sampling, and
+duplicate/conflicting sources.
+
+Immutable edits should return new objects:
+
+```python
+updated = extracellular.replace_drive(drive_id, stimulus=new_stimulus)
+```
+
+## 5.5 Dense Fallback
+
+A dense `ExtracellularPotential` remains useful for non-separable fields,
+imported external data, experimental potentials, and reference tests.
+
+It is a fallback, not the default performance representation. The planner or
+estimate path should warn when dense input memory is large.
+
+## 5.6 External Geometry Contract
+
+External geometry packages may own nerve geometry, trajectories, electrodes,
+conductivity, and FEM or analytical field solving.
+
+Their contract with AxonScope is numerical:
+
+```text
+axon identifiers
+intrinsic position support
+footprint values
+units
+provenance
+```
+
+AxonScope may provide lightweight analytical helpers for examples and tests,
+but those helpers should produce footprints and remain peripheral to solver
+execution.
+
+## 5.7 Study Reuse
+
+The footprint/drive model is designed for amplitude sweeps, thresholds, and
+recruitment. When only stimulus samples change, AxonScope should reuse axon
+preparation, footprints, spatial operators, dispatch groups, probe plans, and
+compiled executables whenever signatures remain compatible.
+
+---
+
+# 6. Recording, Results, And Analyses
+
+## 6.1 Recording
+
+`Recording` is a public output request. It should describe semantic signals,
+position selectors, temporal selection, and applicability policy.
+
+Target dependency direction:
+
+```text
+Recording
+RecordingPlan
+axon-structure validation
+cable-capability validation
+backend lowering
+```
+
+`Recording` must not import solver-specific option classes in the final
+architecture. Current JAX lowering from `RecordingPlan` to `BatchOptions` lives
+under `backends/jax`.
+
+Unsupported combinations must be explicit. Do not create meaningless arrays or
+silently fill unavailable rows with `NaN`.
+
+## 6.2 Myelination And Cable Formulation
+
+Do not conflate biological organization with numerical formulation:
+
+```text
+biological organization:
+    myelinated
+    unmyelinated
+
+numerical formulation:
+    single cable
+    double cable
+```
+
+A myelinated single-cable model can still have nodes, internodes, and
+saltatory propagation. A double-cable formulation may additionally expose
+intracellular and periaxonal potentials. Semantic signals hide backend
+equations from analyses.
+
+## 6.3 Canonical Results
+
+The target public result is `AxonSimulationResult` for one axon and
+populations, with `AxonResultView` for per-axon access.
+
+Current migration note: scalar `simulate(...)` still returns `SimResult`; pool
+runs return `AxonSimulationResult`.
+
+Results contain numerical outputs, final state, online observation payloads,
+execution metadata, and diagnostics. Post-hoc analyses return separate objects
+or reports.
+
+## 6.4 Analyses
+
+Analyses produce events, metrics, statuses, and population summaries.
+
+Examples:
+
+```python
+axs.analysis.Activation(...)
+axs.analysis.ConductionVelocity(...)
+axs.analysis.Latency(...)
+axs.analysis.ConductionBlock(...)
+axs.analysis.SpikeCount(...)
+axs.analysis.PeakVoltage(...)
+```
+
+Each analysis declares requirements:
+
+- semantic signals;
+- supported myelination classes;
+- required compartment roles;
+- cable capabilities;
+- positions;
+- post-hoc and online support;
+- algorithm version.
+
+Population aggregates must expose their denominator.
+
+`axs.analysis` is the real public analysis namespace. It must not be a
+compatibility alias to `axs.results.analysis`.
+
+## 6.5 VmRaster Observer Path
+
+The active solver-side observer path is intentionally narrow:
+
+```text
+input per step: Vm[B, Nx]
+state:          packed words[B, R, P, W] uint32
+W:              ceil(Nt / 32)
+output:         observations["vm_raster"]
+```
+
+It thresholds selected membrane-voltage probes at every solver `dt` and packs
+bits. Activation, latency, conduction velocity, threshold, and recruitment
+summaries are decoded after the solver.
+
+Rules:
+
+- keep public concepts analysis-oriented;
+- do not expose backend/detail observer variants as public modes;
+- lower fixed probes to static row-aware tables for padded/heterogeneous
+  groups;
+- keep `VmRasterResult` and CPU unpacking under `results`;
+- protocols consume `axonscope.results` VmRaster output, not solver observer
+  internals;
+- do not retain full Vm just to recover row-specific targets later;
+- keep `PeakVoltage` and richer analyses post-hoc unless benchmark evidence
+  justifies a dedicated solver-side implementation.
+
+The old generic solver-side observer fallback should not re-enter active code.
+
+---
+
+# 7. Simulation Lifecycle And Inspection
+
+## 7.1 Lifecycle
+
+Target lifecycle:
+
+```text
+validate
+plan
+prepare
+compile
+execute
+assemble results
+analyze
+```
+
+Planning determines normalized instances, compatible cohorts, footprint and
+drive structures, recording requirements, analysis requirements, expected
+shapes, memory estimates, and candidate runtimes.
+
+Planning must not create device arrays, compile code, import concrete kernels,
+or execute solvers.
+
+Preparation may compute flattened cable structures, membrane assignments,
+intrinsic positions, cable operators, footprint resampling, compact
+intracellular sources, recording indices, observer plans, and cohort metadata.
+
+Compilation lowers prepared structures to a backend executable and dynamic
+input schema.
+
+Execution should reuse static structures across compatible stimulus-only
+updates.
+
+## 7.2 Inspection
+
+Every major execution stage should be explainable without making diagnostics
+part of the hot path.
+
+Current public inspection:
+
+```python
+report = axs.inspect_simulation(
+    pool,
+    duration=0.1 * axs.ms,
+    dt=0.05 * axs.ms,
+    execution_policy=policy,
+)
+
+report.print()
+report.plot()
+report.plot_details()
+
+simulation.inspect(print_summary=True)
+```
+
+Current coverage:
+
+- planning;
+- dispatch/batch grouping;
+- prepared cohort shapes;
+- input lowering: dense/sparse/zero intracellular input, dense/factorized/zero
+  extracellular input;
+- observer/recording lowering: retained Vm width and VmRaster/post-hoc route;
+- kernel routing: scalar or batch, cable formulation, block solver, chunks;
+- result assembly: compact cohort records, row records, observations, retained
+  recordings;
+- detailed plotting for padding, estimated memory, VmRaster probes, and result
+  assembly.
+
+Target coverage:
+
+- planning: normalized axons, signatures, candidate runtimes, reuse keys;
+- dispatch/batch: scalar/batch route, groups, padding, fallback reasons;
+- preparation: flattened layouts, membrane/cable shapes, cache hits/misses,
+  probe tables, prepared footprints;
+- input lowering: waveform and footprint reuse/cache hits;
+- observer/recording lowering: VmRaster probes, thresholds, masks, packed word
+  shapes;
+- kernel routing: device and dtype details from execution-time capture;
+- result assembly: slicing, padded-row removal, and post-processing
+  requirements.
+
+Inspection must not allocate device arrays during planning, force device to
+host transfers by default, expose private backend objects, change numerical
+results, or replace benchmark spans for timing claims.
+
+---
+
+# 8. Solver And Backend Boundary
+
+## 8.1 Ownership Direction
+
+Required dependency direction:
+
+```text
+core / units / identifiers / timebase
+domain descriptions
+planning
+preparation
+backend lowering
+execution
+results
+analysis / visualization
+studies
+```
+
+Forbidden dependencies:
+
+- `axons/` imports JAX;
+- `membranes/` imports JAX implementations;
+- `extracellular/` imports geometry packages;
+- analytical helpers enter solver execution directly;
+- `recording/` imports solver options in the final architecture;
+- `planning/` creates device arrays or calls backend lowering;
+- `results/` depends on JAX array types;
+- analyses encode backend equations;
+- domain objects eagerly import visualization;
+- internal modules import top-level `axonscope`;
+- mutable global precision silently changes compile identity.
+
+## 8.2 Runtime Boundary
+
+Public/descriptive layers should pass typed runtime requests and public
+simulation definitions downward. Backend-specific modules own JAX imports,
+device resolution, array placement, and kernel lowering.
+
+Current boundary:
+
+- scalar and batch execution enter through `axonscope.backends.jax`;
+- fixed-step time-grid validation and solver time-argument normalization live
+  in `axonscope.timebase`;
+- `axonscope.solvers` exports only the stable solver facade: solver base,
+  `CrankNicholson`, solver options, batch options, and block-solver resolution;
+- JAX runtime preparation, scalar kernels, batch kernels, observer packing, and
+  backend input containers live under `axonscope.backends.jax`;
+- `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
+- `solvers/` retains only solver-facing contracts and the public solver class.
+
+## 8.3 Public Solver Surface
+
+Retained exact double-cable block-solver choices:
+
+```text
+auto
+thomas
+pcr
+pcr_soa
+pcr_adaptive
+```
+
+Policy:
+
+- `auto` resolves from the effective execution device;
+- CPU/default backends resolve to `thomas`;
+- GPU-like backends resolve to `pcr_adaptive`;
+- `pcr_adaptive` uses `pcr_soa` through `B <= 4096` and `pcr` above that;
+- forced choices are diagnostic unless benchmark evidence updates defaults.
+
+Do not expose pseudo-double, split iterative, associative-transfer, Pallas,
+Triton, JAX-Triton, CUDA FFI, or other custom-kernel candidates as public
+solver choices while they remain archived or standby evidence.
+
+`BatchOptions` and `BatchRecording` are currently public execution knobs for
+batch-kernel recording/chunking and retained solver selection. Public examples
+should import them from the root facade (`axs.BatchOptions`) rather than
+descending into `axs.solvers`.
+
+## 8.4 Factorized Vext
+
+Factorized Vext is an internal optimization. The active path is deliberately
+narrow:
+
+```text
+current_mid_A[Nt]
+footprint_mV_per_A[B, Nx]
+```
+
+It is used for shared point-source single-cable VmRaster observer-only batches
+to avoid dense `Vstim[B, Nt, Nx]`.
+
+Do not expose factorized Vext as a public mode. Do not broaden it to
+double-cable without solver-equivalence tests and benchmark evidence.
+
+## 8.5 Precision And Cache Identity
+
+Prepared identity may include semantic identity, discretization, cohort shape,
+resampled footprints, and transformed footprints.
+
+Compiled identity may include prepared identity, backend, backend version,
+device class, precision, static shapes, drive count, solver algorithm, and
+optimization flags.
+
+Stimulus samples should remain dynamic when shape-compatible.
+
+---
+
+# 9. Studies And Reuse
+
+Studies are future public orchestration for related variants of a base
+`AxonSimulation`.
+
+Canonical update mechanism:
+
+```python
+def update(base_simulation, condition) -> axs.AxonSimulation:
+    ...
+```
+
+The callable should avoid mutating the base, return a new simulation, avoid
+hidden side effects, and make the condition explicit.
+
+Target workflows:
+
+- sweeps;
+- threshold search;
+- recruitment curves;
+- retention policies;
+- reuse policies.
+
+Reuse policies:
+
+```text
+AUTO      reuse compatible plans, preparation, and compilation
+REQUIRE   fail if a condition violates the reuse boundary
+NONE      treat every condition independently
+```
+
+Lambdas are allowed, but AxonScope should not claim every lambda is
+serializable. Recommend named functions or frozen callable dataclasses for
+strong reproducibility.
+
+---
+
+# 10. Serialization And Reproducibility
 
 Typed Python values serialize to stable primitive values:
 
@@ -649,1906 +906,10 @@ Typed Python values serialize to stable primitive values:
 }
 ```
 
-Deserialization reconstructs typed values.
+Deserialization reconstructs typed values. Serialized representation must not
+dictate an untyped in-memory API.
 
-The serialized representation must not dictate an untyped in-memory API.
-
----
-
-# 6. Axon, AxonInstance, AxonPopulation, and AxonSimulation
-
-## 5.1 Axon
-
-`Axon` is a reusable scientific description.
-
-It owns:
-
-- sections;
-- layout;
-- compartment roles;
-- membrane models;
-- diameter;
-- cable formulation;
-- myelination structure;
-- initial conditions;
-- temperature;
-- biophysical parameters.
-
-It does not own:
-
-- simulation duration;
-- backend selection;
-- recording;
-- world geometry;
-- extracellular electrode geometry;
-- compiled arrays;
-- results.
-
-## 5.2 AxonInstance
-
-`AxonInstance` represents one concrete occurrence of an `Axon`.
-
-```python
-instance = axs.AxonInstance(
-    axon=axon,
-    label="axon-42",
-    parameters={
-        "diameter_scale": 1.05,
-    },
-    initial_state={
-        "membrane_voltage": -70 * axs.mV,
-    },
-    intracellular=[local_clamp],
-    metadata={
-        "group": "large-fibers",
-    },
-)
-```
-
-It may contain:
-
-- a stable identifier;
-- a label;
-- user metadata;
-- per-axon parameter overrides;
-- initial-state overrides;
-- local intracellular stimulation.
-
-It should not contain:
-
-- world position;
-- trajectory;
-- electrode definitions;
-- field geometry;
-- extracellular footprint generation logic.
-
-The current prototype object named `AxonSimulation` should be renamed directly
-to `AxonInstance`.
-
-No compatibility alias should remain.
-
-## 5.3 AxonPopulation
-
-`AxonPopulation` supports compact homogeneous and heterogeneous forms.
-
-Homogeneous:
-
-```python
-population = axs.AxonPopulation.broadcast(
-    axon=axon,
-    count=10_000,
-    parameters={
-        "diameter": diameters,
-    },
-    labels=labels,
-)
-```
-
-Heterogeneous:
-
-```python
-population = axs.AxonPopulation([
-    axs.AxonInstance(axon_a, label="a"),
-    axs.AxonInstance(axon_b, label="b"),
-    axs.AxonInstance(
-        axon_c,
-        label="c",
-        intracellular=[local_clamp],
-    ),
-])
-```
-
-The public semantics are identical.
-
-Storage optimization is internal.
-
-## 5.4 AxonSimulation
-
-`AxonSimulation` is the complete executable definition.
-
-```python
-simulation = axs.AxonSimulation(
-    axons=axon_or_population,
-    intracellular=intracellular_stimulation,
-    extracellular=extracellular_stimulation,
-    duration=20 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=recording,
-)
-```
-
-Accepted `axons` forms:
-
-```text
-Axon
-AxonInstance
-Sequence[Axon]
-Sequence[AxonInstance]
-AxonPopulation
-```
-
-All forms normalize to:
-
-```text
-AxonInstanceCollection[B]
-```
-
----
-
-# 7. Unified one-axon and population API
-
-One axon and many axons use the same lifecycle:
-
-```text
-describe
-→ validate
-→ plan
-→ prepare
-→ compile
-→ run
-→ analyze
-```
-
-## 6.1 One axon
-
-```python
-simulation = axs.AxonSimulation(
-    axons=axon,
-    intracellular=[clamp],
-    duration=5 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.full(axs.signals.MEMBRANE_VOLTAGE),
-)
-
-result = simulation.run()
-
-result.single.plot.vm()
-```
-
-## 6.2 Population
-
-```python
-population = axs.AxonPopulation.broadcast(
-    axon=axon,
-    count=1000,
-    parameters={
-        "diameter": diameters,
-    },
-)
-
-simulation = axs.AxonSimulation(
-    axons=population,
-    extracellular=extracellular_stimulation,
-    duration=20 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.center(axs.signals.MEMBRANE_VOLTAGE),
-)
-
-result = simulation.run()
-```
-
-## 6.3 Internal execution
-
-The backend may choose:
-
-```text
-scalar debug execution
-batch execution with B = 1
-batch execution with B > 1
-several homogeneous cohorts
-padded cohorts
-scalar fallback
-```
-
-This must not change:
-
-- scientific semantics;
-- recording semantics;
-- result semantics;
-- units;
-- events;
-- error behavior.
-
-A single axon is the smallest population, not a separate product.
-
----
-
-# 8. Intracellular stimulation
-
-Intracellular stimulation remains explicit and local to the cable model.
-
-## 7.1 Shared or targeted stimulation
-
-```python
-simulation = axs.AxonSimulation(
-    axons=population,
-    intracellular=[
-        axs.IntracellularCurrentClamp(
-            target=axs.AxonSelector.indices([0, 3, 7]),
-            position=50 * axs.um,
-            stimulus=pulse,
-        )
-    ],
-    ...
-)
-```
-
-## 7.2 Instance-local stimulation
-
-```python
-instance = axs.AxonInstance(
-    axon=axon,
-    intracellular=[local_clamp],
-)
-```
-
-## 7.3 Combination rule
-
-```text
-simulation-level intracellular stimulation
-    shared or explicitly targeted
-
-instance-level intracellular stimulation
-    local to one instance
-
-combination
-    additive by default
-```
-
-Replacement or masking must require an explicit override object.
-
----
-
-# 9. Extracellular architecture
-
-The extracellular API is built from four concepts:
-
-```text
-ExtracellularFootprint
-ExtracellularDrive
-ExtracellularStimulation
-ExtracellularPotential
-```
-
-The recommended path is factorized:
-
-```text
-one spatial footprint
-+
-one temporal stimulus
-=
-one ExtracellularDrive
-```
-
-Several drives are aggregated into:
-
-```text
-ExtracellularStimulation
-```
-
-The solver performs the sum during time integration.
-
----
-
-# 10. ExtracellularFootprint
-
-`ExtracellularFootprint` is a static spatial transfer profile.
-
-It contains no time dimension and no waveform.
-
-Conceptually:
-
-```text
-footprint[axon, intrinsic_position]
-```
-
-or, when shared:
-
-```text
-footprint[intrinsic_position]
-```
-
-## 9.1 Physical meaning
-
-A footprint represents extracellular potential per unit command.
-
-Typical unit:
-
-```text
-V / A
-```
-
-or an equivalent consistent unit.
-
-For one drive:
-
-```text
-Vext_drive[a, t, x]
-    = footprint[a, x] × stimulus[t]
-```
-
-## 9.2 One axon
-
-```python
-footprint = axs.ExtracellularFootprint(
-    values=values,
-    axon_ids=("axon-0",),
-    positions=axon.compartment_positions,
-)
-```
-
-## 9.3 Population
-
-```python
-footprint = axs.ExtracellularFootprint(
-    values=values,
-    axon_ids=population.ids,
-    positions=position_support,
-)
-```
-
-Logical shape:
-
-```text
-[axon, position]
-```
-
-## 9.4 Shared footprint
-
-For simplified tests:
-
-```python
-footprint = axs.ExtracellularFootprint.shared(
-    values=values,
-    positions=position_support,
-)
-```
-
-The planner should preserve the shared representation rather than eagerly
-copying it across all axons.
-
-## 9.5 Required metadata
-
-A footprint should preserve:
-
-```text
-axon identifiers or shared flag
-intrinsic position support
-units
-interpolation policy
-sampling provenance
-source identifier
-reference convention
-optional metadata
-```
-
-It should not contain:
-
-```text
-electrode CAD
-world coordinates
-nerve geometry
-time samples
-stimulus amplitude
-```
-
----
-
-# 11. ExtracellularDrive
-
-`ExtracellularDrive` represents one independent extracellular contribution.
-
-```python
-CATHODE = axs.DriveId("cathode")
-
-drive = axs.ExtracellularDrive(
-    id=CATHODE,
-    footprint=cathode_footprint,
-    stimulus=cathode_stimulus,
-)
-```
-
-The object groups:
-
-```text
-one footprint
-one stimulus
-one name
-optional metadata
-```
-
-Its physical contribution is:
-
-```text
-Vdrive[a, t, x]
-    = footprint[a, x] × stimulus[t]
-```
-
-This object is the user-facing unit corresponding to:
-
-- one electrode contact;
-- one source;
-- one field basis component;
-- one multipolar mode;
-- one externally computed spatial mode.
-
-The name `drive` is intentionally more general than `electrode`.
-
----
-
-# 12. ExtracellularStimulation
-
-`ExtracellularStimulation` aggregates multiple drives.
-
-```python
-extracellular = axs.ExtracellularStimulation([
-    cathode_drive,
-    anode_left_drive,
-    anode_right_drive,
-])
-```
-
-It is the object passed to `AxonSimulation`:
-
-```python
-simulation = axs.AxonSimulation(
-    axons=population,
-    extracellular=extracellular,
-    duration=5 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=recording,
-)
-```
-
-## 11.1 Mathematical model
-
-For drives `d = 1 ... D`:
-
-```text
-Vext[a, t, x]
-    = Σd footprint[d, a, x] × stimulus[d, t]
-```
-
-The sum is performed inside the solver or in a prepared linear forcing stage.
-
-The full tensor:
-
-```text
-Vext[axon, time, position]
-```
-
-must not be materialized by default.
-
-## 11.2 Collection API
-
-```python
-extracellular.drives
-extracellular.names
-extracellular["cathode"]
-```
-
-Immutable modifications:
-
-```python
-updated = extracellular.replace_drive(
-    "cathode",
-    stimulus=new_stimulus,
-)
-```
-
-```python
-updated = extracellular.add(
-    axs.ExtracellularDrive(...)
-)
-```
-
-```python
-updated = extracellular.remove("anode-right")
-```
-
-Each operation returns a new object.
-
-## 11.3 Validation
-
-The collection validates:
-
-- unique names;
-- compatible physical units;
-- axon identifier coverage;
-- compatible intrinsic supports;
-- stimulus duration and sampling;
-- interpolation policy;
-- duplicate or conflicting sources;
-- missing footprint rows.
-
-Example error:
-
-```text
-ExtracellularDriveValidationError
-
-Drive:
-  cathode
-
-Population axons:
-  axon-0
-  axon-1
-  axon-2
-
-Footprint available for:
-  axon-0
-  axon-2
-
-Missing:
-  axon-1
-```
-
----
-
-# 13. Dense extracellular fallback
-
-A fully precomputed potential remains useful for general cases.
-
-```python
-potential = axs.ExtracellularPotential(
-    values=values,
-    dims=("axon", "time", "position"),
-    axon_ids=population.ids,
-    positions=position_support,
-)
-```
-
-This supports:
-
-- time-dependent non-separable fields;
-- imported simulation data;
-- experimental potentials;
-- reference tests;
-- arbitrary external solvers.
-
-It is a fallback, not the preferred representation.
-
-The planner should warn when a dense representation is large:
-
-```text
-Extracellular input
-  representation: dense potential
-  estimated size: 18.4 GB
-
-Recommendation
-  provide ExtracellularStimulation with factorized drives
-```
-
----
-
-# 14. External geometry package contract
-
-A separate package may own:
-
-```text
-nerve geometry
-fiber trajectories
-electrode geometry
-conductivity
-FEM or analytical field solving
-```
-
-It should output one footprint per independent source:
-
-```python
-footprints = geometry_package.compute_footprints(
-    fibers=fiber_trajectories,
-    sources=electrodes,
-    target_axons=population,
-)
-```
-
-It may then construct AxonScope objects:
-
-```python
-drives = [
-    axs.ExtracellularDrive(
-        name=source.name,
-        footprint=footprints[source.name],
-        stimulus=stimuli[source.name],
-    )
-    for source in sources
-]
-
-extracellular = axs.ExtracellularStimulation(drives)
-```
-
-AxonScope must not depend on the geometry package.
-
-The contract between packages is numerical:
-
-```text
-axon identifiers
-intrinsic position support
-footprint values
-units
-provenance
-```
-
----
-
-# 15. Analytical field helpers
-
-AxonScope may provide lightweight analytical helpers for:
-
-- examples;
-- validation;
-- tests;
-- educational use;
-- simple standalone simulations.
-
-These helpers should be peripheral.
-
-Recommended namespace:
-
-```text
-axonscope.analytical_fields
-```
-
-Potential modules:
-
-```text
-analytical_fields/
-├── point_source.py
-├── line_source.py
-├── uniform_field.py
-└── builders.py
-```
-
-The helpers produce footprints only.
-
-They do not enter the solver.
-
-## 14.1 One point source
-
-```python
-footprint = axs.analytical_fields.point_source(
-    axon=axon,
-    axial_position=2 * axs.mm,
-    radial_distance=500 * axs.um,
-    conductivity=0.3 * axs.S_per_m,
-)
-```
-
-## 14.2 Population point-source helper
-
-```python
-footprint = axs.analytical_fields.point_source_population(
-    axons=population,
-    axial_positions=axial_positions,
-    radial_distances=radial_distances,
-    conductivity=0.3 * axs.S_per_m,
-)
-```
-
-This helper may accept simplified geometric parameters.
-
-It must not make world position a required property of `AxonInstance`.
-
-## 14.3 Multiple sources
-
-```python
-cathode_footprint = axs.analytical_fields.point_source(...)
-anode_left_footprint = axs.analytical_fields.point_source(...)
-anode_right_footprint = axs.analytical_fields.point_source(...)
-```
-
-Then create drives explicitly:
-
-```python
-extracellular = axs.ExtracellularStimulation([
-    axs.ExtracellularDrive(
-        name="cathode",
-        footprint=cathode_footprint,
-        stimulus=cathode_stimulus,
-    ),
-    axs.ExtracellularDrive(
-        name="anode-left",
-        footprint=anode_left_footprint,
-        stimulus=anode_left_stimulus,
-    ),
-    axs.ExtracellularDrive(
-        name="anode-right",
-        footprint=anode_right_footprint,
-        stimulus=anode_right_stimulus,
-    ),
-])
-```
-
-The analytical helper owns only spatial calculation.
-
-`Stimulus` owns time.
-
-The solver combines both.
-
----
-
-# 16. Preparation of extracellular drives
-
-The public object model is object-oriented:
-
-```text
-ExtracellularStimulation
-    tuple[ExtracellularDrive, ...]
-```
-
-Preparation converts it into efficient arrays.
-
-Possible prepared layout:
-
-```text
-footprints[drive, axon, position]
-stimuli[time, drive]
-```
-
-or:
-
-```text
-footprints[axon, drive, position]
-stimuli[time, drive]
-```
-
-At each time step:
-
-```python
-stimulus_t = stimuli[t]
-
-vext_t = einsum(
-    "dax,d->ax",
-    footprints,
-    stimulus_t,
-)
-```
-
-This produces:
-
-```text
-vext_t[axon, position]
-```
-
-without storing:
-
-```text
-Vext[axon, time, position]
-```
-
-## 15.1 Linear operator preapplication
-
-When the cable forcing is linear:
-
-```text
-forcing_ext = Lext(Vext)
-```
-
-preparation may compute per-drive transformed footprints:
-
-```text
-prepared_footprint[d, a, x]
-    = Lext(footprint[d, a, x])
-```
-
-Then:
-
-```text
-forcing_ext[a, t, x]
-    = Σd prepared_footprint[d, a, x]
-         × stimulus[d, t]
-```
-
-This preserves the critical separation:
-
-```text
-spatial footprint
-    prepared once
-
-temporal stimulus
-    dynamic and replaceable
-```
-
-## 15.2 Shared footprints
-
-A shared footprint should remain logically:
-
-```text
-footprint[drive, position]
-```
-
-when possible.
-
-The backend should broadcast without eager duplication.
-
-## 15.3 Dynamic stimulus inputs
-
-Compiled execution should accept sampled stimuli as dynamic inputs:
-
-```python
-compiled.run(
-    extracellular_stimuli=sampled_stimuli,
-)
-```
-
-Prepared footprints should remain reusable when only waveforms change.
-
----
-
-# 17. Sweeps with extracellular drives
-
-The drive model is designed for efficient callable-based studies.
-
-## 16.1 Replace one stimulus
-
-```python
-def update_amplitude(simulation, amplitude):
-    extracellular = simulation.extracellular.replace_drive(
-        axs.DriveId("cathode"),
-        stimulus=build_cathodic_stimulus(amplitude),
-    )
-
-    return simulation.replace(
-        extracellular=extracellular,
-    )
-```
-
-Reusable artifacts:
-
-```text
-axon preparation
-footprints
-spatial operators
-cohort structure
-compiled executable
-```
-
-Only temporal stimulus samples change.
-
-## 16.2 Replace several stimuli
-
-```python
-def update_configuration(simulation, amplitude):
-    extracellular = (
-        simulation.extracellular
-        .replace_drive(
-            axs.DriveId("cathode"),
-            stimulus=build_stimulus(-amplitude),
-        )
-        .replace_drive(
-            axs.DriveId("anode-left"),
-            stimulus=build_stimulus(0.5 * amplitude),
-        )
-        .replace_drive(
-            axs.DriveId("anode-right"),
-            stimulus=build_stimulus(0.5 * amplitude),
-        )
-    )
-
-    return simulation.replace(
-        extracellular=extracellular,
-    )
-```
-
-## 16.3 Replace a footprint
-
-```python
-def update_spatial_configuration(simulation, condition):
-    return simulation.replace(
-        extracellular=condition.extracellular_stimulation,
-    )
-```
-
-The planner compares signatures.
-
-```text
-same drive count and array shapes
-    dynamic update may be possible
-
-same compile shape but changed footprint values
-    reuse compilation, update prepared/device buffers
-
-changed drive count or static shape
-    reprepare or recompile affected cohorts
-```
-
----
-
-# 18. Lifecycle
-
-## 17.1 Validation
-
-```python
-report = simulation.validate()
-```
-
-Validation covers:
-
-- units;
-- axon structure;
-- population identities;
-- stimulation targeting;
-- drive names;
-- footprint coverage;
-- intrinsic position support;
-- recording applicability;
-- memory feasibility;
-- backend capabilities.
-
-## 17.2 Planning
-
-```python
-plan = simulation.plan()
-```
-
-Planning determines:
-
-- normalized instances;
-- myelination classes;
-- cable formulations;
-- compatible cohorts;
-- footprint structure;
-- drive structure;
-- recording requirements;
-- analysis requirements;
-- expected shapes;
-- memory estimates;
-- candidate runtimes.
-
-Planning must not:
-
-- create device arrays;
-- compile code;
-- import concrete JAX kernels;
-- execute solvers.
-
-## 17.3 Preparation
-
-```python
-prepared = simulation.prepare()
-```
-
-Preparation may compute and cache:
-
-- flattened cable structures;
-- section and compartment roles;
-- membrane assignments;
-- intrinsic positions;
-- cable operators;
-- footprint resampling;
-- transformed footprints;
-- compact intracellular sources;
-- recording indices;
-- observer plans;
-- cohort metadata.
-
-## 17.4 Compilation
-
-```python
-compiled = prepared.compile(
-    runtime=axs.Runtime.JAX,
-    device=axs.Device.gpu(index=0),
-    precision=axs.PrecisionPolicy.float32(),
-)
-```
-
-Compilation may perform:
-
-- backend lowering;
-- static-shape specialization;
-- solver specialization;
-- JIT or AOT compilation;
-- cache lookup;
-- device memory planning.
-
-## 17.5 Execution
-
-```python
-result = compiled.run(
-    extracellular_stimuli=dynamic_stimuli,
-)
-```
-
-Execution reuses all compatible static structures.
-
-For iterative protocols such as threshold search and recruitment sweeps,
-execution should be able to update only stimulus-dependent data when the static
-simulation shape is unchanged:
-
-```text
-same axon cohort / geometry / cable formulation
-same recording or VmRaster observer plan
-same dispatch group and padding signatures
-same compiled backend executable
-changed stimulus amplitude or waveform values only
-```
-
-In that case, execution should not rebuild solver runtimes, dispatch groups,
-probe tables, or spatial extracellular footprints. If reuse is impossible, the
-reason should be explainable from the planning/preparation signatures.
-
----
-
-# 19. Planning and explainability
-
-```python
-print(simulation.plan().explain())
-```
-
-Example:
-
-```text
-AxonSimulation
-  1000 axons
-  600 unmyelinated
-  400 myelinated
-  3 execution cohorts
-
-Extracellular stimulation
-  3 drives
-  cathode
-  anode-left
-  anode-right
-
-Footprints
-  representation: factorized
-  shape: [drive, axon, position]
-  spatial preparation: cached
-  full Vext tensor: not materialized
-
-Stimuli
-  dynamic inputs
-  sampled shape: [time, drive]
-
-Runtime
-  JAX GPU
-
-Memory
-  footprints: 48 MB
-  stimuli: 0.2 MB
-  runtime state: 110 MB
-  output: 12 MB
-```
-
-The plan should explain automatic decisions.
-
----
-
-# 20. Myelination and cable formulation
-
-The architecture must not conflate:
-
-```text
-biological organization
-    myelinated
-    unmyelinated
-
-numerical formulation
-    single cable
-    double cable
-```
-
-The primary scientific distinction for recording and analysis is:
-
-```text
-myelinated versus unmyelinated
-```
-
-Cable formulation determines numerical state and additional signals.
-
-Examples:
-
-```text
-myelinated + single cable
-myelinated + double cable
-unmyelinated + single cable
-```
-
-A myelinated single-cable model still has:
-
-- nodes;
-- internodes;
-- saltatory propagation;
-- node-based recording selectors.
-
-A double-cable formulation may additionally expose:
-
-- intracellular potential;
-- periaxonal potential;
-- periaxonal current.
-
----
-
-# 21. Axon structure descriptors
-
-Each axon should expose a backend-neutral structure descriptor.
-
-Myelinated:
-
-```python
-AxonStructure(
-    myelination=axs.Myelination.MYELINATED,
-    compartment_roles={
-        "node",
-        "MYSA",
-        "FLUT",
-        "STIN",
-    },
-)
-```
-
-Unmyelinated:
-
-```python
-AxonStructure(
-    myelination=axs.Myelination.UNMYELINATED,
-    compartment_roles={
-        "continuous_cable",
-    },
-)
-```
-
-The descriptor supports:
-
-- semantic position selectors;
-- recording validation;
-- analysis applicability;
-- result metadata;
-- cohort inspection.
-
----
-
-# 22. Cable capabilities and semantic signals
-
-Each formulation declares available signals.
-
-Single cable:
-
-```python
-CableCapabilities(
-    formulation="single_cable",
-    native_signals={
-        "membrane_voltage",
-    },
-)
-```
-
-Double cable:
-
-```python
-CableCapabilities(
-    formulation=axs.CableFormulation.DOUBLE,
-    native_signals={
-        "intracellular_potential",
-        "periaxonal_potential",
-    },
-    derived_signals={
-        "membrane_voltage",
-    },
-)
-```
-
-For double cable:
-
-```text
-membrane_voltage =
-    intracellular_potential - periaxonal_potential
-```
-
-The backend owns this reconstruction.
-
-Analyses request semantic signals.
-
-They do not encode backend equations.
-
----
-
-# 23. Recording
-
-The recording contract combines:
-
-```text
-semantic signal
-axon structure
-compartment role
-intrinsic position selector
-temporal selector
-cable capability
-applicability policy
-```
-
-## 22.1 Myelinated selectors
-
-```python
-axs.positions.Nodes()
-axs.positions.Node(index)
-axs.positions.Internodes()
-axs.positions.SectionType(axs.CompartmentRole.MYSA)
-axs.positions.SectionType(axs.CompartmentRole.FLUT)
-axs.positions.SectionType(axs.CompartmentRole.STIN)
-```
-
-## 22.2 Unmyelinated selectors
-
-```python
-axs.positions.At(2 * axs.mm)
-axs.positions.PROXIMAL
-axs.positions.DISTAL
-axs.positions.Probes(count=16)
-```
-
-## 22.3 Semantic signals
-
-```text
-membrane_voltage
-ionic_current
-membrane_conductance
-state_variables
-intracellular_potential
-periaxonal_potential
-```
-
-Short aliases may exist, but semantic names are canonical.
-
-## 22.4 Applicability
-
-```python
-axs.Recording.signals(
-    "membrane_voltage",
-    positions=axs.positions.Nodes(),
-    applicability=axs.ApplicabilityPolicy.COMPATIBLE_ONLY,
-)
-```
-
-Unmyelinated axons are explicitly not applicable for node selectors.
-
-A periaxonal request may require:
-
-```text
-myelinated structure with requested roles
-double-cable signal capability
-```
-
-## 22.5 No artificial completion
-
-Do not create meaningless arrays for unsupported combinations.
-
-Do not fill unavailable rows silently with `NaN`.
-
-Use explicit applicability and dense compatible storage.
-
-## 22.6 Dependency direction
-
-```text
-Recording
-→ RecordingPlan
-→ axon-structure validation
-→ cable-capability validation
-→ backend lowering
-```
-
-`Recording` must not import solver-specific option classes.
-
-Migration note: if the current implementation still lowers `Recording` directly
-to solver or batch options, that is a transitional convenience. The target
-boundary is `Recording -> RecordingPlan -> validation -> backend lowering`.
-
----
-
-# 24. Canonical numerical result
-
-Use one public result type:
-
-```text
-AxonSimulationResult
-```
-
-for:
-
-- one axon;
-- homogeneous populations;
-- heterogeneous populations;
-- mixed myelination;
-- mixed cable formulations;
-- multiple execution cohorts.
-
-Migration note: the implementation may temporarily keep a scalar `SimResult`
-while pool results move first. Before serialization or final docs, decide
-whether scalar public runs also return `AxonSimulationResult` or whether
-`SimResult` remains an explicitly scoped single-run convenience.
-
-## 23.1 Logical schema
-
-```text
-AxonSimulationResult
-├── axons: AxonMetadataTable
-├── cohorts: tuple[CohortResult, ...]
-├── recording: RecordingManifest
-├── online_analyses: AnalysisCollection
-├── execution: ExecutionMetadata
-└── diagnostics: DiagnosticCollection
-```
-
-## 23.2 Axon metadata
-
-```text
-axon_id
-input_index
-label
-myelination
-formulation
-compartment_roles
-cohort_id
-model_id
-geometry_id
-user metadata
-```
-
-No world position is required.
-
-## 23.3 Dense cohort storage
-
-Example:
-
-```text
-cohort 0
-    600 unmyelinated single-cable axons
-    membrane_voltage
-
-cohort 1
-    250 myelinated single-cable axons
-    membrane_voltage
-    node/internode metadata
-
-cohort 2
-    150 myelinated double-cable axons
-    membrane_voltage
-    intracellular_potential
-    periaxonal_potential
-    node/internode metadata
-```
-
-Each cohort stores dense arrays.
-
-The global result preserves input order logically.
-
-## 23.4 Signal access
-
-```python
-vm = result.signal(axs.signals.MEMBRANE_VOLTAGE)
-```
-
-Logical shape:
-
-```text
-(axon, time, recorded_position)
-```
-
-Partially available signal:
-
-```python
-double_result = result.select(
-    formulation=axs.CableFormulation.DOUBLE,
-)
-
-ve = double_result.signal(
-    axs.signals.PERIAXONAL_POTENTIAL,
-)
-```
-
-Partial availability must never be silent.
-
-## 23.5 One-axon view
-
-```python
-result.single
-result.axon(index)
-```
-
-return:
-
-```text
-AxonResultView
-```
-
-For one axon:
-
-```text
-result.single == result.axon(0)
-```
-
-## 23.6 Numerical result immutability
-
-The numerical result contains:
-
-- recorded signals;
-- final states;
-- online observer outputs;
-- execution metadata;
-- diagnostics.
-
-Post-hoc analyses return separate objects.
-
----
-
-# 25. Scientific analyses
-
-The solver produces signals and states.
-
-Analyses produce:
-
-- events;
-- metrics;
-- statuses;
-- population summaries.
-
-Recommended objects:
-
-```python
-axs.analysis.Activation(...)
-axs.analysis.ConductionVelocity(...)
-axs.analysis.Latency(...)
-axs.analysis.ConductionBlock(...)
-axs.analysis.SpikeCount(...)
-axs.analysis.PeakVoltage(...)
-axs.analysis.PeriaxonalDepolarization(...)
-```
-
-Namespace note: `axs.analysis` is the real public analysis namespace. It must
-not be implemented as a forwarding compatibility alias to
-`axs.results.analysis`.
-
-## 24.1 Requirements
-
-Each analysis declares:
-
-```text
-required semantic signals
-supported myelination classes
-required compartment roles
-required cable capabilities
-required positions
-post-hoc support
-online-observer support
-algorithm version
-```
-
-## 24.2 Activation
-
-Unmyelinated:
-
-```python
-axs.analysis.Activation(
-    signal=axs.signals.MEMBRANE_VOLTAGE,
-    positions=axs.positions.DISTAL,
-    threshold=0 * axs.mV,
-)
-```
-
-Myelinated:
-
-```python
-axs.analysis.Activation(
-    signal=axs.signals.MEMBRANE_VOLTAGE,
-    positions=axs.positions.Node(-1),
-    threshold=0 * axs.mV,
-)
-```
-
-### 24.2.1 Solver-side VmRaster observer
-
-The public concept should stay analysis-oriented:
-
-```python
-axs.analysis.Activation(...)
-```
-
-or a future thin observer spelling that means the same scientific request.
-Do not expose backend/detail variants as public observer modes while the API is
-still pre-release.
-
-For now, hot-path solver-side observer execution should be deliberately narrow:
-threshold selected membrane-voltage probes at each solver step and pack the
-boolean raster. This primitive is generic enough for the example 06/07/08
-workflows, while keeping analysis semantics out of the solver loop:
-
-```text
-velocity:    decode first crossing time from fixed-probe raster
-threshold:   decode activation status from tested-amplitude raster
-recruitment: decode activation status for many axons and amplitudes
-```
-
-```text
-input per solver step: Vm[B, Nx]
-state:                words[B, R, P, W] uint32
-word count:           W = ceil(Nt / 32)
-output:               observations["vm_raster"]
-```
-
-`R` is the static number of lowered threshold/probe definitions and `P` is the
-static number of probe slots per definition. Bit `t % 32` in word `t // 32` is
-true when `Vm[t, probe] >= threshold`. Per-axon activation, latency, conduction
-velocity, and recruitment summaries are derived after the solver. The supported
-implementation is membrane-voltage threshold rasterization on fixed targets. It
-should use static-shaped, batch-first arrays and simple per-probe bit updates:
-
-```text
-one probe:        set raster bit from Vm[:, idx] >= threshold
-fixed probes:     set raster bits from Vm[:, probe_indices] >= threshold
-many axons:       keep the batch axis leading and packed
-```
-
-For padded or heterogeneous groups, the hot path must not fall back to full Vm
-recording just to recover row-specific targets afterward. Lower fixed probes to
-static row-aware tables instead:
-
-```text
-probe_indices[B, R, P]
-probe_mask[B, R, P]
-```
-
-Then update only valid probe slots inside the solver scan.
-
-This strict implementation is intentional. It keeps the API simple for users,
-keeps the backend JAX-friendly, and avoids allocating or transferring
-`Vm[time, position, axon]` when the requested result is a threshold raster. The
-old generic solver-side observer runtime should not remain as a fallback.
-`PeakVoltage` and other rich analyses stay post-hoc on recorded Vm until
-benchmark evidence shows a specific solver-side implementation is needed and
-can stay off the hot path.
-
-## 24.3 Conduction velocity
-
-Unmyelinated strategy:
-
-```text
-crossing times at two physical positions
-distance / time difference
-```
-
-Myelinated strategy:
-
-```text
-crossing times at two nodes
-node-center distance / time difference
-```
-
-## 24.4 Myelinated-specific analyses
-
-Examples:
-
-```text
-node activation sequence
-saltatory velocity
-failed-node detection
-nodal block
-internodal delay
-node-to-node jitter
-```
-
-## 24.5 Unmyelinated-specific analyses
-
-Examples:
-
-```text
-continuous propagation profile
-spatial spike width
-local velocity versus position
-continuous block location
-```
-
-## 24.6 Cable-specific analyses
-
-```python
-axs.analysis.PeriaxonalDepolarization(...)
-```
-
-requires:
-
-```text
-periaxonal_potential
-double-cable capability
-```
-
-Its applicability comes from signal capability, not myelination alone.
-
-## 24.7 Statuses
-
-Per-axon metrics contain:
-
-```text
-value[axon]
-status[axon]
-```
-
-Statuses:
-
-```text
-VALID
-NOT_APPLICABLE
-MISSING_INPUT
-NUMERICAL_FAILURE
-UNDETERMINED
-```
-
-## 24.8 Events
-
-Variable-length events use columnar storage:
-
-```text
-event_type[event]
-axon_index[event]
-time[event]
-position[event]
-value[event]
-direction[event]
-```
-
-## 24.9 Population summaries
-
-```python
-analysis.population.n_total
-analysis.population.n_applicable
-analysis.population.n_valid
-analysis.population.n_failed
-```
-
-Every aggregate records its denominator.
-
-## 24.10 Post-hoc and online
-
-Post-hoc:
-
-```python
-activation = result.analyze(
-    axs.analysis.Activation(...)
-)
-```
-
-Online:
-
-```python
-simulation = axs.AxonSimulation(
-    ...,
-    recording=axs.Recording(
-        traces=[],
-        analyses=[activation_definition],
-    ),
-)
-```
-
-Online and post-hoc definitions must be cross-validated.
-
-## 24.11 Missing input
-
-Post-hoc analysis must not rerun a simulation silently.
-
-It raises a structured error describing the required recording.
-
----
-
-# 26. Reports
-
-To associate a numerical result with analyses:
-
-```text
-AxonSimulationReport
-├── simulation_result
-└── analyses
-```
-
-Example:
-
-```python
-report = result.report(
-    axs.analysis.Activation(...),
-    axs.analysis.ConductionVelocity(...),
-)
-```
-
-The original numerical result remains immutable.
-
----
-
-# 27. Studies and callable updates
-
-`AxonStudy` orchestrates related variants of a base `AxonSimulation`.
-
-The canonical update mechanism is a callable.
-
-## 26.1 Update contract
-
-```python
-update(
-    base_simulation: AxonSimulation,
-    condition: Condition,
-) -> AxonSimulation
-```
-
-The callable should:
-
-- avoid mutating the base;
-- return a new simulation;
-- avoid hidden side effects;
-- make the condition explicit.
-
-## 26.2 Sweep
-
-```python
-study = simulation.sweep(
-    values=conditions,
-    update=update_condition,
-    reuse=axs.ReusePolicy.AUTO,
-)
-
-study_result = study.run()
-```
-
-## 26.3 Threshold
-
-```python
-threshold = simulation.find_threshold(
-    bounds=(0 * axs.mA, 5 * axs.mA),
-    update=update_amplitude,
-    criterion=activation_definition,
-    reuse=axs.ReusePolicy.AUTO,
-)
-```
-
-## 26.4 Recruitment
-
-```python
-study = simulation.recruitment_sweep(
-    values=amplitudes,
-    update=update_amplitude,
-    criterion=activation_definition,
-    reuse=axs.ReusePolicy.REQUIRE,
-    retain=axs.RetentionPolicy.ANALYSES,
-)
-```
-
-## 26.5 Reuse policies
-
-```text
-reuse=axs.ReusePolicy.AUTO
-    reuse compatible plans, preparation, and compilation
-
-reuse=axs.ReusePolicy.REQUIRE
-    fail if a condition violates the required reuse boundary
-
-reuse=axs.ReusePolicy.NONE
-    treat every condition independently
-```
-
-## 26.6 Structural signatures
-
-May include:
-
-```text
-axon count
-myelination classes
-membrane programs
-cable formulations
-compartment roles
-number of extracellular drives
-footprint shapes
-recording contract
-online observer contract
-dtype
-solver algorithm
-```
-
-Dynamic values may include:
-
-```text
-stimulus samples
-amplitudes
-delays
-waveform parameters
-dynamic membrane parameters
-initial states
-```
-
-## 26.7 Callable reproducibility
-
-Lambdas are allowed.
-
-AxonScope should not claim that every lambda is serializable.
-
-For stronger reproducibility, recommend named functions or frozen callable
-dataclasses.
-
----
-
-# 28. Study results
-
-```text
-AxonStudyResult
-├── conditions
-├── simulation identities
-├── per-condition analyses
-├── aggregate metrics
-├── execution metadata
-└── optional retained simulation outputs
-```
-
-Retention:
-
-```text
-retain="all"
-retain="recordings"
-retain=axs.RetentionPolicy.ANALYSES
-retain="summary"
-```
-
-Threshold and recruitment should not retain every trace by default.
-
----
-
-# 29. Resource estimation and diagnostics
-
-```python
-estimate = simulation.estimate()
-```
-
-Report:
-
-```text
-axon count
-myelination classes
-cohorts
-number of extracellular drives
-footprint memory
-stimulus memory
-solver-state memory
-recording memory
-observer memory
-peak memory
-compile count
-recommended device
-recommended chunking
-```
-
-Numerical failures preserve:
-
-```text
-time
-axon
-compartment
-compartment role
-node index when applicable
-variable
-last finite value
-cohort
-backend
-possible causes
-```
-
----
-
-# 30. Reproducibility and serialization
-
-Potential APIs:
+Potential final APIs:
 
 ```python
 simulation.save("simulation.axs.json")
@@ -2556,971 +917,216 @@ result.save("result.axs")
 study_result.save("study.axs")
 ```
 
-A bundle may contain:
-
-- simulation definition;
-- axon model identities;
-- myelination metadata;
-- cable formulations;
-- footprint descriptors;
-- drive definitions;
-- stimulus definitions;
-- recording manifest;
-- analysis definitions;
-- backend and device;
-- precision;
-- environment information.
-
-Only final schemas should receive readers and writers.
-
-Do not maintain readers for prototype formats.
+Only final schemas should receive readers and writers. Do not maintain readers
+for prototype formats.
 
 ---
 
-# 31. Observability
+# 11. Source Organization Direction
 
-Measure separately:
+Do not create empty packages without moving real responsibilities. Do not keep
+forwarding modules for obsolete import paths.
 
-```text
-planning
-preparation
-footprint resampling
-footprint operator application
-compilation
-stimulus sampling
-execution
-recording
-online analysis
-result assembly
-post-hoc analysis
-study orchestration
-```
-
-Suggested events:
+Target ownership map:
 
 ```text
-planning.build
-preparation.geometry
-preparation.membrane
-preparation.extracellular_footprints
-preparation.intracellular
-preparation.recording
-compilation.lower
-compilation.compile
-execution.enqueue
-execution.wait
-recording.finalize
-analysis.online.finalize
-results.assemble
-analysis.posthoc
-study.condition
+core/              units, errors, identifiers, enums, serialization helpers
+axons/             descriptive axons, sections, layouts, templates
+membranes/         runtime-independent membrane descriptions
+stimulation/       stimuli and intracellular contexts
+extracellular/     footprints, drives, dense potentials, validation
+recording/         public recording specs and selectors
+signals/           typed signal descriptors and registry
+simulation/        AxonInstance, AxonPopulation, AxonSimulation
+planning/          plans, cohorts, compatibility, signatures, inspection
+preparation/       host-side prepared geometry/membrane/input structures
+backends/          backend registry and concrete JAX/NumPy lowering
+execution/         engine, progress, group runner, result assembly
+results/           result containers, views, manifests, serialization
+analysis/          scientific definitions and post-hoc algorithms
+studies/           sweeps, thresholds, recruitment
+observability/     benchmark spans, trace reports, profiler metadata
+visualization/     plotting only
 ```
+
+Current code may still differ. Use this map to guide moves, not to justify
+empty directories.
+
+Migration reminders:
+
+- move `dispatcher/plan.py` responsibilities toward `planning/`;
+- split `dispatcher/runtime_batches.py` between preparation and backend input
+  lowering;
+- keep fixed-step timebase rules out of JAX-heavy solver helper modules;
+- keep runtime dataclasses, preparation helpers, scalar kernels, and batch
+  kernels out of the `axonscope.solvers` package facade;
+- keep public `recording.py` independent from solver options;
+- keep JAX membrane/solver implementation under `backends/jax`;
+- keep `solvers/` as a public facade for stable solver classes/options during
+  migration, not as a permanent catch-all for backend internals;
+- keep result-side VmRaster containers and CPU decoders out of solver modules.
 
 ---
 
-# 32. Target source tree
-
-```text
-src/axonscope/
-├── __init__.py
-│
-├── core/
-│   ├── units.py
-│   ├── validation.py
-│   ├── errors.py
-│   ├── precision.py
-│   ├── identifiers.py
-│   ├── enums.py
-│   ├── device.py
-│   └── serialization.py
-│
-├── axons/
-│   ├── axon.py
-│   ├── section.py
-│   ├── layout.py
-│   ├── myelinated.py
-│   └── unmyelinated.py
-│
-├── axon_structure/
-│   ├── myelination.py
-│   ├── compartment_roles.py
-│   └── selectors.py
-│
-├── membranes/
-│   ├── model.py
-│   ├── builtins.py
-│   └── section_layout.py
-│
-├── stimulation/
-│   ├── stimuli.py
-│   ├── intracellular.py
-│   └── targeting.py
-│
-├── extracellular/
-│   ├── footprint.py
-│   ├── drive.py
-│   ├── stimulation.py
-│   ├── potential.py
-│   ├── validation.py
-│   └── serialization.py
-│
-├── analytical_fields/
-│   ├── point_source.py
-│   ├── line_source.py
-│   ├── uniform_field.py
-│   └── builders.py
-│
-├── recording/
-│   ├── spec.py
-│   ├── selectors.py
-│   ├── events.py
-│   └── summaries.py
-│
-├── cable/
-│   ├── formulation.py
-│   ├── capabilities.py
-│   └── signal_definitions.py
-│
-├── signals/
-│   ├── signal.py
-│   ├── identifiers.py
-│   ├── registry.py
-│   └── builtins.py
-│
-├── simulations/
-│   ├── instance.py
-│   ├── population.py
-│   ├── simulation.py
-│   ├── normalization.py
-│   ├── prepared.py
-│   ├── compiled.py
-│   └── estimate.py
-│
-├── planning/
-│   ├── plan.py
-│   ├── cohorts.py
-│   ├── compatibility.py
-│   ├── signatures.py
-│   ├── inspection.py
-│   └── estimates.py
-│
-├── preparation/
-│   ├── geometry.py
-│   ├── axon.py
-│   ├── membrane.py
-│   ├── intracellular.py
-│   ├── extracellular.py
-│   ├── recording.py
-│   ├── cohort.py
-│   └── prepared.py
-│
-├── compilation/
-│   ├── contracts.py
-│   ├── artifacts.py
-│   ├── cache.py
-│   └── keys.py
-│
-├── backends/
-│   ├── base.py
-│   ├── registry.py
-│   ├── capabilities.py
-│   ├── numpy/
-│   └── jax/
-│       ├── runtime.py
-│       ├── lowering.py
-│       ├── intracellular.py
-│       ├── extracellular.py
-│       ├── recording.py
-│       ├── profiler.py
-│       ├── membrane/
-│       │   ├── contracts.py
-│       │   ├── state.py
-│       │   ├── update_plans.py
-│       │   ├── batching.py
-│       │   ├── channels/
-│       │   └── models/
-│       └── solver/
-│           ├── runtime.py
-│           ├── scan.py
-│           ├── linear.py
-│           ├── forcing.py
-│           ├── single_cable.py
-│           ├── double_cable.py
-│           └── observers.py
-│
-├── execution/
-│   ├── engine.py
-│   ├── local.py
-│   ├── group_runner.py
-│   ├── progress.py
-│   └── result_assembly.py
-│
-├── results/
-│   ├── simulation.py
-│   ├── cohort.py
-│   ├── recordings.py
-│   ├── signals.py
-│   ├── states.py
-│   ├── events.py
-│   ├── metrics.py
-│   ├── status.py
-│   ├── views.py
-│   ├── report.py
-│   ├── study.py
-│   ├── validation.py
-│   └── serialization.py
-│
-├── analysis/
-│   ├── base.py
-│   ├── requirements.py
-│   ├── applicability.py
-│   ├── activation.py
-│   ├── velocity.py
-│   ├── latency.py
-│   ├── block.py
-│   ├── peaks.py
-│   ├── spikes.py
-│   ├── myelinated.py
-│   ├── unmyelinated.py
-│   └── periaxonal.py
-│
-├── studies/
-│   ├── study.py
-│   ├── updates.py
-│   ├── threshold.py
-│   ├── recruitment.py
-│   └── sweeps.py
-│
-├── observability/
-│   ├── session.py
-│   ├── events.py
-│   ├── report.py
-│   ├── metadata.py
-│   └── profiler.py
-│
-└── visualization/
-    ├── axons.py
-    ├── results.py
-    ├── activation.py
-    └── planning.py
-```
-
-Do not create empty packages without moving real responsibilities.
-
-Do not retain forwarding modules for obsolete import paths.
-
----
-
-# 33. Dependency rules
-
-Required direction:
-
-```text
-core
-  ↑
-domain descriptions
-  ↑
-planning
-  ↑
-preparation
-  ↑
-backend lowering
-  ↑
-execution
-```
-
-Results form a backend-neutral branch:
-
-```text
-core + domain metadata
-          ↑
-        results
-          ↑
- analysis / visualization
-```
-
-Studies orchestrate:
-
-```text
-simulations + execution + analysis
-                 ↑
-              studies
-```
-
-Forbidden dependencies:
-
-- `axons/` imports JAX;
-- `membranes/` imports JAX implementations;
-- `extracellular/` imports geometry packages;
-- `analytical_fields/` enters solver execution directly;
-- `recording/` imports solver options;
-- `planning/` creates device arrays;
-- `planning/` calls backend lowering;
-- `results/` depends on JAX array types;
-- analyses encode backend equations;
-- domain objects eagerly import visualization;
-- internal modules import top-level `axonscope`;
-- mutable global precision silently changes compile identity.
-
----
-
-# 34. Current-to-target migration map
-
-## 33.1 Current AxonSimulation
-
-```text
-axon_simulation.py
-    rename semantics to simulations/instance.py
-    class becomes AxonInstance
-    delete old module
-```
-
-Then introduce:
-
-```text
-simulations/simulation.py
-    new root AxonSimulation
-```
-
-## 33.2 Axons
-
-```text
-axons/axon.py
-    keep descriptive
-
-axons/section.py
-    keep descriptive
-
-axons/layout.py
-    keep intrinsic layout responsibilities
-
-axons/flattened.py
-    move to preparation/geometry.py
-
-axons/plotting.py
-    move to visualization/axons.py
-```
-
-Remove world-position responsibility from instances.
-
-## 33.3 Existing extracellular contexts
-
-Current descriptive electrode/context objects should be split.
-
-Target:
-
-```text
-core simulation path
-    ExtracellularFootprint
-    ExtracellularDrive
-    ExtracellularStimulation
-    ExtracellularPotential
-
-analytical helper path
-    PointSource
-    LineSource
-    UniformField
-```
-
-Electrode geometry must not remain a core solver dependency.
-
-Existing analytical contexts should be rewritten as footprint builders.
-
-## 33.4 Stimulation
-
-```text
-Stimulus
-    remains temporal
-
-intracellular stimulation
-    remains under stimulation/
-
-extracellular spatial transfer
-    moves to extracellular/
-```
-
-## 33.5 Recording
-
-```text
-recording.py
-    split into recording/spec.py and selectors.py
-
-Recording → solver options
-    remove
-
-backend lowering
-    move to preparation/recording.py and backends/jax/recording.py
-```
-
-## 33.6 Dispatcher
-
-```text
-dispatcher/plan.py
-    split into planning/
-
-dispatcher/inspection.py
-    move to planning/inspection.py
-
-dispatcher/progress.py
-    move to execution/progress.py
-
-dispatcher/runtime_batches.py
-    split into preparation/ and backend/
-
-dispatcher/execution.py
-    split into execution/
-```
-
-Delete `dispatcher/` when empty.
-
-## 33.7 Membranes and solvers
-
-```text
-channel_models/
-    move to backends/jax/membrane/
-
-icm/
-    split between preparation/membrane.py
-    and backends/jax/membrane/batching.py
-
-solvers/*
-    move implementation to backends/jax/solver/
-```
-
-Delete old modules after migration.
-
-## 33.8 Results and analyses
-
-```text
-SimResult
-    replace with AxonSimulationResult and AxonResultView
-
-list[SimResult]
-    delete
-
-results/activation.py
-    move algorithm to analysis/activation.py
-
-results/analysis.py
-    split into analysis modules
-
-results/visualization.py
-    move to visualization/
-```
-
----
-
-# 35. Precision and cache identity
-
-Introduce explicit precision:
-
-```python
-PrecisionPolicy(
-    state_dtype="float32",
-    solver_dtype="float32",
-    accumulation_dtype="float32",
-)
-```
-
-Semantic identity may include:
-
-```text
-axon model hash
-myelination structure hash
-layout hash
-footprint identity
-drive topology
-recording contract
-observer contract
-```
-
-Prepared identity may include:
-
-```text
-semantic identity
-discretization
-cohort shape
-resampled footprints
-transformed footprints
-```
-
-Compiled identity may include:
-
-```text
-prepared identity
-backend
-backend version
-device class
-precision
-static shapes
-drive count
-solver algorithm
-optimization flags
-```
-
-Stimulus samples should remain dynamic when shape-compatible.
-
----
-
-# 36. Test architecture
-
-```text
-tests/
-├── architecture/
-│   ├── test_import_boundaries.py
-│   ├── test_no_jax_in_domain.py
-│   ├── test_no_geometry_dependency.py
-│   ├── test_no_raw_string_public_api.py
-│   ├── test_no_legacy_paths.py
-│   └── test_public_exports.py
-├── unit/
-│   ├── axons/
-│   ├── axon_structure/
-│   ├── stimulation/
-│   ├── extracellular/
-│   ├── analytical_fields/
-│   ├── recording/
-│   ├── simulations/
-│   ├── planning/
-│   ├── preparation/
-│   ├── backends/
-│   ├── execution/
-│   ├── results/
-│   ├── analysis/
-│   └── studies/
-├── integration/
-│   ├── test_single_axon.py
-│   ├── test_population.py
-│   ├── test_multiple_extracellular_drives.py
-│   ├── test_shared_footprint.py
-│   ├── test_dense_extracellular_potential.py
-│   ├── test_mixed_myelination.py
-│   ├── test_prepare_compile_run.py
-│   └── test_recording_applicability.py
-├── scientific/
-│   ├── passive_cable/
-│   ├── myelinated/
-│   ├── unmyelinated/
-│   ├── point_source_reference/
-│   ├── activation/
-│   ├── velocity/
-│   └── convergence/
-└── performance/
-    ├── test_no_recompile_on_stimulus_change.py
-    ├── test_footprint_reuse.py
-    ├── test_no_dense_vext_materialization.py
-    ├── test_memory_contracts.py
-    └── test_batch_scaling.py
-```
-
-Critical tests:
-
-```text
-closed public domains use enums
-built-in signals use typed descriptors
-position selectors are typed objects
-DriveId cannot be passed where AxonId is expected
-serialization reconstructs typed values
-AxonInstance has no required world position
-core extracellular objects contain no electrode geometry
-one drive equals footprint × stimulus
-multiple drives sum inside execution
-stimulus changes do not rebuild footprints
-full Vext tensor is not materialized on factorized paths
-analytical helpers output footprints only
-pool execution uses the canonical result model
-final scalar execution either uses the canonical result model or is documented
-as an explicit single-run convenience
-```
-
----
-
-# 37. Normative examples
-
-Examples should include:
-
-```text
-basic/
-    stimulus waveforms
-    point-source footprint generation
-    one intracellular axon
-    one extracellular drive
-    multiple extracellular drives
-    homogeneous population
-    velocity analysis
-
-advanced/
-    heterogeneous population
-    custom axon
-    shared footprint
-    per-axon footprints
-    mixed myelination
-    recording applicability
-    online activation
-    callable recruitment sweep
-```
-
-Current didactic advanced examples:
-
-```text
-example_01_pool_dispatch_nrv.py
-    heterogeneous pool dispatch inspection with optional NRV-generated fibers
-example_02_layout_options.py
-    advanced axon layout options
-example_03_custom_axon_from_scratch.py
-    custom axon construction
-example_04_stimulation_contexts.py
-    stimulation context variants
-example_05_recording_options.py
-    recording policy options
-example_06_activation_criterion.py
-    post-hoc activation criterion
-example_07_recruitment_curve.py
-    recruitment curve workflow
-example_08_root_axon_simulation.py
-    root executable AxonSimulation
-example_09_axon_population.py
-    AxonPopulation as first-class cohort
-example_10_typed_recording_signals.py
-    typed/extensible recording signal descriptors
-example_11_typed_position_selectors.py
-    typed position selectors
-example_12_cable_formulation.py
-    typed cable formulation selection
-example_13_extracellular_footprint_drive.py
-    extracellular footprints, drives, and stimulation
-example_14_hotpath_benchmarking.py
-    memory estimates plus opt-in hotpath benchmarking and traces
-example_15_preparation_signatures.py
-    deterministic preparation signatures
-example_16_canonical_pool_results.py
-    canonical pool results, per-axon views, and recording manifests
-example_17_analysis_layer.py
-    structured analyses, missing-input requirements, and online Vm observers
-example_18_solver_side_observers.py
-    solver-side observers with trace-free Recording.none() results
-```
+# 12. Examples And Documentation
 
 Examples must:
 
-- use the final API directly;
-- include a clear didactic demo in `examples/advanced/` whenever a new
-  advanced concept or non-trivial user workflow is introduced;
-- teach one concept per demo when possible, with runnable, verbose,
-  line-by-line code and comments focused on guiding the user through the
-  workflow rather than hiding it behind helper scaffolding;
-- include plots whenever they make the feature easier to understand: Vm traces,
-  activation markers, peak-voltage markers, recruitment curves, velocity
-  metrics, dispatch layouts, recording/retention comparisons, or
-  observer-versus-recorded checks;
-- never require world position on `AxonInstance`;
+- use the public API directly;
+- avoid importing solver/backend internals in public tutorials;
+- teach one concept per demo when possible;
+- write examples as executable teaching material, not as terse smoke snippets;
+- prefer a readable line-by-line flow with comments next to the relevant code;
+- keep `examples/basic/` especially flat: avoid helper functions unless they
+  make the script easier to read than the explicit sequence;
+- include plots when they clarify Vm traces, activation, recruitment,
+  velocity, recording retention, dispatch layouts, or observer checks;
 - construct footprints separately from stimuli;
-- group each footprint and stimulus into an `ExtracellularDrive`;
-- pass `ExtracellularStimulation` to the simulation;
-- show that the solver performs the drive sum;
-- use callable study updates;
+- group one footprint and one stimulus into an `ExtracellularDrive`;
+- pass `ExtracellularStimulation` to simulations when using the factorized
+  extracellular model;
+- use callable study updates once studies exist;
 - avoid obsolete simulation entry points;
-- remain syntax-checked in CI.
+- keep benchmark/profiling and CPU/GPU measurement workflows under
+  `benchmark/`, unless the example explicitly teaches a public benchmarking or
+  inspection API;
+- show runtime/device/precision only through `axs.Runtime`, `axs.Device`,
+  `axs.PrecisionPolicy`, and `axs.ExecutionPolicy`;
+- show only retained public solver options;
+- remain syntax-checked or import-checked in CI.
+
+Current didactic example organization:
+
+```text
+examples/basic/
+    compact first-pass scripts that show core AxonScope capabilities
+examples/advanced/object_model/
+    AxonSimulation, AxonPopulation, canonical pool results
+examples/advanced/axon_models/
+    layouts, custom axons, cable formulation
+examples/advanced/stimulation/
+    stimulation contexts, extracellular footprints, drives
+examples/advanced/recording_analysis/
+    recording policies, typed signals/positions, analysis, VmRaster
+examples/advanced/protocols/
+    threshold and recruitment workflows
+examples/advanced/runtime/
+    ExecutionPolicy, preparation signatures, pipeline inspection
+examples/with_nrv/
+    optional NRV geometry/fiber-placement integration
+examples/tutorials/
+    notebook mini-courses, indexed like a teaching sequence
+benchmark/
+    profiling, CPU/GPU measurement, benchmark notebooks
+```
+
+When examples change, update together:
+
+- `examples/README.md`;
+- README commands;
+- smoke/import tests;
+- relevant docs pages;
+- benchmark references if an example moved under `benchmark/`.
 
 ---
 
-# 38. Implementation roadmap
+# 13. Testing And Acceptance Criteria
 
-## Phase 0 — Guardrails and baselines
+## 13.1 Critical Test Classes
 
-Implementation status: done.
+Guardrails should cover:
 
-- add architecture tests;
-- establish CPU/GPU baselines;
-- preserve scientific reference cases;
-- remove obsolete benchmark formats.
+- no JAX imports in public/descriptive layers;
+- no geometry package dependency in core AxonScope;
+- no raw strings as preferred public API for closed/structured domains;
+- no legacy compatibility aliases;
+- public exports stay intentional;
+- standby solver candidates do not re-enter public options or active runtime
+  helpers;
+- examples import or execute through public APIs;
+- factorized paths avoid dense `Vext` when promised;
+- observer-only paths do not retain full Vm unless requested;
+- online and post-hoc analyses are cross-validated;
+- stimulus-only updates reuse compatible static structures where implemented.
 
-## Phase 1 — Object model
+## 13.2 Architecture Acceptance
 
-Implementation status: done.
-
-- rename current `AxonSimulation` to `AxonInstance`;
-- remove world-position requirements;
-- add `AxonPopulation`;
-- add root `AxonSimulation`;
-- rewrite examples and tests.
-
-## Phase 2 — Typed and extracellular contracts
-
-Implementation status: done. Runtime/device/precision planning values were
-added in Phase 7; wiring them into execution remains future work.
-
-Typed public API:
-
-- add enums for closed scientific domains and policies;
-- add `Signal[T]` and the built-in signal registry;
-- add typed position selectors;
-- add opaque identifiers;
-- add structured devices and precision policies;
-- rewrite public examples and tests without raw-string APIs.
-
-Extracellular API:
-
-- add `ExtracellularFootprint`;
-- add `ExtracellularDrive`;
-- add `ExtracellularStimulation`;
-- add dense `ExtracellularPotential`;
-- rewrite analytical contexts as footprint builders;
-- delete core electrode/context coupling.
-
-## Phase 2.5 — Hotpath evidence
-
-Implementation status: done.
-
-- add opt-in benchmark spans;
-- catalog representative hotpath workloads;
-- add a manual Colab GPU workflow;
-- use CPU/GPU results to guide planning and backend-boundary work.
-
-## Phase 3 — Planning and preparation
-
-Implementation status: done for the current JAX backend path.
-
-- make planning backend-neutral;
-- add drive and footprint signatures;
-- add footprint validation and resampling;
-- add transformed-footprint preparation;
-- create reusable prepared cohorts.
-
-## Phase 4 — JAX isolation
-
-Implementation status: done for the current backend boundary. Low-level kernels
-can move later if that reduces real coupling.
-
-- move JAX membrane runtime;
-- move JAX solver runtime;
-- move extracellular drive lowering;
-- implement in-scan drive summation;
-- delete old duplicate solver and dispatcher execution paths when empty.
-
-## Phase 5 — Canonical results
-
-Implementation status: done for pool results and result manifests. Scalar
-`simulate(...)` still returns `SimResult`; decide before final docs whether to
-unify scalar public output as `AxonSimulationResult`.
-
-- add dense `CohortResult`;
-- add signal descriptors;
-- add recording manifests;
-- add `AxonSimulationResult`;
-- add `AxonResultView`;
-- delete public eager `list[SimResult]` pool results.
-
-## Phase 6 — Analyses
-
-Implementation status: done for the current public layer. The public
-`axs.analysis` namespace, definition objects, low-level post-hoc helpers,
-structured input requirements, requirement/capability metadata, statuses,
-population denominators, reports, online Vm observers, and the didactic example
-exist. Phase 7.5 adds the first solver-side observer execution path for
-activation and peak-voltage definitions.
-
-- move activation and velocity into `analysis/`;
-- add requirements and applicability;
-- add statuses and provenance;
-- add online observers;
-- cross-validate online and post-hoc modes.
-
-## Phase 7 — Performance
-
-Implementation status: done for the current evidence layer, with Phase 7.6.5
-continuing as the active execution-envelope optimization pass.
-
-Phase 7 adds public simulation memory estimates, typed runtime/device/precision
-planning values, hotpath manifest memory metadata, and a footprint/stimulus-only
-reuse workload. It does not pretend that dense extracellular time-space arrays
-are gone: estimates explicitly surface current dense `Vstim[B,Nt,Nx]` memory
-risk and compare it with factorized footprint/stimulus sizes. Phase 7.5 owns
-the solver-side kernel changes that remove unnecessary trace/input retention.
-
-The latest realistic Kaggle P100 CPU/GPU recording-mode comparison changes the
-optimization priority. For the current example 06/07/08 stress matrix, GPU
-`kernel.wait` is small compared with `runtime.prepare`, `dispatch.build_plan`,
-`kernel.enqueue`, result splitting, and input/stimulus materialization. The next
-performance work should therefore target:
-
-- stable runtime reuse across repeated amplitude/stimulus updates;
-- dispatch group, padding, and VmRaster probe-plan reuse;
-- factorized/stimulus-only `Vext` updates without full dense rematerialization;
-- memory-aware output policy, especially full Vm versus VmRaster;
-- launch/enqueue and result packaging overhead;
-- only then, optional dispatch coalescing and async scheduling.
-
-- verify whether dense `Vext`/`Vstim` is currently materialized;
-- keep hotpath traces as the CPU/GPU evidence loop;
-- add footprint/stimulus-only sweep diagnostics;
-- add memory estimates and warning thresholds;
-- add typed runtime/device/precision planning values;
-- integrate memory estimates with observability manifests.
-
-## Phase 7.5 — Solver-side observers
-
-Implementation status: superseded by the stricter Phase 7.6.7 compact
-VmRaster observer route.
-
-Purpose: connect the public observer/analysis specifications to backend
-execution so a packed threshold raster is updated at every solver `dt` inside
-the kernel or scan loop. The memory goal is to avoid retaining full
-`Vm[time, position]` traces, and to avoid GPU-to-CPU transfer of those traces,
-when the user only needs threshold-derived outputs such as activation, latency,
-velocity, or recruitment summaries.
-
-- superseded: the old generic solver-side observer runtime and its `PeakVoltage`
-  path are deleted from active code;
-- done: lower public threshold-style specs into one `VmRaster` backend plan;
-- done: call VmRaster bit-packing updates inside scalar kernels, single-cable
-  batch kernels, and the double-cable PCR/SoA batch-native observer-only path;
-- done: keep raster state static-shaped and vectorized over batch rows;
-- done: support observer-only execution with `Recording.none()` and trace-free
-  `result.observations`;
-- done: cross-validate packed raster bits against retained-Vm traces in unit
-  tests;
-- done: add local hotpath/memory evidence showing no retained Vm output for an
-  observer-only run;
-- done: compare VmRaster observer-only against full/center Vm on realistic
-  P100 GPU and CPU workloads; VmRaster is retained and the old generic observer
-  path remains deleted;
-- remaining: finish decoder breadth for latency, velocity, threshold-search
-  updates, and public summary helpers, then stress larger retained-output cases
-  where memory savings should be visible in real RSS.
-
-## Phase 8 — Studies
-
-Implementation status: not started.
-
-- add callable sweeps;
-- add threshold search;
-- add recruitment;
-- add reuse policies;
-- add retention policies;
-- add `AxonStudyResult`.
-
-## Phase 9 — Serialization and reference backend
-
-Implementation status: not started.
-
-- serialize only final schemas;
-- add NumPy reference backend;
-- add cross-backend validation.
-
----
-
-# 39. Suggested pull-request sequence
-
-1. Add architecture and no-legacy tests.
-2. Rename current `AxonSimulation` to `AxonInstance`.
-3. Remove required world position from instances.
-4. Add `AxonPopulation` and root `AxonSimulation`.
-5. Add enums, typed selectors, signal descriptors, and opaque identifiers.
-6. Rewrite public examples and tests without raw-string APIs.
-7. Add `ExtracellularFootprint`.
-8. Add `ExtracellularDrive`.
-9. Add `ExtracellularStimulation`.
-10. Rewrite point-source tools as footprint builders.
-11. Add factorized preparation and in-solver summation.
-12. Add footprint reuse and stimulus-only update tests.
-13. Split planning from preparation.
-14. Isolate JAX membrane and solver code.
-15. Add canonical cohort-backed results.
-16. Add analysis requirements and statuses.
-17. Add online observers.
-18. Add memory/performance estimates for recording and observer workloads.
-19. Wire solver-side observers into scalar and batch kernels as per-`dt`
-    compact reductions.
-20. Add callable studies.
-21. Add final serialization.
-22. Delete every superseded module and format.
-
-The development branch may break temporarily.
-
-The merged target must not contain old and new architectures in parallel.
----
-
-# 40. Non-goals
-
-Do not:
-
-- use raw strings as the preferred API for closed scientific domains;
-- make built-in signals a closed enum that prevents extension;
-- use one untyped string class for every identifier;
-- make AxonScope own nerve geometry;
-- make world position mandatory on `AxonInstance`;
-- keep electrode geometry in the solver core;
-- conflate footprint and stimulus;
-- pre-sum all drives before execution;
-- materialize `Vext[axon, time, position]` by default;
-- create separate one-axon and population APIs;
-- conflate myelination and cable formulation;
-- merge analyses into raw numerical results;
-- expose backend arrays as public contracts;
-- preserve prototype compatibility;
-- keep forwarding modules;
-- introduce a generic Kernel IR before a real second backend;
-- create empty packages without responsibilities.
-
----
-
-# 41. Architecture acceptance criteria
-
-## Typed public API
+Typed API:
 
 - closed domains use enums;
 - extensible signals use typed descriptors;
 - selectors use dedicated classes;
 - identities use opaque identifier types;
 - devices and precision use structured objects;
-- raw strings remain limited to labels, metadata, and serialization boundaries;
-- built-in values are discoverable through IDE autocomplete.
+- raw strings remain limited to labels, metadata, and serialization boundaries.
 
-## Product boundary
+Product boundary:
 
-- AxonScope owns intrinsic axon geometry only.
-- `AxonInstance` has no required world position.
-- external geometry packages provide numerical footprints.
-- AxonScope does not depend on nerve geometry packages.
+- AxonScope owns intrinsic axon geometry only;
+- `AxonInstance` has no required world position;
+- external geometry packages provide numerical footprints;
+- core AxonScope does not depend on nerve geometry packages.
 
-## Extracellular model
+Extracellular model:
 
-- `ExtracellularFootprint` contains spatial transfer only.
-- `Stimulus` contains temporal waveform only.
-- `ExtracellularDrive` contains exactly one footprint and one stimulus.
-- `ExtracellularStimulation` aggregates several drives.
-- the solver sums drive contributions during execution.
-- factorized paths do not materialize full `Vext`.
-- stimulus-only updates reuse prepared footprints.
+- footprints contain spatial transfer only;
+- stimuli contain temporal waveform only;
+- drives pair one footprint with one stimulus;
+- stimulation aggregates drives;
+- solver/prepared execution sums drive contributions;
+- footprint/drive paths do not materialize full `Vext` by default;
+- stimulus-only updates can reuse prepared footprints.
 
-## Simulation model
+Simulation model:
 
-- one and many axons use the same lifecycle.
-- one result model is used for all cardinalities.
-- myelination and cable formulation remain separate metadata.
+- one and many axons use the same lifecycle;
+- public result semantics are coherent across cardinalities;
+- myelination and cable formulation remain separate metadata;
 - shared and per-axon footprints are supported.
 
-## Results and analyses
+Results and analyses:
 
-- results are batch-backed and cohort-dense.
-- unsupported signals are explicit.
-- analyses remain separate from numerical outputs.
-- population summaries expose their denominator.
-- online and post-hoc analyses are cross-validated.
+- unsupported signals are explicit;
+- analyses remain separate from numerical outputs;
+- population summaries expose denominators;
+- VmRaster remains a strict packed runtime primitive surfaced through
+  `VmRasterResult` and decoded into public analysis semantics.
 
-## Migration
+Migration:
 
-- obsolete modules are deleted.
-- no compatibility aliases remain.
-- examples use the final API directly.
+- obsolete modules are deleted;
+- forwarding compatibility aliases are removed;
+- examples use public APIs directly;
 - scientific reference tests pass.
 
 ---
 
-# 42. Final target API
+# 14. Non-goals
 
-## 41.1 Build footprints
+Do not:
+
+- make AxonScope own nerve geometry;
+- make world position mandatory on `AxonInstance`;
+- keep electrode geometry in the solver core;
+- conflate footprint and stimulus;
+- pre-sum all drives before execution;
+- materialize `Vext[axon, time, position]` by default when footprint/drive
+  structure is still available;
+- create separate one-axon and population products;
+- conflate myelination and cable formulation;
+- merge analyses into raw numerical results;
+- expose backend arrays as public contracts;
+- preserve prototype compatibility;
+- keep forwarding modules;
+- introduce a generic kernel IR before a real second backend;
+- create empty packages without responsibilities;
+- expose archived solver experiments as public choices.
+
+---
+
+# 15. Final Target API Sketch
+
+Build footprints outside AxonScope or with lightweight helpers:
 
 ```python
 cathode_footprint = external_package.compute_footprint(
@@ -3528,55 +1134,25 @@ cathode_footprint = external_package.compute_footprint(
     axons=population.ids,
     intrinsic_positions=population.compartment_positions,
 )
-
-anode_footprint = external_package.compute_footprint(
-    source="anode",
-    axons=population.ids,
-    intrinsic_positions=population.compartment_positions,
-)
 ```
 
-Or use the lightweight helper:
+Build drives:
 
 ```python
-cathode_footprint = axs.analytical_fields.point_source_population(
-    axons=population,
-    axial_positions=axial_positions,
-    radial_distances=radial_distances,
-    conductivity=0.3 * axs.S_per_m,
-)
-```
-
-## 41.2 Build drives
-
-```python
-CATHODE = axs.DriveId("cathode")
-
 cathode = axs.ExtracellularDrive(
-    id=CATHODE,
+    id=axs.DriveId("cathode"),
     footprint=cathode_footprint,
     stimulus=cathode_stimulus,
 )
-
-ANODE = axs.DriveId("anode")
-
-anode = axs.ExtracellularDrive(
-    id=ANODE,
-    footprint=anode_footprint,
-    stimulus=anode_stimulus,
-)
 ```
 
-## 41.3 Aggregate drives
+Aggregate drives:
 
 ```python
-extracellular = axs.ExtracellularStimulation([
-    cathode,
-    anode,
-])
+extracellular = axs.ExtracellularStimulation([cathode])
 ```
 
-## 41.4 Run simulation
+Run:
 
 ```python
 simulation = axs.AxonSimulation(
@@ -3585,12 +1161,18 @@ simulation = axs.AxonSimulation(
     duration=20 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.MEMBRANE_VOLTAGE),
+    execution_policy=axs.ExecutionPolicy(
+        runtime=axs.Runtime.JAX,
+        device=axs.Device.gpu(0),
+        precision=axs.PrecisionPolicy.float32(),
+    ),
 )
 
+simulation.inspect(print_summary=True)
 result = simulation.run()
 ```
 
-## 41.5 Analyze
+Analyze:
 
 ```python
 activation = result.analyze(
@@ -3598,7 +1180,7 @@ activation = result.analyze(
 )
 ```
 
-## 41.6 Sweep
+Study:
 
 ```python
 study = simulation.sweep(
@@ -3608,34 +1190,13 @@ study = simulation.sweep(
 )
 ```
 
-Internal path:
+Defining principles:
 
 ```text
-normalize axons
-→ validate drives and footprints
-→ plan compatible cohorts
-→ prepare footprints and cable operators
-→ compile backend executable
-→ sample stimuli
-→ sum footprint × stimulus contributions inside the solver
-→ assemble numerical result
-→ run scientific analyses
+AxonScope knows axons in intrinsic one-dimensional space, not nerve world space.
+External geometry packages provide spatial extracellular footprints.
+One ExtracellularDrive combines one footprint with one stimulus.
+ExtracellularStimulation aggregates all drives.
+The solver/prepared backend performs the drive sum without dense Vext by default.
+Prototype APIs should be deleted once replaced.
 ```
-
-The defining principles are:
-
-> AxonScope knows the axon in intrinsic one-dimensional space, not its world
-> position in a nerve.
-
-> External geometry and field packages provide spatial extracellular
-> footprints.
-
-> One `ExtracellularDrive` combines one footprint with one stimulus.
-
-> `ExtracellularStimulation` aggregates all drives passed to a simulation.
-
-> The solver performs the sum during execution without materializing the full
-> extracellular potential tensor.
-
-> Because AxonScope is not deployed, obsolete prototype APIs should be deleted
-> rather than preserved.

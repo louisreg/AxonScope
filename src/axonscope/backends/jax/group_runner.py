@@ -29,15 +29,15 @@ from axonscope.backends.jax.input_batches import (
 from axonscope.icm.backends import RowIndexedICMBackend
 from axonscope.preparation.cohort import PreparedCohort
 from axonscope.results import SimResult
-from axonscope.solvers.batch_kernels import (
+from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
-from axonscope.solvers.observer_runtime import (
+from axonscope.backends.jax.observer_runtime import (
     build_vm_raster_plan,
 )
 from axonscope.solvers.options import BatchOptions, BatchRecording, SolverOptions
-from axonscope.solvers.runtime import (
+from axonscope.backends.jax.runtime import (
     CableRuntime,
     ExtracellularRuntime,
     MembraneRuntime,

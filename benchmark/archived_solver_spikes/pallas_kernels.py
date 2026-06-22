@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
-from axonscope.solvers.common import Array
+from axonscope.backends.jax.common import Array
 
 try:
     _pallas_load = pl.load

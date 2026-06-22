@@ -22,7 +22,7 @@ from axonscope.analysis import ActivationCriterion, ActivationEvent
 from axonscope.analysis.definitions import Activation
 from axonscope.results import SimResult
 from axonscope.simulation import simulate, simulate_pool
-from axonscope.solvers.observer_runtime import VM_RASTER_OBSERVATION_KEY
+from axonscope.results import VM_RASTER_OBSERVATION_KEY
 from axonscope.utils import units
 
 

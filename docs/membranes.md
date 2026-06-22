@@ -145,6 +145,7 @@ compute layouts. That responsibility stays in `axonscope.icm`.
 `HodgkinHuxleyICM`, `PassiveICM`, and composite channel classes. Public axon
 construction should prefer `axonscope.membranes`.
 
-The narrow bridge is `compile_membrane_model` in `axonscope.solvers.runtime`.
+The narrow bridge is `compile_membrane_model` in
+`axonscope.backends.jax.runtime`.
 This keeps the public model layer ready for a future DSL without coupling it to
 today's compute classes.

@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
-import axonscope.solvers.batch_kernels as batch_kernels
+import axonscope.backends.jax.batch_kernels as batch_kernels
 from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
 from axonscope.backends.jax.input_batches import (
@@ -24,29 +24,29 @@ from axonscope.dispatcher.runtime_batches import (
     scale_extracellular_contexts,
 )
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.backends.jax.batch_kernels import (
+    DoubleCableBatchKernel,
+    SingleCableVStimBatchKernel,
+)
+from axonscope.backends.jax.kernels import DoubleCableKernel
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
-    DoubleCableBatchKernel,
-    DoubleCableKernel,
-    SingleCableVStimBatchKernel,
     resolve_double_cable_block_solver,
 )
-from axonscope.solvers.batch_kernels import (
+from axonscope.backends.jax.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
-from axonscope.solvers.batch_inputs import (
+from axonscope.backends.jax.batch_inputs import (
     FactorizedExtracellularPotentialBatch,
     materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
 )
-from axonscope.solvers.observer_runtime import (
-    VM_RASTER_OBSERVATION_KEY,
-    build_vm_raster_plan,
-)
-from axonscope.solvers.experimental import CrankNicholsonVStimForcing
-from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.results import VM_RASTER_OBSERVATION_KEY
+from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
+from axonscope.backends.jax.experimental import CrankNicholsonVStimForcing
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 

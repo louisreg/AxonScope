@@ -79,9 +79,9 @@ Advanced or semi-internal namespaces:
 axonscope.channel_models
 axonscope.icm
 axonscope.dispatcher
-axonscope.solvers.runtime
-axonscope.solvers.batch_kernels
-axonscope.solvers.kernels
+axonscope.backends.jax.runtime
+axonscope.backends.jax.batch_kernels
+axonscope.backends.jax.kernels
 axonscope.benchmarking
 ```
 
@@ -579,18 +579,17 @@ result = axs.simulate(
     axon,
     duration_ms=5.0,
     dt_ms=0.01,
+    recording=axs.Recording.none(),
     observers=[
-        axs.analysis.RasterObserver(threshold_mV=-10.0),
-        axs.analysis.PeakVoltageObserver(),
+        axs.analysis.Activation(threshold=-10.0 * axs.mV),
     ],
 )
 ```
 
-The solver-side mechanism should be called `observers` or `processors` rather
-than visualization. These functions should consume solver state during the time
-loop and return compact derived outputs, avoiding full `Vm[Nt, Nx]`
-materialization when users only need spikes, peaks, thresholds, or summary
-statistics.
+The solver-side mechanism should be called `observers` rather than
+visualization. The current supported observer-only runtime lowers
+threshold-style membrane-voltage definitions to packed VmRaster output, avoiding
+full `Vm[Nt, Nx]` materialization when users only need activation-style events.
 
 Design constraints for solver-side observers:
 
@@ -599,6 +598,8 @@ Design constraints for solver-side observers:
   output;
 - post-hoc analysis functions and solver-side observers should share naming and
   semantics where possible;
+- `PeakVoltage` remains post-hoc on recorded Vm until a dedicated benchmarked
+  solver-side implementation exists;
 - full trace recording remains the default teaching mode, while observer-only
   simulation becomes the large-scale/pool mode.
 

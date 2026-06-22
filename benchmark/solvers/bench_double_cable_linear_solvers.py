@@ -11,7 +11,7 @@ Examples:
     python benchmark/solvers/bench_double_cable_linear_solvers.py \
       --batch-sizes 128 512 1024 \
       --nx 32 51 64 \
-      --solvers thomas pcr pcr_soa split_jacobi_4 split_gs_4 pcr_adaptive \
+      --solvers thomas pcr pcr_soa pcr_adaptive \
       --dtypes float32 \
       --warmups 1 \
       --repeats 5
@@ -41,14 +41,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(repo_root))
 
 from axonscope.solvers import resolve_double_cable_block_solver
-from axonscope.solvers.common import (
+from axonscope.backends.jax.common import (
     double_cable_block_residual_norm,
-    solve_double_cable_split_gauss_seidel_batched,
-    solve_double_cable_split_jacobi_batched,
-    solve_double_cable_split_jacobi_then_gauss_seidel_batched,
-    solve_double_cable_split_richardson_batched,
-    solve_block_tridiagonal_2x2_assoc_backward_batched,
-    solve_block_tridiagonal_2x2_assoc_transfer_dense_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -60,10 +54,6 @@ from axonscope.solvers.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_scalar_batched,
     solve_block_tridiagonal_2x2_scalar,
-)
-from benchmark.archived_solver_spikes.pallas_kernels import (
-    solve_block_tridiagonal_2x2_pallas_pcr_batched,
-    solve_block_tridiagonal_2x2_pallas_thomas_batched,
 )
 
 
@@ -84,21 +74,6 @@ SOLVER_CHOICES = (
     "pcr_soa_layout_auto",
     "pcr_soa_ref",
     "pcr_adaptive",
-    "assoc_backward",
-    "assoc_transfer_dense",
-    "pallas_pcr_128",
-    "pallas_thomas_4",
-    "pallas_thomas_8",
-    "pallas_thomas_16",
-    "pallas_thomas_128",
-    "split_jacobi_4",
-    "split_jacobi_8",
-    "split_jacobi4_gs1",
-    "split_gs_2",
-    "split_gs_3",
-    "split_gs_4",
-    "split_gs_8",
-    "split_richardson_4",
 )
 KERNEL_SOLVERS = (
     "thomas",
@@ -114,31 +89,9 @@ KERNEL_SOLVERS = (
     "pcr_soa_padded",
     "pcr_soa_layout_auto",
     "pcr_soa_ref",
-    "assoc_backward",
-    "assoc_transfer_dense",
-    "pallas_pcr_128",
-    "pallas_thomas_4",
-    "pallas_thomas_8",
-    "pallas_thomas_16",
-    "pallas_thomas_128",
-    "split_jacobi_4",
-    "split_jacobi_8",
-    "split_jacobi4_gs1",
-    "split_gs_2",
-    "split_gs_3",
-    "split_gs_4",
-    "split_gs_8",
-    "split_richardson_4",
 )
 BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "thomas_batched": "thomas",
-    "assoc_backward": "thomas",
-    "assoc_transfer_dense": "thomas",
-    "pallas_pcr_128": "pcr_soa",
-    "pallas_thomas_4": "thomas",
-    "pallas_thomas_8": "thomas",
-    "pallas_thomas_16": "thomas",
-    "pallas_thomas_128": "thomas",
     "pcr_soa_hybrid_4": "pcr_soa",
     "pcr_soa_hybrid_8": "pcr_soa",
     "pcr_soa_hybrid_16": "pcr_soa",
@@ -148,20 +101,6 @@ BENCHMARK_ONLY_SOLVER_RESOLUTIONS = {
     "pcr_soa_padded": "pcr_soa",
     "pcr_soa_layout_auto": "pcr_soa",
     "pcr_soa_ref": "pcr_soa",
-    "split_jacobi_4": "split_iterative",
-    "split_jacobi_8": "split_iterative",
-    "split_jacobi4_gs1": "split_iterative",
-    "split_gs_2": "split_iterative",
-    "split_gs_3": "split_iterative",
-    "split_gs_4": "split_iterative",
-    "split_gs_8": "split_iterative",
-    "split_richardson_4": "split_iterative",
-}
-PALLAS_THOMAS_BLOCK_SIZES = {
-    "pallas_thomas_4": 4,
-    "pallas_thomas_8": 8,
-    "pallas_thomas_16": 16,
-    "pallas_thomas_128": 128,
 }
 PCR_SOA_MAX_BATCH = 4096
 
@@ -504,81 +443,6 @@ def _compute_reference(batch_size: int, nx: int) -> jax.Array:
 
 
 def _make_batched_solver(kernel_solver: str):
-    if kernel_solver in {
-        "split_jacobi_4",
-        "split_jacobi_8",
-        "split_jacobi4_gs1",
-        "split_gs_2",
-        "split_gs_3",
-        "split_gs_4",
-        "split_gs_8",
-        "split_richardson_4",
-    }:
-        split_solve, split_kwargs = {
-            "split_jacobi_4": (
-                solve_double_cable_split_jacobi_batched,
-                {"iterations": 4, "init": "rhs_guess"},
-            ),
-            "split_jacobi_8": (
-                solve_double_cable_split_jacobi_batched,
-                {"iterations": 8, "init": "rhs_guess"},
-            ),
-            "split_jacobi4_gs1": (
-                solve_double_cable_split_jacobi_then_gauss_seidel_batched,
-                {
-                    "jacobi_iterations": 4,
-                    "gauss_seidel_iterations": 1,
-                    "init": "rhs_guess",
-                },
-            ),
-            "split_gs_2": (
-                solve_double_cable_split_gauss_seidel_batched,
-                {"iterations": 2, "init": "rhs_guess"},
-            ),
-            "split_gs_3": (
-                solve_double_cable_split_gauss_seidel_batched,
-                {"iterations": 3, "init": "rhs_guess"},
-            ),
-            "split_gs_4": (
-                solve_double_cable_split_gauss_seidel_batched,
-                {"iterations": 4, "init": "rhs_guess"},
-            ),
-            "split_gs_8": (
-                solve_double_cable_split_gauss_seidel_batched,
-                {"iterations": 8, "init": "rhs_guess"},
-            ),
-            "split_richardson_4": (
-                solve_double_cable_split_richardson_batched,
-                {"iterations": 4, "relaxation": 0.75, "init": "rhs_guess"},
-            ),
-        }[kernel_solver]
-
-        @jax.jit
-        def solve_split(
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        ):
-            x0, x1 = split_solve(
-                a00,
-                a01,
-                a10,
-                a11,
-                off0,
-                off1,
-                rhs0,
-                rhs1,
-                **split_kwargs,
-            )
-            return jnp.stack((x0, x1), axis=-1)
-
-        return solve_split
-
     if kernel_solver == "thomas_batched":
 
         @jax.jit
@@ -605,117 +469,6 @@ def _make_batched_solver(kernel_solver: str):
             return jnp.stack((x0, x1), axis=-1)
 
         return solve_batch_native_thomas
-
-    if kernel_solver == "assoc_backward":
-
-        @jax.jit
-        def solve_assoc_backward(
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        ):
-            x0, x1 = solve_block_tridiagonal_2x2_assoc_backward_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off0,
-                off1,
-                rhs0,
-                rhs1,
-            )
-            return jnp.stack((x0, x1), axis=-1)
-
-        return solve_assoc_backward
-
-    if kernel_solver == "assoc_transfer_dense":
-
-        @jax.jit
-        def solve_assoc_transfer_dense(
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        ):
-            x0, x1 = solve_block_tridiagonal_2x2_assoc_transfer_dense_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off0,
-                off1,
-                rhs0,
-                rhs1,
-            )
-            return jnp.stack((x0, x1), axis=-1)
-
-        return solve_assoc_transfer_dense
-
-    if kernel_solver == "pallas_pcr_128":
-
-        @jax.jit
-        def solve_pallas_pcr(
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        ):
-            x0, x1 = solve_block_tridiagonal_2x2_pallas_pcr_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off0,
-                off1,
-                rhs0,
-                rhs1,
-                block_b=128,
-            )
-            return jnp.stack((x0, x1), axis=-1)
-
-        return solve_pallas_pcr
-
-    if kernel_solver in PALLAS_THOMAS_BLOCK_SIZES:
-        block_b = PALLAS_THOMAS_BLOCK_SIZES[kernel_solver]
-
-        @jax.jit
-        def solve_pallas_thomas(
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        ):
-            x0, x1 = solve_block_tridiagonal_2x2_pallas_thomas_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off0,
-                off1,
-                rhs0,
-                rhs1,
-                block_b=block_b,
-            )
-            return jnp.stack((x0, x1), axis=-1)
-
-        return solve_pallas_thomas
 
     if kernel_solver in {
         "pcr_soa",

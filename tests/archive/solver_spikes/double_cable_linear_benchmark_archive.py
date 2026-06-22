@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import pytest
 
 from benchmark.solvers.bench_double_cable_linear_solvers import (
     generate_system,
@@ -163,109 +164,26 @@ def test_planned_cases_allow_benchmark_only_batched_thomas():
     assert resolve_kernel_solver("thomas_batched", batch_size=512) == "thomas_batched"
 
 
-def test_planned_cases_allow_benchmark_only_assoc_backward():
-    cases = planned_cases(
-        batch_sizes=[512],
-        nx_values=[51],
-        dtypes=["float32"],
-        solvers=["assoc_backward", "assoc_transfer_dense"],
-        platform="gpu",
-    )
-
-    assert [case.requested_solver for case in cases] == [
+def test_active_linear_benchmark_rejects_archived_solver_spikes():
+    archived_solvers = [
         "assoc_backward",
         "assoc_transfer_dense",
-    ]
-    assert [case.resolved_solver for case in cases] == ["thomas", "thomas"]
-    assert [case.kernel_solver for case in cases] == [
-        "assoc_backward",
-        "assoc_transfer_dense",
-    ]
-    assert resolve_kernel_solver("assoc_backward", batch_size=512) == "assoc_backward"
-    assert (
-        resolve_kernel_solver("assoc_transfer_dense", batch_size=512)
-        == "assoc_transfer_dense"
-    )
-
-
-def test_planned_cases_allow_benchmark_only_pallas_thomas():
-    cases = planned_cases(
-        batch_sizes=[1024],
-        nx_values=[64],
-        dtypes=["float32"],
-        solvers=[
-            "pallas_thomas_4",
-            "pallas_thomas_8",
-            "pallas_thomas_16",
-            "pallas_thomas_128",
-        ],
-        platform="gpu",
-    )
-
-    assert [case.requested_solver for case in cases] == [
+        "pallas_pcr_128",
         "pallas_thomas_4",
-        "pallas_thomas_8",
-        "pallas_thomas_16",
-        "pallas_thomas_128",
-    ]
-    assert [case.resolved_solver for case in cases] == [
-        "thomas",
-        "thomas",
-        "thomas",
-        "thomas",
-    ]
-    assert [case.kernel_solver for case in cases] == [
-        "pallas_thomas_4",
-        "pallas_thomas_8",
-        "pallas_thomas_16",
-        "pallas_thomas_128",
-    ]
-    assert resolve_kernel_solver("pallas_thomas_4", batch_size=1024) == "pallas_thomas_4"
-    assert resolve_kernel_solver("pallas_thomas_8", batch_size=1024) == "pallas_thomas_8"
-    assert resolve_kernel_solver("pallas_thomas_16", batch_size=1024) == "pallas_thomas_16"
-    assert resolve_kernel_solver("pallas_thomas_128", batch_size=1024) == "pallas_thomas_128"
-
-
-def test_planned_cases_allow_benchmark_only_pallas_pcr():
-    cases = planned_cases(
-        batch_sizes=[1024],
-        nx_values=[64],
-        dtypes=["float32"],
-        solvers=["pallas_pcr_128"],
-        platform="gpu",
-    )
-
-    (case,) = cases
-    assert case.requested_solver == "pallas_pcr_128"
-    assert case.resolved_solver == "pcr_soa"
-    assert case.kernel_solver == "pallas_pcr_128"
-    assert resolve_kernel_solver("pallas_pcr_128", batch_size=1024) == "pallas_pcr_128"
-
-
-def test_planned_cases_allow_benchmark_only_split_iterative_variants():
-    solvers = [
         "split_jacobi_4",
-        "split_jacobi_8",
-        "split_jacobi4_gs1",
-        "split_gs_2",
-        "split_gs_3",
         "split_gs_4",
-        "split_gs_8",
-        "split_richardson_4",
     ]
-    cases = planned_cases(
-        batch_sizes=[512],
-        nx_values=[51],
-        dtypes=["float32"],
-        solvers=solvers,
-        platform="gpu",
-    )
-
-    assert [case.requested_solver for case in cases] == solvers
-    assert [case.resolved_solver for case in cases] == ["split_iterative"] * len(solvers)
-    assert [case.kernel_solver for case in cases] == solvers
-    for solver in solvers:
-        assert resolve_kernel_solver(solver, batch_size=512) == solver
+    for solver in archived_solvers:
+        with pytest.raises(ValueError, match="unknown solver choice"):
+            planned_cases(
+                batch_sizes=[512],
+                nx_values=[51],
+                dtypes=["float32"],
+                solvers=[solver],
+                platform="gpu",
+            )
+        with pytest.raises(ValueError, match="unsupported resolved solver"):
+            resolve_kernel_solver(solver, batch_size=512)
 
 
 def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
@@ -279,7 +197,7 @@ def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
             "float32",
             "--solvers",
             "thomas",
-            "split_jacobi_4",
+            "pcr_adaptive",
             "--out-dir",
             str(tmp_path),
             "--dry-run",
@@ -288,5 +206,5 @@ def test_linear_solver_benchmark_dry_run(capsys, tmp_path):
 
     assert capsys.readouterr().out.splitlines() == [
         "thomas -> thomas -> thomas B=2 Nx=5 dtype=float32",
-        "split_jacobi_4 -> split_iterative -> split_jacobi_4 B=2 Nx=5 dtype=float32",
+        "pcr_adaptive -> pcr_adaptive -> pcr_soa B=2 Nx=5 dtype=float32",
     ]

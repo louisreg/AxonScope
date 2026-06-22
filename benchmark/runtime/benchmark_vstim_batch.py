@@ -20,11 +20,9 @@ from axonscope.axons import HodgkinHuxley
 from axonscope.axon_instance import AxonInstance
 from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
 from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
-from axonscope.solvers import (
-    SingleCableKernel,
-    SingleCableVStimBatchKernel,
-)
-from axonscope.solvers.runtime import SolverRuntime, prepare_solver_runtime
+from axonscope.backends.jax.batch_kernels import SingleCableVStimBatchKernel
+from axonscope.backends.jax.kernels import SingleCableKernel
+from axonscope.backends.jax.runtime import SolverRuntime, prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from benchmark.runtime.batch_utils import (
     TimingStats,

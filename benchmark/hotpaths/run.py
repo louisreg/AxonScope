@@ -38,12 +38,12 @@ from axonscope.benchmarking.hotpaths import (
     benchmark_wait,
     record_benchmark_metadata,
 )
+from axonscope.backends.jax.batch_kernels import SingleCableVStimBatchKernel
 from axonscope.solvers import (
     BatchOptions,
-    SingleCableVStimBatchKernel,
     resolve_double_cable_block_solver,
 )
-from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 
 

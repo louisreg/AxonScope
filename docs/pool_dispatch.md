@@ -137,17 +137,17 @@ Solver-level knobs are passed as solver options. Batch memory/recording knobs
 are passed separately as batch options:
 
 ```python
+import axonscope as axs
 from axonscope.channel_models import RateTableConfig
-from axonscope.solvers import BatchOptions, SolverOptions
 
 dispatch_results = run_pool(
     [sim_a, sim_b],
     tsim_ms=5.0,
     dt_ms=0.01,
-    solver_options=SolverOptions(
+    solver_options=axs.SolverOptions(
         rate_table_config=RateTableConfig(step_mV=0.05),
     ),
-    batch_options=BatchOptions(time_chunk_steps=50),
+    batch_options=axs.BatchOptions(time_chunk_steps=50),
 )
 ```
 
@@ -200,7 +200,7 @@ results = axs.simulate_pool(
     simulations,
     duration=10.0 * axs.ms,
     dt=0.005 * axs.ms,
-    batch_options=axs.solvers.BatchOptions.full(time_chunk_steps=200),
+    batch_options=axs.BatchOptions.full(time_chunk_steps=200),
     recording=axs.Recording.voltage(),
     progress=True,
 )
@@ -211,24 +211,11 @@ paths have been removed. Runtime-batch construction now starts from
 already-attached axon contexts or precomputed electrode footprints, then passes
 numeric arrays to solver kernels.
 
-```python
-from axonscope.dispatcher.runtime_batches import build_footprint_vstim_midpoint_batch
-from axonscope.solvers import SingleCableVStimBatchKernel
-
-vstim_mid = build_footprint_vstim_midpoint_batch(
-    stimulus=stimulus,
-    footprint_V_per_A=footprint_V_per_A,
-    tsim_ms=5.0,
-    dt_ms=0.01,
-)
-
-result = SingleCableVStimBatchKernel(
-    runtime,
-    Cm_uF_cm2=runtime.axon.Cm_uF_cm2,
-).run(
-    extracellular_potential_mid_mV=vstim_mid,
-)
-```
+Advanced users should inspect this lowering through dispatch plans, benchmark
+spans, or the planned pipeline inspection surface rather than importing
+backend input builders or solver kernels directly from public examples. The
+current JAX tensor builders live behind the JAX backend boundary and are not a
+stable user API.
 
 This boundary is intentional: `dispatcher` knows about public axons, contexts,
 spatial shifts, footprints, and grouping policy; `solvers` know about arrays,

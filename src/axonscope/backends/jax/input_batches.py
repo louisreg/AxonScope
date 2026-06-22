@@ -29,13 +29,13 @@ from axonscope.stimulation.runtime import (
     compile_intracellular_contexts,
     compile_stimulus,
 )
-from axonscope.solvers.batch_inputs import (
+from axonscope.backends.jax.batch_inputs import (
     FactorizedExtracellularPotentialBatch,
     SparseIntracellularCurrentDensityBatch,
 )
-from axonscope.solvers.runtime import SolverRuntime
+from axonscope.backends.jax.runtime import SolverRuntime
 from axonscope.solvers.axon_runtime import SolverAxon
-from axonscope.solvers.common import simulation_step_count
+from axonscope.timebase import simulation_step_count
 
 Array = Any
 AxonLike = Axon | AxonInstance

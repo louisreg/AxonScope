@@ -30,7 +30,9 @@ from axonscope.backends.jax.input_batches import (
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
-from axonscope.solvers import BatchOptions, DoubleCableBatchKernel, prepare_solver_runtime
+from axonscope.solvers import BatchOptions
+from axonscope.backends.jax.batch_kernels import DoubleCableBatchKernel
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 from benchmark.solvers.bench_double_cable_end_to_end import (
     IINJ_CHOICES,

@@ -1,864 +1,247 @@
 # AxonScope TODO
 
-Living operational roadmap for AxonScope documentation, API cleanup, examples,
-benchmarks, solver/backend work, and study APIs.
+Living execution plan for cleanup, stabilization, examples, runtime policy, and
+solver/backend work.
 
-Read this file at the start of cleanup/API/performance work. Keep it actionable,
-chronological, and free of long benchmark prose. Detailed evidence belongs in
-dedicated reports under `benchmark/reports/` or focused roadmap files under
-`ideas/`.
+`GUIDELINES.md` is the architecture reference. `agent.md` is the agent working
+guide. `todo.md` should stay short: current work, next decisions, and the
+minimum references needed to act. Long benchmark narratives belong in
+`benchmark/reports/`; design alternatives belong in `ideas/`.
 
-## How To Use This File
+## Snapshot
 
-- `GUIDELINES.md` is the master architecture and product-boundary reference.
-- `agent.md` captures project working rules for future agents.
-- `todo.md` is the current execution plan, not the full historical log.
-- Source, tests, and runnable examples remain the truth for current behavior.
+Updated on 2026-06-22.
+
+The solver optimization campaign is closed. The active work is now a
+stabilization pass:
+
+- keep only retained solver routes in active runtime code;
+- preserve the separation between public/runtime layers and JAX backend code;
+- make runtime/device/precision policies executable, not estimate-only;
+- make planning, batching, preparation, lowering, kernel route, and result
+  assembly inspectable;
+- converge scalar and population runs on one coherent public result model;
+- remove real-world coordinate ownership from core/public simulation objects;
+- flatten all examples against the public API;
+- remove stale docs and obsolete branches.
+
+## Non-Negotiables
+
 - AxonScope is pre-release: prefer clean breaking changes over compatibility
-  shims, and delete superseded paths once replacements are in use.
-
-## Current Snapshot
-
-Updated on 2026-06-20 after the full/center/VmRaster CPU+GPU recording-mode
-comparison and the observer amplitude-batching validation. The current
-hot-path optimization pass has reached a checkpoint: warm solver-side observer
-execution is acceptable for now, and the next default work is cleanup/API/docs
-rather than another solver tweak.
-
-| Area | Status | Notes |
-| --- | --- | --- |
-| Phases 0-7.5 | Done | Guardrails, object model, typed contracts, JAX boundary, pool results, analysis layer, performance estimates, and solver-side observers are implemented for the current public layer. |
-| Phase 7.6.1 | Done | Benchmark evidence matrix exists under `benchmark/hotpaths/`. |
-| Phase 7.6.2 | Done | Memory-transfer and long-run cleanup landed for current hotpaths. |
-| Phase 7.6.3 | Closed | Exact double-cable GPU solver optimization pass is complete. No new public solver route; see `benchmark/reports/double_cable_solver_optimization_2026_06.md`. |
-| Phase 7.6.4 | Standby | Pseudo-double/pseudo-MRG remains validation-only under `benchmark/pseudo_double/`; not public, not `auto`. |
-| Phase 7.6.5 | Checkpoint | Execution-envelope optimization is good enough for now. Future work must include cold-run, RSS/device-memory, and warm-repeat evidence. |
-| Phase 7.6.6 | Later | GPU dispatch scheduling remains a conceptual benchmark target only: memory-aware bucket/coalesce first, optional async enqueue second. |
-| Phase 7.6.7 | In progress | VmRaster observer redesign: observer-only now lowers to one strict packed membrane-voltage threshold raster. CPU/GPU P100 validation passed; remaining work is decoder breadth and larger memory-focused stress. |
-| Phase 7.7 | Next | Stimulation and placement API cleanup against `GUIDELINES.md`. |
-| Phase 7.8 | Later | Examples learning-path cleanup after API and Vext work. |
-| Phase 8 | Later | Callable studies, reuse policies, retention policies, and study results. |
-| Phase 9 | Later | Serialization schemas and reference backend validation. |
-
-Current solver surface:
-
-- `BatchOptions.double_cable_block_solver` accepts exactly `auto`, `thomas`,
-  `pcr`, `pcr_soa`, and `pcr_adaptive`.
-- `auto` resolves on CPU/default backends to `thomas`; GPU-like backends use
-  `pcr_adaptive`.
+  shims.
+- Public double-cable solver options are exactly `auto`, `thomas`, `pcr`,
+  `pcr_soa`, and `pcr_adaptive`.
+- `auto` resolves from the effective execution device: CPU/default -> `thomas`,
+  GPU-like -> `pcr_adaptive`.
 - `pcr_adaptive` uses `pcr_soa` for `B <= 4096`, then matrix-layout `pcr`.
 - Pallas, Triton, JAX-Triton, CUDA FFI, split iterative, associative-transfer,
-  and pseudo-double candidates are archived/standby evidence, not active solver
+  and pseudo-double candidates are archived/standby evidence, not public solver
   routes.
+- Solver-side observer-only execution produces strict
+  `observations["vm_raster"]`; activation, latency, velocity, threshold, and
+  recruitment are post-processing.
+- `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
+  solver-side implementation is designed.
+- Factorized `Vext` is an internal optimization. Do not expose it as a public
+  mode and do not re-densify when the caller only needs observer output.
+- Public examples must not import solver/backend internals.
+- World/anatomical coordinates, trajectories, nerve geometry, and electrode CAD
+  stay outside AxonScope core; AxonScope consumes intrinsic positions and
+  sampled footprints.
 
-## Immediate Queue
+## Active Queue
 
 Work should start here unless the user asks otherwise.
 
-Default next step after the 2026-06-20 optimization checkpoint:
+### 1. Solver Route Cleanup
 
-1. Clean solver/backend surface.
-   - Keep the active double-cable solver options limited to `auto`, `thomas`,
-     `pcr`, `pcr_soa`, and `pcr_adaptive`.
-   - Move failed/standby Pallas, Triton, JAX-Triton, split iterative,
-     associative, and pseudo-double evidence out of active solver code paths.
-   - Keep benchmark/research artifacts discoverable under `benchmark/` or
-     `ideas/`, not mixed into runtime dispatch.
+- [x] Trace every active scalar, pool, batch, single-cable, double-cable,
+  VmRaster, dense/factorized Vext, and fallback route.
+- [x] Move split/associative/custom-kernel candidates out of
+  `src/axonscope/solvers/` into benchmark/archive locations.
+- [x] Keep active benchmark runners focused on retained public solver options;
+  split archived reproduction scripts if needed.
+- [x] Add guardrails that prevent standby solver choices from reappearing in
+  public options or runtime dispatch.
 
-2. Clean observer/VmRaster API and docs.
-   - Document VmRaster as the strict solver-side observer output.
-   - Update examples/tests/docs to use the current observer path only.
-   - Remove or archive old generic observer entry points that could confuse the
-     public API.
+### 2. Runtime And Backend Boundary
 
-3. Clean Vext/stimulation and placement APIs against `GUIDELINES.md`.
-   - Prefer clear breaking changes over compatibility shims while AxonScope is
-     pre-release.
-   - Keep point-source factorized `Vext` as an internal optimization, not a new
-     user-facing mode.
+- [x] Split solver-facing contracts from JAX implementation details.
+- [x] Move fixed-step time-grid validation out of JAX-heavy solver helpers into
+  neutral `axonscope.timebase`.
+- [x] Restrict `axonscope.solvers` to the stable solver facade; import
+  kernels/runtime helpers through explicit internal modules.
+- [x] Move or wrap JAX runtime/kernels/lowering under `backends/jax` where the
+  target architecture requires it.
+- [x] Keep `solvers` as the public facade for stable solver classes/options, not
+  as a catch-all for backend internals.
+- [x] Add guardrails for forbidden dependencies, especially high-level modules
+  importing solver-specific lowering.
 
-Performance backlog, only if optimization work resumes:
+### 3. Recording And VmRaster
 
-1. Stabilize the benchmark target.
-   - Keep the six-way full/center/VmRaster CPU+GPU comparison as the regression
-     harness.
-   - Preserve plots under
-     `benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620`
-     as the current reference.
-   - Track `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`,
-     `kernel.wait`, `results.split_batch`, RSS, and device memory estimates.
+- [x] Introduce or finalize a `RecordingPlan` boundary so `recording.py` no
+  longer imports solver batch options directly.
+- [x] Move VmRaster result containers and CPU decoders to a result/analysis
+  boundary; keep JAX bit-packing in backend/runtime code.
+- [x] Update protocols to consume backend-neutral VmRaster output rather than
+  importing solver observer internals.
+- [x] Remove stale documentation for superseded broad observer design.
 
-2. Reduce repeated stable preparation.
-   - Identify what `runtime.prepare` rebuilds on every amplitude in
-     `example08_recruitment`.
-   - Split stable cohort/runtime/probe/footprint preparation from dynamic
-     stimulus/amplitude values.
-   - Add cache-hit/miss metadata and reuse-failure explanations.
+### 4. Vext, Stimulation, And Placement API
 
-3. Reuse dispatch and observer plans.
-   - Cache dispatch groups, padding signatures, recording width, and VmRaster
-     row-aware probe tables when static shapes match.
-   - Confirm result order and padded-row masks remain identical.
+- [x] Audit stimulation/context names against the product boundary in
+  `GUIDELINES.md`.
+- [x] Keep public concepts simple: clamps, point-source electrodes,
+  extracellular footprints, drives, stimulation, populations.
+- [x] Preserve the static-footprint/dynamic-stimulus split internally.
+- [x] Keep factorized/dynamic Vext reuse gated by dense-equivalence tests.
 
-4. Reuse Vext/stimulus inputs.
-   - Keep spatial footprints stable and update only temporal stimulus/amplitude
-     buffers for sweeps.
-   - Avoid dense zero `Iinj` and avoid full dense `Vext` rematerialization when
-     a factorized representation is available.
+### 5. Runtime Policy
 
-5. Re-benchmark before scheduler work.
-   - Re-run the six-way comparison and regenerate all plots.
-   - If `runtime.prepare + dispatch.build_plan` falls substantially and group
-     count/enqueue remains a bottleneck, start Phase 7.6.6 coalescing.
-   - Only test async groups after bucket/coalesce and memory-budget checks.
+- [x] Promote `axs.Runtime`, `axs.Device`, and `axs.PrecisionPolicy` from
+  estimate-only values to real execution policy.
+- [x] Decide final spelling: keyword arguments on `run(...)` or an
+  `ExecutionPolicy` object.
+- [x] Resolve requested JAX device explicitly and fail clearly if unavailable.
+- [x] Make precision part of preparation/compile cache identity.
+- [x] Handle `float64` requests explicitly with JAX `jax_enable_x64`.
+- [x] Ensure solver `auto` routing uses the effective requested device.
 
-- [x] Close Phase 7.6.3 solver optimization campaign.
-- [x] Clean active solver package and move non-retained custom-kernel tests/code
-  to benchmark/archive locations.
-- [x] Add a clean solver-campaign summary report with a small speedup plot.
-- [x] Add workflow-level benchmark based on basic examples 06/07/08:
-  `benchmark/realistic_examples/bench_basic_examples.py`.
-- [x] Run Kaggle P100 `realistic_stress` CPU vs GPU with solver/workflow
-  profiling; summarized in
-  `benchmark/reports/double_cable_solver_optimization_2026_06.md`.
-- [ ] Keep the bounded `standard` matrix as an optional cheaper regression run
-  once the next Vext/runtime changes land.
-- [x] Phase 7.6.5 first pass: reuse batch-safe solver runtimes, cache shared
-  point-source footprints, and expose per-group memory estimates in realistic
-  profile CSV/events.
-- [x] Phase 7.6.5 validation: Kaggle P100 `realistic_stress` CPU vs GPU
-  completed at
-  `benchmark/results/kaggle/20260619_195351_realistic_stress_NvidiaTeslaP100`;
-  warm totals improved from `72.58 -> 60.31 s` CPU and `43.04 -> 36.99 s`
-  GPU versus the previous stress run.
-- [ ] Propagate optional memory/cache metadata into
-  `realistic_examples_profile_cpu_vs_gpu.csv`; current run writes them in the
-  per-platform profile CSVs and raw events.
-- [x] Phase 7.6.5 observer-only protocol pass: route activation/recruitment
-  sweeps through solver-side `Activation` observers when `Recording.none()` is
-  used, so recruitment can return compact bool arrays instead of moving full
-  `Vm` traces back to host.
-- [x] Validate VmRaster observer-only on CPU stress. The old generic observer
-  path hit CPU LLVM compile-memory errors, but the VmRaster route completed on
-  Kaggle CPU-only at
-  `benchmark/results/kaggle/20260620_155134_realistic_stress_observer_cpu_cpu`.
-- [x] Run Kaggle `realistic_stress_single_vm` to compare CPU vs GPU with
-  example 08 retaining one center Vm column instead of full spatial `Vm`.
-  Completed at
-  `benchmark/results/kaggle/20260619_232746_realistic_stress_single_vm_NvidiaTeslaP100`.
-- [x] Try Kaggle `realistic_stress_observer_gpu` separately after excluding CPU
-  observer-only. Decision: inconclusive, not rejected; the run was stopped
-  during `example08_recruitment` before a full timing row was produced. The
-  `426.7s` Kaggle UI value was a log timestamp, not a case duration.
-- [x] Preserve the double-cable batch-native `pcr_soa` fast path for
-  observer-only output at realistic batch sizes. Observer-only now uses packed
-  `VmRaster` state rather than the removed generic observer state.
-- [x] Fix the observer-only route threshold for realistic recruitment batches.
-  The first post-fix Kaggle run at `926a8ce` showed `runs=50` taking about
-  19 min before `runs=100` because observer-only reused the retained-Vm
-  `B >= 2048` threshold and therefore did not activate the new batch-native
-  path for `B=50/100`. The batch-native `pcr_soa` route now uses one shared
-  low batch threshold for full, center, and observer-only recording modes.
-- [x] Add progress diagnostics for long realistic observer GPU runs. The
-  `d64fb77` Kaggle run was cancelled while `example08_recruitment runs=50` was
-  still silent, so `realistic_stress_observer_gpu` now prints solver route,
-  amplitude/dispatch progress, and per-case completion timing/RSS.
-- [x] Fix realistic mixed-pool route diagnostics and threshold. The `35693e5`
-  Kaggle log confirmed `runs=50` is split into `single-cable B=25` and
-  `double-cable B=25`, so the previous `B >= 32` shared threshold still missed
-  the double-cable subgroup. The shared route threshold is now `B >= 16`, and
-  realistic benchmark logs print solver routing per dispatch group.
-- [x] Analyze the completed observer-only Kaggle artifacts against
-  `realistic_stress` and `realistic_stress_single_vm`. Report:
-  `benchmark/reports/compact_activation_observer_2026_06_20.md`. Decision:
-  threshold/probes workflows are normal, but the generic double-cable observer
-  path was not retained for the hot path exposed by `example08`: `B=100`
-  warm mean is `503.184 s` versus `5.903 s` full Vm and `6.308 s` center Vm on
-  P100.
-- [x] Validate the packed VmRaster replacement on Kaggle P100
-  `realistic_stress_observer_gpu`. Run:
-  `benchmark/results/kaggle/20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100`.
-  Result: `example08` observer-only warm mean is `3.532 s` at `B=50` and
-  `6.338 s` at `B=100`, versus `244.105 s` and `503.184 s` for the rejected
-  observer path. Whole stress warm total is `38.59 s`, close to center Vm
-  `39.09 s`; process peak is reduced from `20,906 MiB` to `5,325 MiB` at
-  `B=100`.
-- [x] Phase 7.6.7A implementation pass: add internal VmRaster lowering for
-  threshold-style observer requests. The user concept stays simple:
-  `observers=[Activation/Latency/ConductionBlock(...)]`; there are no public
-  implementation-specific observer modes.
-- [x] Phase 7.6.7B implementation pass: replace the active solver-side observer
-  state with packed VmRaster state, `words[B, R, P, W] uint32`, where
-  `W=ceil(Nt/32)`. The solver only writes threshold bits
-  (`Vm >= threshold`) and returns `observations["vm_raster"]`; activation,
-  latency, velocity, threshold-search, and recruitment summaries are
-  post-processing. `PeakVoltage` remains post-hoc on recorded Vm.
-- [x] Phase 7.6.7C instrumentation pass: VmRaster observer execution now exposes
-  `runtime.prepare`, input materialization, `kernel.enqueue`, `kernel.wait`,
-  and result finalization in the realistic profile CSV. The P100 validation run
-  shows warm `B=100` is dominated by `runtime.prepare` (`3.585 s`) and
-  `dispatch.build_plan` (`1.061 s`), not `kernel.wait` (`0.107 s`).
-- [x] Phase 7.6.7D padded-group probe pass: VmRaster observers use row-aware
-  static probe indices/masks and `-1` padded original indices, so heterogeneous
-  padded groups can stay trace-free.
-- [ ] Phase 7.6.7E post-processing pass: finish CPU-side decoders for
-  `VmRasterResult`. Activation/recruitment decoding is now wired for the
-  realistic observer route; remaining decoder breadth is first crossing/latency,
-  conduction velocity, threshold-search updates, and public summary helpers
-  without changing the solver contract.
-- [x] Phase 7.6.7 validation, first P100 pass: compare full Vm, single-probe Vm,
-  and VmRaster observer outputs on the realistic `example08` stress workload.
-  VmRaster is retained: it is within center-Vm timing noise and removes the old
-  observer slowdown.
-- [ ] Phase 7.6.7 validation, broader pass: compare VmRaster decoders against
-  full Vm for example 06 velocity and example 07 threshold, then run larger
-  `Naxon`/diameter sweeps where output memory should matter most.
-- [x] Run full/center/VmRaster recording-mode comparison on CPU and GPU.
-  Artifacts:
-  `benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620`.
-  Warm totals: GPU `observer 37.08 s`, `center 38.44 s`, `full 38.49 s`;
-  CPU `full 68.83 s`, `observer 69.19 s`, `center 71.61 s`. Conclusion:
-  GPU `kernel.wait` is small; `runtime.prepare`, `dispatch.build_plan`,
-  `kernel.enqueue`, and result/input packaging dominate.
-- [x] Phase 7.6.5A first execution-reuse pass: cache stable dispatch plans,
-  batch solver runtimes, prepared cohorts, and VmRaster probe plans for repeated
-  runs over the same `AxonInstance` pool. The cache is intentionally tied to
-  stable simulation objects so stimulus amplitudes can change without freezing
-  the dynamic drive.
-- [x] Phase 7.6.5A Kaggle validation on P100 observer stress:
-  `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`.
-  Against the previous observer GPU stress run
-  `20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100`, example 08
-  warm time dropped from `9.87 s` to `3.64 s` total (`2.71x`). `B=50` improved
-  `3.53 s -> 1.35 s`; `B=100` improved `6.34 s -> 2.29 s`.
-  Warm profile totals for example 08: `runtime.prepare`
-  `16.51 s -> 2.33 s`, `dispatch.build_plan` `4.95 s -> 0.43 s`,
-  `simulation.pool.total` `27.56 s -> 8.85 s`. Comparison plots:
-  `benchmark/results/realistic_examples/execution_reuse_compare_20260620`.
-- [x] Phase 7.6.5A Vext first factorization pass: shared point-source
-  single-cable observer-only groups can pass `current_mid_A[Nt]` plus
-  `footprint_mV_per_A[B,Nx]` into the VmRaster kernel instead of materializing
-  dense `Vstim[B,Nt,Nx]`. The specialized sparse-Iinj VmRaster kernel applies
-  the cable forcing operator once to the spatial footprint and scans only the
-  temporal current. Local validation: dense and factorized builders match;
-  dense and factorized VmRaster outputs match; dispatcher smoke confirms
-  `inputs.extracellular input_format=factorized_point_source`.
-- [x] Phase 7.6.5A Vext Kaggle validation on P100 observer stress:
-  `benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`.
-  Compared with the dense/reuse baseline
-  `20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`, example 08
-  warm time is effectively flat (`3.636 s -> 3.639 s`) while the single-cable
-  `Vstim` estimate drops from `976000 -> 6740 bytes` at `B=50` and
-  `1952000 -> 12840 bytes` at `B=100`. `inputs.extracellular` gets faster, but
-  the factorized single-cable path adds `kernel.enqueue` overhead. Treat this as
-  a memory-scalability win, not a runtime win yet. Comparison artifacts:
-  `benchmark/results/realistic_examples/vext_factorization_compare_20260620`.
-- [ ] Phase 7.6.5A follow-up: add explicit input/Vext reuse for repeated
-  amplitude or stimulus-only updates. Entry target: `example08_recruitment`
-  should not rebuild spatial footprints or dense/factorized `Vext` structures
-  for every amplitude when static shapes are unchanged.
-- [x] Phase 7.6.5A first factorized enqueue mitigation: moved the single-cable
-  factorized `L(footprint)` transform into the same jitted VmRaster scan instead
-  of building it as a separate eager JAX expression before enqueue. Local
-  validation: `tests/unit/solvers/test_batch.py` passes.
-- [x] Phase 7.6.5A Kaggle validation of factorized enqueue mitigation:
-  `benchmark/results/kaggle/20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`.
-  The mitigation removes most of the single-cable factorized enqueue regression:
-  example 08 warm total improves from `3.639 s -> 3.319 s` versus the pre-fix
-  factorized run, and from `3.636 s -> 3.319 s` versus dense/reuse (`~1.10x`).
-  Single-cable `Vstim` memory remains reduced by about `145-152x`. Comparison
-  artifacts:
-  `benchmark/results/realistic_examples/vext_factorization_mitigation_compare_20260620`.
-- [x] Phase 7.6.5A first double-cable factorized `Vext` pass: shared
-  point-source double-cable VmRaster observer-only groups can pass
-  `current_mid_A[Nt]`, `current_initial_previous_A`, and
-  `footprint_mV_per_A[B,Nx]` into the batch-native PCR/SoA observer kernel. The
-  kernel builds the double-cable extracellular RHS inside the time scan instead
-  of receiving dense `Vstim[B,Nt,Nx]` plus dense previous `Vstim[B,Nx]`.
-  Fallback remains dense for center/full recordings and unsupported context
-  shapes. Local validation: dense/factorized double-cable VmRaster outputs match
-  and dispatcher metadata records
-  `inputs.extracellular input_format=factorized_point_source`.
-- [x] Phase 7.6.5A Kaggle validation of double-cable factorized `Vext`: rerun
-  `realistic_stress_observer_gpu` against
-  `20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100` and check
-  example 08 double-cable group memory, `inputs.extracellular`,
-  `kernel.enqueue`, and `kernel.wait`.
-  - 2026-06-20 diagnostic run
-    `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100`: not a
-    valid double-cable factorized measurement. The single-cable group used
-    `factorized_point_source`, but the padded double-cable group was still
-    forced to `recording_mode=full` and dense `Vstim`. Local fix: preserve
-    `recording=none` for padded groups when a VmRaster observer is present, and
-    cover it with a padded double-cable factorized dispatcher test. Rerun still
-    required.
-  - 2026-06-20 validation run
-    `20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100`: padded
-    double-cable groups now run `recording_mode=none` with
-    `input_format=factorized_point_source`, `vm_output=0`, and factorized
-    `Vstim`. Example 08 warm mean improves versus `194533` by `1.237 -> 1.042 s`
-    at `B=50` (`1.19x`) and `2.082 -> 1.728 s` at `B=100` (`1.20x`).
-    Double-cable group estimates drop from dense `Vstim+Vm` to compact raster
-    inputs: `0.678 -> 0.0069 MiB` at `B=50`, `1.355 -> 0.0132 MiB` at `B=100`.
-    Summary semantics also return to the full-Vm baseline:
-    `myelinated_final ~= 0.28/0.30` instead of the intermediate broken
-    observer-only `0.0`.
-- [x] Phase 7.6.5B0 structural runtime cache: the batch runtime cache now uses
-  a structural group signature for stimulation-independent solver runtimes
-  instead of `id(simulation)`/`id(solver_axon)`. This lets benchmark repeats or
-  protocol code that rebuild equivalent pools reuse the expensive membrane/cable
-  runtime while keeping cohort/context/stimulus caches identity-based. Local
-  validation:
-  `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`.
-  Kaggle validation:
-  `20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100`. Example 08
-  warm-repeat `runtime.prepare` now reports `16 hits / 0 miss` instead of
-  `14 hits / 2 misses`; `B=100` warm-repeat 3 `runtime.prepare` drops
-  `522.5 -> 86.0 ms`. End-to-end example 08 warm mean improves versus
-  `204138` by `1.042 -> 0.977 s` at `B=50` (`1.07x`) and `1.728 -> 1.562 s`
-  at `B=100` (`1.11x`). `kernel.enqueue` rises, so the next optimization should
-  investigate launch/enqueue and input-buffer reuse rather than more runtime
-  preparation caching.
-- [ ] Phase 7.6.5B: split stable versus dynamic preparation in profile spans.
-  Required visibility: planning, runtime construction/cache hit, footprint
-  materialization/cache hit, stimulus sampling, dense/factorized `Vext`
-  materialization, device transfer, enqueue, wait, and result packaging.
-- [x] Phase 7.6.5B first enqueue visibility pass: VmRaster observer kernels now
-  record nested `kernel.dispatch_jax` and `kernel.finalize_observer` spans under
-  `kernel.enqueue`. The next GPU run should read `kernel.enqueue.self_ms` as
-  remaining Python/JAX preparation, `kernel.dispatch_jax` as the actual JIT
-  dispatch/solve call, and `kernel.finalize_observer` as raster host
-  finalization/copy.
-- [x] Phase 7.6.5B Kaggle validation:
-  `benchmark/results/kaggle/20260620_212926_realistic_stress_observer_gpu_NvidiaTeslaP100`.
-  New plots and compact CSV are in
-  `benchmark/results/realistic_examples/enqueue_phase_compare_20260620_212926`.
-  `example08` warm `kernel.enqueue` splits as follows:
-  B50 `515.0 ms = 291.7 dispatch_jax + 119.2 finalize_observer + 104.1 self/other`;
-  B100 `742.1 ms = 465.8 dispatch_jax + 117.6 finalize_observer + 158.7 self/other`.
-  Extracted event metadata shows the B100 warm `dispatch_jax` is mostly
-  double-cable PCR/SoA: about `49.7 ms` per double-cable group versus `8.5 ms`
-  per single-cable group. `kernel.wait` remains near zero.
-- [ ] Phase 7.6.5C: reduce warm `kernel.enqueue` using the new split. If
-  `kernel.finalize_observer` dominates, defer/collapse host finalization and
-  avoid repeated static VmRaster metadata copies. If `kernel.dispatch_jax`
-  dominates, inspect executable/input-buffer reuse. If `kernel.enqueue.self_ms`
-  dominates, remove Python-side preparation and repeated shape/table work.
-- [x] Phase 7.6.5C first candidate implementation: row-specific factorized
-  point-source currents are supported on the double-cable VmRaster observer path
-  (`current_mid_A[B,Nt]`, `current_initial_previous_A[B]`) without dense
-  `Vstim`. The activation/recruitment observer-only sweep can now batch
-  independent amplitude values into the solver row dimension when the pool and
-  update function are compatible. Iterative threshold workflows keep the
-  existing CPU->GPU update loop. Local validation:
-  `tests/unit/solvers/test_batch.py::test_factorized_point_source_batch_supports_row_specific_currents`,
-  `tests/unit/solvers/test_batch.py::test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa`,
-  `tests/unit/test_protocols.py::test_recruitment_sweep_batches_observer_only_independent_values`,
-  and an active-pulse local smoke showing one flattened observer-only pool call
-  with `shared_current=False` and `current_mid_A.shape == (40, 16)`.
-- [x] Phase 7.6.5C Kaggle validation:
-  `20260620_225920_realistic_stress_observer_gpu_NvidiaTeslaP100`, compared to
-  `20260620_212926` and the precommit control `20260620_222226`. The fast path
-  is active: example 08 warm repeat call counts drop from `8`
-  `simulation.pool.total` and `16` `dispatch.group.total` events to `1` and
-  `2`. The factorized inputs are row-specific (`shared_current=False`) with
-  `current_mid_A` shapes `[200,160]` at B50 and `[400,160]` at B100. Warm time
-  improves B50 `0.835 -> 0.698 s` (`1.20x`) and B100 `1.572 -> 1.340 s`
-  versus the `212926` baseline, but B100 is not better than the cleaner
-  precommit control (`1.321 s`). Cold compile/build and memory regress strongly:
-  B50 first run `20.9 -> 93.0 s`, B100 `22.1 -> 235.0 s`, and B100 peak RSS
-  `5.6 -> 9.9 GiB`. Decision: the idea is useful, but full amplitude flattening
-  must not be unconditional for large `pool_size * protocol_steps`; add
-  chunking or memory-aware gating before keeping it as the default.
-- [ ] Future performance backlog: chunk non-iterative amplitude batching.
-  Target 2-4 amplitudes per solver call first, then choose automatically from
-  hardware memory capacity and estimated simulation/output bytes. Success means
-  keeping most of the call-count/finalization win while avoiding B400-style
-  cold/RSS blow-ups.
-- [ ] Future performance backlog: implement a stimulus/amplitude-only execution
-  cache for point-source/extracellular sweeps. Reuse prepared spatial footprints
-  and compiled executable; update only temporal stimulus/amplitude buffers where
-  shapes match.
-- [ ] Future performance backlog: benchmark reuse using full/center/VmRaster
-  output modes on CPU and GPU, then regenerate the recording-mode comparison
-  plots. Success: reduce `runtime.prepare + dispatch.build_plan` by at least
-  30% on `example08` warm repeats without changing solver outputs.
-- [ ] Future performance backlog: cold-run optimization pass. Every future GPU
-  optimization must report first-run/cold compile time, warm-repeat time,
-  process RSS, device-memory estimate, and output equivalence. Improve
-  compile/first-call behavior without regressing warm-repeat timings or changing
-  the fast path.
-- [ ] Future performance backlog: evaluate GPU dispatch scheduling only as a
-  bounded concept test. Use `ideas/axonscope_dispatch_scheduling_gpu_note.md`:
-  first test memory-aware bucket/coalesce of compatible groups, then optional
-  async enqueue/wait behind an explicit benchmark option. Do not rely on async
-  for core speedups and do not enable it by default without memory-budget checks.
-- [ ] Phase 7.7: clean stimulation and placement APIs after the first Vext pass.
+### 6. Pipeline Inspection
 
-## Phase 7.6.5 Execution-Envelope And Vext Plan
+- [x] Define host-side inspection records for planning, dispatch/batch, and
+  preparation.
+- [x] Add `print()` summaries for planning, dispatch/batch, and preparation.
+- [x] Extend inspection to input lowering, observer/recording lowering, kernel
+  routing, and result assembly.
+- [x] Add a lightweight plot for dispatch groups, retained Vm width, and
+  materialization choices.
+- [x] Add deeper plots where useful: padding, memory, probe positions, and
+  result assembly.
+- [x] Keep inspection opt-in and zero-overhead by default.
+- [x] Avoid device-to-host transfers unless explicitly requested by an
+  execution-time capture.
+- [ ] Redesign pool progress reporting around dispatch groups, cohort rows, or
+  callback events; examples may still use temporary `progress=True` prints, but
+  the current boolean progress does not expose enough per-simulation visibility.
 
-Goal: reduce complete workflow time now that solver-only custom-kernel work is
-closed and VmRaster is validated. The working conclusion from the 2026-06-20
-recording-mode comparison is that the GPU solver kernel is not the current
-dominant cost. The dominant costs are the execution envelope around it:
-`runtime.prepare`, dispatch/probe-plan rebuilds, `kernel.enqueue`, Vext/stimulus
-materialization, result splitting, and public packaging.
+### 7. Examples Flattening
 
-Evidence:
+- [x] Audit `examples/basic/`, `examples/advanced/`, `examples/with_nrv/`,
+  `examples/tutorials/`, `benchmark/`, README commands, and
+  `examples/README.md` together.
+- [x] Replace direct `CrankNicholson`, solver/backend internals, or observer
+  runtime imports in public examples with public API usage.
+- [x] Move benchmark/profiling-only material under `benchmark/` or rewrite it as
+  a public inspection/runtime-policy tutorial.
+- [x] Add a concise runtime-policy example after the execution policy surface is
+  real.
+- [x] Keep pseudo-double/custom-kernel/archive experiments out of user-facing
+  examples.
+- [x] Split `with_nrv/` out of `advanced/` for NRV-owned geometry workflows.
+- [x] Add a tutorial index for future notebook mini-courses.
+- [ ] Write real notebook tutorials under `examples/tutorials/` following the
+  indexed mini-course sequence.
+- [x] Flatten `examples/basic/` into mostly linear `main()` scripts with
+  didactic comments and minimal helper functions.
+- [x] Flatten `examples/advanced/` so each public script has one top-level
+  `main()` and keeps callbacks/helpers local to the concept being taught.
+- [x] Split advanced protocol examples into threshold-parameter and recruitment
+  waveform workflows instead of mixing both in one script.
+- [x] Rewrite each moved example for the new didactic order instead of only
+  preserving the previous script body.
+- [ ] Provide realistic example with NRV built-in geometry capabilities.
 
-```text
-benchmark/results/realistic_examples/recording_mode_compare/plots_to_review_20260620
-benchmark/results/realistic_examples/recording_mode_compare/kaggle_p100_cpu_gpu_recording_modes_20260620_allplots_*
-```
+### 8. Simulation Results Model
 
-Current benchmark diagnosis:
+- [ ] Audit every public result class/path: `SimResult`, `AxonSimulationResult`,
+  `AxonResultView`, `CohortResult`, `RecordedSignal`, `RecordingManifest`,
+  `VmRasterResult`, analysis reports, and protocol return types.
+- [ ] Decide the final scalar return contract: either migrate scalar
+  `simulate(...)` to `AxonSimulationResult` or keep a clearly documented
+  compatibility boundary until removal.
+- [ ] Make one-axon and population result semantics coherent: signal access,
+  indexing, iteration, metadata, diagnostics, observations, final state, and
+  analysis/report APIs.
+- [ ] Keep analyses separate from raw numerical results while making common
+  workflows ergonomic: `result.analyze(...)`, `result.report(...)`, protocol
+  summaries, and population denominators.
+- [ ] Remove duplicate result containers, forwarding aliases, or shape-specific
+  convenience paths that conflict with the canonical model.
+- [ ] Update examples/tests/docs so result usage teaches the final contract.
 
-- GPU total stress warm time is about `37-38 s` across full, center, and
-  VmRaster output modes.
-- CPU total stress warm time is about `69-72 s`.
-- For GPU, aggregate `kernel.wait` is less than `1 s`; `kernel.enqueue`,
-  `runtime.prepare`, and `dispatch.build_plan` are much larger.
-- For `example08 B=100`, GPU VmRaster spends about `3.44 s` in
-  `runtime.prepare`, `1.00 s` in `dispatch.build_plan`, `0.61 s` in
-  `kernel.enqueue`, and only `0.11 s` in `kernel.wait`.
-- Therefore, optimize reuse and preparation before reopening solver kernels.
+### 9. Remove World Coordinate Ownership
 
-1. Baseline realistic workflows.
-   - Run example 06 velocity, example 07 threshold, and example 08 recruitment
-     with `benchmark/realistic_examples/bench_basic_examples.py`.
-   - Compare CPU vs GPU by workflow, fiber type, run count, and population size.
-   - Record build time, first run, warm run, backend, and devices.
-   - Current Kaggle P100 stress evidence:
-     `benchmark/results/kaggle/20260619_093205_realistic_stress_NvidiaTeslaP100`.
+- [ ] Audit public objects and examples for `x`, `y`, `z`, trajectory,
+  anatomical-frame, nerve-geometry, electrode-geometry, or CAD assumptions.
+- [ ] Keep intrinsic axon position `s = 0 ... length` as the core coordinate used
+  for layout, clamps, recording selectors, event positions, and footprints.
+- [ ] Ensure `Axon`, `AxonInstance`, `ExtracellularFootprint`, and solver
+  preparation do not require world coordinates or external geometry ownership.
+- [ ] Move analytical point-source helpers toward footprint generation/examples
+  only; solver execution should consume sampled footprints/drives.
+- [x] Add a small `axs.analytical.local_point_source_context(...)` helper so
+  public examples can keep transverse point-source geometry out of
+  `AxonInstance`.
+- [ ] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
+  adapter-style inputs that hand AxonScope intrinsic footprints and metadata.
+- [ ] Rename or remove user-facing fields/docs that imply AxonScope owns
+  real-world placement beyond temporary analytical examples.
 
-2. Add execution-envelope and `Vext` timing visibility.
-   - Separate public object construction, extracellular footprint evaluation,
-     dense `Vext` array materialization, host-to-device movement, solver time,
-     and result packaging.
-   - Keep measurements available in CSV/JSON, not only profiler traces.
-   - Treat `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`, result
-     splitting, and GPU/CPU `kernel.wait` as first-class timings too; the
-     recording-mode stress profile shows these dominate recruitment before raw
-     GPU solver time does.
-   - First pass implemented:
-     - reuse the `solver_axon` already built by dispatch planning when preparing
-       batch runtimes;
-     - cache whole solver runtimes only for batch-safe paths where stimulation
-       callables/precomputed drive tensors are not embedded in the runtime;
-     - cache stable dispatch plans across repeated runs of the same
-       `AxonInstance` pool;
-     - cache prepared cohorts and VmRaster probe plans across amplitude sweeps,
-       while keeping context/stimulus objects live;
-     - cache shared point-source spatial footprints while keeping stimulus
-       amplitudes live;
-     - add `memory_estimate_*` and footprint-cache columns to realistic profile
-       CSVs.
-   - 2026-06-20 second pass implemented:
-     - `dispatch.build_plan` now records `dispatch_plan_cache=hit|miss`;
-     - `runtime.prepare` now records `batch_runtime_cache=hit|miss`;
-     - `inputs.positions` now records `prepared_cohort_cache=hit|miss`;
-     - new `observer.plan` span records `vm_raster_plan_cache=hit|miss`.
-   - 2026-06-20 Kaggle P100 validation:
-     - observer GPU stress run:
-       `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`;
-     - example 08 warm total: `9.87 s -> 3.64 s` versus the previous observer
-       GPU run (`2.71x`);
-     - example 08 `runtime.prepare`: `16.51 s -> 2.33 s`;
-     - example 08 `dispatch.build_plan`: `4.95 s -> 0.43 s`;
-     - generated comparison CSV/plots:
-       `benchmark/results/realistic_examples/execution_reuse_compare_20260620`.
-   - 2026-06-20 Vext factorization local pass:
-     - shared point-source single-cable observer-only batches now avoid dense
-       `Vstim[B,Nt,Nx]` and pass `current_mid_A[Nt]` plus
-       `footprint_mV_per_A[B,Nx]`;
-     - the VmRaster sparse-Iinj kernel uses a precomputed spatial forcing
-       footprint, then multiplies by the temporal current inside the scan;
-     - local dispatcher smoke recorded
-       `inputs.extracellular input_format=factorized_point_source`;
-     - remaining work: reuse dynamic current buffers across amplitude sweeps and
-       extend the same idea to double-cable RHS construction.
-   - 2026-06-20 Kaggle P100 Vext factorization validation:
-     - run:
-       `benchmark/results/kaggle/20260620_191644_realistic_stress_observer_gpu_NvidiaTeslaP100`;
-     - comparison baseline:
-       `benchmark/results/kaggle/20260620_183215_realistic_stress_observer_gpu_NvidiaTeslaP100`;
-     - single-cable `Vstim` memory estimate drops by about `145-152x`
-       (`976000 -> 6740 bytes` at `B=50`, `1952000 -> 12840 bytes` at
-       `B=100`);
-     - `inputs.extracellular` warm-repeat time drops
-       (`200.4 -> 131.8 ms` at `B=50`, `217.7 -> 140.5 ms` at `B=100`);
-     - `kernel.enqueue` rises (`1282.2 -> 1617.8 ms` at `B=50`,
-       `1958.4 -> 2285.7 ms` at `B=100`), so example 08 warm total is unchanged
-       (`3.636 -> 3.639 s`);
-     - decision: keep factorized `Vext` as the memory-scalability path, but
-       either precompute/pass the forcing footprint without extra eager JAX
-       dispatch or gate the path by memory pressure before claiming speedup.
-     - generated comparison CSV/plots:
-       `benchmark/results/realistic_examples/vext_factorization_compare_20260620`.
-   - 2026-06-20 local factorized enqueue mitigation:
-     - moved the single-cable factorized `L(footprint)` transform into
-       `_run_single_cable_factorized_vstim_batch_sparse_observer_scan`, so it is
-       compiled with the VmRaster scan instead of emitted as a separate eager JAX
-       expression before the kernel call;
-     - validation: `tests/unit/solvers/test_batch.py` passes;
-     - Kaggle P100 validation:
-       `benchmark/results/kaggle/20260620_194533_realistic_stress_observer_gpu_NvidiaTeslaP100`;
-     - example 08 warm total: `3.639 s -> 3.319 s` versus the pre-fix
-       factorized run, and `3.636 s -> 3.319 s` versus dense/reuse;
-     - warm-repeat `kernel.enqueue`: `1617.8 -> 1224.4 ms` at `B=50` and
-       `2285.7 -> 1868.4 ms` at `B=100`, now slightly below dense/reuse totals;
-     - decision: keep factorized single-cable point-source `Vext` enabled for
-       VmRaster observer-only groups. The next `Vext` pass should focus on
-       stimulus/amplitude-only reuse and double-cable RHS/input factorization,
-       not further micro-tuning this single-cable path.
-   - 2026-06-20 local double-cable factorized `Vext` pass:
-     - `FactorizedExtracellularPotentialBatch` now optionally carries
-       `current_initial_previous_A`, the `t=-dt/2` sample required by the
-       double-cable RHS;
-     - double-cable VmRaster observer-only groups use factorized point-source
-       inputs when all rows share one analytical point-source context;
-     - `_run_double_cable_batch_observer_pcr_soa_scan` computes
-       `((Cx/dt + Gx) * current_mid - (Cx/dt) * current_previous) * footprint`
-       inside the scan instead of receiving dense `Vstim[B,Nt,Nx]`;
-     - center/full recordings and unsupported context shapes still use the dense
-       path;
-     - validation:
-       `tests/unit/solvers/test_batch.py::test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa`
-       and
-       `tests/unit/test_dispatcher.py::test_run_pool_double_cable_observer_uses_factorized_point_source_vstim`;
-     - Kaggle diagnostic
-       `20260620_201931_realistic_stress_observer_gpu_NvidiaTeslaP100` showed
-       that padded double-cable cohorts were still routed as full/dense; fixed
-       locally by exempting observer-only padded groups from the full-recording
-       padding fallback;
-     - Kaggle validation
-       `20260620_204138_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms
-       the padded double-cable group now stays in `recording=none`,
-       factorizes `Vstim`, avoids dense `Vm` output, restores the full-Vm
-       myelinated recruitment summary, and gives about `1.2x` end-to-end warm
-       speedup on example 08.
-   - 2026-06-20 local structural runtime cache:
-     - `_prepare_batch_runtime` now keys runtime reuse on a structural group
-       signature instead of simulation/solver object identity;
-     - this targets the two `batch_runtime_cache_misses` visible at the start of
-       every rebuilt benchmark repeat, while leaving prepared cohorts and
-       contexts identity-bound to avoid stale stimulus reuse;
-     - validation:
-       `tests/unit/test_dispatcher.py::test_batch_runtime_cache_reuses_equivalent_rebuilt_pool`;
-     - Kaggle validation:
-       `20260620_210223_realistic_stress_observer_gpu_NvidiaTeslaP100` removes
-       warm-repeat runtime misses (`16 hits / 0 miss`) and lowers example 08
-       warm mean to `0.977 s` at `B=50`, `1.562 s` at `B=100`;
-     - local CPU benchmark smoke for mixed observer-only is not representative
-       because double-cable VmRaster requires the batch-native PCR/SoA path;
-       use Kaggle/P100 for this hot path.
-   - Local validation:
-     `benchmark/results/realistic_examples/local_runtime_cache_smoke_local_smoke_profile.csv`.
+### 10. Docs
 
-3. Split stable and dynamic state.
-   - Static across amplitude/stimulus-only updates:
-     - axon cohort/grouping;
-     - cable/membrane runtime;
-     - dispatch group and padding plan;
-     - VmRaster probe tables;
-     - spatial extracellular footprints;
-     - compiled executable for the same static shapes.
-   - Dynamic across amplitude/stimulus-only updates:
-     - temporal stimulus samples;
-     - scalar amplitude/current values;
-     - any dense/factorized input buffer whose values change but shape does not.
-   - Make cache hits/misses explicit in benchmark metadata.
-   - Add a reuse-failure explanation when a condition forces reprepare/recompile.
+- [x] Fix stale solver docs, including `pcr_adaptive` cutoff `4096`.
+- [x] Update recording/analysis docs to strict VmRaster and post-hoc rich
+  analyses.
+- [x] Update dispatch docs so advanced snippets match the actual backend/input
+  lowering modules.
+- [ ] Keep proposal docs clearly labeled when they show future APIs.
+- [ ] Prepare proper Sphinx Documentation
+- [ ] Do/update all docstrings 
 
-4. Reduce avoidable dense inputs.
-   - Preserve the current public API while testing internal representations for
-     shared point-source/electrode drives.
-   - Avoid materializing dense zero `Iinj`.
-   - Use factorized point-source `Vext` on hot observer-only paths when the
-     spatial footprint is static and only the temporal current changes.
-   - Reuse or cache `Vext` when protocols sweep only current amplitude.
-   - Prefer observer-only outputs for activation/recruitment protocols when the
-     user only needs compact decisions, reducing GPU-to-CPU movement and
-     avoiding per-row `Vm` materialization.
-   - Explore on-device/lazy `Vext` generation for analytical point sources.
+### 11. Validation
 
-5. Validate behavior.
-   - Re-run unit tests for stimulation, dispatcher, protocols, and solvers.
-   - Re-run relevant NRV comparisons if `Vext` semantics change.
-   - Keep `pcr_adaptive` as the GPU solver baseline during Vext work.
-   - Re-run the six-way full/center/VmRaster CPU+GPU comparison and compare
-     `runtime.prepare`, `dispatch.build_plan`, `kernel.enqueue`, `kernel.wait`,
-     and memory columns.
+- [x] Run focused unit tests after each cleanup slice.
+- [x] Run architecture guardrails after dependency-boundary changes.
+- [x] Run example import/smoke tests after examples flattening.
+- [ ] Run NRV validation only for numerical behavior changes.
+- [ ] Re-run hotpath/realistic benchmarks only when making performance claims.
+  
+### 12. Misc
+- [ ] Clean Benchmark solver
 
-6. Decide next branch.
-   - If runtime/dispatch/Vext reuse improves the envelope, continue toward
-     study-level reuse policies.
-   - If dispatch group count or launch overhead remains high, move to Phase
-     7.6.6 bucket/coalesce scheduling.
-   - If solver time becomes dominant again, reopen custom kernels only with a
-     clear validation gate and a target device that supports the required stack.
+## Later
 
-## Phase 7.6.6 GPU Dispatch Scheduling
+- GPU dispatch scheduling: memory-aware bucket/coalesce first, optional async
+  enqueue second, only after memory budgets and group-route inspection exist.
+  see axonscope_dispatch_scheduling_gpu_note.md
+- Improve GPU solver: see axonscope_gpu_tridiagonal_solver_literature_synthesis.md and update axonscope_double_cable_exact_gpu_solver_roadmap.md
+- Improve cold run and not only warm (althrough warm is more important)
+- Provide scipy runtime for scalar/tiny simulations
+- Studies: callable threshold curves, recruitment curves, conduction validation,
+  parameter sweeps, reuse policies, retention policies, and study results.
+- Serialization: final schemas, typed serialization, etc
+- Work on HPC integration
+- DSL model AXONSCOPE_RUNTIME_AGNOSTIC_DSL_ARCHITECTURE.md
+- Work on FEM footprint integration, see fem_axon_gpu_coupling_design.md
 
-Reference note: `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
+## Key References
 
-Goal: improve GPU throughput by launching fewer, larger compatible JAX calls
-and, only after that, testing optional async enqueue/wait scheduling for
-remaining independent groups. This is a dispatch/planning phase, not a solver
-replacement.
-
-Latest 2026-06-20 interpretation:
-
-- Do not start with async scheduling. JAX async enqueue may avoid host-side
-  bubbles, but the GPU may still serialize work and async keeps more inputs and
-  outputs alive.
-- Start with better reuse and, after that, conservative bucket/coalesce
-  scheduling.
-- Treat hardware memory capacity versus estimated simulation/output bytes as an
-  entry condition before coalescing or async pending groups.
-- Full Vm output should use stricter pending-memory limits than VmRaster
-  observer-only output.
-
-Entry gate:
-
-- [x] Use `realistic_examples_*_profile.csv` and hotpath traces to confirm that
-  dispatch group count, repeated `kernel.wait`, input preparation, or
-  `results.split_batch` are meaningful bottlenecks. Current finding:
-  input/runtime preparation, dispatch plan rebuilds, and enqueue dominate GPU
-  more than raw `kernel.wait`; CPU `kernel.wait` still matters.
-- [ ] Compare available hardware capacity, especially GPU memory, against the
-  estimated memory cost of each simulation/bucket before enabling coalescing or
-  async scheduling.
-- [ ] Re-check this gate on larger heterogeneous pools after Phase 7.6.5 reuse:
-  current P100 `realistic_stress` evidence mostly has one dispatch group per
-  simulation call, with mixed recruitment at two groups, so scheduling is not
-  yet the immediate bottleneck.
-- [x] Keep Phase 7.6.5 execution-envelope profiling as the immediate source of
-  truth before changing dispatch architecture.
-
-Implementation plan:
-
-1. Add conservative execution bucket keys.
-   - Start with `mode`, resolved solver/backend, `Nx` bucket, dtype,
-     recording mode, and geometry compatibility.
-   - Keep scalar fallback groups out of bucket coalescing.
-
-2. Add `Nx` bucketing and padding as an explicit scheduling policy.
-   - Target buckets: `32`, `64`, `128`, then `256` only if profiling demands it.
-   - Consider a `96` bucket if padding from `65 -> 128` is too expensive.
-   - Slice padded outputs back to original rows and keep observers blind to
-     padded compartments.
-
-3. Coalesce compatible groups before considering concurrency.
-   - Prefer one larger JAX call over many small calls when safety rules match.
-   - Track original group count, bucket count, coalesced group count, effective
-     batch size, available device memory, estimated simulation memory, and
-     estimated output bytes.
-
-4. Prototype optional async group scheduling behind an explicit option.
-   - Split batch execution into prepare/enqueue/wait/finalize steps.
-   - Add `PendingGroup` plus memory-pressure flushing.
-   - Track `max_pending_groups`, `max_pending_output_bytes`,
-     `async_flush_count`, and `async_pending_max`.
-   - Do not enable async by default until benchmarks show stable wins.
-
-5. Add a dedicated scheduler benchmark.
-   - Create `benchmark/dispatcher/bench_group_scheduling.py`.
-   - Compare `sync_current`, `async_groups`, `coalesce_buckets`, and
-     `coalesce_buckets_async`.
-   - Cover many small compatible groups, semi-compatible `Nx` groups, mixed
-     single/double groups, full recording, center recording, and observer-only
-     output.
-   - Report memory budget versus estimated memory cost per bucket, including
-     inputs, outputs, padded rows, retained traces, and pending async groups.
-
-Success criteria:
-
-- [ ] Keep bucket coalescing if it improves total wall time by at least about
-  20% or materially reduces JIT call count without memory regressions.
-- [ ] Keep async scheduling only if it improves total wall time by at least
-  about 10% on relevant GPU workloads and peak memory remains acceptable.
-- [ ] Reject or downshift any scheduling policy when estimated memory pressure is
-  too close to the available hardware budget.
-- [ ] Keep all changes internal to dispatch/runtime options until the public
-  API story is clear.
-
-## Phase 7.6.7 VmRaster Observer Redesign
-
-Goal: keep the public observer/analysis story simple while making the first
-solver-side observer implementation deliberately optimized for the workflows
-AxonScope needs most in examples 06/07/08: velocity, threshold, activation, and
-recruitment-style sweeps over many axons.
-
-Evidence gate:
-
-- [x] Kaggle P100
-  `20260620_111038_realistic_stress_observer_gpu_NvidiaTeslaP100` confirms the
-  generic double-cable observer path is unsuitable for the hot path exposed by
-  the recruitment-style stress case. The mixed `B=100` case spends about
-  `62.7 s` per double-cable subgroup amplitude, while full/center Vm output
-  spends about `0.5 s` for the same double-cable subgroup shape.
-- [x] The slowdown is isolated to the double-cable observer path exercised by
-  observer-only `example08`. The single-cable observer subgroup stays around
-  `50 ms` per amplitude, and example 06/07 timings remain comparable to earlier
-  GPU stress runs.
-- [x] Treat process `peak_rss` as a high-water diagnostic, not a direct retained
-  output size. The observer run reached `20,906 MiB` process peak at `B=100`,
-  but case-local deltas and profiler memory estimates point toward XLA/cache or
-  hidden compile/execution pressure rather than raw `Vm` output arrays.
-- [x] Kaggle P100
-  `20260620_144714_realistic_stress_observer_gpu_NvidiaTeslaP100` validates the
-  packed VmRaster replacement. `example08` observer-only warm mean is
-  `6.338 s` at `B=100`, close to center Vm `6.308 s` and far below the rejected
-  observer path `503.184 s`. The double-cable subgroup warm mean is `561.5 ms`,
-  about `1.1x` full Vm, and process peak falls to `5,325 MiB`.
-
-User-facing rule:
-
-- [x] Keep one analysis-oriented concept for solver-side observations, centered
-  on scientific requests such as activation/first-crossing time, plus trace-free
-  simulation output when the user does not request Vm traces.
-- [x] Do not introduce public implementation-specific observer modes while the
-  API is still pre-release. A user should ask for the scientific result, not
-  choose an internal kernel family.
-- [x] Document that the first hot-path observer is intentionally strict:
-  membrane-voltage threshold events only, with fixed target positions/probes.
-
-Implementation direction:
-
-1. Define VmRaster lowering.
-   - Done: lower simple membrane-voltage threshold definitions to an internal
-     VmRaster plan.
-   - Supported first shape: one or more threshold/probe definitions, scalar
-     thresholds, fixed target indices/probes, and static raster/probe slots.
-   - Done: padded/heterogeneous groups lower to row-aware static probe tables
-     and padded original indices are masked with `-1`.
-   - Done: broader `PeakVoltage` solver-side observer support was removed.
-     Peak voltage remains available as post-hoc analysis on recorded Vm.
-
-2. Define the packed raster state.
-   - Done: minimal state is `words[B, R, P, W] uint32` for static raster count
-     `R`, probe count `P`, and `W=ceil(Nt/32)`.
-   - Done: one bit is written per solver step/probe when `Vm >= threshold`.
-   - Started: activation/recruitment can decode from `VmRasterResult`.
-   - Remaining: derive latency, velocity, threshold-search, and public summary
-     helpers from `VmRasterResult` in CPU post-processing.
-   - Per-step input: `Vm[B, Nx]`.
-   - Output: `observations["vm_raster"]`, not `Vm[Nt, Nx, Naxon]`.
-
-3. Keep reductions fixed and JAX-friendly.
-   - Center/probe mode: set bit from `Vm[:, idx] >= threshold`.
-   - Small fixed probe set: set bits independently so velocity can decode
-     per-probe first crossing times afterward.
-   - Whole-axon activation should be represented by explicit fixed probes for
-     now; do not add broad reductions until benchmarked.
-   - Avoid arbitrary Python callbacks, dynamic output tables, or rich metadata
-     in the solver loop.
-
-4. Preserve solver fast paths.
-   - Done locally: the active observer update no longer uses the old generic
-     observer state or the short-lived compact event state.
-   - It must be independent of recording mode selection in dispatch routing.
-   - Done locally: it works with `pcr_soa` batch-native paths for mixed groups
-     such as `B=25`; validate next on Kaggle.
-   - Done locally: it avoids the previous conservative center/probe padded-group behavior
-     where `_kernel_batch_options(...)` forces `BatchRecording.full()` before
-     the solver kernel and only slices back to the requested probe afterward.
-   - Done for the first P100 stress validation: VmRaster observer-only warm time
-     is within center-Vm noise for `example08`, and double-cable subgroup timing
-     is about `1.1x` retained-Vm timing.
-
-5. Benchmark as a memory feature first.
-   - Compare full Vm, single-probe Vm, and VmRaster observer on the
-     realistic examples.
-   - Track real process RSS deltas, device memory estimates, output bytes, and
-     solver/profile timings.
-   - Stress large axon counts and diameter sweeps, because memory savings should
-     matter most there.
-   - First P100 result: retained simulation arrays are estimated at `0.94 MiB`
-     for `B=50` and `1.88 MiB` for `B=100`; process RSS is now dominated by
-     runtime/JAX/cache overhead rather than the packed raster itself.
-
-6. Migrate the public learning surface in the same phase.
-   - Done locally: observer runtime, solver, dispatcher, public facade,
-     performance, hotpath catalog, and analysis tests were updated.
-   - Done locally: `example_14_hotpath_benchmarking.py` and
-     `example_18_solver_side_observers.py` now use VmRaster observer-only output.
-   - Done locally: the old generic solver-side observer runtime was deleted
-     from active code; do not reintroduce it as a fallback.
-   - Remaining: update any longer-form benchmark docs after the next Kaggle
-     validation run.
-
-Success criteria:
-
-- [ ] Observer-only execution is clearly lighter than full Vm output for large
-  `Naxon` workloads that only need event outputs.
-- [ ] Observer-only execution does not materially slow the retained-Vm fast
-  path for the same solver route.
-- [ ] The public API remains one clean analysis concept with documented
-  constraints.
-- [ ] All observer-related tests, examples, benchmark docs, and roadmap notes
-  are updated in the same change set as the new observer contract.
-- [ ] Any broader observer system stays out of the hot path until there is
-  benchmark evidence and a concrete user need.
-
-## Solver Campaign References
-
-- Summary report: `benchmark/reports/double_cable_solver_optimization_2026_06.md`
-- Plot: `benchmark/reports/double_cable_solver_optimization_2026_06_speedups.svg`
-- Compact Vm-event observer report:
-  `benchmark/reports/compact_activation_observer_2026_06_20.md`
-- Compact Vm-event observer plot:
-  `benchmark/reports/compact_activation_observer_2026_06_20.svg`
+- Architecture reference: `GUIDELINES.md`
+- Agent guide: `agent.md`
+- Solver organization: `docs/solver_organization.md`
+- Axon model organization: `docs/axon_model_organization.md`
+- Stimulation model: `docs/stimulation.md`
+- Pool dispatch: `docs/pool_dispatch.md`
+- Recording/results/analysis: `docs/results_recording_analysis.md`
 - Active solver README: `benchmark/solvers/README.md`
-- Kaggle runner README: `benchmark/kaggle/README.md`
-- Solver roadmap archive: `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`
-- Dispatch scheduling note: `ideas/axonscope_dispatch_scheduling_gpu_note.md`
-
-Archived experiment locations:
-
-- `benchmark/archived_solver_spikes/`
-- `benchmark/triton_solver/`
-- `benchmark/jax_triton_solver/`
-- `benchmark/cuda_ffi_solver/`
-- `tests/archive/solver_spikes/`
-
-## Phase 7.7 Stimulation And Placement API Cleanup
-
-Goal: make the public API match the product boundary before Phase 8 studies.
-
-- [ ] Re-read `GUIDELINES.md` before implementation.
-- [ ] Audit public stimulation/context API names after Vext work clarifies the
-  internal representation.
-- [ ] Keep user-facing examples simple: clamps, point-source electrodes,
-  extracellular drives, footprints, stimulation protocols, and populations.
-- [ ] Avoid exposing solver/backend implementation details in public examples.
-
-## Phase 7.8 Examples Learning Path
-
-- [ ] Update basic examples after Vext/API cleanup.
-- [ ] Add a solver-options example only for retained public options:
-  `auto`, `thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`.
-- [ ] Do not add pseudo-double or custom-kernel examples unless a candidate
-  leaves standby and becomes public.
-
-## Phase 8 Studies
-
-- [ ] Add callable study objects for threshold curves, recruitment curves,
-  conduction validation, and parameter sweeps.
-- [ ] Define reuse policies for prepared populations and stimulation contexts.
-- [ ] Define retention policies for recordings and derived analysis outputs.
-
-## Phase 9 Serialization And Reference Backend
-
-- [ ] Finalize serialization schemas for public objects.
-- [ ] Add NumPy/reference backend validation where it improves trust in JAX
-  lowering or custom kernels.
-
-## Recent Verification
-
-- 2026-06-15: non-NRV unit run after dispatch cleanup: `314 passed, 1 skipped`.
-- 2026-06-18: solver optimization campaign closed; active solver surface cleaned.
-
-Update this section only with high-signal final checks, not every exploratory
-benchmark run.
+- Solver campaign report:
+  `benchmark/reports/double_cable_solver_optimization_2026_06.md`
+- Vm observer report:
+  `benchmark/reports/compact_activation_observer_2026_06_20.md`
+- Pseudo-double standby: `benchmark/pseudo_double/README.md`
+- Archived solver spikes:
+  `benchmark/archived_solver_spikes/`, `benchmark/triton_solver/`,
+  `benchmark/jax_triton_solver/`, `benchmark/cuda_ffi_solver/`,
+  `tests/archive/solver_spikes/`

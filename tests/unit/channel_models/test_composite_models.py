@@ -8,7 +8,7 @@ from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from tests.unit.channel_models.fixtures import HHLeakICM, HHKICM, HHNaICM
 from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.solvers.runtime import compile_membrane_model
+from axonscope.backends.jax.runtime import compile_membrane_model
 from axonscope.axons import Axon, Layout, Section
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units

@@ -47,7 +47,7 @@ class MembraneModel:
             sorted((key, _signature_value(value)) for key, value in self.params.items())
         )
         components = tuple(component._static_signature() for component in self.components)
-        return ("membrane", self.kind, params, components)
+        return ("membrane", self.kind, str(self.dtype), params, components)
 
     def __hash__(self) -> int:
         return hash(self._static_signature())

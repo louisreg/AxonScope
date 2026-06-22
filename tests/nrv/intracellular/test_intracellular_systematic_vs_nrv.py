@@ -425,9 +425,6 @@ def _make_hh_axon():
         compartments=101,
         celsius=6.3 * degC,
         v_init=-70.0 * mV,
-        include_passive_leak=True,
-        g_pas=0.001,
-        e_pas=-70.0,
     )
     sim = AxonInstance(ax)
     sim.add_current_clamp(position=500.0 * um, current=Stimulus.pulse(start=1.0 * ms, duration=1.0 * ms, amplitude=2.0))

@@ -12,7 +12,7 @@ import inspect
 from enum import Enum
 from collections.abc import Iterable
 from pathlib import Path
-from typing import get_type_hints
+from typing import get_args, get_type_hints
 
 import pytest
 import axonscope as axs
@@ -74,6 +74,61 @@ def test_analysis_namespace_is_real_package_not_results_alias():
     assert axs.analysis.Activation is axs.Activation
     assert axs.analysis.ActivationCriterion is not None
     assert "analysis" in axs.__all__
+
+
+def test_recording_observer_strategy_excludes_superseded_generic_observer_design():
+    text = (REPO_ROOT / "docs" / "recorders_observers_activation_strategy.md").read_text(
+        encoding="utf-8"
+    )
+
+    forbidden_terms = {
+        "CompiledObserver",
+        "RasterObserver",
+        "PeakVoltageObserver",
+        'observations["activation"]',
+        "observer peak equals",
+    }
+
+    assert all(term not in text for term in forbidden_terms)
+    assert "observations[\"vm_raster\"]" in text
+    assert "VmRasterResult" in text
+    assert "PeakVoltage" in text
+    assert "post-hoc on recorded Vm" in text
+
+
+def test_public_stimulation_surface_avoids_factorized_runtime_terms():
+    import axonscope.stimulation as stimulation
+
+    public_names = set(axs.__all__) | set(stimulation.__all__)
+    forbidden_fragments = {
+        "Factorized",
+        "Vstim",
+        "VextBatch",
+        "DenseVext",
+    }
+
+    leaked = sorted(
+        name
+        for name in public_names
+        if any(fragment in name for fragment in forbidden_fragments)
+    )
+    assert leaked == []
+
+    public_texts = [
+        SRC_ROOT / "stimulation" / "__init__.py",
+        SRC_ROOT / "stimulation" / "extracellular.py",
+        SRC_ROOT / "preparation" / "signatures.py",
+        REPO_ROOT / "docs" / "stimulation.md",
+    ]
+    forbidden_phrases = {
+        "factorized API",
+        "factorized Phase",
+        "factorized extracellular drive",
+        "factorized extracellular contribution",
+    }
+    for path in public_texts:
+        text = path.read_text(encoding="utf-8")
+        assert all(phrase not in text for phrase in forbidden_phrases)
 
 
 def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
@@ -293,12 +348,152 @@ def test_descriptive_layers_do_not_import_jax_backend_directly():
     assert offenders == []
 
 
+def test_recording_module_does_not_import_solver_options():
+    path = SRC_ROOT / "recording.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "axonscope.solvers" or alias.name.startswith(
+                    "axonscope.solvers."
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level == 0 and (
+                module == "axonscope.solvers" or module.startswith("axonscope.solvers.")
+            ):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_protocols_do_not_import_jax_observer_runtime():
+    offenders: list[str] = []
+
+    for path in _python_sources(SRC_ROOT / "protocols"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "axonscope.backends.jax.observer_runtime":
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level == 0 and module == "axonscope.backends.jax.observer_runtime":
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_vm_raster_result_container_lives_under_results_boundary():
+    assert not (SRC_ROOT / "solvers" / "observer_runtime.py").exists()
+
+    backend_text = (SRC_ROOT / "backends" / "jax" / "observer_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    results_text = (SRC_ROOT / "results" / "vm_raster.py").read_text(encoding="utf-8")
+
+    assert "class VmRasterResult" not in backend_text
+    assert "def unpack_vm_raster_words" not in backend_text
+    assert "class VmRasterResult" in results_text
+    assert "def unpack_vm_raster_words" in results_text
+
+
+def test_public_planning_helpers_do_not_import_jax_numerical_helpers():
+    forbidden = "axonscope.backends.jax.common"
+    offenders: list[str] = []
+
+    for path in (SRC_ROOT / "performance.py", SRC_ROOT / "inspection.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == forbidden:
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level == 0 and module == forbidden:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_jax_runtime_modules_live_under_backend_boundary():
+    moved_modules = {
+        "batch_inputs.py",
+        "batch_kernels.py",
+        "common.py",
+        "experimental.py",
+        "kernels.py",
+        "observables.py",
+        "observer_runtime.py",
+        "runtime.py",
+    }
+
+    for filename in moved_modules:
+        assert not (SRC_ROOT / "solvers" / filename).exists()
+        assert (SRC_ROOT / "backends" / "jax" / filename).is_file()
+
+    offenders: list[str] = []
+    for path in _python_sources(SRC_ROOT / "solvers"):
+        offenders.extend(_jax_import_locations(path))
+
+    assert offenders == []
+
+
+def test_solver_facade_exposes_only_stable_solver_surface():
+    import axonscope.solvers as solver_facade
+
+    stable_exports = {
+        "Solver",
+        "CrankNicholson",
+        "BatchOptions",
+        "BatchRecording",
+        "SolverOptions",
+        "resolve_double_cable_block_solver",
+    }
+    forbidden_exports = {
+        "BatchKernelResult",
+        "CableRuntime",
+        "DoubleCableBatchKernel",
+        "DoubleCableKernel",
+        "ExtracellularRuntime",
+        "KernelResult",
+        "MembraneRuntime",
+        "SimulationGrid",
+        "SingleCableKernel",
+        "SingleCableVStimBatchKernel",
+        "SolverAxon",
+        "SolverRuntime",
+        "StimulationRuntime",
+        "build_icm_backend_from_axon",
+        "build_solver_axon",
+        "compile_axon_membrane",
+        "compile_membrane_model",
+        "precompute_extracellular_potential_mV",
+        "precompute_intracellular_current_density",
+        "prepare_solver_runtime",
+    }
+
+    assert set(solver_facade.__all__) == stable_exports
+    assert forbidden_exports.isdisjoint(set(solver_facade.__all__))
+    assert forbidden_exports.isdisjoint(set(vars(solver_facade)))
+
+    text = (SRC_ROOT / "solvers" / "__init__.py").read_text(encoding="utf-8")
+    assert "axonscope.backends.jax.batch_kernels" not in text
+    assert "axonscope.backends.jax.kernels" not in text
+    assert "axonscope.backends.jax.runtime" not in text
+
+
 def test_dispatcher_execution_does_not_import_concrete_jax_batch_kernels():
     path = SRC_ROOT / "dispatcher" / "execution.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
-        "axonscope.solvers.batch_kernels",
-        "axonscope.solvers.runtime",
+        "axonscope.backends.jax.batch_kernels",
+        "axonscope.backends.jax.runtime",
         "axonscope.icm.backends",
     }
     offenders = _jax_import_locations(path)
@@ -333,8 +528,8 @@ def test_crank_nicholson_facade_delegates_to_backend_boundary():
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
         "axonscope.solvers.axon_runtime",
-        "axonscope.solvers.kernels",
-        "axonscope.solvers.runtime",
+        "axonscope.backends.jax.kernels",
+        "axonscope.backends.jax.runtime",
     }
     offenders = _jax_import_locations(path)
 
@@ -351,3 +546,112 @@ def test_crank_nicholson_facade_delegates_to_backend_boundary():
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
     assert offenders == []
+
+
+def test_active_double_cable_solver_surface_excludes_archived_candidates():
+    from axonscope.solvers.options import DoubleCableBlockSolver
+    from benchmark.solvers.bench_double_cable_linear_solvers import (
+        BENCHMARK_ONLY_SOLVER_RESOLUTIONS,
+        SOLVER_CHOICES,
+    )
+
+    retained_public = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
+    archived = {
+        "assoc_backward",
+        "assoc_transfer_dense",
+        "pallas_pcr_128",
+        "pallas_thomas_4",
+        "pallas_thomas_8",
+        "pallas_thomas_16",
+        "pallas_thomas_128",
+        "split_jacobi_4",
+        "split_jacobi_8",
+        "split_jacobi4_gs1",
+        "split_gs_2",
+        "split_gs_3",
+        "split_gs_4",
+        "split_gs_8",
+        "split_richardson_4",
+    }
+
+    assert set(get_args(DoubleCableBlockSolver)) == retained_public
+    assert archived.isdisjoint(set(SOLVER_CHOICES))
+    assert archived.isdisjoint(set(BENCHMARK_ONLY_SOLVER_RESOLUTIONS))
+
+    common_text = (SRC_ROOT / "backends" / "jax" / "common.py").read_text(
+        encoding="utf-8"
+    )
+    archived_common_functions = {
+        "solve_block_tridiagonal_2x2_assoc_backward_batched",
+        "solve_block_tridiagonal_2x2_assoc_transfer_dense_batched",
+        "split_double_cable_block_system_soa",
+        "solve_tridiagonal_batched",
+        "split_initial_guess",
+        "solve_double_cable_split_jacobi_batched",
+        "solve_double_cable_split_gauss_seidel_batched",
+        "solve_double_cable_split_jacobi_then_gauss_seidel_batched",
+        "solve_double_cable_split_richardson_batched",
+    }
+    assert all(f"def {name}" not in common_text for name in archived_common_functions)
+
+
+def test_factorized_vext_route_has_dense_equivalence_tests():
+    text = (REPO_ROOT / "tests" / "unit" / "solvers" / "test_batch.py").read_text(
+        encoding="utf-8"
+    )
+
+    required_tests = {
+        "test_factorized_point_source_batch_matches_dense_builder_and_observer_raster",
+        "test_factorized_point_source_batch_supports_row_specific_currents",
+        "test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa",
+        "test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
+    }
+
+    missing = sorted(name for name in required_tests if f"def {name}" not in text)
+    assert missing == []
+
+
+def test_solver_route_map_documents_retained_runtime_paths():
+    text = (REPO_ROOT / "docs" / "solver_organization.md").read_text(encoding="utf-8")
+
+    required_terms = {
+        "## Active Solver Route Map",
+        "### Scalar Route",
+        "### Pool, Planning, And Fallback Route",
+        "### Single-Cable Batch Route",
+        "### Double-Cable Batch Route",
+        "### VmRaster, Dense/Factorized Vext, And Results",
+        "run_jax_crank_nicholson",
+        "build_dispatch_plan",
+        "_run_scalar_group",
+        "_run_batch_group",
+        "_run_single_cable_batch_group",
+        "_run_double_cable_batch_group",
+        "build_sparse_intracellular_current_density_batch",
+        "build_intracellular_current_density_batch",
+        "build_factorized_vstim_midpoint_batch",
+        "build_vstim_midpoint_batch",
+        "build_vstim_midpoint_and_initial_previous_batch",
+        "SingleCableVStimBatchKernel",
+        "DoubleCableBatchKernel",
+        "build_vm_raster_plan",
+        "_dispatch_results_from_batch",
+        "DispatchCohortResult",
+        "AxonSimulationResult",
+    }
+
+    missing = sorted(term for term in required_terms if term not in text)
+    assert missing == []
+
+    option_section = text.split("The current exact double-cable block-solver options are:", 1)[
+        1
+    ].split("Example:", 1)[0]
+    archived_options = {
+        "assoc_backward",
+        "assoc_transfer_dense",
+        "pallas_pcr_128",
+        "pallas_thomas_4",
+        "split_jacobi_4",
+        "split_gs_4",
+    }
+    assert archived_options.isdisjoint(option_section)

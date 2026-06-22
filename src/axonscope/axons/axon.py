@@ -132,5 +132,10 @@ class Axon:
 
         return self.layout.diameter_values(unit=unit)
 
+    def compartment_position(self, index: int, *, unit: Any = "micrometer") -> units.length_t:
+        """Return one compartment-center position as a unit-bearing quantity."""
+
+        return self.layout.compartment_position(index, unit=unit)
+
 
 __all__ = ["Axon"]

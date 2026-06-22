@@ -206,8 +206,8 @@ context.plot_evaluation(x_positions, t, voltage_unit=axs.mV)
 context.plot_activation_function(x_positions, voltage_unit=axs.mV, current_unit=axs.uA)
 ```
 
-For the Phase 2 factorized API, build static footprints first, then pair each
-footprint with one temporal stimulus:
+For reusable extracellular stimulation, build static footprints first, then
+pair each footprint with one temporal stimulus:
 
 ```python
 footprint = context.build_footprint(
@@ -269,10 +269,9 @@ footprints with explicit voltage/current/position units. The lower-level
 meters.
 
 Use `AnalyticalExtracellularContext.build_footprint(...)` when the next step is
-the factorized Phase 2 API (`ExtracellularDrive` and
-`ExtracellularStimulation`). `PointSourceElectrode.build_footprint(...)` is also
-available for simple one-electrode analytical scripts when passing `sigma`
-directly is clearer.
+an `ExtracellularDrive` or `ExtracellularStimulation`.
+`PointSourceElectrode.build_footprint(...)` is also available for simple
+one-electrode analytical scripts when passing `sigma` directly is clearer.
 
 In pool simulations, point-source electrode coordinates are global coordinates.
 `sim.set_position(...)` places each axon simulation in that same global frame;

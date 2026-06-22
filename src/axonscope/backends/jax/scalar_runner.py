@@ -9,10 +9,10 @@ import jax.numpy as jnp
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.solvers.axon_runtime import build_solver_axon
-from axonscope.solvers.kernels import DoubleCableKernel, SingleCableKernel
-from axonscope.solvers.observer_runtime import build_vm_raster_plan
+from axonscope.backends.jax.kernels import DoubleCableKernel, SingleCableKernel
+from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
 from axonscope.solvers.options import SolverOptions
-from axonscope.solvers.runtime import prepare_solver_runtime
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 
 
 @dataclass(frozen=True)

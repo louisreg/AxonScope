@@ -1,86 +1,111 @@
 # Examples
 
-Examples are organized as a learning path.
-
-Scripts use Pint quantities through AxonScope's top-level unit aliases: inputs
-are written as physical values such as `500 * axs.um`, then converted to plain
-arrays only at solver/plotting boundaries.
+Examples are the executable learning path for AxonScope. They use public
+top-level APIs (`import axonscope as axs`) and Pint-style quantities such as
+`500 * axs.um`. Backend, solver, benchmark, and profiling internals stay out of
+public examples.
 
 ## Basic
 
-`examples/basic/` contains short scripts that each introduce one concept:
+`examples/basic/` is the first tour. Scripts are short, runnable, and focused on
+one visible result.
 
-- `example_01_stimulus_waveforms.py`: temporal waveforms in milliseconds and
-  microamperes.
-- `example_02_point_source_electrode.py`: analytical point-source footprints in
-  micrometers, microamperes, and millivolts.
-- `example_03_intracellular_hh.py`: one axon with one current clamp.
-- `example_04_extracellular_mrg.py`: one myelinated axon with one point-source
-  context.
-- `example_05_pool_dispatch_basic.py`: a tiny pool dispatch workflow without
-  NRV.
-- `example_06_velocity_vs_diameter.py`: conduction velocity trends across
-  diameters with automatic batch dispatch.
-- `example_07_threshold_vs_diameter.py`: extracellular activation thresholds
-  versus diameter with point-source stimulation and batched binary search.
-- `example_08_recruitment_curve_population.py`: recruitment curve for a mixed
-  unmyelinated/myelinated population around a point-source electrode.
-
-These examples should stay compact and avoid benchmarking or profiling. Pool
-examples should focus on the public `simulate_pool` workflow rather than
-low-level dispatcher internals.
+- `01_first_intracellular_simulation.py`: simulate one Hodgkin-Huxley axon with
+  a current clamp.
+- `02_stimuli_and_units.py`: build temporal stimuli with physical units.
+- `03_point_source_footprint.py`: evaluate an analytical point-source
+  extracellular footprint.
+- `04_extracellular_mrg_simulation.py`: stimulate one myelinated MRG axon with a
+  point-source electrode.
+- `05_population_pool_run.py`: run a small population with `axs.simulate_pool`.
+- `06_activation_velocity.py`: compare activation/velocity trends over
+  diameters.
+- `07_threshold_vs_diameter.py`: estimate extracellular activation thresholds.
+- `08_recruitment_curve_population.py`: compute a recruitment curve for a mixed
+  population.
 
 ## Advanced
 
-`examples/advanced/` contains complete workflows that combine concepts:
+`examples/advanced/` is organized by AxonScope subsystem. These scripts are
+still runnable examples, but they explain the moving parts more explicitly.
 
-- `example_01_pool_dispatch_nrv.py`: build a heterogeneous axon pool and run
-  dispatcher execution while preserving input order.
-- `example_02_layout_options.py`: compare low-level `Layout` construction
-  patterns and template-generated layouts.
-- `example_03_custom_axon_from_scratch.py`: define a custom axon class from
-  membranes, sections, and explicit layout elements.
-- `example_04_stimulation_contexts.py`: reuse electrode geometry with different
-  stimuli and combine multiple electrodes in one analytical context.
-- `example_05_recording_options.py`: compare public recording policies,
-  single-axon observable groups, and pool Vm retention modes.
-- `example_06_activation_criterion.py`: evaluate post-hoc activation criteria
-  from recorded Vm traces.
-- `example_07_recruitment_curve.py`: estimate one activation threshold and a
-  small recruitment curve with the protocol API.
-- `example_08_root_axon_simulation.py`: use the executable `AxonSimulation`
-  root object for one axon and a small population.
-- `example_09_axon_population.py`: build an explicit `AxonPopulation` cohort
-  and run it through the root simulation object.
-- `example_10_typed_recording_signals.py`: request recording outputs with
-  typed `axs.signals` selectors instead of raw strings.
-- `example_11_typed_position_selectors.py`: evaluate activation criteria with
-  typed `axs.positions` selectors instead of raw position strings.
-- `example_12_cable_formulation.py`: use `axs.axons.CableFormulation` for
-  custom axon layouts instead of raw formulation strings.
-- `example_13_extracellular_footprint_drive.py`: separate static
-  extracellular footprints from temporal drives and summed stimulation.
-- `example_14_hotpath_benchmarking.py`: estimate simulation memory and collect
-  opt-in hotpath timing spans for an observer-only run that keeps packed
-  solver-side VmRaster output instead of full Vm traces.
-- `example_15_preparation_signatures.py`: inspect deterministic signatures for
-  reusable preparation inputs.
-- `example_16_canonical_pool_results.py`: work with canonical cohort-backed
-  pool results and per-axon result views.
-- `example_17_analysis_layer.py`: evaluate structured scientific analyses,
-  missing-input/status metadata, and lightweight online Vm observers.
-- `example_18_solver_side_observers.py`: compare a normal Vm recording with
-  solver-side VmRaster observer-only execution using `Recording.none()`.
+### Object Model
 
-Advanced examples may include optional NRV input helpers, but should still favor
-readability over measurement.
+- `object_model/01_axon_simulation_root.py`: use `AxonSimulation` as the
+  executable root.
+- `object_model/02_axon_population.py`: build and run explicit
+  `AxonPopulation` cohorts.
+- `object_model/03_pool_results.py`: inspect cohort-backed pool results and
+  per-axon views.
+
+### Axon Models
+
+- `axon_models/01_layout_options.py`: compare descriptive layout construction
+  patterns.
+- `axon_models/02_custom_axon_from_scratch.py`: define a custom axon from
+  membranes, sections, and layout elements.
+- `axon_models/03_cable_formulation.py`: choose typed single-cable or
+  double-cable formulations.
+
+### Stimulation
+
+- `stimulation/01_stimulation_contexts.py`: reuse electrodes with different
+  temporal stimuli.
+- `stimulation/02_extracellular_footprint_drive.py`: separate static
+  extracellular footprints from temporal drives.
+
+### Recording And Analysis
+
+- `recording_analysis/01_recording_options.py`: compare public recording
+  policies, `RecordingPlan` values, and typed `axs.signals` descriptors.
+- `recording_analysis/02_position_selectors.py`: select analysis targets
+  with `axs.positions`.
+- `recording_analysis/03_activation_criterion.py`: evaluate post-hoc activation
+  criteria from recorded Vm.
+- `recording_analysis/04_analysis_layer.py`: use structured post-hoc analyses,
+  statuses, reports, and population denominators.
+- `recording_analysis/05_vmraster_observer_only.py`: run trace-free VmRaster
+  observer-only simulations with `Recording.none()`.
+
+### Protocols
+
+- `protocols/01_threshold_vs_parameters.py`: estimate threshold curves over
+  diameter and extracellular waveform parameters.
+- `protocols/02_recruitment_waveforms.py`: compare recruitment curves for
+  different extracellular waveforms.
+
+### Runtime
+
+- `runtime/01_runtime_policy.py`: set JAX/CPU/precision through
+  `ExecutionPolicy`.
+- `runtime/02_preparation_signatures.py`: inspect preparation signatures for
+  reusable inputs.
+- `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
+  preparation, lowering, kernel route, and result assembly without launching
+  kernels.
+
+## With NRV
+
+`examples/with_nrv/` is for integration with NRV, where NRV owns complex nerve
+geometry/fiber placement and AxonScope owns axon dynamics.
+
+- `01_nrv_pool_geometry.py`: use NRV when available to generate a fiber table,
+  then map it into AxonScope simulations.
+
+## Tutorials
+
+`examples/tutorials/` is reserved for notebook mini-courses. The intended style
+is close to NRV's tutorial index: numbered lessons, one concept per notebook,
+short explanations before code, and a workflow progression from first
+simulation to population protocols and NRV integration.
 
 ## Benchmarks And Profiling
 
 Timing, memory, profiling, and reproducibility scripts live under `benchmark/`,
 not `examples/`:
 
-- `benchmark/runtime/pool_batch_demo.py`: scalar-vs-batch timing/profiling for
-  imposed-field pool batches.
-- `benchmark/runtime/pool_memory.py`: retained-output and tensor-size scans.
-- `benchmark/runtime/environment_info_demo.py`: environment metadata capture.
+- `benchmark/runtime/benchmark_001_simple_batching.py`: compare batched and
+  simulation-by-simulation execution.
+- `benchmark/runtime/hotpath_observer_only_example.py`: inspect hotpath spans
+  for trace-free VmRaster observer-only execution.
+- `benchmark/notebooks/`: benchmark notebooks and Colab-style runs.

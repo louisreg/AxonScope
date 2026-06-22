@@ -52,7 +52,7 @@ class FootprintSignature:
 
 @dataclass(frozen=True)
 class DriveSignature:
-    """Preparation signature for one factorized extracellular drive."""
+    """Preparation signature for one extracellular drive."""
 
     id: DriveId
     footprint: FootprintSignature

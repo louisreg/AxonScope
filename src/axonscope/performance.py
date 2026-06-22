@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Literal
 
@@ -14,8 +14,8 @@ from axonscope.axons.axon import Axon
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording
 from axonscope.solvers import BatchOptions
-from axonscope.solvers.common import simulation_step_count
 from axonscope.stimulation import IntracellularCurrentClamp
+from axonscope.timebase import simulation_step_count
 from axonscope.utils import units
 
 
@@ -110,6 +110,24 @@ class PrecisionPolicy:
             "accumulation_dtype",
             _dtype_name(self.accumulation_dtype),
         )
+
+
+@dataclass(frozen=True)
+class ExecutionPolicy:
+    """Typed runtime, device, and precision request for executable simulations."""
+
+    runtime: Runtime = Runtime.AUTO
+    device: Device = field(default_factory=Device.auto)
+    precision: PrecisionPolicy | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "runtime", _coerce_runtime(self.runtime))
+        if not isinstance(self.device, Device):
+            raise TypeError("execution_policy.device must be an axonscope.Device value.")
+        if self.precision is not None and not isinstance(self.precision, PrecisionPolicy):
+            raise TypeError(
+                "execution_policy.precision must be an axonscope.PrecisionPolicy value."
+            )
 
 
 @dataclass(frozen=True)
@@ -522,11 +540,13 @@ def _recording_widths(
         return tuple(0 for _ in instances)
     if is_population:
         if recording is not None:
-            policy = recording.to_batch_options().recording
-        elif batch_options is not None:
-            policy = batch_options.recording
-        else:
-            policy = BatchOptions().recording
+            plan = recording.to_plan()
+            if plan.wants_observables:
+                raise NotImplementedError("pool recording currently supports Vm only.")
+            if plan.sample_dt_ms is not None or plan.every_n_steps is not None:
+                raise NotImplementedError("temporal recording subsampling is not wired yet.")
+            return tuple(plan.width_for(int(instance.axon.n_compartments)) for instance in instances)
+        policy = batch_options.recording if batch_options is not None else BatchOptions().recording
         return tuple(policy.width_for(int(instance.axon.n_compartments)) for instance in instances)
     return tuple(int(instance.axon.n_compartments) for instance in instances)
 
@@ -684,6 +704,7 @@ def _recording_label(recording: Recording | None, batch_options: BatchOptions | 
 
 __all__ = [
     "Device",
+    "ExecutionPolicy",
     "MemoryEstimateItem",
     "PrecisionPolicy",
     "Runtime",

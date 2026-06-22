@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax.lax.linalg import tridiagonal_solve
 import numpy as np
 
-from axonscope.solvers.common import solve_block_tridiagonal_2x2_scalar
+from axonscope.backends.jax.common import solve_block_tridiagonal_2x2_scalar
 from benchmark.pseudo_double.reductions import (
     DoubleCableBlockCoefficients,
     double_cable_coefficients_from_solver_terms,

@@ -8,9 +8,9 @@ from axonscope.backends.jax.scalar_runner import run_jax_crank_nicholson
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.results import SimResult
+from axonscope.timebase import resolve_time_args
 
 from .base import Solver
-from .common import resolve_time_args
 from .options import SolverOptions
 
 

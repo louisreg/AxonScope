@@ -27,8 +27,12 @@ def test_unmyelinated_template_accepts_public_unit_names():
         axon.layout.position_values(unit=axs.mm),
         [0.1, 0.3, 0.5, 0.7, 0.9],
     )
+    assert axon.compartment_position(0, unit=axs.mm).magnitude == pytest.approx(0.1)
+    assert axon.layout.compartment_position(-1, unit=axs.um).magnitude == pytest.approx(900.0)
     np.testing.assert_allclose(axon.layout.diameter_values(unit=axs.um), np.full(5, 0.5))
     np.testing.assert_allclose(axon.diameter_values(unit=axs.um), np.full(5, 0.5))
+    with pytest.raises(IndexError, match="compartment index"):
+        axon.compartment_position(5)
 
 
 def test_unmyelinated_templates_do_not_expose_legacy_geometry_aliases():
@@ -193,6 +197,11 @@ def test_myelinated_geometry_helpers_and_layout_plotting():
     )
 
     assert axon.node_position_values(unit=axs.um).shape == (5,)
+    assert axon.node_index("proximal") == int(axon.node_indices[0])
+    assert axon.node_index("distal") == int(axon.node_indices[-1])
+    assert axon.node_position("center", unit=axs.um).magnitude == pytest.approx(
+        axon.node_position_values(unit=axs.um)[2]
+    )
     flat = axs.axons.flatten_layout(axon.layout)
     assert flat.Nx > len(axon.layout.elements)
 

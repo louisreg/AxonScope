@@ -251,6 +251,37 @@ def test_point_source_builds_same_footprint_as_context_builder():
     assert np.allclose(direct.values_for_axon(), through_context.values_for_axon())
 
 
+def test_local_point_source_context_matches_transverse_offset_calculation():
+    positions_m = np.linspace(0.0, 1.0e-3, 5)
+    stimulus = Stimulus.constant(0.0 * axs.uA)
+    electrode = PointSourceElectrode(
+        x=500.0 * axs.um,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+    )
+    context = AnalyticalExtracellularContext(
+        electrodes=[electrode.with_stimulus(stimulus)],
+        sigma=0.3 * axs.S_per_m,
+    )
+
+    legacy = context.footprint_for_electrode(
+        context.electrodes[0],
+        positions_m,
+        axon_y_um=20.0,
+        axon_z_um=-40.0,
+    )
+    local = axs.analytical.local_point_source_context(
+        electrode,
+        stimulus=stimulus,
+        sigma=0.3 * axs.S_per_m,
+        axon_y=20.0 * axs.um,
+        axon_z=-40.0 * axs.um,
+    )
+    shifted = local.footprint_for_electrode(local.electrodes[0], positions_m)
+
+    np.testing.assert_allclose(shifted, legacy)
+
+
 def test_extracellular_drive_and_stimulation_evaluate_factorized_sum():
     positions = np.array([0.0, 500.0, 1000.0]) * axs.um
     footprint_a = ExtracellularFootprint.shared(

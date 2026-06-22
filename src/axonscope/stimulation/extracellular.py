@@ -189,7 +189,7 @@ class ExtracellularFootprint:
 
 @dataclass(frozen=True, kw_only=True)
 class ExtracellularDrive:
-    """One factorized extracellular contribution: footprint times stimulus."""
+    """One extracellular contribution: static footprint times stimulus."""
 
     id: DriveId
     footprint: ExtracellularFootprint

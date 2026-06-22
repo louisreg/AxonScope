@@ -15,6 +15,7 @@ class PositionMode(Enum):
     """Closed set of named one-dimensional position selectors."""
 
     ALL = "all"
+    PROXIMAL = "proximal"
     CENTER = "center"
     DISTAL = "distal"
 
@@ -38,6 +39,12 @@ class PositionSelector:
         """Select the recorded position nearest the axon center."""
 
         return cls(mode=PositionMode.CENTER)
+
+    @classmethod
+    def proximal(cls) -> "PositionSelector":
+        """Select the most proximal recorded position."""
+
+        return cls(mode=PositionMode.PROXIMAL)
 
     @classmethod
     def distal(cls) -> "PositionSelector":
@@ -97,6 +104,8 @@ class PositionSelector:
         mode = self.mode or PositionMode.ALL
         if mode is PositionMode.ALL:
             return np.arange(positions_um.shape[0], dtype=int)
+        if mode is PositionMode.PROXIMAL:
+            return np.asarray([int(np.argmin(positions_um))], dtype=int)
         if mode is PositionMode.CENTER:
             center_um = 0.5 * (float(np.min(positions_um)) + float(np.max(positions_um)))
             return np.asarray([int(np.argmin(np.abs(positions_um - center_um)))], dtype=int)
@@ -106,6 +115,7 @@ class PositionSelector:
 
 
 ALL = PositionSelector.all()
+PROXIMAL = PositionSelector.proximal()
 CENTER = PositionSelector.center()
 DISTAL = PositionSelector.distal()
 
@@ -128,6 +138,7 @@ __all__ = [
     "PositionMode",
     "PositionSelector",
     "ALL",
+    "PROXIMAL",
     "CENTER",
     "DISTAL",
     "At",

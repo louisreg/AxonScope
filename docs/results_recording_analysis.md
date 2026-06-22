@@ -50,10 +50,11 @@ Current solver handling:
 - `axs.simulate(...)` validates the public `Recording`, forwards
   `record_observables=True` to the scalar solver when observable groups are
   requested, then filters `SimResult.recordings` to the requested groups.
-- `axs.simulate_pool(...)` translates public pool Vm recording policies to
-  solver-level `BatchRecording` through `Recording.to_batch_options()`. Scalar
-  fallback rows are filtered after the solve so public `record_indices` match
-  the requested center/probe/index columns.
+- `axs.simulate_pool(...)` translates public pool Vm recording policies to a
+  backend-neutral `RecordingPlan`, then the JAX backend lowers that plan to
+  solver-level `BatchRecording`. Scalar fallback rows are filtered after the
+  solve so public `record_indices` match the requested center/probe/index
+  columns.
 - Low-level solvers and batch kernels still receive numerical flags/options;
   they do not own the user-facing `Recording` contract.
 
@@ -266,12 +267,17 @@ online_activation = observer.finalize()
 posthoc_activation = result.analyze(activation)
 ```
 
-Solver-side observer execution is implemented for the current
-`axs.analysis.Activation(...)` and `axs.analysis.PeakVoltage(...)` definitions
-when they are passed as simulation observers with `Recording.none()`. Observer
-state is updated at every solver `dt` inside the scalar or compatible batch
-kernel, and the result carries compact `observations` rather than retained Vm
-traces.
+Solver-side observer-only execution now uses one strict VmRaster primitive.
+Threshold-style definitions such as `axs.analysis.Activation(...)` lower to
+fixed membrane-voltage probes, the solver thresholds those probes at every
+`dt`, and the result carries compact `observations["vm_raster"]` rather than
+retained Vm traces. Activation, latency, velocity, threshold, and recruitment
+summaries are post-processing of that raster.
+
+The packed result container is `axs.results.VmRasterResult` and the canonical
+observation key is `axs.results.VM_RASTER_OBSERVATION_KEY`. Solver/backend code
+owns the packed-bit update loop, but CPU unpacking and result-side helpers live
+with public results.
 
 ```python
 result = axs.simulate(
@@ -281,14 +287,13 @@ result = axs.simulate(
     recording=axs.Recording.none(),
     observers=[
         axs.analysis.Activation(threshold=-20.0 * axs.mV),
-        axs.analysis.PeakVoltage(),
     ],
 )
 ```
 
-For pool runs, homogeneous single-cable and homogeneous double-cable groups can
-use the compact observer-only batch path. Incompatible or padded groups may
-still fall back to scalar execution or post-hoc observer evaluation depending on
-the requested recording and group shape. Solver-side observers currently support
-membrane-voltage based `Activation` and `PeakVoltage`; richer latency, block,
-spike-count, and non-Vm signal observers remain future work.
+For pool runs, compatible single-cable and double-cable groups can use the
+compact observer-only batch path. Row-specific probe tables and masks must be
+lowered before the solver so padded rows do not force full Vm retention.
+`PeakVoltage` and other rich analyses remain post-hoc on recorded Vm until a
+dedicated solver-side implementation is designed, benchmarked, and kept off the
+hot path.

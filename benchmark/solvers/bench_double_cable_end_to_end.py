@@ -37,14 +37,14 @@ from axonscope.backends.jax.input_batches import (
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
+from axonscope.backends.jax.batch_kernels import DoubleCableBatchKernel
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
-    DoubleCableBatchKernel,
-    prepare_solver_runtime,
     resolve_double_cable_block_solver,
 )
-from axonscope.solvers.observer_runtime import build_vm_raster_plan
+from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
+from axonscope.backends.jax.runtime import prepare_solver_runtime
 from benchmark.hotpaths.run import build_double_cable_extracellular_pool
 
 

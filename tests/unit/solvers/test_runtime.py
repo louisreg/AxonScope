@@ -14,7 +14,8 @@ from axonscope.stimulation import (
     IntracellularContext,
     PointSourceElectrode,
 )
-from axonscope.solvers.runtime import (
+from axonscope.backends.jax.runtime import (
+    _membrane_runtime_cache_key,
     precompute_extracellular_potential_mV,
     prepare_cable_runtime,
     prepare_extracellular_runtime,
@@ -175,6 +176,51 @@ def test_prepare_membrane_runtime_keeps_initial_voltage_in_cache_key():
     assert runtime_b is not runtime_a
     assert np.asarray(runtime_a.Vm0_mV)[0] == pytest.approx(-67.5)
     assert np.asarray(runtime_b.Vm0_mV)[0] == pytest.approx(-65.0)
+
+
+def test_membrane_dtype_participates_in_static_and_runtime_cache_identity():
+    membrane32 = axs.membranes.MembraneModel(
+        "passive",
+        {"Rm": 1e4, "EL": -70.0},
+        dtype=np.float32,
+    )
+    membrane64 = axs.membranes.MembraneModel(
+        "passive",
+        {"Rm": 1e4, "EL": -70.0},
+        dtype=np.float64,
+    )
+    assert membrane32._static_signature() != membrane64._static_signature()
+
+    axon32 = Axon(
+        layout=Layout.single_uniform(
+            Section(
+                "axon",
+                membrane=membrane32,
+                diameter=1.0 * axs.um,
+            ),
+            length=100.0 * axs.um,
+            compartments=5,
+        )
+    )
+    axon64 = Axon(
+        layout=Layout.single_uniform(
+            Section(
+                "axon",
+                membrane=membrane64,
+                diameter=1.0 * axs.um,
+            ),
+            length=100.0 * axs.um,
+            compartments=5,
+        )
+    )
+    solver32 = build_solver_axon(axon32)
+    solver64 = build_solver_axon(axon64)
+
+    assert solver32.dtype == np.dtype("float32")
+    assert solver64.dtype == np.dtype("float64")
+    assert _membrane_runtime_cache_key(axon32, solver32, SolverOptions()) != (
+        _membrane_runtime_cache_key(axon64, solver64, SolverOptions())
+    )
 
 
 def test_prepare_cable_runtime_reuses_static_geometry_runtime():

@@ -15,7 +15,6 @@ from axonscope.signals import (
     Signal,
     SignalSelection,
 )
-from axonscope.solvers import BatchOptions, BatchRecording
 from axonscope.utils import units
 
 
@@ -26,6 +25,90 @@ class RecordingSpatial(Enum):
     CENTER = "center"
     PROBES = "probes"
     INDICES = "indices"
+
+
+def _probe_indices(*, nx: int, count: int) -> tuple[int, ...]:
+    if nx < 1:
+        raise ValueError("nx must be >= 1.")
+    probe_count = min(int(count), int(nx))
+    if probe_count <= 1:
+        return (0,)
+    values = [int(index * (nx - 1) / (probe_count - 1)) for index in range(probe_count)]
+    return tuple(dict.fromkeys(values))
+
+
+@dataclass(frozen=True)
+class RecordingPlan:
+    """Backend-neutral recording plan derived from a public ``Recording``.
+
+    This object belongs to the public/runtime boundary. It describes which
+    signal groups and spatial samples should be retained without naming solver
+    or backend option classes. Backend layers are responsible for lowering this
+    plan to concrete kernel options.
+    """
+
+    voltage: bool
+    gates: bool
+    currents: bool
+    conductances: bool
+    state_variables: bool
+    signals: tuple[Signal, ...]
+    positions_um: tuple[float, ...] | None
+    record_indices: tuple[int, ...] | None
+    sample_dt_ms: float | None
+    every_n_steps: int | None
+    spatial: RecordingSpatial
+    probe_count: int
+
+    @classmethod
+    def from_recording(cls, recording: "Recording") -> "RecordingPlan":
+        """Build a backend-neutral plan from a public recording policy."""
+
+        if not isinstance(recording, Recording):
+            raise TypeError("recording must be an axonscope.Recording value.")
+        return recording.to_plan()
+
+    @property
+    def wants_observables(self) -> bool:
+        """Return whether non-voltage observable groups are requested."""
+
+        return bool(
+            self.gates
+            or self.currents
+            or self.conductances
+            or self.state_variables
+        )
+
+    def indices_for(self, nx: int) -> tuple[int, ...] | None:
+        """Return retained Vm indices, ``None`` for full, or ``()`` for none."""
+
+        if nx < 1:
+            raise ValueError("nx must be >= 1.")
+        if not self.voltage:
+            return ()
+        if self.positions_um is not None:
+            raise NotImplementedError(
+                "position-based recording indices require backend/layout lowering."
+            )
+        if self.spatial is RecordingSpatial.FULL:
+            return None
+        if self.spatial is RecordingSpatial.CENTER:
+            return (int(nx) // 2,)
+        if self.spatial is RecordingSpatial.PROBES:
+            return _probe_indices(nx=int(nx), count=self.probe_count)
+        if self.record_indices is None:
+            raise ValueError("indices recording requires record_indices.")
+        if any(index < 0 or index >= nx for index in self.record_indices):
+            raise ValueError(
+                f"recording indices must be within [0, {nx}), got {self.record_indices}."
+            )
+        return self.record_indices
+
+    def width_for(self, nx: int) -> int:
+        """Return the number of retained Vm columns for ``nx`` compartments."""
+
+        indices = self.indices_for(nx)
+        return int(nx) if indices is None else len(indices)
 
 
 def _normalize_signals(
@@ -286,31 +369,23 @@ class Recording:
             or self.state_variables
         )
 
-    def to_batch_options(self) -> BatchOptions:
-        """Translate this public policy to the current pool batch options."""
+    def to_plan(self) -> RecordingPlan:
+        """Return the backend-neutral runtime recording plan."""
 
-        if self.wants_observables:
-            raise NotImplementedError("pool recording currently supports Vm only.")
-        if not self.voltage:
-            return BatchOptions.none()
-        if self.positions_um is not None:
-            raise NotImplementedError(
-                "position-based batch recording is not wired yet; "
-                "use center/probes/indices/full."
-            )
-        if self.sample_dt_ms is not None or self.every_n_steps is not None:
-            raise NotImplementedError("temporal recording subsampling is not wired yet.")
-        if self.spatial is RecordingSpatial.CENTER:
-            recording = BatchRecording.center()
-        elif self.spatial is RecordingSpatial.PROBES:
-            recording = BatchRecording.probes(self.probe_count)
-        elif self.spatial is RecordingSpatial.INDICES:
-            if self.record_indices is None:
-                raise ValueError("indices recording requires record_indices.")
-            recording = BatchRecording.indices(self.record_indices)
-        else:
-            recording = BatchRecording.full()
-        return BatchOptions(recording=recording)
+        return RecordingPlan(
+            voltage=self.voltage,
+            gates=self.gates,
+            currents=self.currents,
+            conductances=self.conductances,
+            state_variables=self.state_variables,
+            signals=self.signals,
+            positions_um=self.positions_um,
+            record_indices=self.record_indices,
+            sample_dt_ms=self.sample_dt_ms,
+            every_n_steps=self.every_n_steps,
+            spatial=self.spatial,
+            probe_count=self.probe_count,
+        )
 
 
-__all__ = ["Recording", "RecordingSpatial"]
+__all__ = ["Recording", "RecordingPlan", "RecordingSpatial"]

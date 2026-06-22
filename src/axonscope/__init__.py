@@ -2,9 +2,11 @@ from .utils import units
 
 from . import (
     analysis,
+    analytical,
     axons,
     dispatcher,
     identifiers,
+    inspection,
     membranes,
     performance,
     preparation,
@@ -43,8 +45,23 @@ from axonscope.benchmarking import (
     reset_benchmark,
 )
 from axonscope.identifiers import AxonId, DriveId, SignalId
+from axonscope.inspection import (
+    AssemblyDetailInspection,
+    DispatchGroupInspection,
+    KernelInspection,
+    LoweringInspection,
+    MemoryInspection,
+    PaddingInspection,
+    PlanningInspection,
+    ProbeInspection,
+    PreparationInspection,
+    ResultAssemblyInspection,
+    SimulationInspection,
+    inspect_simulation,
+)
 from axonscope.performance import (
     Device,
+    ExecutionPolicy,
     MemoryEstimateItem,
     PrecisionPolicy,
     Runtime,
@@ -59,11 +76,14 @@ from axonscope.results import (
     RecordedSignal,
     RecordingManifest,
     SimResult,
+    VM_RASTER_OBSERVATION_KEY,
+    VmRasterResult,
+    unpack_vm_raster_words,
 )
-from axonscope.recording import Recording, RecordingSpatial
+from axonscope.recording import Recording, RecordingPlan, RecordingSpatial
 from axonscope.signals import Signal
 from axonscope.simulation import AxonSimulation, simulate, simulate_pool
-from axonscope.solvers import SolverOptions
+from axonscope.solvers import BatchOptions, BatchRecording, SolverOptions
 from axonscope.stimulation import (
     AnalyticalExtracellularContext,
     ExtracellularContext,
@@ -127,9 +147,11 @@ def __getattr__(name: str):
 __all__ = [
     "__version__",
     "analysis",
+    "analytical",
     "axons",
     "dispatcher",
     "identifiers",
+    "inspection",
     "membranes",
     "performance",
     "preparation",
@@ -158,7 +180,20 @@ __all__ = [
     "AxonId",
     "DriveId",
     "SignalId",
+    "AssemblyDetailInspection",
+    "DispatchGroupInspection",
+    "KernelInspection",
+    "LoweringInspection",
+    "MemoryInspection",
+    "PaddingInspection",
+    "PlanningInspection",
+    "ProbeInspection",
+    "PreparationInspection",
+    "ResultAssemblyInspection",
+    "SimulationInspection",
+    "inspect_simulation",
     "Device",
+    "ExecutionPolicy",
     "MemoryEstimateItem",
     "PrecisionPolicy",
     "Runtime",
@@ -178,10 +213,13 @@ __all__ = [
     "AnalyticalExtracellularContext",
     "Electrode",
     "PointSourceElectrode",
+    "BatchOptions",
+    "BatchRecording",
     "SolverOptions",
     "simulate",
     "simulate_pool",
     "Recording",
+    "RecordingPlan",
     "RecordingSpatial",
     "Signal",
     "IntracellularContext",
@@ -193,10 +231,13 @@ __all__ = [
     "ExtracellularStimulation",
     "NRVExtracellularContext",
     "SimResult",
+    "VM_RASTER_OBSERVATION_KEY",
+    "VmRasterResult",
     "CohortResult",
     "AxonResultView",
     "AxonSimulationResult",
     "RecordedSignal",
     "RecordingManifest",
+    "unpack_vm_raster_words",
     *_UNIT_ALIASES,
 ]

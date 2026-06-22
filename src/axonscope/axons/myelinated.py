@@ -129,6 +129,55 @@ class Myelinated(Axon):
         unit_label = units.unit_label(unit) or "micrometer"
         return units.to_array(units.Q_(self.x_nodes_um, "micrometer"), unit_label, dtype=float)
 
+    def node_index(self, index: int | str = 0) -> int:
+        """Return the compartment index of one Ranvier node."""
+
+        node_indices = self.node_indices
+        resolved = _resolve_node_selector(index, int(node_indices.shape[0]))
+        return int(node_indices[resolved])
+
+    def node_position(
+        self,
+        index: int | str = 0,
+        *,
+        unit: Any = "micrometer",
+    ) -> length_t:
+        """Return one Ranvier-node position as a unit-bearing quantity.
+
+        `index` accepts integer node ordinals or the names `"first"`/`"proximal"`,
+        `"center"`, and `"last"`/`"distal"`.
+        """
+
+        values = self.node_position_values(unit=unit)
+        resolved = _resolve_node_selector(index, int(values.shape[0]))
+        unit_label = units.unit_label(unit) or "micrometer"
+        return units.Q_(float(values[resolved]), unit_label)
+
+
+def _resolve_node_selector(index: int | str, count: int) -> int:
+    if count <= 0:
+        raise ValueError("myelinated axon has no Ranvier nodes.")
+
+    if isinstance(index, str):
+        key = index.strip().lower()
+        if key in {"first", "proximal"}:
+            return 0
+        if key == "center":
+            return count // 2
+        if key in {"last", "distal"}:
+            return count - 1
+        raise ValueError(
+            "node selector must be an integer, 'first'/'proximal', "
+            "'center', or 'last'/'distal'."
+        )
+
+    resolved = int(index)
+    if resolved < 0:
+        resolved += count
+    if resolved < 0 or resolved >= count:
+        raise IndexError(f"node index {index} is out of range for {count} nodes.")
+    return resolved
+
 
 class MRG(Myelinated):
     """Concrete MRG myelinated axon model.
