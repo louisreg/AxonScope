@@ -50,6 +50,7 @@ class SimResult(SingleAxonResultMixin):
     observations: ObservationDict | None = None
     recording: Recording | None = None
     record_indices: tuple[int, ...] | None = None
+    final_state: Any | None = None
     simulation: AxonInstance | None = None
 
     def __init__(
@@ -63,6 +64,7 @@ class SimResult(SingleAxonResultMixin):
         observations: ObservationDict | None = None,
         recording: Recording | None = None,
         record_indices: tuple[int, ...] | None = None,
+        final_state: Any | None = None,
         simulation: AxonInstance | None = None,
     ) -> None:
         if t is None:
@@ -74,6 +76,7 @@ class SimResult(SingleAxonResultMixin):
         self.observations = observations
         self.recording = recording
         self.record_indices = record_indices
+        self.final_state = final_state
         self.simulation = simulation
 
     @property

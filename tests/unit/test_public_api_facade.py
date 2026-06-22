@@ -38,6 +38,10 @@ def test_public_unmyelinated_template_and_simulate():
     assert axon.resolved_formulation == "single-cable"
     assert result.axon is axon
     assert result.simulation is sim
+    assert run.recordings == (result.recordings,)
+    assert run.recorded_axes[0].original_indices == tuple(range(11))
+    assert run.final_states == (None,)
+    assert result.final_state is None
 
 
 def test_public_axon_is_descriptive_and_simulation_owns_protocol():
@@ -545,6 +549,10 @@ def test_public_simulate_pool_returns_canonical_cohort_result():
     assert result.axons == (axon_model, axon_model)
     assert result.simulations == (axon_a, axon_b)
     assert result.diagnostics[0]["pool_index"] == 0
+    assert len(result.recordings) == 2
+    assert result.recordings[0] is not None
+    assert result.recordings[0]["Vm"].shape == (2, 1)
+    assert result.final_states == (None, None)
 
     manifest = result.recording_manifest
     assert isinstance(manifest, axs.RecordingManifest)
@@ -571,6 +579,7 @@ def test_public_simulate_pool_returns_canonical_cohort_result():
     assert isinstance(first.recorded_axis, axs.RecordedAxis)
     assert first.recorded_axis.original_indices == (5,)
     np.testing.assert_allclose(first.recorded_axis.position_values(unit=axs.um), [50.0])
+    assert result.recorded_axes[0].original_indices == (5,)
     np.testing.assert_allclose(first.signal(axs.signals.Vm), first.Vm)
 
     dense_vm = result.signal(axs.signals.Vm)
@@ -703,6 +712,8 @@ def test_public_root_axon_simulation_runs_single_instance():
     assert result.simulation is instance
     assert result.recording is recording
     assert result.Vm.shape == (2, 11)
+    assert run.recordings == (result.recordings,)
+    assert run.final_states == (None,)
 
 
 def test_public_root_axon_simulation_keeps_one_row_population_lifecycle():

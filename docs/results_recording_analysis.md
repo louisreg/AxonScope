@@ -110,6 +110,7 @@ result.recorded_axis   # recorded intrinsic positions + original layout indices
 result.recordings      # Vm plus optional gates/currents/etc.
 result.observations    # compact observer outputs for observer-only runs
 result.diagnostics     # metadata such as pool index/method
+result.final_state     # final backend state, or None when not retained
 ```
 
 Results expose small unit-aware accessors and plot helpers for common notebook
@@ -154,6 +155,9 @@ dense_vm = results.signal(axs.signals.Vm)
 first = results.axon(0)
 center_trace = first.signal(axs.signals.Vm)
 vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
+row_recordings = results.recordings
+row_axes = results.recorded_axes
+row_final_states = results.final_states
 ```
 
 For homogeneous recordings, `results.signal(axs.signals.Vm)` returns a dense
@@ -162,13 +166,21 @@ accessible through per-axon views and through `results.cohorts`.
 `results.recording_manifest` records which signals were requested, which
 signals are actually available, and the dense shape/dtype for each cohort.
 
+Public result surface audit:
+
+| Object | Role |
+| --- | --- |
+| `AxonSimulationResult` | canonical execution result for one row or many rows; supports indexing, iteration, `signal(...)`, `analyze(...)`, `report(...)`, diagnostics, observations, recordings, recorded axes, and final-state aggregation. |
+| `AxonResultView` | one simulated row; exposes `Vm`, `t`, `signal(...)`, `recorded_axis`, recordings, observations, diagnostics, final state, plots, and analysis/report helpers. |
+| `CohortResult` | dense storage block behind `AxonSimulationResult`; useful for advanced inspection, not the beginner path. |
+| `RecordedSignal` and `RecordingManifest` | structured record of requested and available signals. |
+| `RecordedAxis` | canonical interpretation of retained Vm columns as intrinsic axon positions plus original layout indices. |
+| `VmRasterResult` | compact observer-only threshold raster stored under `observations["vm_raster"]`. |
+| `AnalysisReport` and protocol summaries | separate scientific interpretations of results; they do not mutate or merge into raw numerical result objects. |
+
 The lower-level `run_pool` path returns private dispatch results. Those
 containers keep `index`, `group_id`, and `method` before the public wrapper
 converts the pool into `AxonSimulationResult`.
-
-`SimResult` is an internal scalar solver payload. It is not exported from
-`axonscope` or `axonscope.results`, and examples/tests should not teach it as a
-public user path.
 
 ## Analysis
 

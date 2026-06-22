@@ -589,12 +589,9 @@ equations from analyses.
 
 ## 6.3 Canonical Results
 
-The target public result is `AxonSimulationResult` for one axon and
-populations, with `AxonResultView` for per-axon access.
-
-`SimResult` is an internal scalar solver payload. It is not exported from
-`axonscope` or `axonscope.results` and must not appear in examples as a user
-path.
+The public result is `AxonSimulationResult` for one axon and populations, with
+`AxonResultView` for per-axon access. Internal scalar solver payloads are not
+exported and must not appear in examples as a user path.
 
 Use:
 
@@ -608,8 +605,10 @@ for row in pool_run:
 ```
 
 Results contain numerical outputs, final state, online observation payloads,
-execution metadata, and diagnostics. Post-hoc analyses return separate objects
-or reports.
+execution metadata, and diagnostics. Per-row data lives on `AxonResultView`;
+population-wide aggregation lives on explicit plural properties such as
+`recordings`, `recorded_axes`, `final_states`, and `diagnostics`. Post-hoc
+analyses return separate objects or reports.
 
 ## 6.4 Analyses
 

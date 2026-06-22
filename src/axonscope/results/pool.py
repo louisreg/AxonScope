@@ -182,6 +182,7 @@ class CohortResult:
     recording: Recording | None = None
     observations: ObservationDict | None = None
     recordings: tuple[RecordingDict | None, ...] | None = None
+    final_states: tuple[Any | None, ...] | None = None
 
     @property
     def size(self) -> int:
@@ -199,6 +200,11 @@ def _cohort_from_dispatch_cohort(
 
     if len(result.record_indices) != len(result.indices):
         raise ValueError("cohort record_indices must align with cohort input indices.")
+    final_states = result.final_states
+    if final_states is None:
+        final_states = tuple(None for _ in result.indices)
+    if len(final_states) != len(result.indices):
+        raise ValueError("cohort final_states must align with cohort input indices.")
     return CohortResult(
         input_indices=tuple(int(index) for index in result.indices),
         axons=tuple(result.axons),
@@ -209,6 +215,7 @@ def _cohort_from_dispatch_cohort(
         record_indices=tuple(result.record_indices),
         recording=recording,
         observations=result.observations,
+        final_states=tuple(final_states),
     )
 
 
@@ -384,6 +391,15 @@ class AxonResultView(SingleAxonResultMixin):
         }
 
     @property
+    def final_state(self) -> Any | None:
+        """Final solver state for this row, when retained by the backend."""
+
+        cohort, row = self._cohort_row
+        if cohort.final_states is None:
+            return None
+        return cohort.final_states[row]
+
+    @property
     def recorded_axis(self) -> RecordedAxis:
         """Recorded intrinsic spatial axis for this row's ``Vm`` columns."""
 
@@ -485,6 +501,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                     record_indices=tuple(row.record_indices for row in grouped_rows),
                     recording=recording,
                     observations=_merge_dispatch_observations(grouped_rows),
+                    final_states=tuple(row.final_state for row in grouped_rows),
                 )
             )
 
@@ -566,6 +583,24 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         """Per-row dispatch diagnostics in input order."""
 
         return tuple(view.diagnostics for view in self)
+
+    @property
+    def recordings(self) -> tuple[RecordingDict | None, ...]:
+        """Per-row recording dictionaries in input order."""
+
+        return tuple(view.recordings for view in self)
+
+    @property
+    def recorded_axes(self) -> tuple[RecordedAxis, ...]:
+        """Per-row recorded intrinsic axes in input order."""
+
+        return tuple(view.recorded_axis for view in self)
+
+    @property
+    def final_states(self) -> tuple[Any | None, ...]:
+        """Per-row final solver states in input order, when retained."""
+
+        return tuple(view.final_state for view in self)
 
     @property
     def observations(self) -> ObservationDict | None:

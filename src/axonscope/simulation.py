@@ -288,6 +288,7 @@ def _single_result_to_public(result: SimResult, recording: Recording) -> AxonSim
         recording=recording,
         observations=result.observations,
         recordings=(result.recordings,),
+        final_states=(result.final_state,),
     )
     return AxonSimulationResult((cohort,), size=1, recording=recording)
 

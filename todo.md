@@ -161,22 +161,22 @@ Work should start here unless the user asks otherwise.
   results.
 - [x] Decide and enforce the scalar return contract:
   `simulate(...) -> AxonSimulationResult`, one row through `.single` or `[0]`.
-- [x] Remove public `SimResult` export and public view conversion paths.
-- [ ] Audit every remaining public result class/path: `AxonSimulationResult`,
+- [x] Remove public scalar-solver-result export and public view conversion paths.
+- [x] Audit every remaining public result class/path: `AxonSimulationResult`,
   `AxonResultView`, `CohortResult`, `RecordedSignal`, `RecordingManifest`,
   `VmRasterResult`, analysis reports, and protocol return types.
-- [ ] Finish one-axon and population result semantics: signal access,
+- [x] Finish one-axon and population result semantics: signal access,
   indexing, iteration, metadata, diagnostics, observations, final state, and
   analysis/report APIs.
-- [ ] Keep analyses separate from raw numerical results while making common
+- [x] Keep analyses separate from raw numerical results while making common
   workflows ergonomic: `result.analyze(...)`, `result.report(...)`, protocol
   summaries, and population denominators.
 - [x] Remove duplicate result containers, forwarding aliases, or shape-specific
   convenience paths that conflict with the canonical model.
 - [x] Update basic/advanced examples and primary docs so result usage teaches
   the final contract.
-- [ ] Clean stale proposal/secondary docs that still mention historical
-  `SimResult` public APIs.
+- [x] Clean stale proposal/secondary docs that still mention historical
+  public result APIs.
 
 ### 9. Remove World Coordinate Ownership
 
