@@ -6,7 +6,7 @@ from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import RattayAberham 
 from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.stimulation import Stimulus
 
 # ==============================================================================

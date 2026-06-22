@@ -48,12 +48,13 @@ def main() -> None:
             amplitude=0.8 * axs.nA,
         ),
     )
-    full_result = axs.simulate(
+    full_run = axs.simulate(
         full_instance,
         duration=2.0 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.full(),
     )
+    full_result = full_run.single
 
     # Step 3: run a shorter solve that explicitly asks for Vm and gates only.
     gates_axon = axs.axons.HodgkinHuxley(
@@ -71,12 +72,13 @@ def main() -> None:
             amplitude=0.8 * axs.nA,
         ),
     )
-    gates_only_result = axs.simulate(
+    gates_only_run = axs.simulate(
         gates_instance,
         duration=0.2 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.only(axs.signals.Vm, axs.signals.GATES),
     )
+    gates_only_result = gates_only_run.single
 
     # Step 4: build a small pool. Pool recording policies currently control the
     # retained Vm columns rather than HH gates/currents.

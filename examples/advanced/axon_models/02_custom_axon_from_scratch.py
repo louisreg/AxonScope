@@ -110,7 +110,8 @@ def main() -> None:
     )
     sim.add_intracellular_context(context=clamp)
 
-    result = axs.simulate(sim, duration=6.0 * axs.ms, dt=0.01 * axs.ms)
+    run = axs.simulate(sim, duration=6.0 * axs.ms, dt=0.01 * axs.ms)
+    result = run.single
 
     probe_positions = np.asarray([150.0, 350.0, 750.0]) * axs.um
     peak_mV = axs.analysis.peak_voltage(result)

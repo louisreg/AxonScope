@@ -9,7 +9,7 @@ from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_met
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
 from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, SolverOptions
 from axonscope.utils import units
 
@@ -202,7 +202,7 @@ def _dispatch_result_from_sim(
     *,
     group_id: int,
 ) -> DispatchResult:
-    """Convert a scalar ``SimResult`` to a raw dispatch result."""
+    """Convert an internal scalar solver result to a raw dispatch row."""
 
     return DispatchResult(
         index=item.index,

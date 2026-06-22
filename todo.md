@@ -20,7 +20,7 @@ stabilization pass:
 - make runtime/device/precision policies executable, not estimate-only;
 - make planning, batching, preparation, lowering, kernel route, and result
   assembly inspectable;
-- converge scalar and population runs on one coherent public result model;
+- keep scalar and population runs on one coherent public result model;
 - remove real-world coordinate ownership from core/public simulation objects;
 - flatten all examples against the public API;
 - remove stale docs and obsolete branches.
@@ -155,21 +155,28 @@ Work should start here unless the user asks otherwise.
 
 ### 8. Simulation Results Model
 
-- [ ] Audit every public result class/path: `SimResult`, `AxonSimulationResult`,
+- [x] Introduce `RecordedAxis` as the shared scalar/pool interpretation of
+  recorded intrinsic positions and original layout indices.
+- [x] Add descriptor-based `signal(...)` access to one-axon views and population
+  results.
+- [x] Decide and enforce the scalar return contract:
+  `simulate(...) -> AxonSimulationResult`, one row through `.single` or `[0]`.
+- [x] Remove public `SimResult` export and public view conversion paths.
+- [ ] Audit every remaining public result class/path: `AxonSimulationResult`,
   `AxonResultView`, `CohortResult`, `RecordedSignal`, `RecordingManifest`,
   `VmRasterResult`, analysis reports, and protocol return types.
-- [ ] Decide the final scalar return contract: either migrate scalar
-  `simulate(...)` to `AxonSimulationResult` or keep a clearly documented
-  compatibility boundary until removal.
-- [ ] Make one-axon and population result semantics coherent: signal access,
+- [ ] Finish one-axon and population result semantics: signal access,
   indexing, iteration, metadata, diagnostics, observations, final state, and
   analysis/report APIs.
 - [ ] Keep analyses separate from raw numerical results while making common
   workflows ergonomic: `result.analyze(...)`, `result.report(...)`, protocol
   summaries, and population denominators.
-- [ ] Remove duplicate result containers, forwarding aliases, or shape-specific
+- [x] Remove duplicate result containers, forwarding aliases, or shape-specific
   convenience paths that conflict with the canonical model.
-- [ ] Update examples/tests/docs so result usage teaches the final contract.
+- [x] Update basic/advanced examples and primary docs so result usage teaches
+  the final contract.
+- [ ] Clean stale proposal/secondary docs that still mention historical
+  `SimResult` public APIs.
 
 ### 9. Remove World Coordinate Ownership
 

@@ -309,7 +309,7 @@ def compartments_for(diameter_um: float, kind: FiberKind) -> int:
     return 41 if diameter_um >= 0.6 else 31
 
 
-def print_summary(rows: Sequence[FiberRow], results: Sequence[axs.SimResult]) -> None:
+def print_summary(rows: Sequence[FiberRow], results: axs.AxonSimulationResult) -> None:
     """Print row-level dispatch and voltage summary."""
 
     print("\n=== Row summary ===")
@@ -328,7 +328,7 @@ def print_summary(rows: Sequence[FiberRow], results: Sequence[axs.SimResult]) ->
 
 def plot_summary(
     rows: Sequence[FiberRow],
-    results: Sequence[axs.SimResult],
+    results: axs.AxonSimulationResult,
     plan: axs.dispatcher.DispatchPlan,
 ) -> None:
     """Plot dispatch grouping and the transverse fiber map."""

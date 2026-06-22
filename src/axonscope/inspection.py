@@ -1042,10 +1042,10 @@ def _inspect_result_assembly(
             observations = "posthoc_from_recorded_vm"
         return ResultAssemblyInspection(
             group_id=int(group.group_id),
-            record_kind="SimResult via scalar fallback",
+            record_kind="scalar fallback row",
             vm_output=vm_output,
             observation_output=observations,
-            public_result="SimResult or scalar DispatchResult",
+            public_result="AxonSimulationResult row",
         )
 
     kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
@@ -1245,7 +1245,7 @@ _DISPLAY_LABELS = {
     "DispatchResult rows": "row results",
     "DoubleCableBatchKernel": "double-cable batch",
     "factorized_point_source": "factorized point-source",
-    "SimResult via scalar fallback": "scalar fallback",
+    "scalar fallback row": "scalar fallback",
     "SingleCableKernel": "single-cable scalar",
     "SingleCableVStimBatchKernel": "single-cable Vstim batch",
     "sparse_current_clamp": "sparse clamp",

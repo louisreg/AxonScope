@@ -7,25 +7,25 @@ from typing import Any
 import numpy as np
 from scipy.signal import find_peaks
 
-from axonscope.results.single import SimResult
+from axonscope.results.axes import RecordedAxis
 from axonscope.utils import units
 
 
-def _vm_matrix(result: SimResult) -> np.ndarray:
+def _vm_matrix(result: Any) -> np.ndarray:
     vm = np.asarray(result.Vm, dtype=float)
     if vm.ndim != 2:
         raise ValueError(f"result.Vm must be 2D (time, position), got shape {vm.shape}.")
     return vm
 
 
-def _time_vector_ms(result: SimResult) -> np.ndarray:
+def _time_vector_ms(result: Any) -> np.ndarray:
     time_ms = np.asarray(result.t, dtype=float)
     if time_ms.ndim != 1:
         raise ValueError(f"result.t must be 1D, got shape {time_ms.shape}.")
     return time_ms
 
 
-def recorded_positions_um(result: SimResult) -> np.ndarray:
+def recorded_positions_um(result: Any) -> np.ndarray:
     """Return the axon positions represented by ``result.Vm`` columns.
 
     Full recordings map directly to the axon layout positions. Filtered
@@ -34,30 +34,7 @@ def recorded_positions_um(result: SimResult) -> np.ndarray:
     ``Vm.shape[1] == axon.n_compartments``.
     """
 
-    vm = _vm_matrix(result)
-    if not hasattr(result.axon, "layout"):
-        raise ValueError("result.axon must expose a layout for spatial analysis.")
-    positions = np.asarray(result.axon.layout.position_values(unit="micrometer"), dtype=float)
-    if positions.ndim != 1:
-        raise ValueError(f"result axon positions must be 1D, got shape {positions.shape}.")
-    if result.record_indices is not None:
-        indices = np.asarray(result.record_indices, dtype=int)
-        if indices.shape != (vm.shape[1],):
-            raise ValueError(
-                "record_indices must contain one entry per Vm column; "
-                f"got {indices.shape[0]} indices for {vm.shape[1]} columns."
-            )
-        if np.any(indices < 0) or np.any(indices >= positions.shape[0]):
-            raise ValueError("record_indices contains values outside axon positions.")
-        return positions[indices]
-
-    if vm.shape[1] == positions.shape[0]:
-        return positions
-
-    raise ValueError(
-        "result.Vm is spatially filtered but result.record_indices is missing; "
-        "cannot infer physical positions for analysis."
-    )
+    return RecordedAxis.from_result(result).position_values(unit="micrometer")
 
 
 def _peak_height_mV(value: Any | None, *, threshold_mV: Any) -> float | tuple[float, float] | None:
@@ -76,20 +53,12 @@ def _peak_height_mV(value: Any | None, *, threshold_mV: Any) -> float | tuple[fl
     return (lower, upper)
 
 
-def _recorded_indices(result: SimResult, vm: np.ndarray) -> np.ndarray:
-    if result.record_indices is None:
-        return np.arange(vm.shape[1], dtype=int)
-    indices = np.asarray(result.record_indices, dtype=int)
-    if indices.shape != (vm.shape[1],):
-        raise ValueError(
-            "record_indices must contain one entry per Vm column; "
-            f"got {indices.shape[0]} indices for {vm.shape[1]} columns."
-        )
-    return indices
+def _recorded_indices(result: Any, vm: np.ndarray) -> np.ndarray:
+    return RecordedAxis.from_result(result).index_values()
 
 
 def _spatially_filter_recording(
-    result: SimResult,
+    result: Any,
     vm: np.ndarray,
     positions_um: np.ndarray,
     *,
@@ -120,7 +89,7 @@ def _spatially_filter_recording(
 
 
 def rasterize(
-    result: SimResult,
+    result: Any,
     *,
     threshold_mV: Any = -10.0,
     min_distance_ms: Any = 1.0,
@@ -189,7 +158,7 @@ def rasterize(
 
 
 def conduction_velocity(
-    result: SimResult,
+    result: Any,
     *,
     threshold_mV: Any | None = None,
     min_distance_ms: Any = 0.5,
@@ -219,7 +188,7 @@ def conduction_velocity(
 
 
 def average_velocity(
-    result: SimResult,
+    result: Any,
     *,
     threshold_mV: Any | None = None,
     min_distance_ms: Any = 0.5,
@@ -239,7 +208,7 @@ def average_velocity(
     )
 
 
-def peak_voltage(result: SimResult) -> np.ndarray:
+def peak_voltage(result: Any) -> np.ndarray:
     """Return the peak membrane voltage in mV for each recorded position."""
 
     return np.max(_vm_matrix(result), axis=0)

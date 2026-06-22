@@ -43,13 +43,14 @@ def main() -> None:
 
     # Step 3: pass the policy to execution. The same policy can be used for
     # estimation or inspection so all runtime-facing reports agree.
-    result = axs.simulate(
+    run = axs.simulate(
         simulation,
         duration=10 * axs.ms,
         dt=0.001 * axs.ms,
         recording=recording,
         execution_policy=policy,
     )
+    result = run.single
     estimate = axs.AxonSimulation(
         simulation,
         duration=10 * axs.ms,

@@ -22,21 +22,80 @@ def _result_for_current(electrode_current, *, threshold_nA=1.0):
     vm = np.full((3, 2), -70.0)
     if amp_nA >= threshold_nA:
         vm[2, 1] = 20.0
-    return axs.SimResult(axon=_DummyAxon(), Vm=vm, t=t)
+    return _public_pool_result((vm,), axons=(_DummyAxon(),))
 
 
-def test_find_activation_threshold_accepts_result_factory():
+def _public_pool_result(vms, *, axons=None):
+    vm_tuple = tuple(np.asarray(vm, dtype=float) for vm in vms)
+    row_count = len(vm_tuple)
+    if axons is None:
+        axons = tuple(_DummyAxon() for _ in range(row_count))
+    t = np.asarray([0.0, 1.0, 2.0])
+    cohort = axs.CohortResult(
+        input_indices=tuple(range(row_count)),
+        axons=tuple(axons),
+        simulations=tuple(None for _ in range(row_count)),
+        Vm=np.stack(vm_tuple, axis=0) if vm_tuple else np.zeros((0, 3, 2)),
+        t=t,
+        diagnostics=tuple({} for _ in range(row_count)),
+        record_indices=tuple(None for _ in range(row_count)),
+    )
+    return axs.AxonSimulationResult((cohort,), size=row_count)
+
+
+def _observer_only_pool_result(activated):
+    flags = tuple(bool(value) for value in activated)
+    row_count = len(flags)
+    words = np.asarray(
+        [[[[0b100 if flag else 0]] for _ in range(1)] for flag in flags],
+        dtype=np.uint32,
+    )
+    raster = VmRasterResult(
+        words=words,
+        nt=3,
+        dt_ms=1.0,
+        definitions=(),
+        names=("activation",),
+        probe_indices=np.asarray([[1]], dtype=np.int32),
+        probe_mask=np.asarray([[True]], dtype=bool),
+        original_indices=np.asarray([[1]], dtype=np.int32),
+        positions_um=np.asarray([[100.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    cohort = axs.CohortResult(
+        input_indices=tuple(range(row_count)),
+        axons=tuple(_DummyAxon() for _ in range(row_count)),
+        simulations=tuple(None for _ in range(row_count)),
+        Vm=None,
+        t=np.asarray([0.0, 1.0, 2.0]),
+        diagnostics=tuple({} for _ in range(row_count)),
+        record_indices=tuple(None for _ in range(row_count)),
+        observations={VM_RASTER_OBSERVATION_KEY: raster},
+    )
+    return axs.AxonSimulationResult((cohort,), size=row_count)
+
+
+def test_find_activation_threshold_accepts_simulation_factory(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
     )
+    calls = []
+
+    def factory(tested_current):
+        candidate = _DummyAxon()
+        candidate.tested_current = tested_current
+        return candidate
+
+    def fake_simulate(candidate, **kwargs):
+        calls.append(kwargs)
+        return _result_for_current(candidate.tested_current, threshold_nA=1.0)
+
+    monkeypatch.setattr(activation_protocols, "simulate", fake_simulate)
 
     threshold = axs.protocols.find_activation_threshold(
-        lambda tested_current: _result_for_current(
-            tested_current,
-            threshold_nA=1.0,
-        ),
+        factory,
         bounds=(0.0 * axs.nA, 2.0 * axs.nA),
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
@@ -48,6 +107,7 @@ def test_find_activation_threshold_accepts_result_factory():
     assert threshold.amplitude is not None
     assert 1.0 <= threshold.amplitude.to(axs.nA).magnitude <= 1.25
     assert threshold.n_iterations >= 3
+    assert calls
 
 
 def test_find_activation_threshold_requires_current_units():
@@ -78,19 +138,36 @@ def test_find_activation_threshold_requires_current_units():
         )
 
 
-def test_recruitment_sweep_accepts_pool_update():
+def test_recruitment_sweep_accepts_pool_update(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
+        require_propagation=True,
     )
     tested_values_nA: list[float] = []
     pool = (_DummyAxon(), _DummyAxon())
     threshold_by_row = dict(zip(pool, (0.5, 1.5), strict=True))
 
     def update(row, tested_current):
-        tested_values_nA.append(float(tested_current.to(axs.nA).magnitude))
-        return _result_for_current(tested_current, threshold_nA=threshold_by_row[row])
+        current_nA = float(tested_current.to(axs.nA).magnitude)
+        tested_values_nA.append(current_nA)
+        row.tested_current = tested_current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        del kwargs
+        return _public_pool_result(
+            tuple(
+                _result_for_current(
+                    row.tested_current,
+                    threshold_nA=threshold_by_row[row],
+                ).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
 
     curve = axs.protocols.recruitment_sweep(
         pool,
@@ -121,33 +198,14 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
     thresholds_nA = (0.5, 1.5)
     calls = []
 
-    class _ObservedView:
-        def __init__(self, activated):
-            words = np.asarray([[[[0b100 if activated else 0]]]], dtype=np.uint32)
-            self.observations = {
-                VM_RASTER_OBSERVATION_KEY: VmRasterResult(
-                    words=words,
-                    nt=3,
-                    dt_ms=1.0,
-                    definitions=(),
-                    names=("activation",),
-                    probe_indices=np.asarray([[1]], dtype=np.int32),
-                    probe_mask=np.asarray([[True]], dtype=bool),
-                    original_indices=np.asarray([[1]], dtype=np.int32),
-                    positions_um=np.asarray([[100.0]], dtype=float),
-                    thresholds_mV=np.asarray([0.0], dtype=float),
-                )
-            }
-
     def update(row, tested_current):
-        row_index = pool.index(row)
-        return row_index, float(tested_current.to(axs.nA).magnitude)
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
 
     def fake_simulate_pool(updated_pool, **kwargs):
         calls.append(kwargs)
-        return tuple(
-            _ObservedView(amplitude_nA >= thresholds_nA[row_index])
-            for row_index, amplitude_nA in updated_pool
+        return _observer_only_pool_result(
+            row.tested_current_nA >= thresholds_nA[pool.index(row)]
+            for row in updated_pool
         )
 
     monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
@@ -193,32 +251,14 @@ def test_recruitment_sweep_batches_observer_only_independent_values(monkeypatch)
     thresholds_nA = (0.5, 1.5)
     calls = []
 
-    class _ObservedView:
-        def __init__(self, activated):
-            words = np.asarray([[[[0b100 if activated else 0]]]], dtype=np.uint32)
-            self.observations = {
-                VM_RASTER_OBSERVATION_KEY: VmRasterResult(
-                    words=words,
-                    nt=3,
-                    dt_ms=1.0,
-                    definitions=(),
-                    names=("activation",),
-                    probe_indices=np.asarray([[1]], dtype=np.int32),
-                    probe_mask=np.asarray([[True]], dtype=bool),
-                    original_indices=np.asarray([[1]], dtype=np.int32),
-                    positions_um=np.asarray([[100.0]], dtype=float),
-                    thresholds_mV=np.asarray([0.0], dtype=float),
-                )
-            }
-
     def update(row, tested_current):
         row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
 
     def fake_simulate_pool(updated_pool, **kwargs):
         updated_pool = tuple(updated_pool)
         calls.append((updated_pool, kwargs))
-        return tuple(
-            _ObservedView(row.tested_current_nA >= thresholds_nA[index % len(pool)])
+        return _observer_only_pool_result(
+            row.tested_current_nA >= thresholds_nA[index % len(pool)]
             for index, row in enumerate(updated_pool)
         )
 
@@ -264,14 +304,26 @@ def test_recruitment_sweep_requires_current_units():
         )
 
 
-def test_pool_sweep_accepts_generic_observer():
+def test_pool_sweep_accepts_generic_observer(monkeypatch):
     tested_values_nA: list[float] = []
     pool = (_DummyAxon(), _DummyAxon())
 
     def update(row, tested_current):
-        del row
-        tested_values_nA.append(float(tested_current.to(axs.nA).magnitude))
-        return _result_for_current(tested_current, threshold_nA=1.0)
+        current_nA = float(tested_current.to(axs.nA).magnitude)
+        tested_values_nA.append(current_nA)
+        row.tested_current = tested_current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        del kwargs
+        return _public_pool_result(
+            tuple(
+                _result_for_current(row.tested_current, threshold_nA=1.0).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
 
     sweep = axs.protocols.pool_sweep(
         pool,
@@ -292,11 +344,12 @@ def test_pool_sweep_accepts_generic_observer():
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
 
 
-def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update():
+def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
+        require_propagation=True,
     )
     thresholds_nA = np.asarray([0.5, 1.5], dtype=float)
     rows = np.asarray([0.5, 1.5]) * axs.um
@@ -306,9 +359,22 @@ def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update():
     def update(row, tested_current):
         current_nA = float(tested_current.to(axs.nA).magnitude)
         tested_currents_nA.append(current_nA)
-        index = pool.index(row)
-        threshold = thresholds_nA[index]
-        return _result_for_current(tested_current, threshold_nA=threshold)
+        row.tested_current = tested_current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        del kwargs
+        return _public_pool_result(
+            tuple(
+                _result_for_current(
+                    row.tested_current,
+                    threshold_nA=thresholds_nA[pool.index(row)],
+                ).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
 
     curve = axs.protocols.find_activation_threshold_curve(
         pool,
@@ -348,24 +414,40 @@ def test_find_activation_threshold_curve_requires_current_units():
         )
 
 
-def test_find_activation_threshold_curve_accepts_callable_bounds_and_relative_tolerance():
+def test_find_activation_threshold_curve_accepts_callable_bounds_and_relative_tolerance(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
+        require_propagation=True,
     )
     rows = ("low", "high")
     pool = tuple(_DummyAxon() for _ in rows)
     label_by_row = dict(zip(pool, rows, strict=True))
     thresholds_nA = {"low": 1.0, "high": 4.0}
 
+    def update(row, current):
+        row.tested_current = current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        del kwargs
+        return _public_pool_result(
+            tuple(
+                _result_for_current(
+                    row.tested_current,
+                    threshold_nA=thresholds_nA[label_by_row[row]],
+                ).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
     curve = axs.protocols.find_activation_threshold_curve(
         pool=pool,
         rows=rows,
-        update=lambda row, current: _result_for_current(
-            current,
-            threshold_nA=thresholds_nA[label_by_row[row]],
-        ),
+        update=update,
         bounds=lambda row: (
             0.0 * axs.nA,
             (2.0 if row == "low" else 8.0) * axs.nA,

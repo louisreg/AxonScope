@@ -90,9 +90,8 @@ def main() -> None:
     dense_vm = results.signal(axs.signals.Vm)
     print(f"dense Vm shape: {dense_vm.shape}  # axon, time, recorded_position")
 
-    # Step 13: convert a view only when an API really needs a standalone SimResult.
-    standalone = first.to_sim_result()
-    print(f"standalone type: {type(standalone).__name__}")
+    # Step 13: the view is the public one-axon result surface.
+    print(f"second simulation is original row: {second.simulation is axon_b}")
 
 
 if __name__ == "__main__":

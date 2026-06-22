@@ -8,7 +8,6 @@ from typing import Any, TypedDict
 import numpy as np
 
 from axonscope.positions import ALL, PositionSelector
-from axonscope.results.single import SimResult
 from axonscope.utils import units
 
 
@@ -44,7 +43,7 @@ class ActivationCriterion:
     target: PositionSelector = ALL
     require_propagation: bool = False
 
-    def evaluate(self, result: SimResult) -> ActivationEvent:
+    def evaluate(self, result: Any) -> ActivationEvent:
         """Evaluate the criterion on a simulation result."""
 
         threshold_mV = units.to_mV(self.threshold)
@@ -91,17 +90,15 @@ class ActivationCriterion:
 
     def _selected_columns(
         self,
-        result: SimResult,
+        result: Any,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         vm = result.voltage_values(unit="millivolt")
-        positions_um = result.position_values(unit="micrometer")
+        axis = result.recorded_axis
+        positions_um = axis.position_values(unit="micrometer")
         if positions_um.shape != (vm.shape[1],):
             raise ValueError("recorded positions must match result.Vm columns.")
 
-        if result.record_indices is None:
-            original_indices = np.arange(vm.shape[1], dtype=int)
-        else:
-            original_indices = np.asarray(result.record_indices, dtype=int)
+        original_indices = axis.index_values()
 
         if not isinstance(self.target, PositionSelector):
             raise TypeError("target must be an axonscope.positions.PositionSelector.")
@@ -137,7 +134,7 @@ class ActivationCriterion:
         }
 
 
-def detect_activation(result: SimResult, **kwargs: Any) -> ActivationEvent:
+def detect_activation(result: Any, **kwargs: Any) -> ActivationEvent:
     """Convenience wrapper around ``ActivationCriterion(...).evaluate(result)``."""
 
     return ActivationCriterion(**kwargs).evaluate(result)

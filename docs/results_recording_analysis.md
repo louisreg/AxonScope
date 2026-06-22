@@ -3,7 +3,8 @@
 This layer has three separate responsibilities:
 
 - `Recording` describes what the solver should store.
-- `SimResult` stores what a simulation actually returned.
+- `AxonSimulationResult` stores what public execution returned.
+- `AxonResultView` exposes one simulated axon row from that result.
 - `axonscope.analysis` turns returned arrays into scientific metrics with
   statuses and population denominators.
 - `axonscope.analysis` also provides lower-level rasterization and velocity
@@ -26,12 +27,13 @@ recording = axs.Recording(
     signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
 )
 
-result = axs.simulate(
+run = axs.simulate(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=recording,
 )
+result = run.single
 ```
 
 Current support:
@@ -49,7 +51,8 @@ Current solver handling:
 
 - `axs.simulate(...)` validates the public `Recording`, forwards
   `record_observables=True` to the scalar solver when observable groups are
-  requested, then filters `SimResult.recordings` to the requested groups.
+  requested, then filters the internal scalar recording payload to the requested
+  groups before wrapping it in the canonical public result.
 - `axs.simulate_pool(...)` translates public pool Vm recording policies to a
   backend-neutral `RecordingPlan`, then the JAX backend lowers that plan to
   solver-level `BatchRecording`. Scalar fallback rows are filtered after the
@@ -89,19 +92,24 @@ recording = axs.Recording(
 )
 ```
 
-## SimResult And Pool Results
+## Canonical Simulation Results
 
-`SimResult` is the scalar single-axon result and remains intentionally small:
+All public execution returns `AxonSimulationResult`, including one-axon runs:
 
 ```python
+run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
+result = run.single      # or run[0]
+
 result.t               # time samples in ms, shape (Nt,)
 result.recordings["Vm"]  # voltage samples, shape (Nt, Nrecorded)
-result.Vm              # convenience alias for recordings["Vm"]
+result.Vm              # alias for recordings["Vm"] on one-axon views
+result.signal(axs.signals.Vm)
 result.recording       # Recording policy used by the public wrapper, if any
 result.record_indices  # original axon indices represented by Vm columns, if filtered
+result.recorded_axis   # recorded intrinsic positions + original layout indices
 result.recordings      # Vm plus optional gates/currents/etc.
 result.observations    # compact observer outputs for observer-only runs
-result.diagnostics     # optional metadata such as pool index/method
+result.diagnostics     # metadata such as pool index/method
 ```
 
 Results expose small unit-aware accessors and plot helpers for common notebook
@@ -110,6 +118,8 @@ workflows:
 ```python
 result.time_values(unit=axs.ms)
 result.position_values(unit=axs.um)
+result.recorded_axis.position_values(unit=axs.um)
+result.recorded_axis.index_values()
 result.voltage_values(unit=axs.mV)
 result.trace_values(position=500 * axs.um)
 result.peak_voltage_values(unit=axs.mV)
@@ -120,10 +130,12 @@ result.plot_map()
 
 For a full recording, `result.Vm.shape[1] == result.axon.n_compartments`. For a
 filtered recording, `result.record_indices` maps each `Vm` column back to the
-original axon position. Analysis functions must use that mapping instead of
+original axon position. `result.recorded_axis` is the canonical interpreted
+view of that metadata: it contains intrinsic axon positions, never anatomical
+or world placement. Analysis functions must use that mapping instead of
 assuming that columns are contiguous compartments.
 
-Pool runs return `AxonSimulationResult`, a cohort-backed container. Indexing or
+Pool runs return the same `AxonSimulationResult` container. Indexing or
 iterating over it gives one `AxonResultView` per simulated row:
 
 ```python
@@ -136,12 +148,12 @@ results = axs.simulate_pool(
 
 for result in results:
     assert result.Vm.shape[1] == 1
-    print(result.record_indices)
+    print(result.recorded_axis.original_indices)
 
 dense_vm = results.signal(axs.signals.Vm)
 first = results.axon(0)
+center_trace = first.signal(axs.signals.Vm)
 vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
-standalone = first.to_sim_result()
 ```
 
 For homogeneous recordings, `results.signal(axs.signals.Vm)` returns a dense
@@ -153,6 +165,10 @@ signals are actually available, and the dense shape/dtype for each cohort.
 The lower-level `run_pool` path returns private dispatch results. Those
 containers keep `index`, `group_id`, and `method` before the public wrapper
 converts the pool into `AxonSimulationResult`.
+
+`SimResult` is an internal scalar solver payload. It is not exported from
+`axonscope` or `axonscope.results`, and examples/tests should not teach it as a
+public user path.
 
 ## Analysis
 
@@ -227,8 +243,8 @@ observers and the current solver-side observer path.
 ## Visualization
 
 Shared plotting helpers live under `axs.results.visualization` and consume the
-same analysis helpers. `SimResult` also exposes direct plot methods for the
-common single-result voltage trace/map workflows.
+same analysis helpers. One-axon views expose direct plot methods for common
+voltage trace/map workflows.
 
 ```python
 ax = axs.results.visualization.plot_raster(
@@ -239,8 +255,8 @@ ax = axs.results.visualization.plot_raster(
 ```
 
 Future plotting helpers should follow the same rule: they can consume
-`SimResult`, `AxonResultView`, `AxonSimulationResult`, axon models, or
-dispatcher outputs, and should reuse the same position/recording guardrails.
+`AxonResultView`, `AxonSimulationResult`, axon models, or dispatcher outputs,
+and should reuse the same position/recording guardrails.
 
 ## Online Vm Observers
 
@@ -255,8 +271,8 @@ activation = axs.analysis.Activation(
 )
 
 observer = activation.online_observer(
-    positions=result.position_values(unit=axs.um) * axs.um,
-    original_indices=result.record_indices,
+    positions=result.recorded_axis.position_values(unit=axs.um) * axs.um,
+    original_indices=result.recorded_axis.original_indices,
 )
 observer.update(
     result.time_values(unit=axs.ms) * axs.ms,
@@ -280,7 +296,7 @@ owns the packed-bit update loop, but CPU unpacking and result-side helpers live
 with public results.
 
 ```python
-result = axs.simulate(
+run = axs.simulate(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
@@ -289,6 +305,7 @@ result = axs.simulate(
         axs.analysis.Activation(threshold=-20.0 * axs.mV),
     ],
 )
+result = run.single
 ```
 
 For pool runs, compatible single-cable and double-cable groups can use the

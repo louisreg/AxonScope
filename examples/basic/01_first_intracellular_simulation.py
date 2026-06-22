@@ -41,9 +41,10 @@ def main() -> None:
     )
     sim.add_intracellular_context(context=clamp)
 
-    # `simulate(...)` returns a single SimResult with time, Vm, metadata, and
-    # convenience plotting helpers.
-    result = axs.simulate(sim, duration=duration, dt=dt)
+    # `simulate(...)` always returns the canonical run container. For one axon,
+    # use `.single` to get the one-axon view with Vm and plotting helpers.
+    run = axs.simulate(sim, duration=duration, dt=dt)
+    result = run.single
 
     print(f"Recorded Vm shape: {result.Vm.shape} (time steps x compartments)")
 

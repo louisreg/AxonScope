@@ -46,7 +46,8 @@ def main() -> None:
         dt=0.02 * axs.ms,
         recording=axs.Recording.full(),
     )
-    single_result = single_simulation.run()
+    single_run = single_simulation.run()
+    single_result = single_run.single
 
     # Step 4: build three rows for a population run. They share the
     # same public model class, but each row owns its own stimulus amplitude.
@@ -107,8 +108,8 @@ def main() -> None:
     )
     population_results = population_simulation.run()
 
-    # Step 6: inspect what the two roots returned. The population result keeps
-    # row order and exposes per-row views when iterated.
+    # Step 6: inspect what the two roots returned. Both roots return
+    # AxonSimulationResult; `.single` extracts the one-row view.
     print("=== Single executable root ===")
     print(f"Vm shape: {np.asarray(single_result.Vm).shape}")
     print(f"recording groups: {tuple(single_result.recordings or {})}")

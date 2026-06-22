@@ -4,6 +4,13 @@ import pytest
 import axonscope as axs
 
 
+def test_public_results_expose_one_canonical_path():
+    assert not hasattr(axs, "SimResult")
+    assert not hasattr(axs.results, "SimResult")
+    assert "SimResult" not in axs.__all__
+    assert "SimResult" not in axs.results.__all__
+
+
 def test_public_unmyelinated_template_and_simulate():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
@@ -21,8 +28,10 @@ def test_public_unmyelinated_template_and_simulate():
         ),
     )
 
-    result = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
+    run = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
+    result = run.single
 
+    assert isinstance(run, axs.AxonSimulationResult)
     assert result.Vm.shape == (2, 11)
     assert np.asarray(result.t).shape == (2,)
     assert isinstance(axon, axs.axons.Unmyelinated)
@@ -113,12 +122,13 @@ def test_public_recording_full_requests_observables():
         celsius=6.3 * axs.degC,
     )
 
-    result = axs.simulate(
+    run = axs.simulate(
         axon,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.full(),
     )
+    result = run.single
 
     assert result.recordings is not None
     assert "Vm" in result.recordings
@@ -148,17 +158,17 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
         target=axs.positions.CENTER,
     )
 
-    recorded = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
+    recorded = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms).single
     compact = axs.simulate(
         sim,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
         observers=[activation],
-    )
+    ).single
 
     assert compact.recordings is None
-    with pytest.raises(AttributeError, match="Vm recording"):
+    with pytest.raises(ValueError, match="Vm recording"):
         _ = compact.Vm
     assert compact.observations is not None
     raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
@@ -370,12 +380,13 @@ def test_public_recording_signals_filter_single_result():
         celsius=6.3 * axs.degC,
     )
 
-    result = axs.simulate(
+    run = axs.simulate(
         axon,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES]),
     )
+    result = run.single
 
     assert result.recordings is not None
     assert set(result.recordings) == {"Vm", "gates"}
@@ -557,12 +568,16 @@ def test_public_simulate_pool_returns_canonical_cohort_result():
     assert first.simulation is axon_a
     assert first.record_indices == (5,)
     assert first.trace_values(index=0)[0].shape == (2,)
+    assert isinstance(first.recorded_axis, axs.RecordedAxis)
+    assert first.recorded_axis.original_indices == (5,)
+    np.testing.assert_allclose(first.recorded_axis.position_values(unit=axs.um), [50.0])
+    np.testing.assert_allclose(first.signal(axs.signals.Vm), first.Vm)
 
     dense_vm = result.signal(axs.signals.Vm)
     assert dense_vm.shape == (2, 2, 1)
     np.testing.assert_allclose(np.asarray(first.Vm), dense_vm[0])
     assert result.views[1].simulation is axon_b
-    assert result[1].to_sim_result().simulation is axon_b
+    assert not hasattr(result[1], "to_sim_result")
 
     with pytest.raises(TypeError, match="signals values"):
         result.signal("Vm")
@@ -679,8 +694,10 @@ def test_public_root_axon_simulation_runs_single_instance():
         recording=recording,
     )
 
-    result = simulation.run()
+    run = simulation.run()
+    result = run.single
 
+    assert isinstance(run, axs.AxonSimulationResult)
     assert simulation.is_single
     assert not simulation.is_population
     assert result.simulation is instance

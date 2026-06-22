@@ -20,21 +20,20 @@ from axonscope.axons.axon import Axon
 from axonscope.recording import Recording
 from axonscope.analysis import ActivationCriterion, ActivationEvent
 from axonscope.analysis.definitions import Activation
-from axonscope.results import SimResult
 from axonscope.simulation import simulate, simulate_pool
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
 from axonscope.utils import units
 
 
-SimulationCandidate: TypeAlias = Axon | AxonInstance | SimResult
+SimulationCandidate: TypeAlias = Axon | AxonInstance
 SimulationFactory: TypeAlias = Callable[[Any], SimulationCandidate]
 """Callable that builds one simulation candidate for a tested value."""
 
 PoolUpdate: TypeAlias = Callable[[SimulationCandidate, Any], SimulationCandidate | None]
 """Callable that updates or replaces one pool row for a tested value."""
 
-PoolObserver: TypeAlias = Callable[[SimResult], Any]
-"""Callable that extracts one observed value from one simulation result."""
+PoolObserver: TypeAlias = Callable[[Any], Any]
+"""Callable that extracts one observed value from one per-axon result view."""
 
 ProgressSummary: TypeAlias = Callable[[np.ndarray], str]
 """Callable that formats one completed sweep-observation row for progress."""
@@ -348,7 +347,7 @@ def find_activation_threshold(
     evaluations. The protocol passes each tested current amplitude as a Pint
     quantity; the factory should attach the desired stimulus, electrode,
     extracellular context, axon position, or any other parameter change and
-    return a fresh simulation candidate or precomputed ``SimResult``.
+    return a fresh simulation candidate.
     """
 
     low_uA = units.require_current_uA(bounds[0], name="bounds[0]")
@@ -713,22 +712,13 @@ def _activation_pool_sweep(
             updated_pool = tuple(
                 _apply_pool_update(row, update, value) for row in base_pool
             )
-            if all(isinstance(item, SimResult) for item in updated_pool):
-                observations = np.asarray(
-                    [
-                        criterion.evaluate(result).activated
-                        for result in updated_pool  # type: ignore[arg-type]
-                    ],
-                    dtype=bool,
-                )
-            else:
-                observations = _evaluate_activation_observer_pool(
-                    updated_pool,  # type: ignore[arg-type]
-                    criterion=criterion,
-                    duration=duration,
-                    dt=dt,
-                    progress=solver_progress,
-                )
+            observations = _evaluate_activation_observer_pool(
+                updated_pool,
+                criterion=criterion,
+                duration=duration,
+                dt=dt,
+                progress=solver_progress,
+            )
             observation_rows.append(observations)
             progress_display.update(
                 label="Pool sweep",
@@ -767,8 +757,6 @@ def _try_evaluate_activation_observer_pool_batched_values(
     """Evaluate independent activation sweep values in one observer-only pool run."""
 
     if len(values) <= 1 or len(pool) == 0:
-        return None
-    if any(isinstance(row, SimResult) for row in pool):
         return None
     if any(not isinstance(row, (Axon, AxonInstance)) for row in pool):
         return None
@@ -861,7 +849,7 @@ def pool_sweep(
     Parameters
     ----------
     pool:
-        Stable sequence of simulations, axons, or precomputed results.
+        Stable sequence of simulations or axons.
     update:
         Called as ``update(row, value)`` before each run. It may mutate the row
         in place and return ``None``, or return a replacement candidate.
@@ -869,7 +857,7 @@ def pool_sweep(
         Parameter values to test. Unit-bearing arrays are accepted and each row
         receives one scalar quantity from the array.
     observe:
-        Called on each ``SimResult`` to produce one per-row observation.
+        Called on each per-axon result view to produce one per-row observation.
     duration, dt:
         Simulation duration and timestep.
     recording:
@@ -940,16 +928,13 @@ def _evaluate_activation(
 ) -> ActivationEvent:
     tested_current = units.Q_(tested_current_uA, "microampere")
     candidate = simulation_factory(tested_current)
-    if isinstance(candidate, SimResult):
-        result = candidate
-    else:
-        result = simulate(
-            candidate,
-            duration=duration,
-            dt=dt,
-            recording=recording or Recording.voltage(),
-        )
-    return criterion.evaluate(result)
+    result = simulate(
+        candidate,
+        duration=duration,
+        dt=dt,
+        recording=recording or Recording.voltage(),
+    )
+    return criterion.evaluate(result.single)
 
 
 def _normalize_rows(rows: Sequence[Any]) -> tuple[Any, ...]:
@@ -1058,27 +1043,23 @@ def _evaluate_activation_updated_pool(
         _apply_threshold_update(row, update, float(current_uA))
         for row, current_uA in zip(pool, values_uA, strict=True)
     )
-    if all(isinstance(item, SimResult) for item in updated_pool):
-        results = tuple(updated_pool)  # type: ignore[assignment]
-    elif _can_use_activation_observer(recording, criterion):
+    if _can_use_activation_observer(recording, criterion):
         return _evaluate_activation_observer_pool(
-            updated_pool,  # type: ignore[arg-type]
+            updated_pool,
             criterion=criterion,
             duration=duration,
             dt=dt,
             progress=progress,
         )
-    else:
-        pool_result = simulate_pool(
-            updated_pool,  # type: ignore[arg-type]
-            duration=duration,
-            dt=dt,
-            recording=recording or Recording.voltage(),
-            progress=progress,
-        )
-        results = tuple(view.to_sim_result() for view in pool_result)
+    pool_result = simulate_pool(
+        updated_pool,
+        duration=duration,
+        dt=dt,
+        recording=recording or Recording.voltage(),
+        progress=progress,
+    )
     return np.asarray(
-        [criterion.evaluate(result).activated for result in results],
+        [criterion.evaluate(result).activated for result in pool_result],
         dtype=bool,
     )
 
@@ -1092,7 +1073,7 @@ def _run_updated_pool(
     dt: Any,
     recording: Recording | None,
     progress: bool | str,
-) -> tuple[SimResult, ...]:
+) -> tuple[Any, ...]:
     if len(values) != len(pool):
         raise ValueError(
             f"values must contain one value per row; got {len(values)} for {len(pool)} rows."
@@ -1101,16 +1082,14 @@ def _run_updated_pool(
         _apply_pool_update(row, update, value)
         for row, value in zip(pool, values, strict=True)
     )
-    if all(isinstance(item, SimResult) for item in updated_pool):
-        return tuple(updated_pool)  # type: ignore[return-value]
     pool_result = simulate_pool(
-        updated_pool,  # type: ignore[arg-type]
+        updated_pool,
         duration=duration,
         dt=dt,
         recording=recording or Recording.voltage(),
         progress=progress,
     )
-    return tuple(view.to_sim_result() for view in pool_result)
+    return tuple(pool_result)
 
 
 def _evaluate_activation_observer_pool(

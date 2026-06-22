@@ -50,22 +50,24 @@ def main() -> None:
     )
 
     # Step 3: run a normal recording as a reference.
-    recorded = axs.simulate(
+    recorded_run = axs.simulate(
         simulation,
         duration=0.30 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.voltage(),
     )
+    recorded = recorded_run.single
 
     # Step 4: run the compact path. This result intentionally has no `Vm`
     # recording, but it does have `observations["vm_raster"]`.
-    compact = axs.simulate(
+    compact_run = axs.simulate(
         simulation,
         duration=0.30 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.none(),
         observers=[activation, latency],
     )
+    compact = compact_run.single
     if compact.observations is None:
         raise RuntimeError("observer-only simulation returned no observations.")
     raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]

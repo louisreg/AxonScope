@@ -39,8 +39,8 @@ Recording policies describe outputs to retain:
 - center/probe/explicit Vm positions for lighter trace inspection;
 - no Vm traces when compact VmRaster observations are enough.
 
-The conceptual home of membrane voltage is `SimResult.recordings["Vm"]`.
-`result.Vm` remains a convenience alias.
+The conceptual home of membrane voltage is `result.recordings["Vm"]` on a
+one-axon result view. `result.Vm` remains a convenience alias.
 
 Unsupported recording requests must fail explicitly. Do not create meaningless
 arrays, fill unavailable rows silently, or retain full Vm only to recover

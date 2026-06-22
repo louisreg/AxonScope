@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from axonscope.analysis.posthoc import rasterize
-from axonscope.results.single import SimResult
 from axonscope.utils import units
 
 if TYPE_CHECKING:
@@ -15,7 +14,7 @@ else:
 
 
 def plot_raster(
-    result: SimResult,
+    result: Any,
     ax: Axes | None = None,
     *,
     threshold_mV: Any = -10.0,

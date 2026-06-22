@@ -158,7 +158,7 @@ def test_runtime_device_and_precision_policy_are_typed_public_values():
 def test_execution_policy_runs_jax_cpu_float32_simulation():
     axon = _hh(compartments=5)
 
-    result = axs.simulate(
+    run = axs.simulate(
         axon,
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
@@ -168,6 +168,7 @@ def test_execution_policy_runs_jax_cpu_float32_simulation():
             precision=axs.PrecisionPolicy.float32(),
         ),
     )
+    result = run.single
 
     assert result.Vm.shape == (2, 5)
 

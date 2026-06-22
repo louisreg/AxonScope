@@ -46,7 +46,8 @@ def main() -> None:
 
     # The default recording keeps full Vm, which is useful here because we want
     # to inspect several nodal traces after the run.
-    result = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+    run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+    result = run.single
 
     t_ms = result.time_values(unit=axs.ms)
     vm_mV = result.voltage_values(unit=axs.mV)

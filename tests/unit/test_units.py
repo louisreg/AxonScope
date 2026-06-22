@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 
 
 class FakeQuantity:

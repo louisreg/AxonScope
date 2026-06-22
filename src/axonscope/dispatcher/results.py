@@ -11,7 +11,7 @@ from axonscope.axons.axon import Axon
 
 @dataclass(frozen=True)
 class DispatchResult:
-    """Raw execution result for one axon before conversion to ``SimResult``."""
+    """Raw execution result for one axon before public result assembly."""
 
     index: int
     axon: Axon

@@ -5,7 +5,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import axonscope as axs
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.analysis import ActivationCriterion, detect_activation
 from axonscope.analysis import conduction_velocity, rasterize, recorded_positions_um
 from axonscope.axons.unmyelinated import RattayAberham
@@ -81,6 +81,7 @@ def test_analysis_rejects_filtered_results_without_position_mapping(fake_result)
 def test_result_value_helpers_convert_units(fake_result):
     assert fake_result.recordings is not None
     np.testing.assert_allclose(fake_result.recordings["Vm"], fake_result.Vm)
+    np.testing.assert_allclose(fake_result.signal(axs.signals.Vm), fake_result.Vm)
     np.testing.assert_allclose(fake_result.time_values(unit=axs.ms), fake_result.t)
     np.testing.assert_allclose(fake_result.position_values(unit=axs.mm), [0.0, 0.5, 1.0])
     np.testing.assert_allclose(fake_result.voltage_values(unit=axs.mV), fake_result.Vm)
@@ -90,6 +91,27 @@ def test_result_value_helpers_convert_units(fake_result):
     t_ms, vm_mV = fake_result.trace_values(position=0.5 * axs.mm)
     np.testing.assert_allclose(t_ms, fake_result.t)
     np.testing.assert_allclose(vm_mV, fake_result.Vm[:, 1])
+
+    with pytest.raises(TypeError, match="signals values"):
+        fake_result.signal("Vm")
+
+
+def test_result_recorded_axis_exposes_intrinsic_positions(fake_result):
+    filtered = SimResult(
+        axon=fake_result.axon,
+        Vm=fake_result.Vm[:, [1]],
+        t=fake_result.t,
+        record_indices=(1,),
+    )
+
+    axis = filtered.recorded_axis
+
+    assert isinstance(axis, axs.RecordedAxis)
+    assert axis.size == 1
+    assert axis.original_indices == (1,)
+    np.testing.assert_allclose(axis.position_values(unit=axs.um), [500.0])
+    np.testing.assert_allclose(axis.position_values(unit=axs.mm), [0.5])
+    np.testing.assert_array_equal(axis.index_values(), [1])
 
 
 def test_activation_criterion_detects_first_crossing(fake_result):

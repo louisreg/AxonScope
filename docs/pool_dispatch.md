@@ -72,8 +72,7 @@ result.diagnostics["dispatch_has_padding"]
 
 `AxonResultView.axon` is the pure descriptive axon. `AxonResultView.simulation`
 is the protocol object that was simulated. Results remain one view per
-population row; call `view.to_sim_result()` only when a standalone `SimResult`
-object is required.
+population row. The view is the public one-axon result surface.
 
 ## Spatial Position
 

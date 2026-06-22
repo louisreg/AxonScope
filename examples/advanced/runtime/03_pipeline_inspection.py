@@ -158,7 +158,7 @@ def main() -> None:
         "callable_or_precomputed_per_axon": "callable/precomputed",
         "DispatchCohortResult": "cohort result",
         "factorized_point_source": "factorized point-source",
-        "SimResult via scalar fallback": "scalar fallback",
+        "scalar fallback row": "scalar fallback",
     }
     comparison = Table(title="Retained Vm versus compact observer-only")
     for column in (

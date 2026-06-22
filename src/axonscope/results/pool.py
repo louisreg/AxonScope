@@ -10,7 +10,9 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.analysis.core import AnalysisResult
-from axonscope.results.single import ObservationDict, RecordingDict, ResultArray, SimResult
+from axonscope.results.axes import RecordedAxis
+from axonscope.results.common import SingleAxonResultMixin
+from axonscope.results.single import ObservationDict, RecordingDict, ResultArray
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 
 if TYPE_CHECKING:
@@ -179,6 +181,7 @@ class CohortResult:
     record_indices: tuple[tuple[int, ...] | None, ...]
     recording: Recording | None = None
     observations: ObservationDict | None = None
+    recordings: tuple[RecordingDict | None, ...] | None = None
 
     @property
     def size(self) -> int:
@@ -280,12 +283,11 @@ class RecordingManifest:
 
 
 @dataclass(frozen=True)
-class AxonResultView:
+class AxonResultView(SingleAxonResultMixin):
     """One-axon view into an ``AxonSimulationResult``.
 
-    The view exposes the same common result surface as ``SimResult`` while
-    keeping pool data stored in dense cohorts. Use ``to_sim_result()`` when an
-    API requires a standalone mutable ``SimResult`` object.
+    The view exposes the common one-axon result surface while keeping pool data
+    stored in dense cohorts.
     """
 
     parent: AxonSimulationResult
@@ -314,9 +316,16 @@ class AxonResultView:
         """Membrane voltage matrix indexed as ``(time, recorded_position)``."""
 
         cohort, row = self._cohort_row
-        if cohort.Vm is None:
-            raise ValueError("this pool result row does not contain a Vm recording.")
-        return cohort.Vm[row]
+        if cohort.Vm is not None:
+            return cohort.Vm[row]
+        if cohort.recordings is not None:
+            recordings = cohort.recordings[row]
+            if recordings is not None and "Vm" in recordings:
+                vm = recordings["Vm"]
+                if isinstance(vm, dict):
+                    raise TypeError("recordings['Vm'] must be an array, not a group.")
+                return vm
+        raise ValueError("this pool result row does not contain a Vm recording.")
 
     @property
     def t(self) -> ResultArray:
@@ -353,9 +362,11 @@ class AxonResultView:
 
     @property
     def recordings(self) -> RecordingDict | None:
-        """Recording dictionary compatible with ``SimResult.recordings``."""
+        """Recording dictionary for this row."""
 
-        cohort, _ = self._cohort_row
+        cohort, row = self._cohort_row
+        if cohort.recordings is not None:
+            return cohort.recordings[row]
         if cohort.Vm is None:
             return None
         return {"Vm": self.Vm}
@@ -372,24 +383,25 @@ class AxonResultView:
             for name, observation in cohort.observations.items()
         }
 
-    def to_sim_result(self) -> SimResult:
-        """Materialize this view as a standalone ``SimResult``."""
+    @property
+    def recorded_axis(self) -> RecordedAxis:
+        """Recorded intrinsic spatial axis for this row's ``Vm`` columns."""
 
-        return SimResult(
-            axon=self.axon,
-            Vm=self.Vm,
-            t=self.t,
-            diagnostics=dict(self.diagnostics),
-            observations=self.observations,
-            recording=self.recording,
-            record_indices=self.record_indices,
-            simulation=self.simulation,
-        )
+        return RecordedAxis.from_result(self)
 
-    def __getattr__(self, name: str) -> Any:
-        """Delegate less common ``SimResult`` helpers without duplicating them."""
+    def signal(self, signal: Any) -> ResultArray:
+        """Return one recorded signal by public signal descriptor."""
 
-        return getattr(self.to_sim_result(), name)
+        descriptor = _require_signal(signal)
+        recordings = self.recordings
+        if recordings is None or descriptor.result_key not in recordings:
+            raise KeyError(f"signal {descriptor.id!s} is not available in this result.")
+        value = recordings[descriptor.result_key]
+        if isinstance(value, dict):
+            raise TypeError(
+                f"recordings[{descriptor.result_key!r}] is a grouped recording, not an array."
+            )
+        return value
 
 
 class AxonSimulationResult(Sequence[AxonResultView]):

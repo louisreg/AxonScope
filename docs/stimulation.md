@@ -104,7 +104,8 @@ simulation = axs.AxonSimulation(
     dt=0.01 * axs.ms,
     recording=axs.Recording.voltage(),
 )
-result = simulation.run()
+run = simulation.run()
+result = run.single
 ```
 
 Passing a pure `Axon` is still allowed for a no-stimulation simulation.

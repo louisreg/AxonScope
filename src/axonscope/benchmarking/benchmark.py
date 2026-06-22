@@ -15,7 +15,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
 
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.benchmarking.profiling import trace_annotation
 
 

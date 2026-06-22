@@ -25,7 +25,7 @@ from axonscope.backends.jax.runtime import (
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers.base import Solver
 from axonscope.solvers.crank_nicholson import CrankNicholson

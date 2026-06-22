@@ -85,7 +85,8 @@ AxonSimulation/run helper
   -> build_solver_axon(...)
   -> backends/jax/runtime.prepare_solver_runtime(...)
   -> backends/jax/kernels.SingleCableKernel or DoubleCableKernel
-  -> SimResult
+  -> internal scalar result
+  -> AxonSimulationResult at the public boundary
 ```
 
 `SingleCableKernel` covers normal single-cable solves and single-cable imposed
@@ -182,10 +183,11 @@ Dense extracellular input is produced by `build_vstim_midpoint_batch(...)` or
 extracellular input is produced by `build_factorized_vstim_midpoint_batch(...)`
 and should remain internal to backend lowering.
 
-Scalar results become `SimResult` values in the public solver wrapper. Batch
-results become `DispatchResult` rows or compact `DispatchCohortResult` records
-in `_dispatch_results_from_batch(...)`, then `AxonSimulationResult` in the
-public `simulate_pool(...)` boundary.
+Scalar solver output is an internal payload converted to `AxonSimulationResult`
+at the public `simulate(...)` boundary. Batch results become `DispatchResult`
+rows or compact `DispatchCohortResult` records in
+`_dispatch_results_from_batch(...)`, then `AxonSimulationResult` in the public
+`simulate_pool(...)` boundary.
 
 ## Solver Options
 

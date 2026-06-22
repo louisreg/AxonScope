@@ -44,7 +44,7 @@ Current focus:
 | 2.5 - Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. |
 | 3 - Planning and preparation | Done for current JAX path | Preparation signatures, prepared cohorts, footprint-oriented preparation. |
 | 4 - JAX isolation | Done for current boundary | Scalar and batch execution enter through `axonscope.backends.jax`; low-level kernels still need later ownership cleanup. |
-| 5 - Canonical pool results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`. |
+| 5 - Canonical simulation results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`. |
 | 6 - Analyses | Done for current public layer | Real `axs.analysis`, definitions, requirements, statuses, reports, post-hoc helpers. |
 | 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
 | 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
@@ -61,9 +61,9 @@ Current focus:
 
 ## 1.2 Active Gaps
 
-- Scalar `simulate(...)` still returns `SimResult`; pool runs return
-  `AxonSimulationResult`. Decide before final docs/serialization whether scalar
-  runs also become `AxonSimulationResult`.
+- Public execution returns one result model: `simulate(...)`, `simulate_pool(...)`,
+  and `AxonSimulation.run()` return `AxonSimulationResult`. One-axon access is
+  through `.single` or `[0]`.
 - `Recording.to_plan()` now produces a backend-neutral `RecordingPlan`; the JAX
   backend lowers that plan to batch-kernel options. The remaining work is to
   broaden validation and move more result/observer boundaries out of solver
@@ -413,6 +413,7 @@ result = axs.simulate(
     dt=0.01 * axs.ms,
     execution_policy=policy,
 )
+single = result.single
 ```
 
 Current behavior:
@@ -591,8 +592,20 @@ equations from analyses.
 The target public result is `AxonSimulationResult` for one axon and
 populations, with `AxonResultView` for per-axon access.
 
-Current migration note: scalar `simulate(...)` still returns `SimResult`; pool
-runs return `AxonSimulationResult`.
+`SimResult` is an internal scalar solver payload. It is not exported from
+`axonscope` or `axonscope.results` and must not appear in examples as a user
+path.
+
+Use:
+
+```python
+run = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
+result = run.single
+
+pool_run = axs.simulate_pool(pool, duration=5 * axs.ms, dt=0.01 * axs.ms)
+for row in pool_run:
+    row.signal(axs.signals.Vm)
+```
 
 Results contain numerical outputs, final state, online observation payloads,
 execution metadata, and diagnostics. Post-hoc analyses return separate objects

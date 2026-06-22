@@ -28,7 +28,7 @@ from axonscope.backends.jax.input_batches import (
 )
 from axonscope.icm.backends import RowIndexedICMBackend
 from axonscope.preparation.cohort import PreparedCohort
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,

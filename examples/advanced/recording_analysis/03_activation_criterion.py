@@ -38,12 +38,13 @@ def main() -> None:
         )
     )
 
-    result = axs.simulate(
+    run = axs.simulate(
         simulation,
         duration=5.0 * axs.ms,
         dt=0.01 * axs.ms,
         recording=axs.Recording.voltage(),
     )
+    result = run.single
 
     # Step 2: define criteria with the same threshold but different typed
     # position selectors.

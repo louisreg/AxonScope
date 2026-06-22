@@ -8,7 +8,7 @@ from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from tests.nrv._helpers import axonscope_x_um
 
 pytestmark = pytest.mark.nrv_numerics

@@ -77,7 +77,7 @@ Primary namespaces:
 axs.axons          descriptive axon geometry and templates
 axs.membranes      runtime-independent membrane descriptions
 axs.stimulation    stimuli, electrodes, clamps, and contexts
-axs.results        SimResult, AxonSimulationResult, visualization, legacy helpers
+axs.results        AxonSimulationResult, AxonResultView, recording manifests, visualization
 axs.analysis       structured analysis definitions, statuses, reports
 axs.performance    simulation memory estimates and runtime/device policies
 axs.inspection     printable planning, dispatch, lowering, kernel, and result reports
@@ -111,11 +111,12 @@ sim.add_current_clamp(
     ),
 )
 
-result = axs.simulate(
+run = axs.simulate(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
 )
+result = run.single
 
 center = result.nearest_position_index(250.0 * axs.um)
 print(result.t.shape, result.Vm[:, center].shape)
@@ -131,7 +132,8 @@ simulation = axs.AxonSimulation(
     dt=0.01 * axs.ms,
     recording=axs.Recording.full(),
 )
-result = simulation.run()
+run = simulation.run()
+result = run.single
 ```
 
 Runtime/device/precision requests use the typed public execution policy:
@@ -142,7 +144,8 @@ policy = axs.ExecutionPolicy(
     device=axs.Device.cpu(),
     precision=axs.PrecisionPolicy.float32(),
 )
-result = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, execution_policy=policy)
+run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, execution_policy=policy)
+result = run.single
 ```
 
 Pipeline planning can be printed before launching solver kernels:
@@ -180,7 +183,8 @@ sim.add_extracellular_context(
     )
 )
 
-result = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+result = run.single
 ```
 
 For workflows that need reusable spatial transfer functions, analytical
@@ -246,7 +250,7 @@ full contracts.
 ## Analysis And Protocols
 
 Structured post-hoc analysis definitions live under `axs.analysis` and consume
-`SimResult`, `AxonResultView`, or `AxonSimulationResult` objects:
+one-axon result views or whole `AxonSimulationResult` objects:
 
 ```python
 report = result.report(
@@ -395,7 +399,7 @@ and `benchmark/nrv_performance/` for detailed runners.
 - `docs/membranes.md`: membrane model descriptions.
 - `docs/stimulation.md`: stimuli, electrodes, clamps, and contexts.
 - `docs/pool_dispatch.md`: pool dispatch and batching behavior.
-- `docs/results_recording_analysis.md`: `Recording`, `SimResult`, analysis, and
+- `docs/results_recording_analysis.md`: `Recording`, canonical results, analysis, and
   visualization.
 - `docs/solver_organization.md`: solver package boundaries and time grids.
 - `docs/validation.md`: fast checks and local NRV validation policy.

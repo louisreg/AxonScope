@@ -16,7 +16,8 @@ from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording, RecordingSpatial
-from axonscope.results import AxonSimulationResult, SimResult
+from axonscope.results import AxonSimulationResult, CohortResult
+from axonscope.results.single import SimResult
 from axonscope.solvers import (
     BatchOptions,
     CrankNicholson,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
 AxonInput: TypeAlias = Axon | AxonInstance
 AxonPoolInput: TypeAlias = AxonPopulation | Sequence[Axon | AxonInstance]
-SimulationRunResult: TypeAlias = SimResult | AxonSimulationResult
+SimulationRunResult: TypeAlias = AxonSimulationResult
 
 _RECORDING_GROUPS = (
     ("gates", "gates"),
@@ -259,6 +260,38 @@ def _finalize_single_result(result: SimResult, recording: Recording) -> SimResul
     return replace(result, recording=recording)
 
 
+def _single_result_to_public(result: SimResult, recording: Recording) -> AxonSimulationResult:
+    """Convert one internal scalar result to the canonical public container."""
+
+    simulation = result.simulation
+    if simulation is None:
+        simulation = as_axon_instance(result.axon)
+    cohort = CohortResult(
+        input_indices=(0,),
+        axons=(result.axon,),
+        simulations=(simulation,),
+        Vm=(
+            None
+            if result.recordings is None or "Vm" not in result.recordings
+            else np.asarray(result.Vm)[None, ...]
+        ),
+        t=np.asarray(result.t),
+        diagnostics=(
+            {
+                **(result.diagnostics or {}),
+                "pool_index": 0,
+                "dispatch_method": "scalar",
+                "dispatch_batch_kind": "scalar",
+            },
+        ),
+        record_indices=(result.record_indices,),
+        recording=recording,
+        observations=result.observations,
+        recordings=(result.recordings,),
+    )
+    return AxonSimulationResult((cohort,), size=1, recording=recording)
+
+
 def _filter_pool_recording(
     results: Sequence[DispatchRecord],
     recording: Recording,
@@ -331,12 +364,13 @@ def simulate(
     recording: Recording | None = None,
     observers: Sequence[Any] | None = None,
     execution_policy: ExecutionPolicy | None = None,
-) -> SimResult:
-    """Run one axon simulation and return a ``SimResult``.
+) -> AxonSimulationResult:
+    """Run one axon simulation and return an ``AxonSimulationResult``.
 
     Plain numeric durations are interpreted as milliseconds. Pint-like
     quantities are converted at the public boundary. Passing a pure `Axon`
-    creates a no-stimulation protocol around it.
+    creates a no-stimulation protocol around it. Use ``result.single`` or
+    ``result[0]`` for one-axon access.
     """
 
     observer_defs = tuple(observers) if observers is not None else None
@@ -361,7 +395,7 @@ def simulate(
                 observers=observer_defs,
             )
         with benchmark_span("results.to_public", pool_size=1):
-            return _finalize_single_result(result, rec)
+            return _single_result_to_public(_finalize_single_result(result, rec), rec)
 
 
 def simulate_pool(

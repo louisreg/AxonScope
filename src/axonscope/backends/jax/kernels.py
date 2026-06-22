@@ -24,7 +24,7 @@ from .runtime import SolverRuntime
 
 @dataclass(frozen=True)
 class KernelResult:
-    """Raw solver-kernel output before packaging into a public SimResult."""
+    """Raw solver-kernel output before scalar result assembly."""
 
     Vm: Array | None
     t: Array

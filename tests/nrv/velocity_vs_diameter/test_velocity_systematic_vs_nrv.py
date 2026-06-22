@@ -22,7 +22,7 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus

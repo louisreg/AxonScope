@@ -5,7 +5,7 @@ from typing import Any
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.results import SimResult
+from axonscope.results.single import SimResult
 
 
 class Solver(ABC):

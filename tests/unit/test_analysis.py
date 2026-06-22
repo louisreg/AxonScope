@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.results import CohortResult, AxonSimulationResult, SimResult
+from axonscope.results import CohortResult, AxonSimulationResult
+from axonscope.results.single import SimResult
 
 
 class _DummyLayout:

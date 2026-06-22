@@ -26,7 +26,7 @@ the examples. In short:
   `axs.simulate(...)`, and `axs.simulate_pool(...)` are the current execution
   entry points.
 - `axs.Recording.full()`, `axs.Recording.center(...)`, `axs.Recording.none()`,
-  `axs.signals`, `SimResult.Vm`, `recording_manifest`, and compact
+  `axs.signals`, one-axon result views, `recording_manifest`, and compact
   `observations` are current result/recording concepts.
 - `axs.analysis.Activation`, `axs.analysis.PeakVoltage`, and their observer
   aliases are current analysis concepts. Solver-side observer execution exists
@@ -308,18 +308,20 @@ extracellular attachment method.
 Single-axon simulation should have one simple entry point:
 
 ```python
-result = axs.simulate(
+run = axs.simulate(
     sim,
-    duration_ms=5.0,
-    dt_ms=0.01,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
 )
+result = run.single
 ```
 
-Advanced users can still choose a solver:
+Advanced users can still choose a solver through the public wrapper:
 
 ```python
 solver = axs.solvers.CrankNicholson()
-result = solver.solve(sim, duration_ms=5.0, dt_ms=0.01)
+run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, solver=solver)
+result = run.single
 ```
 
 Compatibility aliases can keep `tsim` and `dt` while public docs prefer
@@ -347,10 +349,10 @@ membrane model. This is the public-friendly name for the current internal
 Target API:
 
 ```python
-result = axs.simulate(
+run = axs.simulate(
     axon,
-    duration_ms=5.0,
-    dt_ms=0.01,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=axs.Recording(
         voltage=True,
         gates=True,
@@ -359,6 +361,7 @@ result = axs.simulate(
         state_variables=False,
     ),
 )
+result = run.single
 ```
 
 Convenience constructors:
@@ -397,10 +400,10 @@ For batch and pool runs, this same concept should map onto the existing
 batch recording machinery:
 
 ```python
-result = axs.simulate_pool(
+results = axs.simulate_pool(
     pool,
-    duration_ms=5.0,
-    dt_ms=0.01,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.Vm),
 )
 ```
@@ -465,10 +468,10 @@ sim_b.add_extracellular_context(
     )
 )
 
-result = axs.simulate_pool(
+results = axs.simulate_pool(
     [sim_a, sim_b],
-    duration_ms=5.0,
-    dt_ms=0.01,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
 )
 ```
 
@@ -506,13 +509,14 @@ axs.analysis
 
 ### Result Visualization
 
-Result plotting should work from `SimResult` and pool results without
+Result plotting should work from one-axon result views and pool results without
 requiring users to know the internal array layout.
 
 Target API:
 
 ```python
-result = axs.simulate(sim, duration_ms=5.0, dt_ms=0.01)
+run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
+result = run.single
 
 axs.results.visualization.plot_voltage_trace(
     result,
@@ -526,15 +530,16 @@ axs.results.visualization.plot_raster(result, threshold_mV=-10.0)
 Pool result visualization:
 
 ```python
-pool_result = axs.simulate_pool(pool, duration_ms=5.0, dt_ms=0.01)
+pool_result = axs.simulate_pool(pool, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
 
 axs.results.visualization.plot_pool_peaks(pool_result)
 axs.results.visualization.plot_pool_raster(pool_result)
 ```
 
-`SimResult` should stay a data container. Plotting and post-processing should
-live under `axs.results.visualization` and `axs.analysis` so analysis code can explicitly
-check whether `Vm` is full, center-only, probe-only, or otherwise filtered.
+One-axon result views should stay focused on returned numerical data. Plotting
+and post-processing should live under `axs.results.visualization` and
+`axs.analysis` so analysis code can explicitly check whether `Vm` is full,
+center-only, probe-only, or otherwise filtered.
 
 ### Geometry Visualization
 
@@ -575,15 +580,16 @@ peaks = axs.analysis.peak_voltage(result)
 Long-term solver-side API:
 
 ```python
-result = axs.simulate(
+run = axs.simulate(
     axon,
-    duration_ms=5.0,
-    dt_ms=0.01,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
     recording=axs.Recording.none(),
     observers=[
         axs.analysis.Activation(threshold=-10.0 * axs.mV),
     ],
 )
+result = run.single
 ```
 
 The solver-side mechanism should be called `observers` rather than
@@ -627,7 +633,8 @@ axon = axs.axons.HodgkinHuxley(
     compartments=41,
 )
 
-result = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
+run = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
+result = run.single
 ```
 
 ## Migration Strategy

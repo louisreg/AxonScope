@@ -41,7 +41,7 @@ def main() -> None:
 
     # Step 2: post-hoc analyses need recorded Vm at the requested positions.
     # Full Vm is the most flexible choice while designing an analysis workflow.
-    result = axs.simulate_pool(
+    results = axs.simulate_pool(
         pool,
         duration=2.0 * axs.ms,
         dt=0.02 * axs.ms,
@@ -72,7 +72,7 @@ def main() -> None:
     print(f"activation algorithm: {activation.requirements.algorithm_version}")
 
     # Step 5: one report keeps related metrics aligned by row.
-    report = result.report(activation, latency, peak)
+    report = results.report(activation, latency, peak)
     activation_result = report["activation"]
     latency_result = report["latency"]
     peak_result = report["peak_voltage"]
@@ -104,7 +104,7 @@ def main() -> None:
         figsize=(11.0, 4.0),
         constrained_layout=True,
     )
-    for row_index, row in enumerate(result):
+    for row_index, row in enumerate(results):
         center_index = row.nearest_position_index(90.0 * axs.um)
         t_ms, vm_mV = row.trace_values(
             index=center_index,

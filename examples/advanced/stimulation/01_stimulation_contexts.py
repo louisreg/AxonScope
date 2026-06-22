@@ -83,11 +83,12 @@ def main() -> None:
     for label, context in cases:
         simulation = axs.AxonInstance(axon)
         simulation.add_extracellular_context(context=context)
-        result = axs.simulate(
+        run = axs.simulate(
             simulation,
             duration=1.6 * axs.ms,
             dt=0.02 * axs.ms,
         )
+        result = run.single
         results.append((label, context, result))
 
     # Step 5: plot both sides of the concept: the imposed extracellular field and
