@@ -9,7 +9,6 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.dispatcher.runtime_batches import (
-    axon_transverse_positions_um,
     extracellular_context_rows,
 )
 from axonscope.solvers.axon_runtime import SolverAxon
@@ -48,7 +47,8 @@ class PreparedCohort:
             solver_axons,
             target_nx=int(group.nx),
         )
-        axon_y_um, axon_z_um = axon_transverse_positions_um(axons)
+        axon_y_um = np.zeros((len(axons),), dtype=float)
+        axon_z_um = np.zeros((len(axons),), dtype=float)
         return cls(
             group_id=int(group.group_id),
             mode=str(group.mode),
@@ -86,14 +86,12 @@ def _x_positions_from_solver_axons_m(
     target_nx: int,
 ) -> np.ndarray:
     rows: list[np.ndarray] = []
-    row_cache: dict[tuple[int, float, int], np.ndarray] = {}
-    for axon, solver_axon in zip(axons, solver_axons, strict=True):
-        x_offset_um = float(getattr(axon, "x_offset_um", 0.0))
-        cache_key = (id(solver_axon), x_offset_um, int(target_nx))
+    row_cache: dict[tuple[int, int], np.ndarray] = {}
+    for _axon, solver_axon in zip(axons, solver_axons, strict=True):
+        cache_key = (id(solver_axon), int(target_nx))
         row = row_cache.get(cache_key)
         if row is None:
             row = np.asarray(solver_axon.x_um, dtype=float) * 1e-6
-            row = row + x_offset_um * 1e-6
             row = _pad_position_row(row, target_nx=int(target_nx))
             row_cache[cache_key] = row
         rows.append(row)

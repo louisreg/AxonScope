@@ -12,8 +12,8 @@ def test_prepared_cohort_collects_group_rows():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_a = axs.AxonInstance(model, y=10.0 * axs.um)
-    axon_b = axs.AxonInstance(model, y=30.0 * axs.um)
+    axon_a = axs.AxonInstance(model)
+    axon_b = axs.AxonInstance(model)
 
     plan = build_dispatch_plan([axon_a, axon_b])
     cohort = PreparedCohort.from_dispatch_group(plan.groups[0])
@@ -24,4 +24,5 @@ def test_prepared_cohort_collects_group_rows():
     assert cohort.solver_axons[0] is cohort.solver_axons[1]
     assert cohort.contexts == ((), ())
     assert np.asarray(cohort.x_positions_m).shape == (2, 11)
-    np.testing.assert_allclose(cohort.axon_y_um, [10.0, 30.0])
+    np.testing.assert_allclose(cohort.axon_y_um, [0.0, 0.0])
+    np.testing.assert_allclose(cohort.axon_z_um, [0.0, 0.0])

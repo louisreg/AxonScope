@@ -274,10 +274,12 @@ an `ExtracellularDrive` or `ExtracellularStimulation`.
 `PointSourceElectrode.build_footprint(...)` is also available for simple
 one-electrode analytical scripts when passing `sigma` directly is clearer.
 
-In pool simulations, point-source electrode coordinates are global coordinates.
-`sim.set_position(...)` places each axon simulation in that same global frame;
-AxonScope converts the point-source transverse offsets internally before
-evaluating the one-dimensional footprint.
+Point-source coordinates are inputs to analytical footprint construction, not
+placement stored on an `AxonInstance`. When an external workflow owns axon
+placement, convert that geometry to an axon-local context with
+`axs.analytical.local_point_source_context(...)` or to a sampled
+`ExtracellularFootprint` before attaching stimulation. Solver execution then
+sees only intrinsic axon positions and local footprints.
 
 ## Solver Boundary
 

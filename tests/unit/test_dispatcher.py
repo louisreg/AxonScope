@@ -42,7 +42,6 @@ def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
         celsius=6.3 * axs.degC,
     )
     axon = axs.AxonInstance(axon_model)
-    axon.set_position(y=y_um * axs.um, z=z_um * axs.um)
     axon.add_current_clamp(
         position=(length_um / 2.0) * axs.um,
         current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=amp_nA),
@@ -53,9 +52,12 @@ def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
         z=0.0 * axs.um,
     )
     axon.add_extracellular_context(
-        context=_context(
+        context=axs.analytical.local_point_source_context(
             electrode,
-            Stimulus.pulse(start=0.0 * axs.ms, duration=0.05 * axs.ms, amplitude=10e-6)
+            stimulus=Stimulus.pulse(start=0.0 * axs.ms, duration=0.05 * axs.ms, amplitude=10e-6),
+            sigma=0.3 * axs.S_per_m,
+            axon_y=y_um * axs.um,
+            axon_z=z_um * axs.um,
         ),
     )
     return axon
@@ -112,7 +114,7 @@ def _mrg_axon(
     return axon
 
 
-def test_pool_public_api_uses_axon_positions_and_contexts():
+def test_pool_public_api_uses_local_contexts_not_axon_positions():
     axon_a = _hh_axon(nx=11, amp_nA=0.4, y_um=20.0, z_um=30.0)
     axon_b = _hh_axon(nx=13, amp_nA=0.2, y_um=60.0, z_um=10.0)
 
@@ -126,8 +128,8 @@ def test_pool_public_api_uses_axon_positions_and_contexts():
     assert len(result) == 2
     assert [axon_result.diagnostics["pool_index"] for axon_result in result] == [0, 1]
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 1), (2, 1)]
-    assert result[0].simulation.y_um == 20.0
-    assert result[1].simulation.z_um == 10.0
+    assert not hasattr(result[0].simulation, "y_um")
+    assert not hasattr(result[1].simulation, "z_um")
     assert np.asarray([np.max(np.asarray(axon_result.Vm)) for axon_result in result]).shape == (2,)
 
 
@@ -551,8 +553,8 @@ def test_dispatch_plan_reuses_solver_axon_for_shared_model_instances():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_a = axs.AxonInstance(model, y=0.0 * axs.um)
-    axon_b = axs.AxonInstance(model, y=50.0 * axs.um)
+    axon_a = axs.AxonInstance(model)
+    axon_b = axs.AxonInstance(model)
 
     plan = build_dispatch_plan([axon_a, axon_b])
 
@@ -650,7 +652,7 @@ def test_dispatch_plan_description_mentions_parameter_batch():
     assert "batched" in text
 
 
-def test_pool_vstim_batch_uses_global_yz_positions_for_point_sources():
+def test_pool_vstim_batch_uses_localized_point_source_contexts():
     def axon_at(y_um: float):
         axon_model = axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
@@ -659,14 +661,19 @@ def test_pool_vstim_batch_uses_global_yz_positions_for_point_sources():
             celsius=6.3 * axs.degC,
         )
         axon = axs.AxonInstance(axon_model)
-        axon.set_position(y=y_um * axs.um, z=0.0 * axs.um)
         electrode = PointSourceElectrode(
             x=50.0 * axs.um,
             y=0.0 * axs.um,
             z=0.0 * axs.um,
         )
         axon.add_extracellular_context(
-            context=_context(electrode, Stimulus.constant(10e-6, start=0.0 * axs.ms)),
+            context=axs.analytical.local_point_source_context(
+                electrode,
+                stimulus=Stimulus.constant(10e-6, start=0.0 * axs.ms),
+                sigma=0.3 * axs.S_per_m,
+                axon_y=y_um * axs.um,
+                axon_z=0.0 * axs.um,
+            ),
         )
         return axon
 
@@ -678,8 +685,6 @@ def test_pool_vstim_batch_uses_global_yz_positions_for_point_sources():
         tsim_ms=0.1,
         dt_ms=0.05,
         x_positions_m=x_positions_batch_m([near, far]),
-        axon_y_um=np.asarray([near.y_um, far.y_um]),
-        axon_z_um=np.asarray([near.z_um, far.z_um]),
     )
 
     center = near.n_compartments // 2

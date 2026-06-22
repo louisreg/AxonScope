@@ -35,11 +35,9 @@ the examples. In short:
 - `axs.SolverOptions` exposes current solver choices. Pseudo-double-cable
   options are standby research artifacts, not recommended public API.
 
-Legacy roadmap snippets below may still use older names such as `length_um`,
-`diameter_um`, `duration_ms`, `PointSourceElectrode(x_um=...)`,
-`AxonInstance(..., y_um=...)`, `IntracellularCurrentClamp(position_um=...)`, or
-`Recording(..., positions_um=...)`. Do not copy those forms into new examples
-without checking current source and examples first.
+Legacy roadmap snippets below may still use older unit-suffix constructor
+names. Do not copy roadmap snippets into new examples without checking current
+source and examples first.
 
 ## Design Intent
 
@@ -167,13 +165,19 @@ Candidate public hooks:
 
 ```python
 axon.shift_nodes(delta_um=25.0)
-sim = axs.AxonInstance(
-    axon,
-    x_offset=0.0 * axs.um,
-    y=20.0 * axs.um,
-    z=30.0 * axs.um,
+context = axs.analytical.local_point_source_context(
+    electrode,
+    sigma=0.3 * axs.S_per_m,
+    axon_x_offset=0.0 * axs.um,
+    axon_y=20.0 * axs.um,
+    axon_z=30.0 * axs.um,
 )
+sim = axs.AxonInstance(axon)
+sim.add_extracellular_context(context=context)
 ```
+
+Do not store placement offsets on `AxonInstance`; they are external geometry
+inputs used to build local contexts or sampled footprints.
 
 ### Granular Construction
 

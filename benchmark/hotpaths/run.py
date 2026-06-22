@@ -780,16 +780,16 @@ def _x_positions_m_for_instances(instances: Sequence[axs.AxonInstance]) -> np.nd
     rows = []
     for instance in instances:
         x_um = np.asarray(instance.axon.layout.position_values(unit="micrometer"), dtype=float)
-        rows.append((x_um + float(getattr(instance, "x_offset_um", 0.0))) * 1e-6)
+        rows.append(x_um * 1e-6)
     return np.stack(rows, axis=0)
 
 
 def _axon_y_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
-    return np.asarray([float(getattr(instance, "y_um", 0.0)) for instance in instances])
+    return np.zeros((len(instances),), dtype=float)
 
 
 def _axon_z_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
-    return np.asarray([float(getattr(instance, "z_um", 0.0)) for instance in instances])
+    return np.zeros((len(instances),), dtype=float)
 
 
 def _context_vstim_for_instances(
@@ -818,10 +818,11 @@ def _typed_drive_vstim_for_instances(
     duration_ms: float,
     dt_ms: float,
 ):
-    context = instances[0].extracellular_context
-    if context is None:
+    contexts = [instance.extracellular_context for instance in instances]
+    if any(context is None for context in contexts):
         raise ValueError("typed drive workload requires extracellular contexts.")
-    electrode = context.electrodes[0]
+    first_context = contexts[0]
+    electrode = first_context.electrodes[0]
     stimulus = getattr(electrode, "stimulus", None)
     if stimulus is None:
         raise ValueError("typed drive workload requires a stimulated electrode.")
@@ -831,15 +832,11 @@ def _typed_drive_vstim_for_instances(
         dtype=float,
     )
     x_rows_m = _x_positions_m_for_instances(instances)
-    y_rows_um = _axon_y_um_for_instances(instances)
-    z_rows_um = _axon_z_um_for_instances(instances)
     values = np.stack(
         [
-            context.footprint_for_electrode(
-                electrode,
+            contexts[row_index].footprint_for_electrode(
+                contexts[row_index].electrodes[0],
                 x_rows_m[row_index],
-                axon_y_um=float(y_rows_um[row_index]),
-                axon_z_um=float(z_rows_um[row_index]),
             )
             for row_index in range(len(instances))
         ],
@@ -1274,10 +1271,6 @@ def build_realistic_mixed_population(
         z=140.0 * axs.um,
         stimulus=stimulus,
     )
-    context = axs.AnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
-    )
 
     diameter_cycle_um = (0.6, 0.8, 1.0, 1.2)
     offsets = np.linspace(-60.0, 60.0, size) if size > 1 else np.asarray([0.0])
@@ -1306,7 +1299,7 @@ def build_realistic_mixed_population(
             )
             axon_templates[template_key] = axon
 
-        instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
+        instance = axs.AxonInstance(axon)
         instance.add_current_clamp(
             position=0.5 * length_um * axs.um,
             current=axs.Stimulus.pulse(
@@ -1316,7 +1309,13 @@ def build_realistic_mixed_population(
             ),
         )
         if index % 3 == 0:
-            instance.add_extracellular_context(context=context)
+            instance.add_extracellular_context(
+                context=axs.analytical.local_point_source_context(
+                    electrode,
+                    sigma=0.3 * axs.S_per_m,
+                    axon_y=float(offset_um) * axs.um,
+                )
+            )
         instances.append(instance)
     return instances
 
@@ -1573,16 +1572,18 @@ def build_point_source_pool(
         z=120.0 * axs.um,
         stimulus=stimulus,
     )
-    context = axs.AnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
-    )
 
     offsets = np.linspace(-40.0, 40.0, size) if size > 1 else np.asarray([0.0])
     instances = []
     for offset_um in offsets:
-        instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
-        instance.add_extracellular_context(context=context)
+        instance = axs.AxonInstance(axon)
+        instance.add_extracellular_context(
+            context=axs.analytical.local_point_source_context(
+                electrode,
+                sigma=0.3 * axs.S_per_m,
+                axon_y=float(offset_um) * axs.um,
+            )
+        )
         instances.append(instance)
     return instances
 
@@ -1610,16 +1611,18 @@ def build_double_cable_extracellular_pool(
         z=120.0 * axs.um,
         stimulus=stimulus,
     )
-    context = axs.AnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
-    )
 
     offsets = np.linspace(-80.0, 80.0, size) if size > 1 else np.asarray([0.0])
     instances = []
     for offset_um in offsets:
-        instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
-        instance.add_extracellular_context(context=context)
+        instance = axs.AxonInstance(axon)
+        instance.add_extracellular_context(
+            context=axs.analytical.local_point_source_context(
+                electrode,
+                sigma=0.3 * axs.S_per_m,
+                axon_y=float(offset_um) * axs.um,
+            )
+        )
         instances.append(instance)
     return instances
 

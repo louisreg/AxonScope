@@ -279,9 +279,6 @@ def _group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
         _group_static_signature(group),
         tuple(
             (
-                float(getattr(item.simulation, "x_offset_um", 0.0)),
-                float(getattr(item.simulation, "y_um", 0.0)),
-                float(getattr(item.simulation, "z_um", 0.0)),
                 bool(getattr(item.simulation, "use_extracellular", False)),
                 tuple(
                     id(context)

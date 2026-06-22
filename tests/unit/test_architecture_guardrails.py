@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 from enum import Enum
 from collections.abc import Iterable
 from pathlib import Path
@@ -44,6 +45,14 @@ def _jax_import_locations(path: Path) -> list[str]:
             if node.level == 0 and (module == "jax" or module.startswith("jax.")):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
     return offenders
+
+
+def _call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
 
 
 def test_guidelines_is_the_root_project_philosophy_reference():
@@ -137,8 +146,7 @@ def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
         axs.AxonPopulation: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
         axs.simulate: {"duration_ms", "dt_ms", "tsim"},
         axs.simulate_pool: {"duration_ms", "dt_ms", "tsim"},
-        axs.AxonInstance: {"x_offset_um", "y_um", "z_um"},
-        axs.AxonInstance.set_position: {"x_offset_um", "y_um", "z_um"},
+        axs.AxonInstance: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
         axs.Recording: {"positions_um", "sample_dt_ms"},
         axs.PointSourceElectrode: {
             "x_um",
@@ -159,10 +167,66 @@ def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
             reintroduced[getattr(obj, "__qualname__", repr(obj))] = present
 
     assert reintroduced == {}
+    assert not hasattr(axs.AxonInstance, "set_position")
+
+
+def test_public_examples_and_docs_do_not_place_axon_instances_in_world_space():
+    forbidden_instance_kwargs = {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"}
+    offenders: list[str] = []
+
+    for root in (
+        REPO_ROOT / "examples",
+        REPO_ROOT / "benchmark" / "hotpaths",
+        REPO_ROOT / "benchmark" / "nrv_performance",
+        REPO_ROOT / "benchmark" / "pseudo_double",
+        REPO_ROOT / "benchmark" / "runtime",
+        REPO_ROOT / "benchmark" / "solvers",
+    ):
+        for path in _python_sources(root):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = _call_name(node.func)
+                if name == "AxonInstance":
+                    bad_kwargs = sorted(
+                        kw.arg
+                        for kw in node.keywords
+                        if kw.arg in forbidden_instance_kwargs
+                    )
+                    if bad_kwargs:
+                        offenders.append(
+                            f"{path.relative_to(REPO_ROOT)}:{node.lineno} "
+                            f"AxonInstance kwargs {bad_kwargs}"
+                        )
+                elif name == "set_position":
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{node.lineno} set_position"
+                    )
+
+    markdown_paths = [
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "GUIDELINES.md",
+        *(REPO_ROOT / "docs").glob("*.md"),
+        *(REPO_ROOT / "benchmark" / "notebooks").glob("*.ipynb"),
+    ]
+    placement_call = re.compile(
+        r"AxonInstance\s*\([^)]*\b(?:x_offset|x_offset_um|y|y_um|z|z_um)\s*=",
+        re.DOTALL,
+    )
+    for path in markdown_paths:
+        text = path.read_text(encoding="utf-8")
+        if "set_position(" in text:
+            offenders.append(f"{path.relative_to(REPO_ROOT)} set_position")
+        if placement_call.search(text):
+            offenders.append(f"{path.relative_to(REPO_ROOT)} AxonInstance placement kwargs")
+
+    assert offenders == []
 
 
 def test_root_axon_simulation_is_not_the_legacy_instance_alias():
     assert axs.AxonSimulation is not axs.AxonInstance
+    assert not hasattr(axs.AxonInstance, "set_position")
     assert not hasattr(axs.AxonSimulation, "add_current_clamp")
     assert not hasattr(axs.AxonSimulation, "add_extracellular_context")
     assert not hasattr(axs.AxonSimulation, "set_position")

@@ -62,7 +62,7 @@ def test_public_axon_is_descriptive_and_simulation_owns_protocol():
     assert not hasattr(axon, "plot_geometry")
     assert callable(axon.layout.plot)
 
-    sim = axs.AxonInstance(axon, y=20.0 * axs.um)
+    sim = axs.AxonInstance(axon)
     clamp = axs.IntracellularCurrentClamp(
         position=50.0 * axs.um,
         current=axs.Stimulus.pulse(
@@ -75,7 +75,9 @@ def test_public_axon_is_descriptive_and_simulation_owns_protocol():
 
     assert sim.axon is axon
     assert sim.n_compartments == axon.n_compartments
-    assert sim.y_um == pytest.approx(20.0)
+    assert not hasattr(sim, "set_position")
+    assert not hasattr(sim, "y_um")
+    assert not hasattr(sim, "z_um")
     assert not hasattr(sim, "intracellular_clamps")
     assert len(sim.intracellular_contexts) == 1
     assert sim.intracellular_contexts[0] is clamp
@@ -340,13 +342,15 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
         z=120.0 * axs.um,
         stimulus=stimulus,
     )
-    context = axs.AnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
-    )
     axons = []
     for y_um in (-10.0, 10.0):
-        instance = axs.AxonInstance(axon, y=y_um * axs.um)
+        context = axs.analytical.local_point_source_context(
+            electrode,
+            sigma=0.3 * axs.S_per_m,
+            axon_y=y_um * axs.um,
+            axon_z=0.0 * axs.um,
+        )
+        instance = axs.AxonInstance(axon)
         instance.add_extracellular_context(context=context)
         axons.append(instance)
 
@@ -493,9 +497,6 @@ def test_public_pool_accepts_simulation_protocols():
             celsius=6.3 * axs.degC,
         )
     )
-    axon_a.set_position(y=20.0 * axs.um, z=30.0 * axs.um)
-    axon_b.set_position(y=-40.0 * axs.um, z=10.0 * axs.um)
-
     result = axs.simulate_pool(
         [axon_a, axon_b],
         duration=0.1 * axs.ms,
@@ -503,8 +504,8 @@ def test_public_pool_accepts_simulation_protocols():
     )
 
     assert len(result) == 2
-    assert result[0].simulation.y_um == 20.0
-    assert result[1].simulation.z_um == 10.0
+    assert result[0].simulation is axon_a
+    assert result[1].simulation is axon_b
 
 
 def test_public_simulate_pool_accepts_unit_duration_and_dt():
@@ -534,8 +535,8 @@ def test_public_simulate_pool_returns_canonical_result():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    axon_a = axs.AxonInstance(axon_model, y=-20.0 * axs.um)
-    axon_b = axs.AxonInstance(axon_model, y=20.0 * axs.um)
+    axon_a = axs.AxonInstance(axon_model)
+    axon_b = axs.AxonInstance(axon_model)
     recording = axs.Recording.center(axs.signals.Vm)
 
     result = axs.simulate_pool(
@@ -647,8 +648,7 @@ def test_public_axon_population_normalizes_instances_and_axons():
             diameter=0.6 * axs.um,
             compartments=13,
             celsius=6.3 * axs.degC,
-        ),
-        y=20.0 * axs.um,
+        )
     )
 
     population = axs.AxonPopulation([plain_axon, wrapped_axon], name="demo")
@@ -754,8 +754,7 @@ def test_public_root_axon_simulation_runs_population():
             diameter=0.5 * axs.um,
             compartments=11,
             celsius=6.3 * axs.degC,
-        ),
-        y=10.0 * axs.um,
+        )
     )
     second = axs.AxonInstance(
         axs.axons.HodgkinHuxley(
@@ -763,8 +762,7 @@ def test_public_root_axon_simulation_runs_population():
             diameter=0.5 * axs.um,
             compartments=11,
             celsius=6.3 * axs.degC,
-        ),
-        y=20.0 * axs.um,
+        )
     )
     simulation = axs.AxonSimulation(
         [first, second],

@@ -32,14 +32,12 @@ def x_positions_batch_m(
     *,
     target_nx: int | None = None,
 ) -> np.ndarray:
-    """Return batched axial positions in meters, including x offsets."""
+    """Return batched intrinsic axial positions in meters."""
 
     rows = []
     for axon in axons:
-        x_offset_um = float(getattr(axon, "x_offset_um", 0.0))
         x_row = (
             np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
-            + x_offset_um * 1e-6
         )
         if target_nx is not None:
             x_row = _pad_numpy_space_array(x_row, target_nx=target_nx)
@@ -48,10 +46,10 @@ def x_positions_batch_m(
 
 
 def axon_transverse_positions_um(axons: Sequence[AxonLike]) -> tuple[np.ndarray, np.ndarray]:
-    """Return batched axon transverse y/z positions in micrometers."""
+    """Return zero transverse offsets for local-intrinsic AxonScope rows."""
 
-    y = np.asarray([float(getattr(axon, "y_um", 0.0)) for axon in axons], dtype=float)
-    z = np.asarray([float(getattr(axon, "z_um", 0.0)) for axon in axons], dtype=float)
+    y = np.zeros((len(axons),), dtype=float)
+    z = np.zeros((len(axons),), dtype=float)
     return y, z
 
 

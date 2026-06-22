@@ -164,9 +164,11 @@ World position belongs outside the simulation core:
 x, y, z, orientation, trajectory, anatomical frame
 ```
 
-`AxonInstance` may carry simple offsets needed by current analytical examples,
-but world geometry must not become a core solver dependency or required public
-property.
+`AxonInstance` does not carry world offsets. Analytical examples that need a
+point-source in an external frame must first localize the context or build a
+sampled footprint for that axon, then attach the resulting local stimulation to
+the instance. World geometry must not become a core solver dependency or
+required public property.
 
 ## 2.4 One Concept, One Public Name
 
@@ -997,6 +999,9 @@ Examples must:
 - include plots when they clarify Vm traces, activation, recruitment,
   velocity, recording retention, dispatch layouts, or observer checks;
 - construct footprints separately from stimuli;
+- keep world/anatomical placement out of `AxonInstance`; when a didactic
+  point-source example needs external offsets, use an analytical localization
+  helper or precomputed footprints before attaching stimulation;
 - group one footprint and one stimulus into an `ExtracellularDrive`;
 - pass `ExtracellularStimulation` to simulations when using the factorized
   extracellular model;

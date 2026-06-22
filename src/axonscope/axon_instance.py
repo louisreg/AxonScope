@@ -20,40 +20,26 @@ class AxonInstance:
     """One concrete occurrence of a descriptive axon.
 
     `Axon` objects remain purely descriptive: geometry, layout, cable
-    formulation, and membrane models. `AxonInstance` is the current
-    user-facing object that adds transitional spatial placement and stimulation
-    contexts. The future root `AxonSimulation` will own executable run
-    definitions across one or more instances.
+    formulation, and membrane models. `AxonInstance` binds one descriptive axon
+    to local stimulation contexts for a concrete run. It does not own
+    anatomical/world placement; external geometry should be converted to
+    sampled footprints or local analytical contexts before attachment.
 
     Parameters
     ----------
     axon:
         Descriptive axon model.
-    x_offset, y, z:
-        Axon origin in the global simulation frame. Values must carry length
-        units when provided; omitted coordinates default to 0 um.
     """
 
     def __init__(
         self,
         axon: Axon,
-        *,
-        x_offset: Any | None = None,
-        y: Any | None = None,
-        z: Any | None = None,
     ) -> None:
         if not isinstance(axon, Axon):
             raise TypeError("axon must be an axonscope.axons.Axon instance.")
         self.axon = axon
         self.intracellular_contexts: list[IntracellularContext] = []
         self.extracellular_context: ExtracellularContext | None = None
-        self.x_offset_um = (
-            0.0
-            if x_offset is None
-            else units.require_length_um(x_offset, name="x_offset")
-        )
-        self.y_um = 0.0 if y is None else units.require_length_um(y, name="y")
-        self.z_um = 0.0 if z is None else units.require_length_um(z, name="z")
         self.Veinit = units.to_mV(0.0)
         self._use_extracellular_override: bool | None = None
         self._xraxial_override: np.ndarray | None = None
@@ -84,30 +70,6 @@ class AxonInstance:
         """Force-enable or force-disable extracellular solver handling."""
 
         self._use_extracellular_override = bool(value)
-
-    def set_position(
-        self,
-        *,
-        x_offset: Any | None = None,
-        y: Any | None = None,
-        z: Any | None = None,
-    ) -> None:
-        """Set the axon's spatial offset in the global simulation frame.
-
-        Parameters
-        ----------
-        x_offset, y, z:
-            Axon origin in the global simulation frame. Values must carry
-            length units when provided; omitted coordinates reset to 0 um.
-        """
-
-        self.x_offset_um = (
-            0.0
-            if x_offset is None
-            else units.require_length_um(x_offset, name="x_offset")
-        )
-        self.y_um = 0.0 if y is None else units.require_length_um(y, name="y")
-        self.z_um = 0.0 if z is None else units.require_length_um(z, name="z")
 
     def add_intracellular_context(
         self,
@@ -267,8 +229,8 @@ class AxonInstance:
         t_value_ms = units.to_ms(t_ms)
         x_positions_m = (
             np.asarray(self.axon.layout.position_values(unit="micrometer"), dtype=float)
-            + self.x_offset_um
-        ) * 1e-6
+            * 1e-6
+        )
         vext = np.zeros((self.axon.n_compartments,), dtype=self.dtype)
         for ctx in self.extracellular_contexts:
             sample_mV = ctx.evaluate(
@@ -276,8 +238,6 @@ class AxonInstance:
                 [t_value_ms],
                 voltage_unit="millivolt",
                 position_unit="meter",
-                axon_y_um=self.y_um,
-                axon_z_um=self.z_um,
             )[0]
             vext = vext + sample_mV.astype(vext.dtype)
         return vext

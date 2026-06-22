@@ -1186,13 +1186,13 @@ def _resolve_axon_transverse_um(
 ) -> tuple[Array, Array]:
     y = _as_batch_vector(
         "axon_y_um",
-        float(getattr(axon, "y_um", 0.0)) if axon_y_um is None else axon_y_um,
+        0.0 if axon_y_um is None else axon_y_um,
         batch_size=batch_size,
         dtype_local=dtype_local,
     )
     z = _as_batch_vector(
         "axon_z_um",
-        float(getattr(axon, "z_um", 0.0)) if axon_z_um is None else axon_z_um,
+        0.0 if axon_z_um is None else axon_z_um,
         batch_size=batch_size,
         dtype_local=dtype_local,
     )
@@ -1208,13 +1208,13 @@ def _resolve_axon_transverse_um_numpy(
 ) -> tuple[np.ndarray, np.ndarray]:
     y = _as_batch_vector_numpy(
         "axon_y_um",
-        float(getattr(axon, "y_um", 0.0)) if axon_y_um is None else axon_y_um,
+        0.0 if axon_y_um is None else axon_y_um,
         batch_size=batch_size,
         dtype_local=np.dtype(float),
     )
     z = _as_batch_vector_numpy(
         "axon_z_um",
-        float(getattr(axon, "z_um", 0.0)) if axon_z_um is None else axon_z_um,
+        0.0 if axon_z_um is None else axon_z_um,
         batch_size=batch_size,
         dtype_local=np.dtype(float),
     )

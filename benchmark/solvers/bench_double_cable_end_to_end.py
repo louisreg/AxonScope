@@ -441,16 +441,16 @@ def _x_positions_m_for_instances(instances: Sequence[axs.AxonInstance]) -> np.nd
     rows = []
     for instance in instances:
         x_um = np.asarray(instance.axon.layout.position_values(unit="micrometer"), dtype=float)
-        rows.append((x_um + float(getattr(instance, "x_offset_um", 0.0))) * 1e-6)
+        rows.append(x_um * 1e-6)
     return np.stack(rows, axis=0)
 
 
 def _axon_y_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
-    return np.asarray([float(getattr(instance, "y_um", 0.0)) for instance in instances])
+    return np.zeros((len(instances),), dtype=float)
 
 
 def _axon_z_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarray:
-    return np.asarray([float(getattr(instance, "z_um", 0.0)) for instance in instances])
+    return np.zeros((len(instances),), dtype=float)
 
 
 def _block_until_ready(value: Any) -> Any:

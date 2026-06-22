@@ -28,8 +28,9 @@ instructions: |
     should combine those footprints with temporal stimuli and run the cable and
     membrane dynamics.
   - Intrinsic axon coordinates belong in AxonScope. World coordinates,
-    orientation, trajectories, and field-generation geometry are transitional in
-    the current prototype and should move out of the core architecture.
+    orientation, trajectories, and field-generation geometry stay outside the
+    core architecture; examples must convert them to axon-local contexts or
+    sampled footprints before creating solver-facing simulations.
   - The desired target is one concept, one public name, one execution path, and
     one canonical result model. Do not keep old and new architectures in
     parallel for compatibility.

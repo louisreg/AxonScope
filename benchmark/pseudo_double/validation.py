@@ -298,19 +298,6 @@ def build_validation_population(
         z=electrode_z_um * axs.um,
         stimulus=stimulus,
     )
-    if normalized_mode == "pseudo_double_single_myelinated_chain":
-        context = SegmentScaledAnalyticalExtracellularContext(
-            electrodes=[electrode],
-            sigma=0.3 * axs.S_per_m,
-            positions_um=axon.layout.position_values(unit="micrometer"),
-            alpha=single_chain_vext_alpha(axon, single_chain_config),
-        )
-    else:
-        context = axs.AnalyticalExtracellularContext(
-            electrodes=[electrode],
-            sigma=0.3 * axs.S_per_m,
-        )
-
     if size <= 0:
         raise ValueError("size must be positive.")
     offsets = (
@@ -320,7 +307,27 @@ def build_validation_population(
     )
     instances: list[axs.AxonInstance] = []
     for offset_um in offsets:
-        instance = axs.AxonInstance(axon, y=float(offset_um) * axs.um)
+        if normalized_mode == "pseudo_double_single_myelinated_chain":
+            local_electrode = axs.PointSourceElectrode(
+                x=electrode.x_um * axs.um,
+                y=(electrode.y_um - float(offset_um)) * axs.um,
+                z=electrode.z_um * axs.um,
+                min_distance=electrode.min_distance_um * axs.um,
+            ).with_stimulus(electrode.stimulus)
+            context = SegmentScaledAnalyticalExtracellularContext(
+                electrodes=[local_electrode],
+                sigma=0.3 * axs.S_per_m,
+                positions_um=axon.layout.position_values(unit="micrometer"),
+                alpha=single_chain_vext_alpha(axon, single_chain_config),
+            )
+        else:
+            context = axs.analytical.local_point_source_context(
+                electrode,
+                sigma=0.3 * axs.S_per_m,
+                axon_y=float(offset_um) * axs.um,
+                axon_z=0.0 * axs.um,
+            )
+        instance = axs.AxonInstance(axon)
         instance.add_extracellular_context(context=context)
         instances.append(instance)
     return instances

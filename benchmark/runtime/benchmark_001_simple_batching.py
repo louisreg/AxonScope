@@ -29,8 +29,8 @@ import axonscope as axs
 REPEATS = 3
 
 
-def make_extracellular_context(length):
-    """Return one analytical context shared by every axon in a pool."""
+def make_point_source_electrode(length):
+    """Return one analytical source to localize for every axon in a pool."""
 
     electrode = axs.PointSourceElectrode(
         x=length / 2.0,
@@ -42,15 +42,11 @@ def make_extracellular_context(length):
         duration=0.50 * axs.ms,
         amplitude=-50.0 * axs.uA,
     )
-    context = axs.AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(current)],
-        sigma=0.3 * axs.S_per_m,
-    )
-    return context, electrode
+    return electrode.with_stimulus(current)
 
 
-def make_simulations(y_positions, *, length, extracellular_context):
-    """Create one positioned simulation per y coordinate."""
+def make_simulations(y_positions, *, length, electrode):
+    """Create one axon-local simulation per external y coordinate."""
 
     simulations = []
 
@@ -61,13 +57,14 @@ def make_simulations(y_positions, *, length, extracellular_context):
             compartments=51,
             celsius=37.0 * axs.degC,
         )
-        simulation = axs.AxonInstance(
-            axon,
-            y=y_position,
-            z=0.0 * axs.um,
-        )
+        simulation = axs.AxonInstance(axon)
         simulation.add_extracellular_context(
-            context=extracellular_context,
+            context=axs.analytical.local_point_source_context(
+                electrode,
+                sigma=0.3 * axs.S_per_m,
+                axon_y=y_position,
+                axon_z=0.0 * axs.um,
+            ),
         )
         simulation.label = f"fiber {index}"
         simulations.append(simulation)
@@ -443,23 +440,22 @@ def main() -> None:
     length = 100.0 * axs.um
     dt = 0.01 * axs.ms
     duration = 20.0 * axs.ms
-    recording = axs.Recording.center("Vm")
+    recording = axs.Recording.center(axs.signals.Vm)
 
     y_positions = (
         np.asarray([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 120.0, 250.0])
         * axs.um
     )
 
-    # This context is used only to obtain the electrode for plotting.
-    _, electrode = make_extracellular_context(length)
+    electrode = make_point_source_electrode(length)
 
     def simulation_factory():
-        # Each benchmark measurement receives a fresh context and pool.
-        context, _ = make_extracellular_context(length)
+        # Each benchmark measurement receives a fresh localized pool.
+        fresh_electrode = make_point_source_electrode(length)
         return make_simulations(
             y_positions,
             length=length,
-            extracellular_context=context,
+            electrode=fresh_electrode,
         )
 
     outputs, timings_s = benchmark_modes(

@@ -22,7 +22,7 @@ def main() -> None:
     # Step 1: choose the intrinsic axon positions where the field is sampled.
     positions = np.linspace(0.0, 1000.0, 201) * axs.um
 
-    # Step 2: describe two analytical point sources in global coordinates.
+    # Step 2: describe two analytical point sources in the local axon frame.
     cathode = axs.PointSourceElectrode(
         x=500.0 * axs.um,
         z=120.0 * axs.um,

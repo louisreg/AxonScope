@@ -227,7 +227,8 @@ def build_pool_inputs(
         celsius=6.3 * degC,
     )
     axon = AxonInstance(axon_model)
-    axon.add_current_clamp(position_um=length_um / 2.0,
+    axon.add_current_clamp(
+        position=(length_um / 2.0) * um,
         current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )
     axon.set_extracellular_layer(
@@ -242,15 +243,15 @@ def build_pool_inputs(
     radial_um = np.linspace(radial_min_um, radial_max_um, fibers)
     longitudinal_offsets_um = np.linspace(-0.5 * x_spread_um, 0.5 * x_spread_um, fibers)
     base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
-    x_positions_m = base_x_m[None, :] + longitudinal_offsets_um[:, None] * 1e-6
+    x_positions_m = np.repeat(base_x_m[None, :], fibers, axis=0)
 
     context_batch = []
     footprint_rows = []
     for axon_index, radial in enumerate(radial_um):
         electrode = PointSourceElectrode(
-            x_um=length_um / 2.0,
-            y_um=float(radial),
-            z_um=0.0,
+            x=(length_um / 2.0 - float(longitudinal_offsets_um[axon_index])) * um,
+            y=float(radial) * um,
+            z=0.0 * um,
         )
         context = AnalyticalExtracellularContext(
             electrodes=[electrode.with_stimulus(stimulus)],

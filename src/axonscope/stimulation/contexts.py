@@ -2,8 +2,8 @@
 
 Contexts are lightweight, backend-independent descriptions. Intracellular
 contexts bind a current waveform to one axonal position. Extracellular contexts
-group globally positioned electrodes; specific subclasses decide how electrode
-currents become extracellular potentials.
+group stimulated electrodes or precomputed spatial transfer data; specific
+subclasses decide how electrode currents become extracellular potentials.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class ExtracellularContext:
     """
 
     electrodes: Sequence["Electrode"]
-    """Stimulated electrodes in the global extracellular frame."""
+    """Stimulated electrodes in the context's coordinate frame."""
 
     def __post_init__(self) -> None:
         """Validate and freeze the electrode collection as a tuple."""

@@ -1,9 +1,10 @@
 """Extracellular electrode source descriptions.
 
-Electrodes describe physical sources in the global simulation frame: position,
-attached temporal current stimulus, and source-specific geometry. They do not
-own the extracellular medium. Analytical media such as homogeneous point-source
-conductivity live on `AnalyticalExtracellularContext`.
+Electrodes describe physical sources in the coordinate frame chosen by the
+caller: position, attached temporal current stimulus, and source-specific
+geometry. They do not own axon placement or the extracellular medium.
+Analytical media such as homogeneous point-source conductivity live on
+`AnalyticalExtracellularContext`.
 """
 
 from __future__ import annotations
@@ -102,7 +103,7 @@ class AnalyticalElectrode(Electrode, ABC):
         axon_y_um: Any = 0.0,
         axon_z_um: Any = 0.0,
     ) -> np.ndarray:
-        """Return V/A footprint samples for one globally positioned axon."""
+        """Return V/A footprint samples for one axon-local evaluation."""
 
         return self.footprint(x_positions_m, sigma_S_m=sigma_S_m)
 
@@ -136,8 +137,8 @@ class PointSourceElectrode(AnalyticalElectrode):
         Parameters
         ----------
         x, y, z:
-            Global electrode coordinates. Values must carry length units. `y`
-            defaults to 0 um when omitted.
+            Electrode coordinates in the context frame. Values must carry
+            length units. `y` defaults to 0 um when omitted.
         min_distance:
             Lower bound on source distance to avoid singular footprints.
         stimulus:
@@ -207,11 +208,11 @@ class PointSourceElectrode(AnalyticalElectrode):
         axon_y_um: Any = 0.0,
         axon_z_um: Any = 0.0,
     ) -> np.ndarray:
-        """Return the point-source footprint for an axon in global coordinates.
+        """Return the point-source footprint with optional transverse offsets.
 
-        `x_positions_m` should include the axon's global x offset. `axon_y_um`
-        and `axon_z_um` are subtracted from the electrode's global transverse
-        coordinates before computing the source distance.
+        Runtime paths pass intrinsic axon positions and zero offsets. Analytical
+        helper code can pass offsets while building an axon-local context or a
+        sampled footprint from external geometry.
         """
 
         x = units.to_m_array(x_positions_m, dtype=float)

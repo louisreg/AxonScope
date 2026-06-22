@@ -48,13 +48,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         radius=args.radius_um * axs.um,
         include_mrg=args.include_mrg,
     )
-    extracellular = make_extracellular_context(length=length)
+    electrode = make_point_source_electrode(length=length)
     simulations = tuple(
         build_simulation(
             row,
             length=length,
             mrg_nodes=args.mrg_nodes,
-            extracellular=extracellular,
+            electrode=electrode,
             index=index,
         )
         for index, row in enumerate(rows)
@@ -98,8 +98,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def make_extracellular_context(*, length: Any) -> axs.AnalyticalExtracellularContext:
-    """Create one analytical extracellular context shared by every fiber."""
+def make_point_source_electrode(*, length: Any) -> axs.PointSourceElectrode:
+    """Create one global analytical source to localize per fiber."""
 
     electrode = axs.PointSourceElectrode(
         x=length / 2.0,
@@ -111,10 +111,7 @@ def make_extracellular_context(*, length: Any) -> axs.AnalyticalExtracellularCon
         duration=0.08 * axs.ms,
         amplitude=20.0 * axs.uA,
     )
-    return axs.AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(stimulus)],
-        sigma=0.3 * axs.S_per_m,
-    )
+    return electrode.with_stimulus(stimulus)
 
 
 def build_pool_rows(
@@ -221,18 +218,20 @@ def build_simulation(
     *,
     length: Any,
     mrg_nodes: int,
-    extracellular: axs.ExtracellularContext,
+    electrode: axs.PointSourceElectrode,
     index: int,
 ) -> axs.AxonInstance:
-    """Create one positioned axon simulation from a pool row."""
+    """Create one local axon simulation from a geometry-owned pool row."""
 
     axon = build_axon(row, length=length, mrg_nodes=mrg_nodes)
-    sim = axs.AxonInstance(
-        axon,
-        y=row.y_um * axs.um,
-        z=row.z_um * axs.um,
-        x_offset=row.x_offset_um * axs.um,
+    extracellular = axs.analytical.local_point_source_context(
+        electrode,
+        sigma=0.3 * axs.S_per_m,
+        axon_x_offset=row.x_offset_um * axs.um,
+        axon_y=row.y_um * axs.um,
+        axon_z=row.z_um * axs.um,
     )
+    sim = axs.AxonInstance(axon)
     sim.add_extracellular_context(context=extracellular)
     sim.add_current_clamp(
         position=stimulation_position(axon, length=length),

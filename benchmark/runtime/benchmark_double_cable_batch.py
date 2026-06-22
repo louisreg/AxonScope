@@ -270,13 +270,14 @@ def _build_hh_double_cable(nx: int) -> AxonInstance:
         use_extracellular=True,
         Veinit=0.0,
     )
-    simulation.add_current_clamp(position_um=length_um / 2.0,
+    simulation.add_current_clamp(
+        position=(length_um / 2.0) * um,
         current=Stimulus.pulse(start=0.4, duration=0.05, amplitude=0.8),
     )
     electrode = PointSourceElectrode(
-        x0_m=(length_um / 2.0) * 1e-6,
-        y0_m=100e-6,
-        z0_m=100e-6,
+        x=(length_um / 2.0) * um,
+        y=100.0 * um,
+        z=100.0 * um,
     )
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
     simulation.add_extracellular_context(

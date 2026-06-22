@@ -7,8 +7,8 @@ public container for cohorts:
 ```python
 import axonscope as axs
 
-sim_a = axs.AxonInstance(axon_a, y=20.0 * axs.um, z=30.0 * axs.um)
-sim_b = axs.AxonInstance(axon_b, y=-40.0 * axs.um, z=10.0 * axs.um)
+sim_a = axs.AxonInstance(axon_a)
+sim_b = axs.AxonInstance(axon_b)
 population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
 
 results = axs.simulate_pool(
@@ -34,9 +34,9 @@ results = simulation.run()
 ```
 
 There is no public `Fiber` wrapper. `Axon` objects carry descriptive
-geometry/membrane information; `AxonInstance` objects carry per-row positions
-and stimulation protocols; `AxonPopulation` preserves the ordered cohort that
-is sent to dispatch.
+geometry/membrane information; `AxonInstance` objects carry per-row stimulation
+protocols in the axon's intrinsic coordinate system; `AxonPopulation` preserves
+the ordered cohort that is sent to dispatch.
 
 ## Public Flow
 
@@ -76,15 +76,36 @@ population row. The view is the public one-axon result surface.
 
 ## Spatial Position
 
-Set pool placement on each simulation protocol:
+AxonScope core uses the intrinsic one-dimensional coordinate:
 
-```python
-sim = axs.AxonInstance(axon)
-sim.set_position(y=20.0 * axs.um, z=30.0 * axs.um, x_offset=0.0 * axs.um)
+```text
+s = 0 ... axon length
 ```
 
-Positions must carry length units when provided. They are converted to internal
-micrometers at the simulation boundary.
+World/anatomical coordinates belong to external geometry packages or to small
+analytical helper code in examples. If a point-source setup starts in an
+external frame, localize it before attaching it to the simulation protocol:
+
+```python
+electrode = axs.PointSourceElectrode(
+    x=500.0 * axs.um,
+    y=0.0 * axs.um,
+    z=100.0 * axs.um,
+).with_stimulus(extra_current)
+
+sim = axs.AxonInstance(axon)
+sim.add_extracellular_context(
+    context=axs.analytical.local_point_source_context(
+        electrode,
+        sigma=0.3 * axs.S_per_m,
+        axon_y=20.0 * axs.um,
+        axon_z=30.0 * axs.um,
+    )
+)
+```
+
+The offsets above are inputs to the helper only. They are not stored on
+`AxonInstance`, and they do not become solver state.
 
 ## Stimulation Contexts
 
@@ -109,9 +130,10 @@ sim.add_extracellular_context(
 That keeps the public model didactic: a pool is a collection of already
 described axon simulations.
 
-Point-source electrode coordinates are interpreted in the same global frame as
-`sim.set_position(...)`. The dispatcher/runtime converts each point source to
-the transverse offset seen by each axon before building batched `Vstim` arrays.
+Point-source electrode coordinates are interpreted by the context or footprint
+builder. By the time dispatch/preparation starts, each row has local
+extracellular contexts or sampled footprints. The dispatcher/runtime never
+requires a world position on the axon instance.
 
 ## Advanced Dispatch
 
@@ -176,8 +198,8 @@ are sliced back to the original axon width, and center/probe recordings are
 resolved against each original axon.
 
 The intended per-row differences in a batch are cable geometry, attached
-stimulation contexts, intracellular contexts, spatial offsets, and, for
-padded double-cable groups, the number of compartments. Per-row membrane
+stimulation contexts, intracellular contexts, local extracellular footprints,
+and, for padded double-cable groups, the number of compartments. Per-row membrane
 parameters are not batched yet; if membrane signatures differ, the dispatcher
 keeps rows in separate groups.
 
@@ -217,8 +239,8 @@ current JAX tensor builders live behind the JAX backend boundary and are not a
 stable user API.
 
 This boundary is intentional: `dispatcher` knows about public axons, contexts,
-spatial shifts, footprints, and grouping policy; `solvers` know about arrays,
-time integration, and numerical state.
+local footprints, and grouping policy; `solvers` know about arrays, time
+integration, and numerical state.
 
 ## Module Responsibilities
 
@@ -230,7 +252,7 @@ Current files:
 - `dispatcher/inspection.py`: text and Matplotlib inspection helpers for
   dispatch plans;
 - `dispatcher/runtime_batches.py`: builders for batched solver inputs from
-  intracellular contexts, extracellular contexts, per-row positions, and
+  intracellular contexts, extracellular contexts, intrinsic positions, and
   electrode footprints.
 - `solvers/options.py`: solver-owned numerical options, batch execution
   options, and batch Vm retention policies.

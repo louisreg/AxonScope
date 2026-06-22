@@ -360,22 +360,28 @@ def test_precompute_extracellular_potential_matches_axon_method():
     assert np.allclose(sampled[2], np.asarray(axon.extracellular_potential_mV(0.5)))
 
 
-def test_extracellular_potential_uses_global_axon_position_for_point_source():
+def test_extracellular_potential_uses_localized_point_source_context():
     axon = AxonInstance(HodgkinHuxley(length=300.0 * axs.um, diameter=0.5 * axs.um, compartments=11, celsius=6.3 * axs.degC))
-    axon.set_position(x_offset=25.0 * axs.um, y=40.0 * axs.um, z=-10.0 * axs.um)
     electrode = PointSourceElectrode(
-        x=150.0 * axs.um,
+        x=125.0 * axs.um,
         y=10.0 * axs.um,
         z=20.0 * axs.um,
     )
     stim = Stimulus.constant(10e-6, start=0.0 * axs.ms)
-    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    axon.add_extracellular_context(
+        context=axs.analytical.local_point_source_context(
+            electrode,
+            stimulus=stim,
+            sigma=0.2 * axs.S_per_m,
+            axon_y=40.0 * axs.um,
+            axon_z=-10.0 * axs.um,
+        ),
+        replace=True,
+    )
 
-    x_m = (
-        np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) + 25.0
-    ) * 1e-6
+    x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     r = np.sqrt(
-        (x_m - 150e-6) ** 2
+        (x_m - 125e-6) ** 2
         + ((10.0 - 40.0) * 1e-6) ** 2
         + ((20.0 - (-10.0)) * 1e-6) ** 2
     )

@@ -180,21 +180,26 @@ Work should start here unless the user asks otherwise.
 
 ### 9. Remove World Coordinate Ownership
 
-- [ ] Audit public objects and examples for `x`, `y`, `z`, trajectory,
+- [x] Audit public objects and examples for `x`, `y`, `z`, trajectory,
   anatomical-frame, nerve-geometry, electrode-geometry, or CAD assumptions.
-- [ ] Keep intrinsic axon position `s = 0 ... length` as the core coordinate used
+- [x] Remove `AxonInstance` placement arguments/properties and
+  `set_position(...)`; reject the old public path explicitly.
+- [x] Keep intrinsic axon position `s = 0 ... length` as the core coordinate used
   for layout, clamps, recording selectors, event positions, and footprints.
-- [ ] Ensure `Axon`, `AxonInstance`, `ExtracellularFootprint`, and solver
+- [x] Ensure `Axon`, `AxonInstance`, `ExtracellularFootprint`, and solver
   preparation do not require world coordinates or external geometry ownership.
 - [ ] Move analytical point-source helpers toward footprint generation/examples
   only; solver execution should consume sampled footprints/drives.
 - [x] Add a small `axs.analytical.local_point_source_context(...)` helper so
   public examples can keep transverse point-source geometry out of
   `AxonInstance`.
-- [ ] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
+- [x] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
   adapter-style inputs that hand AxonScope intrinsic footprints and metadata.
-- [ ] Rename or remove user-facing fields/docs that imply AxonScope owns
+- [x] Rename or remove user-facing fields/docs that imply AxonScope owns
   real-world placement beyond temporary analytical examples.
+- [x] Add architecture guardrails so public examples/docs cannot reintroduce
+  `AxonInstance(..., y=...)`, `z=...`, `x_offset=...`, or
+  `set_position(...)`.
 
 ### 10. Docs
 

@@ -801,12 +801,7 @@ def _try_evaluate_activation_observer_pool_batched_values(
 
 def _clone_candidate_for_batched_update(row: Axon | AxonInstance) -> Axon | AxonInstance:
     if isinstance(row, AxonInstance):
-        clone = AxonInstance(
-            row.axon,
-            x_offset=units.Q_(row.x_offset_um, "micrometer"),
-            y=units.Q_(row.y_um, "micrometer"),
-            z=units.Q_(row.z_um, "micrometer"),
-        )
+        clone = AxonInstance(row.axon)
         clone.intracellular_contexts = [
             copy.copy(context) for context in row.intracellular_contexts
         ]

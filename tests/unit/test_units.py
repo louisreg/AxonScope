@@ -124,7 +124,7 @@ def test_simulation_protocol_accepts_unit_quantities():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    sim = axs.AxonInstance(axon, y=0.02 * axs.mm, z=10.0 * axs.um)
+    sim = axs.AxonInstance(axon)
     sim.add_current_clamp(
         position=0.05 * axs.mm,
         current=axs.Stimulus.pulse(
@@ -134,8 +134,8 @@ def test_simulation_protocol_accepts_unit_quantities():
         ),
     )
 
-    assert sim.y_um == pytest.approx(20.0)
-    assert sim.z_um == pytest.approx(10.0)
+    assert not hasattr(sim, "y_um")
+    assert not hasattr(sim, "z_um")
     assert sim.intracellular_contexts[0].position_um == pytest.approx(50.0)
     np.testing.assert_allclose(sim.intracellular_contexts[0].current.t, [0.0, 0.02, 0.04])
 
@@ -145,7 +145,7 @@ def test_current_clamp_position_requires_units():
         axs.IntracellularCurrentClamp(position=50.0, current=axs.Stimulus.constant(0.0))
 
 
-def test_simulation_protocol_position_requires_units():
+def test_simulation_protocol_rejects_world_coordinates():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -153,11 +153,10 @@ def test_simulation_protocol_position_requires_units():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(TypeError, match="y must include units compatible with length"):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
         axs.AxonInstance(axon, y=20.0)
     sim = axs.AxonInstance(axon)
-    with pytest.raises(TypeError, match="x_offset must include units compatible with length"):
-        sim.set_position(x_offset=0.0, y=20.0 * axs.um, z=0.0 * axs.um)
+    assert not hasattr(sim, "set_position")
 
 
 def test_analysis_accepts_quantity_like_thresholds():

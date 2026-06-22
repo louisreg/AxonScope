@@ -159,9 +159,9 @@ def _build_axonscope_case(
     axon = MRG(diameter=diameter_um * um, nodes=nodes)
     x0_um = float(axon.length / 2.0)
     electrode = PointSourceElectrode(
-        x0_m=x0_um * 1e-6,
-        y0_m=ELECTRODE_Y_UM * 1e-6,
-        z0_m=ELECTRODE_Z_UM * 1e-6,
+        x=x0_um * um,
+        y=ELECTRODE_Y_UM * um,
+        z=ELECTRODE_Z_UM * um,
     )
     stim = Stimulus.biphasic(
         start=1.0,

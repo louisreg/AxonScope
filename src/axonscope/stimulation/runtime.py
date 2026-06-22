@@ -69,13 +69,6 @@ def _extracellular_contexts_from_axon(axon) -> tuple[ExtracellularContext, ...]:
     return tuple(getattr(axon, "extracellular_contexts", ()))
 
 
-def _global_x_positions_m(axon, solver_axon: "SolverAxon", dtype_local: jnp.dtype) -> jnp.ndarray:
-    """Return compartment x positions in global meters for one axon."""
-
-    x_offset_um = dtype_local(getattr(axon, "x_offset_um", 0.0))
-    return (jnp.asarray(solver_axon.x_um, dtype=dtype_local) + x_offset_um) * dtype_local(1e-6)
-
-
 @dataclass(frozen=True)
 class JaxStimulus:
     """JAX-ready stimulus representation used by runtime code.
@@ -196,11 +189,12 @@ def compile_extracellular_context(
     ctx:
         Extracellular context containing stimulated electrodes.
     x_positions_m:
-        Axial sample positions in meters, including the axon's x offset.
+        Intrinsic axial sample positions in meters.
     dtype_local:
         JAX dtype used for compiled arrays.
     axon_y_um, axon_z_um:
-        Axon's transverse global position in micrometers.
+        Optional analytical offsets for helpers that still evaluate a global
+        point source. Core simulation instances do not own these coordinates.
     """
     if dtype_local is None:
         dtype_local = jnp.float32
@@ -313,14 +307,12 @@ def compile_extracellular_contexts(
             contexts=(),
         )
 
-    x_positions_m = _global_x_positions_m(axon, solver_data, dtype_local)
+    x_positions_m = jnp.asarray(solver_data.x_um, dtype=dtype_local) * dtype_local(1e-6)
     compiled_contexts = tuple(
         compile_extracellular_context(
             ctx,
             x_positions_m,
             dtype_local=dtype_local,
-            axon_y_um=float(getattr(axon, "y_um", 0.0)),
-            axon_z_um=float(getattr(axon, "z_um", 0.0)),
         )
         for ctx in contexts
     )

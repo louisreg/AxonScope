@@ -381,7 +381,8 @@ def _make_axonscope_case(case: GridCase):
             e_pas=-70.0,
         )
         simulation = AxonInstance(axon)
-        simulation.add_current_clamp(position_um=500.0,
+        simulation.add_current_clamp(
+            position=500.0 * um,
             current=Stimulus.pulse(start=1.0, duration=1.0, amplitude=2.0),
         )
         simulation.comparison_sample_position_um = 500.0
@@ -395,7 +396,8 @@ def _make_axonscope_case(case: GridCase):
     simulation.comparison_sample_position_um = center_node_pos_um
 
     if case.model == "mrg_intracellular":
-        simulation.add_current_clamp(position_um=center_node_pos_um,
+        simulation.add_current_clamp(
+            position=center_node_pos_um * um,
             current=Stimulus.pulse(start=1.0, duration=0.1, amplitude=2.0),
         )
         return simulation
@@ -404,9 +406,9 @@ def _make_axonscope_case(case: GridCase):
         _ = center_node_idx
         x0_um = float(axon.length / 2.0)
         electrode = PointSourceElectrode(
-            x0_m=x0_um * 1e-6,
-            y0_m=100e-6,
-            z0_m=0.0,
+            x=x0_um * um,
+            y=100.0 * um,
+            z=0.0 * um,
         )
         stim = Stimulus.biphasic(
             start=1.0,
