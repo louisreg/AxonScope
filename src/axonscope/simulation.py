@@ -16,7 +16,8 @@ from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording, RecordingSpatial
-from axonscope.results import AxonSimulationResult, CohortResult
+from axonscope.results import AxonSimulationResult
+from axonscope.results.pool import CohortResult
 from axonscope.results.single import SimResult
 from axonscope.solvers import (
     BatchOptions,
@@ -411,7 +412,7 @@ def simulate_pool(
     execution_policy: ExecutionPolicy | None = None,
     progress: ProgressOption = False,
 ) -> AxonSimulationResult:
-    """Run a pool and return a cohort-backed ``AxonSimulationResult``.
+    """Run a pool and return the canonical ``AxonSimulationResult``.
 
     Per-axon views are exposed in pool order through indexing and iteration.
     The lower-level dispatch metadata is kept in each view's ``diagnostics``

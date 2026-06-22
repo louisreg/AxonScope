@@ -4,6 +4,7 @@ import pytest
 import axonscope as axs
 from axonscope.protocols import activation as activation_protocols
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, VmRasterResult
+from axonscope.results.pool import CohortResult
 
 
 class _DummyLayout:
@@ -31,7 +32,7 @@ def _public_pool_result(vms, *, axons=None):
     if axons is None:
         axons = tuple(_DummyAxon() for _ in range(row_count))
     t = np.asarray([0.0, 1.0, 2.0])
-    cohort = axs.CohortResult(
+    cohort = CohortResult(
         input_indices=tuple(range(row_count)),
         axons=tuple(axons),
         simulations=tuple(None for _ in range(row_count)),
@@ -62,7 +63,7 @@ def _observer_only_pool_result(activated):
         positions_um=np.asarray([[100.0]], dtype=float),
         thresholds_mV=np.asarray([0.0], dtype=float),
     )
-    cohort = axs.CohortResult(
+    cohort = CohortResult(
         input_indices=tuple(range(row_count)),
         axons=tuple(_DummyAxon() for _ in range(row_count)),
         simulations=tuple(None for _ in range(row_count)),

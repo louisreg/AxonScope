@@ -3,9 +3,9 @@
 Run:
     python examples/advanced/object_model/03_pool_results.py
 
-Phase 5 makes pool simulations return one canonical result object instead of a
-plain list. The object stores dense cohorts internally and exposes one-axon
-views when you index or iterate over it.
+Pool simulations return one canonical result object instead of a plain list.
+Indexing or iterating over that object gives one-axon views in the original
+input order.
 """
 
 from __future__ import annotations
@@ -64,14 +64,13 @@ def main() -> None:
     # Step 8: the top-level result is not a list.
     print(f"result type: {type(results).__name__}")
     print(f"rows: {len(results)}")
-    print(f"cohorts: {len(results.cohorts)}")
+    print(f"recording rows: {len(results.recordings)}")
+    print(f"final states: {sum(state is not None for state in results.final_states)} retained")
 
     # Step 9: the recording manifest says what signals are actually available.
     manifest = results.recording_manifest
-    vm_manifest = manifest.signal(axs.signals.Vm)
     print(f"requested signals: {[signal.id.value for signal in manifest.requested_signals]}")
     print(f"available signals: {[signal.id.value for signal in manifest.available_signals]}")
-    print(f"Vm cohort shapes: {vm_manifest.cohort_shapes}")
 
     # Step 10: indexing returns a one-axon view in the original pool order.
     first = results[0]
@@ -86,7 +85,7 @@ def main() -> None:
     print(f"first peak: {float(np.max(first_trace_mV)):.3f} mV")
     print(f"second peak: {float(np.max(second_trace_mV)):.3f} mV")
 
-    # Step 12: homogeneous cohorts can also expose one dense signal block.
+    # Step 12: homogeneous recordings can also expose one dense signal block.
     dense_vm = results.signal(axs.signals.Vm)
     print(f"dense Vm shape: {dense_vm.shape}  # axon, time, recorded_position")
 

@@ -526,10 +526,11 @@ def _materialize_vm(result: AxonSimulationResult) -> None:
 def _result_output_metadata(result: AxonSimulationResult) -> dict[str, object]:
     vm_arrays = []
     total_bytes = 0
-    for cohort in result.cohorts:
-        if cohort.Vm is None:
+    for row in result:
+        try:
+            vm = np.asarray(row.Vm)
+        except ValueError:
             continue
-        vm = np.asarray(cohort.Vm)
         total_bytes += int(vm.nbytes)
         vm_arrays.append(
             {
@@ -554,20 +555,19 @@ def _row_metrics(
     threshold_mV: float,
     blanking_ms: float,
 ) -> RowMetrics:
-    sim_result = row.to_sim_result() if hasattr(row, "to_sim_result") else row
     event = ActivationCriterion(
         threshold=threshold_mV * axs.mV,
         blanking=blanking_ms * axs.ms,
-    ).evaluate(sim_result)
-    vm = np.asarray(sim_result.voltage_values(unit="millivolt"), dtype=float)
-    positions_um = np.asarray(sim_result.position_values(unit="micrometer"), dtype=float)
+    ).evaluate(row)
+    vm = np.asarray(row.voltage_values(unit="millivolt"), dtype=float)
+    positions_um = np.asarray(row.position_values(unit="micrometer"), dtype=float)
     center_col = int(vm.shape[1] // 2)
     peak_position_um = None
     if event.peak_index is not None:
-        if sim_result.record_indices is None:
+        if row.record_indices is None:
             peak_col = int(event.peak_index)
         else:
-            record_indices = tuple(int(index) for index in sim_result.record_indices)
+            record_indices = tuple(int(index) for index in row.record_indices)
             peak_col = record_indices.index(int(event.peak_index))
         if 0 <= peak_col < positions_um.shape[0]:
             peak_position_um = float(positions_um[peak_col])
@@ -606,8 +606,8 @@ def _trace_sample(
 ) -> dict[str, object] | None:
     if row < 0 or row >= len(reference) or row >= len(candidate):
         return None
-    ref_result = reference[row].to_sim_result()
-    cand_result = candidate[row].to_sim_result()
+    ref_result = reference[row]
+    cand_result = candidate[row]
     ref_vm = np.asarray(ref_result.voltage_values(unit="millivolt"), dtype=float)
     cand_vm = np.asarray(cand_result.voltage_values(unit="millivolt"), dtype=float)
     if ref_vm.shape != cand_vm.shape or ref_vm.ndim != 2:

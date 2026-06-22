@@ -13,7 +13,8 @@ from jax.lax.linalg import tridiagonal_solve
 
 import axonscope as axs
 from axonscope.axon_instance import AxonInstance
-from axonscope.results import AxonSimulationResult, CohortResult
+from axonscope.results import AxonSimulationResult
+from axonscope.results.pool import CohortResult
 from axonscope.backends.jax.runtime import prepare_solver_runtime
 
 from benchmark.pseudo_double.reductions import (

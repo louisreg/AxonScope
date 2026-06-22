@@ -89,7 +89,7 @@ def main() -> None:
         recording=axs.Recording.center(axs.signals.Vm),
     )
 
-    # Step 6: running a population returns a cohort-backed pool result.
+    # Step 6: running a population returns the canonical pool result.
     results = simulation.run()
 
     print("dispatch:")

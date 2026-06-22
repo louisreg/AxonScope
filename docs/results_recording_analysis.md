@@ -162,9 +162,10 @@ row_final_states = results.final_states
 
 For homogeneous recordings, `results.signal(axs.signals.Vm)` returns a dense
 array indexed as `(axon, time, recorded_position)`. Heterogeneous pools remain
-accessible through per-axon views and through `results.cohorts`.
+accessible through per-axon views; storage partitioning is an implementation
+detail, not a second result workflow.
 `results.recording_manifest` records which signals were requested, which
-signals are actually available, and the dense shape/dtype for each cohort.
+signals are actually available, and advanced storage shape/dtype metadata.
 
 Public result surface audit:
 
@@ -172,13 +173,12 @@ Public result surface audit:
 | --- | --- |
 | `AxonSimulationResult` | canonical execution result for one row or many rows; supports indexing, iteration, `signal(...)`, `analyze(...)`, `report(...)`, diagnostics, observations, recordings, recorded axes, and final-state aggregation. |
 | `AxonResultView` | one simulated row; exposes `Vm`, `t`, `signal(...)`, `recorded_axis`, recordings, observations, diagnostics, final state, plots, and analysis/report helpers. |
-| `CohortResult` | dense storage block behind `AxonSimulationResult`; useful for advanced inspection, not the beginner path. |
 | `RecordedSignal` and `RecordingManifest` | structured record of requested and available signals. |
 | `RecordedAxis` | canonical interpretation of retained Vm columns as intrinsic axon positions plus original layout indices. |
 | `VmRasterResult` | compact observer-only threshold raster stored under `observations["vm_raster"]`. |
 | `AnalysisReport` and protocol summaries | separate scientific interpretations of results; they do not mutate or merge into raw numerical result objects. |
 
-The lower-level `run_pool` path returns private dispatch results. Those
+The lower-level `run_pool` path returns private dispatch records. Those
 containers keep `index`, `group_id`, and `method` before the public wrapper
 converts the pool into `AxonSimulationResult`.
 

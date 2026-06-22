@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.results import CohortResult, AxonSimulationResult
+from axonscope.results import AxonSimulationResult
+from axonscope.results.pool import CohortResult
 from axonscope.results.single import SimResult
 
 

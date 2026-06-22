@@ -35,7 +35,7 @@ still runnable examples, but they explain the moving parts more explicitly.
   executable root.
 - `object_model/02_axon_population.py`: build and run explicit
   `AxonPopulation` cohorts.
-- `object_model/03_pool_results.py`: inspect cohort-backed pool results and
+- `object_model/03_pool_results.py`: inspect canonical pool results and
   per-axon views.
 
 ### Axon Models

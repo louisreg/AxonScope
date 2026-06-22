@@ -1,4 +1,4 @@
-"""Cohort-backed pool simulation results."""
+"""Pool simulation results exposed through one canonical public surface."""
 
 from __future__ import annotations
 
@@ -166,7 +166,7 @@ class RecordedSignal:
 
 @dataclass(frozen=True)
 class CohortResult:
-    """Dense result block for compatible pool rows.
+    """Internal dense result block for compatible pool rows.
 
     ``Vm`` is indexed as ``(axon, time, recorded_position)``. ``input_indices``
     maps each dense row back to the original user-provided pool order.
@@ -423,22 +423,22 @@ class AxonResultView(SingleAxonResultMixin):
 class AxonSimulationResult(Sequence[AxonResultView]):
     """Canonical result returned by population simulations.
 
-    Results are stored as one or more dense cohorts and exposed through
-    lightweight per-axon views in the original input order.
+    Results may use dense storage blocks internally, but the public data path is
+    the sequence of lightweight per-axon views in the original input order.
     """
 
     def __init__(
         self,
-        cohorts: Sequence[CohortResult],
+        _cohorts: Sequence[CohortResult],
         *,
         size: int,
         recording: Recording | None = None,
     ) -> None:
-        self.cohorts = tuple(cohorts)
+        self._cohorts = tuple(_cohorts)
         self.size = int(size)
         self.recording = recording
         self.recording_manifest = RecordingManifest.from_cohorts(
-            self.cohorts,
+            self._cohorts,
             policy=recording,
         )
         self._lookup = self._build_lookup()
@@ -450,7 +450,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         *,
         recording: Recording | None = None,
     ) -> AxonSimulationResult:
-        """Build a cohort-backed public result from dispatcher records."""
+        """Build the public result container from dispatcher records."""
 
         records = tuple(results)
         if not records:
@@ -509,7 +509,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 
     def _build_lookup(self) -> tuple[tuple[int, int], ...]:
         lookup: list[tuple[int, int] | None] = [None] * self.size
-        for cohort_index, cohort in enumerate(self.cohorts):
+        for cohort_index, cohort in enumerate(self._cohorts):
             for row_index, input_index in enumerate(cohort.input_indices):
                 if input_index < 0 or input_index >= self.size:
                     raise ValueError(
@@ -530,7 +530,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         if normalized < 0 or normalized >= self.size:
             raise IndexError(f"pool result index {index} is out of range.")
         cohort_index, row_index = self._lookup[normalized]
-        return self.cohorts[cohort_index], row_index
+        return self._cohorts[cohort_index], row_index
 
     def __len__(self) -> int:
         return self.size
@@ -606,8 +606,8 @@ class AxonSimulationResult(Sequence[AxonResultView]):
     def observations(self) -> ObservationDict | None:
         """Solver-side observations in input order, if requested."""
 
-        if len(self.cohorts) == 1:
-            cohort = self.cohorts[0]
+        if len(self._cohorts) == 1:
+            cohort = self._cohorts[0]
             if cohort.input_indices == tuple(range(self.size)):
                 return cohort.observations
 
@@ -645,8 +645,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         shapes = {value.shape for value in values}
         if len(shapes) != 1:
             raise ValueError(
-                "signal is split across heterogeneous cohorts; use .cohorts "
-                "or per-axon views instead."
+                "signal is heterogeneous across result rows; use per-axon views instead."
             )
         return np.stack(values, axis=0)
 
@@ -674,7 +673,6 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 __all__ = [
     "RecordedSignal",
     "RecordingManifest",
-    "CohortResult",
     "AxonResultView",
     "AxonSimulationResult",
 ]

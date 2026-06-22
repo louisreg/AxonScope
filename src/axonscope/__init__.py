@@ -72,7 +72,6 @@ from axonscope.population import AxonPopulation
 from axonscope.results import (
     AxonResultView,
     AxonSimulationResult,
-    CohortResult,
     RecordedAxis,
     RecordedSignal,
     RecordingManifest,
@@ -232,7 +231,6 @@ __all__ = [
     "NRVExtracellularContext",
     "VM_RASTER_OBSERVATION_KEY",
     "VmRasterResult",
-    "CohortResult",
     "AxonResultView",
     "AxonSimulationResult",
     "RecordedAxis",

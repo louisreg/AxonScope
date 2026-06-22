@@ -8,7 +8,6 @@ from axonscope.results.single import (
     ResultArray,
 )
 from axonscope.results.pool import (
-    CohortResult,
     AxonResultView,
     AxonSimulationResult,
     RecordedSignal,
@@ -39,7 +38,6 @@ __all__ = [
     "RecordedAxis",
     "ResultArray",
     "VmRasterResult",
-    "CohortResult",
     "AxonResultView",
     "AxonSimulationResult",
     "RecordedSignal",

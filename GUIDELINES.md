@@ -44,7 +44,7 @@ Current focus:
 | 2.5 - Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. |
 | 3 - Planning and preparation | Done for current JAX path | Preparation signatures, prepared cohorts, footprint-oriented preparation. |
 | 4 - JAX isolation | Done for current boundary | Scalar and batch execution enter through `axonscope.backends.jax`; low-level kernels still need later ownership cleanup. |
-| 5 - Canonical simulation results | Done | `CohortResult`, `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`. |
+| 5 - Canonical simulation results | Done | `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`, internal dense storage blocks. |
 | 6 - Analyses | Done for current public layer | Real `axs.analysis`, definitions, requirements, statuses, reports, post-hoc helpers. |
 | 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
 | 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
@@ -591,7 +591,10 @@ equations from analyses.
 
 The public result is `AxonSimulationResult` for one axon and populations, with
 `AxonResultView` for per-axon access. Internal scalar solver payloads are not
-exported and must not appear in examples as a user path.
+exported and must not appear in examples as a user path. Internal dense storage
+blocks are implementation details; examples and public docs should teach
+indexing, iteration, `.single`, `.signal(...)`, `recordings`, `recorded_axes`,
+`final_states`, diagnostics, observations, and analysis/report helpers.
 
 Use:
 

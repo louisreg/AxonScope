@@ -270,7 +270,59 @@ def test_pool_results_use_canonical_result_model_not_lists():
     assert "list[SimResult]" not in (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
     assert "AxonSimulationResult" in axs.__all__
     assert "AxonResultView" in axs.__all__
-    assert "CohortResult" in axs.__all__
+    assert "CohortResult" not in axs.__all__
+    assert "CohortResult" not in axs.results.__all__
+
+
+def test_examples_and_public_docs_teach_one_result_path():
+    public_paths = [
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "GUIDELINES.md",
+        REPO_ROOT / "docs" / "results_recording_analysis.md",
+        REPO_ROOT / "examples" / "README.md",
+        *sorted((REPO_ROOT / "examples" / "basic").rglob("*.py")),
+        *sorted((REPO_ROOT / "examples" / "advanced").rglob("*.py")),
+        *sorted((REPO_ROOT / "examples" / "with_nrv").rglob("*.py")),
+    ]
+    forbidden = {
+        "SimResult",
+        "to_sim_result",
+        "results.cohorts",
+        ".cohorts",
+        "axs.CohortResult",
+    }
+
+    offenders: dict[str, list[str]] = {}
+    for path in public_paths:
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        hits = sorted(term for term in forbidden if term in text)
+        if hits:
+            offenders[str(path.relative_to(REPO_ROOT))] = hits
+
+    assert offenders == {}
+
+
+def test_benchmark_helpers_do_not_use_removed_public_result_paths():
+    benchmark_paths = sorted((REPO_ROOT / "benchmark" / "pseudo_double").rglob("*.py"))
+    forbidden = {
+        "to_sim_result",
+        "results.cohorts",
+        ".cohorts",
+        "axs.CohortResult",
+        "from axonscope.results import AxonSimulationResult, CohortResult",
+        "from axonscope.results import CohortResult",
+    }
+
+    offenders: dict[str, list[str]] = {}
+    for path in benchmark_paths:
+        text = path.read_text(encoding="utf-8")
+        hits = sorted(term for term in forbidden if term in text)
+        if hits:
+            offenders[str(path.relative_to(REPO_ROOT))] = hits
+
+    assert offenders == {}
 
 
 def test_signals_are_extensible_descriptors_not_closed_enums():

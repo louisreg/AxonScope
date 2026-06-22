@@ -7,8 +7,12 @@ import axonscope as axs
 def test_public_results_expose_one_canonical_path():
     assert not hasattr(axs, "SimResult")
     assert not hasattr(axs.results, "SimResult")
+    assert not hasattr(axs, "CohortResult")
+    assert not hasattr(axs.results, "CohortResult")
     assert "SimResult" not in axs.__all__
     assert "SimResult" not in axs.results.__all__
+    assert "CohortResult" not in axs.__all__
+    assert "CohortResult" not in axs.results.__all__
 
 
 def test_public_unmyelinated_template_and_simulate():
@@ -244,9 +248,9 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     )
 
     assert compact.recording_manifest.available == ()
-    assert len(compact.cohorts) == 1
+    assert len(compact) == 2
+    assert compact.recordings == (None, None)
     assert compact.observations is not None
-    assert compact.cohorts[0].observations is compact.observations
     raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
     assert raster.words.shape == (2, 1, 1, 1)
     expected = np.stack(
@@ -523,7 +527,7 @@ def test_public_simulate_pool_accepts_unit_duration_and_dt():
     assert result[0].Vm.shape == (2, 11)
 
 
-def test_public_simulate_pool_returns_canonical_cohort_result():
+def test_public_simulate_pool_returns_canonical_result():
     axon_model = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -543,9 +547,8 @@ def test_public_simulate_pool_returns_canonical_cohort_result():
 
     assert isinstance(result, axs.AxonSimulationResult)
     assert not isinstance(result, list)
+    assert not hasattr(result, "cohorts")
     assert len(result) == 2
-    assert len(result.cohorts) == 1
-    assert result.cohorts[0].Vm.shape == (2, 2, 1)
     assert result.axons == (axon_model, axon_model)
     assert result.simulations == (axon_a, axon_b)
     assert result.diagnostics[0]["pool_index"] == 0
@@ -595,7 +598,7 @@ def test_public_simulate_pool_returns_canonical_cohort_result():
         _ = result.single
 
 
-def test_public_simulate_pool_single_view_and_heterogeneous_cohorts():
+def test_public_simulate_pool_single_view_and_heterogeneous_rows():
     short_axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -623,8 +626,11 @@ def test_public_simulate_pool_single_view_and_heterogeneous_cohorts():
         dt=0.05 * axs.ms,
     )
     assert [view.Vm.shape for view in mixed] == [(2, 11), (2, 13)]
-    assert len(mixed.cohorts) == 2
-    with pytest.raises(ValueError, match="heterogeneous cohorts"):
+    assert [axis.original_indices for axis in mixed.recorded_axes] == [
+        tuple(range(11)),
+        tuple(range(13)),
+    ]
+    with pytest.raises(ValueError, match="heterogeneous across result rows"):
         mixed.signal(axs.signals.Vm)
 
 

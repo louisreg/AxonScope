@@ -163,8 +163,8 @@ Work should start here unless the user asks otherwise.
   `simulate(...) -> AxonSimulationResult`, one row through `.single` or `[0]`.
 - [x] Remove public scalar-solver-result export and public view conversion paths.
 - [x] Audit every remaining public result class/path: `AxonSimulationResult`,
-  `AxonResultView`, `CohortResult`, `RecordedSignal`, `RecordingManifest`,
-  `VmRasterResult`, analysis reports, and protocol return types.
+  `AxonResultView`, `RecordedSignal`, `RecordingManifest`, `VmRasterResult`,
+  analysis reports, protocol return types, and internal dense storage blocks.
 - [x] Finish one-axon and population result semantics: signal access,
   indexing, iteration, metadata, diagnostics, observations, final state, and
   analysis/report APIs.
