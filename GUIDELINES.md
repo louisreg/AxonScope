@@ -805,13 +805,17 @@ device resolution, array placement, and kernel lowering.
 
 Current boundary:
 
+- public simulation entry points call `axonscope.backends.execution`, which
+  resolves the currently supported concrete backend without importing JAX
+  adapters from `simulation.py`;
 - scalar and batch execution enter through `axonscope.backends.jax`;
 - fixed-step time-grid validation and solver time-argument normalization live
   in `axonscope.timebase`;
 - `axonscope.solvers` exports only the stable solver facade: solver base,
   `CrankNicholson`, solver options, batch options, and block-solver resolution;
-- JAX runtime preparation, scalar kernels, batch kernels, observer packing, and
-  backend input containers live under `axonscope.backends.jax`;
+- JAX runtime preparation, stimulation compilation, scalar kernels, batch
+  kernels, observer packing, and backend input containers live under
+  `axonscope.backends.jax`;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
 - `solvers/` retains only solver-facing contracts and the public solver class.
 
@@ -972,8 +976,8 @@ empty directories.
 Migration reminders:
 
 - move `dispatcher/plan.py` responsibilities toward `planning/`;
-- split `dispatcher/runtime_batches.py` between preparation and backend input
-  lowering;
+- keep host-side runtime-batch row helpers in `preparation/runtime_batches.py`
+  and backend array lowering under `backends/jax`;
 - keep fixed-step timebase rules out of JAX-heavy solver helper modules;
 - keep runtime dataclasses, preparation helpers, scalar kernels, and batch
   kernels out of the `axonscope.solvers` package facade;

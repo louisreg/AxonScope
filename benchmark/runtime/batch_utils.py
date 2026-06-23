@@ -12,7 +12,7 @@ import numpy as np
 
 from axonscope.benchmarking import collect_benchmark_metadata
 from axonscope.stimulation import ExtracellularContext
-from axonscope.dispatcher.runtime_batches import scale_extracellular_contexts
+from axonscope.preparation.runtime_batches import scale_extracellular_contexts
 
 
 @dataclass(frozen=True)

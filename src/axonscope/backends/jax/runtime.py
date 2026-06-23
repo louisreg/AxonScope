@@ -40,7 +40,7 @@ from .common import (
 )
 from axonscope.solvers.options import SolverOptions
 from .observables import membrane_observable_names
-from axonscope.stimulation.runtime import (
+from axonscope.backends.jax.stimulation_runtime import (
     build_extracellular_potential_fn,
     build_intracellular_current_density_fn,
 )

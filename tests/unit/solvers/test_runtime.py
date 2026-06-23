@@ -23,7 +23,7 @@ from axonscope.backends.jax.runtime import (
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
-from axonscope.stimulation.runtime import (
+from axonscope.backends.jax.stimulation_runtime import (
     CompiledExtracellularContexts,
     CompiledIntracellularContexts,
     compile_extracellular_contexts,

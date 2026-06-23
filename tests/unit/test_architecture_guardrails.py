@@ -470,6 +470,17 @@ def test_descriptive_layers_do_not_import_jax_backend_directly():
     assert offenders == []
 
 
+def test_stimulation_package_stays_descriptive_without_jax_runtime_imports():
+    assert not (SRC_ROOT / "stimulation" / "runtime.py").exists()
+    assert (SRC_ROOT / "backends" / "jax" / "stimulation_runtime.py").is_file()
+
+    offenders: list[str] = []
+    for path in _python_sources(SRC_ROOT / "stimulation"):
+        offenders.extend(_jax_import_locations(path))
+
+    assert offenders == []
+
+
 def test_recording_module_does_not_import_solver_options():
     path = SRC_ROOT / "recording.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -633,16 +644,20 @@ def test_dispatcher_execution_does_not_import_concrete_jax_batch_kernels():
     assert offenders == []
 
 
-def test_dispatcher_runtime_batches_remains_host_side_only():
-    path = SRC_ROOT / "dispatcher" / "runtime_batches.py"
+def test_preparation_runtime_batches_remains_host_side_only():
+    assert not (SRC_ROOT / "dispatcher" / "runtime_batches.py").exists()
+    path = SRC_ROOT / "preparation" / "runtime_batches.py"
 
     assert _jax_import_locations(path) == []
 
 
-def test_public_simulation_orchestrator_does_not_import_jax_directly():
+def test_public_simulation_orchestrator_uses_backend_execution_boundary():
     path = SRC_ROOT / "simulation.py"
+    text = path.read_text(encoding="utf-8")
 
     assert _jax_import_locations(path) == []
+    assert "axonscope.backends.jax" not in text
+    assert "axonscope.backends.execution" in text
 
 
 def test_crank_nicholson_facade_delegates_to_backend_boundary():

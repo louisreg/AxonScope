@@ -284,5 +284,6 @@ length; it must be an integer multiple of `sum(section_lengths)`.
 - no stimulation protocol state.
 
 Membrane/cable runtime compilation belongs in `axonscope.backends.jax.runtime`.
-Stimulation runtime compilation belongs in `axonscope.stimulation.runtime`.
-Pool and batch array assembly belongs in `axonscope.dispatcher`.
+Stimulation runtime compilation belongs in
+`axonscope.backends.jax.stimulation_runtime`.
+Pool and batch row preparation belongs in `axonscope.preparation`.

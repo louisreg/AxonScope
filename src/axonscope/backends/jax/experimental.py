@@ -32,7 +32,7 @@ from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.solvers.options import SolverOptions
 from axonscope.timebase import resolve_time_args, simulation_step_count
 
-from axonscope.stimulation.runtime import build_intracellular_current_density_fn
+from axonscope.backends.jax.stimulation_runtime import build_intracellular_current_density_fn
 
 
 class CrankNicholsonVStimForcing(Solver):

@@ -13,7 +13,7 @@ from axonscope.backends.jax.input_batches import (
 from axonscope.dispatcher import build_dispatch_plan, run_pool
 from axonscope.dispatcher import describe_dispatch_plan
 from axonscope.dispatcher.results import DispatchCohortResult
-from axonscope.dispatcher.runtime_batches import (
+from axonscope.preparation.runtime_batches import (
     extracellular_context_rows,
     x_positions_batch_m,
 )

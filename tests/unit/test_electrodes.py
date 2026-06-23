@@ -14,7 +14,7 @@ from axonscope.stimulation import (
 )
 from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import Stimulus
-from axonscope.stimulation.runtime import (
+from axonscope.backends.jax.stimulation_runtime import (
     CompiledExtracellularContext,
     compile_extracellular_context,
 )

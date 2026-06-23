@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance
-from axonscope.dispatcher.runtime_batches import (
+from axonscope.preparation.runtime_batches import (
     extracellular_context_rows,
 )
 from axonscope.solvers.axon_runtime import SolverAxon

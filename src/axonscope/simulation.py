@@ -6,8 +6,11 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
-from axonscope.backends.jax.execution_policy import JaxExecutionContext, jax_execution_context
-from axonscope.backends.jax.recording import batch_options_from_recording
+from axonscope.backends.execution import (
+    batch_options_for_execution_context,
+    batch_options_from_recording,
+    execution_context,
+)
 from axonscope.benchmarking.hotpaths import benchmark_span
 from axonscope.performance import ExecutionPolicy
 from axonscope.utils import units
@@ -24,7 +27,6 @@ from axonscope.solvers import (
     CrankNicholson,
     Solver,
     SolverOptions,
-    resolve_double_cable_block_solver,
 )
 
 if TYPE_CHECKING:
@@ -336,26 +338,6 @@ def _pool_batch_options_for_recording(
     return batch_options_from_recording(recording, batch_options=batch_options)
 
 
-def _pool_batch_options_for_execution_context(
-    batch_options: BatchOptions | None,
-    context: JaxExecutionContext,
-) -> BatchOptions | None:
-    """Apply execution-policy device routing to batch-only solver options."""
-
-    if context.platform is None:
-        return batch_options
-    options = BatchOptions.full() if batch_options is None else batch_options
-    if options.double_cable_block_solver != "auto":
-        return options
-    return replace(
-        options,
-        double_cable_block_solver=resolve_double_cable_block_solver(
-            "auto",
-            platform=context.platform,
-        ),
-    )
-
-
 def simulate(
     axon: Axon | AxonInstance,
     *,
@@ -387,7 +369,7 @@ def simulate(
         tsim_ms=duration_ms,
         dt_ms=step_ms,
     ):
-        with jax_execution_context(execution_policy, instances=(simulation,)):
+        with execution_context(execution_policy, instances=(simulation,)):
             result = active_solver.solve(
                 simulation,
                 tsim=duration_ms,
@@ -437,8 +419,8 @@ def simulate_pool(
         recording=recording,
         batch_options=batch_options,
     )
-    with jax_execution_context(execution_policy, instances=population.instances) as context:
-        effective_batch_options = _pool_batch_options_for_execution_context(
+    with execution_context(execution_policy, instances=population.instances) as context:
+        effective_batch_options = batch_options_for_execution_context(
             resolved_batch_options,
             context,
         )

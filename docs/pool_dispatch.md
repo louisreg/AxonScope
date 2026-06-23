@@ -248,7 +248,7 @@ Current files:
 - `dispatcher/execution.py`: scalar/batch execution and `run_pool`;
 - `dispatcher/inspection.py`: text and Matplotlib inspection helpers for
   dispatch plans;
-- `dispatcher/runtime_batches.py`: builders for batched solver inputs from
+- `preparation/runtime_batches.py`: host-side builders for batched solver inputs from
   intracellular contexts, extracellular contexts, intrinsic positions, and
   electrode footprints.
 - `solvers/options.py`: solver-owned numerical options, batch execution
@@ -262,11 +262,14 @@ dispatcher/
   plan.py           normalization and grouping
   execution.py      scalar/batch execution and public run_pool entry point
   inspection.py     print/plot helpers for dispatch plans
-  runtime_batches.py  advanced runtime-batch input assembly
+
+preparation/
+  runtime_batches.py  host-side runtime-batch row assembly
 
 solvers/
   options.py        solver and batch execution options
 ```
 
 Use `axonscope.dispatcher` for dispatch. Import advanced batch-input builders
-from `axonscope.dispatcher.runtime_batches` so the dispatch surface stays small.
+from `axonscope.preparation.runtime_batches` so the dispatch surface stays
+small.

@@ -9,7 +9,7 @@ from axonscope.stimulation import (
     IntracellularContext,
     IntracellularCurrentClamp,
 )
-from axonscope.stimulation.runtime import compile_stimulus
+from axonscope.backends.jax.stimulation_runtime import compile_stimulus
 
 
 # ==========================================================

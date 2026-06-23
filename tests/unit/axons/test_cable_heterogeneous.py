@@ -11,7 +11,7 @@ from axonscope.channel_models.passive import PassiveICM
 from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
 from axonscope.icm import HeterogeneousICMBackend, UniformICMBackend
 from axonscope.backends.jax.runtime import build_icm_backend_from_axon, compile_membrane_model
-from axonscope.stimulation.runtime import build_intracellular_current_density_fn
+from axonscope.backends.jax.stimulation_runtime import build_intracellular_current_density_fn
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
 

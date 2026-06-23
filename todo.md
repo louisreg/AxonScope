@@ -77,15 +77,14 @@ Work should start here unless the user asks otherwise.
   as a catch-all for backend internals.
 - [x] Add guardrails for forbidden dependencies, especially high-level modules
   importing solver-specific lowering.
-- [ ] Decide the final home for JAX-dependent stimulation compilation:
-  `stimulation.runtime` currently imports `jax.numpy`; either move it under
-  `backends/jax` or explicitly document it as an internal runtime boundary.
-- [ ] Hide direct JAX backend adapters from the public simulation entry layer:
-  `simulation.py` still imports JAX execution-policy/recording adapters at
-  module import time.
-- [ ] Move host-side batch row helpers out of `dispatcher/runtime_batches.py`
-  into the preparation/backend-input boundary, or document the current module
-  as internal preparation infrastructure.
+- [x] Move JAX-dependent stimulation compilation under
+  `backends/jax/stimulation_runtime.py`; `axonscope.stimulation` remains
+  descriptive.
+- [x] Hide direct JAX backend adapters from the public simulation entry layer:
+  `simulation.py` enters through `axonscope.backends.execution`.
+- [x] Move host-side batch row helpers into
+  `preparation/runtime_batches.py`; backend array lowering stays under
+  `backends/jax`.
 
 ### 3. Recording And VmRaster
 

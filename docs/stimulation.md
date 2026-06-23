@@ -268,8 +268,8 @@ then sees only intrinsic axon positions and sampled footprints.
 
 ## Solver Boundary
 
-Stimulation objects stay descriptive. Runtime compilation lives in
-`axonscope.stimulation.runtime`:
+Stimulation objects stay descriptive. JAX runtime compilation lives under the
+backend boundary in `axonscope.backends.jax.stimulation_runtime`:
 
 - `Stimulus` becomes a JAX-ready temporal callable;
 - `IntracellularContext` objects become a current-density injection callable
@@ -277,6 +277,6 @@ Stimulation objects stay descriptive. Runtime compilation lives in
 - `ExtracellularContext` objects become a summed imposed-potential callable
   through `compile_extracellular_contexts(...)`.
 
-This keeps stimulation construction independent from runtime choices such as
-single axon solving, pool batches, JAX compilation, or precomputed
-footprint tensors.
+This keeps the public stimulation package independent from runtime choices such
+as single axon solving, pool batches, JAX compilation, or precomputed footprint
+tensors.
