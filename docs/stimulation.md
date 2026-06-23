@@ -1,12 +1,13 @@
 # Stimulation
 
 `axonscope.stimulation` contains backend-independent stimulation descriptions:
-temporal waveforms, electrodes, and physical contexts.
+temporal waveforms, sampled extracellular footprints/drives, and physical
+contexts.
 
 The main idea is to keep each object responsible for one physical layer:
 
 ```text
-Stimulus -> Electrode/Clamp -> Context -> AxonInstance/AxonPopulation -> AxonSimulation/run -> solver runtime
+Stimulus -> Clamp or Footprint/Drive -> AxonInstance/AxonPopulation -> AxonSimulation/run -> solver runtime
 ```
 
 ## Public Surface
@@ -21,11 +22,11 @@ from axonscope.stimulation import (
     ExtracellularFootprint,
     ExtracellularDrive,
     ExtracellularStimulation,
+    ExtracellularStimulationContext,
     ExtracellularPotential,
     AnalyticalExtracellularContext,
     NRVExtracellularContext,
     Electrode,
-    PointSourceElectrode,
 )
 
 drive_id = axs.DriveId("center contact")
@@ -35,11 +36,11 @@ Package layout:
 
 ```text
 src/axonscope/stimulation/
-  stimuli.py      temporal waveforms
-  electrodes.py   spatial extracellular electrode descriptions
+  stimuli.py       temporal waveforms
+  electrodes.py    generic stimulated electrode base contracts
   extracellular.py static footprints, drives, and dense inspection objects
-  contexts.py     intracellular and extracellular physical contexts
-  __init__.py     public facade
+  contexts.py      intracellular contexts and extracellular adapters
+  __init__.py      public facade
 ```
 
 ## Stimulus
@@ -146,75 +147,50 @@ to nanoamperes.
 
 ## Extracellular Stimulation
 
-Extracellular stimulation separates the electrode geometry from the temporal
-stimulus.
+The high-level extracellular path is sampled and typed:
+
+```text
+ExtracellularFootprint -> ExtracellularDrive -> ExtracellularStimulation
+```
+
+Helpers that know about analytical geometry or external anatomical placement
+must convert that information before attachment. `AxonInstance` receives only
+the sampled stimulation.
 
 ```python
-stimulus = axs.stimulation.Stimulus.pulse(
-    start=0.2 * axs.ms,
-    duration=0.1 * axs.ms,
-    amplitude=-50 * axs.uA,
-)
+axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
+positions = axon.layout.position_values(unit=axs.um) * axs.um
 
-electrode = axs.stimulation.PointSourceElectrode(
-    x=500.0 * axs.um,
-    y=0.0 * axs.um,
+electrode = axs.analytical.PointSourceElectrode(
+    x=axon.node_position("center", unit=axs.um),
     z=100.0 * axs.um,
 )
 
-context = axs.stimulation.AnalyticalExtracellularContext(
-    electrodes=[electrode.with_stimulus(stimulus)],
-    sigma=0.3 * axs.S_per_m,
+stimulus = axs.Stimulus.pulse(
+    start=0.2 * axs.ms,
+    duration=0.1 * axs.ms,
+    amplitude=-50.0 * axs.uA,
 )
-sim.add_extracellular_context(context=context)
-```
 
-Here, `amplitude=-50 * axs.uA` is normalized to amperes internally because the
-waveform is used as an electrode current.
-
-For explicit construction:
-
-```python
-context = axs.stimulation.AnalyticalExtracellularContext(
-    electrodes=[electrode.with_stimulus(stimulus)],
-    sigma=0.3 * axs.S_per_m,
-)
-assert context.electrodes[0].stimulus.y_unit == "ampere"
-```
-
-`with_stimulus` returns a copy with the same geometry and a new stimulus, which
-makes it safe to reuse an electrode geometry across several simulations.
-
-For multi-electrode stimulation, use one context containing all electrodes:
-
-```python
-context = axs.stimulation.AnalyticalExtracellularContext(
-    electrodes=[
-        electrode_a.with_stimulus(stimulus_a),
-        electrode_b.with_stimulus(stimulus_b),
-    ],
-    sigma=0.3 * axs.S_per_m,
-)
-sim.add_extracellular_context(context=context)
-```
-
-For exploratory plots, analytical contexts evaluate and plot the summed field:
-
-```python
-values = context.evaluate(x_positions, t, voltage_unit=axs.mV)
-context.plot_footprint(x_positions, voltage_unit=axs.mV, current_unit=axs.uA)
-context.plot_evaluation(x_positions, t, voltage_unit=axs.mV)
-context.plot_activation_function(x_positions, voltage_unit=axs.mV, current_unit=axs.uA)
-```
-
-For reusable extracellular stimulation, build static footprints first, then
-pair each footprint with one temporal stimulus:
-
-```python
-footprint = context.build_footprint(
+extracellular = axs.analytical.point_source_stimulation(
     electrode,
-    x_positions,
-    source_id="center contact",
+    positions,
+    sigma=0.3 * axs.S_per_m,
+    stimulus=stimulus,
+)
+
+sim = axs.AxonInstance(axon)
+sim.add_extracellular_stimulation(stimulation=extracellular)
+```
+
+`PointSourceElectrode` lives in `axs.analytical` because it is a quick-start
+helper, not a solver/runtime concept. It can also be used one layer lower:
+
+```python
+footprint = axs.analytical.point_source_footprint(
+    electrode,
+    positions,
+    sigma=0.3 * axs.S_per_m,
 )
 
 drive = axs.ExtracellularDrive(
@@ -229,13 +205,33 @@ vext_mV = extracellular.evaluate(t, voltage_unit=axs.mV)
 
 `ExtracellularFootprint` contains only spatial transfer samples in V/A.
 `ExtracellularDrive` contains exactly one footprint and one stimulus.
-`ExtracellularStimulation` sums drives for inspection without eagerly
-duplicating electrode geometry. Use `extracellular.potential(...)` only when a
-dense `ExtracellularPotential` object is useful for plotting or diagnostics.
+`ExtracellularStimulation` sums drives for inspection and attachment without
+duplicating geometry. Use `extracellular.potential(...)` only when a dense
+`ExtracellularPotential` object is useful for plotting or diagnostics.
 
-The solver-facing extracellular contract is `footprint_for_electrode(...)`.
-Runtime code can compile any `ExtracellularContext` subclass that implements
-that method, including future FEM-backed contexts.
+For multi-source stimulation, build several drives on the same intrinsic
+position support:
+
+```python
+extracellular = axs.ExtracellularStimulation([cathode_drive, anode_drive])
+sim.add_extracellular_stimulation(stimulation=extracellular)
+```
+
+During threshold or recruitment protocols, keep the footprint fixed and replace
+only the drive stimulus:
+
+```python
+drive = sim.extracellular_stimulation.drives[0]
+updated = sim.extracellular_stimulation.replace_drive(
+    drive.id,
+    stimulus=new_stimulus,
+)
+sim.add_extracellular_stimulation(stimulation=updated, replace=True)
+```
+
+`AnalyticalExtracellularContext` remains available as a low-level context
+contract for tests, benchmarks, and custom analytical electrodes. It is not the
+recommended point-source quick-start path.
 
 `NRVExtracellularContext` reserves that future FEM path:
 
@@ -254,32 +250,21 @@ evaluation is implemented.
 
 ## Electrode Footprints
 
-`PointSourceElectrode` uses quantity-oriented public coordinates. Pass lengths
+Analytical point-source helpers use quantity-oriented coordinates. Pass lengths
 with units; they are normalized to internal micrometers during construction.
 
 ```python
-electrode = axs.stimulation.PointSourceElectrode(
+electrode = axs.analytical.PointSourceElectrode(
     x=0.5 * axs.mm,
     z=100.0 * axs.um,
 )
 ```
 
-Use `AnalyticalExtracellularContext.footprint_per_current(...)` for user-facing
-footprints with explicit voltage/current/position units. The lower-level
-`footprint_for_electrode` method remains solver-facing and expects positions in
-meters.
-
-Use `AnalyticalExtracellularContext.build_footprint(...)` when the next step is
-an `ExtracellularDrive` or `ExtracellularStimulation`.
-`PointSourceElectrode.build_footprint(...)` is also available for simple
-one-electrode analytical scripts when passing `sigma` directly is clearer.
-
 Point-source coordinates are inputs to analytical footprint construction, not
 placement stored on an `AxonInstance`. When an external workflow owns axon
-placement, convert that geometry to an axon-local context with
-`axs.analytical.local_point_source_context(...)` or to a sampled
-`ExtracellularFootprint` before attaching stimulation. Solver execution then
-sees only intrinsic axon positions and local footprints.
+placement, pass offsets to `axs.analytical.point_source_footprint(...)`,
+`point_source_drive(...)`, or `point_source_stimulation(...)`. Solver execution
+then sees only intrinsic axon positions and sampled footprints.
 
 ## Solver Boundary
 

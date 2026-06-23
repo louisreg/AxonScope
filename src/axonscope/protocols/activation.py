@@ -808,6 +808,11 @@ def _clone_candidate_for_batched_update(row: Axon | AxonInstance) -> Axon | Axon
         clone.extracellular_context = _clone_extracellular_context(
             row.extracellular_context
         )
+        clone.extracellular_stimulation = getattr(
+            clone.extracellular_context,
+            "stimulation",
+            None,
+        )
         clone.Veinit = row.Veinit
         clone._use_extracellular_override = row._use_extracellular_override
         clone._xraxial_override = (

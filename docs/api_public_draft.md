@@ -165,19 +165,20 @@ Candidate public hooks:
 
 ```python
 axon.shift_nodes(delta_um=25.0)
-context = axs.analytical.local_point_source_context(
+stimulation = axs.analytical.point_source_stimulation(
     electrode,
+    axon.layout.position_values(unit=axs.um) * axs.um,
     sigma=0.3 * axs.S_per_m,
     axon_x_offset=0.0 * axs.um,
     axon_y=20.0 * axs.um,
     axon_z=30.0 * axs.um,
 )
 sim = axs.AxonInstance(axon)
-sim.add_extracellular_context(context=context)
+sim.add_extracellular_stimulation(stimulation=stimulation)
 ```
 
 Do not store placement offsets on `AxonInstance`; they are external geometry
-inputs used to build local contexts or sampled footprints.
+inputs used to build sampled footprints/stimulation.
 
 ### Granular Construction
 
@@ -290,22 +291,22 @@ current = axs.stimulation.Stimulus.biphasic(
     interphase=0.02,
 )
 
-electrode = axs.stimulation.PointSourceElectrode(
+electrode = axs.analytical.PointSourceElectrode(
     x=250.0 * axs.um,
     y=0.0 * axs.um,
     z=500.0 * axs.um,
 )
-
-sim.add_extracellular_context(
-    context=axs.stimulation.AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(current)],
-        sigma=0.3 * axs.S_per_m,
-    ),
+stimulation = axs.analytical.point_source_stimulation(
+    electrode,
+    axon.layout.position_values(unit=axs.um) * axs.um,
+    sigma=0.3 * axs.S_per_m,
+    stimulus=current,
 )
+sim.add_extracellular_stimulation(stimulation=stimulation)
 ```
 
-`AxonInstance.add_extracellular_context` stays as the canonical explicit
-extracellular attachment method.
+`AxonInstance.add_extracellular_stimulation` is the canonical explicit
+extracellular attachment method for sampled fields.
 
 ## Simulation
 
@@ -451,10 +452,12 @@ sim_a.add_intracellular_context(
         current=stimulus_a,
     )
 )
-sim_a.add_extracellular_context(
-    context=axs.stimulation.AnalyticalExtracellularContext(
-        electrodes=[electrode_a.with_stimulus(extra_a)],
+sim_a.add_extracellular_stimulation(
+    stimulation=axs.analytical.point_source_stimulation(
+        electrode_a,
+        axon_a.layout.position_values(unit=axs.um) * axs.um,
         sigma=0.3 * axs.S_per_m,
+        stimulus=extra_a,
     )
 )
 
@@ -465,10 +468,12 @@ sim_b.add_intracellular_context(
         current=stimulus_b,
     )
 )
-sim_b.add_extracellular_context(
-    context=axs.stimulation.AnalyticalExtracellularContext(
-        electrodes=[electrode_b.with_stimulus(extra_b)],
+sim_b.add_extracellular_stimulation(
+    stimulation=axs.analytical.point_source_stimulation(
+        electrode_b,
+        axon_b.layout.position_values(unit=axs.um) * axs.um,
         sigma=0.3 * axs.S_per_m,
+        stimulus=extra_b,
     )
 )
 

@@ -11,7 +11,8 @@ from axonscope.stimulation import (
     ExtracellularStimulation,
     NRVExtracellularContext,
 )
-from axonscope.stimulation import PointSourceElectrode, Stimulus
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import Stimulus
 from axonscope.stimulation.runtime import (
     CompiledExtracellularContext,
     compile_extracellular_context,
@@ -237,7 +238,7 @@ def test_analytical_context_builds_static_extracellular_footprint():
     )
 
 
-def test_point_source_builds_same_footprint_as_context_builder():
+def test_point_source_helper_matches_generic_analytical_footprint():
     positions = np.linspace(0.0, 1000.0, 5) * axs.um
     electrode = PointSourceElectrode(x=500.0 * axs.um, z=1000.0 * axs.um)
     context = AnalyticalExtracellularContext(
@@ -245,41 +246,69 @@ def test_point_source_builds_same_footprint_as_context_builder():
         sigma=0.3 * axs.S_per_m,
     )
 
-    direct = electrode.build_footprint(positions, sigma=0.3 * axs.S_per_m)
+    direct = axs.analytical.point_source_footprint(
+        electrode,
+        positions,
+        sigma=0.3 * axs.S_per_m,
+    )
     through_context = context.build_footprint(electrode, positions)
 
     assert np.allclose(direct.values_for_axon(), through_context.values_for_axon())
 
 
-def test_local_point_source_context_matches_transverse_offset_calculation():
+def test_point_source_stimulation_attaches_as_typed_context():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=5,
+        celsius=6.3 * axs.degC,
+    )
+    positions = axon.layout.position_values(unit=axs.um) * axs.um
+    electrode = PointSourceElectrode(x=50.0 * axs.um, z=100.0 * axs.um)
+    stimulation = axs.analytical.point_source_stimulation(
+        electrode,
+        positions,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=Stimulus.constant(1.0 * axs.uA),
+    )
+
+    sim = axs.AxonInstance(axon)
+    sim.add_extracellular_stimulation(stimulation=stimulation)
+
+    assert sim.extracellular_stimulation is stimulation
+    assert isinstance(sim.extracellular_context, axs.ExtracellularStimulationContext)
+    assert sim.extracellular_contexts == (sim.extracellular_context,)
+    got = sim.extracellular_context.evaluate(
+        positions,
+        np.asarray([0.0]) * axs.ms,
+        voltage_unit=axs.mV,
+    )
+    expected = stimulation.evaluate(np.asarray([0.0]) * axs.ms, voltage_unit=axs.mV)
+    np.testing.assert_allclose(got, expected)
+
+
+def test_point_source_footprint_offsets_match_transverse_calculation():
     positions_m = np.linspace(0.0, 1.0e-3, 5)
-    stimulus = Stimulus.constant(0.0 * axs.uA)
     electrode = PointSourceElectrode(
         x=500.0 * axs.um,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
     )
-    context = AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(stimulus)],
-        sigma=0.3 * axs.S_per_m,
-    )
-
-    legacy = context.footprint_for_electrode(
-        context.electrodes[0],
-        positions_m,
-        axon_y_um=20.0,
-        axon_z_um=-40.0,
-    )
-    local = axs.analytical.local_point_source_context(
+    footprint = axs.analytical.point_source_footprint(
         electrode,
-        stimulus=stimulus,
+        positions_m * axs.m,
         sigma=0.3 * axs.S_per_m,
         axon_y=20.0 * axs.um,
         axon_z=-40.0 * axs.um,
     )
-    shifted = local.footprint_for_electrode(local.electrodes[0], positions_m)
 
-    np.testing.assert_allclose(shifted, legacy)
+    r = np.sqrt(
+        (positions_m - 500.0e-6) ** 2
+        + ((0.0 - 20.0) * 1e-6) ** 2
+        + ((0.0 - (-40.0)) * 1e-6) ** 2
+    )
+    expected = 1.0 / (4.0 * np.pi * 0.3 * r)
+    np.testing.assert_allclose(footprint.values_for_axon(), expected)
 
 
 def test_extracellular_drive_and_stimulation_evaluate_factorized_sum():

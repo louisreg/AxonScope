@@ -1,3 +1,5 @@
+import numpy as np
+
 from axonscope import (
     Activation,
     ActivationObserver,
@@ -23,7 +25,6 @@ from axonscope import (
     MemoryInspection,
     MemoryEstimateItem,
     PaddingInspection,
-    PointSourceElectrode,
     PeakVoltageObserver,
     PrecisionPolicy,
     ProbeInspection,
@@ -70,8 +71,23 @@ def test_public_package_imports_are_available():
     assert AnalysisResult is __import__("axonscope").analysis.AnalysisResult
     assert AnalysisStatus.VALID.value == "VALID"
     assert results.visualization.plot_raster is not None
-    electrode = PointSourceElectrode(x=0.0 * um, z=1000.0 * um, stimulus=Stimulus.constant(0.0))
-    assert AnalyticalExtracellularContext(electrodes=[electrode]).sigma_S_m == 0.3
+    assert not hasattr(__import__("axonscope"), "PointSourceElectrode")
+    assert not hasattr(__import__("axonscope").stimulation, "PointSourceElectrode")
+    electrode = analytical.PointSourceElectrode(
+        x=0.0 * um,
+        z=1000.0 * um,
+        stimulus=Stimulus.constant(0.0),
+    )
+    stimulation = analytical.point_source_stimulation(
+        electrode,
+        np.asarray([0.0]) * um,
+        sigma=0.3 * __import__("axonscope").S_per_m,
+    )
+    assert stimulation.drives[0].id.value == "point_source"
+    assert (
+        AnalyticalExtracellularContext
+        is __import__("axonscope").stimulation.AnalyticalExtracellularContext
+    )
     assert isinstance(
         IntracellularCurrentClamp(position=0.0 * um, current=Stimulus.constant(0.0)),
         IntracellularContext,
@@ -84,7 +100,7 @@ def test_public_package_imports_are_available():
     assert not hasattr(Signal, "VM")
     assert RecordingSpatial.CENTER is not None
     assert RecordingPlan is not None
-    assert analytical.local_point_source_context is not None
+    assert not hasattr(analytical, "local_point_source_context")
     assert positions.PROXIMAL is not None
     assert hasattr(__import__("axonscope").positions, "DISTAL")
     assert AxonInstance is not None

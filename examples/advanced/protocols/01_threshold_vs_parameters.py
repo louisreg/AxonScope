@@ -40,7 +40,7 @@ def main() -> None:
     # Step 2: the electrode is defined in the analytical helper space. The helper
     # will convert it into each axon-local context without storing world
     # coordinates on AxonInstance.
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=length / 2.0,
         y=0.0 * axs.um,
         z=80.0 * axs.um,
@@ -116,12 +116,15 @@ def main() -> None:
         *,
         waveform_name: str,
     ) -> None:
-        context = simulation.extracellular_context
-        if context is None:
-            raise ValueError("simulation has no extracellular context to update.")
-        context.electrodes[0].set_stimulus(
-            build_waveform_stimulus(waveform_name, current_magnitude)
+        stimulation = simulation.extracellular_stimulation
+        if stimulation is None:
+            raise ValueError("simulation has no extracellular stimulation to update.")
+        drive = stimulation.drives[0]
+        updated = stimulation.replace_drive(
+            drive.id,
+            stimulus=build_waveform_stimulus(waveform_name, current_magnitude),
         )
+        simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
 
     curves: dict[str, axs.protocols.ThresholdCurve] = {}
     preview_stimuli: dict[str, axs.Stimulus] = {}
@@ -136,7 +139,7 @@ def main() -> None:
 
     for waveform in waveforms:
         # Step 6: build one pool for this waveform. Each row owns its axon
-        # diameter and a local point-source context initialized at zero current.
+        # diameter and a sampled extracellular stimulation initialized at zero.
         pool: list[axs.AxonInstance] = []
         for diameter in diameters:
             axon = axs.axons.RattayAberham(
@@ -146,13 +149,15 @@ def main() -> None:
                 celsius=37.0 * axs.degC,
             )
             initial_stimulus = build_waveform_stimulus(waveform, 0.0 * axs.uA)
-            context = axs.analytical.local_point_source_context(
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            stimulation = axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=initial_stimulus,
                 sigma=sigma,
             )
             simulation = axs.AxonInstance(axon)
-            simulation.add_extracellular_context(context=context)
+            simulation.add_extracellular_stimulation(stimulation=stimulation)
             pool.append(simulation)
 
         # Step 7: batched threshold search returns one threshold per row.

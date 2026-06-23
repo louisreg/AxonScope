@@ -23,7 +23,7 @@ def main() -> None:
     electrode_x = node_positions[len(node_positions) // 2] * axs.um
     electrode_z = 500.0 * axs.um
 
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=electrode_x,
         z=electrode_z,
     )
@@ -34,15 +34,18 @@ def main() -> None:
         interphase=0.02 * axs.ms,
     )
 
-    # The extracellular context is attached to the instance, not the reusable
-    # MRG axon description.
-    sim = axs.AxonInstance(axon)
-    sim.add_extracellular_context(
-        context=axs.AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stimulus)],
-            sigma=0.3 * axs.S_per_m,
-        )
+    positions = axon.layout.position_values(unit=axs.um) * axs.um
+    extracellular = axs.analytical.point_source_stimulation(
+        electrode,
+        positions,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=stimulus,
     )
+
+    # The sampled extracellular stimulation is attached to the instance, not
+    # the reusable MRG axon description.
+    sim = axs.AxonInstance(axon)
+    sim.add_extracellular_stimulation(stimulation=extracellular)
 
     # The default recording keeps full Vm, which is useful here because we want
     # to inspect several nodal traces after the run.

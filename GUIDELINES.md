@@ -854,8 +854,8 @@ current_mid_A[Nt]
 footprint_mV_per_A[B, Nx]
 ```
 
-It is used for shared point-source single-cable VmRaster observer-only batches
-to avoid dense `Vstim[B, Nt, Nx]`.
+It is used for static-footprint single-cable VmRaster observer-only batches to
+avoid dense `Vstim[B, Nt, Nx]`.
 
 Do not expose factorized Vext as a public mode. Do not broaden it to
 double-cable without solver-equivalence tests and benchmark evidence.
@@ -1000,8 +1000,8 @@ Examples must:
   velocity, recording retention, dispatch layouts, or observer checks;
 - construct footprints separately from stimuli;
 - keep world/anatomical placement out of `AxonInstance`; when a didactic
-  point-source example needs external offsets, use an analytical localization
-  helper or precomputed footprints before attaching stimulation;
+  point-source example needs external offsets, use `axs.analytical` helpers to
+  build sampled footprints/drives before attaching stimulation;
 - group one footprint and one stimulus into an `ExtracellularDrive`;
 - pass `ExtracellularStimulation` to simulations when using the factorized
   extracellular model;

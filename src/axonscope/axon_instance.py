@@ -9,6 +9,8 @@ import numpy as np
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (
     ExtracellularContext,
+    ExtracellularStimulation,
+    ExtracellularStimulationContext,
     IntracellularContext,
     IntracellularCurrentClamp,
     Stimulus,
@@ -23,7 +25,7 @@ class AxonInstance:
     formulation, and membrane models. `AxonInstance` binds one descriptive axon
     to local stimulation contexts for a concrete run. It does not own
     anatomical/world placement; external geometry should be converted to
-    sampled footprints or local analytical contexts before attachment.
+    sampled footprints/drives before attachment.
 
     Parameters
     ----------
@@ -40,6 +42,7 @@ class AxonInstance:
         self.axon = axon
         self.intracellular_contexts: list[IntracellularContext] = []
         self.extracellular_context: ExtracellularContext | None = None
+        self.extracellular_stimulation: ExtracellularStimulation | None = None
         self.Veinit = units.to_mV(0.0)
         self._use_extracellular_override: bool | None = None
         self._xraxial_override: np.ndarray | None = None
@@ -143,8 +146,38 @@ class AxonInstance:
                 "or pass replace=True."
             )
         self.extracellular_context = context
+        self.extracellular_stimulation = (
+            context.stimulation
+            if isinstance(context, ExtracellularStimulationContext)
+            else None
+        )
         if enable:
             self._use_extracellular_override = True
+
+    def add_extracellular_stimulation(
+        self,
+        *,
+        stimulation: ExtracellularStimulation,
+        replace: bool = False,
+        enable: bool = True,
+    ) -> None:
+        """Attach sampled extracellular stimulation.
+
+        This is the canonical high-level extracellular path: helpers or
+        external tools build `ExtracellularFootprint`/`ExtracellularDrive`
+        objects, then the simulation receives the resulting immutable
+        `ExtracellularStimulation`.
+        """
+
+        if not isinstance(stimulation, ExtracellularStimulation):
+            raise TypeError(
+                "stimulation must be an axonscope.stimulation.ExtracellularStimulation."
+            )
+        self.add_extracellular_context(
+            context=ExtracellularStimulationContext(stimulation=stimulation),
+            replace=replace,
+            enable=enable,
+        )
 
     @property
     def extracellular_contexts(self) -> tuple[ExtracellularContext, ...]:
@@ -158,6 +191,7 @@ class AxonInstance:
         """Remove the extracellular stimulation context."""
 
         self.extracellular_context = None
+        self.extracellular_stimulation = None
         self._use_extracellular_override = None
 
     def _validate_layer_array(self, value: Any, name: str, unit: str) -> np.ndarray:

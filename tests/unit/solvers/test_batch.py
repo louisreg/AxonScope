@@ -23,7 +23,8 @@ from axonscope.backends.jax.input_batches import (
 from axonscope.dispatcher.runtime_batches import (
     scale_extracellular_contexts,
 )
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
@@ -357,7 +358,7 @@ def test_build_vstim_batch_shared_point_source_matches_context_formula():
     np.testing.assert_allclose(np.asarray(vext_batch), expected, rtol=1e-6, atol=1e-6)
 
 
-def test_factorized_point_source_batch_matches_dense_builder_and_observer_raster():
+def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -438,7 +439,7 @@ def test_factorized_point_source_batch_matches_dense_builder_and_observer_raster
     )
 
 
-def test_factorized_point_source_batch_supports_row_specific_currents():
+def test_factorized_footprint_batch_supports_row_specific_currents():
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -786,7 +787,7 @@ def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_v
     )
 
 
-def test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa(
+def test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
     monkeypatch,
 ):
     axon = _hh_extracellular_axon(current_clamp=False)

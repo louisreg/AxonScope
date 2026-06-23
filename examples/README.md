@@ -13,10 +13,10 @@ one visible result.
 - `01_first_intracellular_simulation.py`: simulate one Hodgkin-Huxley axon with
   a current clamp.
 - `02_stimuli_and_units.py`: build temporal stimuli with physical units.
-- `03_point_source_footprint.py`: evaluate an analytical point-source
-  extracellular footprint.
+- `03_point_source_footprint.py`: sample an analytical point-source helper into
+  typed extracellular objects.
 - `04_extracellular_mrg_simulation.py`: stimulate one myelinated MRG axon with a
-  point-source electrode.
+  sampled point-source footprint.
 - `05_population_pool_run.py`: run a small population with `axs.simulate_pool`.
 - `06_activation_velocity.py`: compare activation/velocity trends over
   diameters.
@@ -49,7 +49,7 @@ still runnable examples, but they explain the moving parts more explicitly.
 
 ### Stimulation
 
-- `stimulation/01_stimulation_contexts.py`: reuse electrodes with different
+- `stimulation/01_stimulation_contexts.py`: reuse sampled drives with different
   temporal stimuli.
 - `stimulation/02_extracellular_footprint_drive.py`: separate static
   extracellular footprints from temporal drives.

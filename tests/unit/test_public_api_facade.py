@@ -91,7 +91,7 @@ def test_public_simulation_owns_one_extracellular_context():
         celsius=6.3 * axs.degC,
     )
     sim = axs.AxonInstance(axon)
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=50.0 * axs.um,
         z=1000.0 * axs.um,
         stimulus=axs.Stimulus.constant(0.0 * axs.uA),
@@ -337,21 +337,22 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
         duration=0.04 * axs.ms,
         amplitude=20.0 * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=50.0 * axs.um,
         z=120.0 * axs.um,
-        stimulus=stimulus,
     )
     axons = []
     for y_um in (-10.0, 10.0):
-        context = axs.analytical.local_point_source_context(
+        stimulation = axs.analytical.point_source_stimulation(
             electrode,
+            axon.layout.position_values(unit=axs.um) * axs.um,
             sigma=0.3 * axs.S_per_m,
+            stimulus=stimulus,
             axon_y=y_um * axs.um,
             axon_z=0.0 * axs.um,
         )
         instance = axs.AxonInstance(axon)
-        instance.add_extracellular_context(context=context)
+        instance.add_extracellular_stimulation(stimulation=stimulation)
         axons.append(instance)
 
     axs.enable_benchmark("/tmp/axonscope-zero-iinj-test", print_summary=False, save=False)

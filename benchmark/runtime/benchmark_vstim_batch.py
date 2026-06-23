@@ -19,7 +19,8 @@ from axonscope import degC, um
 from axonscope.axons import HodgkinHuxley
 from axonscope.axon_instance import AxonInstance
 from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.batch_kernels import SingleCableVStimBatchKernel
 from axonscope.backends.jax.kernels import SingleCableKernel
 from axonscope.backends.jax.runtime import SolverRuntime, prepare_solver_runtime

@@ -91,7 +91,7 @@ def materialize_sparse_intracellular_current_density_batch(
 
 @dataclass(frozen=True)
 class FactorizedExtracellularPotentialBatch:
-    """Point-source extracellular potential without the dense time-space tensor.
+    """Static-footprint extracellular potential without the dense time-space tensor.
 
     ``current_mid_A`` stores the dynamic stimulus samples with shape ``(Nt,)``
     for a shared waveform or ``(B, Nt)`` for row-specific waveforms.

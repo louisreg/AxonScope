@@ -4,7 +4,8 @@ import axonscope as axs
 import axonscope.backends.jax.group_runner as group_runner
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.backends.jax.batch_kernels as batch_kernels
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
@@ -44,17 +45,26 @@ def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
     axon = axs.AxonInstance(axon_model)
     axon.add_current_clamp(
         position=(length_um / 2.0) * axs.um,
-        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=amp_nA),
+        current=Stimulus.pulse(
+            start=0.02 * axs.ms,
+            duration=0.04 * axs.ms,
+            amplitude=amp_nA,
+        ),
     )
     electrode = PointSourceElectrode(
         x=50.0 * axs.um,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
     )
-    axon.add_extracellular_context(
-        context=axs.analytical.local_point_source_context(
+    axon.add_extracellular_stimulation(
+        stimulation=axs.analytical.point_source_stimulation(
             electrode,
-            stimulus=Stimulus.pulse(start=0.0 * axs.ms, duration=0.05 * axs.ms, amplitude=10e-6),
+            axon_model.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=Stimulus.pulse(
+                start=0.0 * axs.ms,
+                duration=0.05 * axs.ms,
+                amplitude=10e-6,
+            ),
             sigma=0.3 * axs.S_per_m,
             axon_y=y_um * axs.um,
             axon_z=z_um * axs.um,
@@ -406,7 +416,7 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
-def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
+def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
     monkeypatch,
 ):
     stimulus = Stimulus.pulse(
@@ -462,7 +472,7 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     ]
     assert len(extracellular_events) == 1
     metadata = extracellular_events[0].metadata
-    assert metadata["input_format"] == "factorized_point_source"
+    assert metadata["input_format"] == "factorized_footprint"
     assert metadata["dense_vstim_avoided"] is True
     assert "vstim_mid" not in metadata
     assert "vstim_previous" not in metadata
@@ -492,7 +502,7 @@ def test_run_pool_double_cable_observer_uses_factorized_point_source_vstim(
     group_metadata = group_events[0].metadata
     components = group_metadata["memory_estimate_components_nbytes"]
     assert group_metadata["has_padding"] is True
-    assert group_metadata["memory_estimate_extracellular_format"] == "factorized_point_source"
+    assert group_metadata["memory_estimate_extracellular_format"] == "factorized_footprint"
     assert components["vm_output"] == 0
     assert components["vstim_mid"] < group_metadata["memory_estimate_vstim_dense_equivalent_nbytes"]
     assert components["vstim_previous"] < 2 * 11 * 8
@@ -652,7 +662,7 @@ def test_dispatch_plan_description_mentions_parameter_batch():
     assert "batched" in text
 
 
-def test_pool_vstim_batch_uses_localized_point_source_contexts():
+def test_pool_vstim_batch_uses_sampled_point_source_stimulation():
     def axon_at(y_um: float):
         axon_model = axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
@@ -666,9 +676,10 @@ def test_pool_vstim_batch_uses_localized_point_source_contexts():
             y=0.0 * axs.um,
             z=0.0 * axs.um,
         )
-        axon.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        axon.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                axon_model.layout.position_values(unit=axs.um) * axs.um,
                 stimulus=Stimulus.constant(10e-6, start=0.0 * axs.ms),
                 sigma=0.3 * axs.S_per_m,
                 axon_y=y_um * axs.um,

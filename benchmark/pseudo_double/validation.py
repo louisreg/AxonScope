@@ -293,7 +293,7 @@ def build_validation_population(
         effective_config=effective_config,
         split_config=split_config,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=center_x_um * axs.um,
         z=electrode_z_um * axs.um,
         stimulus=stimulus,
@@ -307,8 +307,9 @@ def build_validation_population(
     )
     instances: list[axs.AxonInstance] = []
     for offset_um in offsets:
+        instance = axs.AxonInstance(axon)
         if normalized_mode == "pseudo_double_single_myelinated_chain":
-            local_electrode = axs.PointSourceElectrode(
+            local_electrode = axs.analytical.PointSourceElectrode(
                 x=electrode.x_um * axs.um,
                 y=(electrode.y_um - float(offset_um)) * axs.um,
                 z=electrode.z_um * axs.um,
@@ -320,15 +321,16 @@ def build_validation_population(
                 positions_um=axon.layout.position_values(unit="micrometer"),
                 alpha=single_chain_vext_alpha(axon, single_chain_config),
             )
+            instance.add_extracellular_context(context=context)
         else:
-            context = axs.analytical.local_point_source_context(
+            stimulation = axs.analytical.point_source_stimulation(
                 electrode,
+                axon.layout.position_values(unit="micrometer") * axs.um,
                 sigma=0.3 * axs.S_per_m,
                 axon_y=float(offset_um) * axs.um,
                 axon_z=0.0 * axs.um,
             )
-        instance = axs.AxonInstance(axon)
-        instance.add_extracellular_context(context=context)
+            instance.add_extracellular_stimulation(stimulation=stimulation)
         instances.append(instance)
     return instances
 

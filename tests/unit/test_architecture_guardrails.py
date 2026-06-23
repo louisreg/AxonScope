@@ -148,7 +148,7 @@ def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
         axs.simulate_pool: {"duration_ms", "dt_ms", "tsim"},
         axs.AxonInstance: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
         axs.Recording: {"positions_um", "sample_dt_ms"},
-        axs.PointSourceElectrode: {
+        axs.analytical.PointSourceElectrode: {
             "x_um",
             "y_um",
             "z_um",
@@ -324,7 +324,13 @@ def test_extracellular_public_contracts_are_exported():
     assert axs.ExtracellularFootprint is axs.stimulation.ExtracellularFootprint
     assert axs.ExtracellularDrive is axs.stimulation.ExtracellularDrive
     assert axs.ExtracellularStimulation is axs.stimulation.ExtracellularStimulation
+    assert axs.ExtracellularStimulationContext is axs.stimulation.ExtracellularStimulationContext
     assert axs.ExtracellularPotential is axs.stimulation.ExtracellularPotential
+    assert not hasattr(axs, "PointSourceElectrode")
+    assert not hasattr(axs.stimulation, "PointSourceElectrode")
+    assert "PointSourceElectrode" not in axs.__all__
+    assert "PointSourceElectrode" not in axs.stimulation.__all__
+    assert axs.analytical.PointSourceElectrode is not None
 
 
 def test_pool_results_use_canonical_result_model_not_lists():
@@ -717,9 +723,9 @@ def test_factorized_vext_route_has_dense_equivalence_tests():
     )
 
     required_tests = {
-        "test_factorized_point_source_batch_matches_dense_builder_and_observer_raster",
-        "test_factorized_point_source_batch_supports_row_specific_currents",
-        "test_double_cable_factorized_point_source_observer_matches_dense_pcr_soa",
+        "test_factorized_footprint_batch_matches_dense_builder_and_observer_raster",
+        "test_factorized_footprint_batch_supports_row_specific_currents",
+        "test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa",
         "test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
     }
 

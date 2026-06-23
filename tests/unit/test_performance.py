@@ -81,21 +81,22 @@ def test_extracellular_estimate_surfaces_dense_vstim_and_factorized_footprint():
         duration=0.05 * axs.ms,
         amplitude=25.0 * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=20.0 * axs.um,
         z=120.0 * axs.um,
         stimulus=stimulus,
     )
     instances = []
     for y_um in (-10.0, 10.0):
-        context = axs.analytical.local_point_source_context(
+        stimulation = axs.analytical.point_source_stimulation(
             electrode,
+            axon.layout.position_values(unit=axs.um) * axs.um,
             sigma=0.3 * axs.S_per_m,
             axon_y=y_um * axs.um,
             axon_z=0.0 * axs.um,
         )
         instance = axs.AxonInstance(axon)
-        instance.add_extracellular_context(context=context)
+        instance.add_extracellular_stimulation(stimulation=stimulation)
         instances.append(instance)
 
     estimate = axs.estimate_simulation(

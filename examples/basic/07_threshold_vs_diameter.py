@@ -56,25 +56,27 @@ def main() -> None:
     )
 
     # The protocol calls this function with a candidate current amplitude at
-    # every bisection step. Keeping it local makes the mutation easy to read:
-    # only the electrode stimulus changes; geometry and axon models stay fixed.
+    # every bisection step. Only the drive stimulus changes; the sampled
+    # footprint and axon model stay fixed.
     def update_point_source_current(
         sim: axs.AxonInstance,
         current_magnitude: Any,
         *,
         pulse_width: Any,
     ) -> None:
-        context = sim.extracellular_context
-        if context is None:
-            raise ValueError("simulation has no extracellular context to update.")
-        electrode = context.electrodes[0]
-        electrode.set_stimulus(
-            axs.Stimulus.pulse(
+        stimulation = sim.extracellular_stimulation
+        if stimulation is None:
+            raise ValueError("simulation has no extracellular stimulation to update.")
+        drive = stimulation.drives[0]
+        updated = stimulation.replace_drive(
+            drive.id,
+            stimulus=axs.Stimulus.pulse(
                 start=stim_start,
                 duration=pulse_width,
                 amplitude=-current_magnitude,
-            )
+            ),
         )
+        sim.add_extracellular_stimulation(stimulation=updated, replace=True)
 
     results: dict[str, dict[float, axs.protocols.ThresholdCurve]] = {
         "Rattay-Aberham": {},
@@ -94,7 +96,7 @@ def main() -> None:
                 compartments=101,
                 celsius=temperature,
             )
-            electrode = axs.PointSourceElectrode(
+            electrode = axs.analytical.PointSourceElectrode(
                 x=rattay_length / 2.0,
                 y=0.0 * axs.um,
                 z=100.0 * axs.um,
@@ -104,13 +106,15 @@ def main() -> None:
                 duration=pulse_width,
                 amplitude=0.0 * axs.uA,
             )
-            context = axs.analytical.local_point_source_context(
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            extracellular = axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=stimulus,
                 sigma=sigma,
             )
             sim = axs.AxonInstance(axon)
-            sim.add_extracellular_context(context=context)
+            sim.add_extracellular_stimulation(stimulation=extracellular)
             rattay_pool.append(sim)
 
         rattay_curve = axs.protocols.find_activation_threshold_curve(
@@ -152,7 +156,7 @@ def main() -> None:
                 nodes=9,
                 compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
             )
-            electrode = axs.PointSourceElectrode(
+            electrode = axs.analytical.PointSourceElectrode(
                 x=axon.node_position("center", unit=axs.um),
                 y=0.0 * axs.um,
                 z=100.0 * axs.um,
@@ -162,13 +166,15 @@ def main() -> None:
                 duration=pulse_width,
                 amplitude=0.0 * axs.uA,
             )
-            context = axs.analytical.local_point_source_context(
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            extracellular = axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=stimulus,
                 sigma=sigma,
             )
             sim = axs.AxonInstance(axon)
-            sim.add_extracellular_context(context=context)
+            sim.add_extracellular_stimulation(stimulation=extracellular)
             mrg_pool.append(sim)
 
         mrg_node_indices = tuple(int(value) for value in mrg_pool[0].node_indices)

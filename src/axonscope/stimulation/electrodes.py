@@ -1,10 +1,9 @@
 """Extracellular electrode source descriptions.
 
-Electrodes describe physical sources in the coordinate frame chosen by the
-caller: position, attached temporal current stimulus, and source-specific
-geometry. They do not own axon placement or the extracellular medium.
-Analytical media such as homogeneous point-source conductivity live on
-`AnalyticalExtracellularContext`.
+Electrodes describe current sources with attached temporal stimuli. Concrete
+analytical source geometries live in helper modules such as
+`axonscope.analytical`; stimulation core code only depends on the generic
+electrode and footprint contracts.
 """
 
 from __future__ import annotations
@@ -16,9 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from axonscope.identifiers import AxonId
 from axonscope.stimulation.stimuli import ArrayLike, Stimulus
-from axonscope.utils import units
 
 
 def _normalize_stimulus(stimulus: Stimulus) -> Stimulus:
@@ -106,162 +103,3 @@ class AnalyticalElectrode(Electrode, ABC):
         """Return V/A footprint samples for one axon-local evaluation."""
 
         return self.footprint(x_positions_m, sigma_S_m=sigma_S_m)
-
-
-@dataclass(frozen=True, init=False)
-class PointSourceElectrode(AnalyticalElectrode):
-    """Point-source electrode in a homogeneous infinite medium.
-
-    The electrode stores only source geometry and stimulus. Conductivity is
-    supplied by `AnalyticalExtracellularContext`, which evaluates:
-
-        Vext(x, t) = I(t) / (4*pi*sigma*r)
-    """
-
-    x_um: float
-    y_um: float
-    z_um: float
-    min_distance_um: float = 1e-3
-
-    def __init__(
-        self,
-        *,
-        x: Any,
-        z: Any,
-        y: Any | None = None,
-        min_distance: Any | None = None,
-        stimulus: Stimulus | None = None,
-    ) -> None:
-        """Create a point-source electrode.
-
-        Parameters
-        ----------
-        x, y, z:
-            Electrode coordinates in the context frame. Values must carry
-            length units. `y` defaults to 0 um when omitted.
-        min_distance:
-            Lower bound on source distance to avoid singular footprints.
-        stimulus:
-            Optional temporal current waveform attached at construction.
-        """
-
-        object.__setattr__(self, "x_um", units.require_length_um(x, name="x"))
-        object.__setattr__(
-            self,
-            "y_um",
-            0.0 if y is None else units.require_length_um(y, name="y"),
-        )
-        object.__setattr__(self, "z_um", units.require_length_um(z, name="z"))
-        object.__setattr__(
-            self,
-            "min_distance_um",
-            1e-3
-            if min_distance is None
-            else units.require_length_um(min_distance, name="min_distance"),
-        )
-        if stimulus is not None:
-            stimulus = _normalize_stimulus(stimulus)
-        object.__setattr__(self, "stimulus", stimulus)
-
-    @property
-    def x0_m(self) -> float:
-        """Electrode x position in meters."""
-
-        return self.x_um * 1e-6
-
-    @property
-    def y0_m(self) -> float:
-        """Electrode y position in meters."""
-
-        return self.y_um * 1e-6
-
-    @property
-    def z0_m(self) -> float:
-        """Electrode z position in meters."""
-
-        return self.z_um * 1e-6
-
-    @property
-    def min_distance_m(self) -> float:
-        """Minimum source distance in meters."""
-
-        return self.min_distance_um * 1e-6
-
-    def footprint(
-        self,
-        x_positions_m: ArrayLike,
-        *,
-        sigma_S_m: float,
-    ) -> np.ndarray:
-        """Return the point-source V/A footprint for an axon at y=z=0."""
-
-        x = units.to_m_array(x_positions_m, dtype=float)
-        r = np.sqrt((x - self.x0_m) ** 2 + self.y0_m**2 + self.z0_m**2)
-        r = np.maximum(r, self.min_distance_m)
-        return 1.0 / (4.0 * np.pi * float(sigma_S_m) * r)
-
-    def footprint_for_axon(
-        self,
-        x_positions_m: ArrayLike,
-        *,
-        sigma_S_m: float,
-        axon_y_um: Any = 0.0,
-        axon_z_um: Any = 0.0,
-    ) -> np.ndarray:
-        """Return the point-source footprint with optional transverse offsets.
-
-        Runtime paths pass intrinsic axon positions and zero offsets. Analytical
-        helper code can pass offsets while building an axon-local context or a
-        sampled footprint from external geometry.
-        """
-
-        x = units.to_m_array(x_positions_m, dtype=float)
-        y_rel_m = (self.y_um - units.to_um(axon_y_um)) * 1e-6
-        z_rel_m = (self.z_um - units.to_um(axon_z_um)) * 1e-6
-        r = np.sqrt((x - self.x0_m) ** 2 + y_rel_m**2 + z_rel_m**2)
-        r = np.maximum(r, self.min_distance_m)
-        return 1.0 / (4.0 * np.pi * float(sigma_S_m) * r)
-
-    def build_footprint(
-        self,
-        positions: ArrayLike,
-        *,
-        sigma: Any,
-        axon_y: Any | None = None,
-        axon_z: Any | None = None,
-        source_id: str | None = None,
-        axon_id: AxonId | None = None,
-    ):
-        """Build a static `ExtracellularFootprint` from this point source."""
-
-        from axonscope.stimulation.extracellular import ExtracellularFootprint
-
-        positions_um = units.require_length_array_um(
-            positions,
-            name="positions",
-            dtype=float,
-        )
-        x_m = positions_um * 1e-6
-        sigma_S_m = units.require_conductivity_S_per_m(sigma, name="sigma")
-        values = self.footprint_for_axon(
-            x_m,
-            sigma_S_m=sigma_S_m,
-            axon_y_um=0.0 if axon_y is None else axon_y,
-            axon_z_um=0.0 if axon_z is None else axon_z,
-        )
-        if axon_id is not None and not isinstance(axon_id, AxonId):
-            raise TypeError("axon_id must be an AxonId.")
-        axon_ids = None if axon_id is None else (axon_id,)
-        return ExtracellularFootprint(
-            values=values,
-            positions=units.Q_(positions_um, "micrometer"),
-            axon_ids=axon_ids,
-            source_id=source_id,
-            metadata={
-                "builder": "PointSourceElectrode.build_footprint",
-                "electrode_x_um": self.x_um,
-                "electrode_y_um": self.y_um,
-                "electrode_z_um": self.z_um,
-                "sigma_S_m": sigma_S_m,
-            },
-        )

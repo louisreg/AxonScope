@@ -20,7 +20,8 @@ import numpy as np
 
 from axonscope import AxonInstance, degC, mV, um
 from axonscope.axons import HodgkinHuxley, MRG
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.solvers import CrankNicholson
 from axonscope.stimulation import Stimulus
 

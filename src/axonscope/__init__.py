@@ -33,7 +33,7 @@ from axonscope.analysis import (
     PeakVoltageObserver,
     SpikeCount,
 )
-from axonscope.stimulation import AnalyticalElectrode, Electrode, PointSourceElectrode
+from axonscope.stimulation import AnalyticalElectrode, Electrode
 from axonscope.axon_instance import AxonInstance
 from axonscope.benchmarking import (
     BenchmarkReport,
@@ -90,6 +90,7 @@ from axonscope.stimulation import (
     ExtracellularFootprint,
     ExtracellularPotential,
     ExtracellularStimulation,
+    ExtracellularStimulationContext,
     IntracellularContext,
     IntracellularCurrentClamp,
     NRVExtracellularContext,
@@ -211,7 +212,6 @@ __all__ = [
     "AnalyticalElectrode",
     "AnalyticalExtracellularContext",
     "Electrode",
-    "PointSourceElectrode",
     "BatchOptions",
     "BatchRecording",
     "SolverOptions",
@@ -228,6 +228,7 @@ __all__ = [
     "ExtracellularFootprint",
     "ExtracellularPotential",
     "ExtracellularStimulation",
+    "ExtracellularStimulationContext",
     "NRVExtracellularContext",
     "VM_RASTER_OBSERVATION_KEY",
     "VmRasterResult",

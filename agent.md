@@ -223,9 +223,9 @@ instructions: |
   - Vext optimization direction: keep the public stimulation API stable, but
     prefer internal factorized representations when a spatial footprint is
     static and only the temporal stimulus/current changes. The current active
-    path is shared point-source single-cable VmRaster observer-only execution
-    with `current_mid_A[Nt] + footprint_mV_per_A[B,Nx]`; do not re-densify it
-    unless the caller needs retained Vm or a fallback condition is hit.
+    path is static-footprint single-cable VmRaster observer-only execution with
+    `current_mid_A[Nt] + footprint_mV_per_A[B,Nx]`; do not re-densify it unless
+    the caller needs retained Vm or a fallback condition is hit.
   - Runtime/device/precision direction: use typed public values
     `axs.Runtime`, `axs.Device`, `axs.PrecisionPolicy`, and
     `axs.ExecutionPolicy` as the user-facing language. The JAX backend now

@@ -7,12 +7,12 @@ import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons import HodgkinHuxley
+from axonscope.analytical import PointSourceElectrode
 from axonscope.channel_models import RateTableConfig
 from axonscope.channel_models.passive import PassiveICM
 from axonscope.stimulation import (
     AnalyticalExtracellularContext,
     IntracellularContext,
-    PointSourceElectrode,
 )
 from axonscope.backends.jax.runtime import (
     _membrane_runtime_cache_key,
@@ -360,7 +360,7 @@ def test_precompute_extracellular_potential_matches_axon_method():
     assert np.allclose(sampled[2], np.asarray(axon.extracellular_potential_mV(0.5)))
 
 
-def test_extracellular_potential_uses_localized_point_source_context():
+def test_extracellular_potential_uses_sampled_point_source_offsets():
     axon = AxonInstance(HodgkinHuxley(length=300.0 * axs.um, diameter=0.5 * axs.um, compartments=11, celsius=6.3 * axs.degC))
     electrode = PointSourceElectrode(
         x=125.0 * axs.um,
@@ -368,9 +368,10 @@ def test_extracellular_potential_uses_localized_point_source_context():
         z=20.0 * axs.um,
     )
     stim = Stimulus.constant(10e-6, start=0.0 * axs.ms)
-    axon.add_extracellular_context(
-        context=axs.analytical.local_point_source_context(
+    axon.add_extracellular_stimulation(
+        stimulation=axs.analytical.point_source_stimulation(
             electrode,
+            axon.layout.position_values(unit="micrometer") * axs.um,
             stimulus=stim,
             sigma=0.2 * axs.S_per_m,
             axon_y=40.0 * axs.um,

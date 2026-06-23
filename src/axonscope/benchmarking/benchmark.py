@@ -142,7 +142,7 @@ def default_solver_factories() -> dict[str, SolverFactory]:
 def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
     from axonscope.axon_instance import AxonInstance
     from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, Schild97
-    from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+    from axonscope.analytical import PointSourceElectrode, point_source_stimulation
     from axonscope.stimulation import Stimulus
     from axonscope.utils.units import ureg
 
@@ -179,10 +179,12 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             anodic_amplitude=5e-6,
             interphase=0.04 * ms,
         )
-        axon.add_extracellular_context(
-            context=AnalyticalExtracellularContext(
-                electrodes=[electrode.with_stimulus(stimulus)],
+        axon.add_extracellular_stimulation(
+            stimulation=point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit="micrometer") * um,
                 sigma=0.3 * S_per_m,
+                stimulus=stimulus,
             ),
             replace=True,
         )
@@ -229,10 +231,12 @@ def default_solver_benchmark_cases() -> dict[str, SolverBenchmarkCase]:
             anodic_amplitude=20e-6,
             interphase=0.02 * ms,
         )
-        axon.add_extracellular_context(
-            context=AnalyticalExtracellularContext(
-                electrodes=[electrode.with_stimulus(stimulus)],
+        axon.add_extracellular_stimulation(
+            stimulation=point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit="micrometer") * um,
                 sigma=0.2 * S_per_m,
+                stimulus=stimulus,
             ),
             replace=True,
         )

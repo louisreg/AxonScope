@@ -92,7 +92,7 @@ Work should start here unless the user asks otherwise.
 
 - [x] Audit stimulation/context names against the product boundary in
   `GUIDELINES.md`.
-- [x] Keep public concepts simple: clamps, point-source electrodes,
+- [x] Keep public concepts simple: clamps, analytical quick-start helpers,
   extracellular footprints, drives, stimulation, populations.
 - [x] Preserve the static-footprint/dynamic-stimulus split internally.
 - [x] Keep factorized/dynamic Vext reuse gated by dense-equivalence tests.
@@ -188,11 +188,11 @@ Work should start here unless the user asks otherwise.
   for layout, clamps, recording selectors, event positions, and footprints.
 - [x] Ensure `Axon`, `AxonInstance`, `ExtracellularFootprint`, and solver
   preparation do not require world coordinates or external geometry ownership.
-- [ ] Move analytical point-source helpers toward footprint generation/examples
-  only; solver execution should consume sampled footprints/drives.
-- [x] Add a small `axs.analytical.local_point_source_context(...)` helper so
-  public examples can keep transverse point-source geometry out of
-  `AxonInstance`.
+- [x] Move analytical point-source helpers under `axs.analytical`; public
+  examples now build sampled footprints/drives/stimulation, and solver
+  execution consumes the generic footprint contract.
+- [x] Remove the legacy `local_point_source_context(...)` shortcut; the only
+  public point-source path is helper -> sampled footprint/drive/stimulation.
 - [x] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
   adapter-style inputs that hand AxonScope intrinsic footprints and metadata.
 - [x] Rename or remove user-facing fields/docs that imply AxonScope owns

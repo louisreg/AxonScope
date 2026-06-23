@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import Stimulus
 from axonscope.stimulation import (
     ExtracellularContext,
     IntracellularContext,
     IntracellularCurrentClamp,
-    PointSourceElectrode,
 )
 from axonscope.stimulation.runtime import compile_stimulus
 

@@ -22,7 +22,8 @@ from axonscope.backends.jax.input_batches import (
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.batch_kernels import DoubleCableBatchKernel
 from axonscope.backends.jax.kernels import DoubleCableKernel
 from axonscope.backends.jax.runtime import SolverRuntime, prepare_solver_runtime

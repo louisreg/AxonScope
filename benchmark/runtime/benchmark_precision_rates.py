@@ -335,7 +335,8 @@ def _solve_case_once(
 def _build_case(case_name: str):
     from axonscope import AxonInstance, degC, um
     from axonscope.axons import HodgkinHuxley, MRG, Schild97, Tigerholm
-    from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+    from axonscope.analytical import PointSourceElectrode
+    from axonscope.stimulation import AnalyticalExtracellularContext
     from axonscope.stimulation import Stimulus
 
     if case_name == "hh_intracellular":

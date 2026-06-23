@@ -39,18 +39,16 @@ def main() -> None:
     # The central electrode is shared by every simulation row. The current is
     # initialized at zero because `recruitment_sweep(...)` will update it for
     # each tested amplitude.
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=fiber_length / 2.0,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
         min_distance=5.0 * axs.um,
     )
-    electrode.set_stimulus(
-        axs.Stimulus.pulse(
-            start=stim_start,
-            duration=pulse_width,
-            amplitude=0.0 * axs.uA,
-        )
+    zero_current = axs.Stimulus.pulse(
+        start=stim_start,
+        duration=pulse_width,
+        amplitude=0.0 * axs.uA,
     )
 
     # Draw positions uniformly in a disk. The square root on the random radius
@@ -96,14 +94,17 @@ def main() -> None:
             compartments=61,
             celsius=37.0 * axs.degC,
         )
-        extracellular_context = axs.analytical.local_point_source_context(
+        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        extracellular = axs.analytical.point_source_stimulation(
             electrode,
+            positions,
             sigma=sigma,
+            stimulus=zero_current,
             axon_y=y,
             axon_z=z,
         )
         sim = axs.AxonInstance(axon)
-        sim.add_extracellular_context(context=extracellular_context)
+        sim.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(sim)
         families.append("unmyelinated")
         diameter_values_um.append(float(diameter.to(axs.um).magnitude))
@@ -120,14 +121,17 @@ def main() -> None:
             length=fiber_length,
             compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
         )
-        extracellular_context = axs.analytical.local_point_source_context(
+        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        extracellular = axs.analytical.point_source_stimulation(
             electrode,
+            positions,
             sigma=sigma,
+            stimulus=zero_current,
             axon_y=y,
             axon_z=z,
         )
         sim = axs.AxonInstance(axon)
-        sim.add_extracellular_context(context=extracellular_context)
+        sim.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(sim)
         families.append("myelinated")
         diameter_values_um.append(float(diameter.to(axs.um).magnitude))
@@ -149,17 +153,19 @@ def main() -> None:
         sim: axs.AxonInstance,
         current_magnitude: Any,
     ) -> None:
-        context = sim.extracellular_context
-        if context is None:
-            raise ValueError("simulation has no extracellular context to update.")
-        row_electrode = context.electrodes[0]
-        row_electrode.set_stimulus(
-            axs.Stimulus.pulse(
+        stimulation = sim.extracellular_stimulation
+        if stimulation is None:
+            raise ValueError("simulation has no extracellular stimulation to update.")
+        drive = stimulation.drives[0]
+        updated = stimulation.replace_drive(
+            drive.id,
+            stimulus=axs.Stimulus.pulse(
                 start=stim_start,
                 duration=pulse_width,
                 amplitude=-current_magnitude,
-            )
+            ),
         )
+        sim.add_extracellular_stimulation(stimulation=updated, replace=True)
 
     curve = axs.protocols.recruitment_sweep(
         tuple(pool),

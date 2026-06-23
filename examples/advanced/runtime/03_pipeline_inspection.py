@@ -87,15 +87,15 @@ def main() -> None:
         execution_policy=policy,
     )
 
-    # Step 3: build the same heterogeneous shape as an observer-only point-source
-    # pool. Compatible batch groups can keep Vext factorized and return compact
+    # Step 3: build the same heterogeneous shape as an observer-only sampled
+    # extracellular pool. Compatible batch groups can keep Vext factorized and return compact
     # VmRaster observations instead of retained Vm traces.
     stimulus = axs.Stimulus.pulse(
         start=0.20 * axs.ms,
         duration=0.20 * axs.ms,
         amplitude=20.0 * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=40.0 * axs.um,
         y=0.0 * axs.um,
         z=120.0 * axs.um,
@@ -109,12 +109,13 @@ def main() -> None:
             celsius=6.3 * axs.degC,
         )
         simulation = axs.AxonInstance(axon)
-        simulation.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        simulation.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=stimulus,
                 sigma=0.3 * axs.S_per_m,
-                axon_y=0.0 * axs.um,
             )
         )
         extracellular_rows.append(simulation)
@@ -125,12 +126,13 @@ def main() -> None:
             nodes=nodes,
         )
         simulation = axs.AxonInstance(axon)
-        simulation.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        simulation.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=stimulus,
                 sigma=0.3 * axs.S_per_m,
-                axon_y=0.0 * axs.um,
             )
         )
         extracellular_rows.append(simulation)
@@ -157,7 +159,7 @@ def main() -> None:
     display = {
         "callable_or_precomputed_per_axon": "callable/precomputed",
         "DispatchCohortResult": "cohort result",
-        "factorized_point_source": "factorized point-source",
+        "factorized_footprint": "factorized footprint",
         "scalar fallback row": "scalar fallback",
     }
     comparison = Table(title="Retained Vm versus compact observer-only")

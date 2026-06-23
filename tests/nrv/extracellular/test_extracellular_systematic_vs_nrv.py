@@ -22,7 +22,8 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from tests.nrv._helpers import (

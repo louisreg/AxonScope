@@ -14,7 +14,8 @@ import pytest
 from axonscope import AxonInstance, S_per_m, degC, ms, um
 from axonscope.analysis import rasterize
 from axonscope.axons.unmyelinated import Tigerholm
-from axonscope.stimulation import AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import CrankNicholson
 

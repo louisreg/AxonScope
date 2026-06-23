@@ -3,11 +3,12 @@
 from axonscope.stimulation.contexts import (
     AnalyticalExtracellularContext,
     ExtracellularContext,
+    ExtracellularStimulationContext,
     IntracellularContext,
     IntracellularCurrentClamp,
     NRVExtracellularContext,
 )
-from axonscope.stimulation.electrodes import AnalyticalElectrode, Electrode, PointSourceElectrode
+from axonscope.stimulation.electrodes import AnalyticalElectrode, Electrode
 from axonscope.stimulation.extracellular import (
     ExtracellularDrive,
     ExtracellularFootprint,
@@ -26,9 +27,9 @@ __all__ = [
     "ExtracellularFootprint",
     "ExtracellularPotential",
     "ExtracellularStimulation",
+    "ExtracellularStimulationContext",
     "IntracellularContext",
     "IntracellularCurrentClamp",
     "NRVExtracellularContext",
-    "PointSourceElectrode",
     "Stimulus",
 ]

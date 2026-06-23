@@ -11,7 +11,8 @@ from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
 from axonscope.channel_models.passive import PassiveICM
-from axonscope.stimulation import AnalyticalElectrode, AnalyticalExtracellularContext, PointSourceElectrode
+from axonscope.analytical import PointSourceElectrode
+from axonscope.stimulation import AnalyticalElectrode, AnalyticalExtracellularContext
 from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,

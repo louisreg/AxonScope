@@ -62,7 +62,7 @@ def test_single_chain_alpha_vector_is_segment_specific():
 def test_segment_scaled_context_multiplies_footprint():
     import axonscope as axs
 
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=0.0 * axs.um,
         z=100.0 * axs.um,
         stimulus=axs.Stimulus.constant(1.0 * axs.uA),

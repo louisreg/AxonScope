@@ -9,18 +9,23 @@ subclasses decide how electrode currents become extracellular potentials.
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
 from axonscope.identifiers import AxonId
+from axonscope.stimulation.electrodes import Electrode
+from axonscope.stimulation.extracellular import (
+    ExtracellularDrive,
+    ExtracellularStimulation,
+)
 from axonscope.stimulation.stimuli import ArrayLike, Stimulus
 from axonscope.utils import units
 
 if TYPE_CHECKING:
-    from axonscope.stimulation.electrodes import AnalyticalElectrode, Electrode
+    from axonscope.stimulation.electrodes import AnalyticalElectrode
 
 
 _UNIT_DISPLAY = {
@@ -199,6 +204,110 @@ class ExtracellularContext:
         if voltage_unit is not None:
             values = units.to_array(units.Q_(values, "volt"), voltage_unit, dtype=float)
         return values
+
+
+@dataclass(frozen=True)
+class _DriveElectrode(Electrode):
+    """Internal electrode adapter for typed extracellular drives."""
+
+    drive: ExtracellularDrive
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.drive, ExtracellularDrive):
+            raise TypeError("drive must be an ExtracellularDrive.")
+        object.__setattr__(self, "stimulus", self.drive.stimulus)
+
+    def with_stimulus(self, stimulus: Stimulus) -> "_DriveElectrode":
+        """Return a copy whose drive carries `stimulus`."""
+
+        if not isinstance(stimulus, Stimulus):
+            raise TypeError("stimulus must be an axonscope.stimulation.Stimulus.")
+        return _DriveElectrode(drive=replace(self.drive, stimulus=stimulus))
+
+    def set_stimulus(self, stimulus: Stimulus) -> None:
+        """Reject in-place mutation; typed drives are immutable."""
+
+        raise TypeError(
+            "ExtracellularStimulationContext electrodes are immutable. "
+            "Build a new stimulation or use with_stimulus/with_scaled_stimulus."
+        )
+
+
+@dataclass(frozen=True, kw_only=True, init=False)
+class ExtracellularStimulationContext(ExtracellularContext):
+    """Adapter from typed sampled extracellular drives to the context contract.
+
+    This is the preferred solver-facing representation for sampled extracellular
+    stimulation. Analytical or external geometry helpers should first build
+    `ExtracellularFootprint`/`ExtracellularDrive` objects, then attach the
+    resulting `ExtracellularStimulation`.
+    """
+
+    stimulation: ExtracellularStimulation
+    """Typed sampled extracellular stimulation consumed by this context."""
+
+    def __init__(self, *, stimulation: ExtracellularStimulation) -> None:
+        if not isinstance(stimulation, ExtracellularStimulation):
+            raise TypeError("stimulation must be an ExtracellularStimulation.")
+        object.__setattr__(self, "stimulation", stimulation)
+        object.__setattr__(
+            self,
+            "electrodes",
+            tuple(_DriveElectrode(drive=drive) for drive in stimulation.drives),
+        )
+        ExtracellularContext.__post_init__(self)
+
+    def with_electrodes(
+        self,
+        electrodes: Sequence["Electrode"],
+    ) -> "ExtracellularStimulationContext":
+        """Return a context with the drives carried by `electrodes`."""
+
+        drive_electrodes = tuple(electrodes)
+        if any(
+            not isinstance(electrode, _DriveElectrode)
+            for electrode in drive_electrodes
+        ):
+            raise TypeError(
+                "ExtracellularStimulationContext.with_electrodes expects "
+                "electrodes produced by this context."
+            )
+        return ExtracellularStimulationContext(
+            stimulation=ExtracellularStimulation(
+                tuple(electrode.drive for electrode in drive_electrodes)
+            )
+        )
+
+    def footprint_for_electrode(
+        self,
+        electrode: "Electrode",
+        x_positions_m: ArrayLike,
+        *,
+        axon_y_um: Any = 0.0,
+        axon_z_um: Any = 0.0,
+    ) -> np.ndarray:
+        """Return V/A samples from the drive footprint on intrinsic positions."""
+
+        if not isinstance(electrode, _DriveElectrode):
+            raise TypeError("electrode must come from this ExtracellularStimulationContext.")
+        if electrode not in self.electrodes:
+            raise ValueError("electrode does not belong to this context.")
+
+        footprint = electrode.drive.footprint
+        values = footprint.values_for_axon()
+        x_um = units.to_m_array(x_positions_m, dtype=float) * 1e6
+        support_um = np.asarray(footprint.positions_um, dtype=float)
+        if x_um.shape == support_um.shape and np.allclose(x_um, support_um):
+            return np.asarray(values, dtype=float)
+
+        if footprint.interpolation not in {"sampled", "linear"}:
+            raise NotImplementedError(
+                "Only sampled/linear footprint interpolation is supported by "
+                "ExtracellularStimulationContext."
+            )
+        if np.any(np.diff(support_um) < 0.0):
+            raise ValueError("Footprint positions must be sorted for interpolation.")
+        return np.interp(x_um, support_um, np.asarray(values, dtype=float))
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -37,7 +37,7 @@ def main() -> None:
         "sampled triphasic",
     )
 
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=length / 2.0,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
@@ -54,6 +54,52 @@ def main() -> None:
     curves: dict[str, axs.protocols.RecruitmentCurve] = {}
     preview_stimuli: dict[str, axs.Stimulus] = {}
 
+    def build_waveform_stimulus(waveform_name: str, current_magnitude: Any) -> axs.Stimulus:
+        if waveform_name == "monophasic cathodic":
+            return axs.Stimulus.pulse(
+                start=pulse_start,
+                duration=phase_duration,
+                amplitude=-current_magnitude,
+            )
+        if waveform_name == "biphasic charge-balanced":
+            return axs.Stimulus.biphasic(
+                start=pulse_start,
+                cathodic_duration=phase_duration,
+                cathodic_amplitude=current_magnitude,
+                interphase=interphase,
+            )
+        if waveform_name == "linear ramp":
+            current_uA = float(current_magnitude.to(axs.uA).magnitude)
+            start_ms = float(pulse_start.to(axs.ms).magnitude)
+            phase_ms = float(phase_duration.to(axs.ms).magnitude)
+            return axs.Stimulus.from_samples(
+                t=np.asarray(
+                    [0.0, start_ms, start_ms + phase_ms, start_ms + phase_ms + 0.02]
+                )
+                * axs.ms,
+                y=np.asarray([0.0, 0.0, -current_uA, 0.0]),
+                mode="linear",
+                unit=axs.uA,
+            )
+        if waveform_name == "sinusoidal burst":
+            return axs.Stimulus.sinus(
+                start=pulse_start,
+                duration=sinus_duration,
+                amplitude=current_magnitude,
+                frequency_khz=5.0,
+                phase=0.0,
+                dt=0.005 * axs.ms,
+            )
+        if waveform_name == "sampled triphasic":
+            current_uA = float(current_magnitude.to(axs.uA).magnitude)
+            return axs.Stimulus.from_samples(
+                t=np.asarray([0.0, 0.20, 0.30, 0.42, 0.58, 0.72]) * axs.ms,
+                y=np.asarray([0.0, 0.0, -1.0, 0.45, -0.25, 0.0]) * current_uA,
+                mode="linear",
+                unit=axs.uA,
+            )
+        raise ValueError(f"Unknown recruitment waveform: {waveform_name!r}")
+
     for waveform in waveforms:
         # Step 3: rebuild an identical local pool for each waveform. This keeps
         # the mutable electrode stimulus history separate between protocol runs.
@@ -65,14 +111,16 @@ def main() -> None:
                 compartments=51,
                 celsius=37.0 * axs.degC,
             )
-            context = axs.analytical.local_point_source_context(
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            stimulation = axs.analytical.point_source_stimulation(
                 electrode,
+                positions,
                 stimulus=axs.Stimulus.constant(0.0 * axs.uA),
                 sigma=sigma,
                 axon_y=y_position,
             )
             simulation = axs.AxonInstance(axon)
-            simulation.add_extracellular_context(context=context)
+            simulation.add_extracellular_stimulation(stimulation=stimulation)
             pool.append(simulation)
 
         # Step 4: recruitment_sweep calls this callback once per row and sampled
@@ -84,56 +132,15 @@ def main() -> None:
             *,
             waveform_name: str,
         ) -> None:
-            context = simulation.extracellular_context
-            if context is None:
-                raise ValueError("simulation has no extracellular context to update.")
-
-            if waveform_name == "monophasic cathodic":
-                stimulus = axs.Stimulus.pulse(
-                    start=pulse_start,
-                    duration=phase_duration,
-                    amplitude=-current_magnitude,
-                )
-            elif waveform_name == "biphasic charge-balanced":
-                stimulus = axs.Stimulus.biphasic(
-                    start=pulse_start,
-                    cathodic_duration=phase_duration,
-                    cathodic_amplitude=current_magnitude,
-                    interphase=interphase,
-                )
-            elif waveform_name == "linear ramp":
-                current_uA = float(current_magnitude.to(axs.uA).magnitude)
-                start_ms = float(pulse_start.to(axs.ms).magnitude)
-                phase_ms = float(phase_duration.to(axs.ms).magnitude)
-                stimulus = axs.Stimulus.from_samples(
-                    t=np.asarray(
-                        [0.0, start_ms, start_ms + phase_ms, start_ms + phase_ms + 0.02]
-                    )
-                    * axs.ms,
-                    y=np.asarray([0.0, 0.0, -current_uA, 0.0]),
-                    mode="linear",
-                    unit=axs.uA,
-                )
-            elif waveform_name == "sinusoidal burst":
-                stimulus = axs.Stimulus.sinus(
-                    start=pulse_start,
-                    duration=sinus_duration,
-                    amplitude=current_magnitude,
-                    frequency_khz=5.0,
-                    phase=0.0,
-                    dt=0.005 * axs.ms,
-                )
-            elif waveform_name == "sampled triphasic":
-                current_uA = float(current_magnitude.to(axs.uA).magnitude)
-                stimulus = axs.Stimulus.from_samples(
-                    t=np.asarray([0.0, 0.20, 0.30, 0.42, 0.58, 0.72]) * axs.ms,
-                    y=np.asarray([0.0, 0.0, -1.0, 0.45, -0.25, 0.0]) * current_uA,
-                    mode="linear",
-                    unit=axs.uA,
-                )
-            else:
-                raise ValueError(f"Unknown recruitment waveform: {waveform_name!r}")
-            context.electrodes[0].set_stimulus(stimulus)
+            stimulation = simulation.extracellular_stimulation
+            if stimulation is None:
+                raise ValueError("simulation has no extracellular stimulation to update.")
+            drive = stimulation.drives[0]
+            updated = stimulation.replace_drive(
+                drive.id,
+                stimulus=build_waveform_stimulus(waveform_name, current_magnitude),
+            )
+            simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
 
         curve = axs.protocols.recruitment_sweep(
             tuple(pool),
@@ -150,7 +157,7 @@ def main() -> None:
             progress=True,
         )
         curves[waveform] = curve
-        preview_stimuli[waveform] = pool[0].extracellular_context.electrodes[0].stimulus
+        preview_stimuli[waveform] = build_waveform_stimulus(waveform, amplitudes[-1])
 
         print(f"\n=== Recruitment: {waveform} ===")
         for amplitude_uA, count, fraction in zip(

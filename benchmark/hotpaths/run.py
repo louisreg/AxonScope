@@ -1266,7 +1266,7 @@ def build_realistic_mixed_population(
         duration=0.10 * axs.ms,
         amplitude=18.0 * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=0.5 * length_um * axs.um,
         z=140.0 * axs.um,
         stimulus=stimulus,
@@ -1309,9 +1309,10 @@ def build_realistic_mixed_population(
             ),
         )
         if index % 3 == 0:
-            instance.add_extracellular_context(
-                context=axs.analytical.local_point_source_context(
+            instance.add_extracellular_stimulation(
+                stimulation=axs.analytical.point_source_stimulation(
                     electrode,
+                    axon.layout.position_values(unit=axs.um) * axs.um,
                     sigma=0.3 * axs.S_per_m,
                     axon_y=float(offset_um) * axs.um,
                 )
@@ -1567,7 +1568,7 @@ def build_point_source_pool(
         duration=0.10 * axs.ms,
         amplitude=float(amplitude_uA) * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=0.5 * length_um * axs.um,
         z=120.0 * axs.um,
         stimulus=stimulus,
@@ -1577,9 +1578,10 @@ def build_point_source_pool(
     instances = []
     for offset_um in offsets:
         instance = axs.AxonInstance(axon)
-        instance.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        instance.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
                 sigma=0.3 * axs.S_per_m,
                 axon_y=float(offset_um) * axs.um,
             )
@@ -1606,7 +1608,7 @@ def build_double_cable_extracellular_pool(
         duration=0.10 * axs.ms,
         amplitude=60.0 * axs.uA,
     )
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=center_x_um * axs.um,
         z=120.0 * axs.um,
         stimulus=stimulus,
@@ -1616,9 +1618,10 @@ def build_double_cable_extracellular_pool(
     instances = []
     for offset_um in offsets:
         instance = axs.AxonInstance(axon)
-        instance.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        instance.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
                 sigma=0.3 * axs.S_per_m,
                 axon_y=float(offset_um) * axs.um,
             )

@@ -32,7 +32,7 @@ REPEATS = 3
 def make_point_source_electrode(length):
     """Return one analytical source to localize for every axon in a pool."""
 
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=length / 2.0,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
@@ -58,9 +58,10 @@ def make_simulations(y_positions, *, length, electrode):
             celsius=37.0 * axs.degC,
         )
         simulation = axs.AxonInstance(axon)
-        simulation.add_extracellular_context(
-            context=axs.analytical.local_point_source_context(
+        simulation.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
                 electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
                 sigma=0.3 * axs.S_per_m,
                 axon_y=y_position,
                 axon_z=0.0 * axs.um,

@@ -1,14 +1,14 @@
-"""Reuse electrodes with different stimuli and combine multiple electrodes.
+"""Reuse sampled extracellular drives and combine several sources.
 
 Run:
     python examples/advanced/stimulation/01_stimulation_contexts.py
 
 The important API pattern is:
 
-    electrode.with_stimulus(stimulus)
+    helper geometry -> ExtracellularFootprint -> ExtracellularDrive
 
-It returns a stimulated copy of the same electrode geometry, so a base electrode
-can be reused safely across simulations.
+Point-source geometry is only a helper used to generate footprints. The solver
+receives the typed `ExtracellularStimulation`.
 """
 
 from __future__ import annotations
@@ -20,16 +20,16 @@ import axonscope as axs
 
 
 def main() -> None:
-    # Step 1: build one MRG axon and locate its center compartment. The electrode
-    # geometry below is defined in the same physical coordinate system.
+    # Step 1: choose the axon and the intrinsic positions used to sample fields.
     axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
-    x = axon.layout.position_values(unit=axs.um) * axs.um
-    center_x = x[axon.n_compartments // 2]
+    positions = axon.layout.position_values(unit=axs.um) * axs.um
+    center_x = positions[axon.n_compartments // 2]
     t = np.linspace(0.0, 1.6, 161) * axs.ms
+    t_ms = np.asarray(t.to(axs.ms).magnitude, dtype=float)
 
-    # Step 2: create one reusable electrode geometry, then attach different
-    # temporal stimuli to stimulated copies of it.
-    base_electrode = axs.PointSourceElectrode(
+    # Step 2: one helper geometry can generate several drives by pairing the
+    # same sampled footprint with different temporal stimuli.
+    base_electrode = axs.analytical.PointSourceElectrode(
         x=center_x,
         z=100.0 * axs.um,
     )
@@ -44,65 +44,81 @@ def main() -> None:
         amplitude=80.0 * axs.uA,
     )
 
-    cathodic_context = axs.AnalyticalExtracellularContext(
-        electrodes=[base_electrode.with_stimulus(cathodic)],
+    cathodic_stimulation = axs.analytical.point_source_stimulation(
+        base_electrode,
+        positions,
         sigma=0.3 * axs.S_per_m,
+        stimulus=cathodic,
+        drive_id="source",
     )
-    anodic_context = axs.AnalyticalExtracellularContext(
-        electrodes=[base_electrode.with_stimulus(anodic)],
-        sigma=0.3 * axs.S_per_m,
+    anodic_stimulation = cathodic_stimulation.replace_drive(
+        axs.DriveId("source"),
+        stimulus=anodic,
     )
 
-    # Step 3: a context can also combine several electrodes. Here the two copies
-    # use opposite pulse polarities and sit on opposite sides of the axon center.
-    left_electrode = axs.PointSourceElectrode(
+    # Step 3: combine several helpers by building several drives on the same
+    # intrinsic position support.
+    left_electrode = axs.analytical.PointSourceElectrode(
         x=center_x - 250.0 * axs.um,
         z=500.0 * axs.um,
     )
-    right_electrode = axs.PointSourceElectrode(
+    right_electrode = axs.analytical.PointSourceElectrode(
         x=center_x + 250.0 * axs.um,
         z=500.0 * axs.um,
     )
-    bipolar_context = axs.AnalyticalExtracellularContext(
-        electrodes=[
-            left_electrode.with_stimulus(cathodic),
-            right_electrode.with_stimulus(anodic),
-        ],
+    left_drive = axs.analytical.point_source_drive(
+        left_electrode,
+        positions,
         sigma=0.3 * axs.S_per_m,
+        stimulus=cathodic,
+        drive_id="left",
     )
+    right_drive = axs.analytical.point_source_drive(
+        right_electrode,
+        positions,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=anodic,
+        drive_id="right",
+    )
+    bipolar_stimulation = axs.ExtracellularStimulation([left_drive, right_drive])
 
     cases = [
-        ("same electrode, cathodic", cathodic_context),
-        ("same electrode, anodic", anodic_context),
-        ("two electrodes", bipolar_context),
+        ("same footprint, cathodic", cathodic_stimulation),
+        ("same footprint, anodic", anodic_stimulation),
+        ("two sampled drives", bipolar_stimulation),
     ]
 
     # Step 4: solve each case explicitly. The axon description is reused, but
-    # each AxonInstance receives one context for that run.
+    # each AxonInstance receives one typed stimulation for that run.
     results = []
-    for label, context in cases:
+    for label, stimulation in cases:
         simulation = axs.AxonInstance(axon)
-        simulation.add_extracellular_context(context=context)
+        simulation.add_extracellular_stimulation(stimulation=stimulation)
         run = axs.simulate(
             simulation,
             duration=1.6 * axs.ms,
             dt=0.02 * axs.ms,
         )
         result = run.single
-        results.append((label, context, result))
+        results.append((label, stimulation, result))
 
-    # Step 5: plot both sides of the concept: the imposed extracellular field and
-    # the membrane response at the center compartment.
+    # Step 5: plot the imposed extracellular field and the membrane response at
+    # the center compartment.
+    x_um = np.asarray(positions.to(axs.um).magnitude, dtype=float)
     fig, axes = plt.subplots(2, 3, figsize=(13, 6), constrained_layout=True)
-    for col, (label, context, result) in enumerate(results):
-        context.plot_evaluation(
-            x,
-            t,
-            ax=axes[0, col],
-            voltage_unit=axs.mV,
-            title=label,
-            colorbar=False,
+    for col, (label, stimulation, result) in enumerate(results):
+        values_mV = stimulation.evaluate(t, voltage_unit=axs.mV)
+        axes[0, col].imshow(
+            values_mV.T,
+            aspect="auto",
+            origin="lower",
+            extent=[t_ms[0], t_ms[-1], x_um[0], x_um[-1]],
+            cmap="coolwarm",
         )
+        axes[0, col].set_title(label)
+        axes[0, col].set_xlabel("Time [ms]")
+        axes[0, col].set_ylabel("Position [um]")
+
         result.plot_trace(
             ax=axes[1, col],
             position=center_x,

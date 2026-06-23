@@ -22,7 +22,7 @@ def main() -> None:
     # The electrode is centered along the axon. Its temporal current is a short
     # cathodic pulse. The transverse fiber positions below are teaching data for
     # the analytical point-source helper; they are not stored on AxonInstance.
-    electrode = axs.PointSourceElectrode(
+    electrode = axs.analytical.PointSourceElectrode(
         x=length / 2.0,
         y=0.0 * axs.um,
         z=0.0 * axs.um,
@@ -43,15 +43,17 @@ def main() -> None:
             compartments=51,
             celsius=37.0 * axs.degC,
         )
-        extracellular_context = axs.analytical.local_point_source_context(
+        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        extracellular = axs.analytical.point_source_stimulation(
             electrode,
+            positions,
             stimulus=current,
             sigma=0.3 * axs.S_per_m,
             axon_y=y_position,
             axon_z=0.0 * axs.um,
         )
         sim = axs.AxonInstance(axon)
-        sim.add_extracellular_context(context=extracellular_context)
+        sim.add_extracellular_stimulation(stimulation=extracellular)
         sim.label = f"fiber {index}"
         simulations.append(sim)
 

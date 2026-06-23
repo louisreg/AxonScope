@@ -84,24 +84,26 @@ s = 0 ... axon length
 
 World/anatomical coordinates belong to external geometry packages or to small
 analytical helper code in examples. If a point-source setup starts in an
-external frame, localize it before attaching it to the simulation protocol:
+external frame, sample it into a local footprint before attaching it to the
+simulation protocol:
 
 ```python
-electrode = axs.PointSourceElectrode(
+electrode = axs.analytical.PointSourceElectrode(
     x=500.0 * axs.um,
     y=0.0 * axs.um,
     z=100.0 * axs.um,
-).with_stimulus(extra_current)
+)
+extracellular = axs.analytical.point_source_stimulation(
+    electrode,
+    axon.layout.position_values(unit=axs.um) * axs.um,
+    sigma=0.3 * axs.S_per_m,
+    stimulus=extra_current,
+    axon_y=20.0 * axs.um,
+    axon_z=30.0 * axs.um,
+)
 
 sim = axs.AxonInstance(axon)
-sim.add_extracellular_context(
-    context=axs.analytical.local_point_source_context(
-        electrode,
-        sigma=0.3 * axs.S_per_m,
-        axon_y=20.0 * axs.um,
-        axon_z=30.0 * axs.um,
-    )
-)
+sim.add_extracellular_stimulation(stimulation=extracellular)
 ```
 
 The offsets above are inputs to the helper only. They are not stored on
@@ -119,21 +121,16 @@ sim.add_intracellular_context(
         current=stimulus,
     )
 )
-sim.add_extracellular_context(
-    context=axs.AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(extra_current)],
-        sigma=0.3 * axs.S_per_m,
-    )
-)
+sim.add_extracellular_stimulation(stimulation=extracellular)
 ```
 
 That keeps the public model didactic: a pool is a collection of already
 described axon simulations.
 
-Point-source electrode coordinates are interpreted by the context or footprint
-builder. By the time dispatch/preparation starts, each row has local
-extracellular contexts or sampled footprints. The dispatcher/runtime never
-requires a world position on the axon instance.
+Point-source helper coordinates are interpreted only while building sampled
+footprints. By the time dispatch/preparation starts, each row has local sampled
+extracellular stimulation. The dispatcher/runtime never requires a world
+position on the axon instance.
 
 ## Advanced Dispatch
 

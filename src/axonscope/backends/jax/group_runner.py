@@ -463,13 +463,13 @@ def _record_group_memory_estimate(
     dense_nbytes = int(np.prod(dense_shape, dtype=np.int64)) * itemsize
     if extracellular_format == "zero_no_context":
         vstim_mid_nbytes = 0
-    elif extracellular_format == "factorized_point_source":
+    elif extracellular_format == "factorized_footprint":
         vstim_mid_nbytes = (nt + batch_size * nx) * itemsize
     else:
         vstim_mid_nbytes = dense_nbytes
     if not include_vstim_previous:
         vstim_previous_nbytes = 0
-    elif extracellular_format == "factorized_point_source":
+    elif extracellular_format == "factorized_footprint":
         vstim_previous_nbytes = itemsize
     else:
         vstim_previous_nbytes = batch_size * nx * itemsize
@@ -499,7 +499,7 @@ def _record_group_memory_estimate(
         "memory_estimate_intracellular_format": intracellular_format,
         "memory_estimate_extracellular_format": extracellular_format,
     }
-    if extracellular_format == "factorized_point_source":
+    if extracellular_format == "factorized_footprint":
         metadata["memory_estimate_vstim_dense_equivalent_nbytes"] = dense_nbytes
     if capacity_bytes is not None and capacity_bytes > 0:
         metadata["device_memory_capacity_bytes"] = int(capacity_bytes)
@@ -701,9 +701,9 @@ def _run_single_cable_batch_group(
                     **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input"),
                 )
             else:
-                extracellular_format = "factorized_point_source"
+                extracellular_format = "factorized_footprint"
                 record_benchmark_metadata(
-                    input_format="factorized_point_source",
+                    input_format="factorized_footprint",
                     target_nx=vstim_mid.target_nx,
                     shared_current=vstim_mid.shared_current,
                     dense_vstim_avoided=True,
@@ -922,9 +922,9 @@ def _run_double_cable_batch_group(
             )
         else:
             vstim_previous = None
-            extracellular_format = "factorized_point_source"
+            extracellular_format = "factorized_footprint"
             record_benchmark_metadata(
-                input_format="factorized_point_source",
+                input_format="factorized_footprint",
                 target_nx=vstim_mid.target_nx,
                 shared_current=vstim_mid.shared_current,
                 dense_vstim_avoided=True,

@@ -22,9 +22,7 @@ from axonscope.solvers.options import (
     resolve_double_cable_block_solver,
 )
 from axonscope.stimulation import (
-    AnalyticalExtracellularContext,
     IntracellularCurrentClamp,
-    PointSourceElectrode,
 )
 from axonscope.timebase import simulation_step_count
 from axonscope.utils import units
@@ -845,12 +843,12 @@ def _inspect_lowering(
     if group.mode == "single":
         if sparse_intracellular and cohort.context_count == 0:
             extracellular_format = "zero_no_context"
-        elif sparse_intracellular and observer_plan and _can_factorize_point_source(cohort):
-            extracellular_format = "factorized_point_source"
+        elif sparse_intracellular and observer_plan and _can_factorize_footprint_rows(cohort):
+            extracellular_format = "factorized_footprint"
         else:
             extracellular_format = "dense"
-    elif observer_plan and _can_factorize_point_source(cohort):
-        extracellular_format = "factorized_point_source"
+    elif observer_plan and _can_factorize_footprint_rows(cohort):
+        extracellular_format = "factorized_footprint"
     else:
         extracellular_format = "dense"
 
@@ -1188,47 +1186,20 @@ def _can_build_sparse_intracellular_from_clamps(
     )
 
 
-def _can_factorize_point_source(cohort: PreparedCohort) -> bool:
+def _can_factorize_footprint_rows(cohort: PreparedCohort) -> bool:
     rows = cohort.contexts
     if not rows or not any(rows) or any(len(row) != 1 for row in rows):
         return False
-    first_context = rows[0][0]
-    if not isinstance(first_context, AnalyticalExtracellularContext):
-        return False
-    if len(first_context.electrodes) != 1:
-        return False
-    first_electrode = first_context.electrodes[0]
-    if not isinstance(first_electrode, PointSourceElectrode):
-        return False
     for row in rows:
         context = row[0]
-        if not isinstance(context, AnalyticalExtracellularContext):
-            return False
         if len(context.electrodes) != 1:
             return False
         electrode = context.electrodes[0]
-        if not isinstance(electrode, PointSourceElectrode):
+        if not hasattr(context, "footprint_for_electrode"):
             return False
         if getattr(electrode, "stimulus", None) is None:
             return False
-        if not _same_point_source_geometry(first_context, first_electrode, context, electrode):
-            return False
     return True
-
-
-def _same_point_source_geometry(
-    lhs_context: AnalyticalExtracellularContext,
-    lhs_electrode: PointSourceElectrode,
-    rhs_context: AnalyticalExtracellularContext,
-    rhs_electrode: PointSourceElectrode,
-) -> bool:
-    return (
-        float(lhs_context.sigma_S_m) == float(rhs_context.sigma_S_m)
-        and float(lhs_electrode.x0_m) == float(rhs_electrode.x0_m)
-        and float(lhs_electrode.y_um) == float(rhs_electrode.y_um)
-        and float(lhs_electrode.z_um) == float(rhs_electrode.z_um)
-        and float(lhs_electrode.min_distance_m) == float(rhs_electrode.min_distance_m)
-    )
 
 
 def _shape_text(shape: tuple[int, ...] | None) -> str:
@@ -1244,7 +1215,7 @@ _DISPLAY_LABELS = {
     "DispatchCohortResult": "cohort result",
     "DispatchResult rows": "row results",
     "DoubleCableBatchKernel": "double-cable batch",
-    "factorized_point_source": "factorized point-source",
+    "factorized_footprint": "factorized footprint",
     "scalar fallback row": "scalar fallback",
     "SingleCableKernel": "single-cable scalar",
     "SingleCableVStimBatchKernel": "single-cable Vstim batch",

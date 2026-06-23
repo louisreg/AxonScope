@@ -14,8 +14,8 @@ treated as supported compatibility.
 - Unmyelinated and myelinated one-dimensional axon descriptions.
 - Hodgkin-Huxley, Rattay-Aberham, Sundt, Tigerholm, Schild94/Schild97, and MRG
   style templates.
-- Intracellular current clamps and analytical point-source extracellular
-  stimulation.
+- Intracellular current clamps and sampled extracellular stimulation, including
+  analytical point-source quick-start helpers.
 - Executable `AxonSimulation` root object plus public `simulate(...)` and
   `simulate_pool(...)` wrappers.
 - Structured post-hoc analysis definitions with per-axon statuses, population
@@ -164,7 +164,7 @@ axon = axs.axons.MRG(
 )
 center_x = axon.layout.position_values(unit=axs.um)[axon.n_compartments // 2] * axs.um
 
-electrode = axs.PointSourceElectrode(
+electrode = axs.analytical.PointSourceElectrode(
     x=center_x,
     z=500.0 * axs.um,
 )
@@ -174,23 +174,23 @@ stimulus = axs.Stimulus.biphasic(
     cathodic_duration=0.05 * axs.ms,
     interphase=0.02 * axs.ms,
 )
+extracellular = axs.analytical.point_source_stimulation(
+    electrode,
+    axon.layout.position_values(unit=axs.um) * axs.um,
+    sigma=0.3 * axs.S_per_m,
+    stimulus=stimulus,
+)
 
 sim = axs.AxonInstance(axon)
-sim.add_extracellular_context(
-    context=axs.AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(stimulus)],
-        sigma=0.3 * axs.S_per_m,
-    )
-)
+sim.add_extracellular_stimulation(stimulation=extracellular)
 
 run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
 result = run.single
 ```
 
-For workflows that need reusable spatial transfer functions, analytical
-contexts can build static `ExtracellularFootprint` objects, which are paired
-with stimuli as `ExtracellularDrive` objects and grouped in
-`ExtracellularStimulation`.
+Point-source geometry is a quick-start helper under `axs.analytical`. It is
+sampled into an `ExtracellularFootprint`, paired with a stimulus as an
+`ExtracellularDrive`, and attached as `ExtracellularStimulation`.
 
 See `docs/stimulation.md` for the stimulation model and
 `docs/axon_model_organization.md` for axon geometry/layout details.
