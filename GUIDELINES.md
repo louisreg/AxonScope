@@ -745,6 +745,8 @@ Current coverage:
   recordings;
 - detailed plotting for padding, estimated memory, VmRaster probes, and result
   assembly.
+- progress reporting: structured dispatch/backend events for route choice,
+  preparation, input lowering, kernel chunks, and result assembly.
 
 Target coverage:
 

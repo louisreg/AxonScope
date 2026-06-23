@@ -133,9 +133,9 @@ Work should start here unless the user asks otherwise.
 - [x] Keep inspection opt-in and zero-overhead by default.
 - [x] Avoid device-to-host transfers unless explicitly requested by an
   execution-time capture.
-- [ ] Redesign pool progress reporting around dispatch groups, cohort rows, or
-  callback events; examples may still use temporary `progress=True` prints, but
-  the current boolean progress does not expose enough per-simulation visibility.
+- [x] Redesign pool progress reporting around structured dispatch/backend
+  events: route choice, preparation, input lowering, kernel chunks, and result
+  assembly.
 
 ### 7. Examples Flattening
 

@@ -64,6 +64,7 @@ def main() -> None:
         duration=duration,
         dt=dt,
         recording=axs.Recording.center(axs.signals.Vm),
+        progress=True,
     )
 
     # The result is ordered like the input pool, so we can zip the positions and

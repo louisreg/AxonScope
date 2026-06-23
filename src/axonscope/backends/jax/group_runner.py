@@ -17,6 +17,7 @@ from axonscope.benchmarking.hotpaths import (
     record_benchmark_metadata,
 )
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
+from axonscope.dispatcher.progress import ProgressEvent, ProgressStage
 from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
 from axonscope.backends.jax.input_batches import (
     build_factorized_vstim_midpoint_batch,
@@ -114,6 +115,29 @@ def _dispatch_method(group: DispatchGroup) -> str:
     if group.mode == "double":
         return f"{prefix}-double-cable"
     return f"{prefix}-single-cable"
+
+
+def _emit_progress(
+    progress_callback: Any,
+    group: DispatchGroup,
+    stage: str,
+    message: str,
+    **details: Any,
+) -> None:
+    """Emit one structured progress event when reporting is enabled."""
+
+    if progress_callback is None:
+        return
+    event = ProgressEvent(
+        stage=cast(ProgressStage, stage),
+        group_id=int(group.group_id),
+        rows=int(group.size),
+        nx=int(group.nx),
+        route=_dispatch_method(group),
+        message=message,
+        details={key: value for key, value in details.items() if value is not None},
+    )
+    progress_callback(event)
 
 
 def _batch_wait_target(out: Any) -> Any:
@@ -545,6 +569,7 @@ def _run_single_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
+    _emit_progress(progress_callback, group, "prepare", "runtime", mode="single")
     with benchmark_span(
         "runtime.prepare",
         group_id=group.group_id,
@@ -568,6 +593,7 @@ def _run_single_cable_batch_group(
             nx=runtime.membrane.Nx,
             dtype=str(runtime.membrane.dtype),
         )
+    _emit_progress(progress_callback, group, "prepare", "cohort rows")
     with benchmark_span(
         "inputs.positions",
         group_id=group.group_id,
@@ -584,6 +610,15 @@ def _run_single_cable_batch_group(
             context_count=cohort.context_count,
         )
     kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
+    _emit_progress(
+        progress_callback,
+        group,
+        "batch",
+        "recording plan",
+        recording=kernel_options.recording.mode,
+        time_chunk_steps=kernel_options.time_chunk_steps,
+        observers=0 if observers is None else len(observers),
+    )
     with benchmark_span(
         "observer.plan",
         group_id=group.group_id,
@@ -732,6 +767,15 @@ def _run_single_cable_batch_group(
             record_benchmark_metadata(
                 **benchmark_array_metadata("vstim_mid", vstim_mid, role="kernel_input")
             )
+    _emit_progress(
+        progress_callback,
+        group,
+        "lowering",
+        "inputs",
+        intracellular=intracellular_format,
+        extracellular=extracellular_format,
+        contexts=cohort.context_count,
+    )
     _record_group_memory_estimate(
         group=group,
         runtime=runtime,
@@ -740,6 +784,14 @@ def _run_single_cable_batch_group(
         intracellular_format=intracellular_format,
         extracellular_format=extracellular_format,
         include_vstim_previous=False,
+    )
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "enqueue",
+        recording=kernel_options.recording.mode,
+        time_chunk_steps=kernel_options.time_chunk_steps,
     )
     with benchmark_span(
         "kernel.enqueue",
@@ -770,6 +822,14 @@ def _run_single_cable_batch_group(
         mode=group.mode,
     ):
         benchmark_wait(_batch_wait_target(out))
+    _emit_progress(progress_callback, group, "kernel", "complete")
+    _emit_progress(
+        progress_callback,
+        group,
+        "result",
+        "assemble batch output",
+        output="observations" if out.Vm is None else "Vm",
+    )
     with benchmark_span(
         "results.split_batch",
         group_id=group.group_id,
@@ -802,6 +862,7 @@ def _run_double_cable_batch_group(
 
     representative_item = _representative_item(group)
     representative = representative_item.simulation
+    _emit_progress(progress_callback, group, "prepare", "runtime", mode="double")
     with benchmark_span(
         "runtime.prepare",
         group_id=group.group_id,
@@ -825,6 +886,7 @@ def _run_double_cable_batch_group(
             nx=runtime.membrane.Nx,
             dtype=str(runtime.membrane.dtype),
         )
+    _emit_progress(progress_callback, group, "prepare", "cohort rows")
     with benchmark_span(
         "inputs.positions",
         group_id=group.group_id,
@@ -841,6 +903,16 @@ def _run_double_cable_batch_group(
             context_count=cohort.context_count,
         )
     kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
+    _emit_progress(
+        progress_callback,
+        group,
+        "batch",
+        "recording plan",
+        recording=kernel_options.recording.mode,
+        time_chunk_steps=kernel_options.time_chunk_steps,
+        observers=0 if observers is None else len(observers),
+        block_solver=kernel_options.double_cable_block_solver,
+    )
     with benchmark_span(
         "observer.plan",
         group_id=group.group_id,
@@ -944,6 +1016,15 @@ def _run_double_cable_batch_group(
                     role="kernel_input",
                 ),
             )
+    _emit_progress(
+        progress_callback,
+        group,
+        "lowering",
+        "inputs",
+        intracellular=intracellular_format,
+        extracellular=extracellular_format,
+        contexts=cohort.context_count,
+    )
     _record_group_memory_estimate(
         group=group,
         runtime=runtime,
@@ -952,6 +1033,15 @@ def _run_double_cable_batch_group(
         intracellular_format=intracellular_format,
         extracellular_format=extracellular_format,
         include_vstim_previous=True,
+    )
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "enqueue",
+        recording=kernel_options.recording.mode,
+        time_chunk_steps=kernel_options.time_chunk_steps,
+        block_solver=kernel_options.double_cable_block_solver,
     )
     with benchmark_span(
         "kernel.enqueue",
@@ -983,6 +1073,14 @@ def _run_double_cable_batch_group(
         mode=group.mode,
     ):
         benchmark_wait(_batch_wait_target(out))
+    _emit_progress(progress_callback, group, "kernel", "complete")
+    _emit_progress(
+        progress_callback,
+        group,
+        "result",
+        "assemble batch output",
+        output="observations" if out.Vm is None else "Vm",
+    )
     with benchmark_span(
         "results.split_batch",
         group_id=group.group_id,

@@ -208,10 +208,12 @@ axs.dispatcher.print_dispatch_plan(plan)
 axs.dispatcher.plot_dispatch_plan(plan)
 ```
 
-Progress reporting is optional. `progress=True` uses Rich when installed and
-falls back to plain text otherwise. `progress="rich"` requires Rich, while
-`progress="plain"` always uses simple text output. JAX kernels cannot stream
-from inside one compiled scan; for finer solver progress, run chunked batches:
+Progress reporting is optional. `progress=True` uses Rich, while
+`progress="plain"` uses simple text output that is easy to capture in logs. The
+report is event-based: it announces the selected route for each dispatch group,
+runtime/cohort preparation, input lowering, kernel enqueue/chunks, and result
+assembly. JAX kernels cannot stream from inside one compiled scan; for finer
+solver progress, run chunked batches:
 
 ```python
 results = axs.simulate_pool(
@@ -222,6 +224,17 @@ results = axs.simulate_pool(
     recording=axs.Recording.voltage(),
     progress=True,
 )
+```
+
+Plain output is intentionally compact, for example:
+
+```text
+Dispatch progress: 4 rows, 2 groups
+[1/2] group 0 batch-single-cable rows=3 Nx=101
+  route group=0: route=batch-single-cable rows=3 Nx=101 compatible batch route
+  prepare group=0: route=batch-single-cable rows=3 Nx=101 runtime mode=single
+  lowering group=0: route=batch-single-cable rows=3 Nx=101 inputs intracellular=sparse_current_clamp extracellular=factorized_footprint
+  result group=0: route=batch-single-cable rows=3 Nx=101 assemble batch output output=observations
 ```
 
 The old precomputed global extracellular API and policy-specific public batch

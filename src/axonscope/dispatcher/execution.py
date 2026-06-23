@@ -7,7 +7,7 @@ from axonscope.axons.axon import Axon
 from axonscope.backends.jax.group_runner import run_jax_batch_group
 from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
-from axonscope.dispatcher.progress import DispatchProgress, ProgressOption
+from axonscope.dispatcher.progress import DispatchProgress, ProgressEvent, ProgressOption
 from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
 from axonscope.results.single import SimResult
 from axonscope.solvers import BatchOptions, CrankNicholson, SolverOptions
@@ -31,8 +31,8 @@ def run_pool(
     only groups may remain a single compact record instead of one record per
     input axon. Plain numeric times are interpreted as milliseconds; Pint-like
     quantities are converted at this boundary. ``progress`` enables optional
-    Rich/plain progress reporting at the dispatch-group level and, for chunked
-    batch runs, at the kernel-chunk level.
+    Rich/plain event reporting for route choice, preparation, input lowering,
+    kernel chunks, and result assembly.
     """
 
     if not axons:
@@ -90,7 +90,13 @@ def _run_pool_checked(
                 has_padding=group.has_padding,
             ):
                 progress_reporter.start_group(group)
-                if _can_run_batch_group(group, observers=observers):
+                can_batch = _can_run_batch_group(group, observers=observers)
+                if can_batch:
+                    progress_reporter.route_group(
+                        group,
+                        route=_dispatch_method(group),
+                        reason="compatible batch route",
+                    )
                     group_results = _run_batch_group(
                         group,
                         tsim_ms=tsim_ms,
@@ -101,6 +107,11 @@ def _run_pool_checked(
                         progress_callback=progress_reporter.kernel_callback(group),
                     )
                 else:
+                    progress_reporter.route_group(
+                        group,
+                        route="scalar",
+                        reason=_batch_rejection_reason(group, observers=observers),
+                    )
                     group_results = _run_scalar_group(
                         group,
                         tsim_ms=tsim_ms,
@@ -112,6 +123,16 @@ def _run_pool_checked(
                     callback = progress_reporter.kernel_callback(group)
                     if callback is not None:
                         callback(1, 1)
+                    progress_reporter.emit(
+                        ProgressEvent(
+                            stage="result",
+                            group_id=int(group.group_id),
+                            rows=int(group.size),
+                            nx=int(group.nx),
+                            route="scalar",
+                            message="assembled scalar rows",
+                        )
+                    )
                 progress_reporter.finish_group(group)
             for result in group_results:
                 indices = (
@@ -171,6 +192,32 @@ def _can_run_batch_group(
     if group.size < 2:
         return False
     return group.mode in {"single", "double"}
+
+
+def _dispatch_method(group: DispatchGroup) -> str:
+    """Return the public diagnostic label for a dispatch group."""
+
+    if group.size < 2:
+        return "scalar"
+    prefix = "batch" if group.geometry_shared else "parameter-batch"
+    if group.mode == "double":
+        return f"{prefix}-double-cable"
+    return f"{prefix}-single-cable"
+
+
+def _batch_rejection_reason(
+    group: DispatchGroup,
+    *,
+    observers: tuple[Any, ...] | None,
+) -> str:
+    """Return a readable reason why a group is using scalar execution."""
+
+    del observers
+    if group.size < 2:
+        return "single row group"
+    if group.mode not in {"single", "double"}:
+        return f"unsupported batch mode {group.mode!r}"
+    return "batch route unavailable"
 
 
 def _run_batch_group(

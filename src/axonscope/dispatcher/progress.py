@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, TypeAlias
+from typing import Any, Callable, Literal, Mapping, TypeAlias
 
 
 ProgressMode: TypeAlias = Literal["auto", "rich", "plain"]
 ProgressOption: TypeAlias = bool | ProgressMode
-KernelProgressCallback: TypeAlias = Callable[[int, int], None]
+ProgressStage: TypeAlias = Literal[
+    "dispatch",
+    "route",
+    "prepare",
+    "batch",
+    "lowering",
+    "kernel",
+    "result",
+]
+KernelProgressCallback: TypeAlias = Callable[..., None]
 
 
 def _normalize_progress_mode(progress: ProgressOption) -> ProgressMode | None:
@@ -28,6 +37,48 @@ def _dispatch_method(group: Any) -> str:
     return f"{prefix}-{group.mode}-cable"
 
 
+@dataclass(frozen=True)
+class ProgressEvent:
+    """Structured progress event emitted by dispatch and backend execution."""
+
+    stage: ProgressStage
+    group_id: int | None = None
+    group_index: int | None = None
+    group_count: int | None = None
+    rows: int | None = None
+    nx: int | None = None
+    route: str | None = None
+    message: str = ""
+    completed: int | None = None
+    total: int | None = None
+    details: Mapping[str, Any] | None = None
+
+    def plain_text(self) -> str:
+        """Return a compact one-line representation for plain progress."""
+
+        prefix = self.stage
+        if self.group_id is not None:
+            prefix += f" group={self.group_id}"
+        parts: list[str] = []
+        if self.route:
+            parts.append(f"route={self.route}")
+        if self.rows is not None:
+            parts.append(f"rows={self.rows}")
+        if self.nx is not None:
+            parts.append(f"Nx={self.nx}")
+        if self.completed is not None and self.total is not None:
+            parts.append(f"{self.completed}/{self.total}")
+        if self.message:
+            parts.append(self.message)
+        if self.details:
+            parts.extend(
+                f"{key}={value}"
+                for key, value in self.details.items()
+                if value is not None
+            )
+        return f"{prefix}: " + " ".join(str(part) for part in parts)
+
+
 @dataclass
 class DispatchProgress:
     """Context manager used by the dispatcher to report execution progress."""
@@ -41,6 +92,7 @@ class DispatchProgress:
         self._group_task = None
         self._kernel_task = None
         self._group_index = 0
+        self._current_group_index: dict[int, int] = {}
         self._use_plain = False
 
     def __enter__(self) -> "DispatchProgress":
@@ -67,11 +119,11 @@ class DispatchProgress:
                 )
                 self._rich.start()
                 self._group_task = self._rich.add_task(
-                    "dispatch groups",
+                    f"dispatch groups ({len(self.plan.items)} rows)",
                     total=len(self.plan.groups),
                 )
                 self._kernel_task = self._rich.add_task(
-                    "kernel",
+                    "kernel chunks",
                     total=1,
                     visible=False,
                 )
@@ -96,9 +148,10 @@ class DispatchProgress:
         if self._mode is None:
             return
         self._group_index += 1
+        self._current_group_index[int(group.group_id)] = self._group_index
         label = (
             f"group {group.group_id} {_dispatch_method(group)} "
-            f"B={group.size} Nx={group.nx}"
+            f"rows={group.size} Nx={group.nx}"
             f"{' padded' if group.has_padding else ''}"
         )
         if self._rich is not None:
@@ -113,6 +166,27 @@ class DispatchProgress:
         elif self._use_plain:
             print(f"[{self._group_index}/{len(self.plan.groups)}] {label}", flush=True)
 
+    def route_group(self, group: Any, *, route: str, reason: str) -> None:
+        """Report the selected execution route for one group."""
+
+        self.emit(
+            ProgressEvent(
+                stage="route",
+                group_id=int(group.group_id),
+                group_index=self._current_group_index.get(int(group.group_id)),
+                group_count=len(self.plan.groups),
+                rows=int(group.size),
+                nx=int(group.nx),
+                route=route,
+                message=reason,
+                details={
+                    "mode": group.mode,
+                    "batch_kind": group.batch_kind,
+                    "padding": bool(group.has_padding),
+                },
+            )
+        )
+
     def finish_group(self, group: Any) -> None:
         """Mark one dispatch group as complete."""
 
@@ -125,31 +199,82 @@ class DispatchProgress:
             print(f"done group {group.group_id}", flush=True)
 
     def kernel_callback(self, group: Any) -> KernelProgressCallback | None:
-        """Return a callback for chunked solver kernels."""
+        """Return a callback for backend progress events and kernel chunks."""
 
         if self._mode is None:
             return None
 
-        def _callback(done: int, total: int) -> None:
-            total = max(int(total), 1)
-            done = min(max(int(done), 0), total)
-            if self._rich is not None:
-                self._rich.update(
-                    self._kernel_task,
-                    description=f"kernel {group.group_id} chunks",
+        def _callback(event_or_done: Any, total: int | None = None) -> None:
+            if isinstance(event_or_done, ProgressEvent):
+                self.emit(event_or_done)
+                return
+            total = max(1 if total is None else int(total), 1)
+            done = min(max(int(event_or_done), 0), total)
+            self.emit(
+                ProgressEvent(
+                    stage="kernel",
+                    group_id=int(group.group_id),
+                    group_index=self._current_group_index.get(int(group.group_id)),
+                    group_count=len(self.plan.groups),
+                    rows=int(group.size),
+                    nx=int(group.nx),
+                    message="chunks",
                     completed=done,
                     total=total,
-                    visible=True,
                 )
-            elif self._use_plain and total > 1:
-                print(f"  kernel chunks {done}/{total}", flush=True)
+            )
 
         return _callback
+
+    def emit(self, event: ProgressEvent) -> None:
+        """Render one structured progress event."""
+
+        if self._mode is None:
+            return
+        if self._rich is not None:
+            self._render_rich_event(event)
+        elif self._use_plain:
+            self._render_plain_event(event)
+
+    def _render_rich_event(self, event: ProgressEvent) -> None:
+        if self._rich is None:
+            return
+        if event.stage == "kernel" and event.completed is not None and event.total is not None:
+            self._rich.update(
+                self._kernel_task,
+                description=self._event_label(event),
+                completed=event.completed,
+                total=max(event.total, 1),
+                visible=True,
+            )
+            return
+        self._rich.update(self._group_task, description=self._event_label(event))
+        if event.stage in {"route", "prepare", "lowering", "result"}:
+            self._rich.console.print(f"[dim]{event.plain_text()}[/dim]")
+
+    def _render_plain_event(self, event: ProgressEvent) -> None:
+        if event.stage == "kernel" and event.total == 1:
+            return
+        print(f"  {event.plain_text()}", flush=True)
+
+    def _event_label(self, event: ProgressEvent) -> str:
+        label = event.stage
+        if event.group_id is not None:
+            label += f" group {event.group_id}"
+        if event.route:
+            label += f" {event.route}"
+        if event.message:
+            label += f" {event.message}"
+        if event.completed is not None and event.total is not None:
+            label += f" {event.completed}/{event.total}"
+        return label
 
 
 __all__ = [
     "DispatchProgress",
     "KernelProgressCallback",
+    "ProgressEvent",
     "ProgressMode",
     "ProgressOption",
+    "ProgressStage",
 ]

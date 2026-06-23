@@ -638,6 +638,28 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
     assert len(result) == 2
     assert "Dispatch progress" in captured.out
     assert "group 0" in captured.out
+    assert "route=batch-single-cable" in captured.out
+    assert "prepare group=0" in captured.out
+    assert "lowering group=0" in captured.out
+    assert "result group=0" in captured.out
+
+
+def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
+    axon = _hh_axon(nx=11, amp_nA=0.1)
+
+    result = axs.simulate_pool(
+        [axon],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
+        progress="plain",
+    )
+
+    captured = capsys.readouterr()
+    assert len(result) == 1
+    assert "route=scalar" in captured.out
+    assert "single row group" in captured.out
+    assert "assembled scalar rows" in captured.out
 
 
 def test_dispatch_plan_description_mentions_parameter_batch():
