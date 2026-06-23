@@ -839,7 +839,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     time_start_index: Array,
     dt_ms: Array,
 ) -> tuple[Array, Array, tuple[Array, ...], VmRasterState]:
-    """Run one observer chunk with sparse Iinj and factorized point-source Vstim."""
+    """Run one observer chunk with sparse Iinj and factorized-footprint Vstim."""
 
     def one_batch(
         Vm0_row,

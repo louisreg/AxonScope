@@ -5,7 +5,6 @@ import axonscope.backends.jax.group_runner as group_runner
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.backends.jax.batch_kernels as batch_kernels
 from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
@@ -25,13 +24,6 @@ from axonscope.backends.jax.batch_inputs import (
 from axonscope.solvers import BatchOptions
 from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
-
-
-def _context(electrode: PointSourceElectrode, stimulus: Stimulus):
-    return AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(stimulus)],
-        sigma=0.3 * axs.S_per_m,
-    )
 
 
 def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
@@ -429,13 +421,19 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
         y=0.0 * axs.um,
         z=0.0 * axs.um,
     )
-    context = _context(electrode, stimulus)
     axons = [
         _passive_double_cable_axon(amp_nA=0.1, compartments=11),
         _passive_double_cable_axon(amp_nA=0.2, compartments=13),
     ]
     for axon in axons:
-        axon.add_extracellular_context(context=context)
+        axon.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
+                stimulus=stimulus,
+                sigma=0.3 * axs.S_per_m,
+            )
+        )
 
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,

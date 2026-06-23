@@ -309,6 +309,9 @@ def build_validation_population(
     for offset_um in offsets:
         instance = axs.AxonInstance(axon)
         if normalized_mode == "pseudo_double_single_myelinated_chain":
+            # Reference-only pseudo-double path: this benchmark validates a
+            # segment-scaled analytical context, not the public point-source
+            # workflow used by examples and normal benchmarks.
             local_electrode = axs.analytical.PointSourceElectrode(
                 x=electrode.x_um * axs.um,
                 y=(electrode.y_um - float(offset_um)) * axs.um,

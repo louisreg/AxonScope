@@ -18,8 +18,7 @@ import pytest
 from axonscope import AxonInstance, S_per_m, ms, um
 from axonscope.analysis import rasterize
 from axonscope.axons.myelinated import MRG
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
+from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from tests.nrv._helpers import axonscope_x_um
@@ -49,9 +48,11 @@ def _has_ap(diameter_um: float, amp_uA: float) -> bool:
         duration=PULSE_DURATION_MS * ms,
     )
     sim = AxonInstance(ax_copy)
-    sim.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stim)],
+    sim.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            ax_copy.layout.position_values(unit=um) * um,
+            stimulus=stim,
             sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,

@@ -22,8 +22,7 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
+from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from tests.nrv._helpers import (
@@ -111,9 +110,11 @@ def _attach_point_source_extra_as(
         duration=duration_ms * ms,
     )
     sim = AxonInstance(axon)
-    sim.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stim)],
+    sim.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=um) * um,
+            stimulus=stim,
             sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
@@ -248,9 +249,11 @@ def _make_mrg_extra_axon(d: float):
         interphase=0.04 * ms,
     )
     sim = AxonInstance(ax)
-    sim.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stim)],
+    sim.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            ax.layout.position_values(unit=um) * um,
+            stimulus=stim,
             sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,

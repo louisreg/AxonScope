@@ -15,12 +15,11 @@ if __package__ in (None, ""):
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope import degC, um
+from axonscope import S_per_m, degC, um
 from axonscope.axons import HodgkinHuxley
 from axonscope.axon_instance import AxonInstance
 from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
+from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.backends.jax.batch_kernels import SingleCableVStimBatchKernel
 from axonscope.backends.jax.kernels import SingleCableKernel
 from axonscope.backends.jax.runtime import SolverRuntime, prepare_solver_runtime
@@ -242,10 +241,12 @@ def _build_hh_extracellular(nx: int) -> AxonInstance:
         z=100.0 * um,
     )
     stim = Stimulus.pulse(start=0.3, amplitude=20e-6, duration=0.1, baseline=0.0)
-    simulation.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stim)],
-            sigma=0.3,
+    simulation.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=um) * um,
+            stimulus=stim,
+            sigma=0.3 * S_per_m,
         ),
         replace=True,
     )

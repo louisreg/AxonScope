@@ -10,10 +10,7 @@ from axonscope.axons import HodgkinHuxley
 from axonscope.analytical import PointSourceElectrode
 from axonscope.channel_models import RateTableConfig
 from axonscope.channel_models.passive import PassiveICM
-from axonscope.stimulation import (
-    AnalyticalExtracellularContext,
-    IntracellularContext,
-)
+from axonscope.stimulation import IntracellularContext
 from axonscope.backends.jax.runtime import (
     _membrane_runtime_cache_key,
     precompute_extracellular_potential_mV,
@@ -39,8 +36,23 @@ class _UnsupportedIntracellularContext(IntracellularContext):
     pass
 
 
-def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.2 * axs.S_per_m):
-    return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=sigma)
+def _attach_point_source_stimulation(
+    axon: AxonInstance,
+    electrode: PointSourceElectrode,
+    stimulus: Stimulus,
+    *,
+    sigma=0.2 * axs.S_per_m,
+    replace: bool = True,
+) -> None:
+    axon.add_extracellular_stimulation(
+        stimulation=axs.analytical.point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=stimulus,
+            sigma=sigma,
+        ),
+        replace=replace,
+    )
 
 
 def test_prepare_simulation_grid_ends_at_requested_duration():
@@ -101,15 +113,15 @@ def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_a
         )
     )
     electrode = PointSourceElectrode(x=150.0 * axs.um, z=100.0 * axs.um)
-    electrode.set_stimulus(
-        Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10.0 * axs.uA)
-    )
-    axon.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode],
-            sigma=0.3 * axs.S_per_m,
+    _attach_point_source_stimulation(
+        axon,
+        electrode,
+        Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=10.0 * axs.uA,
         ),
-        replace=True,
+        sigma=0.3 * axs.S_per_m,
     )
     solver_axon = build_solver_axon(axon)
 
@@ -124,8 +136,15 @@ def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_a
         precompute_extracellular=False,
         compile_stimulation=False,
     )
-    electrode.set_stimulus(
-        Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=20.0 * axs.uA)
+    _attach_point_source_stimulation(
+        axon,
+        electrode,
+        Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=20.0 * axs.uA,
+        ),
+        sigma=0.3 * axs.S_per_m,
     )
     second = prepare_solver_runtime(
         axon,
@@ -317,7 +336,7 @@ def test_compile_extracellular_contexts_returns_callable_collection():
         z=1000.0 * axs.um,
     )
     stim = Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10e-6)
-    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    _attach_point_source_stimulation(axon, electrode, stim)
 
     compiled = compile_extracellular_contexts(axon)
 
@@ -349,7 +368,7 @@ def test_precompute_extracellular_potential_matches_axon_method():
         z=1000.0 * axs.um,
     )
     stim = Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10e-6)
-    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    _attach_point_source_stimulation(axon, electrode, stim)
 
     t_ms = np.asarray([0.1, 0.25, 0.5], dtype=float)
     sampled = np.asarray(precompute_extracellular_potential_mV(axon, t_ms))
@@ -420,7 +439,7 @@ def test_prepare_solver_runtime_precomputes_extracellular_step_potentials():
         z=1000.0 * axs.um,
     )
     stim = Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10e-6)
-    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    _attach_point_source_stimulation(axon, electrode, stim)
 
     runtime = prepare_solver_runtime(
         axon,

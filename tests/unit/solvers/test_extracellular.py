@@ -70,9 +70,28 @@ def _point_source_m(x_m: float, y_m: float, z_m: float) -> PointSourceElectrode:
     return PointSourceElectrode(x=x_m * axs.m, y=y_m * axs.m, z=z_m * axs.m)
 
 
+def _attach_point_source_stimulation(
+    axon: AxonInstance,
+    electrode: PointSourceElectrode,
+    stimulus: Stimulus,
+    *,
+    sigma=0.3 * axs.S_per_m,
+    replace: bool = True,
+) -> None:
+    axon.add_extracellular_stimulation(
+        stimulation=axs.analytical.point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=stimulus,
+            sigma=sigma,
+        ),
+        replace=replace,
+    )
+
+
 def test_add_extracellular_context_requires_context():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
-    electrode = _point_source_m(200e-6, 100e-6, 100e-6)
+    electrode = _UniformFieldElectrode(10.0)
     stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
 
     ax.add_extracellular_context(context=_context(electrode, stim))
@@ -84,10 +103,15 @@ def test_add_extracellular_context_requires_context():
 
 def test_add_extracellular_context_accepts_pre_attached_electrode():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
-    electrode = _point_source_m(200e-6, 100e-6, 100e-6)
+    electrode = _UniformFieldElectrode(10.0)
     stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
 
-    ax.add_extracellular_context(context=_context(electrode, stim))
+    ax.add_extracellular_context(
+        context=AnalyticalExtracellularContext(
+            electrodes=[electrode.with_stimulus(stim)],
+            sigma=0.3 * axs.S_per_m,
+        )
+    )
 
     assert ax.use_extracellular is True
     vext = np.asarray(ax.extracellular_potential_mV(0.31))
@@ -96,25 +120,17 @@ def test_add_extracellular_context_accepts_pre_attached_electrode():
 
 def test_extracellular_context_accumulates_multiple_electrodes():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
-    x0_m = 200e-6
-    y0_m = 100e-6
-    z0_m = 100e-6
-    sigma_S_m = 0.3
-    sigma = sigma_S_m * axs.S_per_m
     t_probe = 0.31
 
-    e1 = _point_source_m(x0_m, y0_m, z0_m)
+    e1 = _UniformFieldElectrode(2.0)
     s1 = Stimulus.constant(-10e-6, start=0.0 * axs.ms)
-    e2 = _point_source_m(x0_m, y0_m, z0_m)
+    e2 = _UniformFieldElectrode(3.0)
     s2 = Stimulus.constant(-15e-6, start=0.0 * axs.ms)
 
-    x_m = np.asarray(ax.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
-    r = np.sqrt((x_m - x0_m) ** 2 + y0_m**2 + z0_m**2)
-    fp = 1.0 / (4.0 * np.pi * sigma_S_m * np.maximum(r, 1e-12))
     expected_mV = (
-        s1.evaluate([t_probe])[0]
-        + s2.evaluate([t_probe])[0]
-    ) * fp * 1e3
+        s1.evaluate([t_probe])[0] * 2.0
+        + s2.evaluate([t_probe])[0] * 3.0
+    ) * 1e3
 
     ax.add_extracellular_context(
         context=AnalyticalExtracellularContext(
@@ -122,7 +138,7 @@ def test_extracellular_context_accumulates_multiple_electrodes():
                 e1.with_stimulus(s1),
                 e2.with_stimulus(s2),
             ],
-            sigma=sigma,
+            sigma=0.3 * axs.S_per_m,
         ),
         replace=True,
     )
@@ -139,30 +155,42 @@ def test_point_source_vstim_footprint_cache_keeps_stimulus_amplitude_live():
         x=50.0 * axs.um,
         z=100.0 * axs.um,
     )
-    electrode.set_stimulus(
+    first_stimulus = (
         Stimulus.pulse(start=0.0 * axs.ms, duration=0.1 * axs.ms, amplitude=10.0 * axs.uA)
     )
-    context = AnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
+    first_context = axs.ExtracellularStimulationContext(
+        stimulation=axs.analytical.point_source_stimulation(
+            electrode,
+            ax.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=first_stimulus,
+            sigma=0.3 * axs.S_per_m,
+        )
     )
 
     first = np.asarray(
         build_vstim_midpoint_batch(
             ax,
-            [(context,), (context,)],
+            [(first_context,), (first_context,)],
             tsim_ms=0.1,
             dt_ms=0.05,
             dtype_local=np.float32,
         )
     )
-    electrode.set_stimulus(
+    second_stimulus = (
         Stimulus.pulse(start=0.0 * axs.ms, duration=0.1 * axs.ms, amplitude=20.0 * axs.uA)
+    )
+    second_context = axs.ExtracellularStimulationContext(
+        stimulation=axs.analytical.point_source_stimulation(
+            electrode,
+            ax.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=second_stimulus,
+            sigma=0.3 * axs.S_per_m,
+        )
     )
     second = np.asarray(
         build_vstim_midpoint_batch(
             ax,
-            [(context,), (context,)],
+            [(second_context,), (second_context,)],
             tsim_ms=0.1,
             dt_ms=0.05,
             dtype_local=np.float32,
@@ -174,8 +202,8 @@ def test_point_source_vstim_footprint_cache_keeps_stimulus_amplitude_live():
 
 def test_add_extracellular_context_rejects_second_context_without_replace():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
-    e1 = _point_source_m(200e-6, 100e-6, 100e-6)
-    e2 = _point_source_m(200e-6, 150e-6, 100e-6)
+    e1 = _UniformFieldElectrode(2.0)
+    e2 = _UniformFieldElectrode(3.0)
     stimulus = Stimulus.constant(-10e-6, start=0.0 * axs.ms)
 
     ax.add_extracellular_context(context=_context(e1, stimulus))
@@ -192,9 +220,11 @@ def test_myelinated_vext_matches_analytic_point_source():
     amp_A = -80e-6
 
     electrode = _point_source_m(x0_um * 1e-6, 100e-6, 0.0)
-    ax.add_extracellular_context(
-        context=_context(electrode, Stimulus.constant(amp_A, start=0.0 * axs.ms), sigma=sigma),
-        replace=True,
+    _attach_point_source_stimulation(
+        ax,
+        electrode,
+        Stimulus.constant(amp_A, start=0.0 * axs.ms),
+        sigma=sigma,
     )
 
     x_m = np.asarray(ax.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
@@ -219,13 +249,23 @@ def test_myelinated_extracellular_stimulus_has_nonzero_effect():
         anodic_amplitude=20e-6,
         interphase=0.04 * axs.ms,
     )
-    ax_on.add_extracellular_context(context=_context(electrode, stim_on, sigma=0.2 * axs.S_per_m), replace=True)
+    _attach_point_source_stimulation(
+        ax_on,
+        electrode,
+        stim_on,
+        sigma=0.2 * axs.S_per_m,
+    )
 
     ax_off = AxonInstance(MRG(diameter=10.0 * axs.um, nodes=7))
     x0_off_um = float(ax_off.length / 2.0)
     electrode_off = _point_source_m(x0_off_um * 1e-6, 100e-6, 0.0)
     stim_off = Stimulus.constant(0.0, start=0.0 * axs.ms)
-    ax_off.add_extracellular_context(context=_context(electrode_off, stim_off, sigma=0.2 * axs.S_per_m), replace=True)
+    _attach_point_source_stimulation(
+        ax_off,
+        electrode_off,
+        stim_off,
+        sigma=0.2 * axs.S_per_m,
+    )
 
     solver = CrankNicholson()
     vm_on = np.asarray(solver.solve(ax_on, tsim=tsim, dt=dt).Vm)
@@ -278,7 +318,7 @@ def test_public_vstim_default_is_close_to_double_cable_for_unmyelinated_nrv_defa
         ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
         electrode = _point_source_m(200e-6, 100e-6, 100e-6)
         stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
-        ax.add_extracellular_context(context=_context(electrode, stim), replace=True)
+        _attach_point_source_stimulation(ax, electrode, stim)
         ax.add_current_clamp(position=200.0 * axs.um,
             current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
         )
@@ -401,7 +441,7 @@ def test_all_solvers_run_unmyelinated_with_extracellular_and_vext(solver):
 
     electrode = _point_source_m(200e-6, 100e-6, 100e-6)
     stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
-    ax.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    _attach_point_source_stimulation(ax, electrode, stim)
 
     ax.add_current_clamp(position=200.0 * axs.um,
         current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),

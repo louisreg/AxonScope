@@ -10,7 +10,7 @@ minimum references needed to act. Long benchmark narratives belong in
 
 ## Snapshot
 
-Updated on 2026-06-22.
+Updated on 2026-06-23.
 
 The solver optimization campaign is closed. The active work is now a
 stabilization pass:
@@ -77,6 +77,15 @@ Work should start here unless the user asks otherwise.
   as a catch-all for backend internals.
 - [x] Add guardrails for forbidden dependencies, especially high-level modules
   importing solver-specific lowering.
+- [ ] Decide the final home for JAX-dependent stimulation compilation:
+  `stimulation.runtime` currently imports `jax.numpy`; either move it under
+  `backends/jax` or explicitly document it as an internal runtime boundary.
+- [ ] Hide direct JAX backend adapters from the public simulation entry layer:
+  `simulation.py` still imports JAX execution-policy/recording adapters at
+  module import time.
+- [ ] Move host-side batch row helpers out of `dispatcher/runtime_batches.py`
+  into the preparation/backend-input boundary, or document the current module
+  as internal preparation infrastructure.
 
 ### 3. Recording And VmRaster
 
@@ -96,6 +105,9 @@ Work should start here unless the user asks otherwise.
   extracellular footprints, drives, stimulation, populations.
 - [x] Preserve the static-footprint/dynamic-stimulus split internally.
 - [x] Keep factorized/dynamic Vext reuse gated by dense-equivalence tests.
+- [x] Audit low-level point-source context usage in tests and benchmarks; migrate
+  active paths to typed stimulation and mark the remaining pseudo-double case as
+  reference-only validation, not an alternate user route.
 
 ### 5. Runtime Policy
 
@@ -208,6 +220,11 @@ Work should start here unless the user asks otherwise.
   analyses.
 - [x] Update dispatch docs so advanced snippets match the actual backend/input
   lowering modules.
+- [x] Refresh stale factorized-Vext wording in `GUIDELINES.md`,
+  `docs/solver_organization.md`, and backend docstrings: the code now uses
+  generic `factorized_footprint` lowering for sampled footprints.
+- [x] Remove stale "localize context" language from `GUIDELINES.md`; the public
+  path is analytical helper -> sampled footprint/drive/stimulation.
 - [ ] Keep proposal docs clearly labeled when they show future APIs.
 - [ ] Prepare proper Sphinx Documentation
 - [ ] Do/update all docstrings 

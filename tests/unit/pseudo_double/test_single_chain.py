@@ -67,7 +67,6 @@ def test_segment_scaled_context_multiplies_footprint():
         z=100.0 * axs.um,
         stimulus=axs.Stimulus.constant(1.0 * axs.uA),
     )
-    base = axs.AnalyticalExtracellularContext(electrodes=[electrode], sigma=0.3 * axs.S_per_m)
     scaled = SegmentScaledAnalyticalExtracellularContext(
         electrodes=[electrode],
         sigma=0.3 * axs.S_per_m,
@@ -75,8 +74,9 @@ def test_segment_scaled_context_multiplies_footprint():
         alpha=(1.0, 0.5, 0.25),
     )
     x_m = np.asarray([0.0, 10e-6, 20e-6])
+    base = electrode.footprint_for_axon(x_m, sigma_S_m=0.3)
 
     np.testing.assert_allclose(
         scaled.footprint_for_electrode(electrode, x_m),
-        base.footprint_for_electrode(electrode, x_m) * np.asarray([1.0, 0.5, 0.25]),
+        base * np.asarray([1.0, 0.5, 0.25]),
     )

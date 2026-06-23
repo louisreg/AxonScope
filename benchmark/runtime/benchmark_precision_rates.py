@@ -333,10 +333,9 @@ def _solve_case_once(
 
 
 def _build_case(case_name: str):
-    from axonscope import AxonInstance, degC, um
+    from axonscope import AxonInstance, S_per_m, degC, um
     from axonscope.axons import HodgkinHuxley, MRG, Schild97, Tigerholm
-    from axonscope.analytical import PointSourceElectrode
-    from axonscope.stimulation import AnalyticalExtracellularContext
+    from axonscope.analytical import PointSourceElectrode, point_source_stimulation
     from axonscope.stimulation import Stimulus
 
     if case_name == "hh_intracellular":
@@ -365,10 +364,12 @@ def _build_case(case_name: str):
             anodic_amplitude=5e-6,
             interphase=0.04,
         )
-        simulation.add_extracellular_context(
-            context=AnalyticalExtracellularContext(
-                electrodes=[electrode.with_stimulus(stimulus)],
-                sigma=0.3,
+        simulation.add_extracellular_stimulation(
+            stimulation=point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=um) * um,
+                stimulus=stimulus,
+                sigma=0.3 * S_per_m,
             ),
             replace=True,
         )
@@ -392,10 +393,12 @@ def _build_case(case_name: str):
             anodic_amplitude=20e-6,
             interphase=0.02,
         )
-        simulation.add_extracellular_context(
-            context=AnalyticalExtracellularContext(
-                electrodes=[electrode.with_stimulus(stimulus)],
-                sigma=0.2,
+        simulation.add_extracellular_stimulation(
+            stimulation=point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=um) * um,
+                stimulus=stimulus,
+                sigma=0.2 * S_per_m,
             ),
             replace=True,
         )

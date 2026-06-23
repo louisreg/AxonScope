@@ -78,7 +78,12 @@ class PseudoDoubleSingleChainConfig:
 
 @dataclass(frozen=True, kw_only=True)
 class SegmentScaledAnalyticalExtracellularContext(axs.AnalyticalExtracellularContext):
-    """Analytical context whose footprint is multiplied by alpha(x)."""
+    """Reference-only context whose analytical footprint is scaled by alpha(x).
+
+    This belongs to the pseudo-double validation benchmark. It is intentionally
+    not the public point-source route; user-facing point-source workflows should
+    sample `axs.analytical.point_source_stimulation(...)` instead.
+    """
 
     positions_um: Sequence[float]
     alpha: Sequence[float]

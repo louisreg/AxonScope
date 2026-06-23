@@ -3,6 +3,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.stimulation import (
+    AnalyticalElectrode,
     AnalyticalExtracellularContext,
     ExtracellularContext,
     ExtracellularDrive,
@@ -19,11 +20,21 @@ from axonscope.stimulation.runtime import (
 )
 
 
-def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3 * axs.S_per_m):
+def _context(electrode: AnalyticalElectrode, stimulus: Stimulus, *, sigma=0.3 * axs.S_per_m):
     return AnalyticalExtracellularContext(
         electrodes=[electrode.with_stimulus(stimulus)],
         sigma=sigma,
     )
+
+
+class _RampAnalyticalElectrode(AnalyticalElectrode):
+    def __init__(self, *, offset: float = 2.0, slope_per_m: float = 1000.0) -> None:
+        self.offset = float(offset)
+        self.slope_per_m = float(slope_per_m)
+
+    def footprint(self, x_positions_m, *, sigma_S_m):
+        x = np.asarray(x_positions_m, dtype=float)
+        return self.offset + self.slope_per_m * x
 
 
 class _ConstantFootprintContext(ExtracellularContext):
@@ -41,12 +52,8 @@ class _ConstantFootprintContext(ExtracellularContext):
 def test_point_source_footprint_matches_analytical_formula():
     x = np.array([0.0, 1.0e-3, 2.0e-3])
     electrode = PointSourceElectrode(x=1.0e-3 * axs.m, y=0.0 * axs.m, z=1.0e-3 * axs.m)
-    ctx = AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(Stimulus.constant(0.0))],
-        sigma=0.3 * axs.S_per_m,
-    )
 
-    fp = ctx.footprint_for_electrode(electrode, x)
+    fp = electrode.footprint_for_axon(x, sigma_S_m=0.3)
 
     r = np.sqrt((x - 1.0e-3) ** 2 + (1.0e-3) ** 2)
     expected = 1.0 / (4.0 * np.pi * 0.3 * r)
@@ -57,12 +64,11 @@ def test_point_source_position_units_normalize_to_common_geometry():
     x_m = np.array([0.0, 1.0e-3, 2.0e-3])
     by_um = PointSourceElectrode(x=1000.0 * axs.um, z=1000.0 * axs.um)
     by_m = PointSourceElectrode(x=1.0e-3 * axs.m, z=1.0e-3 * axs.m)
-    ctx = AnalyticalExtracellularContext(
-        electrodes=[by_um.with_stimulus(Stimulus.constant(0.0))],
-        sigma=0.3 * axs.S_per_m,
-    )
 
-    assert np.allclose(ctx.footprint_for_electrode(by_um, x_m), ctx.footprint_for_electrode(by_m, x_m))
+    assert np.allclose(
+        by_um.footprint_for_axon(x_m, sigma_S_m=0.3),
+        by_m.footprint_for_axon(x_m, sigma_S_m=0.3),
+    )
 
 
 def test_point_source_rejects_plain_coordinate_values():
@@ -77,12 +83,8 @@ def test_point_source_rejects_plain_coordinate_values():
 def test_point_source_footprint_is_symmetric_around_electrode():
     x = np.array([-1.0e-3, 0.0, 1.0e-3])
     electrode = PointSourceElectrode(x=0.0 * axs.m, z=1.0e-3 * axs.m)
-    ctx = AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(Stimulus.constant(0.0))],
-        sigma=0.3 * axs.S_per_m,
-    )
 
-    fp = ctx.footprint_for_electrode(electrode, x)
+    fp = electrode.footprint_for_axon(x, sigma_S_m=0.3)
 
     assert np.isclose(fp[0], fp[2])
     assert fp[1] > fp[0]
@@ -96,12 +98,8 @@ def test_point_source_min_distance_avoids_singularity():
         z=0.0 * axs.m,
         min_distance=1.0e-6 * axs.m,
     )
-    ctx = AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(Stimulus.constant(0.0))],
-        sigma=0.3 * axs.S_per_m,
-    )
 
-    fp = ctx.footprint_for_electrode(electrode, x)
+    fp = electrode.footprint_for_axon(x, sigma_S_m=0.3)
 
     expected = 1.0 / (4.0 * np.pi * 0.3 * 1.0e-6)
     assert np.isfinite(fp[0])
@@ -135,14 +133,14 @@ def test_set_stimulus_updates_electrode_in_place():
 
 
 def test_analytical_context_normalizes_sigma_units():
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um, stimulus=Stimulus.constant(0.0))
+    electrode = _RampAnalyticalElectrode().with_stimulus(Stimulus.constant(0.0))
     ctx = AnalyticalExtracellularContext(electrodes=[electrode], sigma=0.3 * axs.S_per_m)
 
     assert np.isclose(ctx.sigma_S_m, 0.3)
 
 
 def test_analytical_context_rejects_plain_sigma():
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um, stimulus=Stimulus.constant(0.0))
+    electrode = _RampAnalyticalElectrode().with_stimulus(Stimulus.constant(0.0))
 
     with pytest.raises(TypeError, match="sigma must include units compatible with conductivity"):
         AnalyticalExtracellularContext(electrodes=[electrode], sigma=0.3)
@@ -151,7 +149,7 @@ def test_analytical_context_rejects_plain_sigma():
 def test_extracellular_context_evaluate_shape():
     x = np.linspace(0.0, 1.0e-3, 5)
     t = np.linspace(0.0, 3.0, 7)
-    electrode = PointSourceElectrode(x=0.5e-3 * axs.m, z=1.0e-3 * axs.m)
+    electrode = _RampAnalyticalElectrode()
     stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0e-6, duration=1.0 * axs.ms)
     extra = _context(electrode, stim)
 
@@ -163,7 +161,7 @@ def test_extracellular_context_evaluate_shape():
 def test_extracellular_context_evaluate_values():
     x = np.array([0.0, 1.0e-3])
     t = np.array([0.5, 1.5, 2.5])
-    electrode = PointSourceElectrode(x=0.0 * axs.m, z=1.0e-3 * axs.m)
+    electrode = _RampAnalyticalElectrode()
     stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0e-6, duration=1.0 * axs.ms)
     extra = _context(electrode, stim)
 
@@ -177,7 +175,7 @@ def test_extracellular_context_evaluate_values():
 
 def test_context_evaluate_uses_attached_stimulus_with_units():
     x = np.array([0.0, 1000.0]) * axs.um
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um)
+    electrode = _RampAnalyticalElectrode()
     stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0 * axs.uA, duration=1.0 * axs.ms)
     extra = _context(electrode, stim, sigma=0.3 * axs.S_per_m)
 
@@ -189,7 +187,7 @@ def test_context_evaluate_uses_attached_stimulus_with_units():
 
 def test_footprint_and_activation_helpers_convert_units():
     x = np.linspace(0.0, 1000.0, 5) * axs.um
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um)
+    electrode = _RampAnalyticalElectrode()
     extra = AnalyticalExtracellularContext(
         electrodes=[electrode.with_stimulus(Stimulus.constant(0.0))],
         sigma=0.3 * axs.S_per_m,
@@ -216,7 +214,7 @@ def test_footprint_and_activation_helpers_convert_units():
 
 def test_analytical_context_builds_static_extracellular_footprint():
     positions = np.linspace(0.0, 1000.0, 5) * axs.um
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um)
+    electrode = _RampAnalyticalElectrode()
     context = AnalyticalExtracellularContext(
         electrodes=[electrode.with_stimulus(Stimulus.constant(0.0 * axs.uA))],
         sigma=0.3 * axs.S_per_m,
@@ -241,19 +239,16 @@ def test_analytical_context_builds_static_extracellular_footprint():
 def test_point_source_helper_matches_generic_analytical_footprint():
     positions = np.linspace(0.0, 1000.0, 5) * axs.um
     electrode = PointSourceElectrode(x=500.0 * axs.um, z=1000.0 * axs.um)
-    context = AnalyticalExtracellularContext(
-        electrodes=[electrode.with_stimulus(Stimulus.constant(0.0 * axs.uA))],
-        sigma=0.3 * axs.S_per_m,
-    )
 
     direct = axs.analytical.point_source_footprint(
         electrode,
         positions,
         sigma=0.3 * axs.S_per_m,
     )
-    through_context = context.build_footprint(electrode, positions)
+    x_m = np.asarray(positions.to(axs.m).magnitude, dtype=float)
+    expected = electrode.footprint_for_axon(x_m, sigma_S_m=0.3)
 
-    assert np.allclose(direct.values_for_axon(), through_context.values_for_axon())
+    assert np.allclose(direct.values_for_axon(), expected)
 
 
 def test_point_source_stimulation_attaches_as_typed_context():
@@ -377,7 +372,7 @@ def test_context_plot_helpers_smoke():
 
     x = np.linspace(0.0, 1000.0, 25) * axs.um
     t = np.linspace(0.0, 3.0, 50) * axs.ms
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um)
+    electrode = _RampAnalyticalElectrode()
     extra = _context(
         electrode,
         Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0 * axs.uA, duration=1.0 * axs.ms),
@@ -398,7 +393,7 @@ def test_context_plot_helpers_smoke():
 
 def test_compile_returns_jax_ready_object():
     x = np.linspace(0.0, 1.0e-3, 5)
-    electrode = PointSourceElectrode(x=0.5e-3 * axs.m, z=1.0e-3 * axs.m)
+    electrode = _RampAnalyticalElectrode()
     stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=1.0e-6, duration=1.0 * axs.ms)
     extra = _context(electrode, stim)
 
@@ -410,7 +405,7 @@ def test_compile_returns_jax_ready_object():
 
 def test_compiled_extracellular_stimulus_matches_numpy():
     x = np.linspace(0.0, 1.0e-3, 5)
-    electrode = PointSourceElectrode(x=0.5e-3 * axs.m, z=1.0e-3 * axs.m)
+    electrode = _RampAnalyticalElectrode()
     stim = Stimulus.pulse(start=1.0 * axs.ms, amplitude=2.0e-6, duration=1.0 * axs.ms)
     extra = _context(electrode, stim)
     compiled = compile_extracellular_context(extra, x)
@@ -423,9 +418,7 @@ def test_compiled_extracellular_stimulus_matches_numpy():
 
 def test_extracellular_runtime_accepts_context_contract_without_analytical_subclass():
     x = np.linspace(0.0, 1.0e-3, 5)
-    electrode = PointSourceElectrode(x=0.0 * axs.m, z=1.0e-3 * axs.m).with_stimulus(
-        Stimulus.constant(2.0e-6)
-    )
+    electrode = _RampAnalyticalElectrode().with_stimulus(Stimulus.constant(2.0e-6))
     extra = _ConstantFootprintContext(electrodes=[electrode])
 
     expected = extra.evaluate(x, np.array([0.0]), position_unit="meter")[0]
@@ -437,20 +430,30 @@ def test_extracellular_runtime_accepts_context_contract_without_analytical_subcl
 
 
 def test_point_source_units_scale_linearly_with_current():
-    x = np.array([1.0e-3])
+    x = np.array([1.0e-3]) * axs.m
     electrode = PointSourceElectrode(x=0.0 * axs.m, z=1.0e-3 * axs.m)
 
-    extra_1 = _context(electrode, Stimulus.constant(1.0e-6))
-    extra_2 = _context(electrode, Stimulus.constant(2.0e-6))
+    extra_1 = axs.analytical.point_source_stimulation(
+        electrode,
+        x,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=Stimulus.constant(1.0e-6),
+    )
+    extra_2 = axs.analytical.point_source_stimulation(
+        electrode,
+        x,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=Stimulus.constant(2.0e-6),
+    )
 
-    V1 = extra_1.evaluate(x, np.array([0.0]), position_unit="meter")[0, 0]
-    V2 = extra_2.evaluate(x, np.array([0.0]), position_unit="meter")[0, 0]
+    V1 = extra_1.evaluate(np.array([0.0]) * axs.ms)[0, 0]
+    V2 = extra_2.evaluate(np.array([0.0]) * axs.ms)[0, 0]
 
     assert np.isclose(V2, 2.0 * V1)
 
 
 def test_nrv_extracellular_context_is_declared_but_not_implemented():
-    electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um, stimulus=Stimulus.constant(0.0))
+    electrode = _RampAnalyticalElectrode().with_stimulus(Stimulus.constant(0.0))
     ctx = NRVExtracellularContext(
         electrodes=[electrode],
         medium="endoneurium_bhadra",

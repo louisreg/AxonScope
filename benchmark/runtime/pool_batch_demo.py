@@ -22,7 +22,7 @@ from typing import Callable, Literal, Sequence
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope import degC, um
+from axonscope import S_per_m, degC, um
 from axonscope.axons import HodgkinHuxley
 from axonscope.axon_instance import AxonInstance
 from axonscope.backends.jax.input_batches import (
@@ -33,8 +33,7 @@ from axonscope.backends.jax.input_batches import (
 )
 from axonscope.benchmarking import jax_profile_trace, trace_annotation
 from axonscope.channel_models import enable_rate_tables
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
+from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
@@ -45,7 +44,11 @@ from axonscope.solvers import (
     BatchRecording,
 )
 from axonscope.backends.jax.runtime import prepare_solver_runtime
-from axonscope.stimulation import ExtracellularContext, Stimulus
+from axonscope.stimulation import (
+    ExtracellularContext,
+    ExtracellularStimulationContext,
+    Stimulus,
+)
 
 
 Mode = Literal["single", "double"]
@@ -254,14 +257,15 @@ def build_pool_inputs(
             y=float(radial) * um,
             z=0.0 * um,
         )
-        context = AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stimulus)],
-            sigma=0.3,
+        stimulation = point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=um) * um,
+            stimulus=stimulus,
+            sigma=0.3 * S_per_m,
         )
+        context = ExtracellularStimulationContext(stimulation=stimulation)
         context_batch.append((context,))
-        footprint_rows.append(
-            context.footprint_for_electrode(context.electrodes[0], x_positions_m[axon_index])
-        )
+        footprint_rows.append(stimulation.drives[0].footprint.values_for_axon())
 
     return BatchInputs(
         axon=axon,

@@ -94,20 +94,26 @@ def test_public_simulation_owns_one_extracellular_context():
     electrode = axs.analytical.PointSourceElectrode(
         x=50.0 * axs.um,
         z=1000.0 * axs.um,
+    )
+    stimulation = axs.analytical.point_source_stimulation(
+        electrode,
+        axon.layout.position_values(unit=axs.um) * axs.um,
+        sigma=0.3 * axs.S_per_m,
         stimulus=axs.Stimulus.constant(0.0 * axs.uA),
     )
-    context = axs.AnalyticalExtracellularContext(electrodes=[electrode])
 
-    sim.add_extracellular_context(context=context)
+    sim.add_extracellular_stimulation(stimulation=stimulation)
 
-    assert sim.extracellular_context is context
-    assert sim.extracellular_contexts == (context,)
+    assert sim.extracellular_stimulation is stimulation
+    assert isinstance(sim.extracellular_context, axs.ExtracellularStimulationContext)
+    assert sim.extracellular_contexts == (sim.extracellular_context,)
     assert sim.use_extracellular
     assert not hasattr(sim, "clear_extracellular_contexts")
 
     sim.clear_extracellular_context()
 
     assert sim.extracellular_context is None
+    assert sim.extracellular_stimulation is None
     assert sim.extracellular_contexts == ()
     assert not sim.use_extracellular
 

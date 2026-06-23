@@ -24,7 +24,6 @@ from axonscope.dispatcher.runtime_batches import (
     scale_extracellular_contexts,
 )
 from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
 from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
@@ -51,10 +50,6 @@ from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
-def _context(electrode: PointSourceElectrode, stimulus: Stimulus, *, sigma=0.3 * axs.S_per_m):
-    return AnalyticalExtracellularContext(electrodes=[electrode.with_stimulus(stimulus)], sigma=sigma)
-
-
 def _hh_extracellular_axon(*, current_clamp: bool = True) -> AxonInstance:
     axon = AxonInstance(
         HodgkinHuxley(
@@ -75,7 +70,15 @@ def _hh_extracellular_axon(*, current_clamp: bool = True) -> AxonInstance:
         z=100e-6 * axs.m,
     )
     stim = Stimulus.pulse(start=0.3 * axs.ms, amplitude=20e-6, duration=0.1 * axs.ms, baseline=0.0)
-    axon.add_extracellular_context(context=_context(electrode, stim), replace=True)
+    axon.add_extracellular_stimulation(
+        stimulation=axs.analytical.point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=axs.um) * axs.um,
+            stimulus=stim,
+            sigma=0.3 * axs.S_per_m,
+        ),
+        replace=True,
+    )
     return axon
 
 

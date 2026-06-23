@@ -13,10 +13,9 @@ if __package__ in (None, ""):
 
 import numpy as np
 
-from axonscope import AxonInstance, um
+from axonscope import AxonInstance, S_per_m, um
 from axonscope.axons import MRG
-from axonscope.analytical import PointSourceElectrode
-from axonscope.stimulation import AnalyticalExtracellularContext
+from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.solvers import CrankNicholson
 from axonscope.stimulation import Stimulus
 
@@ -172,10 +171,12 @@ def _build_axonscope_case(
         interphase=interphase_ms,
     )
     simulation = AxonInstance(axon)
-    simulation.add_extracellular_context(
-        context=AnalyticalExtracellularContext(
-            electrodes=[electrode.with_stimulus(stim)],
-            sigma=SIGMA_S_M,
+    simulation.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            axon.layout.position_values(unit=um) * um,
+            stimulus=stim,
+            sigma=SIGMA_S_M * S_per_m,
         ),
         replace=True,
     )

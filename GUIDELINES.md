@@ -1,6 +1,6 @@
 # AxonScope Architecture Guidelines
 
-Snapshot: 2026-06-21.
+Snapshot: 2026-06-23.
 
 This is the consolidated architecture reference for AxonScope. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
@@ -30,8 +30,8 @@ Current focus:
 - preserve the public/runtime/backend boundary;
 - flatten public examples against the public API;
 - make runtime/device/precision policy executable;
-- make planning, batch/dispatch, preparation, and later lowering/execution
-  inspectable;
+- make planning, batch/dispatch, preparation, lowering, execution, and result
+  assembly inspectable;
 - keep benchmark/profiling experiments out of public tutorials.
 
 ## 1.1 Phase Snapshot
@@ -78,11 +78,11 @@ Current focus:
   precision. Precision participates in membrane/runtime cache identity; runtime
   execution still rejects implicit casting instead of rebuilding models.
 - `inspect_simulation(...)` covers host-side planning, dispatch/batch,
-  preparation, input/observer/recording lowering, kernel routing, and result
-  assembly. Richer memory/probe/result plots remain to add.
-- Factorized Vext is active only on a narrow internal point-source
-  single-cable VmRaster path. Keep it internal until double-cable equivalence
-  tests and benchmark evidence exist.
+  preparation, input/observer/recording lowering, kernel routing, result
+  assembly, and detailed plots for padding, memory, probes, and assembly.
+- Factorized Vext is active for compatible static-footprint rows and remains an
+  internal lowering choice. Keep it behind dense-equivalence tests and
+  benchmark evidence.
 
 ---
 
@@ -165,10 +165,10 @@ x, y, z, orientation, trajectory, anatomical frame
 ```
 
 `AxonInstance` does not carry world offsets. Analytical examples that need a
-point-source in an external frame must first localize the context or build a
-sampled footprint for that axon, then attach the resulting local stimulation to
-the instance. World geometry must not become a core solver dependency or
-required public property.
+point-source in an external frame must sample the helper into an intrinsic
+footprint/drive/stimulation for that axon, then attach the resulting sampled
+stimulation to the instance. World geometry must not become a core solver
+dependency or required public property.
 
 ## 2.4 One Concept, One Public Name
 

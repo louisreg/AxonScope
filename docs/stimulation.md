@@ -24,8 +24,6 @@ from axonscope.stimulation import (
     ExtracellularStimulation,
     ExtracellularStimulationContext,
     ExtracellularPotential,
-    AnalyticalExtracellularContext,
-    NRVExtracellularContext,
     Electrode,
 )
 
@@ -81,8 +79,9 @@ unit.
 
 ## Simulation Protocol
 
-`Axon` objects are descriptive: geometry, layout, formulation, and membrane
-model. Positions and stimulation live on `AxonInstance`.
+`Axon` objects are descriptive: intrinsic geometry, layout, formulation, and
+membrane model. Simulation-local stimulation lives on `AxonInstance`; world
+placement does not.
 
 ```python
 axon = axs.axons.HodgkinHuxley(
@@ -229,9 +228,10 @@ updated = sim.extracellular_stimulation.replace_drive(
 sim.add_extracellular_stimulation(stimulation=updated, replace=True)
 ```
 
-`AnalyticalExtracellularContext` remains available as a low-level context
-contract for tests, benchmarks, and custom analytical electrodes. It is not the
-recommended point-source quick-start path.
+`AnalyticalExtracellularContext` remains available as a low-level adapter for
+reference validation and custom analytical electrodes. Do not use it as the
+point-source quick-start path; sample point sources into typed footprints,
+drives, or stimulation first.
 
 `NRVExtracellularContext` reserves that future FEM path:
 

@@ -135,10 +135,10 @@ _prepare_batch_runtime(...)
 
 Sparse intracellular lowering is used for compatible current-clamp cohorts.
 Dense intracellular lowering remains the general path. When an observer-only
-single-cable batch has compatible point-source extracellular stimulation, the
-factorized path keeps the field as current samples plus footprints and avoids a
-dense `Vstim[B, Nt, Nx]` materialization. Otherwise the route uses dense
-midpoint `Vstim`.
+single-cable batch has compatible static-footprint extracellular stimulation,
+the factorized footprint path keeps the field as current samples plus
+footprints and avoids a dense `Vstim[B, Nt, Nx]` materialization. Otherwise the
+route uses dense midpoint `Vstim`.
 
 ### Double-Cable Batch Route
 
@@ -164,10 +164,10 @@ and `pcr_adaptive`, plus public `auto` resolution. `auto` is resolved before
 kernel dispatch from the effective execution device. `pcr_adaptive` selects
 `pcr_soa` for batches up to `B=4096`, then matrix-layout `pcr` above that.
 
-Double-cable observer-only batches may use factorized point-source
-extracellular lowering when the inputs are compatible. Dense midpoint and
-initial-previous `Vstim` arrays remain the fallback for full recording or
-unsupported factorized inputs.
+Double-cable observer-only batches may use factorized footprint extracellular
+lowering when the inputs are compatible. Dense midpoint and initial-previous
+`Vstim` arrays remain the fallback for full recording or unsupported
+factorized inputs.
 
 ### VmRaster, Dense/Factorized Vext, And Results
 
