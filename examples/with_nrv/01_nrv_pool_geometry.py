@@ -20,9 +20,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import axonscope as axs
-
-
-FiberKind = Literal["hh", "rattay", "mrg"]
+from axonscope.integrations.nrv import (
+    FiberKind,
+    fiber_kind_from_nrv,
+    nrv_node_shift_to_x_shift_um,
+)
 
 
 @dataclass(frozen=True)
@@ -34,7 +36,7 @@ class FiberRow:
     y_um: float
     z_um: float
     compartments: int
-    x_offset_um: float = 0.0
+    x_shift_um: float = 0.0
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -164,6 +166,7 @@ def build_pool_rows_from_nrv(
         nrv_type = int(float(get("types", index % 2)))
         diameter_um = float(get("diameters", 1.0 if nrv_type == 0 else 6.0))
         kind = fiber_kind_from_nrv(nrv_type, include_mrg=include_mrg)
+        node_shift = float(get("node_shift", 0.0))
         rows.append(
             FiberRow(
                 kind=kind,
@@ -171,7 +174,11 @@ def build_pool_rows_from_nrv(
                 y_um=float(get("y", 0.0)),
                 z_um=float(get("z", 0.0)),
                 compartments=compartments_for(diameter_um, kind),
-                x_offset_um=float(get("node_shift", 0.0)),
+                x_shift_um=nrv_node_shift_to_x_shift_um(
+                    node_shift,
+                    diameter_um,
+                    kind=kind,
+                ),
             )
         )
     return rows
@@ -207,7 +214,11 @@ def build_synthetic_pool_rows(
                 y_um=float(local_radius * np.cos(angle)),
                 z_um=float(local_radius * np.sin(angle)),
                 compartments=compartments_for(diameter_um, kind),
-                x_offset_um=float(rng.uniform(-50.0, 50.0)),
+                x_shift_um=float(rng.uniform(0.0, 0.5)) * (
+                    axs.axons.mrg_like_node_spacing(diameter_um * axs.um)
+                    if kind == "mrg"
+                    else 0.0
+                ),
             )
         )
     return rows
@@ -229,7 +240,6 @@ def build_simulation(
         electrode,
         positions,
         sigma=0.3 * axs.S_per_m,
-        axon_x_offset=row.x_offset_um * axs.um,
         axon_y=row.y_um * axs.um,
         axon_z=row.z_um * axs.um,
     )
@@ -255,6 +265,7 @@ def build_axon(row: FiberRow, *, length: Any, mrg_nodes: int) -> axs.axons.Axon:
         return axs.axons.MRG(
             diameter=max(row.diameter_um, 2.0) * axs.um,
             nodes=mrg_nodes,
+            x_shift=row.x_shift_um * axs.um,
             membranes=mrg_batch_membranes(),
         )
     if row.kind == "rattay":
@@ -290,14 +301,6 @@ def stimulation_position(axon: axs.axons.Axon, *, length: Any) -> Any:
         x_um = np.asarray(axon.layout.position_values(unit=axs.um), dtype=float)
         return float(x_um[axon.n_compartments // 2]) * axs.um
     return length / 2.0
-
-
-def fiber_kind_from_nrv(nrv_type: int, *, include_mrg: bool) -> FiberKind:
-    """Map NRV's type code to this example's axon templates."""
-
-    if nrv_type == 1:
-        return "mrg" if include_mrg else "rattay"
-    return "hh"
 
 
 def compartments_for(diameter_um: float, kind: FiberKind) -> int:

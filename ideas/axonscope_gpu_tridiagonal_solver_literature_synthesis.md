@@ -1,395 +1,534 @@
-# AxonScope GPU Double-Cable Solver: Literature Synthesis and Implementation Plan
+# AxonScope GPU Tridiagonal / Block-Tridiagonal Solver Literature Synthesis — Expanded v2
 
-## Executive summary
+## Purpose
 
-The additional tridiagonal-solver resources strongly reinforce a practical conclusion for AxonScope:
+This document synthesizes the external GPU tridiagonal / TDMA / Hines-solver resources and translates them into a concrete AxonScope roadmap for improving the **exact double-cable solver**.
 
-> For `Nx = 30-100` and `B > 500`, the highest-return path is probably not a theoretically exotic solver first. It is a **many-small-systems GPU strategy**: batched/block Thomas with excellent memory layout, larger coalesced batches, and only then PCR/associative/Pallas if profiling proves they win.
+This version intentionally preserves the practical detail from the earlier notes and adds the Hines-matrix GPU paper as an additional source of design guidance, rather than replacing the previous material.
 
-AxonScope's double-cable linear system is not a scalar tridiagonal system; it is a specialized **2x2 block-tridiagonal** system. However, the GPU literature on many tridiagonal systems maps very well to AxonScope because the workload is also many independent short systems.
-
-Recommended priority order:
+Target AxonScope regime:
 
 ```text
-Phase 0   Baseline, profiling, correctness, memory layout experiments
-Phase 1.1 PTA-style batched block-Thomas 2x2
-Phase 1.2 Layout/coalescing benchmark: [B,Nx] vs [Nx,B] vs tiled [Nx_pad,BLOCK_B]
-Phase 1.3 Dispatch scheduler: bucket/coalesce groups, increase B_effective
-Phase 1.4 PCR_SOA batch-native exact solver
-Phase 1.5 Split two-rail fixed-K iterative solver
-Phase 2   Associative scan experiments
-Phase 3   Pallas or FFI custom kernel only if JAX leaves performance on the table
+Nx = 30-100 compartments per fiber
+B  > 500 fibers
+Nt = many time steps
+model = exact double-cable
+linear system = many small 2x2 block-tridiagonal systems
+main use cases = threshold, activation, recruitment, conduction validation
 ```
 
-The key update from the new references is this:
+Main conclusion:
 
-> For many short systems, a well-implemented Thomas-like method can beat more parallel algorithms because it does less arithmetic and can be made efficient with warp-level/tile-level batching and coalesced memory access.
-
-This is especially relevant because AxonScope's target `Nx` is small.
+> For AxonScope's target regime, the first serious GPU optimization to test should be a **PTA-style batched block-Thomas 2x2 solver with SoA coefficients and interleaved/tiled memory layout**. PCR, associative scan, split iterative, and Pallas are still important, but they should be benchmarked against a strong many-small-systems Thomas baseline.
 
 ---
 
-## AxonScope target problem
+## Why exact double-cable remains worth optimizing
 
-### Workload
+Pseudo-single or pseudo-double surrogate models are useful for fast screening, but they cannot fully replace the exact double-cable solver.
+
+Abdollahi & Prescott (2024) show that myelinated axon conduction depends strongly on how current distributes across:
 
 ```text
-Model: exact double-cable axon solver
-System per time step: 2x2 block-tridiagonal
-Cable length: Nx = 30-100
-Batch size: B > 500 fibers
-Typical use: threshold, activation, recruitment, conduction studies
-Backend: JAX on GPU, possibly TPU, possibly future Pallas/FFI
+axial intracellular current
+submyelin / periaxonal current
+transmyelin current
+extramyelin / extracellular current
 ```
 
-### Linear system form
+Their adapted MRG double-cable simulations show that extracellular boundary conditions change conduction velocity, propagation reliability, energy efficiency, demyelination sensitivity, and ephaptic effects.
 
-At each implicit time step, the double-cable system can be written as:
+They compare:
+
+```text
+Condition 1:
+    conventional double-cable / grounded extramyelin layer
+    absorptive boundary
+    more transmyelin leakage
+    less axial current reaching the next node
+
+Condition 2:
+    internodal extramyelin compartments disconnected from ground
+    node-associated extracellular space connected to ground
+    dense-fascicle-like condition
+    less transmyelin leakage
+    more axial/submyelin current reaches the next node
+    faster conduction
+
+Condition 3:
+    similar to Condition 2 but with lower longitudinal extramyelin resistance
+    more current escapes into extramyelin longitudinal paths
+    slower than Condition 2
+
+Condition 2*:
+    multifiber validation of the dense-fascicle interpretation
+```
+
+Implication for AxonScope:
+
+```text
+pseudo models:
+    useful for large-scale screening
+
+exact double-cable:
+    still required as reference
+    required for validation
+    required when current pathways and boundary effects matter
+```
+
+Therefore the goal here is to improve the exact double-cable solver, not to replace it.
+
+---
+
+## AxonScope linear algebra target
+
+At each implicit double-cable time step, the system is a 2x2 block-tridiagonal chain:
 
 ```text
 L_i x_{i-1} + D_i x_i + U_i x_{i+1} = r_i
 
 x_i = [Vi_i, Ve_i]^T
 D_i = 2x2 local block
-L_i, U_i = off-diagonal 2x2 blocks, often diagonal in the two rails
+L_i = lower 2x2 off-block
+U_i = upper 2x2 off-block
 ```
 
-Equivalently, if reordered by rail:
+Because the off-blocks are often diagonal in the two rails, a highly specialized SoA implementation should be possible.
+
+The same system can also be written as two coupled scalar cables:
 
 ```text
 Ti Vi + Cie Ve = bi
 Cei Vi + Te Ve = be
 ```
 
-where `Ti` and `Te` are scalar tridiagonal cable operators and `Cie`, `Cei` are local couplings.
-
-### Current bottleneck
-
-The current block Thomas solver has two spatial passes:
+where:
 
 ```text
-forward elimination:     i = 0 -> Nx-1
-backward substitution:   i = Nx-1 -> 0
+Ti = scalar tridiagonal intracellular/axonal cable
+Te = scalar tridiagonal periaxonal/extracellular cable
+Cie, Cei = local diagonal couplings between rails
 ```
 
-This is stable and exact but exposes limited spatial parallelism. GPU utilization relies mostly on the batch axis `B`.
-
-For `Nx = 30-100`, this may still be acceptable if `B_effective` is large and memory layout is optimal. That is exactly the insight reinforced by the new TDMA/PTA resources.
-
----
-
-## Scientific motivation for preserving exact double-cable
-
-The biological reason to keep an exact double-cable solver is not just numerical conservatism. Abdollahi & Prescott (2024) show that conduction velocity, reliability, and ephaptic interactions depend on how current partitions between axial, submyelin, transmyelin, and extramyelin pathways.
-
-Important takeaways:
-
-- The adapted MRG model includes nodes, paranodes, juxtaparanodes, and internodes, with active conductances at nodes.
-- Condition 1 corresponds to a conventional double-cable MRG model whose extramyelin layer is connected to ground.
-- Conditions 2 and 3 disconnect internodal extramyelin compartments from ground and vary longitudinal extramyelin resistance.
-- Condition 2 conducts faster than Condition 1 and Condition 3 because less current is lost across the myelin/extracellular pathways and more axial current reaches the next node.
-- The effect of intrinsic parameters, including myelin thickness, depends on extracellular boundary conditions.
-
-This means pseudo-single-cable surrogates are useful for screening, but the exact double-cable path remains important for validation and for studying boundary-condition-dependent physiology.
-
----
-
-## Literature synthesis
-
-## 1. Parallel Thomas Algorithm / PTA for many independent systems
-
-### Main idea
-
-The Parallel Thomas Algorithm literature focuses on solving many independent tridiagonal systems efficiently on GPUs. The key is not necessarily to parallelize one single Thomas solve in `Nx`; it is to run many short Thomas solves in parallel and make memory access efficient.
-
-This maps directly to AxonScope:
+This gives two families of solver approaches:
 
 ```text
-PTA paper systems: many independent tridiagonal systems
-AxonScope systems: many independent fibers, possibly fibers × amplitudes × configs
-```
+direct block solve:
+    block Thomas
+    PCR / cyclic reduction
+    associative transfer scan
+    Pallas/CUDA custom block solver
 
-### Relevant lesson
-
-For short systems, Thomas can be competitive or superior because:
-
-```text
-Thomas:
-    low arithmetic work
-    stable
-    simple data dependencies
-    good if many systems are available
-
-PCR/CR:
-    more parallel depth
-    more arithmetic
-    more temporary data movement
-    may lose for small Nx
-```
-
-### AxonScope implication
-
-Add a backend:
-
-```python
-DoubleCableLinearSolver.PTA_BLOCK_THOMAS
-```
-
-This should be an optimized batched block-Thomas solver, not a new mathematical solver.
-
-Target implementation style:
-
-```text
-one tile/program/warp handles many fibers or one fiber depending backend
-Nx is small and statically bucketed
-2x2 operations are scalarized
-coefficients are stored in SoA layout
-memory access is coalesced
+split two-rail solve:
+    Jacobi / Gauss-Seidel / Richardson fixed-K
+    two scalar tridiagonal solves per iteration
+    exact only at convergence
 ```
 
 ---
 
-## 2. PfSolve / ACM 2025
+# Resource 1 — PfSolve / Parallel Factorization Solver
 
-### What it contributes
+## Reference
 
-PfSolve is a GPU-oriented solver utility for bi-/tridiagonal systems. The ACM paper describes a high-performance GPU solution based on an optimized Parallel Thomas Algorithm with warp-level instructions and occupancy optimizations.
+- PfSolve: Parallel Factorization Solver for tridiagonal and bidiagonal matrices.
+- ACM Transactions on Mathematical Software, 2025.
+- DOI: `10.1145/3716171`
+- ACM URL: https://dl.acm.org/doi/10.1145/3716171
+- ETH Research Collection URL: https://www.research-collection.ethz.ch/items/fab84ea7-24e3-48ec-bd12-85477e1ef4e3
 
-The public PfSolve repository also describes GPU bi-/tri-diagonal solvers based on Parallel Cyclic Reduction plus Thomas using single-warp GPU programming.
+## What it contributes
 
-### Why it matters for AxonScope
-
-PfSolve reinforces two ideas:
-
-1. **Thomas-like algorithms are still highly relevant on GPU** when implemented for many systems with warp-level optimization.
-2. **Hybrid PCR + Thomas** can be a strong practical strategy.
-
-### AxonScope adaptation
-
-PfSolve is scalar tridiagonal. AxonScope needs a specialized 2x2 block-tridiagonal version.
-
-Direct integration may not be straightforward, but the design inspiration is strong:
+PfSolve is directly relevant because it focuses on GPU tridiagonal and bidiagonal solves. Its abstract and related descriptions emphasize:
 
 ```text
-PfSolve scalar TDMA/PCR+Thomas
-    -> AxonScope block-Thomas 2x2 PTA
-    -> AxonScope block-PCR + block-Thomas hybrid
+many tridiagonal systems
+GPU-oriented Thomas-family factorization
+warp-level instructions
+occupancy optimizations
+low extra memory overhead
+support for arbitrary system sizes that fit on GPU
 ```
 
-### Action item
+The main idea to transfer is not a literal library call, because AxonScope has a **2x2 block-tridiagonal** system rather than a scalar tridiagonal system.
 
-Before investing heavily in associative scan or Pallas, benchmark:
+The transferable lesson is:
+
+> A highly optimized Thomas-family solver can be very strong on GPU when the workload consists of many short independent systems.
+
+## AxonScope implication
+
+Before spending too much effort on PCR or associative scan, implement and benchmark:
 
 ```text
-current block Thomas
-PTA-style block Thomas [B,Nx]
-PTA-style block Thomas [Nx,B]
-PTA-style block Thomas tiled [Nx_pad,BLOCK_B]
+PTA_BLOCK_THOMAS_2X2
+```
+
+This should be:
+
+```text
+exact
+same numerical solution as current block Thomas
+SoA-based
+batch-native
+layout-optimized
+GPU-oriented
+```
+
+## Why this matters for Nx=30-100
+
+For very long systems, Thomas' sequential depth is a major problem. But for AxonScope:
+
+```text
+Nx = 30-100
+```
+
+so the sequential depth is short. The main issue may be:
+
+```text
+not enough independent systems
+bad coalescing
+wrong layout
+too many small kernels
+too many array temporaries
+```
+
+rather than Thomas itself.
+
+---
+
+# Resource 2 — Mechanics & Industry 2020 Parallel Thomas Algorithm article
+
+## Reference
+
+- Mechanics & Industry 2020, Parallel Thomas Algorithm for GPUs.
+- URL: https://www.mechanics-industry.org/articles/meca/full_html/2020/03/mi170262/mi170262.html
+
+## What it contributes
+
+This paper compares GPU variants for solving many tridiagonal systems and emphasizes a key point:
+
+> Coalesced memory access can be as important as the algorithmic choice.
+
+The paper discusses Parallel Thomas Algorithm (PTA), CR, and PCR-like approaches. Its key practical message for AxonScope is that a Thomas-style algorithm can perform very well when many systems are solved in parallel and memory access is organized correctly.
+
+## AxonScope implication
+
+Do not only benchmark:
+
+```text
+current Thomas vs PCR
+```
+
+Instead benchmark:
+
+```text
+current Thomas
+PTA-style Thomas [B, Nx]
+PTA-style Thomas [Nx, B]
+PTA-style Thomas tiled [tile, Nx_pad, BLOCK_B]
 PCR_SOA
-hybrid PCR/Thomas
+```
+
+If a layout-optimized Thomas wins, use it as the default GPU backend for small `Nx`.
+
+---
+
+# Resource 3 — NVIDIA GTC 2009 tridiagonal GPU slides
+
+## Reference
+
+- NVIDIA GTC 2009 presentation, tridiagonal solvers on GPU.
+- URL: https://www.nvidia.com/content/gtc/documents/1058_gtc09.pdf
+
+## What it contributes
+
+The slides present a simple and important GPU pattern:
+
+```text
+one thread solves one tridiagonal system
+many independent tridiagonal systems are solved in parallel
+```
+
+They also highlight that memory layout can dominate performance. In their stencil/ADI context, one sweep direction is slower because memory access is not coalesced; reordering / changing data access improves performance.
+
+## AxonScope implication
+
+The essential question for AxonScope is:
+
+> During a Thomas forward/backward sweep, are neighboring GPU lanes reading contiguous memory?
+
+If the solver stores data as:
+
+```text
+rhs[B, Nx]
+```
+
+and each lane/thread/program handles a fiber, then a given fiber is contiguous. But if the implementation updates all fibers at spatial index `i`, memory access may be strided.
+
+Therefore test both:
+
+```text
+fiber-major:
+    [B, Nx]
+
+index-major / interleaved:
+    [Nx, B]
+
+tiled:
+    [n_tiles, Nx_pad, BLOCK_B]
+```
+
+This is especially important for a PTA-style solver.
+
+---
+
+# Resource 4 — arXiv 2509.03933v1 Pipelined TDMA
+
+## Reference
+
+- A Highly Scalable TDMA for GPUs / Pipelined TDMA.
+- URL: https://arxiv.org/html/2509.03933v1
+
+## What it contributes
+
+The paper emphasizes the throughput problem of small tridiagonal systems on GPUs:
+
+```text
+small systems underutilize GPU
+batching improves occupancy
+kernel launch overhead matters
+batch size has an optimal range
+too-large batches can increase temporary memory or reduce pipeline efficiency
+```
+
+## AxonScope implication
+
+The solver cannot be optimized in isolation. The dispatcher must feed it large enough batches.
+
+Recommended AxonScope scheduling direction:
+
+```text
+B_effective = fibers × amplitudes × electrode configs × model variants
+```
+
+and:
+
+```text
+Nx buckets:
+    32 / 64 / 128
+
+coalesce dispatch groups:
+    merge compatible groups into larger JIT calls
+
+async enqueue:
+    optional secondary optimization
+    not the main strategy
+
+compact outputs:
+    avoid full Vm[B, Nt, Nx] when not needed
+```
+
+This resource reinforces the dispatch scheduling note: **batch size is a performance parameter**.
+
+---
+
+# Resource 5 — PaScaL_TDMA
+
+## Reference
+
+- PaScaL_TDMA GitHub.
+- URL: https://github.com/xccels/PaScaL_TDMA
+
+## What it contributes
+
+PaScaL_TDMA is a Parallel and Scalable Library for Tridiagonal Matrix Algorithm. It targets many tridiagonal systems, including multi-GPU / MPI contexts, and includes CUDA-oriented implementations.
+
+It is not directly reusable in AxonScope because:
+
+```text
+AxonScope uses JAX
+AxonScope target is small Nx
+AxonScope system is 2x2 block-tridiagonal
+single-GPU performance is the first target
+```
+
+But it is useful as a reference for:
+
+```text
+multi-GPU decomposition
+pipeline-style TDMA
+CUDA FFI backend ideas
+how mature TDMA libraries organize memory and communication
+```
+
+## AxonScope implication
+
+Do not integrate PaScaL_TDMA directly in Phase 1.
+
+Use it later as inspiration for:
+
+```text
+FFI CUDA backend
+multi-device batch sharding
+Pallas kernel design
 ```
 
 ---
 
-## 3. Pipelined-TDMA / arXiv 2025
+# Resource 6 — Efficient Tree Solver for Hines Matrices on the GPU
 
-### What it contributes
+## Reference
 
-The Pipelined-TDMA paper targets scalable TDMA on multi-GPU systems. Its core message is relevant even for one GPU:
+- Huber, F. (2018). Efficient Tree Solver for Hines Matrices on the GPU.
+- arXiv: `1810.12742`
+- URL: https://arxiv.org/abs/1810.12742
+- PDF: https://arxiv.org/pdf/1810.12742
 
-- Small TDMA systems can suffer from low GPU occupancy.
-- Larger batches improve throughput.
-- But excessively large batches can reduce pipeline efficiency or increase temporary-memory pressure.
-- Kernel concurrency and overlapping non-scalable phases with scalable compute can improve utilization.
+## What it contributes
 
-### AxonScope implication
+This paper solves Hines matrices for neuronal tree morphologies on GPU. Its algorithm is not directly applicable to AxonScope's linear double-cable chain, but its GPU engineering lessons are very relevant.
 
-This validates the dispatch/scheduler roadmap:
-
-```text
-increase B_effective
-bucket Nx to 32/64/128
-coalesce groups with compatible execution signatures
-enqueue groups asynchronously only when useful
-avoid full Vm outputs during throughput-critical runs
-```
-
-### Practical translation
-
-Do not only improve the solver. Also improve the workload presented to the solver.
-
-For AxonScope:
+The paper addresses a similar problem class:
 
 ```text
-B_effective = fibers × amplitudes × electrode configs × stimulation conditions
+many small structured linear systems
+GPU underutilization if each system is assigned too coarsely
+need for fine-grained parallelism
+need for memory layout that supports coalesced access
+need for work balancing when systems have different sizes
 ```
 
-If each individual dispatch group is too small, the GPU may remain underoccupied even with a good solver.
+## Important design lessons
+
+### 1. One whole system per thread/program may underutilize the GPU
+
+For small systems, mapping one full matrix or one full cell to one GPU thread can leave too little parallelism.
+
+AxonScope equivalent:
+
+```text
+avoid assuming:
+    one fiber = one thread/program
+
+test:
+    one warp/block/tile handles multiple fibers
+    [Nx_pad, BLOCK_B] tile
+    multiple fibers processed together at each spatial index
+```
+
+### 2. Interleaved layout matters
+
+The Hines solver uses interleaved data layout so that operations at a similar dependency level access contiguous memory.
+
+AxonScope equivalent:
+
+```text
+test [Nx, B] layout
+test tiled [Nx_pad, BLOCK_B] layout
+```
+
+This reinforces the same conclusion from NVIDIA and PTA resources: layout can dominate the perceived quality of the solver.
+
+### 3. Bucket and balance work
+
+The Hines paper deals with heterogeneous tree sizes and branches. AxonScope has a simpler version of this:
+
+```text
+fibers with different Nx
+models with different compartment counts
+different recording modes
+different solver backends
+```
+
+Equivalent AxonScope strategy:
+
+```text
+Nx buckets = 32 / 64 / 128
+avoid mixing very different Nx in one GPU tile
+track padded overhead
+sort/coalesce compatible jobs
+```
+
+### 4. Do not directly port the Hines algorithm
+
+The Hines solver is for branched trees:
+
+```text
+parent-child dependencies
+branch splitting
+tree reduction
+```
+
+AxonScope double-cable is:
+
+```text
+linear chain
+two coupled voltage rails
+2x2 block-tridiagonal system
+```
+
+So the direct Hines algorithm is not the target. The target is to adopt its GPU layout and work-granularity lessons.
 
 ---
 
-## 4. NVIDIA GTC 2009 tridiagonal slides
+# Updated interpretation of the solver problem
 
-### What it contributes
-
-The NVIDIA tridiagonal-solver slides emphasize two practical GPU lessons:
-
-1. Solving many independent tridiagonal systems on GPU is a natural pattern.
-2. Memory coalescing can dominate performance.
-
-The slides illustrate that different sweep directions can have very different performance depending on whether memory accesses are coalesced. Reordering data to make the sweep coalesced can yield large gains.
-
-### AxonScope implication
-
-The memory layout may matter as much as the algorithm.
-
-Test these layouts:
+Earlier instinct:
 
 ```text
-Layout A: [B, Nx]
-    each fiber is contiguous
-
-Layout B: [Nx, B]
-    all fibers at the same compartment index are contiguous
-
-Layout C: tiled [Nx_pad, BLOCK_B]
-    good candidate for Pallas/FFI kernels
+The double-cable GPU problem is mainly that Thomas is sequential in Nx.
+Therefore PCR/associative scan should be the main route.
 ```
 
-For Thomas-like batched updates, the loop is usually:
+Updated interpretation after the literature:
 
-```python
-for i in range(Nx):
-    update all B fibers at spatial index i
+```text
+For Nx=30-100, the sequential depth of Thomas is short.
+The larger bottleneck may be:
+    many small systems
+    weak batching
+    non-coalesced memory
+    poor layout
+    too many temporaries
+    JAX/XLA not generating the ideal kernel
 ```
 
-That suggests `[Nx, B]` or tiled `[Nx_pad, BLOCK_B]` may give better coalescing than `[B, Nx]`.
+Therefore the first serious target should be:
 
-This must be measured. Do not assume.
+```text
+PTA-style batched block-Thomas 2x2
+with SoA coefficients
+and explicit layout benchmarks
+```
+
+PCR/associative/Pallas should be compared against that strong baseline, not against the current possibly layout-suboptimal Thomas implementation.
 
 ---
 
-## 5. PaScaL_TDMA
+# Updated recommended roadmap
 
-### What it contributes
+## Phase 0 — Measurement and tracing
 
-PaScaL_TDMA is a parallel and scalable TDMA library for many tridiagonal systems, with CPU/GPU and multi-GPU/MPI orientation. It uses modified Thomas algorithms, communication schemes, and CUDA-aware MPI for large PDE workloads.
-
-### AxonScope implication
-
-PaScaL_TDMA is not an obvious drop-in dependency for AxonScope because:
+Before changing algorithms:
 
 ```text
-it is PDE/HPC oriented
-it is scalar TDMA oriented
-it is multi-GPU/MPI oriented
-AxonScope currently uses JAX and needs 2x2 block systems
+1. Add solver-only benchmark.
+2. Add end-to-end double-cable benchmark.
+3. Add JAX profiler traces.
+4. Separate compile time from runtime.
+5. Use block_until_ready for all timings.
+6. Enable transfer_guard=log in benchmarks.
+7. Record kernel count and effective batch size.
 ```
 
-But it is useful as a design reference for:
+Benchmark matrix:
 
 ```text
-many-system TDMA batching
-multi-device sharding
-communication-aware scheduling
-future FFI/CUDA backend
-```
-
-### Action item
-
-Keep PaScaL_TDMA as a reference for a future FFI backend, not as Phase 1.
-
----
-
-## 6. CR, PCR, recursive doubling, hybrid solvers
-
-The broader GPU tridiagonal literature compares:
-
-```text
-Thomas / TDMA
-Cyclic Reduction (CR)
-Parallel Cyclic Reduction (PCR)
-Recursive Doubling (RD)
-Hybrid CR/PCR/Thomas variants
-```
-
-For AxonScope:
-
-```text
-Thomas:
-    best baseline, stable, low arithmetic, not Nx-parallel
-
-PCR:
-    exact, spatially parallel, more arithmetic and memory movement
-
-Hybrid PCR/Thomas:
-    likely attractive for Nx=30-100
-
-Recursive doubling / associative scan:
-    interesting but more complex/stability-sensitive
-```
-
-The key is that `Nx` is short. A more parallel algorithm is not automatically faster.
-
----
-
-# Revised AxonScope solver roadmap
-
-## Phase 0 — Baseline and profiling
-
-### Goal
-
-Understand whether the bottleneck is:
-
-```text
-solver arithmetic
-gather/scatter temporaries
-memory layout
-kernel count
-output materialization
-Vext construction
-dense zero Iinj
-```
-
-### Actions
-
-Add solver-only benchmark:
-
-```text
-benchmark/solvers/bench_double_cable_linear_solvers.py
-```
-
-Matrix:
-
-```text
-B:      512, 1024, 2048, 4096, 8192
-Nx:     32, 51, 64, 96, 100, 128
-solver: current_thomas, pcr_soa, pta_block_thomas variants
-dtype:  float32, float64
-layout: BxNx, NxB, tiled
-```
-
-Add JAX trace script:
-
-```text
-benchmark/solvers/profile_double_cable_jax.py
-```
-
-Use:
-
-```python
-jax.profiler.trace(...)
-jax.block_until_ready(out)
-```
-
-### Deliverables
-
-```text
-1. baseline solver-only table
-2. end-to-end table
-3. GPU trace for current Thomas
-4. memory layout comparison
-5. clear statement of whether solver or output dominates
+B  = 128, 512, 1024, 2048, 4096, 8192
+Nx = 16, 32, 51, 64, 96, 100, 128
+dtype = float32, float64
+solver = current_thomas, pcr_soa, split_iterative, future PTA
 ```
 
 ---
@@ -398,7 +537,7 @@ jax.block_until_ready(out)
 
 ### Goal
 
-Implement the same exact block Thomas math, but optimized as many short independent systems.
+Implement a stronger Thomas baseline that is GPU-oriented but mathematically identical to the current block Thomas solver.
 
 ### Backend name
 
@@ -406,268 +545,55 @@ Implement the same exact block Thomas math, but optimized as many short independ
 DoubleCableLinearSolver.PTA_BLOCK_THOMAS
 ```
 
-### Implementation requirements
+### Key implementation principles
 
-Use SoA representation:
-
-```text
-d00, d01, d10, d11       [B,Nx] or [Nx,B]
-lower0, lower1           [B,Nx] or [Nx,B]
-upper0, upper1           [B,Nx] or [Nx,B]
-rhs0, rhs1               [B,Nx] or [Nx,B]
-```
-
-Avoid performance-critical arrays like:
+Use SoA:
 
 ```text
-[B, Nx, 2, 2]
+d00, d01, d10, d11
+l0, l1
+u0, u1
+rhs0, rhs1
 ```
 
-unless only used in a prototype.
-
-### Variants to test
+Avoid generic tiny matrices in performance-critical code:
 
 ```text
-PTA_BxNx
-PTA_NxB
-PTA_tiled_Nxpad_BLOCKB
+avoid [B, Nx, 2, 2]
+prefer scalar arrays
 ```
 
-### Why this comes before PCR
-
-For `Nx=30-100`, the sequential Thomas depth is short. If `B_effective` is high and layout is good, Thomas may beat PCR because it does less work.
-
-### Go/no-go
-
-Keep as default GPU backend for small Nx if:
+Keep the block 2x2 operations explicit:
 
 ```text
-PTA_BLOCK_THOMAS speedup >= 1.5x vs current Thomas
-and correctness is identical within numerical tolerance
+det = a00 * a11 - a01 * a10
+inv00 =  a11 / det
+inv01 = -a01 / det
+inv10 = -a10 / det
+inv11 =  a00 / det
 ```
 
----
-
-## Phase 1.2 — Layout and coalescing benchmark
-
-### Goal
-
-Determine the best internal memory layout.
-
-### Layouts
+### Variants
 
 ```text
-A. [B, Nx]
-B. [Nx, B]
-C. tiled [Nx_pad, BLOCK_B]
+PTA_BLOCK_THOMAS_BX:
+    layout [B, Nx]
+
+PTA_BLOCK_THOMAS_XB:
+    layout [Nx, B]
+
+PTA_BLOCK_THOMAS_TILED:
+    layout [n_tiles, Nx_pad, BLOCK_B]
 ```
 
-### Hypothesis
+### Correctness
 
-If the Thomas forward loop is:
-
-```python
-for i in range(Nx):
-    update all B fibers at i
-```
-
-then `[Nx, B]` may produce more coalesced accesses than `[B, Nx]`.
-
-### Test
-
-For each solver backend:
+Must match current Thomas:
 
 ```text
-current Thomas
-PTA block Thomas
-PCR_SOA
-split fixed-K
-```
-
-measure:
-
-```text
-solver-only time
-memory bandwidth proxy
-kernel count
-HLO/trace behavior
-```
-
-### Decision
-
-Pick one internal solver layout per backend. The public API can remain batch-first.
-
----
-
-## Phase 1.3 — Dispatch scheduler and B_effective
-
-### Goal
-
-Increase the batch size seen by the GPU.
-
-### Actions
-
-Add execution buckets:
-
-```text
-mode
-solver
-Nx_pad bucket
-dtype
-recording mode
-Iinj kind
-Vext kind
-membrane signature
-```
-
-Coalesce compatible groups:
-
-```text
-many small groups -> one larger JAX call
-```
-
-Use buckets:
-
-```text
-Nx <= 32 -> 32
-Nx <= 64 -> 64
-Nx <= 128 -> 128
-```
-
-Optionally enqueue multiple groups before waiting:
-
-```text
-async_groups=True
-```
-
-but only after coalescing is tested.
-
-### Why this is part of solver optimization
-
-The solver can only use the parallelism it is given. A short `Nx` system needs large `B_effective` to saturate the GPU.
-
-### Go/no-go
-
-Keep coalescing if:
-
-```text
-end-to-end speedup > 20%
-JIT call count drops significantly
-memory remains acceptable
-```
-
-Keep async scheduling if:
-
-```text
-end-to-end speedup > 10%
-no memory pressure issues
-```
-
----
-
-## Phase 1.4 — PCR_SOA batch-native
-
-### Goal
-
-Add an exact spatially parallel solver backend.
-
-### Backend
-
-```python
-DoubleCableLinearSolver.PCR_SOA
-```
-
-### Algorithm
-
-PCR eliminates neighbors at strides:
-
-```text
-1, 2, 4, 8, ...
-```
-
-After `ceil(log2(Nx))` stages, rows are independent.
-
-### Expected value
-
-PCR may win if:
-
-```text
-Thomas remains limited by Nx dependency
-B is not large enough to saturate GPU
-XLA lowers PCR stages well
-```
-
-PCR may lose if:
-
-```text
-Nx is very small
-extra arithmetic dominates
-gather/scatter temporaries dominate
-```
-
-### Go/no-go
-
-Keep as GPU backend if:
-
-```text
-speedup >= 1.5x vs best Thomas backend for relevant B,Nx
-```
-
-Otherwise keep as optional backend.
-
----
-
-## Phase 1.5 — Split two-rail fixed-K solver
-
-### Goal
-
-Exploit the fact that double-cable can be written as two coupled scalar cable equations:
-
-```text
-Ti Vi + Cie Ve = bi
-Cei Vi + Te Ve = be
-```
-
-Use scalar tridiagonal solves in fixed iterations:
-
-```text
-given Ve^k: solve Ti Vi^{k+1} = bi - Cie Ve^k
-given Vi^k or Vi^{k+1}: solve Te Ve^{k+1} = be - Cei Vi
-```
-
-### Methods
-
-```text
-split_jacobi_fixed_K
-split_gauss_seidel_fixed_K
-preconditioned_richardson_fixed_K
-```
-
-### Why it is interesting
-
-It reuses the single-cable GPU path and turns one block solve into:
-
-```text
-2 * K scalar tridiagonal solves
-```
-
-This can scale well if the scalar solver is highly optimized.
-
-### Warning
-
-Fixed `K` is approximate. Iterating to convergence is exact but less GPU-friendly.
-
-### Validation
-
-Compare against block Thomas:
-
-```text
-residual norm
-max Vi/Ve/Vm error
-activation agreement
-threshold error
-conduction velocity
-first spike time
+float64 max_abs_error < 1e-9
+float32 max_abs_error < 1e-5
+no activation/threshold difference
 ```
 
 ### Go/no-go
@@ -675,448 +601,635 @@ first spike time
 Keep if:
 
 ```text
-K <= 4 gives physiologically negligible error
-and speedup > best exact direct backend
+speedup vs current Thomas >= 1.5x for B>=1024, Nx<=100
+or end-to-end speedup >= 1.2x with compact outputs
+```
+
+---
+
+## Phase 1.1b — Interleaved/tiled layout benchmark
+
+### Goal
+
+Find the best internal layout for the double-cable solver.
+
+### Layouts to test
+
+```text
+A. fiber-major:
+    [B, Nx]
+
+B. spatial-index-major:
+    [Nx, B]
+
+C. tiled:
+    [n_tiles, Nx_pad, BLOCK_B]
+```
+
+### Why this phase exists
+
+Multiple resources point to the same principle:
+
+```text
+memory coalescing can dominate tridiagonal solver speed on GPU
+```
+
+If `[Nx, B]` or tiled layout wins by a large margin, integrate that layout into the GPU backend even if AxonScope's public API remains batch-first.
+
+### Go/no-go
+
+Adopt new layout if:
+
+```text
+speedup >= 1.3x
+packing/unpacking overhead is small
+end-to-end improvement remains visible
+```
+
+---
+
+## Phase 1.2 — Dispatch coalescing and Nx bucketization
+
+### Goal
+
+Make sure the solver sees large enough batches.
+
+### Scheduler improvements
+
+```text
+1. bucket Nx to 32 / 64 / 128
+2. coalesce compatible groups
+3. keep solver/mode/dtype/recording/Iinj/Vext in the bucket key
+4. optionally enqueue multiple groups asynchronously
+5. synchronize once or at memory-budget flush points
+```
+
+### Why this matters
+
+Small TDMA systems are occupancy-limited. Even a perfect solver can perform poorly if it gets many small calls.
+
+### Default recommendation
+
+```text
+coalesce_groups = True
+async_groups = False initially
+Nx buckets = 32, 64, 128
+```
+
+Enable async only after memory-safe benchmarking.
+
+---
+
+## Phase 1.3 — PCR_SOA batch-native
+
+### Goal
+
+Implement/officialize an exact cyclic reduction solver that exposes spatial parallelism.
+
+### Why still test PCR
+
+PCR has:
+
+```text
+dependency depth O(log Nx)
+more arithmetic than Thomas
+more temporary arrays
+potentially better GPU parallelism
+```
+
+It may beat PTA for larger `Nx` or if batch size is not high enough.
+
+### Required comparison
+
+Compare PCR against the **best PTA backend**, not only against current Thomas.
+
+### Go/no-go
+
+Keep PCR if:
+
+```text
+PCR beats best PTA for Nx>=64 or Nx>=96
+and numerical agreement is strong
+```
+
+---
+
+## Phase 1.4 — Split two-rail iterative solver
+
+### Goal
+
+Use the two-rail form:
+
+```text
+Ti Vi + Cie Ve = bi
+Cei Vi + Te Ve = be
+```
+
+and solve by iterations:
+
+```text
+given Ve:
+    solve Ti for Vi
+
+given Vi:
+    solve Te for Ve
+```
+
+### Backends
+
+```text
+split_jacobi_fixed_K
+split_gauss_seidel_fixed_K
+preconditioned_richardson_fixed_K
+```
+
+### Why this is attractive
+
+It reuses scalar tridiagonal solves, potentially the already fast single-cable path.
+
+Effective work:
+
+```text
+2 scalar tridiagonal solves per iteration per fiber
+```
+
+For GPU:
+
+```text
+B_effective ≈ 2 * K * B
+```
+
+### Exactness
+
+```text
+fixed K:
+    approximate
+
+iterate to convergence:
+    exact numerically but less GPU-friendly
+```
+
+### Validation metrics
+
+Do not rely only on voltage norm error. Check:
+
+```text
+residual ||Ax-b|| / ||b||
+Vm error vs Thomas
+activation agreement
+threshold error
+first spike timing
+conduction velocity
+recruitment curve
+```
+
+### Go/no-go
+
+Keep if:
+
+```text
+K=2 or K=4 gives large speedup
+and physiological metrics remain acceptable
 ```
 
 ---
 
 ## Phase 2 — Associative scan
 
-### Goal
+### Phase 2A — Associative backward substitution
 
-Explore exact parallel prefix formulations.
-
-### Backward associative scan
-
-After forward Thomas:
+After Thomas forward elimination, the backward pass is affine:
 
 ```text
 x_i = d_i - C_i x_{i+1}
 ```
 
-This is affine:
+This can be written as:
 
 ```text
 f_i(x) = A_i x + q_i
 ```
 
-Affine composition is associative, so the backward pass can use `jax.lax.associative_scan`.
+Affine transform composition is associative:
+
+```text
+f(g(x)) = A_f A_g x + A_f q_g + q_f
+```
+
+Use `jax.lax.associative_scan(reverse=True)` to parallelize the backward pass.
 
 Expected gain:
 
 ```text
-modest, maybe 5-25%
+modest
+low risk
+does not remove forward dependency
 ```
 
-### Transfer-matrix associative scan
+### Phase 2B — Full transfer-matrix associative scan
 
-Rewrite the whole system as:
+Rewrite each row as a state transition:
 
 ```text
-y_{i+1} = M_i y_i
+x_{i+1} = -U_i^{-1}D_i x_i - U_i^{-1}L_i x_{i-1} + U_i^{-1}b_i
 ```
 
-where:
+State:
 
 ```text
 y_i = [x_i, x_{i-1}, 1]
 ```
 
-Then use matrix-product prefix scan.
+Then:
+
+```text
+y_{i+1} = M_i y_i
+```
+
+Prefix products of `M_i` can be computed by associative scan.
 
 Risks:
 
 ```text
-conditioning
+U_i conditioning
+matrix product instability
 float32 stability
-U_i invertibility
-larger temporary matrices
+heterogeneous NODE/MYSA/FLUT/STIN coefficients
 ```
 
-### Go/no-go
-
-Continue only if:
-
-```text
-float64 error < 1e-8 vs Thomas
-float32 is stable on physical systems
-performance is competitive with PCR/PTA
-```
+Prototype dense 5x5 first, optimize only if stable.
 
 ---
 
-## Phase 3 — Pallas or FFI
+## Phase 3 — Pallas / custom kernels
 
-### Goal
+### When to move to Pallas
 
-Only after JAX backends identify the winning algorithm, implement a custom kernel.
+Only after Phase 1 identifies the best math/layout.
 
-### Pallas candidates
-
-```text
-pallas_pta_block_thomas_small_nx
-pallas_hybrid_pcr_thomas_small_nx
-pallas_pcr_full_small_nx
-```
-
-### Why Pallas may help
+Use Pallas if JAX traces show:
 
 ```text
-control tiling
-control memory layout
-reduce temporaries
-scalarize 2x2 operations
-avoid generic gather/scatter overhead
-reduce kernel count
+too many kernels
+poor fusion
+large temporary arrays
+bad gather/scatter overhead
+layout not expressible cleanly in JAX
 ```
 
-### FFI candidates
-
-Only consider FFI if Pallas is insufficient and the best algorithm is clear.
-
-Possible future FFI direction:
+### Candidate Pallas kernels
 
 ```text
-CUDA block-Thomas 2x2 kernel inspired by PfSolve/PTA
-CUDA hybrid PCR+Thomas 2x2 kernel
+pallas_pta_block_thomas_2x2:
+    first custom kernel candidate
+
+pallas_pcr_hybrid:
+    only if PCR/hybrid wins algorithmically
+
+pallas_tiled_solver:
+    [tile, Nx_pad, BLOCK_B]
 ```
 
-### Go/no-go
+### Why not start with Pallas
 
-Use Pallas/FFI only if:
-
-```text
-end-to-end speedup >= 1.5x over best JAX backend
-or solver-only speedup >= 2x over best JAX backend
-```
+Pallas does not change the math. It only gives lower-level control. It is more work and more maintenance.
 
 ---
 
-# Backend selection policy
+## Optional Phase 4 — FFI / CUDA backend
 
-Initial policy:
+Use only if:
+
+```text
+Pallas is insufficient
+the winning solver is stable
+there is a clear reason to maintain CUDA/C++ code
+```
+
+Potentially useful references:
+
+```text
+PfSolve
+PaScaL_TDMA
+custom CUDA TDMA kernels
+```
+
+But FFI should not be a Phase 1 solution.
+
+---
+
+# Proposed backend enum
 
 ```python
-if device == "cpu":
-    solver = THOMAS
-elif Nx <= 100 and B_effective >= 512:
-    solver = PTA_BLOCK_THOMAS
-else:
-    solver = THOMAS
+class DoubleCableLinearSolver(str, Enum):
+    THOMAS = "thomas"
+
+    PTA_BLOCK_THOMAS = "pta_block_thomas"
+    PTA_BLOCK_THOMAS_BX = "pta_block_thomas_bx"
+    PTA_BLOCK_THOMAS_XB = "pta_block_thomas_xb"
+    PTA_BLOCK_THOMAS_TILED = "pta_block_thomas_tiled"
+
+    PCR_SOA = "pcr_soa"
+
+    SPLIT_JACOBI = "split_jacobi"
+    SPLIT_GAUSS_SEIDEL = "split_gauss_seidel"
+    SPLIT_RICHARDSON = "split_richardson"
+
+    ASSOCIATIVE_BACKWARD = "associative_backward"
+    ASSOCIATIVE_TRANSFER = "associative_transfer"
+
+    PALLAS_PTA_BLOCK_THOMAS = "pallas_pta_block_thomas"
+    PALLAS_PCR_HYBRID = "pallas_pcr_hybrid"
+
+    AUTO = "auto"
 ```
-
-After benchmarks:
-
-```python
-if PTA wins for Nx <= 64:
-    use PTA_BLOCK_THOMAS
-elif PCR wins for Nx >= 96:
-    use PCR_SOA
-elif split fixed-K is accurate and faster:
-    use SPLIT_ITERATIVE for screening/threshold workflows
-else:
-    use THOMAS
-```
-
-Pallas/FFI should be opt-in until very stable.
 
 ---
 
-# Benchmark matrix
+# Benchmark plan
 
 ## Solver-only benchmark
 
+Create:
+
 ```text
-B:       512, 1024, 2048, 4096, 8192
-Nx:      32, 51, 64, 96, 100, 128
-dtype:   float32, float64
-layout:  BxNx, NxB, tiled
-solver:  current_thomas, pta_block_thomas, pcr_soa, split_K2/K4, assoc_*
+benchmark/solvers/bench_double_cable_linear_solvers.py
+```
+
+Backends:
+
+```text
+current_thomas
+pta_block_thomas_BxNx
+pta_block_thomas_NxB
+pta_block_thomas_tiled
+pcr_soa
+split_jacobi_K1/K2/K4/K8
+split_gauss_seidel_K1/K2/K4/K8
+associative_backward
+associative_transfer_dense
+```
+
+Sizes:
+
+```text
+B  = 128, 512, 1024, 2048, 4096, 8192
+Nx = 16, 32, 51, 64, 96, 100, 128
+dtype = float32, float64
 ```
 
 Metrics:
 
 ```text
-steady-state time
 compile time
-node-solves/s
+steady-state time
+node-solves/s = B * Nx / time
 speedup vs current Thomas
-max_abs_error vs Thomas float64
-memory allocated
-kernel count
-trace interpretation
+max_abs_error vs current Thomas
+max_rel_error vs current Thomas
+residual norm
+number of kernels
+estimated memory traffic
 ```
 
 ## End-to-end benchmark
 
+Create:
+
 ```text
-B:         512, 1024, 2048, 4096
-Nx:        32, 51, 64, 96, 100
-Nt:        500, 1000
-output:    none, observer, center, full
-Iinj:      none, dense_zero, nonzero
-Vext:      dense, factorized
-solver:    current_thomas, pta, pcr, split, assoc
+benchmark/solvers/bench_double_cable_end_to_end.py
+```
+
+Backends:
+
+```text
+current_thomas
+best_pta_block_thomas
+pcr_soa
+split_iterative_best
+associative_best_if_any
+```
+
+Workloads:
+
+```text
+B  = 512, 1024, 2048, 4096
+Nx = 32, 51, 64, 96, 100
+Nt = 500, 1000
+recording = observer-only, center, full
+Iinj = none, dense_zero, nonzero
+Vext = dense, factorized if available
 ```
 
 Metrics:
 
 ```text
 total wall time
-solver-only portion if isolated
+solver-only time if isolated
+kernel wait time
 GPU memory
-JIT call count
-effective B per call
-activation/threshold agreement
+compile count
+kernel count
+activation agreement
+threshold agreement
 ```
 
 ---
 
-# Implementation details for PTA block-Thomas
+# AUTO policy sketch
 
-## SoA 2x2 operations
+Initial:
 
-Use scalarized 2x2 formulas.
+```python
+if device == "cpu":
+    solver = THOMAS
 
-For a block:
+elif Nx <= 100 and B >= 512:
+    solver = PTA_BLOCK_THOMAS_BEST_LAYOUT
 
-```text
-D = [[d00, d01],
-     [d10, d11]]
+elif Nx > 100 and B >= 512:
+    solver = PCR_SOA
+
+else:
+    solver = THOMAS
 ```
 
-Inverse-vector solve:
+After benchmarking:
 
 ```text
-det = d00*d11 - d01*d10
-x0 = ( d11*r0 - d01*r1) / det
-x1 = (-d10*r0 + d00*r1) / det
+choose PTA vs PCR vs split by table:
+    device
+    dtype
+    Nx bucket
+    B bucket
+    output mode
 ```
 
-Never call generic small-matrix inverse inside the hot loop.
-
-## Layout variants
-
-### BxNx
-
-```text
-rhs0[b, i]
-rhs1[b, i]
-```
-
-Good for per-fiber contiguous local scans.
-
-### NxB
-
-```text
-rhs0[i, b]
-rhs1[i, b]
-```
-
-Likely better when each spatial step updates all fibers.
-
-### Tiled
-
-```text
-rhs0[tile_i, tile_b]
-```
-
-Best candidate for Pallas/FFI.
-
-## Padding
-
-Use buckets:
-
-```text
-32, 64, 128
-```
-
-Padded rows should be identity/no-op:
-
-```text
-D = I
-L = U = 0
-rhs = 0
-```
-
-Slice outputs back to real `Nx`.
+Do not hardcode theoretical preferences. Use measured backend tables.
 
 ---
 
-# Integration with AxonScope dispatcher
+# Key implementation rules
 
-The scheduler should maximize:
+## 1. Preserve Thomas as oracle
+
+Never remove the current robust Thomas solver.
+
+Use it for:
 
 ```text
-B_effective per compiled call
+CPU
+small B
+validation
+fallback
+debugging
 ```
 
-Use bucket keys:
+## 2. Use SoA for block 2x2
+
+Prefer:
 
 ```text
-mode
-solver
-Nx_pad
-dtype
-recording mode
-Iinj kind
-Vext kind
-membrane signature
+d00, d01, d10, d11
+rhs0, rhs1
 ```
 
-Do not rely primarily on concurrent small GPU calls. Prefer:
+over:
 
 ```text
-coalesce first
-async enqueue second
+block[..., 2, 2]
 ```
 
-This follows the same logic as Pipelined-TDMA: large enough batches improve GPU occupancy, but batch size should be managed to avoid excess temporary memory or pipeline inefficiency.
+in optimized paths.
 
----
+## 3. Benchmark layout before concluding algorithmic failure
 
-# Risks and mitigations
-
-## Risk: PTA still underutilizes GPU
-
-Mitigation:
+If Thomas is slow, first ask:
 
 ```text
-increase B_effective
-use scheduler coalescing
-try NxB/tiled layout
-then test PCR
+is the layout coalesced?
+is B large enough?
+are shapes bucketed?
+are there too many tiny calls?
 ```
 
-## Risk: PCR has too much overhead
+Only then conclude that Thomas is algorithmically insufficient.
 
-Mitigation:
+## 4. Separate solver-only from end-to-end
+
+Solver-only speedup may not show end-to-end if time is dominated by:
 
 ```text
-use hybrid PCR+Thomas
-use Pallas only if JAX overhead is visible
+Vm[B, Nt, Nx] output
+Vext materialization
+dense zero Iinj
+host/device transfers
+dispatch group overhead
 ```
 
-## Risk: split fixed-K is inaccurate
+## 5. Compact outputs matter
 
-Mitigation:
+For threshold/recruitment workflows, prefer:
 
 ```text
-residual check
-threshold/conduction validation
-fallback to exact Thomas/PCR
+activation observer
+first spike time
+peak Vm
+threshold result
+center/probe traces
 ```
 
-## Risk: layout changes complicate code
-
-Mitigation:
+over full trace:
 
 ```text
-keep public API batch-first
-transpose internally inside solver backend
-benchmark before committing
-```
-
-## Risk: full Vm output hides solver gains
-
-Mitigation:
-
-```text
-benchmark observer-only and full-output separately
-optimize compact outputs
-factorize Vext
-remove dense zero Iinj
+Vm[B, Nt, Nx]
 ```
 
 ---
 
 # Final recommendation
 
-The new literature shifts the recommended first solver engineering step.
-
-Previously, the natural next step was:
+The next practical implementation order should be:
 
 ```text
-PCR_SOA first
+1. Add solver-only benchmark and JAX traces.
+2. Implement PTA-style batched block-Thomas 2x2.
+3. Benchmark [B,Nx] vs [Nx,B] vs tiled layout.
+4. Add Nx bucketization and group coalescing in dispatcher.
+5. Officialize PCR_SOA and compare against best PTA baseline.
+6. Test split two-rail fixed-K.
+7. Only then test associative scan.
+8. Move to Pallas only after identifying the best algorithm/layout.
+9. Consider FFI/CUDA only if Pallas is insufficient.
 ```
 
-After reviewing PTA/PfSolve/Pipelined-TDMA/NVIDIA/PaScaL_TDMA resources, the better order is:
+The main updated lesson from the literature is:
 
-```text
-1. Optimize batched block-Thomas first.
-2. Treat memory layout and coalescing as first-class solver work.
-3. Increase B_effective through scheduler coalescing.
-4. Then compare PCR_SOA and hybrid PCR/Thomas.
-5. Then test split two-rail fixed-K.
-6. Associative scan and Pallas/FFI remain later-stage options.
-```
-
-For AxonScope's target regime, `Nx=30-100` is short enough that Thomas may be algorithmically fine. The real issue may be that the current implementation does not present the GPU with enough coalesced, regular, many-system work.
-
-The most actionable backend to implement next is:
-
-```python
-DoubleCableLinearSolver.PTA_BLOCK_THOMAS
-```
-
-with layout variants:
-
-```text
-PTA_BxNx
-PTA_NxB
-PTA_TILED_Nxpad_BLOCKB
-```
-
-This should be benchmarked against the current block Thomas and PCR_SOA before investing heavily in associative scan or Pallas.
+> For short cables (`Nx=30-100`) and many independent fibers (`B>500`), a memory-coalesced, batch-optimized Thomas-family solver may be the most realistic first win. PCR and associative scan are still important, but they should be benchmarked against a strong PTA baseline, not against the current implementation alone.
 
 ---
 
 # References
 
+## GPU tridiagonal / TDMA
+
+1. PfSolve / Parallel Factorization Solver for tridiagonal and bidiagonal matrices.
+   - DOI: `10.1145/3716171`
+   - https://dl.acm.org/doi/10.1145/3716171
+   - https://www.research-collection.ethz.ch/items/fab84ea7-24e3-48ec-bd12-85477e1ef4e3
+
+2. Pipelined TDMA for GPUs.
+   - arXiv `2509.03933v1`
+   - https://arxiv.org/html/2509.03933v1
+
+3. NVIDIA GTC 2009 tridiagonal solver slides.
+   - https://www.nvidia.com/content/gtc/documents/1058_gtc09.pdf
+
+4. PaScaL_TDMA.
+   - https://github.com/xccels/PaScaL_TDMA
+
+5. Mechanics & Industry 2020 Parallel Thomas Algorithm article.
+   - https://www.mechanics-industry.org/articles/meca/full_html/2020/03/mi170262/mi170262.html
+
+## Hines / neuroscience GPU solvers
+
+6. Huber, F. (2018). Efficient Tree Solver for Hines Matrices on the GPU.
+   - arXiv `1810.12742`
+   - https://arxiv.org/abs/1810.12742
+   - https://arxiv.org/pdf/1810.12742
+
 ## Axon biology / double-cable motivation
 
-- Abdollahi, N. and Prescott, S. A. (2024). *Impact of Extracellular Current Flow on Action Potential Propagation in Myelinated Axons*. Journal of Neuroscience. DOI: 10.1523/JNEUROSCI.0569-24.2024.
-  - Uploaded file in this conversation: `e0569242024.full.pdf`
+7. Abdollahi, N. and Prescott, S. A. (2024). Impact of Extracellular Current Flow on Action Potential Propagation in Myelinated Axons.
+   - Journal of Neuroscience, 44(26):e0569242024.
+   - DOI: `10.1523/JNEUROSCI.0569-24.2024`
+   - Uploaded PDF in this conversation: `e0569242024.full.pdf`
 
-## GPU tridiagonal / TDMA resources
+## AxonScope implementation targets
 
-- Souri, M. et al. (2020). *Parallel Thomas approach development for solving tridiagonal matrix equations on GPUs*. Mechanics & Industry.
-  - https://www.mechanics-industry.org/articles/meca/full_html/2020/03/mi170262/mi170262.html
+8. Current double-cable linear solver and PCR prototypes.
+   - `src/axonscope/solvers/common.py`
+   - https://raw.githubusercontent.com/louisreg/AxonScope/bench-colab/src/axonscope/solvers/common.py
 
-- Tolmachev, D. et al. (2025). *High Performance Solution of Tridiagonal Systems on the GPU*. ACM.
-  - https://dl.acm.org/doi/10.1145/3716171
-  - https://www.research-collection.ethz.ch/items/fab84ea7-24e3-48ec-bd12-85477e1ef4e3
+9. Current dispatcher and batch grouping.
+   - `src/axonscope/dispatcher/plan.py`
+   - `src/axonscope/dispatcher/execution.py`
+   - https://raw.githubusercontent.com/louisreg/AxonScope/main/src/axonscope/dispatcher/plan.py
+   - https://raw.githubusercontent.com/louisreg/AxonScope/main/src/axonscope/dispatcher/execution.py
 
-- PfSolve repository.
-  - https://github.com/QuICC/PfSolve
+## JAX implementation tools
 
-- Kim, S. et al. (2025). *A Highly Scalable TDMA for GPUs and Its Application to Flow Solver Optimization*. arXiv:2509.03933.
-  - https://arxiv.org/abs/2509.03933
-  - https://arxiv.org/html/2509.03933v1
+10. JAX asynchronous dispatch.
+    - https://docs.jax.dev/en/latest/async_dispatch.html
 
-- NVIDIA GTC 2009. *Tridiagonal Solvers on the GPU and Applications to Fluid Simulation*.
-  - https://www.nvidia.com/content/gtc/documents/1058_gtc09.pdf
+11. JAX benchmarking guide.
+    - https://docs.jax.dev/en/latest/benchmarking.html
 
-- PaScaL_TDMA: Parallel and Scalable Library for TriDiagonal Matrix Algorithm.
-  - https://github.com/xccels/PaScaL_TDMA
+12. JAX profiler.
+    - https://docs.jax.dev/en/latest/profiling.html
 
-- Zhang, Y., Cohen, J., and Owens, J. D. *Fast Tridiagonal Solvers on the GPU*.
-  - https://research.nvidia.com/sites/default/files/pubs/2010-01_Fast-Tridiagonal-Solvers/Zhang_Fast_2009.pdf
+13. `jax.lax.associative_scan`.
+    - https://docs.jax.dev/en/latest/_autosummary/jax.lax.associative_scan.html
 
-- Appleyard, J., et al. *Manycore Algorithms for Batch Scalar and Block Tridiagonal Solvers*.
-  - https://people.maths.ox.ac.uk/gilesm/files/toms_16b.pdf
-
-## JAX implementation references
-
-- JAX asynchronous dispatch.
-  - https://docs.jax.dev/en/latest/async_dispatch.html
-
-- JAX benchmarking.
-  - https://docs.jax.dev/en/latest/benchmarking.html
-
-- JAX `associative_scan`.
-  - https://docs.jax.dev/en/latest/_autosummary/jax.lax.associative_scan.html
-
-- JAX Pallas.
-  - https://docs.jax.dev/en/latest/pallas/index.html
+14. JAX Pallas.
+    - https://docs.jax.dev/en/latest/pallas/index.html

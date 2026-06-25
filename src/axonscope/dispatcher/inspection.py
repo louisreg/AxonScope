@@ -15,8 +15,6 @@ PoolLike = DispatchPlan | Sequence[Axon | AxonInstance]
 def dispatch_method_for_group(group: DispatchGroup) -> str:
     """Return the execution method implied by one dispatch group."""
 
-    if group.size < 2:
-        return "scalar"
     prefix = "batch" if group.geometry_shared else "parameter-batch"
     return f"{prefix}-{group.mode}-cable"
 

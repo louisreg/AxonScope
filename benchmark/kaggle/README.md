@@ -122,6 +122,7 @@ The wrapper also accepts:
 --benchmark realistic_stress_observer
 --benchmark realistic_stress_observer_cpu
 --benchmark realistic_stress_observer_gpu
+--benchmark population_tsim_gpu
 --benchmark both
 --benchmark e2e_full
 --branch bench-colab
@@ -167,6 +168,25 @@ observer-only stress is currently standby: Kaggle CPU-only and GPU-host attempts
 hit LLVM compile-memory errors at the 50-fiber recruitment case. Use different
 slugs if submitting comparison runs at the same time.
 
+`population_tsim_gpu` is the focused population validation preset for the
+current default AxonScope path on Kaggle GPU. It runs
+`benchmark/nrv_performance/run.py --suite population_tsim_gpu`, which uses a
+deterministic synthetic NRV-shaped mixed population, `ExecutionPolicy` with
+`Device.gpu(0)`, observer-only output, first/warm timings, and cold/warm
+hotpath reports. It does not require NRV on Kaggle; use the local
+`population_tsim` suite with `--geometry-source nrv` for direct NRV comparison.
+
+Run it with:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --benchmark population_tsim_gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 7200
+```
+
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and
 `e2e_jax_triton_focus` are intentionally no longer accepted by this wrapper.
@@ -174,9 +194,10 @@ Their code and historical evidence live under `benchmark/archived_solver_spikes/
 `benchmark/triton_solver/`, `benchmark/jax_triton_solver/`, and
 `benchmark/cuda_ffi_solver/`.
 
-These values are written to `benchmark/kaggle/kaggle_config.json`, which is
-uploaded with the kernel. The corresponding `AXONSCOPE_*` environment variables
-are still supported for manual runs inside a Kaggle session.
+These values are written to ignored generated files under `benchmark/kaggle/`
+before submission, including `kaggle_config.json` and `kernel-metadata.json`.
+The corresponding `AXONSCOPE_*` environment variables are still supported for
+manual runs inside a Kaggle session.
 
 Check status:
 

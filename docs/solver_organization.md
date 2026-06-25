@@ -104,14 +104,15 @@ dispatch grouping stays in `dispatcher/execution.py`:
 simulate_pool(...)
   -> run_pool(...)
   -> build_dispatch_plan(...)
-  -> _run_batch_group(...) when group size >= 2 and mode is single/double
+  -> _run_batch_group(...) for supported single/double-cable batch groups
   -> _run_scalar_group(...) otherwise
 ```
 
-The scalar fallback route is intentional. Singletons, unsupported group modes,
-and any future group kind that has not been promoted to batch execution must go
-through `_run_scalar_group(...)`, which calls the same `CrankNicholson` scalar
-route as one-axon public simulation.
+The scalar fallback route is intentional for unsupported group modes and for
+single-row pool groups that request ordinary voltage recording. Observer-only
+singletons (`Recording.none()` plus solver-side observers) use the same compact
+batch route as larger pool groups so population runs have one observer path and
+avoid dense scalar traces.
 
 ### Single-Cable Batch Route
 
@@ -169,6 +170,17 @@ lowering when the inputs are compatible. Dense midpoint and initial-previous
 `Vstim` arrays remain the fallback for full recording or unsupported
 factorized inputs.
 
+Parameter-batched double-cable groups are allowed to contain rows with different
+local MRG phase shifts (`x_shift`) and different padded widths as long as they
+share the same membrane-family set. The dispatcher owns that grouping policy;
+the JAX backend receives a row-indexed membrane backend plus already padded
+cable/extracellular arrays.
+
+For parameter-batched groups, `_prepare_batch_runtime(...)` prepares only the
+representative fields that survive batching. It must not build a full
+representative cable/extracellular runtime just to replace it immediately with
+stacked row arrays.
+
 ### VmRaster, Dense/Factorized Vext, And Results
 
 Public observer definitions are lowered to solver-side VmRaster plans by
@@ -177,6 +189,11 @@ observer output during the scan. The public result key is strictly
 `observations["vm_raster"]`; activation, latency, velocity, threshold, and
 recruitment stay in post-processing. The result container and CPU unpacking live
 under `axonscope.results`, not in solver runtime modules.
+
+Chunked observer-only batch kernels use local VmRaster states per chunk and
+assemble them into one full-duration packed raster before result assembly. This
+keeps the public result identical while stabilizing JAX kernel signatures across
+duration sweeps.
 
 Dense extracellular input is produced by `build_vstim_midpoint_batch(...)` or
 `build_vstim_midpoint_and_initial_previous_batch(...)`. Factorized
@@ -198,6 +215,11 @@ There are two solver option containers:
 - `BatchOptions`: batch-kernel execution options. It carries
   `BatchRecording`, optional `time_chunk_steps`, and
   `double_cable_block_solver`.
+
+`BatchOptions.none()` is the compact observer-only batch policy. It defaults to
+`DEFAULT_OBSERVER_TIME_CHUNK_STEPS` so duration sweeps reuse a stable JAX kernel
+chunk shape with local VmRaster chunk assembly. Passing `time_chunk_steps=None`
+explicitly keeps the old unchunked single-scan behavior.
 
 The current exact double-cable block-solver options are:
 

@@ -162,7 +162,7 @@ Work should start here unless the user asks otherwise.
   waveform workflows instead of mixing both in one script.
 - [x] Rewrite each moved example for the new didactic order instead of only
   preserving the previous script body.
-- [ ] Provide realistic example with NRV built-in geometry capabilities.
+- [x] Provide realistic example with NRV built-in geometry capabilities.
 
 ### 8. Simulation Results Model
 
@@ -235,8 +235,94 @@ Work should start here unless the user asks otherwise.
 - [x] Run example import/smoke tests after examples flattening.
 - [ ] Run NRV validation only for numerical behavior changes.
 - [ ] Re-run hotpath/realistic benchmarks only when making performance claims.
-  
-### 12. Misc
+- [x] Use `benchmark/nrv_performance/population_tsim_scaling.py` to diagnose
+  AxonScope-vs-NRV population timing before optimizing long realistic runs:
+  point source, <=100 fibers, observer-only vs full-Vm, runtime vs `tsim`.
+  Local validation `population_tsim_20260625_081718` shows the retained
+  default path is faster than NRV on first-run and warm-run timings.
+- [x] Run the matching Kaggle GPU validation preset:
+  `benchmark/kaggle/run_kernel.py --benchmark population_tsim_gpu`, then record
+  the downloaded CSV/JSON/profile directory and summarize first/warm GPU timing.
+  Kaggle P100 run `20260625_083510_population_tsim_gpu_NvidiaTeslaP100`
+  completed on commit `344b6d2` with `jax_backend=gpu`, `groups=2`,
+  `padded=1`; AS first-run `7.18-8.10 s`, warm-run `0.088-0.239 s` for
+  synthetic mixed populations of `25/50/100` fibers at `tsim=0.5/1 ms`.
+- [ ] Use the cold-path profile mode before making performance claims from
+  first-call timings: `population_cold_path_smoke`, `--profile-cold-path`,
+  `--profile-warm-path`, and `--clear-jax-caches`. Track at least
+  `runtime.prepare`, `kernel.enqueue`, `kernel.dispatch_jax`, cache hits/misses,
+  and first-vs-warm deltas.
+
+### 12. Cold-Run Optimization
+
+- [x] Add this as a dedicated workstream instead of burying it under validation.
+- [x] Keep observer-only singleton groups on compact batch observers instead of
+  scalar fallback.
+- [x] Split batch runtime caching into a static structural cache plus a
+  per-time-grid cache so repeated `tsim/dt` sweeps reuse prepared membrane,
+  cable, and extracellular runtime data.
+- [x] Prepare padded double-cable extracellular arrays host-side and transfer
+  one stacked array per field instead of per-row JAX preparation.
+- [x] Group shifted MRG/double-cable rows by membrane-family set rather than
+  membrane-prefix compatibility, so NRV `node_shift`/AxonScope `x_shift`
+  populations do not fragment into many solver routes.
+- [x] Add nested cold-path benchmark spans for batch runtime base preparation,
+  cable stack, extracellular stack, and membrane stack.
+- [x] Reduce double-cable population cold `runtime.prepare` time, especially MRG
+  parameter batches with padding. The current path now uses a minimal
+  AxNode/passive base runtime, direct solver-axon membrane encoding, NumPy
+  AxNode initial gates, and a row-parametric AxNode/passive family backend.
+  Smoke profile (`50/100` fibers, `tsim=0.5 ms`) shows double-cable
+  `stack_membrane` around `37/75 ms` and 100-fiber total `runtime.prepare`
+  around `469 ms`.
+- [x] Avoid preparing a full representative cable/extracellular runtime for
+  parameter batches whose row-stacked arrays replace those fields.
+- [x] Reduce first-call membrane/channel preparation time by compiling repeated
+  compartment models once, grouping heterogeneous backends by cached signatures,
+  preparing heterogeneous initial arrays host-side, and broadcasting eligible
+  Rattay/Rattay+passive initial gates from a NumPy host calculation.
+- [x] Use static gate metadata instead of calling `init_gates(...)` just to
+  discover gate counts; keep actual gate equations owned by channel models.
+- [x] Reduce observer-only duration-sweep JAX compile pressure by defaulting
+  `BatchOptions.none()` to stable time chunks and assembling local VmRaster
+  chunk states into the public full-duration raster.
+- [x] Reduce first-call JAX compile pressure from row-indexed MRG/static
+  membrane identity: encode AxNode/passive family parameters in dynamic gate
+  rows and keep the JAX static backend/membrane stable for eligible MRG-like
+  double-cable batches.
+- [ ] Keep shape bucketing internal and opt-in until benchmarks show an end to
+  end cold-run win. After the family backend, smoke runs still showed no CPU
+  total-time gain versus default (`25/50/100` fibers, `tsim=0.5 ms`), even
+  though `kernel.dispatch_jax` can be slightly lower.
+- [x] Close the remaining cold-run cleanup for `kernel.dispatch_jax` and
+  single-cable population preparation. The retained changes are deliberately
+  narrow: Rattay/Rattay+passive host-side initial gates for the single-cable
+  mixed-population group, and pre-lowering factorized single-cable footprints to
+  diffusion forcing footprints before the JIT call. Rejected broader attempts
+  (`linear_membrane_only`, generic uniform gate broadcast) because they
+  increased cold compile time or fragmented the internal route.
+- [x] Validate the retained default path on NRV-vs-AxonScope population timing:
+  `population_tsim_20260625_081718` reports 2 dispatch groups / 1 padded group,
+  AS first-run `3.6-5.7 s` versus NRV `12.0-19.9 s`, and AS warm-run
+  `0.13-0.60 s` on `25/50/100` fiber grids with `tsim=0.5/1 ms`.
+- [ ] Future performance work: investigate persistent JAX compilation/cache
+  policy or a dedicated compiler-level strategy if cold `kernel.dispatch_jax`
+  remains a product requirement. Keep this separate from solver-route cleanup.
+- [x] Add an optional human-readable cold-run progress display that reports the
+  active step (`building plan`, `preparing runtime`, `compiling JAX kernel`,
+  `solving`, `assembling results`, etc.). Prefer wiring it through the existing
+  structured progress/hotpath events rather than ad-hoc prints, and make it most
+  useful for first-call/cold runs where compilation can look stalled. The first
+  pass is wired through `DispatchProgress`: dispatch planning, batch recording,
+  runtime preparation, input lowering, JAX/scalar compile-solve, kernel chunks,
+  and result assembly now share the same reporting path.
+- [x] Keep cold/warm profiling as a first-class benchmark output and compare
+  `first`, `warm`, `cold-warm`, cache hits/misses, `kernel.dispatch_jax`, and
+  `runtime.prepare` before/after each optimization.
+- [x] Preserve the one-path user contract: population observer-only execution
+  should stay on compact batch observers, not scalar fallbacks.
+
+### 13. Misc
 - [ ] Clean Benchmark solver
 
 ## Later
@@ -245,7 +331,6 @@ Work should start here unless the user asks otherwise.
   enqueue second, only after memory budgets and group-route inspection exist.
   see axonscope_dispatch_scheduling_gpu_note.md
 - Improve GPU solver: see axonscope_gpu_tridiagonal_solver_literature_synthesis.md and update axonscope_double_cable_exact_gpu_solver_roadmap.md
-- Improve cold run and not only warm (althrough warm is more important)
 - Provide scipy runtime for scalar/tiny simulations
 - Studies: callable threshold curves, recruitment curves, conduction validation,
   parameter sweeps, reuse policies, retention policies, and study results.

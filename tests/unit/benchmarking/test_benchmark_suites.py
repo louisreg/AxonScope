@@ -36,6 +36,17 @@ def test_nrv_mrg_extracellular_perf_suite_has_warm_repeats():
     assert "--record-gates" not in suite.args
 
 
+def test_population_tsim_gpu_suite_is_axonscope_only_and_synthetic():
+    suite = NRV_PERFORMANCE_SUITES["population_tsim_gpu"]
+
+    assert suite.runner == "population_tsim_scaling"
+    assert suite.args[suite.args.index("--runner") + 1] == "axonscope"
+    assert suite.args[suite.args.index("--geometry-source") + 1] == "synthetic"
+    assert suite.args[suite.args.index("--device") + 1] == "gpu"
+    assert "--profile-cold-path" in suite.args
+    assert "--profile-warm-path" in suite.args
+
+
 def test_runtime_suites_forward_to_benchmark_solver():
     suite = RUNTIME_SUITES["smoke"]
 

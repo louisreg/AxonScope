@@ -86,6 +86,53 @@ def _repeat_count_from_lengths(*, lengths_um: float, motif_length_um: float) -> 
     return repeat_int
 
 
+def _phase_shifted_motif_elements(
+    *,
+    sections: Sequence[Section],
+    section_lengths_um: np.ndarray,
+    compartment_counts: Sequence[int],
+    total_length_um: float,
+    phase_shift_um: float,
+) -> list["LayoutElement"]:
+    motif_length_um = float(np.sum(section_lengths_um))
+    phase_um = float(phase_shift_um) % motif_length_um
+    start_coordinate_um = (motif_length_um - phase_um) % motif_length_um
+    boundaries_um = np.concatenate(
+        [np.asarray([0.0], dtype=np.float64), np.cumsum(section_lengths_um)]
+    )
+    if np.isclose(start_coordinate_um, motif_length_um, rtol=0.0, atol=1e-9):
+        start_coordinate_um = 0.0
+    start_index = int(np.searchsorted(boundaries_um[1:], start_coordinate_um, side="right"))
+
+    elements: list[LayoutElement] = []
+    cursor_um = 0.0
+    index = start_index
+    first = True
+    while cursor_um < total_length_um - 1e-9:
+        base_index = index % len(sections)
+        if first:
+            natural_length_um = float(boundaries_um[base_index + 1] - start_coordinate_um)
+            if natural_length_um <= 1e-9:
+                index += 1
+                continue
+            first = False
+        else:
+            natural_length_um = float(section_lengths_um[base_index])
+        remaining_um = float(total_length_um) - cursor_um
+        length_um = min(natural_length_um, remaining_um)
+        if length_um > 1e-9:
+            elements.append(
+                LayoutElement(
+                    sections[base_index],
+                    length=units.Q_(length_um, "micrometer"),
+                    compartments=compartment_counts[base_index],
+                )
+            )
+            cursor_um += length_um
+        index += 1
+    return elements
+
+
 @dataclass(frozen=True, init=False)
 class LayoutElement:
     """One section placed along the axon.
@@ -137,6 +184,7 @@ class Layout:
         *,
         total_length: units.length_t | None = None,
         x_centers: units.length_t | None = None,
+        x_shift: units.length_t | None = None,
     ) -> None:
         """Create a descriptive spatial layout.
 
@@ -150,6 +198,10 @@ class Layout:
         x_centers:
             Advanced single-section layout: explicit compartment-center
             positions. Normal layouts should use element `compartments`.
+        x_shift:
+            Optional translation of the local compartment centers along the
+            axon's x-axis. This is an intrinsic one-dimensional layout shift,
+            not an electrode/world-coordinate placement.
         """
 
         frozen = tuple(elements)
@@ -187,6 +239,11 @@ class Layout:
         self.elements = frozen
         self.sections = tuple(element.section for element in frozen)
         self.x_centers_um = x_centers_um
+        self.x_shift_um = (
+            0.0
+            if x_shift is None
+            else units.require_length_um(x_shift, name="x_shift")
+        )
         self._total_length_um = (
             None
             if total_length is None
@@ -203,11 +260,13 @@ class Layout:
         *,
         length: units.length_t,
         compartments: int = 1,
+        x_shift: units.length_t | None = None,
     ) -> "Layout":
         """Build one section with uniformly spaced compartments."""
 
         return cls(
             [LayoutElement(section, length=length, compartments=compartments)],
+            x_shift=x_shift,
         )
 
     @classmethod
@@ -216,6 +275,7 @@ class Layout:
         section: Section,
         *,
         x: units.length_t,
+        x_shift: units.length_t | None = None,
     ) -> "Layout":
         """Build one section from explicit compartment-center positions."""
 
@@ -234,6 +294,7 @@ class Layout:
                 )
             ],
             x_centers=units.Q_(centers_um, "micrometer"),
+            x_shift=x_shift,
         )
 
     @classmethod
@@ -244,13 +305,18 @@ class Layout:
         section_lengths: units.length_t,
         compartments: int | Sequence[int] = 1,
         lengths: units.length_t,
+        phase_shift: units.length_t | None = None,
+        x_shift: units.length_t | None = None,
     ) -> "Layout":
         """Build a repeated section motif over a requested total length.
 
         `section_lengths` gives the length of one motif, one entry per
-        `sections` item. `lengths` is the requested full layout length and must
-        be an integer multiple of the motif length. `compartments` can be one
-        count applied to every section type, or one count per section type.
+        `sections` item. `lengths` is the requested full layout length.
+        Without `phase_shift`, `lengths` must be an integer multiple of the
+        motif length. With `phase_shift`, the motif is cyclically rotated and
+        cropped to `lengths`; this is useful for node-phase examples.
+        `compartments` can be one count applied to every section type, or one
+        count per section type.
         """
 
         base_sections = _normalize_sections(sections)
@@ -264,13 +330,27 @@ class Layout:
             units.require_length_um(lengths, name="lengths"),
             name="lengths",
         )
+        compartment_counts = _normalize_compartments(compartments, count=len(base_sections))
+        if phase_shift is not None:
+            phase_shift_um = units.require_length_um(phase_shift, name="phase_shift")
+            return cls(
+                _phase_shifted_motif_elements(
+                    sections=base_sections,
+                    section_lengths_um=section_lengths_um,
+                    compartment_counts=compartment_counts,
+                    total_length_um=lengths_um,
+                    phase_shift_um=phase_shift_um,
+                ),
+                total_length=units.Q_(lengths_um, "micrometer"),
+                x_shift=x_shift,
+            )
         repeat_count = _repeat_count_from_lengths(
             lengths_um=lengths_um,
             motif_length_um=motif_length_um,
         )
         section_tuple = tuple(section for _ in range(repeat_count) for section in base_sections)
         length_tuple = tuple(float(value) for _ in range(repeat_count) for value in section_lengths_um)
-        compartment_tuple = _normalize_compartments(compartments, count=len(base_sections)) * repeat_count
+        compartment_tuple = compartment_counts * repeat_count
         return cls(
             [
                 LayoutElement(
@@ -286,6 +366,7 @@ class Layout:
                 )
             ],
             total_length=units.Q_(lengths_um, "micrometer"),
+            x_shift=x_shift,
         )
 
     @property
@@ -313,6 +394,24 @@ class Layout:
         """Total number of numerical compartments."""
 
         return self.compartments
+
+    def with_x_shift(self, x_shift: units.length_t | None) -> "Layout":
+        """Return the same layout description with a different local x-shift."""
+
+        return Layout(
+            self.elements,
+            total_length=(
+                None
+                if self._total_length_um is None
+                else units.Q_(self._total_length_um, "micrometer")
+            ),
+            x_centers=(
+                None
+                if self.x_centers_um is None
+                else units.Q_(self.x_centers_um, "micrometer")
+            ),
+            x_shift=x_shift,
+        )
 
     def _flattened(self):
         """Return solver-facing per-compartment arrays derived from this layout."""

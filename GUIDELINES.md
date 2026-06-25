@@ -158,6 +158,17 @@ Intrinsic position is required for discretization, section boundaries, node and
 internode selectors, clamp placement, recordings, extracellular footprints, and
 event locations.
 
+Layout phase/shift parameters are still intrinsic geometry. `Layout.x_shift`
+translates local compartment positions along the one-dimensional axon axis.
+`Layout.sequence(..., phase_shift=...)` rotates a repeated motif before it is
+cropped to the requested length. `MRG(..., x_shift=...)` is the MRG-specific
+public hook for the same node-phase concept: it sets the intrinsic distance
+from the axon start to the first node start, and is used when importing NRV
+fractional `node_shift` values.
+
+None of these parameters may be used as a synonym for anatomical placement,
+electrode offset, or nerve world coordinates.
+
 World position belongs outside the simulation core:
 
 ```text
@@ -849,6 +860,13 @@ solver choices while they remain archived or standby evidence.
 batch-kernel recording/chunking and retained solver selection. Public examples
 should import them from the root facade (`axs.BatchOptions`) rather than
 descending into `axs.solvers`.
+
+`BatchOptions.none()` is the observer-only compact-output policy and defaults
+to `axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` to reduce cold JAX recompilation
+across duration sweeps. Chunked observer kernels must assemble local VmRaster
+chunk states back into the same public full-duration `VmRasterResult`; do not
+introduce a second public observer result shape. Explicit
+`time_chunk_steps=None` means unchunked.
 
 ## 8.4 Factorized Vext
 

@@ -145,6 +145,9 @@ class PassiveICM(IonChannelModelBase):
         V0 = jnp.atleast_1d(V0_mV)
         return jnp.zeros((V0.shape[0], 0), dtype=dtype)
 
+    def gate_names(self) -> tuple[str, ...]:
+        return ()
+
     def conductance_names(self) -> tuple[str, ...]:
         return ("g_l",)
 

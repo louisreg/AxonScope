@@ -13,6 +13,7 @@ ResolvedDoubleCableBlockSolver = Literal["thomas", "pcr", "pcr_soa", "pcr_adapti
 
 _DOUBLE_CABLE_BLOCK_SOLVERS = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
 _GPU_PLATFORMS = {"cuda", "gpu", "metal", "rocm"}
+DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 50
 
 
 def resolve_double_cable_block_solver(
@@ -209,10 +210,15 @@ class BatchOptions:
     def none(
         cls,
         *,
-        time_chunk_steps: int | None = None,
+        time_chunk_steps: int | None = DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
         double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
-        """Record no Vm trace, typically for solver-side observer runs."""
+        """Record no Vm trace, typically for solver-side observer runs.
+
+        Observer-only runs default to a stable time chunk to reduce first-call
+        JAX recompilation across duration sweeps. Pass ``time_chunk_steps=None``
+        explicitly to force one unchunked scan.
+        """
 
         return cls(
             recording=BatchRecording.none(),
@@ -236,6 +242,7 @@ __all__ = [
     "BatchOptions",
     "BatchRecording",
     "BatchRecordingMode",
+    "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
     "DoubleCableBlockSolver",
     "ResolvedDoubleCableBlockSolver",
     "SolverOptions",

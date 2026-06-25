@@ -194,6 +194,7 @@ class MRG(Myelinated):
         nodes: int,
         length: length_t | None = None,
         compartments: SectionCompartments = 1,
+        x_shift: length_t | None = None,
         membranes: SectionLayout | None = None,
         formulation: CableFormulation | None = CableFormulation.DOUBLE_CABLE,
         v_init: voltage_t = _DEFAULT_V_INIT,
@@ -224,6 +225,11 @@ class MRG(Myelinated):
             mapping from section name (`"node"`, `"MYSA"`, `"FLUT"`, `"STIN"`)
             to compartment count. Missing mapping entries default to one
             compartment.
+        x_shift:
+            Optional local phase shift of the MRG motif. It is the intrinsic
+            distance from the axon start to the first node start, useful when
+            importing NRV node-shifted fiber tables. It does not assign world
+            coordinates to the axon.
         membranes:
             Optional section-to-membrane assignment. Defaults to MRG node and
             passive internode membranes.
@@ -253,6 +259,7 @@ class MRG(Myelinated):
             nodes=nodes,
             length=length,
             compartments=compartments,
+            x_shift=x_shift,
             fit_all=fit_all,
             mysa_length=mysa_length,
             node_length=node_length,

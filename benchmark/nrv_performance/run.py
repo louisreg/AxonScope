@@ -57,6 +57,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         nrv_axonscope_grid.main(runner_argv)
         return
+    if suite.runner == "population_tsim_scaling":
+        from benchmark.nrv_performance import population_tsim_scaling
+
+        population_tsim_scaling.main(runner_argv)
+        return
 
     raise ValueError(f"Unsupported NRV performance runner: {suite.runner}")
 

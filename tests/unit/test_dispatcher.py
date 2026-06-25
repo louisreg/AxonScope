@@ -3,7 +3,6 @@ import numpy as np
 import axonscope as axs
 import axonscope.backends.jax.group_runner as group_runner
 import axonscope.dispatcher.plan as dispatch_plan_module
-import axonscope.backends.jax.batch_kernels as batch_kernels
 from axonscope.analytical import PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
@@ -22,7 +21,11 @@ from axonscope.backends.jax.batch_inputs import (
     materialize_sparse_intracellular_current_density_batch,
 )
 from axonscope.solvers import BatchOptions
-from axonscope.backends.jax.runtime import prepare_solver_runtime
+from axonscope.backends.jax.runtime import (
+    prepare_cable_runtime,
+    prepare_extracellular_runtime,
+    prepare_solver_runtime,
+)
 from axonscope.stimulation import Stimulus
 
 
@@ -102,11 +105,13 @@ def _mrg_axon(
     diameter_um: float,
     amp_nA: float,
     nodes: int = 5,
+    x_shift_um: float = 0.0,
 ):
     axon_model = axs.axons.MRG(
         diameter=diameter_um * axs.um,
         nodes=nodes,
         compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+        x_shift=x_shift_um * axs.um,
     )
     axon = axs.AxonInstance(axon_model)
     axon.add_current_clamp(
@@ -243,18 +248,11 @@ def test_pool_dispatch_pads_compatible_double_cable_axons():
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 11), (2, 13)]
 
 
-def test_dispatch_plan_groups_homogeneous_double_cable_rows_without_full_rescan(monkeypatch):
-    def fail_full_group_rescan(_signatures):
-        raise AssertionError("double-cable grouping should use incremental compatibility")
-
-    monkeypatch.setattr(
-        dispatch_plan_module,
-        "_double_cable_membranes_are_padding_compatible",
-        fail_full_group_rescan,
-    )
+def test_dispatch_plan_groups_shifted_mrg_double_cable_rows():
     axons = [
-        _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
-        for index in range(8)
+        _mrg_axon(diameter_um=10.0, amp_nA=0.1, x_shift_um=0.0),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.2, x_shift_um=80.0),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.3, x_shift_um=160.0),
     ]
 
     plan = dispatch_plan_module.build_dispatch_plan(axons)
@@ -262,6 +260,7 @@ def test_dispatch_plan_groups_homogeneous_double_cable_rows_without_full_rescan(
     assert len(plan.groups) == 1
     assert plan.groups[0].mode == "double"
     assert plan.groups[0].size == len(axons)
+    assert plan.groups[0].batch_kind == "parameter-double-cable"
 
 
 def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
@@ -297,10 +296,78 @@ def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():
     assert group.has_padding
 
 
+def test_double_cable_shape_bucketing_is_internal_opt_in(monkeypatch):
+    axons = [
+        _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)
+        for diameter_um in (4.0, 10.0, 20.0)
+    ]
+    group = build_dispatch_plan(axons).groups[0]
+
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    assert group_runner._double_cable_kernel_group(group) is group
+
+    monkeypatch.setenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", "1")
+    kernel_group = group_runner._double_cable_kernel_group(group)
+
+    assert kernel_group is not group
+    assert kernel_group.size >= group.size
+    assert kernel_group.nx >= group.nx
+    assert kernel_group.items[: group.size] == group.items
+    assert kernel_group.items[-1] == group.items[-1]
+
+
+def test_axnode_numpy_initial_gates_match_channel_model():
+    from axonscope.channel_models.axnode import AxnodeICM
+
+    model = AxnodeICM()
+    for vm0 in (-90.0, -80.0, -65.0):
+        expected = np.asarray(model.init_gates(np.asarray([vm0], dtype=np.float32)))[0]
+        got = group_runner._axnode_initial_gates_numpy(
+            model,
+            vm0_mV=vm0,
+            dtype=np.dtype(np.float32),
+        )
+        np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-7)
+
+
+def test_double_cable_mrg_membrane_stack_uses_family_backend(monkeypatch):
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    axons = [
+        _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)
+        for diameter_um in (4.0, 10.0, 20.0)
+    ]
+    group = build_dispatch_plan(axons).groups[0]
+    fast_stack = group_runner._try_stack_axnode_passive_family_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=group.items[0].solver_axon.dtype,
+        solver_options=None,
+    )
+
+    group_runner._BATCH_RUNTIME_CACHE.clear()
+    group_runner._BATCH_STATIC_RUNTIME_CACHE.clear()
+    runtime = group_runner._prepare_batch_runtime(
+        group,
+        tsim_ms=0.05,
+        dt_ms=0.01,
+        solver_options=None,
+        mode="double",
+        include_extracellular=True,
+        include_area=True,
+    )
+
+    assert fast_stack is not None
+    assert fast_stack.source == "solver_axon_membrane_models"
+    assert type(runtime.membrane.backend).__name__ == "_AxNodePassiveFamilyICMBackend"
+    assert runtime.membrane.gates0.shape == (len(axons), group.nx, 7)
+    assert runtime.membrane.backend.n_gates_max == 7
+    assert runtime.membrane.membrane is runtime.membrane.backend.node_model
+
+
 def test_pool_dispatch_parameter_batched_mrg_matches_scalar_rows():
     axons = [
-        _mrg_axon(diameter_um=4.0, amp_nA=0.1),
-        _mrg_axon(diameter_um=20.0, amp_nA=0.2),
+        _mrg_axon(diameter_um=4.0, amp_nA=0.1, x_shift_um=0.0),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.2, x_shift_um=120.0),
     ]
 
     batched = axs.simulate_pool(
@@ -374,8 +441,33 @@ def test_run_pool_observer_only_keeps_one_compact_cohort_record():
     assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
+def test_run_pool_observer_only_batches_singleton_groups():
+    axons = [
+        _hh_axon(nx=11, amp_nA=0.4, y_um=12.0, z_um=34.0),
+        _hh_axon(nx=13, amp_nA=0.5, y_um=22.0, z_um=44.0),
+    ]
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    result = run_pool(
+        axons,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=BatchOptions.none(),
+        observers=(activation,),
+    )
+
+    assert len(result) == 2
+    assert all(isinstance(row, DispatchCohortResult) for row in result)
+    assert [row.indices for row in result] == [(0,), (1,)]
+    assert [row.method for row in result] == ["batch-single-cable", "batch-single-cable"]
+    assert [row.Vm for row in result] == [None, None]
+    assert all(row.observations is not None for row in result)
+
+
 def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
-    monkeypatch,
 ):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1),
@@ -385,17 +477,11 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    monkeypatch.setattr(
-        batch_kernels,
-        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
-        1,
-    )
-
     result = run_pool(
         axons,
         tsim_ms=0.1,
         dt_ms=0.05,
-        batch_options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        batch_options=BatchOptions.none(),
         observers=(activation,),
     )
 
@@ -408,9 +494,33 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
-def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
-    monkeypatch,
-):
+def test_run_pool_double_cable_observer_only_batches_singleton_groups():
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1, compartments=11),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.2, nodes=3),
+    ]
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    result = run_pool(
+        axons,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=BatchOptions.none(),
+        observers=(activation,),
+    )
+
+    assert len(result) == 2
+    assert all(isinstance(row, DispatchCohortResult) for row in result)
+    assert [row.indices for row in result] == [(0,), (1,)]
+    assert [row.method for row in result] == ["batch-double-cable", "batch-double-cable"]
+    assert [row.Vm for row in result] == [None, None]
+    assert all(row.observations is not None for row in result)
+
+
+def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     stimulus = Stimulus.pulse(
         start=0.0 * axs.ms,
         duration=0.05 * axs.ms,
@@ -439,12 +549,6 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    monkeypatch.setattr(
-        batch_kernels,
-        "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
-        1,
-    )
-
     axs.enable_benchmark(
         "/tmp/axonscope-double-factorized-vstim-test",
         print_summary=False,
@@ -455,7 +559,7 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
             axons,
             tsim_ms=0.1,
             dt_ms=0.05,
-            batch_options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+            batch_options=BatchOptions.none(),
             observers=(activation,),
         )
         report = axs.disable_benchmark(print_summary=False, save=False)
@@ -464,6 +568,10 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
 
     assert isinstance(result[0], DispatchCohortResult)
     assert result[0].Vm is None
+    assert result[0].observations is not None
+    raster = result[0].observations[axs.VM_RASTER_OBSERVATION_KEY]
+    assert raster.batch_size == len(axons)
+    assert raster.words.shape[0] == len(axons)
     assert report is not None
     extracellular_events = [
         event for event in report.events if event.name == "inputs.extracellular"
@@ -506,6 +614,87 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim(
     assert components["vstim_previous"] < 2 * 11 * 8
 
 
+def test_double_cable_batch_extracellular_stack_matches_row_runtime():
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1, compartments=11),
+        _passive_double_cable_axon(amp_nA=0.2, compartments=13),
+    ]
+    group = build_dispatch_plan(axons).groups[0]
+    dtype_local = prepare_solver_runtime(
+        axons[0],
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        include_extracellular=True,
+    ).membrane.dtype
+
+    stacked = group_runner._stack_extracellular_runtime(
+        group,
+        dtype_local=dtype_local,
+    )
+
+    def pad_space(values, *, mode):
+        arr = np.asarray(values)
+        pad_count = int(group.nx) - int(arr.shape[0])
+        if pad_count == 0:
+            return arr
+        if mode == "edge":
+            pad_values = np.broadcast_to(arr[-1], (pad_count,)).astype(arr.dtype, copy=False)
+        else:
+            pad_values = np.zeros((pad_count,), dtype=arr.dtype)
+        return np.concatenate([arr, pad_values], axis=0)
+
+    def pad_edge(values):
+        arr = np.asarray(values)
+        pad_count = max(int(group.nx) - 1, 0) - int(arr.shape[0])
+        if pad_count == 0:
+            return arr
+        return np.concatenate([arr, np.zeros((pad_count,), dtype=arr.dtype)], axis=0)
+
+    expected_rows = []
+    for item in group.items:
+        cable = prepare_cable_runtime(
+            item.solver_axon,
+            dtype_local,
+            include_area=True,
+        )
+        row = prepare_extracellular_runtime(item.solver_axon, dtype_local, cable)
+        expected_rows.append(
+            {
+                "Cm_abs": pad_space(row.Cm_abs, mode="edge"),
+                "Cx_abs": pad_space(row.Cx_abs, mode="edge"),
+                "Gx_abs": pad_space(row.Gx_abs, mode="edge"),
+                "Gax_e": pad_edge(row.Gax_e),
+                "Gax_i": pad_edge(row.Gax_i),
+                "left_i": pad_space(row.left_i, mode="zero"),
+                "right_i": pad_space(row.right_i, mode="zero"),
+                "left_e": pad_space(row.left_e, mode="zero"),
+                "right_e": pad_space(row.right_e, mode="zero"),
+            }
+        )
+
+    for field_name in (
+        "Cm_abs",
+        "Cx_abs",
+        "Gx_abs",
+        "Gax_e",
+        "Gax_i",
+        "left_i",
+        "right_i",
+        "left_e",
+        "right_e",
+    ):
+        expected = np.stack(
+            [row[field_name] for row in expected_rows],
+            axis=0,
+        )
+        np.testing.assert_allclose(
+            np.asarray(getattr(stacked, field_name)),
+            expected,
+            rtol=1e-6,
+            atol=1e-8,
+        )
+
+
 def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
     def make_pool():
         return [
@@ -514,6 +703,7 @@ def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
         ]
 
     group_runner._BATCH_RUNTIME_CACHE.clear()
+    group_runner._BATCH_STATIC_RUNTIME_CACHE.clear()
     axs.enable_benchmark(
         "/tmp/axonscope-structural-runtime-cache-test",
         print_summary=False,
@@ -542,6 +732,51 @@ def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
         event.metadata.get("batch_runtime_cache") for event in runtime_events
     ]
     assert runtime_cache_events == ["miss", "hit"]
+
+
+def test_batch_static_runtime_cache_reuses_equivalent_pool_with_new_time_grid():
+    def make_pool():
+        return [
+            _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0),
+            _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
+        ]
+
+    group_runner._BATCH_RUNTIME_CACHE.clear()
+    group_runner._BATCH_STATIC_RUNTIME_CACHE.clear()
+    axs.enable_benchmark(
+        "/tmp/axonscope-static-runtime-cache-test",
+        print_summary=False,
+        save=False,
+    )
+    try:
+        first = run_pool(
+            make_pool(),
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        second = run_pool(
+            make_pool(),
+            tsim_ms=0.2,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert [row.Vm.shape for row in first] == [(2, 1), (2, 1)]
+    assert [row.Vm.shape for row in second] == [(4, 1), (4, 1)]
+    assert report is not None
+    runtime_events = [event for event in report.events if event.name == "runtime.prepare"]
+    runtime_cache_events = [
+        event.metadata.get("batch_runtime_cache") for event in runtime_events
+    ]
+    static_cache_events = [
+        event.metadata.get("batch_static_runtime_cache") for event in runtime_events
+    ]
+    assert runtime_cache_events == ["miss", "miss"]
+    assert static_cache_events == ["miss", "hit"]
 
 
 def test_dispatch_plan_preserves_pool_indices():
@@ -636,11 +871,14 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
 
     captured = capsys.readouterr()
     assert len(result) == 2
+    assert "building dispatch plan" in captured.out
     assert "Dispatch progress" in captured.out
     assert "group 0" in captured.out
     assert "route=batch-single-cable" in captured.out
     assert "prepare group=0" in captured.out
+    assert "batch group=0" in captured.out
     assert "lowering group=0" in captured.out
+    assert "compile/solve JAX kernel" in captured.out
     assert "result group=0" in captured.out
 
 
@@ -659,6 +897,7 @@ def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
     assert len(result) == 1
     assert "route=scalar" in captured.out
     assert "single row group" in captured.out
+    assert "compile/solve scalar kernel" in captured.out
     assert "assembled scalar rows" in captured.out
 
 

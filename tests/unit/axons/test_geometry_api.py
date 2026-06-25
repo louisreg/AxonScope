@@ -133,6 +133,99 @@ def test_unmyelinated_template_accepts_unit_aware_custom_mesh():
     np.testing.assert_allclose(axon.layout.position_values(unit=axs.um), [0.0, 250.0, 1000.0])
 
 
+def test_layout_x_shift_translates_positions_without_changing_lengths():
+    section = axs.axons.Section(
+        "axon",
+        membrane=axs.membranes.Passive(),
+        diameter=1.0 * axs.um,
+    )
+    base = axs.axons.Layout.single_uniform(
+        section,
+        length=100.0 * axs.um,
+        compartments=4,
+    )
+    shifted = base.with_x_shift(25.0 * axs.um)
+
+    np.testing.assert_allclose(
+        shifted.position_values(unit=axs.um),
+        base.position_values(unit=axs.um) + 25.0,
+    )
+    np.testing.assert_allclose(
+        shifted.compartment_length_values(unit=axs.um),
+        base.compartment_length_values(unit=axs.um),
+    )
+    assert shifted.length_um == pytest.approx(base.length_um)
+
+    non_uniform = axs.axons.Layout.single_non_uniform(
+        section,
+        x=np.asarray([0.0, 250.0, 1000.0]) * axs.um,
+        x_shift=-10.0 * axs.um,
+    )
+    np.testing.assert_allclose(non_uniform.position_values(unit=axs.um), [-10.0, 240.0, 990.0])
+
+    with pytest.raises(TypeError, match="x_shift must include units"):
+        axs.axons.Layout.single_uniform(
+            section,
+            length=100.0 * axs.um,
+            compartments=4,
+            x_shift=25.0,
+        )
+
+
+def test_layout_sequence_phase_shift_rotates_and_crops_repeated_motif():
+    node = axs.axons.Section(
+        "node",
+        membrane=axs.membranes.Passive(),
+        diameter=1.0 * axs.um,
+    )
+    internode = axs.axons.Section(
+        "internode",
+        membrane=axs.membranes.Passive(),
+        diameter=1.0 * axs.um,
+    )
+    layout = axs.axons.Layout.sequence(
+        [node, internode],
+        section_lengths=[10.0, 90.0] * axs.um,
+        compartments=[1, 3],
+        lengths=250.0 * axs.um,
+        phase_shift=25.0 * axs.um,
+    )
+    flat = axs.axons.flatten_layout(layout)
+
+    assert flat.section_names[0] == "internode"
+    assert flat.section_names[3] == "node"
+    np.testing.assert_allclose(
+        layout.compartment_position(3, unit=axs.um).magnitude,
+        30.0,
+    )
+    assert layout.length == pytest.approx(250.0)
+
+
+def test_mrg_x_shift_phases_node_positions_without_world_coordinates():
+    base = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
+    shifted = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5, x_shift=80.0 * axs.um)
+
+    node_spacing_um = axs.axons.mrg_like_node_spacing(10.0 * axs.um)
+    np.testing.assert_allclose(
+        base.node_position_values(unit=axs.um),
+        [0.5 + index * node_spacing_um for index in range(base.nodes)],
+        atol=1e-3,
+    )
+    np.testing.assert_allclose(
+        shifted.node_position_values(unit=axs.um),
+        [80.5 + index * node_spacing_um for index in range(shifted.nodes)],
+        atol=1e-3,
+    )
+    assert shifted.nodes == base.nodes
+    assert shifted.length == pytest.approx(base.length + 80.0)
+
+
+def test_mrg_non_tabulated_node_count_uses_actual_morphology_spacing():
+    axon = axs.axons.MRG(diameter=2.52 * axs.um, nodes=47)
+
+    assert axon.nodes == 47
+
+
 def test_unmyelinated_template_requires_length_units():
     with pytest.raises(TypeError, match="length must include units"):
         axs.axons.HodgkinHuxley(length=1000.0, diameter=0.5 * axs.um, compartments=11)

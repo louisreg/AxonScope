@@ -323,6 +323,9 @@ result = run.single
 For pool runs, compatible single-cable and double-cable groups can use the
 compact observer-only batch path. Row-specific probe tables and masks must be
 lowered before the solver so padded rows do not force full Vm retention.
+Population-level `result.observations["vm_raster"]` may be padded to a shared
+probe width; an individual `result[i].observations["vm_raster"]` view exposes
+that row's own probe width.
 `PeakVoltage` and other rich analyses remain post-hoc on recorded Vm until a
 dedicated solver-side implementation is designed, benchmarked, and kept off the
 hot path.

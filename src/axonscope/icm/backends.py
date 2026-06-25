@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import jax
 import jax.numpy as jnp
@@ -245,7 +245,7 @@ class UniformICMBackend:
     def from_model(cls, ion_channel: IonChannelModelBase, nx: int) -> "UniformICMBackend":
         if nx < 1:
             raise ValueError(f"nx must be >= 1, got {nx}.")
-        n_gates = int(ion_channel.init_gates(jnp.array([0.0], dtype=ion_channel.dtype)).shape[1])
+        n_gates = len(ion_channel.gate_names())
         n_channels = int(ion_channel.g_bar.shape[0])
         return cls(
             ion_channel=ion_channel,
@@ -314,18 +314,38 @@ class HeterogeneousICMBackend:
             raise ValueError("icm_vec must contain at least one channel model.")
 
         frozen = tuple(icm_vec)
-        gate_sizes = tuple(int(m.init_gates(jnp.array([0.0], dtype=m.dtype)).shape[1]) for m in frozen)
-        channel_sizes = tuple(int(m.g_bar.shape[0]) for m in frozen)
+        grouped: list[tuple[IonChannelModelBase, list[int], int, int]] = []
+        group_index_by_signature: dict[tuple[Any, ...], int] = {}
+        signature_by_identity: dict[int, tuple[Any, ...]] = {}
+        sizes_by_signature: dict[tuple[Any, ...], tuple[int, int]] = {}
+        gate_sizes_list: list[int] = []
+        channel_sizes_list: list[int] = []
+        for i, model in enumerate(frozen):
+            identity = id(model)
+            signature = signature_by_identity.get(identity)
+            if signature is None:
+                signature = model._static_signature()
+                signature_by_identity[identity] = signature
+            sizes = sizes_by_signature.get(signature)
+            if sizes is None:
+                sizes = (
+                    len(model.gate_names()),
+                    int(model.g_bar.shape[0]),
+                )
+                sizes_by_signature[signature] = sizes
+            gate_size, channel_size = sizes
+            gate_sizes_list.append(gate_size)
+            channel_sizes_list.append(channel_size)
+            group_index = group_index_by_signature.get(signature)
+            if group_index is None:
+                group_index_by_signature[signature] = len(grouped)
+                grouped.append((model, [i], gate_size, channel_size))
+            else:
+                grouped[group_index][1].append(i)
+        gate_sizes = tuple(gate_sizes_list)
+        channel_sizes = tuple(channel_sizes_list)
         n_gates_max = max(gate_sizes) if gate_sizes else 0
         n_channels_max = max(channel_sizes) if channel_sizes else 0
-        grouped: list[tuple[IonChannelModelBase, list[int], int, int]] = []
-        for i, model in enumerate(frozen):
-            for group_model, indices, _, _ in grouped:
-                if model == group_model:
-                    indices.append(i)
-                    break
-            else:
-                grouped.append((model, [i], gate_sizes[i], channel_sizes[i]))
         groups = tuple(
             HeterogeneousICMGroup(
                 model=model,
@@ -562,6 +582,90 @@ class PaddedICMBackend:
 
     def background_current(self) -> Array1D:
         return self._pad_space(self.backend.background_current())
+
+
+@dataclass(frozen=True)
+class _AxNodePassiveFamilyICMBackend:
+    """Row-parametric backend for MRG-like AxNode/passive compartment layouts."""
+
+    node_model: IonChannelModelBase
+    target_nx: int
+    dtype: jnp.dtype
+    n_gates_max: int = 7
+    n_channels_max: int = 4
+
+    @property
+    def Nx(self) -> int:
+        return self.target_nx
+
+    def init_gates(self, V0_mV: Array1D) -> Array2D:
+        node_gates = self.node_model.init_gates(V0_mV)
+        out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
+        return out.at[:, : node_gates.shape[1]].set(node_gates)
+
+    def cn_gate_update_for_row(
+        self,
+        row_index,
+        *,
+        g_prev: Array2D,
+        V_mV: Array1D,
+        dt: float,
+    ) -> Array2D:
+        _ = row_index
+        node_gates = self.node_model.cn_gate_update(
+            g_prev=g_prev[:, :4],
+            V_mV=V_mV,
+            dt=dt,
+        )
+        return jnp.concatenate([node_gates, g_prev[:, 4:]], axis=1)
+
+    def currents_for_row(
+        self,
+        row_index,
+        *,
+        V_mV: Array1D,
+        gates: Array2D,
+    ) -> Array1D:
+        _ = row_index
+        node_mask = gates[:, 6]
+        node_current = self.node_model.currents(V_mV=V_mV, gates=gates[:, :4])
+        passive_current = gates[:, 4] * V_mV - gates[:, 5]
+        return node_mask * node_current + (1.0 - node_mask) * passive_current
+
+    def membrane_conductance_terms_for_row(
+        self,
+        row_index,
+        gates: Array2D,
+    ) -> tuple[Array1D, Array1D]:
+        _ = row_index
+        node_mask = gates[:, 6]
+        node_gm, node_ge = self.node_model.membrane_conductance_terms(gates[:, :4])
+        passive_gm = gates[:, 4]
+        passive_ge = gates[:, 5]
+        return (
+            node_mask * node_gm + (1.0 - node_mask) * passive_gm,
+            node_mask * node_ge + (1.0 - node_mask) * passive_ge,
+        )
+
+    def conductances(self, gates: Array2D) -> Array2D:
+        node_mask = gates[:, 6:7]
+        return node_mask * self.node_model.conductances(gates[:, :4])
+
+    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
+        return self.cn_gate_update_for_row(0, g_prev=g_prev, V_mV=V_mV, dt=dt)
+
+    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+        return self.currents_for_row(0, V_mV=V_mV, gates=gates)
+
+    def total_conductance(self, gates: Array2D) -> Array1D:
+        gm, _ = self.membrane_conductance_terms(gates)
+        return gm
+
+    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
+        return self.membrane_conductance_terms_for_row(0, gates)
+
+    def background_current(self) -> Array1D:
+        return jnp.zeros((self.Nx,), dtype=self.dtype)
 
 
 @dataclass(frozen=True)

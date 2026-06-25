@@ -45,5 +45,7 @@ target
 benchmark/reports/
 benchmark/results/
 benchmark/kaggle/axonscope_solver_benchmarks_generated.py
+benchmark/kaggle/kaggle_config.json
+benchmark/kaggle/kernel-metadata.json
 figures/nrv_tests/
 figures/physics_tests/*.png

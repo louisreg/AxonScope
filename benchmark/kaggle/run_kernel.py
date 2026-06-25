@@ -155,6 +155,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "realistic_stress_observer",
             "realistic_stress_observer_cpu",
             "realistic_stress_observer_gpu",
+            "population_tsim_gpu",
             "both",
         ),
         help="Benchmark suite to run.",

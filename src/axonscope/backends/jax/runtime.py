@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
 from axonscope.channel_models.axnode import AxnodeICM
 from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
@@ -24,6 +25,7 @@ from axonscope.channel_models.rattay_aberham import RattayAberhamICM
 from axonscope.channel_models.rate_tables import enable_rate_tables
 from axonscope.icm import (
     CompartmentMembraneLayout,
+    HeterogeneousICMBackend,
     ICMBackend,
     UniformICMBackend,
 )
@@ -155,10 +157,16 @@ def _membrane_runtime_cache_key(
     axon: Axon,
     solver_data: SolverAxon,
     options: SolverOptions,
+    *,
+    membrane_signatures: tuple[Any, ...] | None = None,
 ) -> tuple[Any, ...]:
     return (
         "membrane_runtime",
-        tuple(model._static_signature() for model in solver_data.membrane_models),
+        (
+            tuple(model._static_signature() for model in solver_data.membrane_models)
+            if membrane_signatures is None
+            else membrane_signatures
+        ),
         _solver_options_cache_key(options),
         int(solver_data.n_compartments),
         solver_data.dtype.str,
@@ -344,6 +352,7 @@ def compile_axon_membrane(
     *,
     solver_axon: SolverAxon | None = None,
     solver_options: SolverOptions | None = None,
+    membrane_signatures: tuple[Any, ...] | None = None,
 ) -> IonChannelModelBase:
     """Compile the membrane description carried by an axon."""
 
@@ -352,24 +361,35 @@ def compile_axon_membrane(
     membrane_models = solver_data.membrane_models
     if len(membrane_models) == 0:
         raise ValueError("Axon membrane_models cannot be empty.")
+    if membrane_signatures is None:
+        membrane_signatures = tuple(model._static_signature() for model in membrane_models)
     cache_key = (
         "axon_membrane",
-        tuple(model._static_signature() for model in membrane_models),
+        membrane_signatures,
         _solver_options_cache_key(options),
     )
     cached = _COMPILED_MEMBRANE_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    first_signature = membrane_models[0]._static_signature()
-    if all(model._static_signature() == first_signature for model in membrane_models):
+    first_signature = membrane_signatures[0]
+    if all(signature == first_signature for signature in membrane_signatures):
         compiled = compile_membrane_model(
             membrane_models[0],
             solver_options=options,
         )
     else:
+        compiled_by_signature: dict[tuple[Any, ...], IonChannelModelBase] = {}
+        for model, signature in zip(membrane_models, membrane_signatures, strict=True):
+            compiled_component = compiled_by_signature.get(signature)
+            if compiled_component is None:
+                compiled_component = compile_membrane_model(
+                    model,
+                    solver_options=options,
+                )
+                compiled_by_signature[signature] = compiled_component
         compiled_components = tuple(
-            compile_membrane_model(model, solver_options=options)
-            for model in membrane_models
+            compiled_by_signature[signature]
+            for signature in membrane_signatures
         )
         compiled = CompartmentMembraneLayout(compiled_components).as_membrane_model()
     _COMPILED_MEMBRANE_CACHE[cache_key] = compiled
@@ -427,21 +447,43 @@ def prepare_membrane_runtime(
 ) -> MembraneRuntime:
     options = _resolve_solver_options(solver_options)
     solver_data = build_solver_axon(axon) if solver_axon is None else solver_axon
-    cache_key = _membrane_runtime_cache_key(axon, solver_data, options)
+    membrane_signatures = tuple(model._static_signature() for model in solver_data.membrane_models)
+    cache_key = _membrane_runtime_cache_key(
+        axon,
+        solver_data,
+        options,
+        membrane_signatures=membrane_signatures,
+    )
     cached = _MEMBRANE_RUNTIME_CACHE.get(cache_key)
     if cached is not None:
+        record_benchmark_metadata(membrane_runtime_cache="hit")
         return cached
-    membrane = compile_axon_membrane(
-        axon,
-        solver_axon=solver_data,
-        solver_options=options,
-    )
-    backend = _backend_from_compiled_membrane(membrane, int(solver_data.n_compartments))
+    record_benchmark_metadata(membrane_runtime_cache="miss")
+    with benchmark_span(
+        "runtime.prepare.membrane_compile",
+        nx=int(solver_data.n_compartments),
+    ):
+        membrane = compile_axon_membrane(
+            axon,
+            solver_axon=solver_data,
+            solver_options=options,
+            membrane_signatures=membrane_signatures,
+        )
+    with benchmark_span(
+        "runtime.prepare.membrane_backend",
+        nx=int(solver_data.n_compartments),
+    ):
+        backend = _backend_from_compiled_membrane(membrane, int(solver_data.n_compartments))
     dtype_local = backend.dtype
     Nx = int(solver_data.n_compartments)
-    Vm0 = initial_voltage(axon, Nx, dtype_local)
-    gates0 = backend.init_gates(V0_mV=Vm0)
-    state0 = membrane.init_membrane_state(Nx=Nx, dtype_local=dtype_local, V0_mV=Vm0)
+    with benchmark_span("runtime.prepare.membrane_init", nx=Nx):
+        Vm0, gates0, state0, background_current = _prepare_membrane_initial_arrays(
+            axon,
+            membrane,
+            backend,
+            nx=Nx,
+            dtype_local=dtype_local,
+        )
     runtime = MembraneRuntime(
         backend=backend,
         membrane=membrane,
@@ -450,12 +492,193 @@ def prepare_membrane_runtime(
         Vm0_mV=Vm0,
         gates0=gates0,
         state0=tuple(state0),
-        background_current=backend.background_current(),
+        background_current=background_current,
         observable_names=membrane_observable_names(membrane),
         diagnostic_names=membrane.diagnostic_names(),
     )
     _MEMBRANE_RUNTIME_CACHE[cache_key] = runtime
     return runtime
+
+
+def _prepare_membrane_initial_arrays(
+    axon: Axon,
+    membrane: IonChannelModelBase,
+    backend: ICMBackend,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> tuple[Array, Array, tuple[Array, ...], Array]:
+    """Prepare initial membrane arrays without unnecessary eager JAX scatter."""
+
+    rattay_initial = _try_prepare_uniform_rattay_initial_arrays(
+        axon,
+        membrane,
+        backend,
+        nx=nx,
+        dtype_local=dtype_local,
+    )
+    if rattay_initial is not None:
+        record_benchmark_metadata(membrane_init_source="rattay_numpy")
+        return rattay_initial
+    if isinstance(backend, HeterogeneousICMBackend) and not membrane.membrane_state_specs():
+        record_benchmark_metadata(membrane_init_source="heterogeneous_numpy")
+        return _prepare_heterogeneous_membrane_initial_arrays(
+            axon,
+            backend,
+            nx=nx,
+            dtype_local=dtype_local,
+        )
+    record_benchmark_metadata(membrane_init_source="backend_jax")
+    Vm0 = initial_voltage(axon, nx, dtype_local)
+    gates0 = backend.init_gates(V0_mV=Vm0)
+    state0 = membrane.init_membrane_state(Nx=nx, dtype_local=dtype_local, V0_mV=Vm0)
+    background_current = backend.background_current()
+    return Vm0, gates0, tuple(state0), background_current
+
+
+def _try_prepare_uniform_rattay_initial_arrays(
+    axon: Axon,
+    membrane: IonChannelModelBase,
+    backend: ICMBackend,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> tuple[Array, Array, tuple[Array, ...], Array] | None:
+    """Prepare the common Rattay/Rattay+passive initial state on the host."""
+
+    if not isinstance(backend, UniformICMBackend):
+        return None
+    if int(backend.Nx) != int(nx) or membrane.membrane_state_specs():
+        return None
+    rattay = _uniform_rattay_component(membrane)
+    if rattay is None or _membrane_uses_rate_table(membrane):
+        return None
+
+    np_dtype = np.dtype(dtype_local)
+    vm0_value = float(getattr(axon, "v_init", 0.0))
+    vm0_np = np.full((int(nx),), vm0_value, dtype=np_dtype)
+    gates_row = _rattay_initial_gates_numpy(
+        rattay,
+        vm0_mV=vm0_value,
+        dtype=np_dtype,
+    )
+    gates_np = np.broadcast_to(gates_row, (int(nx), gates_row.shape[0])).copy()
+    background_np = np.zeros((int(nx),), dtype=np_dtype)
+    return (
+        jnp.asarray(vm0_np, dtype=dtype_local),
+        jnp.asarray(gates_np, dtype=dtype_local),
+        (),
+        jnp.asarray(background_np, dtype=dtype_local),
+    )
+
+
+def _uniform_rattay_component(membrane: IonChannelModelBase) -> RattayAberhamICM | None:
+    if isinstance(membrane, RattayAberhamICM):
+        return membrane
+    if not isinstance(membrane, CompositeICM):
+        return None
+    rattay_components: list[RattayAberhamICM] = []
+    for component in membrane.models:
+        if isinstance(component, RattayAberhamICM):
+            rattay_components.append(component)
+        elif not isinstance(component, PassiveICM):
+            return None
+        elif component.gate_names():
+            return None
+    if len(rattay_components) != 1:
+        return None
+    rattay = rattay_components[0]
+    if tuple(membrane.gate_names()) != tuple(rattay.gate_names()):
+        return None
+    return rattay
+
+
+def _membrane_uses_rate_table(membrane: IonChannelModelBase) -> bool:
+    if getattr(membrane, "_rate_table", None) is not None:
+        return True
+    if isinstance(membrane, CompositeICM):
+        return any(_membrane_uses_rate_table(component) for component in membrane.models)
+    return False
+
+
+def _rattay_initial_gates_numpy(
+    model: RattayAberhamICM,
+    *,
+    vm0_mV: float,
+    dtype: np.dtype,
+) -> np.ndarray:
+    """NumPy equivalent of RattayAberhamICM.init_gates for scalar Vm0."""
+
+    v = dtype.type(vm0_mV)
+
+    def vtrap(x_value: np.generic, y_value: float) -> np.generic:
+        y = dtype.type(y_value)
+        z = x_value / y
+        if abs(float(z)) < 1e-6:
+            return y * (dtype.type(1.0) - z / dtype.type(2.0))
+        return x_value / (dtype.type(np.exp(z)) - dtype.type(1.0))
+
+    alpha_m = vtrap(
+        dtype.type(2.5) - dtype.type(0.1) * (v + dtype.type(70.0)),
+        1.0,
+    )
+    alpha_h = dtype.type(0.07) * dtype.type(
+        np.exp(-(v + dtype.type(70.0)) / dtype.type(20.0))
+    )
+    alpha_n = dtype.type(0.1) * vtrap(
+        dtype.type(1.0) - dtype.type(0.1) * (v + dtype.type(70.0)),
+        1.0,
+    )
+    beta_m = dtype.type(4.0) * dtype.type(
+        np.exp(-(v + dtype.type(70.0)) / dtype.type(18.0))
+    )
+    beta_h = dtype.type(1.0) / (
+        dtype.type(np.exp(dtype.type(3.0) - dtype.type(0.1) * (v + dtype.type(70.0))))
+        + dtype.type(1.0)
+    )
+    beta_n = dtype.type(0.125) * dtype.type(
+        np.exp(-(v + dtype.type(70.0)) / dtype.type(80.0))
+    )
+    alpha = np.asarray((alpha_m, alpha_h, alpha_n), dtype=dtype)
+    beta = np.asarray((beta_m, beta_h, beta_n), dtype=dtype)
+    return alpha / np.maximum(alpha + beta, dtype.type(1e-12))
+
+
+def _prepare_heterogeneous_membrane_initial_arrays(
+    axon: Axon,
+    backend: HeterogeneousICMBackend,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> tuple[Array, Array, tuple[Array, ...], Array]:
+    """Host-side initial arrays for heterogeneous compartment membranes."""
+
+    np_dtype = np.dtype(dtype_local)
+    vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
+    gates_np = np.zeros((nx, backend.n_gates_max), dtype=np_dtype)
+    background_np = np.zeros((nx,), dtype=np_dtype)
+    for group in backend.groups:
+        indices = np.asarray(group.indices, dtype=np.int64)
+        if group.gate_size:
+            local_v = jnp.asarray([vm0_np[indices[0]]], dtype=dtype_local)
+            local_gates = np.asarray(
+                group.model.init_gates(local_v),
+                dtype=np_dtype,
+            )
+            gates_np[indices, : group.gate_size] = np.asarray(
+                np.broadcast_to(local_gates, (len(indices), group.gate_size)),
+                dtype=np_dtype,
+            )
+        background_np[indices] = np.asarray(
+            group.model.I_background(len(indices)),
+            dtype=np_dtype,
+        )
+    return (
+        jnp.asarray(vm0_np, dtype=dtype_local),
+        jnp.asarray(gates_np, dtype=dtype_local),
+        (),
+        jnp.asarray(background_np, dtype=dtype_local),
+    )
 
 
 def prepare_cable_runtime(

@@ -31,10 +31,33 @@ def _normalize_progress_mode(progress: ProgressOption) -> ProgressMode | None:
 
 
 def _dispatch_method(group: Any) -> str:
-    if group.size < 2:
-        return "scalar"
     prefix = "batch" if group.geometry_shared else "parameter-batch"
     return f"{prefix}-{group.mode}-cable"
+
+
+def emit_initial_progress(
+    progress: ProgressOption,
+    *,
+    rows: int,
+    message: str,
+) -> None:
+    """Emit a progress line before a dispatch plan exists."""
+
+    mode = _normalize_progress_mode(progress)
+    if mode is None:
+        return
+
+    event = ProgressEvent(stage="dispatch", rows=int(rows), message=message)
+    if mode in {"auto", "rich"}:
+        try:
+            from rich.console import Console
+
+            Console().print(f"[dim]{event.plain_text()}[/dim]")
+            return
+        except ImportError:
+            if mode == "rich":
+                raise
+    print(event.plain_text(), flush=True)
 
 
 @dataclass(frozen=True)
@@ -249,11 +272,11 @@ class DispatchProgress:
             )
             return
         self._rich.update(self._group_task, description=self._event_label(event))
-        if event.stage in {"route", "prepare", "lowering", "result"}:
+        if event.stage in {"route", "prepare", "batch", "lowering", "kernel", "result"}:
             self._rich.console.print(f"[dim]{event.plain_text()}[/dim]")
 
     def _render_plain_event(self, event: ProgressEvent) -> None:
-        if event.stage == "kernel" and event.total == 1:
+        if event.stage == "kernel" and event.total == 1 and event.message == "chunks":
             return
         print(f"  {event.plain_text()}", flush=True)
 
@@ -277,4 +300,5 @@ __all__ = [
     "ProgressMode",
     "ProgressOption",
     "ProgressStage",
+    "emit_initial_progress",
 ]

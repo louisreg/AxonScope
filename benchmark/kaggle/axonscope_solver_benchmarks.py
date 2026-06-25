@@ -154,6 +154,8 @@ def main() -> None:
             example08_recording="observer_only",
             progress=True,
         )
+    elif BENCHMARK == "population_tsim_gpu":
+        run_population_tsim_gpu(out_dir)
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -165,7 +167,8 @@ def main() -> None:
             "realistic_stress_gpu, realistic_stress_single_vm, "
             "realistic_stress_single_vm_cpu, realistic_stress_single_vm_gpu, "
             "realistic_stress_observer, "
-            "realistic_stress_observer_cpu, realistic_stress_observer_gpu, or both."
+            "realistic_stress_observer_cpu, realistic_stress_observer_gpu, "
+            "population_tsim_gpu, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -497,6 +500,26 @@ def run_realistic_examples(
     run(command, cwd=CHECKOUT_DIR)
 
 
+def run_population_tsim_gpu(out_dir: pathlib.Path) -> None:
+    result_dir = out_dir / "population_tsim_gpu"
+    profile_dir = out_dir / "population_tsim_gpu_profiles"
+    command = [
+        sys.executable,
+        "benchmark/nrv_performance/run.py",
+        "--suite",
+        "population_tsim_gpu",
+        "--out-dir",
+        str(result_dir),
+        "--prefix",
+        "population_tsim_gpu",
+        "--",
+        "--report-dir",
+        str(profile_dir),
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_population_tsim_summary(result_dir / "population_tsim_gpu.csv")
+
+
 def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:
     if not path.exists():
         print(f"summary missing: {path}")
@@ -531,6 +554,26 @@ def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:
                 f"rec={row['recording']} iinj={row['iinj_mode']}: "
                 f"kernel={kernel_ms:.3f} ms total+inputs={float(row['total_with_inputs_ms']):.3f} ms"
             )
+    if len(rows) > limit:
+        print(f"... {len(rows) - limit} more rows")
+
+
+def print_population_tsim_summary(path: pathlib.Path, *, limit: int = 12) -> None:
+    if not path.exists():
+        print(f"population summary missing: {path}")
+        return
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    print(f"\nPOPULATION TSIM GPU summary: {path}")
+    for row in rows[:limit]:
+        print(
+            f"n={int(row['fiber_count_simulated']):3d} "
+            f"mrg={int(row['mrg_count']):3d} rattay={int(row['rattay_count']):3d} "
+            f"tsim={float(row['tsim_ms']):g} ms backend={row.get('jax_backend', '')} "
+            f"AS_first={float(row['as_total_first_s']):.3f}s "
+            f"AS_warm={float(row['as_total_warm_median_s']):.3f}s "
+            f"groups={row.get('as_group_count')} padded={row.get('as_padded_groups')}"
+        )
     if len(rows) > limit:
         print(f"... {len(rows) - limit} more rows")
 

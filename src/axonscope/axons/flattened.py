@@ -144,19 +144,22 @@ def flatten_layout(layout: "Layout") -> FlattenedLayout:
 def _flatten_x_centers(layout: "Layout") -> FlattenedLayout:
     element = layout.elements[0]
     section = element.section
-    x_um = np.asarray(layout.x_centers_um, dtype=np.float32)
-    lengths_um = _control_lengths_um(x_um, total_length_um=layout.length_um).astype(np.float32)
-    if x_um.shape[0] == 1:
+    raw_x_um = np.asarray(layout.x_centers_um, dtype=np.float32)
+    lengths_um = _control_lengths_um(raw_x_um, total_length_um=layout.length_um).astype(np.float32)
+    if raw_x_um.shape[0] == 1:
         half_width = 0.5 * float(lengths_um[0])
         edges_um = np.asarray(
-            [float(x_um[0]) - half_width, float(x_um[0]) + half_width],
+            [float(raw_x_um[0]) - half_width, float(raw_x_um[0]) + half_width],
             dtype=np.float32,
         )
     else:
-        edges_um = np.empty((x_um.shape[0] + 1,), dtype=np.float32)
-        edges_um[1:-1] = 0.5 * (x_um[:-1] + x_um[1:])
-        edges_um[0] = float(x_um[0]) - 0.5 * float(x_um[1] - x_um[0])
-        edges_um[-1] = float(x_um[-1]) + 0.5 * float(x_um[-1] - x_um[-2])
+        edges_um = np.empty((raw_x_um.shape[0] + 1,), dtype=np.float32)
+        edges_um[1:-1] = 0.5 * (raw_x_um[:-1] + raw_x_um[1:])
+        edges_um[0] = float(raw_x_um[0]) - 0.5 * float(raw_x_um[1] - raw_x_um[0])
+        edges_um[-1] = float(raw_x_um[-1]) + 0.5 * float(raw_x_um[-1] - raw_x_um[-2])
+    shift_um = float(layout.x_shift_um)
+    x_um = (raw_x_um.astype(np.float64) + shift_um).astype(np.float32)
+    edges_um = (edges_um.astype(np.float64) + shift_um).astype(np.float32)
     count = int(x_um.shape[0])
     return FlattenedLayout(
         x_um=x_um,
@@ -206,9 +209,13 @@ def _flatten_elements(layout: "Layout") -> FlattenedLayout:
         periaxonal.extend(section.periaxonal for _ in range(element.compartments))
         cursor += element.length_um
 
+    shift_um = float(layout.x_shift_um)
+    x_um = np.asarray(x_positions, dtype=np.float64) + shift_um
+    edges_um = np.asarray(edges, dtype=np.float64) + shift_um
+
     return FlattenedLayout(
-        x_um=np.asarray(x_positions, dtype=np.float32),
-        edges_um=np.asarray(edges, dtype=np.float32),
+        x_um=x_um.astype(np.float32),
+        edges_um=edges_um.astype(np.float32),
         lengths_um=np.asarray(lengths, dtype=np.float32),
         diam_um=np.asarray(diam, dtype=np.float32),
         Ra_ohm_cm=np.asarray(Ra, dtype=np.float32),

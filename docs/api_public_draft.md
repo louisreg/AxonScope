@@ -157,19 +157,18 @@ Geometry still needs to anticipate two advanced cases:
 - non-uniform fibers may contain several anatomical sections inside one
   numerical compartment, so section assignment cannot always be a simple
   one-section-per-compartment lookup;
-- myelinated fibers need an explicit way to shift Ranvier node positions in
-  space, for example to phase-align or de-align nodes across fibers in a
-  pool.
+- myelinated fibers can phase Ranvier node positions along the intrinsic
+  one-dimensional layout axis, for example to align or de-align nodes across
+  fibers in a pool.
 
-Candidate public hooks:
+Current public hook:
 
 ```python
-axon.shift_nodes(delta_um=25.0)
+axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5, x_shift=25.0 * axs.um)
 stimulation = axs.analytical.point_source_stimulation(
     electrode,
     axon.layout.position_values(unit=axs.um) * axs.um,
     sigma=0.3 * axs.S_per_m,
-    axon_x_offset=0.0 * axs.um,
     axon_y=20.0 * axs.um,
     axon_z=30.0 * axs.um,
 )

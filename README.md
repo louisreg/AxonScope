@@ -19,7 +19,7 @@ treated as supported compatibility.
 - Executable `AxonSimulation` root object plus public `simulate(...)` and
   `simulate_pool(...)` wrappers.
 - Structured post-hoc analysis definitions with per-axon statuses, population
-  denominators, and legacy low-level rasterization helpers.
+  denominators, and small low-level spike/raster helpers.
 - Automatic pool dispatch with scalar fallback, strict batches, parameter
   batches, and padded double-cable batches.
 - Fast unit tests and optional NRV validation tests.
@@ -83,7 +83,7 @@ axs.performance    simulation memory estimates and runtime/device policies
 axs.inspection     printable planning, dispatch, lowering, kernel, and result reports
 axs.protocols      threshold, sweep, and recruitment workflows
 axs.dispatcher     pool dispatch inspection and advanced execution helpers
-axs.solvers        advanced solver facade and low-level runtime builders
+axs.solvers        stable solver facade, solver options, and batch execution knobs
 axs.signals        typed, extensible recording signal descriptors
 axs.positions      typed position selectors for analyses and criteria
 axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
@@ -187,6 +187,17 @@ sim.add_extracellular_stimulation(stimulation=extracellular)
 run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
 result = run.single
 ```
+
+MRG layouts can phase the repeated node motif along their local
+one-dimensional axis, for example when importing NRV node-shifted fiber tables:
+
+```python
+axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5, x_shift=80.0 * axs.um)
+```
+
+`x_shift` sets the intrinsic distance from the axon start to the first node
+start. It changes local compartment/node positions only; it is not an
+`AxonInstance` world coordinate.
 
 Point-source geometry is a quick-start helper under `axs.analytical`. It is
 sampled into an `ExtracellularFootprint`, paired with a stimulus as an
@@ -384,6 +395,18 @@ python benchmark/runtime/environment_info_demo.py
 python benchmark/hotpaths/run.py --list
 python benchmark/hotpaths/run.py --workload all --preset smoke
 python benchmark/nrv_performance/run.py --list
+```
+
+GPU validation on Kaggle uses the same population timing runner in AxonScope-only
+mode, with a synthetic NRV-shaped population so the Kaggle worker does not need
+NRV installed:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --benchmark population_tsim_gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60
 ```
 
 Use `simulation.estimate()` before large runs to inspect retained Vm, dense

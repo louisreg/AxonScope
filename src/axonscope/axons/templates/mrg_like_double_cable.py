@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
 
+import numpy as np
+
 from axonscope.utils import units
 from axonscope.utils.units import (
     axoplasmic_resistivity_t,
@@ -29,8 +31,6 @@ from axonscope.utils.validation import (
 from axonscope.axons.layout import Layout, LayoutElement
 from axonscope.axons.section import PeriaxonalLayer, Section
 from axonscope.axons.templates._mrg_morphology import (
-    _is_exact_tabulated_diameter,
-    _mrg_polynomials,
     get_mrg_morphology,
 )
 from axonscope.membranes import SectionLayout
@@ -127,7 +127,20 @@ def _compartments_for_section(value: dict[str, int] | int, section_name: str) ->
     return value.get(section_name.lower(), 1)
 
 
-def mrg_like_length_from_nodes(diameter: length_t, nodes: int) -> float:
+def mrg_like_node_spacing(diameter: length_t, *, fit_all: bool = False) -> float:
+    """Return the MRG-like center-to-center node spacing in micrometers."""
+
+    diameter_um = units.require_length_um(diameter, name="diameter")
+    return float(get_mrg_morphology(diameter_um, fit_all=fit_all).deltax)
+
+
+def mrg_like_length_from_nodes(
+    diameter: length_t,
+    nodes: int,
+    *,
+    x_shift: length_t | None = None,
+    fit_all: bool = False,
+) -> float:
     """Return the NRV-compatible MRG-like length for a requested node count.
 
     Parameters
@@ -136,18 +149,26 @@ def mrg_like_length_from_nodes(diameter: length_t, nodes: int) -> float:
         Fiber diameter, with units.
     nodes:
         Requested number of Ranvier nodes.
+    x_shift:
+        Optional intrinsic distance from the axon start to the first node
+        start. This phases the repeated MRG motif without assigning world
+        coordinates.
     """
 
     nodes = _normalize_nodes(nodes)
-    diameter_um = units.require_length_um(diameter, name="diameter")
-    if _is_exact_tabulated_diameter(diameter_um):
-        deltax = get_mrg_morphology(diameter_um).deltax
-    else:
-        deltax = float(_mrg_polynomials()["deltax_length"](diameter_um))
-    return float(math.ceil(deltax * (nodes - 1)))
+    deltax = mrg_like_node_spacing(diameter, fit_all=fit_all)
+    shift_um = 0.0 if x_shift is None else units.require_length_um(x_shift, name="x_shift")
+    phase_um = float(shift_um) % float(deltax)
+    return float(math.ceil(phase_um + deltax * (nodes - 1)))
 
 
-def mrg_like_nodes_from_length(diameter: length_t, length: length_t) -> int:
+def mrg_like_nodes_from_length(
+    diameter: length_t,
+    length: length_t,
+    *,
+    x_shift: length_t | None = None,
+    fit_all: bool = False,
+) -> int:
     """Return the approximate node count for a requested MRG-like length.
 
     Parameters
@@ -156,13 +177,20 @@ def mrg_like_nodes_from_length(diameter: length_t, length: length_t) -> int:
         Fiber diameter, with units.
     length:
         Requested axon length, with units.
+    x_shift:
+        Optional intrinsic distance from the axon start to the first node
+        start.
     """
 
     length_um = units.require_length_um(length, name="length")
     if length_um <= 0:
         raise ValueError(f"length must be positive, got {length}.")
-    morphology = get_mrg_morphology(units.require_length_um(diameter, name="diameter"))
-    return int(math.floor(length_um / morphology.deltax)) + 1
+    deltax = mrg_like_node_spacing(diameter, fit_all=fit_all)
+    shift_um = 0.0 if x_shift is None else units.require_length_um(x_shift, name="x_shift")
+    phase_um = float(shift_um) % float(deltax)
+    if length_um <= phase_um:
+        return 0
+    return int(math.floor((length_um - phase_um) / deltax)) + 1
 
 
 def build_mrg_like_geometry(
@@ -170,6 +198,7 @@ def build_mrg_like_geometry(
     diameter: length_t,
     nodes: int,
     length: length_t | None = None,
+    x_shift: length_t | None = None,
     fit_all: bool = False,
     mysa_length: length_t = _DEFAULT_MYSA_LENGTH,
     node_length: length_t = _DEFAULT_NODE_LENGTH,
@@ -191,6 +220,10 @@ def build_mrg_like_geometry(
     length:
         Optional nominal length, with units. If omitted, MRG internode spacing determines
         the length from `nodes`.
+    x_shift:
+        Intrinsic phase shift along the MRG motif: distance from the axon
+        start to the first node start. Values are wrapped modulo the node
+        spacing.
     fit_all:
         Use polynomial morphology fits even for tabulated MRG diameters.
     mysa_length, node_length:
@@ -249,9 +282,19 @@ def build_mrg_like_geometry(
         units.require_length_um(stin_space, name="stin_space"),
         name="stin_space",
     )
-    if length_um is None:
-        length_um = mrg_like_length_from_nodes(units.Q_(diameter_um, "micrometer"), nodes) + 1.0
     morph = get_mrg_morphology(float(diameter_um), fit_all=fit_all)
+    x_shift_um = 0.0 if x_shift is None else units.require_length_um(x_shift, name="x_shift")
+    phase_um = float(x_shift_um) % float(morph.deltax)
+    if length_um is None:
+        length_um = (
+            mrg_like_length_from_nodes(
+                units.Q_(diameter_um, "micrometer"),
+                nodes,
+                x_shift=units.Q_(phase_um, "micrometer"),
+                fit_all=fit_all,
+            )
+            + 1.0
+        )
 
     paralength1 = float(mysa_length_um)
     nodelength = float(node_length_um)
@@ -281,6 +324,26 @@ def build_mrg_like_geometry(
     )
 
     seq = mrg_like_section_sequence()
+    motif_lengths = {
+        "node": nodelength,
+        "MYSA": paralength1,
+        "FLUT": paralength2,
+        "STIN": interlength,
+    }
+    seq_lengths = [motif_lengths[kind] for kind in seq]
+    seq_boundaries = [0.0]
+    for seq_length in seq_lengths:
+        seq_boundaries.append(seq_boundaries[-1] + float(seq_length))
+    motif_length = float(seq_boundaries[-1])
+    if not math.isclose(motif_length, float(morph.deltax), rel_tol=1e-9, abs_tol=1e-6):
+        raise ValueError(
+            "MRG motif length does not match node spacing; "
+            f"motif={motif_length} um, deltax={morph.deltax} um."
+        )
+    start_coordinate = (motif_length - phase_um) % motif_length
+    if math.isclose(start_coordinate, motif_length, rel_tol=0.0, abs_tol=1e-9):
+        start_coordinate = 0.0
+    seq_index = int(np.searchsorted(np.asarray(seq_boundaries[1:]), start_coordinate, side="right"))
     lengths: list[float] = []
     diam: list[float] = []
     Ra: list[float] = []
@@ -291,14 +354,18 @@ def build_mrg_like_geometry(
     periaxonal: list[PeriaxonalLayer] = []
 
     x0 = 0.0
-    k = 0
+    first_section = True
     while True:
         remaining_um = float(length_um) - x0
         if remaining_um <= _GEOMETRY_STOP_ATOL_UM:
             break
-        kind = seq[k % len(seq)]
+        kind = seq[seq_index % len(seq)]
+        natural_length = motif_lengths[kind]
+        if first_section:
+            natural_length = float(seq_boundaries[seq_index + 1] - start_coordinate)
+            first_section = False
         if kind == "node":
-            Lk = nodelength
+            Lk = natural_length
             dk = float(morph.nodeD)
             ratio = 1.0
             Rak = rhoa / 10000.0
@@ -306,7 +373,7 @@ def build_mrg_like_geometry(
             leakk_mS = 0.0
             xr, xg, xc = Rpn0, 1e10, 0.0
         elif kind == "MYSA":
-            Lk = paralength1
+            Lk = natural_length
             dk = float(morph.fiberD)
             ratio = float(morph.paraD1 / morph.fiberD)
             Rak = rhoa * (1.0 / ratio**2) / 10000.0
@@ -314,7 +381,7 @@ def build_mrg_like_geometry(
             leakk_mS = 0.001 * ratio * 1e3
             xr, xg, xc = Rpn1, mygm / (morph.nl * 2.0), mycm / (morph.nl * 2.0)
         elif kind == "FLUT":
-            Lk = paralength2
+            Lk = natural_length
             dk = float(morph.fiberD)
             ratio = float(morph.paraD2 / morph.fiberD)
             Rak = rhoa * (1.0 / ratio**2) / 10000.0
@@ -322,7 +389,7 @@ def build_mrg_like_geometry(
             leakk_mS = 0.0001 * ratio * 1e3
             xr, xg, xc = Rpn2, mygm / (morph.nl * 2.0), mycm / (morph.nl * 2.0)
         else:
-            Lk = interlength
+            Lk = natural_length
             dk = float(morph.fiberD)
             ratio = float(morph.axonD / morph.fiberD)
             Rak = rhoa * (1.0 / ratio**2) / 10000.0
@@ -348,7 +415,7 @@ def build_mrg_like_geometry(
             )
         )
         x0 += Lk
-        k += 1
+        seq_index += 1
 
     if sum(1 for value in is_node if value) < 2:
         raise ValueError("Generated MRG-like layout has fewer than 2 nodes.")
@@ -486,6 +553,7 @@ def mrg_like_layout(
     membranes: SectionLayout | None = None,
     length: length_t | None = None,
     compartments: SectionCompartments = 1,
+    x_shift: length_t | None = None,
     temperature: temperature_t = _DEFAULT_TEMPERATURE,
     fit_all: bool = False,
     mysa_length: length_t = _DEFAULT_MYSA_LENGTH,
@@ -502,12 +570,16 @@ def mrg_like_layout(
     Parameters are the same as `build_mrg_like_geometry`; `membranes` may
     override the default MRG section membrane assignment. `compartments` can
     be an integer or a mapping such as `{"node": 1, "FLUT": 2, "STIN": 4}`.
+    `x_shift` phases the repeated MRG motif without assigning world
+    coordinates; it is the distance from the axon start to the first node
+    start.
     """
 
     geometry = build_mrg_like_geometry(
         diameter=diameter,
         nodes=nodes,
         length=length,
+        x_shift=x_shift,
         fit_all=fit_all,
         mysa_length=mysa_length,
         node_length=node_length,
@@ -540,6 +612,7 @@ class MRGLikeDoubleCableTemplate:
     nodes: int
     length: length_t | None = None
     compartments: SectionCompartments = 1
+    x_shift: length_t | None = None
     fit_all: bool = False
     mysa_length: length_t = _DEFAULT_MYSA_LENGTH
     node_length: length_t = _DEFAULT_NODE_LENGTH
@@ -556,7 +629,12 @@ class MRGLikeDoubleCableTemplate:
 
         if self.length is not None:
             return units.require_length_um(self.length, name="length")
-        return mrg_like_length_from_nodes(self.diameter, self.nodes)
+        return mrg_like_length_from_nodes(
+            self.diameter,
+            self.nodes,
+            x_shift=self.x_shift,
+            fit_all=self.fit_all,
+        )
 
     def geometry(self) -> MRGLikeDoubleCableGeometry:
         """Return the expanded MRG-like section geometry."""
@@ -565,6 +643,7 @@ class MRGLikeDoubleCableTemplate:
             diameter=self.diameter,
             nodes=self.nodes,
             length=self.length,
+            x_shift=self.x_shift,
             fit_all=self.fit_all,
             mysa_length=self.mysa_length,
             node_length=self.node_length,
@@ -623,5 +702,6 @@ __all__ = [
     "mrg_like_layout",
     "mrg_like_length_from_nodes",
     "mrg_like_nodes_from_length",
+    "mrg_like_node_spacing",
     "mrg_like_section_sequence",
 ]

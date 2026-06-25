@@ -28,10 +28,13 @@ from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
+from axonscope.backends.execution import batch_options_for_execution_context
+from axonscope.backends.jax.recording import batch_options_from_recording
 from axonscope.backends.jax.kernels import DoubleCableKernel
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
+    DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
     resolve_double_cable_block_solver,
 )
 from axonscope.backends.jax.batch_kernels import (
@@ -114,6 +117,24 @@ def test_batch_recording_resolves_common_policies():
         BatchOptions(double_cable_block_solver="dense")
 
 
+def test_batch_options_none_defaults_to_observer_chunking():
+    default = BatchOptions.none()
+    unchunked = BatchOptions.none(time_chunk_steps=None)
+
+    assert default.recording.mode == "none"
+    assert default.time_chunk_steps == DEFAULT_OBSERVER_TIME_CHUNK_STEPS
+    assert unchunked.recording.mode == "none"
+    assert unchunked.time_chunk_steps is None
+
+
+def test_recording_none_lowers_to_default_observer_chunking():
+    options = batch_options_from_recording(axs.Recording.none())
+
+    assert options is not None
+    assert options.recording.mode == "none"
+    assert options.time_chunk_steps == DEFAULT_OBSERVER_TIME_CHUNK_STEPS
+
+
 def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
     assert (
         _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4096)
@@ -128,6 +149,27 @@ def test_pcr_soa_batch_native_route_starts_at_realistic_batches():
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=50)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=50)
+
+
+def test_execution_context_auto_keeps_cpu_solver_policy():
+    context = type("Context", (), {"platform": "cpu"})()
+
+    full = batch_options_for_execution_context(BatchOptions.full(), context)
+    compact = batch_options_for_execution_context(
+        BatchOptions.none(),
+        context,
+    )
+    explicit = batch_options_for_execution_context(
+        BatchOptions.none(double_cable_block_solver="thomas"),
+        context,
+    )
+
+    assert full is not None
+    assert compact is not None
+    assert explicit is not None
+    assert full.double_cable_block_solver == "thomas"
+    assert compact.double_cable_block_solver == "thomas"
+    assert explicit.double_cable_block_solver == "thomas"
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -397,6 +439,33 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
         rtol=1e-6,
         atol=1e-6,
     )
+    footprint = jnp.asarray(factorized.footprint_mV_per_A, dtype=runtime.membrane.dtype)
+    lower_rows = jnp.broadcast_to(runtime.cable.lower[None, :], footprint.shape)
+    upper_rows = jnp.broadcast_to(runtime.cable.upper[None, :], footprint.shape)
+    forcing = batch_kernels._single_cable_factorized_forcing_footprint(
+        footprint,
+        lower=lower_rows,
+        upper=upper_rows,
+        dtype_local=runtime.membrane.dtype,
+    )
+    expected_forcing = jnp.stack(
+        [
+            batch_kernels.apply_diffusion_operator(
+                row,
+                runtime.cable.lower,
+                runtime.cable.diag,
+                runtime.cable.upper,
+            )
+            for row in footprint
+        ],
+        axis=0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(forcing),
+        np.asarray(expected_forcing),
+        rtol=1e-6,
+        atol=1e-6,
+    )
 
     sparse_iinj = build_sparse_intracellular_current_density_batch(
         [axon, axon],
@@ -431,13 +500,25 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
         options=BatchOptions.none(),
         observers=observer,
     )
+    factorized_chunked = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        intracellular_current_density_mid=sparse_iinj,
+        options=BatchOptions.none(time_chunk_steps=17),
+        observers=observer,
+    )
 
     assert dense_out.Vm is None
     assert factorized_out.Vm is None
+    assert factorized_chunked.Vm is None
     assert dense_out.observations is not None
     assert factorized_out.observations is not None
+    assert factorized_chunked.observations is not None
     np.testing.assert_array_equal(
         np.asarray(factorized_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(factorized_chunked.observations[VM_RASTER_OBSERVATION_KEY].words),
         np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
@@ -722,6 +803,67 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
     assert pcr_soa_none.shape == (2, int(round(tsim / dt)), 0)
 
 
+def test_double_cable_compact_event_observer_thomas_matches_full_vm():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [
+        base_contexts,
+        scale_extracellular_contexts(base_contexts, 0.5),
+    ]
+    vext_mid = build_vstim_midpoint_batch(axon, context_batch, tsim_ms=tsim, dt_ms=dt)
+    vext_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(
+        runtime=runtime,
+        Veinit_mV=float(axon.Veinit),
+    )
+
+    compact = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        observers=observer,
+    )
+    full = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.full(double_cable_block_solver="thomas"),
+    )
+
+    center = axon.n_compartments // 2
+    assert compact.Vm is None
+    assert compact.observations is not None
+    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    np.testing.assert_array_equal(
+        np.any(raster.unpack()[:, 0, 0, :], axis=1),
+        np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
+    )
+
+
 def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_vm(
     monkeypatch,
 ):
@@ -787,6 +929,86 @@ def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_v
     np.testing.assert_array_equal(
         np.any(raster.unpack()[:, 0, 0, :], axis=1),
         np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
+    )
+
+
+def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_contexts = tuple(axon.extracellular_contexts)
+    context_batch = [base_contexts, base_contexts]
+    dense_mid = build_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    dense_previous = build_vstim_initial_previous_batch(
+        axon,
+        context_batch,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        context_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        observers=observer,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        observers=observer,
+    )
+    chunked = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        options=BatchOptions.none(
+            double_cable_block_solver="thomas",
+            time_chunk_steps=17,
+        ),
+        observers=observer,
+    )
+
+    assert dense.observations is not None
+    assert compact.observations is not None
+    assert chunked.observations is not None
+    np.testing.assert_array_equal(
+        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(chunked.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 

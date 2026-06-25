@@ -5,6 +5,7 @@ from axonscope.solvers.crank_nicholson import (
 from axonscope.solvers.options import (
     BatchOptions,
     BatchRecording,
+    DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
     SolverOptions,
     resolve_double_cable_block_solver,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "CrankNicholson",
     "BatchOptions",
     "BatchRecording",
+    "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
     "SolverOptions",
     "resolve_double_cable_block_solver",
 ]

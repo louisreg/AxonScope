@@ -9,7 +9,7 @@ threshold-search analyses are post-processing concerns.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -215,6 +215,66 @@ def init_vm_raster_state(
     return jnp.zeros(shape, dtype=jnp.uint32)
 
 
+def combine_vm_raster_chunk_states(
+    states: Sequence[VmRasterState],
+    *,
+    starts: Sequence[int],
+    lengths: Sequence[int] | None = None,
+    nt: int,
+) -> VmRasterState:
+    """Pack local chunk rasters back into one full-duration raster state."""
+
+    if not states:
+        raise ValueError("at least one VmRaster chunk state is required.")
+    if len(states) != len(starts):
+        raise ValueError("VmRaster chunk states and starts must have the same length.")
+    if lengths is not None and len(states) != len(lengths):
+        raise ValueError("VmRaster chunk states and lengths must have the same length.")
+
+    first = np.asarray(states[0], dtype=np.uint32)
+    if first.ndim < 1:
+        raise ValueError("VmRaster chunk state must have at least one word axis.")
+
+    word_count = (int(nt) + 31) // 32
+    combined = np.zeros(first.shape[:-1] + (word_count,), dtype=np.uint32)
+    static_shape = first.shape[:-1]
+
+    if lengths is None:
+        chunk_lengths = [None] * len(states)
+    else:
+        chunk_lengths = [int(length) for length in lengths]
+        if any(length < 0 for length in chunk_lengths):
+            raise ValueError("VmRaster chunk lengths must be non-negative.")
+
+    for state, start, length in zip(states, starts, chunk_lengths, strict=True):
+        chunk = np.asarray(state, dtype=np.uint32)
+        if chunk.shape[:-1] != static_shape:
+            raise ValueError("VmRaster chunk states must share static axes.")
+        start_index = int(start)
+        if start_index < 0:
+            raise ValueError("VmRaster chunk start indices must be non-negative.")
+        local_capacity = int(chunk.shape[-1]) * 32
+        local_count = min(
+            local_capacity if length is None else int(length),
+            local_capacity,
+            int(nt) - start_index,
+        )
+        if local_count <= 0:
+            continue
+        for local_step in range(local_count):
+            local_word = local_step // 32
+            local_bit = np.uint32(1 << (local_step & 31))
+            hits = (chunk[..., local_word] & local_bit) != 0
+            if not np.any(hits):
+                continue
+            global_step = start_index + local_step
+            global_word = global_step // 32
+            global_bit = np.uint32(1 << (global_step & 31))
+            combined[..., global_word] |= hits.astype(np.uint32) * global_bit
+
+    return jnp.asarray(combined)
+
+
 def _raster_probe_tables_for_batch(
     plan: VmRasterPlan,
     batch_size: int,
@@ -347,6 +407,7 @@ __all__ = [
     "VmRasterPlan",
     "VmRasterState",
     "build_vm_raster_plan",
+    "combine_vm_raster_chunk_states",
     "finalize_vm_raster_state",
     "init_vm_raster_state",
     "update_vm_raster_state_batch",

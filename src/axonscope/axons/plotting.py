@@ -92,7 +92,7 @@ def _section_spans(layout: "Layout") -> list[tuple[int, str, float, float, int]]
         ]
 
     spans: list[tuple[int, str, float, float, int]] = []
-    cursor = 0.0
+    cursor = float(layout.x_shift_um)
     for index, element in enumerate(layout.elements):
         start = cursor
         end = start + element.length_um

@@ -8,6 +8,7 @@ from axonscope.positions import ALL, CENTER, DISTAL, Indices
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
 from axonscope.backends.jax.observer_runtime import (
     build_vm_raster_plan,
+    combine_vm_raster_chunk_states,
     finalize_vm_raster_state,
     init_vm_raster_state,
     update_vm_raster_state_batch,
@@ -141,6 +142,31 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     assert result.nt == 35
     assert result.dt_ms == 0.1
     np.testing.assert_array_equal(result.unpack(), raster)
+
+
+def test_vm_raster_combines_local_chunk_states_across_word_boundaries():
+    chunk0 = np.zeros((1, 1, 1, 2), dtype=np.uint32)
+    chunk1 = np.zeros((1, 1, 1, 2), dtype=np.uint32)
+    chunk2 = np.zeros((1, 1, 1, 1), dtype=np.uint32)
+    chunk0[0, 0, 0, 0] |= np.uint32(1 << 0)
+    chunk0[0, 0, 0, 0] |= np.uint32(1 << 31)
+    chunk0[0, 0, 0, 1] |= np.uint32(1 << 8)
+    chunk1[0, 0, 0, 0] |= np.uint32(1 << 0)
+    chunk1[0, 0, 0, 0] |= np.uint32(1 << 9)
+    chunk1[0, 0, 0, 1] |= np.uint32(1 << 9)
+    chunk2[0, 0, 0, 0] |= np.uint32(1 << 4)
+
+    combined = combine_vm_raster_chunk_states(
+        [chunk0, chunk1, chunk2],
+        starts=[0, 40, 90],
+        lengths=[40, 50, 10],
+        nt=100,
+    )
+
+    raster = unpack_vm_raster_words(np.asarray(combined), nt=100)
+    expected = np.zeros((1, 1, 1, 100), dtype=bool)
+    expected[0, 0, 0, [0, 31, 40, 49, 81, 94]] = True
+    np.testing.assert_array_equal(raster, expected)
 
 
 def test_vm_raster_plan_rejects_non_threshold_observers():

@@ -52,6 +52,8 @@ def batch_options_from_recording_plan(
 
     recording = batch_recording_from_recording_plan(plan)
     if batch_options is None:
+        if recording.mode == "none":
+            return BatchOptions.none()
         return BatchOptions(recording=recording)
     return replace(batch_options, recording=recording)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import jax.numpy as jnp
 
 import axonscope as axs
 from axonscope import AxonInstance
@@ -13,6 +14,8 @@ from axonscope.channel_models.passive import PassiveICM
 from axonscope.stimulation import IntracellularContext
 from axonscope.backends.jax.runtime import (
     _membrane_runtime_cache_key,
+    _rattay_initial_gates_numpy,
+    _try_prepare_uniform_rattay_initial_arrays,
     precompute_extracellular_potential_mV,
     prepare_cable_runtime,
     prepare_extracellular_runtime,
@@ -20,6 +23,7 @@ from axonscope.backends.jax.runtime import (
     prepare_simulation_grid,
     prepare_solver_runtime,
 )
+from axonscope.channel_models.base_channel_model import CompositeICM
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
@@ -30,6 +34,7 @@ from axonscope.backends.jax.stimulation_runtime import (
     compile_intracellular_contexts,
 )
 from axonscope.utils import units
+from axonscope.channel_models.rattay_aberham import RattayAberhamICM
 
 
 class _UnsupportedIntracellularContext(IntracellularContext):
@@ -101,6 +106,47 @@ def test_prepare_membrane_runtime_reuses_static_runtime_for_same_signature():
     second = prepare_membrane_runtime(axon)
 
     assert second is first
+
+
+def test_rattay_numpy_initial_gates_match_channel_model():
+    model = RattayAberhamICM(celsius=37.0)
+
+    for vm0 in (-80.0, -70.0, -55.0):
+        actual = _rattay_initial_gates_numpy(
+            model,
+            vm0_mV=vm0,
+            dtype=np.dtype(np.float32),
+        )
+        expected = np.asarray(
+            model.init_gates(jnp.asarray([vm0], dtype=jnp.float32))[0],
+            dtype=np.float32,
+        )
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-7)
+
+
+def test_prepare_rattay_composite_initial_state_uses_host_fast_path():
+    axon = axs.axons.RattayAberham(
+        length=500.0 * axs.um,
+        diameter=0.8 * axs.um,
+        compartments=21,
+    )
+    runtime = prepare_membrane_runtime(axon)
+
+    assert isinstance(runtime.membrane, CompositeICM)
+    prepared = _try_prepare_uniform_rattay_initial_arrays(
+        axon,
+        runtime.membrane,
+        runtime.backend,
+        nx=runtime.Nx,
+        dtype_local=runtime.dtype,
+    )
+
+    assert prepared is not None
+    vm0, gates0, state0, background = prepared
+    np.testing.assert_allclose(np.asarray(vm0), np.asarray(runtime.Vm0_mV))
+    np.testing.assert_allclose(np.asarray(gates0), np.asarray(runtime.gates0))
+    assert state0 == ()
+    np.testing.assert_allclose(np.asarray(background), np.asarray(runtime.background_current))
 
 
 def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_axon():

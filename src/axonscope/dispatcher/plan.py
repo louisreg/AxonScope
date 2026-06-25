@@ -26,7 +26,6 @@ class DispatchItem:
     signature: tuple[Any, ...]
     mode: _CableMode
     membrane_signature: tuple[Any, ...]
-    membrane_family_sequence: tuple[Any, ...]
     cable_signature: tuple[Any, ...]
 
 
@@ -57,8 +56,6 @@ class DispatchGroup:
     def batch_kind(self) -> str:
         """Return the intended batch family for this group."""
 
-        if self.size < 2:
-            return "scalar"
         prefix = "strict" if self.geometry_shared else "parameter"
         return f"{prefix}-{self.mode}-cable"
 
@@ -85,27 +82,16 @@ class _PendingDispatchGroup:
     """Mutable grouping state used while building a dispatch plan."""
 
     items: list[DispatchItem]
-    longest_membrane_family_sequence: tuple[Any, ...]
 
     @classmethod
     def from_item(cls, item: DispatchItem) -> "_PendingDispatchGroup":
-        return cls(
-            items=[item],
-            longest_membrane_family_sequence=item.membrane_family_sequence,
-        )
+        return cls(items=[item])
 
     def can_accept(self, item: DispatchItem) -> bool:
-        if item.mode == "single":
-            return item.signature == self.items[0].signature
-        return _double_cable_membrane_sequence_can_join(
-            self.longest_membrane_family_sequence,
-            item.membrane_family_sequence,
-        )
+        return item.signature == self.items[0].signature
 
     def append(self, item: DispatchItem) -> None:
         self.items.append(item)
-        if len(item.membrane_family_sequence) > len(self.longest_membrane_family_sequence):
-            self.longest_membrane_family_sequence = item.membrane_family_sequence
 
 
 @dataclass(frozen=True)
@@ -313,7 +299,6 @@ def _make_dispatch_item(
         signature=signature,
         mode=metadata.mode,
         membrane_signature=metadata.membrane_signature,
-        membrane_family_sequence=metadata.membrane_family_sequence,
         cable_signature=metadata.cable_signature,
     )
 
@@ -332,56 +317,10 @@ def _dispatch_signature(item: DispatchItem) -> tuple[Any, ...]:
     return item.signature
 
 
-def _items_can_share_batch_runtime(items: Sequence[DispatchItem]) -> bool:
-    """Return whether items can share one compiled batch runtime."""
-
-    if not items:
-        return False
-    mode = items[0].mode
-    if any(item.mode != mode for item in items):
-        return False
-    if mode == "single":
-        return all(item.signature == items[0].signature for item in items)
-    return _double_cable_membranes_are_padding_compatible(
-        item.membrane_family_sequence for item in items
-    )
-
-
-def _double_cable_membranes_are_padding_compatible(
-    signatures: Iterable[tuple[Any, ...]],
-) -> bool:
-    """Return whether shorter double-cable rows match a longer membrane prefix."""
-
-    signatures = tuple(signatures)
-    if not signatures:
-        return False
-    longest = max(signatures, key=len)
-    return all(longest[: len(signature)] == signature for signature in signatures)
-
-
-def _double_cable_membrane_sequence_can_join(
-    longest: tuple[Any, ...],
-    candidate: tuple[Any, ...],
-) -> bool:
-    """Return whether `candidate` preserves the prefix-padding invariant."""
-
-    if len(candidate) <= len(longest):
-        return longest[: len(candidate)] == candidate
-    return candidate[: len(longest)] == longest
-
-
-def _double_cable_membrane_family_signature(axon: SolverAxon) -> Any:
-    """Return a coarse membrane signature used before padding compatibility."""
-
-    return _unique_membrane_families(_axon_membrane_family_sequence(axon))
-
-
 def _unique_membrane_families(signatures: Iterable[Any]) -> tuple[Any, ...]:
-    unique: list[Any] = []
-    for signature in signatures:
-        if signature not in unique:
-            unique.append(signature)
-    return tuple(unique)
+    """Return an order-independent membrane-family set signature."""
+
+    return tuple(sorted(set(signatures), key=repr))
 
 
 def _model_family_signature(model: Any) -> Any:

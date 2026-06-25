@@ -82,7 +82,12 @@ from axonscope.results import (
 from axonscope.recording import Recording, RecordingPlan, RecordingSpatial
 from axonscope.signals import Signal
 from axonscope.simulation import AxonSimulation, simulate, simulate_pool
-from axonscope.solvers import BatchOptions, BatchRecording, SolverOptions
+from axonscope.solvers import (
+    BatchOptions,
+    BatchRecording,
+    DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
+    SolverOptions,
+)
 from axonscope.stimulation import (
     AnalyticalExtracellularContext,
     ExtracellularContext,
@@ -214,6 +219,7 @@ __all__ = [
     "Electrode",
     "BatchOptions",
     "BatchRecording",
+    "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
     "SolverOptions",
     "simulate",
     "simulate_pool",

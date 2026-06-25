@@ -169,14 +169,26 @@ dispatch_results = run_pool(
 )
 ```
 
+Observer-only pool runs (`Recording.none()` plus solver-side observers, or
+`BatchOptions.none()`) use a stable default chunk size of
+`axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps. This reduces first-call JAX
+recompilation across duration sweeps because the compiled observer kernel sees
+a stable time-axis shape. The backend writes a local packed VmRaster state for
+each chunk and assembles the public full-duration raster after the scan. Pass
+`BatchOptions.none(time_chunk_steps=None)` explicitly when a single unchunked
+scan is desired.
+
 Compatible groups use batch kernels automatically. Incompatible groups fall
-back to scalar solves. The dispatcher now distinguishes three practical cases:
+back to scalar solves. Observer-only singleton groups also use the batch route,
+so compact population observers do not fork through the scalar solver. The
+dispatcher now distinguishes three practical cases:
 
 - **strict batch**: all rows share one exact cable geometry/runtime shape;
 - **parameter batch**: rows share one compiled model and `Nx`, but cable
   geometry differs by row;
-- **padded parameter batch**: double-cable rows share a compatible membrane
-  prefix, but `Nx` differs, so the dispatcher pads shorter rows internally.
+- **padded parameter batch**: double-cable rows share the same set of membrane
+  families, but `Nx` or local section phase differs, so the dispatcher pads
+  shorter rows internally and uses a row-indexed membrane backend.
 
 A compatible non-padded single-cable batch group currently means:
 
@@ -196,9 +208,10 @@ resolved against each original axon.
 
 The intended per-row differences in a batch are cable geometry, attached
 stimulation contexts, intracellular contexts, local extracellular footprints,
-and, for padded double-cable groups, the number of compartments. Per-row membrane
-parameters are not batched yet; if membrane signatures differ, the dispatcher
-keeps rows in separate groups.
+and, for padded double-cable groups, the number of compartments and intrinsic
+layout phase (`MRG(..., x_shift=...)`). Per-row membrane parameter values are
+not batched yet; if the membrane family set differs, the dispatcher keeps rows
+in separate groups.
 
 Inspect plans before running a pool with:
 
@@ -211,9 +224,9 @@ axs.dispatcher.plot_dispatch_plan(plan)
 Progress reporting is optional. `progress=True` uses Rich, while
 `progress="plain"` uses simple text output that is easy to capture in logs. The
 report is event-based: it announces the selected route for each dispatch group,
-runtime/cohort preparation, input lowering, kernel enqueue/chunks, and result
-assembly. JAX kernels cannot stream from inside one compiled scan; for finer
-solver progress, run chunked batches:
+batch/recording planning, runtime/cohort preparation, input lowering,
+compile/solve, kernel chunks, and result assembly. JAX kernels cannot stream
+from inside one compiled scan; for finer solver progress, run chunked batches:
 
 ```python
 results = axs.simulate_pool(
@@ -229,11 +242,15 @@ results = axs.simulate_pool(
 Plain output is intentionally compact, for example:
 
 ```text
+dispatch: rows=4 building dispatch plan
 Dispatch progress: 4 rows, 2 groups
 [1/2] group 0 batch-single-cable rows=3 Nx=101
   route group=0: route=batch-single-cable rows=3 Nx=101 compatible batch route
   prepare group=0: route=batch-single-cable rows=3 Nx=101 runtime mode=single
+  prepare group=0: route=batch-single-cable rows=3 Nx=101 cohort rows
+  batch group=0: route=batch-single-cable rows=3 Nx=101 recording plan recording=VmRaster
   lowering group=0: route=batch-single-cable rows=3 Nx=101 inputs intracellular=sparse_current_clamp extracellular=factorized_footprint
+  kernel group=0: route=batch-single-cable rows=3 Nx=101 compile/solve JAX kernel recording=VmRaster
   result group=0: route=batch-single-cable rows=3 Nx=101 assemble batch output output=observations
 ```
 

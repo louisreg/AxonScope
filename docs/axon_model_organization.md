@@ -40,7 +40,7 @@ New section/layout interfaces use short physical names and require units:
 - `Section(diameter=..., Ra=..., Cm=...)`
 - `Layout.single_uniform(..., length=...)`
 - `Layout.single_non_uniform(..., x=...)`
-- `Layout.sequence(..., section_lengths=..., lengths=...)`
+- `Layout.sequence(..., section_lengths=..., lengths=..., phase_shift=...)`
 - `PeriaxonalLayer(radial_conductance=..., radial_capacitance=..., axial_resistance=...)`
 
 Internally, AxonScope stores explicit canonical floats such as `diameter_um`,
@@ -106,6 +106,14 @@ layout = axs.axons.Layout.sequence(
     section_lengths=axs.units.Q_([1.0, 199.0], "micrometer"),
     compartments=[1, 8],
     lengths=1.0 * axs.mm,
+)
+
+phased = axs.axons.Layout.sequence(
+    [node, internode],
+    section_lengths=axs.units.Q_([1.0, 199.0], "micrometer"),
+    compartments=[1, 8],
+    lengths=1.0 * axs.mm,
+    phase_shift=80.0 * axs.um,
 )
 
 layout.plot(position_unit=axs.um, compartment_labels="auto")
@@ -222,7 +230,12 @@ Defines myelinated templates such as `MRG`.
 `src/axonscope/axons/templates/mrg_like_double_cable.py`
 
 Defines the reusable MRG-like double-cable layout template. It describes the
-node/MYSA/FLUT/STIN geometry and periaxonal structure.
+node/MYSA/FLUT/STIN geometry and periaxonal structure. Use
+`Layout.sequence(..., phase_shift=...)` for generic repeated motifs. Use
+`x_shift` on `MRG(...)` or `mrg_like_layout(...)` when a pool needs intrinsic
+MRG node phase shifts, such as NRV fractional `node_shift` conversion. Use
+`Layout.with_x_shift(...)` only for simple local translation of an already
+defined layout. Do not store anatomical placement on axon instances.
 
 ## Examples
 

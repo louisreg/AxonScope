@@ -91,6 +91,12 @@ geometry/fiber placement and AxonScope owns axon dynamics.
 
 - `01_nrv_pool_geometry.py`: use NRV when available to generate a fiber table,
   then map it into AxonScope simulations.
+- `02_realistic_fascicle_geometry_comparison.py`: recreate NRV's bundled
+  realistic fascicle-contour workflow, convert fractional NRV `node_shift`
+  values into AxonScope MRG `x_shift`, sample NRV's LIFE/FEM footprint into
+  AxonScope stimulation objects, then compare node layouts and fiber-by-fiber
+  activation across the full simulated population. Use `--trace-fibers` for
+  optional detailed single-fiber voltage traces.
 
 ## Tutorials
 

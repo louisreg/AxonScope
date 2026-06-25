@@ -585,6 +585,7 @@ def test_solver_facade_exposes_only_stable_solver_surface():
         "CrankNicholson",
         "BatchOptions",
         "BatchRecording",
+        "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
         "SolverOptions",
         "resolve_double_cable_block_solver",
     }

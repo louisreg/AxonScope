@@ -88,35 +88,81 @@ class VmRasterResult:
         if not results:
             raise ValueError("at least one VmRasterResult is required.")
         first = results[0]
-        row_aware_metadata = (
-            first.row_aware
-            and np.asarray(first.probe_indices).ndim == 3
-            and all(result.row_aware for result in results)
+        for result in results[1:]:
+            _check_concat_compatible(first, result)
+
+        max_probe_count = max(result.probe_count for result in results)
+        words = np.concatenate(
+            [
+                _pad_probe_axis(
+                    np.asarray(result.words, dtype=np.uint32),
+                    max_probe_count,
+                    fill_value=0,
+                )
+                for result in results
+            ],
+            axis=0,
         )
-        if row_aware_metadata:
-            probe_indices = np.concatenate(
-                [np.asarray(result.probe_indices) for result in results],
-                axis=0,
-            )
-            probe_mask = np.concatenate(
-                [np.asarray(result.probe_mask) for result in results],
-                axis=0,
-            )
-            original_indices = np.concatenate(
-                [np.asarray(result.original_indices) for result in results],
-                axis=0,
-            )
-            positions_um = np.concatenate(
-                [np.asarray(result.positions_um) for result in results],
-                axis=0,
-            )
-        else:
+
+        shared_metadata = _metadata_is_shared(results, max_probe_count=max_probe_count)
+        if shared_metadata:
             probe_indices = np.asarray(first.probe_indices)
             probe_mask = np.asarray(first.probe_mask)
             original_indices = np.asarray(first.original_indices)
             positions_um = np.asarray(first.positions_um)
+            row_aware = False
+        else:
+            probe_indices = np.concatenate(
+                [
+                    _metadata_as_row_aware(
+                        result.probe_indices,
+                        result=result,
+                        max_probe_count=max_probe_count,
+                        fill_value=0,
+                    )
+                    for result in results
+                ],
+                axis=0,
+            )
+            probe_mask = np.concatenate(
+                [
+                    _metadata_as_row_aware(
+                        result.probe_mask,
+                        result=result,
+                        max_probe_count=max_probe_count,
+                        fill_value=False,
+                    )
+                    for result in results
+                ],
+                axis=0,
+            )
+            original_indices = np.concatenate(
+                [
+                    _metadata_as_row_aware(
+                        result.original_indices,
+                        result=result,
+                        max_probe_count=max_probe_count,
+                        fill_value=-1,
+                    )
+                    for result in results
+                ],
+                axis=0,
+            )
+            positions_um = np.concatenate(
+                [
+                    _metadata_as_row_aware(
+                        result.positions_um,
+                        result=result,
+                        max_probe_count=max_probe_count,
+                        fill_value=np.nan,
+                    )
+                    for result in results
+                ],
+                axis=0,
+            )
+            row_aware = True
         return cls(
-            words=np.concatenate([np.asarray(result.words) for result in results], axis=0),
+            words=words,
             nt=first.nt,
             dt_ms=first.dt_ms,
             definitions=first.definitions,
@@ -126,7 +172,7 @@ class VmRasterResult:
             original_indices=original_indices,
             positions_um=positions_um,
             thresholds_mV=np.asarray(first.thresholds_mV),
-            row_aware=first.row_aware,
+            row_aware=row_aware,
         )
 
     def unpack(self) -> np.ndarray:
@@ -140,6 +186,96 @@ def _slice_row_aware_metadata(values: Any, row: int, row_aware: bool) -> Any:
     if row_aware and arr.ndim == 3:
         return arr[row : row + 1]
     return arr
+
+
+def _check_concat_compatible(first: VmRasterResult, result: VmRasterResult) -> None:
+    """Validate static raster axes before batch concatenation."""
+
+    if int(result.nt) != int(first.nt):
+        raise ValueError("VmRaster results must share nt to concatenate.")
+    if float(result.dt_ms) != float(first.dt_ms):
+        raise ValueError("VmRaster results must share dt_ms to concatenate.")
+    if int(result.raster_count) != int(first.raster_count):
+        raise ValueError("VmRaster results must share raster_count to concatenate.")
+    if int(result.word_count) != int(first.word_count):
+        raise ValueError("VmRaster results must share word_count to concatenate.")
+    if tuple(result.names) != tuple(first.names):
+        raise ValueError("VmRaster results must share observer names to concatenate.")
+    if not np.array_equal(np.asarray(result.thresholds_mV), np.asarray(first.thresholds_mV)):
+        raise ValueError("VmRaster results must share thresholds to concatenate.")
+
+
+def _pad_probe_axis(values: np.ndarray, max_probe_count: int, *, fill_value: Any) -> np.ndarray:
+    """Pad axis 2, the probe axis, to a common width."""
+
+    array = np.asarray(values)
+    if array.ndim < 3:
+        raise ValueError("VmRaster values must have a probe axis.")
+    pad_count = int(max_probe_count) - int(array.shape[2])
+    if pad_count < 0:
+        raise ValueError("max_probe_count must be greater than or equal to the probe axis.")
+    if pad_count == 0:
+        return array
+    pad_width = [(0, 0)] * array.ndim
+    pad_width[2] = (0, pad_count)
+    return np.pad(array, pad_width, mode="constant", constant_values=fill_value)
+
+
+def _metadata_as_row_aware(
+    values: Any,
+    *,
+    result: VmRasterResult,
+    max_probe_count: int,
+    fill_value: Any,
+) -> np.ndarray:
+    """Return metadata as ``(B, R, P)`` and pad probe slots when needed."""
+
+    array = np.asarray(values)
+    if array.ndim == 2:
+        array = np.broadcast_to(array[None, :, :], (result.batch_size,) + array.shape).copy()
+    elif array.ndim == 3:
+        if array.shape[0] != result.batch_size:
+            raise ValueError("row-aware VmRaster metadata must align with batch_size.")
+    else:
+        raise ValueError("VmRaster metadata must be 2D or 3D.")
+    return _pad_probe_axis(array, int(max_probe_count), fill_value=fill_value)
+
+
+def _metadata_is_shared(
+    results: Sequence[VmRasterResult],
+    *,
+    max_probe_count: int,
+) -> bool:
+    """Return whether all results can safely reuse one non-row-aware metadata table."""
+
+    first = results[0]
+    first_metadata = (
+        np.asarray(first.probe_indices),
+        np.asarray(first.probe_mask),
+        np.asarray(first.original_indices),
+        np.asarray(first.positions_um),
+    )
+    if first.row_aware or any(array.ndim == 3 for array in first_metadata):
+        return False
+    if int(first.probe_count) != int(max_probe_count):
+        return False
+    for result in results[1:]:
+        metadata = (
+            np.asarray(result.probe_indices),
+            np.asarray(result.probe_mask),
+            np.asarray(result.original_indices),
+            np.asarray(result.positions_um),
+        )
+        if result.row_aware or any(array.ndim == 3 for array in metadata):
+            return False
+        if int(result.probe_count) != int(max_probe_count):
+            return False
+        if not all(
+            np.array_equal(current, reference, equal_nan=True)
+            for current, reference in zip(metadata, first_metadata, strict=True)
+        ):
+            return False
+    return True
 
 
 def unpack_vm_raster_words(words: Any, *, nt: int | None = None) -> np.ndarray:

@@ -402,7 +402,8 @@ def simulate_pool(
     ``recording`` controls the public output contract. ``solver_options`` are
     forwarded unchanged to solver runtime preparation; ``batch_options`` only
     affects batch-kernel execution details such as chunking. Set ``progress``
-    to True, ``"rich"``, or ``"plain"`` to display dispatch/solver progress.
+    to True, ``"rich"``, or ``"plain"`` to display dispatch planning,
+    preparation, compile/solve, kernel chunk, and result-assembly progress.
     """
 
     population = pool if isinstance(pool, AxonPopulation) else AxonPopulation(pool)

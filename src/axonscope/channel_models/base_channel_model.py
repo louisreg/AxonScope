@@ -556,7 +556,7 @@ class CompositeICM(IonChannelModelBase):
             )
 
         # sizes per submodel (Python ints)
-        sizes = [int(m.init_gates(jnp.array([0.0])).shape[-1]) for m in models]
+        sizes = [len(m.gate_names()) for m in models]
         self.sizes: List[int] = sizes
 
         # cumulative boundaries for slicing gates

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 import jax.numpy as jnp
@@ -27,10 +28,15 @@ from axonscope.backends.jax.input_batches import (
     build_vstim_midpoint_batch,
     can_build_sparse_intracellular_current_density_batch,
 )
-from axonscope.icm.backends import RowIndexedICMBackend
+from axonscope.icm.backends import (
+    HeterogeneousICMBackend,
+    RowIndexedICMBackend,
+    _AxNodePassiveFamilyICMBackend,
+)
 from axonscope.preparation.cohort import PreparedCohort
 from axonscope.results.single import SimResult
 from axonscope.backends.jax.batch_kernels import (
+    BatchKernelResult,
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
@@ -43,16 +49,33 @@ from axonscope.backends.jax.runtime import (
     ExtracellularRuntime,
     MembraneRuntime,
     SolverRuntime,
-    prepare_extracellular_runtime,
+    compile_membrane_model,
     prepare_membrane_runtime,
+    prepare_simulation_grid,
     prepare_solver_runtime,
+    prepare_stimulation_runtime,
 )
 
 
 _BATCH_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
+_BATCH_STATIC_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _PREPARED_COHORT_CACHE: OrderedDict[tuple[Any, ...], PreparedCohort] = OrderedDict()
 _VM_RASTER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _GROUP_RUNNER_CACHE_MAX_SIZE = 64
+_DOUBLE_CABLE_SHAPE_BUCKETING_ENV = "AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING"
+_DOUBLE_CABLE_BATCH_BUCKETS = (16, 32, 64, 128)
+_DOUBLE_CABLE_NX_BUCKET_MULTIPLE = 128
+
+
+@dataclass(frozen=True)
+class _FamilyMembraneStack:
+    backend: _AxNodePassiveFamilyICMBackend
+    gates0_rows: np.ndarray
+    background_rows: np.ndarray
+    membrane_static: Any
+    node_count: int
+    passive_count: int
+    source: str
 
 
 def _cache_get(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...]) -> Any | None:
@@ -109,12 +132,86 @@ def run_jax_batch_group(
 def _dispatch_method(group: DispatchGroup) -> str:
     """Return the public diagnostic label for a dispatch group."""
 
-    if group.size < 2:
-        return "scalar"
     prefix = "batch" if group.geometry_shared else "parameter-batch"
     if group.mode == "double":
         return f"{prefix}-double-cable"
     return f"{prefix}-single-cable"
+
+
+def _double_cable_kernel_group(group: DispatchGroup) -> DispatchGroup:
+    """Return a backend-only group padded to stable double-cable JAX shapes."""
+
+    if group.mode != "double" or not _double_cable_shape_bucketing_enabled():
+        return group
+    target_size = _bucket_batch_size(group.size, buckets=_DOUBLE_CABLE_BATCH_BUCKETS)
+    target_nx = _bucket_nx(
+        group.nx,
+        multiple=_DOUBLE_CABLE_NX_BUCKET_MULTIPLE,
+    )
+    if target_size == group.size and target_nx == group.nx:
+        return group
+    if not group.items:
+        raise ValueError("cannot bucket an empty dispatch group.")
+    padded_items = tuple(group.items) + (group.items[-1],) * (target_size - group.size)
+    return DispatchGroup(
+        group_id=group.group_id,
+        items=padded_items,
+        signature=(
+            group.signature,
+            "double_cable_kernel_bucket_v1",
+            int(group.size),
+            int(group.nx),
+            int(target_size),
+            int(target_nx),
+        ),
+        mode=group.mode,
+        nx=int(target_nx),
+        geometry_shared=False,
+    )
+
+
+def _double_cable_shape_bucketing_enabled() -> bool:
+    """Whether to run the experimental shape-bucketed double-cable kernel path."""
+
+    return os.environ.get(_DOUBLE_CABLE_SHAPE_BUCKETING_ENV, "").strip() in {"1", "true", "yes"}
+
+
+def _bucket_batch_size(value: int, *, buckets: tuple[int, ...]) -> int:
+    requested = int(value)
+    if requested <= 0:
+        raise ValueError("batch size must be positive.")
+    for bucket in buckets:
+        if requested <= int(bucket):
+            return int(bucket)
+    step = int(buckets[-1])
+    return ((requested + step - 1) // step) * step
+
+
+def _bucket_nx(value: int, *, multiple: int) -> int:
+    requested = int(value)
+    step = int(multiple)
+    if requested <= 0 or step <= 0:
+        raise ValueError("Nx and bucket multiple must be positive.")
+    return ((requested + step - 1) // step) * step
+
+
+def _record_kernel_bucket_metadata(
+    *,
+    group: DispatchGroup,
+    kernel_group: DispatchGroup,
+) -> None:
+    record_benchmark_metadata(
+        public_group_size=int(group.size),
+        public_nx=int(group.nx),
+        kernel_group_size=int(kernel_group.size),
+        kernel_nx=int(kernel_group.nx),
+        kernel_batch_padding_rows=int(kernel_group.size) - int(group.size),
+        kernel_spatial_padding=int(kernel_group.nx) - int(group.nx),
+        kernel_shape_bucketed=(
+            int(kernel_group.size) != int(group.size)
+            or int(kernel_group.nx) != int(group.nx)
+        ),
+    )
 
 
 def _emit_progress(
@@ -367,32 +464,193 @@ def _prepare_batch_runtime(
         record_benchmark_metadata(batch_runtime_cache="hit")
         return cached
 
-    representative_item = _representative_item(group)
-    runtime = prepare_solver_runtime(
-        cast(Any, representative_item.simulation),
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        solver_axon=representative_item.solver_axon,
-        include_extracellular=include_extracellular,
-        include_area=include_area,
-        precompute_intracellular=False,
-        precompute_extracellular=False,
-        compile_stimulation=False,
-        solver_options=solver_options,
+    static_cache_key = (
+        "batch_static_runtime_v1",
+        mode,
+        _group_runtime_signature(group),
+        repr(solver_options),
+        bool(include_extracellular),
+        bool(include_area),
     )
-    if not group.geometry_shared:
-        if mode == "double":
-            runtime = _with_batched_double_cable_runtime(
-                runtime,
-                group,
-                solver_options=solver_options,
-            )
-        else:
-            runtime = _with_batched_single_cable_runtime(runtime, group)
+    runtime = _cache_get(_BATCH_STATIC_RUNTIME_CACHE, static_cache_key)
+    static_cache_state = "hit"
+    if runtime is None:
+        representative_item = _representative_item(group)
+        with benchmark_span(
+            "runtime.prepare.base_runtime",
+            group_id=group.group_id,
+            group_size=group.size,
+            mode=mode,
+            nx=group.nx,
+        ):
+            if group.geometry_shared:
+                runtime = prepare_solver_runtime(
+                    cast(Any, representative_item.simulation),
+                    tsim_ms=tsim_ms,
+                    dt_ms=dt_ms,
+                    solver_axon=representative_item.solver_axon,
+                    include_extracellular=include_extracellular,
+                    include_area=include_area,
+                    precompute_intracellular=False,
+                    precompute_extracellular=False,
+                    compile_stimulation=False,
+                    solver_options=solver_options,
+                )
+                record_benchmark_metadata(batch_base_runtime_kind="full")
+            else:
+                runtime = _prepare_parameter_batch_base_runtime(
+                    group,
+                    representative_item,
+                    tsim_ms=tsim_ms,
+                    dt_ms=dt_ms,
+                    mode=mode,
+                    include_area=include_area,
+                    solver_options=solver_options,
+                )
+                record_benchmark_metadata(batch_base_runtime_kind="parameter_minimal")
+        if not group.geometry_shared:
+            if mode == "double":
+                runtime = _with_batched_double_cable_runtime(
+                    runtime,
+                    group,
+                    solver_options=solver_options,
+                )
+            else:
+                runtime = _with_batched_single_cable_runtime(runtime, group)
+        _cache_store(_BATCH_STATIC_RUNTIME_CACHE, static_cache_key, runtime)
+        static_cache_state = "miss"
+
+    runtime = replace(
+        runtime,
+        grid=prepare_simulation_grid(tsim_ms, dt_ms, runtime.membrane.dtype),
+    )
 
     _cache_store(_BATCH_RUNTIME_CACHE, cache_key, runtime)
-    record_benchmark_metadata(batch_runtime_cache="miss")
+    record_benchmark_metadata(
+        batch_runtime_cache="miss",
+        batch_static_runtime_cache=static_cache_state,
+    )
     return runtime
+
+
+def _prepare_parameter_batch_base_runtime(
+    group: DispatchGroup,
+    representative_item: DispatchItem,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    mode: str,
+    include_area: bool,
+    solver_options: SolverOptions | None,
+) -> SolverRuntime:
+    """Prepare only representative fields that survive parameter batching."""
+
+    simulation = cast(Any, representative_item.simulation)
+    solver_axon = representative_item.solver_axon
+    if mode == "double" and _axnode_passive_family_node_description(group) is not None:
+        membrane = _minimal_axnode_passive_family_membrane_runtime(
+            group,
+            representative_item=representative_item,
+            solver_options=solver_options,
+        )
+        record_benchmark_metadata(batch_base_membrane_kind="axnode_passive_placeholder")
+    else:
+        membrane = prepare_membrane_runtime(
+            simulation,
+            solver_axon=solver_axon,
+            solver_options=solver_options,
+        )
+        record_benchmark_metadata(batch_base_membrane_kind="full_representative")
+    grid = prepare_simulation_grid(tsim_ms, dt_ms, membrane.dtype)
+    cable = _cable_runtime_from_numpy_arrays(
+        solver_axon,
+        dtype_local=membrane.dtype,
+        include_area=include_area,
+    )
+    stimulation = prepare_stimulation_runtime(
+        simulation,
+        solver_axon,
+        membrane.dtype,
+        grid=None,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+        compile_callables=False,
+    )
+    return SolverRuntime(
+        axon=solver_axon,
+        grid=grid,
+        membrane=membrane,
+        cable=cable,
+        stimulation=stimulation,
+        extracellular=None,
+    )
+
+
+def _minimal_axnode_passive_family_membrane_runtime(
+    group: DispatchGroup,
+    *,
+    representative_item: DispatchItem,
+    solver_options: SolverOptions | None,
+) -> MembraneRuntime:
+    """Build a placeholder membrane runtime replaced by direct family stacking."""
+
+    node_description = _axnode_passive_family_node_description(group)
+    if node_description is None:
+        raise ValueError("group is not an AxNode/passive family group.")
+    node_model = compile_membrane_model(
+        node_description,
+        solver_options=solver_options,
+    )
+    dtype_local = node_model.dtype
+    nx = int(representative_item.solver_axon.n_compartments)
+    return MembraneRuntime(
+        backend=None,
+        membrane=node_model,
+        dtype=dtype_local,
+        Nx=nx,
+        Vm0_mV=jnp.zeros((nx,), dtype=dtype_local),
+        gates0=jnp.zeros((nx, 0), dtype=dtype_local),
+        state0=(),
+        background_current=jnp.zeros((nx,), dtype=dtype_local),
+        observable_names={
+            "gates": node_model.gate_names(),
+            "currents": node_model.current_names(),
+            "conductances": node_model.conductance_names(),
+            "states": node_model.membrane_state_names(),
+        },
+        diagnostic_names=node_model.diagnostic_names(),
+    )
+
+
+def _axnode_passive_family_node_description(group: DispatchGroup) -> Any | None:
+    """Return the shared AxNode description when a group is AxNode/passive only."""
+
+    node_description: Any | None = None
+    node_signature: tuple[Any, ...] | None = None
+    node_count = 0
+    passive_count = 0
+    for item in group.items:
+        solver_axon = item.solver_axon
+        membrane_models = tuple(solver_axon.membrane_models)
+        if len(membrane_models) != int(solver_axon.n_compartments):
+            return None
+        for model in membrane_models:
+            kind = str(getattr(model, "kind", "")).lower()
+            if kind == "axnode":
+                signature = model._static_signature()
+                if node_signature is None:
+                    node_signature = signature
+                    node_description = model
+                elif signature != node_signature:
+                    return None
+                node_count += 1
+            elif kind == "passive":
+                passive_count += 1
+            else:
+                return None
+    if node_description is None or node_count == 0 or passive_count == 0:
+        return None
+    return node_description
 
 
 def _prepared_cohort_for_group(group: DispatchGroup) -> PreparedCohort:
@@ -789,7 +1047,7 @@ def _run_single_cable_batch_group(
         progress_callback,
         group,
         "kernel",
-        "enqueue",
+        "compile/solve JAX kernel",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
     )
@@ -860,6 +1118,7 @@ def _run_double_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
 
+    kernel_group = _double_cable_kernel_group(group)
     representative_item = _representative_item(group)
     representative = representative_item.simulation
     _emit_progress(progress_callback, group, "prepare", "runtime", mode="double")
@@ -873,7 +1132,7 @@ def _run_double_cable_batch_group(
         dt_ms=dt_ms,
     ):
         runtime = _prepare_batch_runtime(
-            group,
+            kernel_group,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
             solver_options=solver_options,
@@ -881,6 +1140,7 @@ def _run_double_cable_batch_group(
             include_extracellular=True,
             include_area=True,
         )
+        _record_kernel_bucket_metadata(group=group, kernel_group=kernel_group)
         record_benchmark_metadata(
             nt=runtime.grid.Nt,
             nx=runtime.membrane.Nx,
@@ -893,7 +1153,7 @@ def _run_double_cable_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = _prepared_cohort_for_group(group)
+        cohort = _prepared_cohort_for_group(kernel_group)
         record_benchmark_metadata(
             **benchmark_array_metadata(
                 "x_positions_m",
@@ -901,8 +1161,12 @@ def _run_double_cable_batch_group(
                 role="positions",
             ),
             context_count=cohort.context_count,
+            public_group_size=int(group.size),
+            kernel_group_size=int(kernel_group.size),
+            public_nx=int(group.nx),
+            kernel_nx=int(kernel_group.nx),
         )
-    kernel_options = _kernel_batch_options(group, batch_options, observers=observers)
+    kernel_options = _kernel_batch_options(kernel_group, batch_options, observers=observers)
     _emit_progress(
         progress_callback,
         group,
@@ -949,7 +1213,7 @@ def _run_double_cable_batch_group(
             )
         else:
             iinj_mid = None
-            _record_zero_intracellular_metadata(group=group, runtime=runtime)
+            _record_zero_intracellular_metadata(group=kernel_group, runtime=runtime)
     with benchmark_span(
         "inputs.extracellular",
         group_id=group.group_id,
@@ -1026,7 +1290,7 @@ def _run_double_cable_batch_group(
         contexts=cohort.context_count,
     )
     _record_group_memory_estimate(
-        group=group,
+        group=kernel_group,
         runtime=runtime,
         cohort=cohort,
         kernel_options=kernel_options,
@@ -1034,11 +1298,15 @@ def _run_double_cable_batch_group(
         extracellular_format=extracellular_format,
         include_vstim_previous=True,
     )
+    record_benchmark_metadata(
+        public_group_size=int(group.size),
+        public_nx=int(group.nx),
+    )
     _emit_progress(
         progress_callback,
         group,
         "kernel",
-        "enqueue",
+        "compile/solve JAX kernel",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
         block_solver=kernel_options.double_cable_block_solver,
@@ -1066,6 +1334,7 @@ def _run_double_cable_batch_group(
             record_benchmark_metadata(
                 **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
             )
+        out = _trim_batch_kernel_result(out, batch_size=group.size)
     with benchmark_span(
         "kernel.wait",
         group_id=group.group_id,
@@ -1105,13 +1374,21 @@ def _with_batched_single_cable_runtime(
 ) -> SolverRuntime:
     """Return `runtime` with cable arrays stacked over the batch axis."""
 
-    return replace(
-        runtime,
-        cable=_stack_cable_runtime(
+    with benchmark_span(
+        "runtime.prepare.stack_cable",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
+    ):
+        cable = _stack_cable_runtime(
             group,
             dtype_local=runtime.membrane.dtype,
             include_area=False,
-        ),
+        )
+    return replace(
+        runtime,
+        cable=cable,
     )
 
 
@@ -1124,40 +1401,69 @@ def _with_batched_double_cable_runtime(
     """Return `runtime` with cable and extracellular arrays stacked by row."""
 
     dtype_local = runtime.membrane.dtype
-    cable = _stack_cable_runtime(
-        group,
-        dtype_local=dtype_local,
-        include_area=True,
-    )
-    extracellular_rows = [
-        _pad_extracellular_runtime(
-            prepare_extracellular_runtime(item.solver_axon, dtype_local, cable_row),
+    with benchmark_span(
+        "runtime.prepare.stack_cable",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
+    ):
+        cable = _stack_cable_runtime(
+            group,
+            dtype_local=dtype_local,
+            include_area=True,
+        )
+    with benchmark_span(
+        "runtime.prepare.stack_extracellular",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
+    ):
+        extracellular = _stack_extracellular_runtime(group, dtype_local=dtype_local)
+    with benchmark_span(
+        "runtime.prepare.stack_membrane",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
+    ):
+        membrane = _stack_membrane_runtime(
+            runtime,
+            group,
+            dtype_local=dtype_local,
+            solver_options=solver_options,
+        )
+    return replace(runtime, membrane=membrane, cable=cable, extracellular=extracellular)
+
+
+def _stack_extracellular_runtime(
+    group: DispatchGroup,
+    *,
+    dtype_local: jnp.dtype,
+) -> ExtracellularRuntime:
+    """Stack double-cable extracellular arrays using host-side row preparation."""
+
+    np_dtype = np.dtype(dtype_local)
+    rows = tuple(
+        _extracellular_runtime_numpy(
+            item.solver_axon,
+            dtype=np_dtype,
             target_nx=group.nx,
         )
-        for item, cable_row in zip(
-            group.items,
-            _row_cable_runtimes(group, dtype_local=dtype_local, include_area=True),
-            strict=True,
-        )
-    ]
-    extracellular = ExtracellularRuntime(
-        Cm_abs=jnp.stack([row.Cm_abs for row in extracellular_rows], axis=0),
-        Cx_abs=jnp.stack([row.Cx_abs for row in extracellular_rows], axis=0),
-        Gx_abs=jnp.stack([row.Gx_abs for row in extracellular_rows], axis=0),
-        Gax_e=jnp.stack([row.Gax_e for row in extracellular_rows], axis=0),
-        Gax_i=jnp.stack([row.Gax_i for row in extracellular_rows], axis=0),
-        left_i=jnp.stack([row.left_i for row in extracellular_rows], axis=0),
-        right_i=jnp.stack([row.right_i for row in extracellular_rows], axis=0),
-        left_e=jnp.stack([row.left_e for row in extracellular_rows], axis=0),
-        right_e=jnp.stack([row.right_e for row in extracellular_rows], axis=0),
+        for item in group.items
     )
-    membrane = _stack_membrane_runtime(
-        runtime,
-        group,
-        dtype_local=dtype_local,
-        solver_options=solver_options,
+    return ExtracellularRuntime(
+        Cm_abs=jnp.asarray(np.stack([row.Cm_abs for row in rows], axis=0), dtype=dtype_local),
+        Cx_abs=jnp.asarray(np.stack([row.Cx_abs for row in rows], axis=0), dtype=dtype_local),
+        Gx_abs=jnp.asarray(np.stack([row.Gx_abs for row in rows], axis=0), dtype=dtype_local),
+        Gax_e=jnp.asarray(np.stack([row.Gax_e for row in rows], axis=0), dtype=dtype_local),
+        Gax_i=jnp.asarray(np.stack([row.Gax_i for row in rows], axis=0), dtype=dtype_local),
+        left_i=jnp.asarray(np.stack([row.left_i for row in rows], axis=0), dtype=dtype_local),
+        right_i=jnp.asarray(np.stack([row.right_i for row in rows], axis=0), dtype=dtype_local),
+        left_e=jnp.asarray(np.stack([row.left_e for row in rows], axis=0), dtype=dtype_local),
+        right_e=jnp.asarray(np.stack([row.right_e for row in rows], axis=0), dtype=dtype_local),
     )
-    return replace(runtime, membrane=membrane, cable=cable, extracellular=extracellular)
 
 
 def _stack_membrane_runtime(
@@ -1169,13 +1475,73 @@ def _stack_membrane_runtime(
 ) -> MembraneRuntime:
     """Stack row-specific membrane initial states and row-selectable backends."""
 
+    np_dtype = np.dtype(dtype_local)
+    vm0_rows = np.stack(
+        [
+            _pad_space_array_numpy(
+                np.full(
+                    (int(item.solver_axon.n_compartments),),
+                    float(getattr(item.simulation, "v_init", 0.0)),
+                    dtype=np_dtype,
+                ),
+                target_nx=group.nx,
+                mode="edge",
+            )
+            for item in group.items
+        ],
+        axis=0,
+    )
+    family_stack = _try_stack_axnode_passive_family_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=dtype_local,
+        solver_options=solver_options,
+    )
+    if family_stack is not None:
+        record_benchmark_metadata(
+            membrane_stack_host_side=True,
+            membrane_stack_source=family_stack.source,
+            membrane_row_backend="axnode_passive_family",
+            membrane_row_backend_branches=1,
+            membrane_family_node_compartments=int(family_stack.node_count),
+            membrane_family_passive_compartments=int(family_stack.passive_count),
+        )
+        return replace(
+            runtime.membrane,
+            backend=family_stack.backend,
+            membrane=family_stack.membrane_static,
+            Nx=group.nx,
+            Vm0_mV=jnp.asarray(vm0_rows, dtype=dtype_local),
+            gates0=jnp.asarray(family_stack.gates0_rows, dtype=dtype_local),
+            state0=(),
+            background_current=jnp.asarray(
+                family_stack.background_rows,
+                dtype=dtype_local,
+            ),
+        )
+    if runtime.membrane.backend is None:
+        raise RuntimeError(
+            "internal AxNode/passive placeholder membrane was selected, but direct "
+            "family membrane stacking did not match the dispatch group."
+        )
+
+    representative_index = next(
+        (
+            index
+            for index, item in enumerate(group.items)
+            if int(item.solver_axon.n_compartments) == int(runtime.membrane.Nx)
+        ),
+        None,
+    )
     rows = tuple(
-        prepare_membrane_runtime(
+        runtime.membrane
+        if representative_index is not None and index == representative_index
+        else prepare_membrane_runtime(
             cast(Any, item.simulation),
             solver_axon=item.solver_axon,
             solver_options=solver_options,
         )
-        for item in group.items
+        for index, item in enumerate(group.items)
     )
     if any(row.state0 for row in rows):
         raise NotImplementedError(
@@ -1187,59 +1553,305 @@ def _stack_membrane_runtime(
             "parameter-batched double-cable membranes currently require membrane "
             "models with the stateless Vm-only fast path."
         )
-    row_backend = RowIndexedICMBackend.from_backends(
-        tuple(row.backend for row in rows),
+    family_stack = _try_stack_axnode_passive_family_membrane(
+        rows,
         target_nx=group.nx,
+        dtype_local=dtype_local,
     )
-    return replace(
-        runtime.membrane,
-        backend=row_backend,
-        Nx=group.nx,
-        Vm0_mV=jnp.stack(
+    if family_stack is None:
+        row_backend = RowIndexedICMBackend.from_backends(
+            tuple(row.backend for row in rows),
+            target_nx=group.nx,
+        )
+        gates0_rows = np.stack(
             [
-                _pad_space_array(row.Vm0_mV, target_nx=group.nx, mode="edge")
-                for row in rows
-            ],
-            axis=0,
-        ),
-        gates0=jnp.stack(
-            [
-                _pad_gate_array(
-                    row.gates0,
+                _pad_gate_array_numpy(
+                    np.asarray(row.gates0, dtype=np_dtype),
                     target_nx=group.nx,
                     target_gates=row_backend.n_gates_max,
                 )
                 for row in rows
             ],
             axis=0,
-        ),
-        state0=(),
-        background_current=jnp.stack(
+        )
+        background_rows = np.stack(
             [
-                _pad_space_array(row.background_current, target_nx=group.nx, mode="zero")
+                _pad_space_array_numpy(
+                    np.asarray(row.background_current, dtype=np_dtype),
+                    target_nx=group.nx,
+                    mode="zero",
+                )
                 for row in rows
             ],
             axis=0,
-        ),
+        )
+        membrane_static = runtime.membrane.membrane
+        row_backend_kind = "row_indexed"
+        row_backend_branches = len(rows)
+        family_node_count = 0
+        family_passive_count = 0
+        family_source = "row_membrane_runtime"
+    else:
+        row_backend = family_stack.backend
+        gates0_rows = family_stack.gates0_rows
+        background_rows = family_stack.background_rows
+        membrane_static = family_stack.membrane_static
+        family_node_count = family_stack.node_count
+        family_passive_count = family_stack.passive_count
+        row_backend_kind = "axnode_passive_family"
+        row_backend_branches = 1
+        family_source = family_stack.source
+    record_benchmark_metadata(
+        membrane_stack_host_side=True,
+        membrane_stack_source=family_source,
+        membrane_row_backend=row_backend_kind,
+        membrane_row_backend_branches=int(row_backend_branches),
+        membrane_family_node_compartments=int(family_node_count),
+        membrane_family_passive_compartments=int(family_passive_count),
+    )
+    return replace(
+        runtime.membrane,
+        backend=row_backend,
+        membrane=membrane_static,
+        Nx=group.nx,
+        Vm0_mV=jnp.asarray(vm0_rows, dtype=dtype_local),
+        gates0=jnp.asarray(gates0_rows, dtype=dtype_local),
+        state0=(),
+        background_current=jnp.asarray(background_rows, dtype=dtype_local),
     )
 
 
-def _row_cable_runtimes(
+def _try_stack_axnode_passive_family_membrane_from_group(
     group: DispatchGroup,
     *,
+    target_nx: int,
     dtype_local: jnp.dtype,
-    include_area: bool,
-) -> tuple[CableRuntime, ...]:
-    """Return one cable runtime per row in a dispatch group."""
+    solver_options: SolverOptions | None,
+) -> _FamilyMembraneStack | None:
+    """Fast-path MRG-like rows directly from solver axon membrane descriptions."""
 
-    return tuple(
-        _cable_runtime_from_numpy_arrays(
-            item.solver_axon,
-            dtype_local=dtype_local,
-            include_area=include_area,
-        )
-        for item in group.items
+    from axonscope.channel_models.axnode import AxnodeICM
+
+    if not group.items:
+        return None
+    np_dtype = np.dtype(dtype_local)
+    node_model: AxnodeICM | None = None
+    node_signature: tuple[Any, ...] | None = None
+    gates_rows: list[np.ndarray] = []
+    background_rows: list[np.ndarray] = []
+    node_gates_by_vm0: dict[float, np.ndarray] = {}
+    node_count = 0
+    passive_count = 0
+    for item in group.items:
+        solver_axon = item.solver_axon
+        row_nx = int(solver_axon.n_compartments)
+        if row_nx > int(target_nx):
+            return None
+        membrane_models = tuple(solver_axon.membrane_models)
+        if len(membrane_models) != row_nx:
+            return None
+        encoded = np.zeros((int(target_nx), 7), dtype=np_dtype)
+        vm0 = float(getattr(item.simulation, "v_init", 0.0))
+        for compartment_index, model in enumerate(membrane_models):
+            kind = str(getattr(model, "kind", "")).lower()
+            if kind == "axnode":
+                signature = model._static_signature()
+                if node_signature is None:
+                    compiled = compile_membrane_model(
+                        model,
+                        solver_options=solver_options,
+                    )
+                    if not isinstance(compiled, AxnodeICM):
+                        return None
+                    if not compiled.supports_stateless_vm_only_fast_path():
+                        return None
+                    node_signature = signature
+                    node_model = compiled
+                elif signature != node_signature:
+                    return None
+                row_node_gates = node_gates_by_vm0.get(vm0)
+                if row_node_gates is None:
+                    assert node_model is not None
+                    row_node_gates = _axnode_initial_gates_numpy(
+                        node_model,
+                        vm0_mV=vm0,
+                        dtype=np_dtype,
+                    )
+                    node_gates_by_vm0[vm0] = row_node_gates
+                encoded[compartment_index, :4] = row_node_gates
+                encoded[compartment_index, 6] = np_dtype.type(1.0)
+                node_count += 1
+            elif kind == "passive":
+                params = getattr(model, "params", {})
+                try:
+                    rm = float(params["Rm"])
+                    e_leak = float(params["EL"])
+                except (KeyError, TypeError, ValueError):
+                    return None
+                g_leak = np_dtype.type(1e3) / np.maximum(
+                    np_dtype.type(rm),
+                    np_dtype.type(1e-18),
+                )
+                encoded[compartment_index, 4] = g_leak
+                encoded[compartment_index, 5] = g_leak * np_dtype.type(e_leak)
+                passive_count += 1
+            else:
+                return None
+        gates_rows.append(encoded)
+        background_rows.append(np.zeros((int(target_nx),), dtype=np_dtype))
+    if node_model is None or passive_count == 0:
+        return None
+    backend = _AxNodePassiveFamilyICMBackend(
+        node_model=node_model,
+        target_nx=int(target_nx),
+        dtype=dtype_local,
     )
+    return _FamilyMembraneStack(
+        backend=backend,
+        gates0_rows=np.stack(gates_rows, axis=0),
+        background_rows=np.stack(background_rows, axis=0),
+        membrane_static=node_model,
+        node_count=node_count,
+        passive_count=passive_count,
+        source="solver_axon_membrane_models",
+    )
+
+
+def _try_stack_axnode_passive_family_membrane(
+    rows: tuple[MembraneRuntime, ...],
+    *,
+    target_nx: int,
+    dtype_local: jnp.dtype,
+) -> _FamilyMembraneStack | None:
+    """Encode MRG-like AxNode/passive rows as dynamic row parameters."""
+
+    from axonscope.channel_models.axnode import AxnodeICM
+    from axonscope.channel_models.passive import PassiveICM
+
+    if not rows:
+        return None
+    np_dtype = np.dtype(dtype_local)
+    node_model: AxnodeICM | None = None
+    node_signature: tuple[Any, ...] | None = None
+    gates_rows: list[np.ndarray] = []
+    background_rows: list[np.ndarray] = []
+    node_count = 0
+    passive_count = 0
+    for row in rows:
+        backend = row.backend
+        if not isinstance(backend, HeterogeneousICMBackend):
+            return None
+        row_nx = int(backend.Nx)
+        if row_nx > int(target_nx):
+            return None
+        row_background = np.asarray(row.background_current, dtype=np_dtype)
+        if row_background.shape != (row_nx,) or not np.allclose(row_background, 0.0):
+            return None
+        row_gates = np.asarray(row.gates0, dtype=np_dtype)
+        if row_gates.shape[0] != row_nx:
+            return None
+        encoded = np.zeros((int(target_nx), 7), dtype=np_dtype)
+        gate_cols = min(4, int(row_gates.shape[1]))
+        if gate_cols:
+            encoded[:row_nx, :gate_cols] = row_gates[:row_nx, :gate_cols]
+        for compartment_index, model in enumerate(backend.icm_vec):
+            if isinstance(model, AxnodeICM):
+                if row_gates.shape[1] < 4:
+                    return None
+                signature = model._static_signature()
+                if node_signature is None:
+                    node_signature = signature
+                    node_model = model
+                elif signature != node_signature:
+                    return None
+                encoded[compartment_index, 6] = np_dtype.type(1.0)
+                node_count += 1
+            elif isinstance(model, PassiveICM):
+                g_leak = np.asarray(model.g_bar, dtype=np_dtype)[0]
+                e_leak = np.asarray(model.E_rev, dtype=np_dtype)[0]
+                encoded[compartment_index, 4] = g_leak
+                encoded[compartment_index, 5] = g_leak * e_leak
+                passive_count += 1
+            else:
+                return None
+        gates_rows.append(encoded)
+        background_rows.append(np.zeros((int(target_nx),), dtype=np_dtype))
+    if node_model is None or passive_count == 0:
+        return None
+    backend = _AxNodePassiveFamilyICMBackend(
+        node_model=node_model,
+        target_nx=int(target_nx),
+        dtype=dtype_local,
+    )
+    return _FamilyMembraneStack(
+        backend=backend,
+        gates0_rows=np.stack(gates_rows, axis=0),
+        background_rows=np.stack(background_rows, axis=0),
+        membrane_static=node_model,
+        node_count=node_count,
+        passive_count=passive_count,
+        source="row_membrane_runtime",
+    )
+
+
+def _axnode_initial_gates_numpy(
+    node_model: Any,
+    *,
+    vm0_mV: float,
+    dtype: np.dtype,
+) -> np.ndarray:
+    """NumPy equivalent of AxnodeICM.init_gates for fast host preparation."""
+
+    v = dtype.type(vm0_mV)
+    celsius = dtype.type(float(node_model.celsius))
+
+    def safe_exp(x: np.generic) -> np.generic:
+        return dtype.type(0.0) if x < dtype.type(-100.0) else dtype.type(np.exp(x))
+
+    def vtrap(
+        a_value: float,
+        b_value: float,
+        c_value: float,
+        *,
+        flipped: bool = False,
+    ) -> np.generic:
+        a = dtype.type(a_value)
+        b = dtype.type(b_value)
+        c = dtype.type(c_value)
+        z = (v + b) / c
+        num = a * (-(v + b) if flipped else (v + b))
+        exp_arg = (v + b) / c if flipped else (-(v + b) / c)
+        den = dtype.type(1.0) - safe_exp(exp_arg)
+        if abs(float(z)) < 1e-6:
+            return a * c
+        return num / den
+
+    q10_1 = dtype.type(2.2) ** ((celsius - dtype.type(20.0)) / dtype.type(10.0))
+    q10_2 = dtype.type(2.9) ** ((celsius - dtype.type(20.0)) / dtype.type(10.0))
+    q10_3 = dtype.type(3.0) ** ((celsius - dtype.type(36.0)) / dtype.type(10.0))
+
+    a_mp = q10_1 * vtrap(0.01, 27.0, 10.2)
+    b_mp = q10_1 * vtrap(0.00025, 34.0, 10.0, flipped=True)
+
+    a_m = q10_1 * vtrap(1.86, 21.4, 10.3)
+    b_m = q10_1 * vtrap(0.086, 25.7, 9.16, flipped=True)
+
+    a_h = q10_2 * vtrap(0.062, 114.0, 11.0, flipped=True)
+    b_h = q10_2 * dtype.type(2.3) / (
+        dtype.type(1.0) + safe_exp(-(v + dtype.type(31.8)) / dtype.type(13.4))
+    )
+
+    v2 = v + dtype.type(80.0)
+    a_s = q10_3 * dtype.type(0.3) / (
+        safe_exp((v2 - dtype.type(27.0)) / dtype.type(-5.0)) + dtype.type(1.0)
+    )
+    b_s = q10_3 * dtype.type(0.03) / (
+        safe_exp((v2 + dtype.type(10.0)) / dtype.type(-1.0)) + dtype.type(1.0)
+    )
+
+    alpha = np.asarray([a_mp, a_m, a_h, a_s], dtype=dtype)
+    beta = np.asarray([b_mp, b_m, b_h, b_s], dtype=dtype)
+    return alpha / np.maximum(alpha + beta, dtype.type(1e-12))
 
 
 def _stack_cable_runtime(
@@ -1377,6 +1989,55 @@ def _compartment_area_cm2_numpy(axon: Any, *, dtype: np.dtype) -> np.ndarray:
     return np.asarray(np.pi * (diam * dtype.type(1e-4)) * length_cm, dtype=dtype)
 
 
+def _extracellular_runtime_numpy(
+    axon: Any,
+    *,
+    dtype: np.dtype,
+    target_nx: int,
+) -> ExtracellularRuntime:
+    """Build one padded double-cable extracellular row with NumPy arrays."""
+
+    area = _compartment_area_cm2_numpy(axon, dtype=dtype)
+    cm_uF_cm2 = np.asarray(axon.Cm_uF_cm2, dtype=dtype)
+    Cm_abs = cm_uF_cm2 * area
+
+    xg = np.asarray(axon.xg_S_cm2, dtype=dtype)
+    xc = np.asarray(axon.xc_uF_cm2, dtype=dtype)
+    xraxial = np.asarray(axon.xraxial_MOhm_per_cm, dtype=dtype)
+    dx_cm = np.asarray(axon.dx_cm, dtype=dtype)
+
+    Cx_abs = xc * area
+    Gx_abs = (xg * dtype.type(1e3)) * area
+
+    if int(axon.n_compartments) <= 1:
+        Gax_e = np.zeros((0,), dtype=dtype)
+    else:
+        R_edge_MOhm = (
+            xraxial[:-1] * (dtype.type(0.5) * dx_cm[:-1])
+            + xraxial[1:] * (dtype.type(0.5) * dx_cm[1:])
+        )
+        Gax_e = dtype.type(1e-3) / np.maximum(R_edge_MOhm, dtype.type(1e-18))
+
+    lower, _, upper = _diffusion_operator_coeffs_numpy(axon, dtype=dtype)
+    Gax_i = dtype.type(0.5) * (upper[:-1] * Cm_abs[:-1] + lower[1:] * Cm_abs[1:])
+    left_i = np.concatenate([np.zeros((1,), dtype=dtype), Gax_i])
+    right_i = np.concatenate([Gax_i, np.zeros((1,), dtype=dtype)])
+    left_e = np.concatenate([np.zeros((1,), dtype=dtype), Gax_e])
+    right_e = np.concatenate([Gax_e, np.zeros((1,), dtype=dtype)])
+
+    return ExtracellularRuntime(
+        Cm_abs=_pad_space_array_numpy(Cm_abs, target_nx=target_nx, mode="edge"),
+        Cx_abs=_pad_space_array_numpy(Cx_abs, target_nx=target_nx, mode="edge"),
+        Gx_abs=_pad_space_array_numpy(Gx_abs, target_nx=target_nx, mode="edge"),
+        Gax_e=_pad_edge_array_numpy(Gax_e, target_nx=target_nx),
+        Gax_i=_pad_edge_array_numpy(Gax_i, target_nx=target_nx),
+        left_i=_pad_space_array_numpy(left_i, target_nx=target_nx, mode="zero"),
+        right_i=_pad_space_array_numpy(right_i, target_nx=target_nx, mode="zero"),
+        left_e=_pad_space_array_numpy(left_e, target_nx=target_nx, mode="zero"),
+        right_e=_pad_space_array_numpy(right_e, target_nx=target_nx, mode="zero"),
+    )
+
+
 def _pad_space_array_numpy(
     values: np.ndarray,
     *,
@@ -1403,36 +2064,10 @@ def _pad_space_array_numpy(
     return np.concatenate([arr, pad_values], axis=0)
 
 
-def _pad_space_array(
-    values: jnp.ndarray,
-    *,
-    target_nx: int,
-    mode: str,
-) -> jnp.ndarray:
-    """Pad one compartment-space array to ``target_nx``."""
+def _pad_edge_array_numpy(values: np.ndarray, *, target_nx: int) -> np.ndarray:
+    """Pad one host edge-space array with zero coupling into padded compartments."""
 
-    arr = jnp.asarray(values)
-    pad_count = int(target_nx) - int(arr.shape[0])
-    if pad_count < 0:
-        raise ValueError(
-            f"target_nx must be >= array width, got target_nx={target_nx}, "
-            f"width={arr.shape[0]}."
-        )
-    if pad_count == 0:
-        return arr
-    if mode == "zero":
-        pad_values = jnp.zeros((pad_count,), dtype=arr.dtype)
-    elif mode == "edge":
-        pad_values = jnp.broadcast_to(arr[-1], (pad_count,))
-    else:
-        raise ValueError(f"unknown padding mode: {mode!r}.")
-    return jnp.concatenate([arr, pad_values], axis=0)
-
-
-def _pad_edge_array(values: jnp.ndarray, *, target_nx: int) -> jnp.ndarray:
-    """Pad one edge-space array with zero coupling into padded compartments."""
-
-    arr = jnp.asarray(values)
+    arr = np.asarray(values)
     target_edges = max(int(target_nx) - 1, 0)
     pad_count = target_edges - int(arr.shape[0])
     if pad_count < 0:
@@ -1441,18 +2076,18 @@ def _pad_edge_array(values: jnp.ndarray, *, target_nx: int) -> jnp.ndarray:
         )
     if pad_count == 0:
         return arr
-    return jnp.concatenate([arr, jnp.zeros((pad_count,), dtype=arr.dtype)], axis=0)
+    return np.concatenate([arr, np.zeros((pad_count,), dtype=arr.dtype)], axis=0)
 
 
-def _pad_gate_array(
-    values: jnp.ndarray,
+def _pad_gate_array_numpy(
+    values: np.ndarray,
     *,
     target_nx: int,
     target_gates: int,
-) -> jnp.ndarray:
-    """Pad one gate matrix to shared spatial and gate widths."""
+) -> np.ndarray:
+    """Pad one host gate matrix to shared spatial and gate widths."""
 
-    arr = jnp.asarray(values)
+    arr = np.asarray(values)
     pad_nx = int(target_nx) - int(arr.shape[0])
     pad_gates = int(target_gates) - int(arr.shape[1])
     if pad_nx < 0 or pad_gates < 0:
@@ -1461,36 +2096,16 @@ def _pad_gate_array(
             f"targets=({target_nx}, {target_gates}) and shape={arr.shape}."
         )
     if pad_gates:
-        arr = jnp.concatenate(
-            [arr, jnp.zeros((arr.shape[0], pad_gates), dtype=arr.dtype)],
+        arr = np.concatenate(
+            [arr, np.zeros((arr.shape[0], pad_gates), dtype=arr.dtype)],
             axis=1,
         )
     if pad_nx:
-        arr = jnp.concatenate(
-            [arr, jnp.zeros((pad_nx, arr.shape[1]), dtype=arr.dtype)],
+        arr = np.concatenate(
+            [arr, np.zeros((pad_nx, arr.shape[1]), dtype=arr.dtype)],
             axis=0,
         )
     return arr
-
-
-def _pad_extracellular_runtime(
-    runtime: ExtracellularRuntime,
-    *,
-    target_nx: int,
-) -> ExtracellularRuntime:
-    """Pad double-cable extracellular arrays to a shared batch width."""
-
-    return ExtracellularRuntime(
-        Cm_abs=_pad_space_array(runtime.Cm_abs, target_nx=target_nx, mode="edge"),
-        Cx_abs=_pad_space_array(runtime.Cx_abs, target_nx=target_nx, mode="edge"),
-        Gx_abs=_pad_space_array(runtime.Gx_abs, target_nx=target_nx, mode="edge"),
-        Gax_e=_pad_edge_array(runtime.Gax_e, target_nx=target_nx),
-        Gax_i=_pad_edge_array(runtime.Gax_i, target_nx=target_nx),
-        left_i=_pad_space_array(runtime.left_i, target_nx=target_nx, mode="zero"),
-        right_i=_pad_space_array(runtime.right_i, target_nx=target_nx, mode="zero"),
-        left_e=_pad_space_array(runtime.left_e, target_nx=target_nx, mode="zero"),
-        right_e=_pad_space_array(runtime.right_e, target_nx=target_nx, mode="zero"),
-    )
 
 
 def _group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray:
@@ -1530,6 +2145,45 @@ def _posthoc_observations_for_row(
         analysis = row_result.analyze(definition)
         observations[analysis.name] = analysis
     return observations
+
+
+def _trim_batch_kernel_result(
+    out: BatchKernelResult,
+    *,
+    batch_size: int,
+) -> BatchKernelResult:
+    """Drop backend-only padded batch rows before public result assembly."""
+
+    size = int(batch_size)
+    Vm = None if out.Vm is None else out.Vm[:size]
+    observations = _trim_observations_batch(out.observations, batch_size=size)
+    return BatchKernelResult(Vm=Vm, t=out.t, observations=observations)
+
+
+def _trim_observations_batch(
+    observations: dict[str, Any] | None,
+    *,
+    batch_size: int,
+) -> dict[str, Any] | None:
+    if observations is None:
+        return None
+    return {
+        name: _trim_observation_batch(value, batch_size=batch_size)
+        for name, value in observations.items()
+    }
+
+
+def _trim_observation_batch(value: Any, *, batch_size: int) -> Any:
+    current_size = getattr(value, "batch_size", None)
+    if current_size is None or int(current_size) <= int(batch_size):
+        return value
+    slice_batch = getattr(value, "slice_batch", None)
+    concat_batch = getattr(type(value), "concat_batch", None)
+    if callable(slice_batch) and callable(concat_batch):
+        return concat_batch([slice_batch(index) for index in range(int(batch_size))])
+    raise TypeError(
+        f"cannot trim padded observation result type {type(value).__name__}."
+    )
 
 
 def _dispatch_results_from_batch(

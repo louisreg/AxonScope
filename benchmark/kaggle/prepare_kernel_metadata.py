@@ -50,6 +50,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "realistic_stress_observer",
             "realistic_stress_observer_cpu",
             "realistic_stress_observer_gpu",
+            "population_tsim_gpu",
             "both",
         ),
         help="Benchmark suite to run inside the Kaggle kernel.",

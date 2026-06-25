@@ -282,6 +282,76 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     )
 
 
+def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
+    axons = []
+    for compartments, amplitude in ((7, 0.4), (11, 0.5)):
+        axon = axs.axons.HodgkinHuxley(
+            length=100.0 * axs.um,
+            diameter=0.5 * axs.um,
+            compartments=compartments,
+            celsius=6.3 * axs.degC,
+        )
+        sim = axs.AxonInstance(axon)
+        sim.add_current_clamp(
+            position=50.0 * axs.um,
+            current=axs.Stimulus.pulse(
+                start=0.02 * axs.ms,
+                duration=0.04 * axs.ms,
+                amplitude=amplitude * axs.nA,
+            ),
+        )
+        axons.append(sim)
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.ALL,
+    )
+    recorded = axs.simulate_pool(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording(signals=axs.signals.Vm),
+    )
+    compact = axs.simulate_pool(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[activation],
+    )
+
+    assert compact.observations is not None
+    raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
+    assert raster.row_aware is True
+    assert raster.words.shape == (2, 1, 11, 1)
+    np.testing.assert_array_equal(np.asarray(raster.probe_mask)[0, 0, :7], True)
+    np.testing.assert_array_equal(np.asarray(raster.probe_mask)[0, 0, 7:], False)
+    np.testing.assert_array_equal(np.asarray(raster.probe_mask)[1, 0, :], True)
+
+    unpacked = raster.unpack()[:, 0]
+    np.testing.assert_array_equal(
+        unpacked[0, :7],
+        np.asarray(recorded[0].Vm).T >= -80.0,
+    )
+    np.testing.assert_array_equal(
+        unpacked[1, :11],
+        np.asarray(recorded[1].Vm).T >= -80.0,
+    )
+    np.testing.assert_array_equal(unpacked[0, 7:], False)
+    assert compact[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (
+        1,
+        1,
+        7,
+        1,
+    )
+    assert compact[1].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (
+        1,
+        1,
+        11,
+        1,
+    )
+
+
 def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     axons = []
     for amplitude in (0.4, 0.5):

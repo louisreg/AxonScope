@@ -9,6 +9,8 @@ This example stays in the descriptive layer:
 - `Layout` places sections in space and assigns compartment counts.
 - Axon templates such as `HodgkinHuxley`, `RattayAberham`, and `MRG` build the
   same kind of descriptive layout for you.
+- Repeated motifs can be phase-shifted. For MRG this is the documented way to
+  import NRV-style node shifts without adding world coordinates to the axon.
 - `layout.plot(...)` and `layout.position_values(...)` expose the geometry.
 """
 
@@ -84,6 +86,15 @@ def main() -> None:
         compartments=[1, 8],
         lengths=800.0 * axs.um,
     )
+    # A phase shift rotates the repeated motif before cropping it to the
+    # requested length. This is still intrinsic 1D axon geometry.
+    phased_motif_layout = axs.axons.Layout.sequence(
+        [node_section, stin_section],
+        section_lengths=np.asarray([1.0, 199.0]) * axs.um,
+        compartments=[1, 8],
+        lengths=800.0 * axs.um,
+        phase_shift=65.0 * axs.um,
+    )
     heterogeneous_motif_layout = axs.axons.Layout.sequence(
         [node_section, mysa_section, flut_section, stin_section],
         section_lengths=np.asarray([1.0, 3.0, 20.0, 80.0]) * axs.um,
@@ -108,6 +119,14 @@ def main() -> None:
         diameter=10.0 * axs.um,
         nodes=5,
     )
+    # MRG exposes the same idea as `x_shift`: the distance from the axon start
+    # to the first node start. It phases the node motif; it is not anatomical
+    # placement.
+    mrg_phased_nodes = axs.axons.MRG(
+        diameter=10.0 * axs.um,
+        nodes=5,
+        x_shift=120.0 * axs.um,
+    )
     mrg_compartment_map = axs.axons.MRG(
         diameter=10.0 * axs.um,
         nodes=5,
@@ -123,10 +142,12 @@ def main() -> None:
         "single_uniform": uniform_layout,
         "single_non_uniform": non_uniform_layout,
         "sequence, simple repeated motif": simple_motif_layout,
+        "sequence, phase-shifted repeated motif": phased_motif_layout,
         "sequence, heterogeneous repeated motif": heterogeneous_motif_layout,
         "axon template, uniform HH": hh_template.layout,
         "axon template, non-uniform Rattay": rattay_template.layout,
         "MRG template, one compartment per section": mrg_default.layout,
+        "MRG template, node phase shift": mrg_phased_nodes.layout,
         "MRG template, section compartment map": mrg_compartment_map.layout,
     }
 
@@ -135,10 +156,22 @@ def main() -> None:
     print("=== Layout options ===")
     for title, layout in plots.items():
         positions_um = layout.position_values(unit=axs.um)
+        first_section = axs.axons.flatten_layout(layout).section_names[0]
         print(
             f"{title}: {positions_um.size} compartments, "
-            f"x=[{positions_um[0]:.1f}, {positions_um[-1]:.1f}] um"
+            f"x=[{positions_um[0]:.1f}, {positions_um[-1]:.1f}] um, "
+            f"first section={first_section}"
         )
+
+    print("\n=== Phase checks ===")
+    print(
+        "sequence phase_shift=65 um starts inside the internode/STIN motif; "
+        f"first compartment at {phased_motif_layout.position_values(unit=axs.um)[0]:.1f} um"
+    )
+    print(
+        "MRG x_shift=120 um places the first node center at "
+        f"{mrg_phased_nodes.node_position_values(unit=axs.um)[0]:.1f} um"
+    )
 
     # Step 6: plot each layout. Compartment labels make the difference between
     # uniform, non-uniform, and section-sequence construction visible.

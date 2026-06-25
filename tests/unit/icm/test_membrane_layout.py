@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import jax.numpy as jnp
 
 from axonscope import membranes
 from axonscope.channel_models.axnode import AxnodeICM
@@ -41,6 +42,28 @@ def test_compartment_membrane_layout_builds_heterogeneous_backend():
     assert np.all(np.isfinite(np.asarray(currents)))
     assert np.allclose(np.asarray(gate_trace)[1], 0.0)
     assert float(np.asarray(conductance_trace)[1, membrane.conductance_names().index("g_l")]) > 0.0
+
+
+def test_heterogeneous_backend_sizes_use_static_gate_metadata():
+    class CountingPassiveICM(PassiveICM):
+        calls_by_el: dict[float, int] = {}
+
+        def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
+            key = float(self.EL)
+            self.calls_by_el[key] = self.calls_by_el.get(key, 0) + 1
+            return super().init_gates(V0_mV)
+
+    CountingPassiveICM.calls_by_el = {}
+    HeterogeneousICMBackend.from_icm_vec(
+        [
+            CountingPassiveICM(Rm=1e4, EL=-80.0),
+            CountingPassiveICM(Rm=1e4, EL=-80.0),
+            CountingPassiveICM(Rm=1e4, EL=-70.0),
+            CountingPassiveICM(Rm=1e4, EL=-80.0),
+        ]
+    )
+
+    assert CountingPassiveICM.calls_by_el == {}
 
 
 def test_heterogeneous_membrane_layout_rejects_stateful_components():
