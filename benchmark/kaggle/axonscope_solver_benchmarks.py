@@ -242,7 +242,17 @@ def install_nrv_stack() -> pathlib.Path:
     env_python = env_dir / "bin" / "python"
     configure_conda_env_environment(env_dir)
     run([str(env_python), "-m", "pip", "install", "-U", "pip"])
-    run([str(env_python), "-m", "pip", "install", "nrv-py"], cwd=CHECKOUT_DIR)
+    run(
+        [
+            str(env_python),
+            "-m",
+            "pip",
+            "install",
+            "nrv-py",
+            "opencv-python-headless",
+        ],
+        cwd=CHECKOUT_DIR,
+    )
     return env_python
 
 
