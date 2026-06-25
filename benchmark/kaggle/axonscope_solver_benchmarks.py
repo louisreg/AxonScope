@@ -741,6 +741,8 @@ def run_realistic_fascicle_nrv_gpu(out_dir: pathlib.Path) -> None:
         "plain",
         "--time-chunk-steps",
         "1000",
+        "--gmsh-n-core",
+        "1",
     ]
     run(command, cwd=CHECKOUT_DIR)
     print_realistic_fascicle_summary(result_dir / f"{prefix}_summary.csv")

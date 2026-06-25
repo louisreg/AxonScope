@@ -72,6 +72,7 @@ class ExampleConfig:
     life_length_um: float = 1_000.0
     life_fascicle_id: str = "0"
     fem_n_proc: int | None = None
+    gmsh_n_core: int | None = 1
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,8 @@ def attach_life_electrode(
     nerve.attach_extracellular_stimulation(extra_stim)
     if config.fem_n_proc is not None:
         nerve.extra_stim.set_n_proc(config.fem_n_proc)
+    if config.gmsh_n_core is not None:
+        nerve.extra_stim.model.mesh.n_core = int(config.gmsh_n_core)
 
     return LifeElectrodeSetup(
         extra_stim=nerve.extra_stim,
@@ -1082,6 +1085,7 @@ def nrv_life_footprint(
             "life_x_offset_um": life_setup.x_offset_um,
             "life_y_um": life_setup.y_um,
             "life_z_um": life_setup.z_um,
+            "gmsh_n_core": getattr(life_setup.extra_stim.model.mesh, "n_core", None),
             "nrv_footprint_unit": "mV/mA",
         },
     )

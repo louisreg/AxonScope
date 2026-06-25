@@ -303,6 +303,15 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--clear-jax-caches", action="store_true")
     parser.add_argument("--validate-nrv", action="store_true")
     parser.add_argument("--fem-n-proc", type=int, default=0)
+    parser.add_argument(
+        "--gmsh-n-core",
+        type=int,
+        default=1,
+        help=(
+            "Gmsh mesh thread count for NRV FEM. 1 keeps the robust Delaunay path; "
+            "0 uses NRV's configured default."
+        ),
+    )
     parser.add_argument("--memory-sample-interval-s", type=float, default=0.1)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
@@ -329,6 +338,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--time-chunk-steps must be >= -1.")
     if int(args.fem_n_proc) < 0:
         raise ValueError("--fem-n-proc must be >= 0.")
+    if int(args.gmsh_n_core) < 0:
+        raise ValueError("--gmsh-n-core must be >= 0.")
 
 
 def load_example_module() -> ModuleType:
@@ -375,6 +386,7 @@ def build_example_config(example: ModuleType, args: argparse.Namespace) -> Any:
         nrv_validation_current_uA=float(args.nrv_validation_current_uA),
         activation_threshold_mV=float(args.activation_threshold_mV),
         fem_n_proc=None if int(args.fem_n_proc) == 0 else int(args.fem_n_proc),
+        gmsh_n_core=None if int(args.gmsh_n_core) == 0 else int(args.gmsh_n_core),
     )
 
 
@@ -580,6 +592,8 @@ def build_summary(
         "duration_ms": float(config.duration_ms),
         "dt_ms": float(config.dt_ms),
         "nt": int(nt),
+        "fem_n_proc": None if config.fem_n_proc is None else int(config.fem_n_proc),
+        "gmsh_n_core": None if config.gmsh_n_core is None else int(config.gmsh_n_core),
         "observer_time_chunk_steps": None if chunk_steps is None else int(chunk_steps),
         "chunks_per_group": int(chunk_count),
         "footprint_storage_bytes": footprint_bytes,
@@ -951,6 +965,7 @@ def print_dry_run(console: Console, args: argparse.Namespace) -> None:
         f"axons_per_fascicle={args.axons_per_fascicle}, "
         f"simulated_fibers_per_fascicle={args.simulated_fibers_per_fascicle}, "
         f"sequential_amplitude_steps={args.amplitudes_count}, "
+        f"gmsh_n_core={args.gmsh_n_core}, "
         f"nt={nt}, chunks_per_group={chunk_count}"
     )
 
