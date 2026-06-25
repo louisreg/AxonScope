@@ -352,6 +352,11 @@ Work should start here unless the user asks otherwise.
   says otherwise. Benchmark candidate `amplitude_batch_size` values such as 1,
   2, 4, and 8 against peak memory, footprint duplication
   `footprint[B, Nx]`, cold/warm time, and observer-only result assembly.
+- Benchmark and formalize `time_chunk_steps` policy for observer/result
+  assembly. Compare unchunked, 250, 500, 1000, and adaptive values across
+  full Vm, probe Vm, and observer-only outputs; track peak memory, chunk
+  overhead, cold/warm time, GPU utilization, result equivalence, and whether
+  defaults should depend on `nt`, `Naxons`, recording mode, or backend.
 - Promote reusable NRV integration pieces out of examples when they stabilize:
   realistic fascicle/fiber-table extraction, NRV LIFE/FEM footprint sampling
   into AxonScope `ExtracellularStimulation`, NRV recruitment-result decoding by
