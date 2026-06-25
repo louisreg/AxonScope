@@ -279,6 +279,19 @@ def install_jax_gpu_extra() -> None:
     ]
     if JAX_CUDA_EXTRA == "cuda12":
         requirements.append(f"jax-cuda12-plugin[with_cuda]=={jax_version}")
+        requirements.extend(
+            [
+                "nvidia-cublas-cu12",
+                "nvidia-cuda-cupti-cu12",
+                "nvidia-cuda-runtime-cu12",
+                "nvidia-cudnn-cu12",
+                "nvidia-cufft-cu12",
+                "nvidia-cusolver-cu12",
+                "nvidia-cusparse-cu12",
+                "nvidia-nccl-cu12",
+                "nvidia-nvjitlink-cu12",
+            ]
+        )
     run(
         [
             python_executable(),
@@ -291,7 +304,38 @@ def install_jax_gpu_extra() -> None:
         ],
         cwd=CHECKOUT_DIR,
     )
+    configure_cuda_library_path()
     print_cuda_package_diagnostics()
+
+
+def configure_cuda_library_path() -> None:
+    code = """
+import pathlib
+import site
+
+roots = []
+for site_dir in site.getsitepackages():
+    nvidia_dir = pathlib.Path(site_dir) / "nvidia"
+    if not nvidia_dir.exists():
+        continue
+    roots.extend(str(path) for path in sorted(nvidia_dir.glob("*/lib")) if path.exists())
+print("\\n".join(roots))
+"""
+    output = subprocess.check_output(
+        [python_executable(), "-c", code],
+        cwd=CHECKOUT_DIR,
+        text=True,
+    )
+    paths = [line.strip() for line in output.splitlines() if line.strip()]
+    if not paths:
+        print("No pip NVIDIA CUDA library directories found.")
+        return
+    existing = os.environ.get("LD_LIBRARY_PATH", "")
+    combined = os.pathsep.join(paths + ([existing] if existing else []))
+    os.environ["LD_LIBRARY_PATH"] = combined
+    print("LD_LIBRARY_PATH CUDA entries:")
+    for path in paths:
+        print(f"  {path}")
 
 
 def print_cuda_package_diagnostics() -> None:
