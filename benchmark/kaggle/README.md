@@ -213,7 +213,9 @@ GPU timing, FEM footprint timing, one-amplitude NRV timing, and full-NRV-sweep
 estimate under the Kaggle output archive. The preset pins NRV's Gmsh mesh thread
 count to one (`--gmsh-n-core 1`) so the LIFE/FEM smoke geometry uses the robust
 Delaunay path instead of the multi-threaded HXT mesher, which can fail on
-duplicated facets.
+duplicated facets. The NRV preset also forces process exit after the results
+archive is written, because NRV/FEniCS/MPI can leave native worker processes
+alive after the Python benchmark has printed its final summary on Kaggle.
 
 Run it with:
 

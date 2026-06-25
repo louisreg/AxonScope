@@ -11,10 +11,12 @@ import csv
 import json
 import os
 import pathlib
+import signal
 import shlex
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 
@@ -190,6 +192,7 @@ def main() -> None:
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
     print(f"\nResults folder: {out_dir}")
     print(f"Archive: {archive}")
+    finalize_benchmark_process()
 
 
 def setup_repo() -> None:
@@ -210,6 +213,125 @@ def setup_repo() -> None:
 
 def benchmark_needs_nrv_stack() -> bool:
     return BENCHMARK in {"realistic_fascicle_nrv_gpu"}
+
+
+def force_exit_after_archive() -> bool:
+    return bool_setting(
+        "AXONSCOPE_FORCE_EXIT_AFTER_ARCHIVE",
+        "force_exit_after_archive",
+        benchmark_needs_nrv_stack(),
+    )
+
+
+def finalize_benchmark_process() -> None:
+    if not force_exit_after_archive():
+        return
+    cleanup_stray_nrv_processes()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
+def cleanup_stray_nrv_processes() -> None:
+    candidates = stray_nrv_processes()
+    if not candidates:
+        print("No stray NRV/FEM processes detected before forced exit.")
+        return
+
+    print("Cleaning up stray NRV/FEM processes before forced exit:")
+    for process in candidates:
+        print(
+            f"  pid={process['pid']} comm={process['comm']} "
+            f"args={process['args'][:160]}"
+        )
+
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        remaining = [process for process in candidates if process_is_alive(process["pid"])]
+        if not remaining:
+            return
+        for process in remaining:
+            try:
+                os.kill(process["pid"], sig)
+            except ProcessLookupError:
+                pass
+            except PermissionError as exc:
+                print(f"Could not signal pid={process['pid']}: {exc}")
+        time.sleep(1.0)
+
+
+def stray_nrv_processes() -> list[dict[str, object]]:
+    rows = process_rows()
+    current_pid = os.getpid()
+    try:
+        current_pgid = os.getpgid(current_pid)
+    except OSError:
+        current_pgid = None
+    env_dir = str(WORK_DIR / "axonscope_nrv_env")
+    tokens = (
+        "nrniv",
+        "special",
+        "mpirun",
+        "mpiexec",
+        "orted",
+        "prte",
+        "pmix",
+        "dolfinx",
+        "fenics",
+    )
+    candidates: list[dict[str, object]] = []
+    for row in rows:
+        pid = int(row["pid"])
+        if pid == current_pid:
+            continue
+        command = f"{row['comm']} {row['args']}".lower()
+        same_group = current_pgid is not None and int(row["pgid"]) == current_pgid
+        in_nrv_env = env_dir in str(row["args"])
+        looks_like_nrv = any(token in command for token in tokens)
+        if in_nrv_env or (same_group and looks_like_nrv):
+            candidates.append(row)
+    return candidates
+
+
+def process_rows() -> list[dict[str, object]]:
+    try:
+        output = subprocess.check_output(
+            ["ps", "-eo", "pid=,ppid=,pgid=,comm=,args="],
+            text=True,
+        )
+    except Exception as exc:
+        print(f"Could not inspect process table: {exc}")
+        return []
+
+    rows = []
+    for line in output.splitlines():
+        parts = line.strip().split(maxsplit=4)
+        if len(parts) < 4:
+            continue
+        pid, ppid, pgid, comm = parts[:4]
+        args = parts[4] if len(parts) > 4 else ""
+        try:
+            rows.append(
+                {
+                    "pid": int(pid),
+                    "ppid": int(ppid),
+                    "pgid": int(pgid),
+                    "comm": comm,
+                    "args": args,
+                }
+            )
+        except ValueError:
+            continue
+    return rows
+
+
+def process_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def install_nrv_stack() -> pathlib.Path:
