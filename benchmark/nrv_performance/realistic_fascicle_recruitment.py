@@ -135,25 +135,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     import nrv
 
-    contours = recorder.measure(
-        "load_nrv_contours",
-        lambda: example.load_nrv_contours(
-            nrv,
-            nerve_diameter_um=float(config.nerve_diameter_um),
-        ),
+    geometry_step_name = (
+        "build_synthetic_nrv_nerve"
+        if config.geometry_mode == "synthetic_4_fascicles"
+        else "load_and_build_histology_nrv_nerve"
     )
-    nerve_contour, fascicle_contours = contours
-    nerve = recorder.measure(
-        "build_nrv_nerve",
-        lambda: example.build_nrv_nerve(
-            nrv,
-            fascicle_contours,
-            nerve_length_um=float(config.nerve_length_um),
-            nerve_diameter_um=float(config.nerve_diameter_um),
-            axons_per_fascicle=int(config.axons_per_fascicle),
-            percent_unmyelinated=float(config.percent_unmyelinated),
-            delta_trace_um=float(config.delta_trace_um),
-        ),
+    nerve_contour, fascicle_contours, nerve = recorder.measure(
+        geometry_step_name,
+        lambda: example.build_nrv_nerve_from_config(nrv, config),
     )
     life_setup = recorder.measure(
         "attach_life_fem_electrode",
@@ -272,9 +261,17 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--nerve-diameter-um", type=float, default=1_000.0)
     parser.add_argument("--nerve-length-um", type=float, default=10_000.0)
+    parser.add_argument(
+        "--geometry-mode",
+        choices=("histology", "synthetic_4_fascicles"),
+        default="histology",
+    )
     parser.add_argument("--axons-per-fascicle", type=int, default=25)
     parser.add_argument("--percent-unmyelinated", type=float, default=0.7)
     parser.add_argument("--delta-trace-um", type=float, default=10.0)
+    parser.add_argument("--synthetic-fascicle-diameter-um", type=float, default=250.0)
+    parser.add_argument("--synthetic-fascicle-offset-um", type=float, default=250.0)
+    parser.add_argument("--fascicle-contour-epsilon-fraction", type=float, default=0.002)
     parser.add_argument("--max-fibers", type=int, default=0)
     parser.add_argument(
         "--simulated-fibers-per-fascicle",
@@ -329,6 +326,16 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-fibers must be >= 0.")
     if int(args.simulated_fibers_per_fascicle) < 0:
         raise ValueError("--simulated-fibers-per-fascicle must be >= 0.")
+    if float(args.synthetic_fascicle_diameter_um) <= 0.0:
+        raise ValueError("--synthetic-fascicle-diameter-um must be > 0.")
+    if float(args.synthetic_fascicle_offset_um) < 0.0:
+        raise ValueError("--synthetic-fascicle-offset-um must be >= 0.")
+    synthetic_radius = float(args.synthetic_fascicle_diameter_um) / 2.0
+    synthetic_outer_radius = float(args.synthetic_fascicle_offset_um) + synthetic_radius
+    if synthetic_outer_radius >= float(args.nerve_diameter_um) / 2.0:
+        raise ValueError("Synthetic fascicles must fit inside the nerve diameter.")
+    if float(args.fascicle_contour_epsilon_fraction) < 0.0:
+        raise ValueError("--fascicle-contour-epsilon-fraction must be >= 0.")
     if int(args.amplitudes_count) < 1:
         raise ValueError("--amplitudes-count must be >= 1.")
     if float(args.duration_ms) <= 0.0 or float(args.dt_ms) <= 0.0:
@@ -362,9 +369,13 @@ def build_example_config(example: ModuleType, args: argparse.Namespace) -> Any:
     return example.ExampleConfig(
         nerve_diameter_um=float(args.nerve_diameter_um),
         nerve_length_um=float(args.nerve_length_um),
+        geometry_mode=str(args.geometry_mode),
         axons_per_fascicle=int(args.axons_per_fascicle),
         percent_unmyelinated=float(args.percent_unmyelinated),
         delta_trace_um=float(args.delta_trace_um),
+        synthetic_fascicle_diameter_um=float(args.synthetic_fascicle_diameter_um),
+        synthetic_fascicle_offset_um=float(args.synthetic_fascicle_offset_um),
+        fascicle_contour_epsilon_fraction=float(args.fascicle_contour_epsilon_fraction),
         include_unmyelinated=True,
         max_fibers=int(args.max_fibers),
         simulate_fibers=0,
@@ -576,6 +587,12 @@ def build_summary(
     )
     summary = {
         "axons_per_fascicle": int(config.axons_per_fascicle),
+        "geometry_mode": str(config.geometry_mode),
+        "synthetic_fascicle_diameter_um": float(config.synthetic_fascicle_diameter_um),
+        "synthetic_fascicle_offset_um": float(config.synthetic_fascicle_offset_um),
+        "fascicle_contour_epsilon_fraction": float(
+            config.fascicle_contour_epsilon_fraction
+        ),
         "total_extracted_fibers": int(len(rows)),
         "simulated_fibers": int(len(simulated_rows)),
         "simulated_mrg_fibers": int(mrg_count),
@@ -963,6 +980,7 @@ def print_dry_run(console: Console, args: argparse.Namespace) -> None:
     console.print("[bold]Realistic fascicle benchmark dry run[/bold]")
     console.print(
         f"axons_per_fascicle={args.axons_per_fascicle}, "
+        f"geometry_mode={args.geometry_mode}, "
         f"simulated_fibers_per_fascicle={args.simulated_fibers_per_fascicle}, "
         f"sequential_amplitude_steps={args.amplitudes_count}, "
         f"gmsh_n_core={args.gmsh_n_core}, "

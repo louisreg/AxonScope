@@ -191,10 +191,14 @@ python benchmark/kaggle/run_kernel.py \
   --wait-timeout 7200
 ```
 
-`realistic_fascicle_nrv_gpu` runs the realistic NRV LIFE/FEM fascicle smoke
-benchmark on a Kaggle GPU. This preset bootstraps `micromamba`, downloads NRV's
-official Linux conda environment file, creates an isolated NRV env, then
-installs `nrv-py` plus OpenCV for NRV's contour loader:
+`realistic_fascicle_nrv_gpu` runs the NRV LIFE/FEM fascicle smoke benchmark on
+a Kaggle GPU. The smoke case builds one synthetic NRV nerve with four circular
+fascicles, then compares NRV validation with AxonScope recruitment on the GPU.
+This avoids making the server smoke test depend on NRV's histology-image contour,
+which can produce Gmsh surface-overlap failures on some Linux/Gmsh builds. This
+preset bootstraps `micromamba`, downloads NRV's official Linux conda environment
+file, creates an isolated NRV env, then installs `nrv-py` plus OpenCV for NRV's
+contour loader:
 
 ```bash
 curl -L -o env.yaml \
@@ -207,9 +211,9 @@ It then runs `benchmark/nrv_performance/run.py --suite
 realistic_fascicle_smoke` with NRV validation enabled and writes the AxonScope
 GPU timing, FEM footprint timing, one-amplitude NRV timing, and full-NRV-sweep
 estimate under the Kaggle output archive. The preset pins NRV's Gmsh mesh thread
-count to one (`--gmsh-n-core 1`) so the realistic LIFE/FEM geometry uses the
-robust Delaunay path instead of the multi-threaded HXT mesher, which can fail on
-duplicated facets in this smoke geometry.
+count to one (`--gmsh-n-core 1`) so the LIFE/FEM smoke geometry uses the robust
+Delaunay path instead of the multi-threaded HXT mesher, which can fail on
+duplicated facets.
 
 Run it with:
 

@@ -218,9 +218,11 @@ NRV_PERFORMANCE_SUITES: dict[str, NrvPerformanceSuite] = {
     ),
     "realistic_fascicle_smoke": NrvPerformanceSuite(
         name="realistic_fascicle_smoke",
-        description="Small realistic NRV LIFE/FEM recruitment memory/timing profile.",
+        description="Small synthetic four-fascicle NRV LIFE/FEM recruitment memory/timing profile.",
         runner="realistic_fascicle_recruitment",
         args=(
+            "--geometry-mode",
+            "synthetic_4_fascicles",
             "--axons-per-fascicle",
             "10",
             "--simulated-fibers-per-fascicle",

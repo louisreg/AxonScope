@@ -48,9 +48,12 @@ class ExampleConfig:
 
     nerve_diameter_um: float = 1_000.0
     nerve_length_um: float = 10_000.0
+    geometry_mode: str = "histology"
     axons_per_fascicle: int = 100
     percent_unmyelinated: float = 0.7
     delta_trace_um: float = 10.0
+    synthetic_fascicle_diameter_um: float = 250.0
+    synthetic_fascicle_offset_um: float = 250.0
     include_unmyelinated: bool = True
     max_fibers: int = 0
     simulate_fibers: int = 0
@@ -73,6 +76,7 @@ class ExampleConfig:
     life_fascicle_id: str = "0"
     fem_n_proc: int | None = None
     gmsh_n_core: int | None = 1
+    fascicle_contour_epsilon_fraction: float = 0.002
 
 
 @dataclass(frozen=True)
@@ -147,19 +151,7 @@ def main(config: ExampleConfig | None = None) -> None:
     validation_current_uA = float(config.nrv_validation_current_uA)
 
     fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.0), constrained_layout=True)
-    nerve_contour, fascicle_contours = load_nrv_contours(
-        nrv,
-        nerve_diameter_um=config.nerve_diameter_um,
-    )
-    nerve = build_nrv_nerve(
-        nrv,
-        fascicle_contours,
-        nerve_length_um=config.nerve_length_um,
-        nerve_diameter_um=config.nerve_diameter_um,
-        axons_per_fascicle=config.axons_per_fascicle,
-        percent_unmyelinated=config.percent_unmyelinated,
-        delta_trace_um=config.delta_trace_um,
-    )
+    nerve_contour, fascicle_contours, nerve = build_nrv_nerve_from_config(nrv, config)
     life_setup = attach_life_electrode(nrv, nerve, config)
     rows = extract_fiber_rows(nerve, include_unmyelinated=config.include_unmyelinated)
     rows = select_rows(rows, limit=config.max_fibers)
@@ -199,10 +191,63 @@ def main(config: ExampleConfig | None = None) -> None:
     plt.show()
 
 
+def build_nrv_nerve_from_config(
+    nrv_module: Any,
+    config: ExampleConfig,
+) -> tuple[np.ndarray, list[np.ndarray], Any]:
+    """Build the configured NRV nerve and matching plotting contours."""
+
+    if config.geometry_mode == "histology":
+        nerve_contour, fascicle_contours = load_nrv_contours(
+            nrv_module,
+            nerve_diameter_um=config.nerve_diameter_um,
+            fascicle_epsilon_fraction=config.fascicle_contour_epsilon_fraction,
+        )
+        nerve = build_nrv_nerve(
+            nrv_module,
+            fascicle_contours,
+            nerve_length_um=config.nerve_length_um,
+            nerve_diameter_um=config.nerve_diameter_um,
+            axons_per_fascicle=config.axons_per_fascicle,
+            percent_unmyelinated=config.percent_unmyelinated,
+            delta_trace_um=config.delta_trace_um,
+        )
+        return nerve_contour, fascicle_contours, nerve
+
+    if config.geometry_mode == "synthetic_4_fascicles":
+        nerve_contour = circular_contour(
+            center=(0.0, 0.0),
+            diameter_um=config.nerve_diameter_um,
+            n_points=160,
+        )
+        fascicle_contours = [
+            circular_contour(
+                center=center,
+                diameter_um=config.synthetic_fascicle_diameter_um,
+                n_points=96,
+            )
+            for center in synthetic_fascicle_centers(config.synthetic_fascicle_offset_um)
+        ]
+        nerve = build_synthetic_nrv_nerve(
+            nrv_module,
+            nerve_length_um=config.nerve_length_um,
+            nerve_diameter_um=config.nerve_diameter_um,
+            fascicle_diameter_um=config.synthetic_fascicle_diameter_um,
+            fascicle_offset_um=config.synthetic_fascicle_offset_um,
+            axons_per_fascicle=config.axons_per_fascicle,
+            percent_unmyelinated=config.percent_unmyelinated,
+            delta_trace_um=config.delta_trace_um,
+        )
+        return nerve_contour, fascicle_contours, nerve
+
+    raise ValueError(f"Unsupported NRV geometry mode: {config.geometry_mode!r}")
+
+
 def load_nrv_contours(
     nrv_module: Any,
     *,
     nerve_diameter_um: float,
+    fascicle_epsilon_fraction: float = 0.002,
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     """Load NRV's example histology image and return rescaled contours."""
 
@@ -237,9 +282,35 @@ def load_nrv_contours(
     fascicle_points = []
     for index, contour in enumerate(contours):
         if hierarchy[index, -1] == nerve_id:
-            fascicle_points.append((contour.squeeze() - center_pix) * scale_xy)
+            points = simplify_cv2_contour(
+                cv2,
+                contour,
+                epsilon_fraction=fascicle_epsilon_fraction,
+            )
+            fascicle_points.append((points - center_pix) * scale_xy)
 
     return nerve_points, fascicle_points
+
+
+def simplify_cv2_contour(
+    cv2_module: Any,
+    contour: Any,
+    *,
+    epsilon_fraction: float,
+) -> np.ndarray:
+    """Return a valid open contour suitable for NRV/Gmsh polygon geometry."""
+
+    points = np.asarray(contour).squeeze()
+    if float(epsilon_fraction) > 0.0:
+        epsilon = float(epsilon_fraction) * cv2_module.arcLength(contour, True)
+        simplified = cv2_module.approxPolyDP(contour, epsilon, True).squeeze()
+        if np.asarray(simplified).ndim == 2 and len(simplified) >= 3:
+            points = np.asarray(simplified)
+    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3:
+        raise ValueError("NRV contour simplification produced an invalid polygon.")
+    if np.array_equal(points[0], points[-1]):
+        points = points[:-1]
+    return np.asarray(points, dtype=float)
 
 
 def build_nrv_nerve(
@@ -259,10 +330,7 @@ def build_nrv_nerve(
         length=nrv_numeric(nerve_length_um),
     )
     for fascicle_id, points in enumerate(fascicle_contours):
-        vertex_count = 50
-        indices = np.arange(vertex_count + 1) * points.shape[0] // vertex_count
-        indices[-1] -= 1
-        geometry = nrv_module.create_cshape(vertices=points[indices])
+        geometry = nrv_module.create_cshape(vertices=np.asarray(points, dtype=float))
         fascicle = nrv_module.fascicle(ID=fascicle_id)
         fascicle.set_geometry(geometry=geometry)
         nerve.add_fascicle(fascicle)
@@ -275,6 +343,73 @@ def build_nrv_nerve(
             with_node_shift=True,
         )
     return nerve
+
+
+def build_synthetic_nrv_nerve(
+    nrv_module: Any,
+    *,
+    nerve_length_um: float,
+    nerve_diameter_um: float,
+    fascicle_diameter_um: float,
+    fascicle_offset_um: float,
+    axons_per_fascicle: int,
+    percent_unmyelinated: float,
+    delta_trace_um: float,
+) -> Any:
+    """Create one NRV nerve with four simple circular fascicles."""
+
+    nerve = nrv_module.nerve(
+        diameter=nrv_numeric(nerve_diameter_um),
+        length=nrv_numeric(nerve_length_um),
+    )
+    for fascicle_id, center in enumerate(synthetic_fascicle_centers(fascicle_offset_um)):
+        fascicle = nrv_module.fascicle(ID=fascicle_id)
+        fascicle.set_geometry(
+            geometry=nrv_module.create_cshape(
+                center=tuple(float(value) for value in center),
+                diameter=nrv_numeric(fascicle_diameter_um),
+            )
+        )
+        nerve.add_fascicle(fascicle)
+
+    for fascicle in nerve.fascicles.values():
+        fascicle.fill(
+            n_ax=axons_per_fascicle,
+            percent_unmyel=percent_unmyelinated,
+            delta_trace=delta_trace_um,
+            with_node_shift=True,
+        )
+    return nerve
+
+
+def synthetic_fascicle_centers(offset_um: float) -> tuple[tuple[float, float], ...]:
+    """Return four fascicle centers inside the synthetic nerve cross-section."""
+
+    offset = float(offset_um)
+    return (
+        (offset, 0.0),
+        (0.0, offset),
+        (-offset, 0.0),
+        (0.0, -offset),
+    )
+
+
+def circular_contour(
+    *,
+    center: tuple[float, float],
+    diameter_um: float,
+    n_points: int,
+) -> np.ndarray:
+    """Return y/z contour points for plotting a circular NRV geometry."""
+
+    theta = np.linspace(0.0, 2.0 * np.pi, int(n_points), endpoint=False)
+    radius = float(diameter_um) / 2.0
+    return np.column_stack(
+        (
+            float(center[0]) + radius * np.cos(theta),
+            float(center[1]) + radius * np.sin(theta),
+        )
+    )
 
 
 def nrv_numeric(value: float) -> int | float:
