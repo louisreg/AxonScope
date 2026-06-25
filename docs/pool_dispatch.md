@@ -225,8 +225,11 @@ Progress reporting is optional. `progress=True` uses Rich, while
 `progress="plain"` uses simple text output that is easy to capture in logs. The
 report is event-based: it announces the selected route for each dispatch group,
 batch/recording planning, runtime/cohort preparation, input lowering,
-compile/solve, kernel chunks, and result assembly. JAX kernels cannot stream
-from inside one compiled scan; for finer solver progress, run chunked batches:
+cold compilation points, kernel solving, and result assembly. The
+`compiling JAX kernel if needed` line is the one that can take time on a
+first call because JAX compilation happens inside the kernel dispatch. JAX
+kernels cannot stream from inside one compiled scan; for finer solver progress,
+run chunked batches:
 
 ```python
 results = axs.simulate_pool(
@@ -242,16 +245,19 @@ results = axs.simulate_pool(
 Plain output is intentionally compact, for example:
 
 ```text
-dispatch: rows=4 building dispatch plan
+plan    building dispatch plan (rows=4)
 Dispatch progress: 4 rows, 2 groups
-[1/2] group 0 batch-single-cable rows=3 Nx=101
-  route group=0: route=batch-single-cable rows=3 Nx=101 compatible batch route
-  prepare group=0: route=batch-single-cable rows=3 Nx=101 runtime mode=single
-  prepare group=0: route=batch-single-cable rows=3 Nx=101 cohort rows
-  batch group=0: route=batch-single-cable rows=3 Nx=101 recording plan recording=VmRaster
-  lowering group=0: route=batch-single-cable rows=3 Nx=101 inputs intracellular=sparse_current_clamp extracellular=factorized_footprint
-  kernel group=0: route=batch-single-cable rows=3 Nx=101 compile/solve JAX kernel recording=VmRaster
-  result group=0: route=batch-single-cable rows=3 Nx=101 assemble batch output output=observations
+group   g0 1/2 batch-single-cable (rows=3, Nx=101)
+  route   g0 1/2  compatible batch route (batch, strict, padding=no)
+  prepare g0 1/2  runtime (mode=single)
+  prepare g0 1/2  cohort rows
+  batch   g0 1/2  recording plan (recording=VmRaster)
+  lower   g0 1/2  inputs (sparse_current_clamp -> factorized_footprint)
+  kernel  g0 1/2  compiling JAX kernel if needed (recording=VmRaster)
+  kernel  g0 1/2  solving JAX kernel
+  kernel  g0 1/2  completed JAX kernel
+  result  g0 1/2  assemble batch output (output=observations)
+done    g0
 ```
 
 The old precomputed global extracellular API and policy-specific public batch

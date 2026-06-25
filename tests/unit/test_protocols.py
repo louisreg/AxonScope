@@ -76,6 +76,36 @@ def _observer_only_pool_result(activated):
     return axs.AxonSimulationResult((cohort,), size=row_count)
 
 
+def _observer_only_cohort(activated, *, input_indices):
+    flags = tuple(bool(value) for value in activated)
+    words = np.asarray(
+        [[[[0b100 if flag else 0]] for _ in range(1)] for flag in flags],
+        dtype=np.uint32,
+    )
+    raster = VmRasterResult(
+        words=words,
+        nt=3,
+        dt_ms=1.0,
+        definitions=(),
+        names=("activation",),
+        probe_indices=np.asarray([[1]], dtype=np.int32),
+        probe_mask=np.asarray([[True]], dtype=bool),
+        original_indices=np.asarray([[1]], dtype=np.int32),
+        positions_um=np.asarray([[100.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    return CohortResult(
+        input_indices=tuple(int(index) for index in input_indices),
+        axons=tuple(_DummyAxon() for _ in flags),
+        simulations=tuple(None for _ in flags),
+        Vm=None,
+        t=np.asarray([0.0, 1.0, 2.0]),
+        diagnostics=tuple({} for _ in flags),
+        record_indices=tuple(None for _ in flags),
+        observations={VM_RASTER_OBSERVATION_KEY: raster},
+    )
+
+
 def test_find_activation_threshold_accepts_simulation_factory(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
@@ -149,6 +179,7 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
     tested_values_nA: list[float] = []
     pool = (_DummyAxon(), _DummyAxon())
     threshold_by_row = dict(zip(pool, (0.5, 1.5), strict=True))
+    progress_values: list[bool | str] = []
 
     def update(row, tested_current):
         current_nA = float(tested_current.to(axs.nA).magnitude)
@@ -156,7 +187,7 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
         row.tested_current = tested_current
 
     def fake_simulate_pool(updated_pool, **kwargs):
-        del kwargs
+        progress_values.append(kwargs.get("progress", False))
         return _public_pool_result(
             tuple(
                 _result_for_current(
@@ -177,6 +208,7 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
         criterion=criterion,
+        solver_progress="plain",
     )
 
     np.testing.assert_array_equal(
@@ -187,6 +219,7 @@ def test_recruitment_sweep_accepts_pool_update(monkeypatch):
     np.testing.assert_allclose(curve.fraction, [0.0, 0.5, 1.0])
     np.testing.assert_allclose(curve.threshold_like_uA * 1000.0, [1.0, 2.0])
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+    assert progress_values == ["plain", False, False]
 
 
 def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
@@ -198,11 +231,13 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
     pool = (_DummyAxon(), _DummyAxon())
     thresholds_nA = (0.5, 1.5)
     calls = []
+    progress_values: list[bool | str] = []
 
     def update(row, tested_current):
         row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
 
     def fake_simulate_pool(updated_pool, **kwargs):
+        progress_values.append(kwargs.get("progress", False))
         calls.append(kwargs)
         return _observer_only_pool_result(
             row.tested_current_nA >= thresholds_nA[pool.index(row)]
@@ -219,9 +254,11 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
         dt=1.0 * axs.ms,
         criterion=criterion,
         recording=axs.Recording.none(),
+        solver_progress="plain",
     )
 
     assert len(calls) == 3
+    assert progress_values == ["plain", False, False]
     for call in calls:
         assert isinstance(call["recording"], axs.Recording)
         assert not call["recording"].voltage
@@ -233,7 +270,7 @@ def test_recruitment_sweep_uses_observer_only_recording(monkeypatch):
     )
 
 
-def test_recruitment_sweep_batches_observer_only_independent_values(monkeypatch):
+def test_recruitment_sweep_keeps_axoninstance_observer_values_sequential(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
@@ -273,18 +310,97 @@ def test_recruitment_sweep_batches_observer_only_independent_values(monkeypatch)
         dt=1.0 * axs.ms,
         criterion=criterion,
         recording=axs.Recording.none(),
+        batch_options=axs.BatchOptions.none(time_chunk_steps=123),
+        solver_progress="plain",
     )
 
-    assert len(calls) == 1
-    flat_pool, call = calls[0]
-    assert len(flat_pool) == 6
-    assert isinstance(call["recording"], axs.Recording)
-    assert not call["recording"].voltage
-    assert call["observers"][0].name == "activation"
+    assert len(calls) == 3
+    assert [len(updated_pool) for updated_pool, _call in calls] == [2, 2, 2]
+    assert [call["progress"] for _updated_pool, call in calls] == ["plain", False, False]
+    for _updated_pool, call in calls:
+        assert isinstance(call["recording"], axs.Recording)
+        assert not call["recording"].voltage
+        assert call["batch_options"].time_chunk_steps == 123
+        assert call["observers"][0].name == "activation"
     np.testing.assert_array_equal(
         curve.activated,
         [[False, False], [True, False], [True, True]],
     )
+
+
+def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = tuple(
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=100.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        )
+        for _ in range(2)
+    )
+    calls = []
+    progress_values: list[bool | str] = []
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        updated_pool = tuple(updated_pool)
+        calls.append(updated_pool)
+        progress_values.append(kwargs.get("progress", False))
+        return _observer_only_pool_result(
+            row.tested_current_nA >= 1.0
+            for row in updated_pool
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        amplitudes=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+        solver_progress="plain",
+    )
+
+    assert [len(call) for call in calls] == [2, 2, 2]
+    assert progress_values == ["plain", False, False]
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [False, False], [True, True]],
+    )
+
+
+def test_activation_observer_pool_result_uses_cohort_vector_path():
+    result = axs.AxonSimulationResult(
+        (
+            _observer_only_cohort((True, False), input_indices=(2, 0)),
+            _observer_only_cohort((True,), input_indices=(1,)),
+        ),
+        size=3,
+    )
+    activation = axs.Activation(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+        name="activation",
+    )
+
+    values = activation_protocols._activation_observations_from_pool_result(
+        result,
+        activation,
+    )
+
+    np.testing.assert_array_equal(values, [False, True, True])
 
 
 def test_recruitment_sweep_requires_current_units():
@@ -345,6 +461,43 @@ def test_pool_sweep_accepts_generic_observer(monkeypatch):
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
 
 
+def test_pool_sweep_solver_progress_is_first_run_only(monkeypatch, capsys):
+    progress_values: list[bool | str] = []
+    pool = (_DummyAxon(), _DummyAxon())
+
+    def update(row, tested_current):
+        row.tested_current = tested_current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        progress_values.append(kwargs.get("progress", False))
+        return _public_pool_result(
+            tuple(
+                _result_for_current(row.tested_current, threshold_nA=1.0).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
+    axs.protocols.pool_sweep(
+        pool,
+        update=update,
+        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        progress="plain",
+        solver_progress="plain",
+    )
+
+    captured = capsys.readouterr()
+    assert progress_values == ["plain", False, False]
+    assert "Protocol sweep completed:" in captured.out
+    assert "cold_start=" in captured.out
+    assert "per_iteration=" in captured.out
+
+
 def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
@@ -394,6 +547,52 @@ def test_find_activation_threshold_curve_accepts_mutating_or_replacing_update(mo
     np.testing.assert_allclose(curve.row_values(unit=axs.um), [0.5, 1.5])
     assert curve.n_iterations >= 3
     assert len(tested_currents_nA) >= 2 * curve.n_iterations
+
+
+def test_threshold_curve_solver_progress_is_first_run_only(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+        require_propagation=True,
+    )
+    progress_values: list[bool | str] = []
+    thresholds_nA = np.asarray([0.5, 1.5], dtype=float)
+    pool = tuple(_DummyAxon() for _ in thresholds_nA)
+
+    def update(row, current):
+        row.tested_current = current
+
+    def fake_simulate_pool(updated_pool, **kwargs):
+        progress_values.append(kwargs.get("progress", False))
+        return _public_pool_result(
+            tuple(
+                _result_for_current(
+                    row.tested_current,
+                    threshold_nA=thresholds_nA[pool.index(row)],
+                ).single.Vm
+                for row in updated_pool
+            ),
+            axons=tuple(updated_pool),
+        )
+
+    monkeypatch.setattr(activation_protocols, "simulate_pool", fake_simulate_pool)
+
+    axs.protocols.find_activation_threshold_curve(
+        pool,
+        update=update,
+        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        tolerance=0.25 * axs.nA,
+        max_iterations=8,
+        solver_progress="plain",
+    )
+
+    assert progress_values[0] == "plain"
+    assert progress_values[1:]
+    assert all(value is False for value in progress_values[1:])
 
 
 def test_find_activation_threshold_curve_requires_current_units():

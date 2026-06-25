@@ -134,7 +134,7 @@ Work should start here unless the user asks otherwise.
 - [x] Avoid device-to-host transfers unless explicitly requested by an
   execution-time capture.
 - [x] Redesign pool progress reporting around structured dispatch/backend
-  events: route choice, preparation, input lowering, kernel chunks, and result
+  events: route choice, preparation, input lowering, kernel progress, and result
   assembly.
 
 ### 7. Examples Flattening
@@ -163,6 +163,10 @@ Work should start here unless the user asks otherwise.
 - [x] Rewrite each moved example for the new didactic order instead of only
   preserving the previous script body.
 - [x] Provide realistic example with NRV built-in geometry capabilities.
+- [ ] Add a didactic basic example for high-frequency block. This first requires
+  a block-detection analysis path so the example can distinguish propagation,
+  activation failure, and true conduction block instead of relying on ad-hoc
+  visual inspection.
 
 ### 8. Simulation Results Model
 
@@ -319,10 +323,11 @@ Work should start here unless the user asks otherwise.
   active step (`building plan`, `preparing runtime`, `compiling JAX kernel`,
   `solving`, `assembling results`, etc.). Prefer wiring it through the existing
   structured progress/hotpath events rather than ad-hoc prints, and make it most
-  useful for first-call/cold runs where compilation can look stalled. The first
-  pass is wired through `DispatchProgress`: dispatch planning, batch recording,
-  runtime preparation, input lowering, JAX/scalar compile-solve, kernel chunks,
-  and result assembly now share the same reporting path.
+  useful for first-call/cold runs where compilation can look stalled.
+  `DispatchProgress` now reports dispatch planning, batch recording, runtime
+  preparation, input lowering, optional JAX/scalar compilation points, solving,
+  and result assembly through one structured path; see
+  `examples/advanced/runtime/04_cold_run_progress.py`.
 - [x] Keep cold/warm profiling as a first-class benchmark output and compare
   `first`, `warm`, `cold-warm`, cache hits/misses, `kernel.dispatch_jax`, and
   `runtime.prepare` before/after each optimization.
@@ -334,6 +339,30 @@ Work should start here unless the user asks otherwise.
 
 ## Later
 
+- Prepare a publication-grade benchmark campaign for AxonScope versus baselines.
+  The campaign should cover velocity, activation-threshold curves, and
+  recruitment curves across: `dt`, `Nx`, `Naxons`, FP32 versus FP64; full Vm,
+  single/probe Vm, and observer-only outputs; single-cable, double-cable, and
+  mixed populations; same-diameter versus different-diameter cohorts within the
+  same model family; CPU versus GPU versus NRV. Keep this as a reproducible
+  campaign plan with fixed presets, saved raw data, plots, and publication-ready
+  summary tables.
+- Explore recruitment amplitude micro-batching as a benchmark axis, but keep
+  the runtime/protocol default at one amplitude per solver call until evidence
+  says otherwise. Benchmark candidate `amplitude_batch_size` values such as 1,
+  2, 4, and 8 against peak memory, footprint duplication
+  `footprint[B, Nx]`, cold/warm time, and observer-only result assembly.
+- Promote reusable NRV integration pieces out of examples when they stabilize:
+  realistic fascicle/fiber-table extraction, NRV LIFE/FEM footprint sampling
+  into AxonScope `ExtracellularStimulation`, NRV recruitment-result decoding by
+  fiber row, and compact AxonScope-versus-NRV recruitment summaries. Keep them
+  under `axonscope.integrations.nrv` so NRV still owns external geometry while
+  AxonScope owns intrinsic axon dynamics.
+- Park performance optimization for now. When optimization resumes, start with
+  a cold-path audit for large synthetic/GPU populations (`n=1000`): split
+  `build pool`, `dispatch.build_plan`, `runtime.prepare`, and
+  `kernel.dispatch_jax`; investigate row-by-row planning/preparation overhead
+  before changing kernel routes or adding scheduling complexity.
 - GPU dispatch scheduling: memory-aware bucket/coalesce first, optional async
   enqueue second, only after memory budgets and group-route inspection exist.
   see axonscope_dispatch_scheduling_gpu_note.md
@@ -344,7 +373,13 @@ Work should start here unless the user asks otherwise.
 - Serialization: final schemas, typed serialization, etc
 - Work on HPC integration
 - DSL model AXONSCOPE_RUNTIME_AGNOSTIC_DSL_ARCHITECTURE.md
-- Work on FEM footprint integration, see fem_axon_gpu_coupling_design.md
+- Work on FEM footprint integration, see `ideas/fem_axon_gpu_coupling_design.md`.
+  Start with the CPU/NRV path before thinking GPU FEM: split benchmarks into
+  FEM solve, first footprint, cached footprint sampling, and AxonScope solve;
+  cache reusable FEM field bases; avoid repeated point-location by introducing
+  an axon embedding/projection representation; then choose between full
+  precomputed footprints, chunked projection, and future fused projection-solver
+  paths by memory budget.
 
 ## Key References
 

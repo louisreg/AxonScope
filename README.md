@@ -361,7 +361,7 @@ python examples/advanced/protocols/01_threshold_vs_parameters.py
 python examples/advanced/protocols/02_recruitment_waveforms.py
 python examples/advanced/runtime/01_runtime_policy.py
 python examples/advanced/runtime/03_pipeline_inspection.py
-python examples/with_nrv/01_nrv_pool_geometry.py --fibers 8
+python examples/with_nrv/01_realistic_fascicle_geometry_comparison.py
 ```
 
 See `examples/README.md` for the full learning path.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+from benchmark.nrv_performance.realistic_fascicle_recruitment import profile_report_metrics
 from benchmark.nrv_performance.run import suite_argv as nrv_performance_suite_argv
 from benchmark.nrv_performance.suites import NRV_PERFORMANCE_SUITES
 from benchmark.runtime.run import suite_argv as runtime_suite_argv
@@ -57,6 +59,15 @@ def test_population_tsim_gpu_1000_suite_uses_large_synthetic_case():
     assert suite.args[suite.args.index("--fiber-counts") + 1] == "1000"
 
 
+def test_realistic_fascicle_suite_keeps_runner_default_out_dir():
+    suite = NRV_PERFORMANCE_SUITES["realistic_fascicle_smoke"]
+
+    argv = nrv_performance_suite_argv(suite, out_dir=None)
+
+    assert suite.runner == "realistic_fascicle_recruitment"
+    assert "--out-dir" not in argv
+
+
 def test_runtime_suites_forward_to_benchmark_solver():
     suite = RUNTIME_SUITES["smoke"]
 
@@ -87,3 +98,28 @@ def test_runtime_pool_memory_suite_is_registered_and_forwardable():
     assert argv[argv.index("--fibers") + 1] == "128"
     assert argv[argv.index("--nx") + 1] == "201"
     assert argv[-2:] == ["--scenarios", "full"]
+
+
+def test_realistic_fascicle_profile_metrics_flatten_nbytes_components():
+    report = SimpleNamespace(
+        events=[
+            SimpleNamespace(
+                metadata={
+                    "memory_estimate_components_nbytes": {
+                        "vstim_mid": 10,
+                        "vm_output": 5,
+                    },
+                    "memory_estimate_total_nbytes": 15,
+                }
+            )
+        ],
+        summary=[],
+        metadata={},
+    )
+
+    metrics = profile_report_metrics(report)
+
+    assert metrics["profile_memory_estimate_components_nbytes"] == 15
+    assert metrics["profile_memory_estimate_components_nbytes_vstim_mid"] == 10
+    assert metrics["profile_memory_estimate_components_nbytes_vm_output"] == 5
+    assert metrics["profile_memory_estimate_total_nbytes"] == 15

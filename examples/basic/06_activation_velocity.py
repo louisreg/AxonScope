@@ -77,13 +77,13 @@ def main() -> None:
         hh_simulations,
         duration=10.0 * axs.ms,
         dt=0.001 * axs.ms,
-        progress=True,
+        progress="plain",
     )
     mrg_results = axs.simulate_pool(
         mrg_simulations,
         duration=5.0 * axs.ms,
         dt=0.001 * axs.ms,
-        progress=True,
+        progress="plain",
     )
 
     # The low-level analysis helper reads recorded Vm and estimates conduction

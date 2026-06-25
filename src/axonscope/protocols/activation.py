@@ -9,7 +9,6 @@ stimulus amplitude.
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence, TypeAlias
 
@@ -21,8 +20,16 @@ from axonscope.recording import Recording
 from axonscope.analysis import ActivationCriterion, ActivationEvent
 from axonscope.analysis.definitions import Activation
 from axonscope.simulation import simulate, simulate_pool
+from axonscope.solvers import BatchOptions
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
 from axonscope.utils import units
+from axonscope.utils.progress_reporting import (
+    format_duration,
+    memory_summary,
+    progress_timestamp,
+    runtime_snapshot,
+    timing_summary,
+)
 
 
 SimulationCandidate: TypeAlias = Axon | AxonInstance
@@ -42,6 +49,20 @@ ThresholdUpdate: TypeAlias = PoolUpdate
 """Callable that updates or replaces one threshold-search row."""
 
 ThresholdStatus: TypeAlias = Literal["threshold", "below_range", "above_range"]
+
+
+class _OneShotProgress:
+    """Return a progress option once, then disable it for subsequent runs."""
+
+    def __init__(self, progress: bool | str) -> None:
+        self.progress = progress
+        self._used = False
+
+    def consume(self) -> bool | str:
+        if not self.progress or self._used:
+            return False
+        self._used = True
+        return self.progress
 
 
 @dataclass(frozen=True)
@@ -456,7 +477,8 @@ def find_activation_threshold_curve(
     usually a stimulus amplitude. The update function may mutate the row and
     return ``None``, or return a replacement simulation. ``rows`` optionally
     carries user-facing values such as diameters for plotting and callable
-    bounds.
+    bounds. ``solver_progress`` is forwarded only to the first solver call so
+    cold-start compilation remains visible without logging every bisection run.
     """
 
     base_pool = tuple(pool)
@@ -494,6 +516,7 @@ def find_activation_threshold_curve(
         )
 
     progress_display = _ThresholdProgress(progress)
+    solver_progress_gate = _OneShotProgress(solver_progress)
     try:
         low_events = _evaluate_activation_updated_pool(
             base_pool,
@@ -503,7 +526,7 @@ def find_activation_threshold_curve(
             dt=dt,
             criterion=criterion,
             recording=recording,
-            progress=solver_progress,
+            progress=solver_progress_gate.consume(),
         )
         tested: list[np.ndarray] = [low_vector.copy()]
         activated_history: list[np.ndarray] = [low_events.copy()]
@@ -517,7 +540,7 @@ def find_activation_threshold_curve(
             dt=dt,
             criterion=criterion,
             recording=recording,
-            progress=solver_progress,
+            progress=solver_progress_gate.consume(),
         )
         _validate_pool_width(high_events, row_count)
         tested.append(high_vector.copy())
@@ -566,7 +589,7 @@ def find_activation_threshold_curve(
                 dt=dt,
                 criterion=criterion,
                 recording=recording,
-                progress=solver_progress,
+                progress=solver_progress_gate.consume(),
             )
             _validate_pool_width(events, row_count)
             tested.append(midpoint_uA.copy())
@@ -614,6 +637,7 @@ def recruitment_sweep(
     dt: Any,
     criterion: ActivationCriterion,
     recording: Recording | None = None,
+    batch_options: BatchOptions | None = None,
     progress: bool | str = False,
     solver_progress: bool | str = False,
 ) -> RecruitmentCurve:
@@ -622,7 +646,12 @@ def recruitment_sweep(
     ``pool`` contains the simulations to evaluate. ``update(simulation,
     amplitude)`` is called before each run to change the swept parameter,
     usually an electrode current. The update function may mutate the row and
-    return ``None``, or return a replacement simulation.
+    return ``None``, or return a replacement simulation. ``batch_options``
+    forwards solver-side execution knobs such as observer time chunking.
+    Amplitudes are evaluated sequentially so memory scales with ``n_rows``, not
+    ``n_rows * n_amplitudes``.
+    ``solver_progress`` is forwarded only to the first solver call so cold-start
+    compilation remains visible without logging every sampled amplitude.
     """
 
     amplitudes_uA = _require_current_array_uA(amplitudes, name="amplitudes")
@@ -637,6 +666,7 @@ def recruitment_sweep(
             dt=dt,
             criterion=criterion,
             progress=progress,
+            batch_options=batch_options,
             solver_progress=solver_progress,
         )
         return RecruitmentCurve(
@@ -651,6 +681,7 @@ def recruitment_sweep(
         duration=duration,
         dt=dt,
         recording=recording,
+        batch_options=batch_options,
         progress=progress,
         progress_summary=_activation_progress_summary,
         solver_progress=solver_progress,
@@ -670,6 +701,7 @@ def _activation_pool_sweep(
     dt: Any,
     criterion: ActivationCriterion,
     progress: bool | str = False,
+    batch_options: BatchOptions | None = None,
     solver_progress: bool | str = False,
 ) -> PoolSweepResult:
     """Sweep activation with solver-side observers instead of stored Vm traces."""
@@ -683,41 +715,27 @@ def _activation_pool_sweep(
         )
 
     progress_display = _SweepProgress(progress)
+    solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
     try:
-        batched_observations = _try_evaluate_activation_observer_pool_batched_values(
-            base_pool,
-            update=update,
-            values=value_tuple,
-            criterion=criterion,
-            duration=duration,
-            dt=dt,
-            progress=solver_progress,
-        )
-        if batched_observations is not None:
-            for index, observations in enumerate(batched_observations):
-                observation_rows.append(observations)
-                progress_display.update(
-                    label="Pool sweep",
-                    current_index=index,
-                    values=value_tuple,
-                    completed_rows=observation_rows,
-                    progress_summary=_activation_progress_summary,
-                )
-            return PoolSweepResult(
-                values=value_tuple,
-                observations=np.asarray(observation_rows, dtype=bool),
-            )
         for index, value in enumerate(value_tuple):
             updated_pool = tuple(
                 _apply_pool_update(row, update, value) for row in base_pool
+            )
+            progress_display.begin(
+                label="Pool sweep",
+                current_index=index,
+                values=value_tuple,
+                completed_rows=observation_rows,
+                progress_summary=_activation_progress_summary,
             )
             observations = _evaluate_activation_observer_pool(
                 updated_pool,
                 criterion=criterion,
                 duration=duration,
                 dt=dt,
-                progress=solver_progress,
+                progress=solver_progress_gate.consume(),
+                batch_options=batch_options,
             )
             observation_rows.append(observations)
             progress_display.update(
@@ -744,93 +762,6 @@ def _activation_pool_sweep(
     )
 
 
-def _try_evaluate_activation_observer_pool_batched_values(
-    pool: tuple[SimulationCandidate, ...],
-    *,
-    update: PoolUpdate,
-    values: tuple[Any, ...],
-    criterion: ActivationCriterion,
-    duration: Any,
-    dt: Any,
-    progress: bool | str,
-) -> np.ndarray | None:
-    """Evaluate independent activation sweep values in one observer-only pool run."""
-
-    if len(values) <= 1 or len(pool) == 0:
-        return None
-    if any(not isinstance(row, (Axon, AxonInstance)) for row in pool):
-        return None
-    double_cable_count = sum(
-        1
-        for row in pool
-        if getattr(row, "resolved_formulation", None) == "double-cable"
-    )
-    if double_cable_count and double_cable_count * len(values) < 16:
-        return None
-
-    flat_pool: list[Axon | AxonInstance] = []
-    try:
-        for value in values:
-            for row in pool:
-                candidate = _clone_candidate_for_batched_update(row)
-                updated = _apply_pool_update(candidate, update, value)
-                if not isinstance(updated, (Axon, AxonInstance)):
-                    return None
-                flat_pool.append(updated)
-    except (AttributeError, KeyError, ValueError, TypeError):
-        return None
-
-    activation = _activation_observer_definition(criterion)
-    pool_result = simulate_pool(
-        flat_pool,
-        duration=duration,
-        dt=dt,
-        recording=Recording.none(),
-        observers=(activation,),
-        progress=progress,
-    )
-    flat_observations = np.asarray(
-        [
-            _activation_observation_activated(view, activation)
-            for view in pool_result
-        ],
-        dtype=bool,
-    )
-    return flat_observations.reshape((len(values), len(pool)))
-
-
-def _clone_candidate_for_batched_update(row: Axon | AxonInstance) -> Axon | AxonInstance:
-    if isinstance(row, AxonInstance):
-        clone = AxonInstance(row.axon)
-        clone.intracellular_contexts = [
-            copy.copy(context) for context in row.intracellular_contexts
-        ]
-        clone.extracellular_context = _clone_extracellular_context(
-            row.extracellular_context
-        )
-        clone.extracellular_stimulation = getattr(
-            clone.extracellular_context,
-            "stimulation",
-            None,
-        )
-        clone.Veinit = row.Veinit
-        clone._use_extracellular_override = row._use_extracellular_override
-        clone._xraxial_override = (
-            None if row._xraxial_override is None else row._xraxial_override.copy()
-        )
-        clone._xg_override = None if row._xg_override is None else row._xg_override.copy()
-        clone._xc_override = None if row._xc_override is None else row._xc_override.copy()
-        return clone
-    return copy.copy(row)
-
-
-def _clone_extracellular_context(context: Any) -> Any:
-    if context is None:
-        return None
-    electrodes = [copy.copy(electrode) for electrode in context.electrodes]
-    return context.with_electrodes(electrodes)
-
-
 def pool_sweep(
     pool: Sequence[SimulationCandidate],
     *,
@@ -840,6 +771,7 @@ def pool_sweep(
     duration: Any,
     dt: Any,
     recording: Recording | None = None,
+    batch_options: BatchOptions | None = None,
     progress: bool | str = False,
     progress_summary: ProgressSummary | None = None,
     solver_progress: bool | str = False,
@@ -862,12 +794,16 @@ def pool_sweep(
         Simulation duration and timestep.
     recording:
         Recording policy used when pool entries must be simulated.
+    batch_options:
+        Optional solver-side batch execution knobs, forwarded to
+        ``simulate_pool``.
     progress:
         If true, display a Rich live progress table when Rich is available.
     progress_summary:
         Optional formatter for one completed observation row.
     solver_progress:
-        Optional progress flag forwarded to ``simulate_pool``.
+        Optional progress flag forwarded only to the first ``simulate_pool``
+        call, which is normally the cold solver run.
     """
 
     base_pool = tuple(pool)
@@ -879,9 +815,17 @@ def pool_sweep(
         )
 
     progress_display = _SweepProgress(progress)
+    solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
     try:
         for index, value in enumerate(value_tuple):
+            progress_display.begin(
+                label="Pool sweep",
+                current_index=index,
+                values=value_tuple,
+                completed_rows=observation_rows,
+                progress_summary=progress_summary,
+            )
             results = _run_updated_pool(
                 base_pool,
                 update,
@@ -889,7 +833,8 @@ def pool_sweep(
                 duration=duration,
                 dt=dt,
                 recording=recording,
-                progress=solver_progress,
+                batch_options=batch_options,
+                progress=solver_progress_gate.consume(),
             )
             observations = np.asarray([observe(result) for result in results])
             observation_rows.append(observations)
@@ -1049,6 +994,7 @@ def _evaluate_activation_updated_pool(
             criterion=criterion,
             duration=duration,
             dt=dt,
+            batch_options=None,
             progress=progress,
         )
     pool_result = simulate_pool(
@@ -1072,6 +1018,7 @@ def _run_updated_pool(
     duration: Any,
     dt: Any,
     recording: Recording | None,
+    batch_options: BatchOptions | None,
     progress: bool | str,
 ) -> tuple[Any, ...]:
     if len(values) != len(pool):
@@ -1087,6 +1034,7 @@ def _run_updated_pool(
         duration=duration,
         dt=dt,
         recording=recording or Recording.voltage(),
+        batch_options=batch_options,
         progress=progress,
     )
     return tuple(pool_result)
@@ -1098,6 +1046,7 @@ def _evaluate_activation_observer_pool(
     criterion: ActivationCriterion,
     duration: Any,
     dt: Any,
+    batch_options: BatchOptions | None,
     progress: bool | str,
 ) -> np.ndarray:
     """Evaluate activation through compact solver-side observers."""
@@ -1108,9 +1057,47 @@ def _evaluate_activation_observer_pool(
         duration=duration,
         dt=dt,
         recording=Recording.none(),
+        batch_options=batch_options,
         observers=(activation,),
         progress=progress,
     )
+    return _activation_observations_from_pool_result(pool_result, activation)
+
+
+def _activation_observations_from_pool_result(
+    pool_result: Any,
+    activation: Activation,
+) -> np.ndarray:
+    """Return activation flags for all pool rows without slicing row-by-row."""
+
+    size = len(pool_result)
+    cohorts = getattr(pool_result, "_cohorts", None)
+    if cohorts:
+        values = np.zeros(size, dtype=bool)
+        filled = np.zeros(size, dtype=bool)
+        for cohort in cohorts:
+            observations = getattr(cohort, "observations", None)
+            if observations is None:
+                break
+            cohort_values = _activation_observation_values(observations, activation)
+            indices = np.asarray(getattr(cohort, "input_indices", ()), dtype=int)
+            if cohort_values.shape != (len(indices),):
+                raise RuntimeError(
+                    "activation observer result width does not match cohort size; "
+                    f"got {cohort_values.shape} for {len(indices)} rows."
+                )
+            values[indices] = cohort_values
+            filled[indices] = True
+        else:
+            if bool(np.all(filled)):
+                return values
+
+    observations = getattr(pool_result, "observations", None)
+    if observations is not None:
+        values = _activation_observation_values(observations, activation)
+        if values.shape == (size,):
+            return values
+
     return np.asarray(
         [
             _activation_observation_activated(view, activation)
@@ -1118,6 +1105,20 @@ def _evaluate_activation_observer_pool(
         ],
         dtype=bool,
     )
+
+
+def _activation_observation_values(
+    observations: Any,
+    activation: Activation,
+) -> np.ndarray:
+    if observations is None:
+        raise RuntimeError("activation observer result is missing from solver output.")
+    if activation.name in observations:
+        return np.asarray(observations[activation.name].values, dtype=bool).reshape(-1)
+    raster = observations.get(VM_RASTER_OBSERVATION_KEY)
+    if raster is not None:
+        return _activation_from_vm_raster_batch(raster, activation)
+    raise RuntimeError("activation observer result is missing from solver output.")
 
 
 def _activation_observation_activated(result: Any, activation: Activation) -> bool:
@@ -1133,6 +1134,10 @@ def _activation_observation_activated(result: Any, activation: Activation) -> bo
 
 
 def _activation_from_vm_raster(raster: Any, activation: Activation) -> bool:
+    return bool(_activation_from_vm_raster_batch(raster, activation)[0])
+
+
+def _activation_from_vm_raster_batch(raster: Any, activation: Activation) -> np.ndarray:
     names = tuple(getattr(raster, "names", ()))
     try:
         raster_index = names.index(activation.name)
@@ -1142,22 +1147,24 @@ def _activation_from_vm_raster(raster: Any, activation: Activation) -> bool:
     bits = np.asarray(raster.unpack(), dtype=bool)
     if bits.ndim != 4:
         raise RuntimeError(f"VmRaster output must unpack to (B, R, P, Nt), got {bits.shape}.")
-    row_bits = bits[0, raster_index]
+    row_bits = bits[:, raster_index]
 
     mask = np.asarray(getattr(raster, "probe_mask", True), dtype=bool)
     if mask.ndim == 3:
-        probe_mask = mask[0, raster_index]
+        probe_mask = mask[:, raster_index]
     elif mask.ndim == 2:
-        probe_mask = mask[raster_index]
+        probe_mask = np.broadcast_to(mask[raster_index], row_bits.shape[:2])
+    elif mask.ndim == 1:
+        probe_mask = np.broadcast_to(mask, row_bits.shape[:2])
     else:
-        probe_mask = np.broadcast_to(mask, row_bits.shape[:1])
+        probe_mask = np.broadcast_to(mask, row_bits.shape[:2])
 
     blanking_ms = units.to_ms(activation.blanking)
     if blanking_ms > 0.0:
         times_ms = (np.arange(int(raster.nt), dtype=float) + 1.0) * float(raster.dt_ms)
         time_mask = times_ms >= blanking_ms
-        row_bits = row_bits[:, time_mask]
-    return bool(np.any(row_bits[np.asarray(probe_mask, dtype=bool)]))
+        row_bits = row_bits[:, :, time_mask]
+    return np.any(row_bits & np.asarray(probe_mask, dtype=bool)[:, :, None], axis=(1, 2))
 
 
 def _can_use_activation_observer(
@@ -1234,6 +1241,9 @@ class _ThresholdProgress:
         self.mode = "rich" if progress is True else str(progress)
         self._live: Any | None = None
         self._console: Any | None = None
+        self._started = runtime_snapshot()
+        self._last_update_s = self._started.perf_counter_s
+        self._iteration_durations_s: list[float] = []
 
     def update(
         self,
@@ -1248,6 +1258,11 @@ class _ThresholdProgress:
     ) -> None:
         if not self.progress:
             return
+        now = runtime_snapshot()
+        self._iteration_durations_s.append(
+            max(now.perf_counter_s - self._last_update_s, 0.0)
+        )
+        self._last_update_s = now.perf_counter_s
         if self.mode != "plain":
             try:
                 table = self._rich_table(
@@ -1293,6 +1308,21 @@ class _ThresholdProgress:
             if self._console is not None:
                 self._console.print()
             self._live = None
+        if self.progress:
+            summary = self._summary(end=runtime_snapshot())
+            if self.mode != "plain":
+                try:
+                    from rich.console import Console
+
+                    console = self._console if self._console is not None else Console()
+                    console.print(
+                        f"[dim]{progress_timestamp()}[/dim] "
+                        f"[bold]Threshold protocol completed[/bold] [dim]{summary}[/dim]"
+                    )
+                    return
+                except Exception:
+                    pass
+            print(f"{progress_timestamp()} Threshold protocol completed: {summary}", flush=True)
 
     @staticmethod
     def _rich_table(
@@ -1307,7 +1337,7 @@ class _ThresholdProgress:
     ) -> Any:
         from rich.table import Table
 
-        table = Table(title=f"Threshold search iteration {iteration}")
+        table = Table(title=f"Threshold search iteration {iteration} ({progress_timestamp()})")
         table.add_column("row")
         table.add_column("low (uA)", justify="right")
         table.add_column("high (uA)", justify="right")
@@ -1345,7 +1375,7 @@ class _ThresholdProgress:
         status: np.ndarray,
     ) -> None:
         print("\033[2J\033[H", end="")
-        print(f"Threshold search iteration {iteration}")
+        print(f"{progress_timestamp()} Threshold search iteration {iteration}")
         for row, low, high, tested, active, state in zip(
             rows,
             lower_bound_uA,
@@ -1371,8 +1401,21 @@ class _SweepProgress:
         self.mode = "rich" if progress is True else str(progress)
         self._live: Any | None = None
         self._console: Any | None = None
+        self._started = runtime_snapshot()
+        self._last_update_s = self._started.perf_counter_s
+        self._iteration_durations_s: list[float] = []
+        self._batched_solver_elapsed_s: float | None = None
+        self._batched_value_count: int | None = None
+        self._running_index: int | None = None
+        self._running_started_s: float | None = None
 
-    def update(
+    def note_batched_solver(self, *, elapsed_s: float, value_count: int) -> None:
+        """Record timing for one solver call that covers every sweep value."""
+
+        self._batched_solver_elapsed_s = max(float(elapsed_s), 0.0)
+        self._batched_value_count = max(int(value_count), 1)
+
+    def begin(
         self,
         *,
         label: str,
@@ -1383,6 +1426,59 @@ class _SweepProgress:
     ) -> None:
         if not self.progress:
             return
+        now = runtime_snapshot()
+        self._running_index = int(current_index)
+        self._running_started_s = now.perf_counter_s
+        self._render(
+            label=label,
+            current_index=current_index,
+            values=values,
+            completed_rows=completed_rows,
+            progress_summary=progress_summary,
+        )
+
+    def update(
+        self,
+        *,
+        label: str,
+        current_index: int,
+        values: tuple[Any, ...],
+        completed_rows: list[np.ndarray],
+        progress_summary: ProgressSummary | None,
+        elapsed_s: float | None = None,
+    ) -> None:
+        if not self.progress:
+            return
+        if elapsed_s is None:
+            now = runtime_snapshot()
+            start_s = (
+                self._running_started_s
+                if self._running_started_s is not None
+                else self._last_update_s
+            )
+            self._iteration_durations_s.append(max(now.perf_counter_s - start_s, 0.0))
+            self._last_update_s = now.perf_counter_s
+        else:
+            self._iteration_durations_s.append(max(float(elapsed_s), 0.0))
+        self._running_index = None
+        self._running_started_s = None
+        self._render(
+            label=label,
+            current_index=current_index,
+            values=values,
+            completed_rows=completed_rows,
+            progress_summary=progress_summary,
+        )
+
+    def _render(
+        self,
+        *,
+        label: str,
+        current_index: int,
+        values: tuple[Any, ...],
+        completed_rows: list[np.ndarray],
+        progress_summary: ProgressSummary | None,
+    ) -> None:
         if self.mode != "plain":
             try:
                 table = self._rich_table(
@@ -1391,6 +1487,9 @@ class _SweepProgress:
                     values=values,
                     completed_rows=completed_rows,
                     progress_summary=progress_summary,
+                    durations_s=tuple(self._iteration_durations_s),
+                    running_index=self._running_index,
+                    running_started_s=self._running_started_s,
                 )
                 if self._live is None:
                     from rich.console import Console
@@ -1416,6 +1515,9 @@ class _SweepProgress:
             values=values,
             completed_rows=completed_rows,
             progress_summary=progress_summary,
+            durations_s=tuple(self._iteration_durations_s),
+            running_index=self._running_index,
+            running_started_s=self._running_started_s,
         )
 
     def close(self) -> None:
@@ -1424,6 +1526,39 @@ class _SweepProgress:
             if self._console is not None:
                 self._console.print()
             self._live = None
+        if self.progress:
+            summary = self._summary(end=runtime_snapshot())
+            if self.mode != "plain":
+                try:
+                    from rich.console import Console
+
+                    console = self._console if self._console is not None else Console()
+                    console.print(
+                        f"[dim]{progress_timestamp()}[/dim] "
+                        f"[bold]Protocol sweep completed[/bold] [dim]{summary}[/dim]"
+                    )
+                    return
+                except Exception:
+                    pass
+            print(f"{progress_timestamp()} Protocol sweep completed: {summary}", flush=True)
+
+    def _summary(self, *, end: Any) -> str:
+        if self._batched_solver_elapsed_s is None:
+            return timing_summary(
+                start=self._started,
+                end=end,
+                iteration_durations_s=tuple(self._iteration_durations_s),
+            )
+        value_count = max(1, int(self._batched_value_count or 1))
+        total = end.perf_counter_s - self._started.perf_counter_s
+        per_value = self._batched_solver_elapsed_s / value_count
+        return (
+            f"total={format_duration(total)}, "
+            f"cold_start={format_duration(self._batched_solver_elapsed_s)}, "
+            f"warm=n/a, "
+            f"per_iteration={format_duration(per_value)}, "
+            f"{memory_summary(self._started, end)}"
+        )
 
     @staticmethod
     def _rich_table(
@@ -1433,15 +1568,20 @@ class _SweepProgress:
         values: tuple[Any, ...],
         completed_rows: list[np.ndarray],
         progress_summary: ProgressSummary | None,
+        durations_s: tuple[float, ...],
+        running_index: int | None,
+        running_started_s: float | None,
     ) -> Any:
         from rich.table import Table
 
         current = _format_sweep_value(values[current_index])
-        table = Table(title=f"{label}, current={current}")
+        table = Table(title=f"{label}, current={current} ({progress_timestamp()})")
         table.add_column("value", justify="right")
         table.add_column("summary", justify="right")
+        table.add_column("elapsed", justify="right")
         table.add_column("status", justify="right")
         completed = len(completed_rows)
+        now_s = runtime_snapshot().perf_counter_s
         for index, value in enumerate(values):
             if index < completed:
                 row = completed_rows[index]
@@ -1453,10 +1593,25 @@ class _SweepProgress:
                 table.add_row(
                     _format_sweep_value(value),
                     summary,
+                    _format_optional_duration(
+                        durations_s[index] if index < len(durations_s) else None
+                    ),
                     "done",
                 )
+            elif index == running_index:
+                elapsed = (
+                    None
+                    if running_started_s is None
+                    else max(now_s - running_started_s, 0.0)
+                )
+                table.add_row(
+                    _format_sweep_value(value),
+                    "-",
+                    _format_optional_duration(elapsed),
+                    "running",
+                )
             else:
-                table.add_row(_format_sweep_value(value), "-", "pending")
+                table.add_row(_format_sweep_value(value), "-", "-", "pending")
         return table
 
     @staticmethod
@@ -1467,10 +1622,17 @@ class _SweepProgress:
         values: tuple[Any, ...],
         completed_rows: list[np.ndarray],
         progress_summary: ProgressSummary | None,
+        durations_s: tuple[float, ...],
+        running_index: int | None,
+        running_started_s: float | None,
     ) -> None:
         print("\033[2J\033[H", end="", flush=True)
-        print(f"{label}, current={_format_sweep_value(values[current_index])}", flush=True)
+        print(
+            f"{progress_timestamp()} {label}, current={_format_sweep_value(values[current_index])}",
+            flush=True,
+        )
         completed = len(completed_rows)
+        now_s = runtime_snapshot().perf_counter_s
         for index, value in enumerate(values):
             if index < completed:
                 row = completed_rows[index]
@@ -1479,7 +1641,25 @@ class _SweepProgress:
                     if progress_summary is not None
                     else f"{int(row.shape[0])} rows"
                 )
-                print(f"{_format_sweep_value(value):>12s}: {summary} done", flush=True)
+                elapsed = _format_optional_duration(
+                    durations_s[index] if index < len(durations_s) else None
+                )
+                print(
+                    f"{_format_sweep_value(value):>12s}: {summary} "
+                    f"elapsed={elapsed} done",
+                    flush=True,
+                )
+            elif index == running_index:
+                elapsed = (
+                    None
+                    if running_started_s is None
+                    else max(now_s - running_started_s, 0.0)
+                )
+                print(
+                    f"{_format_sweep_value(value):>12s}: running "
+                    f"elapsed={_format_optional_duration(elapsed)}",
+                    flush=True,
+                )
             else:
                 print(f"{_format_sweep_value(value):>12s}: pending", flush=True)
 
@@ -1490,6 +1670,12 @@ def _validate_pool_width(values: np.ndarray, expected: int) -> None:
             "pool/update must return the same number of fibers for every "
             f"threshold evaluation; expected {expected}, got {values.shape[0]}."
         )
+
+
+def _format_optional_duration(value_s: float | None) -> str:
+    if value_s is None:
+        return "-"
+    return format_duration(float(value_s))
 
 
 __all__ = [

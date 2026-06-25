@@ -124,6 +124,7 @@ The wrapper also accepts:
 --benchmark realistic_stress_observer_gpu
 --benchmark population_tsim_gpu
 --benchmark population_tsim_gpu_1000
+--benchmark realistic_fascicle_nrv_gpu
 --benchmark both
 --benchmark e2e_full
 --branch bench-colab
@@ -188,6 +189,33 @@ python benchmark/kaggle/run_kernel.py \
   --machine-shape NvidiaTeslaP100 \
   --poll-interval 60 \
   --wait-timeout 7200
+```
+
+`realistic_fascicle_nrv_gpu` runs the realistic NRV LIFE/FEM fascicle smoke
+benchmark on a Kaggle GPU. This preset installs the NRV/FEniCS stack inside the
+Kaggle kernel with `mamba` when available, otherwise `conda`:
+
+```bash
+conda install -y -c conda-forge \
+  mpi4py fenics-dolfinx==0.9.0 'libblas=*=*blis' python-gmsh ipykernel
+python -m pip install nrv-py
+```
+
+It then runs `benchmark/nrv_performance/run.py --suite
+realistic_fascicle_smoke` with NRV validation enabled and writes the AxonScope
+GPU timing, FEM footprint timing, one-amplitude NRV timing, and full-NRV-sweep
+estimate under the Kaggle output archive.
+
+Run it with:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --benchmark realistic_fascicle_nrv_gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --poll-interval 60 \
+  --wait-timeout 14400 \
+  --output-file-pattern '.*axonscope_solver_results.*'
 ```
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,

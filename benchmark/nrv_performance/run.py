@@ -16,10 +16,6 @@ from benchmark.nrv_performance.suites import (
     suite_choices,
 )
 
-
-DEFAULT_OUT_DIR = Path("benchmark/results/nrv_performance/nrv_axonscope_grid")
-
-
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run named AxonScope-vs-NRV performance benchmark suites.")
     parser.add_argument(
@@ -30,7 +26,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--list", action="store_true", help="List available suites and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print expanded cases without running simulations.")
-    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="Directory for JSON/CSV outputs.")
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Directory for JSON/CSV outputs. Defaults to the selected runner's output directory.",
+    )
     parser.add_argument("--prefix", default=None, help="Optional output filename prefix.")
     parser.add_argument(
         "extra_args",
@@ -61,6 +62,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         from benchmark.nrv_performance import population_tsim_scaling
 
         population_tsim_scaling.main(runner_argv)
+        return
+    if suite.runner == "realistic_fascicle_recruitment":
+        from benchmark.nrv_performance import realistic_fascicle_recruitment
+
+        realistic_fascicle_recruitment.main(runner_argv)
         return
 
     raise ValueError(f"Unsupported NRV performance runner: {suite.runner}")

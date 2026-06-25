@@ -1047,7 +1047,7 @@ def _run_single_cable_batch_group(
         progress_callback,
         group,
         "kernel",
-        "compile/solve JAX kernel",
+        "compiling JAX kernel if needed",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
     )
@@ -1073,6 +1073,12 @@ def _run_single_cable_batch_group(
             record_benchmark_metadata(
                 **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
             )
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "solving JAX kernel",
+    )
     with benchmark_span(
         "kernel.wait",
         group_id=group.group_id,
@@ -1080,7 +1086,7 @@ def _run_single_cable_batch_group(
         mode=group.mode,
     ):
         benchmark_wait(_batch_wait_target(out))
-    _emit_progress(progress_callback, group, "kernel", "complete")
+    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
     _emit_progress(
         progress_callback,
         group,
@@ -1306,7 +1312,7 @@ def _run_double_cable_batch_group(
         progress_callback,
         group,
         "kernel",
-        "compile/solve JAX kernel",
+        "compiling JAX kernel if needed",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
         block_solver=kernel_options.double_cable_block_solver,
@@ -1335,6 +1341,12 @@ def _run_double_cable_batch_group(
                 **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
             )
         out = _trim_batch_kernel_result(out, batch_size=group.size)
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "solving JAX kernel",
+    )
     with benchmark_span(
         "kernel.wait",
         group_id=group.group_id,
@@ -1342,7 +1354,7 @@ def _run_double_cable_batch_group(
         mode=group.mode,
     ):
         benchmark_wait(_batch_wait_target(out))
-    _emit_progress(progress_callback, group, "kernel", "complete")
+    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
     _emit_progress(
         progress_callback,
         group,

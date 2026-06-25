@@ -82,6 +82,10 @@ def main() -> None:
         "Rattay-Aberham": {},
         "MRG": {},
     }
+    show_cold_solver_progress = {
+        "Rattay-Aberham": True,
+        "MRG": True,
+    }
 
     for pulse_width in pulse_widths:
         pulse_us = int(round(float(pulse_width.to(axs.us).magnitude)))
@@ -134,7 +138,11 @@ def main() -> None:
             max_iterations=20,
             recording=axs.Recording.probes(axs.signals.Vm, count=9),
             progress=True,
+            solver_progress=(
+                "plain" if show_cold_solver_progress["Rattay-Aberham"] else False
+            ),
         )
+        show_cold_solver_progress["Rattay-Aberham"] = False
         results["Rattay-Aberham"][pulse_us] = rattay_curve
 
         print(f"\n=== Rattay-Aberham, PW={pulse_us:.0f} us ===")
@@ -195,7 +203,9 @@ def main() -> None:
             max_iterations=20,
             recording=axs.Recording.indices(mrg_node_indices, axs.signals.Vm),
             progress=True,
+            solver_progress="plain" if show_cold_solver_progress["MRG"] else False,
         )
+        show_cold_solver_progress["MRG"] = False
         results["MRG"][pulse_us] = mrg_curve
 
         print(f"\n=== MRG, PW={pulse_us:.0f} us ===")

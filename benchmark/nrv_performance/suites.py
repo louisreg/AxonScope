@@ -216,6 +216,40 @@ NRV_PERFORMANCE_SUITES: dict[str, NrvPerformanceSuite] = {
             "1",
         ),
     ),
+    "realistic_fascicle_smoke": NrvPerformanceSuite(
+        name="realistic_fascicle_smoke",
+        description="Small realistic NRV LIFE/FEM recruitment memory/timing profile.",
+        runner="realistic_fascicle_recruitment",
+        args=(
+            "--axons-per-fascicle",
+            "10",
+            "--simulated-fibers-per-fascicle",
+            "4",
+            "--amplitudes-count",
+            "2",
+            "--time-chunk-steps",
+            "250",
+            "--profile-axonscope",
+            "--clear-jax-caches",
+        ),
+    ),
+    "realistic_fascicle_full_like_example": NrvPerformanceSuite(
+        name="realistic_fascicle_full_like_example",
+        description="Profile the full with_nrv realistic recruitment workload shape.",
+        runner="realistic_fascicle_recruitment",
+        args=(
+            "--axons-per-fascicle",
+            "100",
+            "--simulated-fibers-per-fascicle",
+            "0",
+            "--amplitudes-count",
+            "21",
+            "--time-chunk-steps",
+            "250",
+            "--profile-axonscope",
+            "--clear-jax-caches",
+        ),
+    ),
 }
 
 def suite_choices() -> tuple[str, ...]:

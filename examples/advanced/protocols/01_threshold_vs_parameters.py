@@ -129,6 +129,7 @@ def main() -> None:
     curves: dict[str, axs.protocols.ThresholdCurve] = {}
     preview_stimuli: dict[str, axs.Stimulus] = {}
     preview_current = 100.0 * axs.uA
+    show_cold_solver_progress = True
     bounds_by_waveform = {
         "monophasic cathodic": (10.0 * axs.uA, 100.0 * axs.uA),
         "biphasic charge-balanced": (20.0 * axs.uA, 250.0 * axs.uA),
@@ -178,7 +179,9 @@ def main() -> None:
             max_iterations=20,
             recording=axs.Recording.probes(axs.signals.Vm, count=9),
             progress=True,
+            solver_progress="plain" if show_cold_solver_progress else False,
         )
+        show_cold_solver_progress = False
         curves[waveform] = curve
         preview_stimuli[waveform] = build_waveform_stimulus(waveform, preview_current)
 

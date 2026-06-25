@@ -46,6 +46,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   membranes, sections, and layout elements.
 - `axon_models/03_cable_formulation.py`: choose typed single-cable or
   double-cable formulations.
+- `axon_models/04_non_uniform_activation_function.py`: derive a non-uniform
+  unmyelinated discretization from an activation-function proxy.
 
 ### Stimulation
 
@@ -83,20 +85,20 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
   preparation, lowering, kernel route, and result assembly without launching
   kernels.
+- `runtime/04_cold_run_progress.py`: run the same batchable pool twice with
+  human-readable progress to make cold JAX compilation and warm execution
+  visible.
 
 ## With NRV
 
 `examples/with_nrv/` is for integration with NRV, where NRV owns complex nerve
 geometry/fiber placement and AxonScope owns axon dynamics.
 
-- `01_nrv_pool_geometry.py`: use NRV when available to generate a fiber table,
-  then map it into AxonScope simulations.
-- `02_realistic_fascicle_geometry_comparison.py`: recreate NRV's bundled
+- `01_realistic_fascicle_geometry_comparison.py`: recreate NRV's bundled
   realistic fascicle-contour workflow, convert fractional NRV `node_shift`
   values into AxonScope MRG `x_shift`, sample NRV's LIFE/FEM footprint into
-  AxonScope stimulation objects, then compare node layouts and fiber-by-fiber
-  activation across the full simulated population. Use `--trace-fibers` for
-  optional detailed single-fiber voltage traces.
+  AxonScope stimulation objects, build per-fascicle AxonScope recruitment
+  curves, and run one NRV validation amplitude.
 
 ## Tutorials
 

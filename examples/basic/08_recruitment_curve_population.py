@@ -176,6 +176,7 @@ def main() -> None:
         criterion=criterion,
         recording=axs.Recording.voltage(),
         progress=True,
+        solver_progress="plain",
     )
 
     print("=== Population ===")

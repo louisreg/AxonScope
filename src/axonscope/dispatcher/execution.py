@@ -37,7 +37,8 @@ def run_pool(
     input axon. Plain numeric times are interpreted as milliseconds; Pint-like
     quantities are converted at this boundary. ``progress`` enables optional
     Rich/plain event reporting for dispatch planning, route choice, preparation,
-    input lowering, compile/solve, kernel chunks, and result assembly.
+    input lowering, cold JAX compilation points, kernel solving, and result
+    assembly.
     """
 
     if not axons:
@@ -135,7 +136,7 @@ def _run_pool_checked(
                                 rows=int(group.size),
                                 nx=int(group.nx),
                                 route="scalar",
-                                message="compile/solve scalar kernel",
+                                message="compiling scalar kernel if needed",
                             )
                         )
                     group_results = _run_scalar_group(
@@ -147,6 +148,16 @@ def _run_pool_checked(
                         record_voltage=resolved_batch_options.recording.mode != "none",
                     )
                     if callback is not None:
+                        callback(
+                            ProgressEvent(
+                                stage="kernel",
+                                group_id=int(group.group_id),
+                                rows=int(group.size),
+                                nx=int(group.nx),
+                                route="scalar",
+                                message="completed scalar kernel",
+                            )
+                        )
                         callback(1, 1)
                     progress_reporter.emit(
                         ProgressEvent(

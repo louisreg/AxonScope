@@ -1,8 +1,11 @@
+import re
+
 import numpy as np
 
 import axonscope as axs
 import axonscope.backends.jax.group_runner as group_runner
 import axonscope.dispatcher.plan as dispatch_plan_module
+import axonscope.dispatcher.progress as progress_module
 from axonscope.analytical import PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
     build_intracellular_current_density_batch,
@@ -873,13 +876,30 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
     assert len(result) == 2
     assert "building dispatch plan" in captured.out
     assert "Dispatch progress" in captured.out
-    assert "group 0" in captured.out
-    assert "route=batch-single-cable" in captured.out
-    assert "prepare group=0" in captured.out
-    assert "batch group=0" in captured.out
-    assert "lowering group=0" in captured.out
-    assert "compile/solve JAX kernel" in captured.out
-    assert "result group=0" in captured.out
+    assert "group   g0 1/1 batch-single-cable" in captured.out
+    assert "route   g0 1/1  compatible batch route" in captured.out
+    assert "prepare g0 1/1  runtime" in captured.out
+    assert "batch   g0 1/1  recording plan" in captured.out
+    assert "lower   g0 1/1  inputs" in captured.out
+    assert "compiling JAX kernel if needed" in captured.out
+    assert "solving JAX kernel" in captured.out
+    assert "completed JAX kernel" in captured.out
+    assert "result  g0 1/1  assemble batch output" in captured.out
+    assert re.search(r"\d{2}:\d{2}:\d{2} .*building dispatch plan", captured.out)
+    assert "Dispatch completed:" in captured.out
+    assert "cold_start=" in captured.out
+    assert "rss=" in captured.out or "memory=n/a" in captured.out
+
+
+def test_plain_chunk_progress_is_throttled():
+    assert progress_module._should_render_plain_chunk_progress(1, 60)
+    assert progress_module._should_render_plain_chunk_progress(6, 60)
+    assert not progress_module._should_render_plain_chunk_progress(7, 60)
+    assert progress_module._should_render_plain_chunk_progress(60, 60)
+    assert all(
+        progress_module._should_render_plain_chunk_progress(done, 12)
+        for done in range(1, 13)
+    )
 
 
 def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
@@ -895,9 +915,11 @@ def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
 
     captured = capsys.readouterr()
     assert len(result) == 1
-    assert "route=scalar" in captured.out
+    assert "route   g0 1/1  single row group" in captured.out
+    assert "(scalar" in captured.out
     assert "single row group" in captured.out
-    assert "compile/solve scalar kernel" in captured.out
+    assert "compiling scalar kernel if needed" in captured.out
+    assert "completed scalar kernel" in captured.out
     assert "assembled scalar rows" in captured.out
 
 

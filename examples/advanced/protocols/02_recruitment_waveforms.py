@@ -53,6 +53,7 @@ def main() -> None:
 
     curves: dict[str, axs.protocols.RecruitmentCurve] = {}
     preview_stimuli: dict[str, axs.Stimulus] = {}
+    show_cold_solver_progress = True
 
     def build_waveform_stimulus(waveform_name: str, current_magnitude: Any) -> axs.Stimulus:
         if waveform_name == "monophasic cathodic":
@@ -155,7 +156,9 @@ def main() -> None:
             criterion=criterion,
             recording=axs.Recording.probes(axs.signals.Vm, count=5),
             progress=True,
+            solver_progress="plain" if show_cold_solver_progress else False,
         )
+        show_cold_solver_progress = False
         curves[waveform] = curve
         preview_stimuli[waveform] = build_waveform_stimulus(waveform, amplitudes[-1])
 

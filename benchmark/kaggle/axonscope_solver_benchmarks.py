@@ -162,6 +162,8 @@ def main() -> None:
             suite="population_tsim_gpu_1000",
             prefix="population_tsim_gpu_1000",
         )
+    elif BENCHMARK == "realistic_fascicle_nrv_gpu":
+        run_realistic_fascicle_nrv_gpu(out_dir)
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -174,7 +176,8 @@ def main() -> None:
             "realistic_stress_single_vm_cpu, realistic_stress_single_vm_gpu, "
             "realistic_stress_observer, "
             "realistic_stress_observer_cpu, realistic_stress_observer_gpu, "
-            "population_tsim_gpu, population_tsim_gpu_1000, or both."
+            "population_tsim_gpu, population_tsim_gpu_1000, "
+            "realistic_fascicle_nrv_gpu, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -188,9 +191,51 @@ def setup_repo() -> None:
     run(["git", "clone", "--depth", "1", "--branch", BRANCH, REPO_URL, str(CHECKOUT_DIR)])
     run(["git", "rev-parse", "--short", "HEAD"], cwd=CHECKOUT_DIR)
     run([sys.executable, "-m", "pip", "install", "-U", "pip"])
+    if benchmark_needs_nrv_stack():
+        install_nrv_stack()
     run([sys.executable, "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
     if REQUIRE_GPU and JAX_CUDA_EXTRA:
         install_jax_gpu_extra()
+    if benchmark_needs_nrv_stack():
+        verify_nrv_stack()
+
+
+def benchmark_needs_nrv_stack() -> bool:
+    return BENCHMARK in {"realistic_fascicle_nrv_gpu"}
+
+
+def install_nrv_stack() -> None:
+    conda_bin = shutil.which("mamba") or shutil.which("conda")
+    if conda_bin is None:
+        raise RuntimeError("Could not find mamba or conda in the Kaggle environment.")
+    run(
+        [
+            conda_bin,
+            "install",
+            "-y",
+            "-c",
+            "conda-forge",
+            "mpi4py",
+            "fenics-dolfinx==0.9.0",
+            "libblas=*=*blis",
+            "python-gmsh",
+            "ipykernel",
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    run([sys.executable, "-m", "pip", "install", "nrv-py"], cwd=CHECKOUT_DIR)
+
+
+def verify_nrv_stack() -> None:
+    code = """
+import dolfinx
+import mpi4py
+import nrv
+print("dolfinx:", getattr(dolfinx, "__version__", "unknown"))
+print("mpi4py import ok")
+print("nrv import ok")
+"""
+    run([sys.executable, "-c", code], cwd=CHECKOUT_DIR)
 
 
 def install_jax_gpu_extra() -> None:
@@ -531,6 +576,32 @@ def run_population_tsim_gpu(
     print_population_tsim_summary(result_dir / f"{prefix}.csv")
 
 
+def run_realistic_fascicle_nrv_gpu(out_dir: pathlib.Path) -> None:
+    prefix = "realistic_fascicle_nrv_gpu"
+    result_dir = out_dir / prefix
+    profile_dir = out_dir / f"{prefix}_profiles"
+    command = [
+        sys.executable,
+        "benchmark/nrv_performance/run.py",
+        "--suite",
+        "realistic_fascicle_smoke",
+        "--out-dir",
+        str(result_dir),
+        "--prefix",
+        prefix,
+        "--",
+        "--report-dir",
+        str(profile_dir),
+        "--validate-nrv",
+        "--solver-progress",
+        "plain",
+        "--time-chunk-steps",
+        "1000",
+    ]
+    run(command, cwd=CHECKOUT_DIR)
+    print_realistic_fascicle_summary(result_dir / f"{prefix}_summary.csv")
+
+
 def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:
     if not path.exists():
         print(f"summary missing: {path}")
@@ -587,6 +658,36 @@ def print_population_tsim_summary(path: pathlib.Path, *, limit: int = 12) -> Non
         )
     if len(rows) > limit:
         print(f"... {len(rows) - limit} more rows")
+
+
+def print_realistic_fascicle_summary(path: pathlib.Path) -> None:
+    if not path.exists():
+        print(f"realistic fascicle summary missing: {path}")
+        return
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        print(f"realistic fascicle summary empty: {path}")
+        return
+    row = rows[0]
+    print(f"\nREALISTIC FASCICLE NRV GPU summary: {path}")
+    for key in (
+        "simulated_fibers",
+        "amplitudes_count",
+        "jax_backend",
+        "nrv_fem_first_footprint_s",
+        "nrv_cached_footprints_s",
+        "axonscope_cold_step_s",
+        "axonscope_warm_step_s",
+        "axonscope_steps_total_s",
+        "nrv_validation_single_amplitude_s",
+        "nrv_full_sweep_estimated_s",
+        "nrv_estimate_over_axonscope_steps",
+        "nrv_estimate_over_axonscope_with_footprints",
+        "maxrss_mib",
+    ):
+        if key in row and row[key] != "":
+            print(f"{key}: {row[key]}")
 
 
 def run(command: list[str], *, cwd: pathlib.Path | None = None) -> None:

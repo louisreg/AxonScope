@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Literal, Mapping, TypeAlias
+
+from axonscope.utils.progress_reporting import (
+    progress_timestamp,
+    runtime_snapshot,
+    timing_summary,
+)
 
 
 ProgressMode: TypeAlias = Literal["auto", "rich", "plain"]
@@ -20,6 +26,27 @@ ProgressStage: TypeAlias = Literal[
 KernelProgressCallback: TypeAlias = Callable[..., None]
 
 
+_STAGE_LABELS: Mapping[ProgressStage, str] = {
+    "dispatch": "plan",
+    "route": "route",
+    "prepare": "prepare",
+    "batch": "batch",
+    "lowering": "lower",
+    "kernel": "kernel",
+    "result": "result",
+}
+
+_STAGE_STYLES: Mapping[ProgressStage, str] = {
+    "dispatch": "cyan",
+    "route": "magenta",
+    "prepare": "blue",
+    "batch": "blue",
+    "lowering": "yellow",
+    "kernel": "green",
+    "result": "cyan",
+}
+
+
 def _normalize_progress_mode(progress: ProgressOption) -> ProgressMode | None:
     if progress is False:
         return None
@@ -33,6 +60,153 @@ def _normalize_progress_mode(progress: ProgressOption) -> ProgressMode | None:
 def _dispatch_method(group: Any) -> str:
     prefix = "batch" if group.geometry_shared else "parameter-batch"
     return f"{prefix}-{group.mode}-cable"
+
+
+def _format_bool(value: Any) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _short_batch_kind(value: Any) -> str:
+    text = str(value)
+    for suffix in ("-single-cable", "-double-cable"):
+        if text.endswith(suffix):
+            return text.removesuffix(suffix)
+    return text
+
+
+def _short_route(value: Any) -> str:
+    text = str(value)
+    if text == "scalar":
+        return "scalar"
+    if text.startswith("parameter-batch-"):
+        return "parameter batch"
+    if text.startswith("batch-"):
+        return "batch"
+    return text
+
+
+def _rich_event_details(event: ProgressEvent) -> str:
+    details = event.details or {}
+    parts: list[str] = []
+
+    if event.stage == "dispatch":
+        if event.rows is not None:
+            parts.append(f"rows={event.rows}")
+    elif event.stage == "route":
+        if event.route:
+            parts.append(_short_route(event.route))
+        if details.get("batch_kind"):
+            parts.append(_short_batch_kind(details["batch_kind"]))
+        if "padding" in details:
+            parts.append(f"padding={_format_bool(details['padding'])}")
+    elif event.stage == "prepare":
+        if details.get("mode"):
+            parts.append(f"mode={details['mode']}")
+    elif event.stage == "batch":
+        if details.get("recording"):
+            parts.append(f"recording={details['recording']}")
+        if "observers" in details:
+            parts.append(f"observers={details['observers']}")
+    elif event.stage == "lowering":
+        intracellular = details.get("intracellular")
+        extracellular = details.get("extracellular")
+        if intracellular or extracellular:
+            parts.append(f"{intracellular or '-'} -> {extracellular or '-'}")
+        if "contexts" in details:
+            parts.append(f"contexts={details['contexts']}")
+    elif event.stage == "kernel":
+        if details.get("recording"):
+            parts.append(f"recording={details['recording']}")
+        if details.get("time_chunk_steps"):
+            parts.append(f"chunk={details['time_chunk_steps']} steps")
+        if details.get("block_solver"):
+            parts.append(f"solver={details['block_solver']}")
+        if event.completed is not None and event.total is not None and event.total > 1:
+            parts.append(f"{event.completed}/{event.total}")
+    elif event.stage == "result":
+        if details.get("output"):
+            parts.append(f"output={details['output']}")
+
+    return ", ".join(str(part) for part in parts)
+
+
+def _rich_event_text(event: ProgressEvent) -> Any:
+    from rich.text import Text
+
+    style = _STAGE_STYLES.get(event.stage, "white")
+    label = _STAGE_LABELS.get(event.stage, event.stage)
+    text = Text()
+    text.append(f"{progress_timestamp()} ", style="dim")
+    text.append(f"{label:<7}", style=f"bold {style}")
+
+    if event.group_id is not None:
+        group = f"g{event.group_id}"
+        if event.group_index is not None and event.group_count is not None:
+            group += f" {event.group_index}/{event.group_count}"
+        text.append(f" {group:<7}", style="bold")
+    else:
+        text.append(" ")
+
+    if event.message:
+        text.append(f" {event.message}", style="default")
+
+    details = _rich_event_details(event)
+    if details:
+        text.append(f"  ({details})", style="dim")
+    return text
+
+
+def _rich_group_text(group: Any, *, group_index: int, group_count: int) -> Any:
+    from rich.text import Text
+
+    text = Text()
+    text.append(f"{progress_timestamp()} ", style="dim")
+    text.append("group   ", style="bold cyan")
+    text.append(f"g{group.group_id} {group_index}/{group_count}", style="bold")
+    text.append(f"  {_dispatch_method(group)}", style="default")
+    meta = f"rows={group.size}, Nx={group.nx}"
+    if group.has_padding:
+        meta += ", padded"
+    text.append(f"  ({meta})", style="dim")
+    return text
+
+
+def _plain_event_text(event: ProgressEvent) -> str:
+    label = _STAGE_LABELS.get(event.stage, event.stage)
+    parts = [progress_timestamp(), f"{label:<7}"]
+    if event.group_id is not None:
+        group = f"g{event.group_id}"
+        if event.group_index is not None and event.group_count is not None:
+            group += f" {event.group_index}/{event.group_count}"
+        parts.append(f"{group:<7}")
+    if event.message:
+        parts.append(event.message)
+    details = _rich_event_details(event)
+    line = " ".join(part for part in parts if part)
+    if details:
+        line += f" ({details})"
+    return line
+
+
+def _plain_group_text(group: Any, *, group_index: int, group_count: int) -> str:
+    meta = f"rows={group.size}, Nx={group.nx}"
+    if group.has_padding:
+        meta += ", padded"
+    return (
+        f"{progress_timestamp()} group   g{group.group_id} {group_index}/{group_count} "
+        f"{_dispatch_method(group)} ({meta})"
+    )
+
+
+def _should_render_plain_chunk_progress(done: int, total: int) -> bool:
+    if total <= 12:
+        return True
+    if done <= 1 or done >= total:
+        return True
+    interval = max(1, total // 10)
+    return done % interval == 0
 
 
 def emit_initial_progress(
@@ -52,12 +226,12 @@ def emit_initial_progress(
         try:
             from rich.console import Console
 
-            Console().print(f"[dim]{event.plain_text()}[/dim]")
+            Console().print(_rich_event_text(event))
             return
         except ImportError:
             if mode == "rich":
                 raise
-    print(event.plain_text(), flush=True)
+    print(_plain_event_text(event), flush=True)
 
 
 @dataclass(frozen=True)
@@ -117,6 +291,7 @@ class DispatchProgress:
         self._group_index = 0
         self._current_group_index: dict[int, int] = {}
         self._use_plain = False
+        self._started = runtime_snapshot()
 
     def __enter__(self) -> "DispatchProgress":
         if self._mode is None:
@@ -125,9 +300,9 @@ class DispatchProgress:
             try:
                 from rich.progress import (
                     BarColumn,
+                    MofNCompleteColumn,
                     Progress,
                     SpinnerColumn,
-                    TaskProgressColumn,
                     TextColumn,
                     TimeElapsedColumn,
                 )
@@ -136,17 +311,24 @@ class DispatchProgress:
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
                     BarColumn(),
-                    TaskProgressColumn(),
+                    MofNCompleteColumn(),
                     TimeElapsedColumn(),
-                    transient=False,
+                    refresh_per_second=8,
+                    transient=True,
                 )
                 self._rich.start()
+                group_label = "group" if len(self.plan.groups) == 1 else "groups"
+                self._rich.console.print(
+                    f"[dim]{progress_timestamp()}[/dim] [bold]Dispatch progress[/bold] "
+                    f"[dim]{len(self.plan.items)} rows, "
+                    f"{len(self.plan.groups)} {group_label}[/dim]"
+                )
                 self._group_task = self._rich.add_task(
-                    f"dispatch groups ({len(self.plan.items)} rows)",
+                    "dispatch groups",
                     total=len(self.plan.groups),
                 )
                 self._kernel_task = self._rich.add_task(
-                    "kernel chunks",
+                    "kernel progress",
                     total=1,
                     visible=False,
                 )
@@ -155,8 +337,10 @@ class DispatchProgress:
                 if self._mode == "rich":
                     raise
         self._use_plain = True
+        group_label = "group" if len(self.plan.groups) == 1 else "groups"
         print(
-            f"Dispatch progress: {len(self.plan.items)} rows, {len(self.plan.groups)} groups",
+            f"{progress_timestamp()} Dispatch progress: {len(self.plan.items)} rows, "
+            f"{len(self.plan.groups)} {group_label}",
             flush=True,
         )
         return self
@@ -164,6 +348,17 @@ class DispatchProgress:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if self._rich is not None:
             self._rich.stop()
+        if self._mode is None:
+            return
+        status = "failed" if exc_type is not None else "completed"
+        summary = timing_summary(start=self._started, end=runtime_snapshot())
+        if self._rich is not None:
+            self._rich.console.print(
+                f"[dim]{progress_timestamp()}[/dim] "
+                f"[bold]Dispatch {status}[/bold] [dim]{summary}[/dim]"
+            )
+        elif self._use_plain:
+            print(f"{progress_timestamp()} Dispatch {status}: {summary}", flush=True)
 
     def start_group(self, group: Any) -> None:
         """Mark one dispatch group as running."""
@@ -173,21 +368,34 @@ class DispatchProgress:
         self._group_index += 1
         self._current_group_index[int(group.group_id)] = self._group_index
         label = (
-            f"group {group.group_id} {_dispatch_method(group)} "
-            f"rows={group.size} Nx={group.nx}"
-            f"{' padded' if group.has_padding else ''}"
+            f"group {self._group_index}/{len(self.plan.groups)} "
+            f"g{group.group_id}"
         )
         if self._rich is not None:
+            self._rich.console.print(
+                _rich_group_text(
+                    group,
+                    group_index=self._group_index,
+                    group_count=len(self.plan.groups),
+                )
+            )
             self._rich.update(self._group_task, description=label)
             self._rich.update(
                 self._kernel_task,
-                description=f"kernel {group.group_id}",
+                description=f"kernel g{group.group_id}",
                 completed=0,
                 total=1,
                 visible=True,
             )
         elif self._use_plain:
-            print(f"[{self._group_index}/{len(self.plan.groups)}] {label}", flush=True)
+            print(
+                _plain_group_text(
+                    group,
+                    group_index=self._group_index,
+                    group_count=len(self.plan.groups),
+                ),
+                flush=True,
+            )
 
     def route_group(self, group: Any, *, route: str, reason: str) -> None:
         """Report the selected execution route for one group."""
@@ -216,13 +424,17 @@ class DispatchProgress:
         if self._mode is None:
             return
         if self._rich is not None:
+            self._rich.update(
+                self._group_task,
+                description=f"completed g{group.group_id}",
+            )
             self._rich.advance(self._group_task, 1)
             self._rich.update(self._kernel_task, visible=False)
         elif self._use_plain:
-            print(f"done group {group.group_id}", flush=True)
+            print(f"{progress_timestamp()} done    g{group.group_id}", flush=True)
 
     def kernel_callback(self, group: Any) -> KernelProgressCallback | None:
-        """Return a callback for backend progress events and kernel chunks."""
+        """Return a callback for backend progress events and kernel progress."""
 
         if self._mode is None:
             return None
@@ -241,7 +453,7 @@ class DispatchProgress:
                     group_count=len(self.plan.groups),
                     rows=int(group.size),
                     nx=int(group.nx),
-                    message="chunks",
+                    message="solving chunks",
                     completed=done,
                     total=total,
                 )
@@ -254,40 +466,68 @@ class DispatchProgress:
 
         if self._mode is None:
             return
+        event = self._with_group_position(event)
         if self._rich is not None:
             self._render_rich_event(event)
         elif self._use_plain:
             self._render_plain_event(event)
 
+    def _with_group_position(self, event: ProgressEvent) -> ProgressEvent:
+        if event.group_id is None or event.group_index is not None:
+            return event
+        group_index = self._current_group_index.get(int(event.group_id))
+        if group_index is None:
+            return event
+        return replace(
+            event,
+            group_index=group_index,
+            group_count=len(self.plan.groups),
+        )
+
     def _render_rich_event(self, event: ProgressEvent) -> None:
         if self._rich is None:
             return
-        if event.stage == "kernel" and event.completed is not None and event.total is not None:
-            self._rich.update(
-                self._kernel_task,
-                description=self._event_label(event),
-                completed=event.completed,
-                total=max(event.total, 1),
-                visible=True,
-            )
+        if event.stage == "kernel":
+            update_kwargs: dict[str, Any] = {
+                "description": self._event_label(event),
+                "visible": True,
+            }
+            if event.completed is not None and event.total is not None:
+                update_kwargs["completed"] = event.completed
+                update_kwargs["total"] = max(event.total, 1)
+            elif event.message.startswith("completed"):
+                update_kwargs["completed"] = 1
+                update_kwargs["total"] = 1
+            else:
+                update_kwargs["completed"] = 0
+                update_kwargs["total"] = 1
+            self._rich.update(self._kernel_task, **update_kwargs)
+            if event.completed is None:
+                self._rich.console.print(_rich_event_text(event))
             return
         self._rich.update(self._group_task, description=self._event_label(event))
-        if event.stage in {"route", "prepare", "batch", "lowering", "kernel", "result"}:
-            self._rich.console.print(f"[dim]{event.plain_text()}[/dim]")
+        if event.stage in {"route", "prepare", "batch", "lowering", "result"}:
+            self._rich.console.print(_rich_event_text(event))
 
     def _render_plain_event(self, event: ProgressEvent) -> None:
-        if event.stage == "kernel" and event.total == 1 and event.message == "chunks":
-            return
-        print(f"  {event.plain_text()}", flush=True)
+        if (
+            event.stage == "kernel"
+            and event.message == "solving chunks"
+            and event.completed is not None
+            and event.total is not None
+        ):
+            if event.total == 1:
+                return
+            if not _should_render_plain_chunk_progress(event.completed, event.total):
+                return
+        print(f"  {_plain_event_text(event)}", flush=True)
 
     def _event_label(self, event: ProgressEvent) -> str:
-        label = event.stage
+        label = _STAGE_LABELS.get(event.stage, event.stage)
         if event.group_id is not None:
-            label += f" group {event.group_id}"
-        if event.route:
-            label += f" {event.route}"
+            label += f" g{event.group_id}"
         if event.message:
-            label += f" {event.message}"
+            label += f": {event.message}"
         if event.completed is not None and event.total is not None:
             label += f" {event.completed}/{event.total}"
         return label
