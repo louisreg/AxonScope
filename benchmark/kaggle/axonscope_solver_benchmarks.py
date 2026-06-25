@@ -240,9 +240,26 @@ def install_nrv_stack() -> pathlib.Path:
     )
     env_yaml.unlink(missing_ok=True)
     env_python = env_dir / "bin" / "python"
+    configure_conda_env_environment(env_dir)
     run([str(env_python), "-m", "pip", "install", "-U", "pip"])
     run([str(env_python), "-m", "pip", "install", "nrv-py"], cwd=CHECKOUT_DIR)
     return env_python
+
+
+def configure_conda_env_environment(env_dir: pathlib.Path) -> None:
+    env_bin = env_dir / "bin"
+    env_lib = env_dir / "lib"
+    os.environ["CONDA_PREFIX"] = str(env_dir)
+    os.environ["PATH"] = os.pathsep.join(
+        [str(env_bin), os.environ.get("PATH", "")]
+    )
+    existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(env_lib), *([existing_ld] if existing_ld else [])]
+    )
+    print(f"Using NRV conda env: {env_dir}")
+    print(f"PATH starts with: {env_bin}")
+    print(f"LD_LIBRARY_PATH starts with: {env_lib}")
 
 
 def install_micromamba() -> pathlib.Path:
@@ -260,12 +277,16 @@ def install_micromamba() -> pathlib.Path:
 
 def verify_nrv_stack() -> None:
     code = """
+import shutil
 import dolfinx
 import mpi4py
 import nrv
 print("dolfinx:", getattr(dolfinx, "__version__", "unknown"))
 print("mpi4py import ok")
 print("nrv import ok")
+print("nrnivmodl:", shutil.which("nrnivmodl"))
+if shutil.which("nrnivmodl") is None:
+    raise SystemExit("nrnivmodl not found in PATH")
 """
     run([python_executable(), "-c", code], cwd=CHECKOUT_DIR)
 
