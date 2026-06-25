@@ -53,6 +53,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "population_tsim_gpu",
             "population_tsim_gpu_1000",
             "realistic_fascicle_nrv_gpu",
+            "realistic_fascicle_nrv_gpu_full",
             "both",
         ),
         help="Benchmark suite to run inside the Kaggle kernel.",

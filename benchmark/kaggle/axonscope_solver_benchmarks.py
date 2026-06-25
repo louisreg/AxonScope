@@ -173,6 +173,12 @@ def main() -> None:
         )
     elif BENCHMARK == "realistic_fascicle_nrv_gpu":
         run_realistic_fascicle_nrv_gpu(out_dir)
+    elif BENCHMARK == "realistic_fascicle_nrv_gpu_full":
+        run_realistic_fascicle_nrv_gpu(
+            out_dir,
+            suite="realistic_fascicle_synthetic_full",
+            prefix="realistic_fascicle_nrv_gpu_full",
+        )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -186,7 +192,7 @@ def main() -> None:
             "realistic_stress_observer, "
             "realistic_stress_observer_cpu, realistic_stress_observer_gpu, "
             "population_tsim_gpu, population_tsim_gpu_1000, "
-            "realistic_fascicle_nrv_gpu, or both."
+            "realistic_fascicle_nrv_gpu, realistic_fascicle_nrv_gpu_full, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -212,7 +218,10 @@ def setup_repo() -> None:
 
 
 def benchmark_needs_nrv_stack() -> bool:
-    return BENCHMARK in {"realistic_fascicle_nrv_gpu"}
+    return BENCHMARK in {
+        "realistic_fascicle_nrv_gpu",
+        "realistic_fascicle_nrv_gpu_full",
+    }
 
 
 def force_exit_after_archive() -> bool:
@@ -842,15 +851,19 @@ def run_population_tsim_gpu(
     print_population_tsim_summary(result_dir / f"{prefix}.csv")
 
 
-def run_realistic_fascicle_nrv_gpu(out_dir: pathlib.Path) -> None:
-    prefix = "realistic_fascicle_nrv_gpu"
+def run_realistic_fascicle_nrv_gpu(
+    out_dir: pathlib.Path,
+    *,
+    suite: str = "realistic_fascicle_smoke",
+    prefix: str = "realistic_fascicle_nrv_gpu",
+) -> None:
     result_dir = out_dir / prefix
     profile_dir = out_dir / f"{prefix}_profiles"
     command = [
         python_executable(),
         "benchmark/nrv_performance/run.py",
         "--suite",
-        "realistic_fascicle_smoke",
+        suite,
         "--out-dir",
         str(result_dir),
         "--prefix",
