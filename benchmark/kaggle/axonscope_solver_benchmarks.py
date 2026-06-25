@@ -272,8 +272,45 @@ print("nrv import ok")
 
 def install_jax_gpu_extra() -> None:
     jax_version = installed_package_version("jax")
-    requirement = f"jax[{JAX_CUDA_EXTRA}]=={jax_version}"
-    run([python_executable(), "-m", "pip", "install", "--upgrade", requirement], cwd=CHECKOUT_DIR)
+    requirements = [
+        f"jax=={jax_version}",
+        f"jaxlib=={jax_version}",
+        f"jax[{JAX_CUDA_EXTRA}]=={jax_version}",
+    ]
+    if JAX_CUDA_EXTRA == "cuda12":
+        requirements.append(f"jax-cuda12-plugin[with_cuda]=={jax_version}")
+    run(
+        [
+            python_executable(),
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--no-cache-dir",
+            *requirements,
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    print_cuda_package_diagnostics()
+
+
+def print_cuda_package_diagnostics() -> None:
+    code = """
+import importlib.metadata as metadata
+for name in (
+    "jax",
+    "jaxlib",
+    "jax-cuda12-plugin",
+    "jax-cuda12-pjrt",
+    "nvidia-cusparse-cu12",
+    "nvidia-cublas-cu12",
+):
+    try:
+        print(f"{name}: {metadata.version(name)}")
+    except metadata.PackageNotFoundError:
+        print(f"{name}: not installed")
+"""
+    run([python_executable(), "-c", code], cwd=CHECKOUT_DIR)
 
 
 def installed_package_version(package_name: str) -> str:
