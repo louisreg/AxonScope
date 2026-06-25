@@ -247,6 +247,13 @@ Work should start here unless the user asks otherwise.
   completed on commit `344b6d2` with `jax_backend=gpu`, `groups=2`,
   `padded=1`; AS first-run `7.18-8.10 s`, warm-run `0.088-0.239 s` for
   synthetic mixed populations of `25/50/100` fibers at `tsim=0.5/1 ms`.
+- [x] Run the large Kaggle GPU population check:
+  `benchmark/kaggle/run_kernel.py --benchmark population_tsim_gpu_1000`.
+  Kaggle P100 run `20260625_125433_population_tsim_gpu_1000_NvidiaTeslaP100`
+  completed on commit `90e62c8` with `jax_backend=gpu`, `groups=2`,
+  `padded=1`; AS first-run `24.50 s` / warm-run `1.92 s` at `tsim=0.5 ms`,
+  and AS first-run `23.78 s` / warm-run `2.23 s` at `tsim=1 ms` for a
+  synthetic mixed population of `1000` fibers.
 - [ ] Use the cold-path profile mode before making performance claims from
   first-call timings: `population_cold_path_smoke`, `--profile-cold-path`,
   `--profile-warm-path`, and `--clear-jax-caches`. Track at least
