@@ -193,7 +193,7 @@ python benchmark/kaggle/run_kernel.py \
 
 `realistic_fascicle_nrv_gpu` runs the realistic NRV LIFE/FEM fascicle smoke
 benchmark on a Kaggle GPU. This preset installs the NRV/FEniCS stack inside the
-Kaggle kernel with `mamba` when available, otherwise `conda`:
+Kaggle kernel with `conda`:
 
 ```bash
 conda install -y -c conda-forge \

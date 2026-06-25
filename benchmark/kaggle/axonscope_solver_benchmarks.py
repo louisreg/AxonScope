@@ -205,9 +205,9 @@ def benchmark_needs_nrv_stack() -> bool:
 
 
 def install_nrv_stack() -> None:
-    conda_bin = shutil.which("mamba") or shutil.which("conda")
+    conda_bin = shutil.which("conda")
     if conda_bin is None:
-        raise RuntimeError("Could not find mamba or conda in the Kaggle environment.")
+        raise RuntimeError("Could not find conda in the Kaggle environment.")
     run(
         [
             conda_bin,
