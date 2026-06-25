@@ -123,6 +123,7 @@ The wrapper also accepts:
 --benchmark realistic_stress_observer_cpu
 --benchmark realistic_stress_observer_gpu
 --benchmark population_tsim_gpu
+--benchmark population_tsim_gpu_1000
 --benchmark both
 --benchmark e2e_full
 --branch bench-colab
@@ -175,6 +176,8 @@ deterministic synthetic NRV-shaped mixed population, `ExecutionPolicy` with
 `Device.gpu(0)`, observer-only output, first/warm timings, and cold/warm
 hotpath reports. It does not require NRV on Kaggle; use the local
 `population_tsim` suite with `--geometry-source nrv` for direct NRV comparison.
+Use `population_tsim_gpu_1000` for the same path with a single 1000-fiber
+synthetic population case at `tsim=0.5/1 ms`.
 
 Run it with:
 

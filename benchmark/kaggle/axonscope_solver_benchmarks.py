@@ -156,6 +156,12 @@ def main() -> None:
         )
     elif BENCHMARK == "population_tsim_gpu":
         run_population_tsim_gpu(out_dir)
+    elif BENCHMARK == "population_tsim_gpu_1000":
+        run_population_tsim_gpu(
+            out_dir,
+            suite="population_tsim_gpu_1000",
+            prefix="population_tsim_gpu_1000",
+        )
     elif BENCHMARK == "both":
         run_linear(out_dir, smoke=False)
         run_e2e(out_dir, smoke=False)
@@ -168,7 +174,7 @@ def main() -> None:
             "realistic_stress_single_vm_cpu, realistic_stress_single_vm_gpu, "
             "realistic_stress_observer, "
             "realistic_stress_observer_cpu, realistic_stress_observer_gpu, "
-            "population_tsim_gpu, or both."
+            "population_tsim_gpu, population_tsim_gpu_1000, or both."
         )
 
     archive = shutil.make_archive(str(out_dir), "zip", out_dir)
@@ -500,24 +506,29 @@ def run_realistic_examples(
     run(command, cwd=CHECKOUT_DIR)
 
 
-def run_population_tsim_gpu(out_dir: pathlib.Path) -> None:
-    result_dir = out_dir / "population_tsim_gpu"
-    profile_dir = out_dir / "population_tsim_gpu_profiles"
+def run_population_tsim_gpu(
+    out_dir: pathlib.Path,
+    *,
+    suite: str = "population_tsim_gpu",
+    prefix: str = "population_tsim_gpu",
+) -> None:
+    result_dir = out_dir / prefix
+    profile_dir = out_dir / f"{prefix}_profiles"
     command = [
         sys.executable,
         "benchmark/nrv_performance/run.py",
         "--suite",
-        "population_tsim_gpu",
+        suite,
         "--out-dir",
         str(result_dir),
         "--prefix",
-        "population_tsim_gpu",
+        prefix,
         "--",
         "--report-dir",
         str(profile_dir),
     ]
     run(command, cwd=CHECKOUT_DIR)
-    print_population_tsim_summary(result_dir / "population_tsim_gpu.csv")
+    print_population_tsim_summary(result_dir / f"{prefix}.csv")
 
 
 def print_summary(path: pathlib.Path, *, mode: str, limit: int = 12) -> None:

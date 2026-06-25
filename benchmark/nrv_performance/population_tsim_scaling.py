@@ -190,8 +190,9 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 
 def validate_args(args: argparse.Namespace) -> None:
-    if any(count < 1 or count > 100 for count in args.fiber_counts):
-        raise ValueError("--fiber-counts values must be in [1, 100].")
+    max_fiber_count = 2_000 if args.geometry_source == "synthetic" else 100
+    if any(count < 1 or count > max_fiber_count for count in args.fiber_counts):
+        raise ValueError(f"--fiber-counts values must be in [1, {max_fiber_count}].")
     if any(value <= 0.0 for value in args.tsim):
         raise ValueError("--tsim values must be > 0.")
     if float(args.dt_ms) <= 0.0:

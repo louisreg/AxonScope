@@ -47,6 +47,16 @@ def test_population_tsim_gpu_suite_is_axonscope_only_and_synthetic():
     assert "--profile-warm-path" in suite.args
 
 
+def test_population_tsim_gpu_1000_suite_uses_large_synthetic_case():
+    suite = NRV_PERFORMANCE_SUITES["population_tsim_gpu_1000"]
+
+    assert suite.runner == "population_tsim_scaling"
+    assert suite.args[suite.args.index("--runner") + 1] == "axonscope"
+    assert suite.args[suite.args.index("--geometry-source") + 1] == "synthetic"
+    assert suite.args[suite.args.index("--device") + 1] == "gpu"
+    assert suite.args[suite.args.index("--fiber-counts") + 1] == "1000"
+
+
 def test_runtime_suites_forward_to_benchmark_solver():
     suite = RUNTIME_SUITES["smoke"]
 

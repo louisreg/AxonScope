@@ -224,6 +224,7 @@ def test_kaggle_runner_accepts_active_benchmark_choices():
         "realistic_stress_observer_cpu",
         "realistic_stress_observer_gpu",
         "population_tsim_gpu",
+        "population_tsim_gpu_1000",
         "both",
     ]:
         args = parse_args(["--username", "owner", "--benchmark", benchmark])
@@ -371,6 +372,31 @@ def test_kaggle_population_tsim_gpu_uses_synthetic_axonscope_suite(tmp_path, mon
     assert command[command.index("--prefix") + 1] == "population_tsim_gpu"
     assert command[command.index("--report-dir") + 1] == str(
         tmp_path / "population_tsim_gpu_profiles"
+    )
+
+
+def test_kaggle_population_tsim_gpu_1000_uses_large_suite(tmp_path, monkeypatch):
+    commands = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command)
+
+    monkeypatch.setattr(kaggle_bench, "run", fake_run)
+
+    kaggle_bench.run_population_tsim_gpu(
+        tmp_path,
+        suite="population_tsim_gpu_1000",
+        prefix="population_tsim_gpu_1000",
+    )
+
+    (command,) = commands
+    assert command[command.index("--suite") + 1] == "population_tsim_gpu_1000"
+    assert command[command.index("--out-dir") + 1] == str(
+        tmp_path / "population_tsim_gpu_1000"
+    )
+    assert command[command.index("--prefix") + 1] == "population_tsim_gpu_1000"
+    assert command[command.index("--report-dir") + 1] == str(
+        tmp_path / "population_tsim_gpu_1000_profiles"
     )
 
 
