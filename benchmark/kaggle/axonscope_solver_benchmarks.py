@@ -11,6 +11,7 @@ import csv
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,12 @@ JAX_CUDA_EXTRA = string_setting("AXONSCOPE_JAX_CUDA_EXTRA", "jax_cuda_extra", "c
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
 CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
 RESULTS_ROOT = WORK_DIR / "axonscope_solver_results"
+PYTHON_EXECUTABLE = pathlib.Path(sys.executable)
+os.environ.setdefault("MAMBA_ROOT_PREFIX", str(WORK_DIR / "micromamba_root"))
+
+
+def python_executable() -> str:
+    return str(PYTHON_EXECUTABLE)
 
 
 def main() -> None:
@@ -186,14 +193,15 @@ def main() -> None:
 
 
 def setup_repo() -> None:
+    global PYTHON_EXECUTABLE
     if CHECKOUT_DIR.exists():
         shutil.rmtree(CHECKOUT_DIR)
     run(["git", "clone", "--depth", "1", "--branch", BRANCH, REPO_URL, str(CHECKOUT_DIR)])
     run(["git", "rev-parse", "--short", "HEAD"], cwd=CHECKOUT_DIR)
-    run([sys.executable, "-m", "pip", "install", "-U", "pip"])
     if benchmark_needs_nrv_stack():
-        install_nrv_stack()
-    run([sys.executable, "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
+        PYTHON_EXECUTABLE = install_nrv_stack()
+    run([python_executable(), "-m", "pip", "install", "-U", "pip"])
+    run([python_executable(), "-m", "pip", "install", "-e", ".[benchmark]"], cwd=CHECKOUT_DIR)
     if REQUIRE_GPU and JAX_CUDA_EXTRA:
         install_jax_gpu_extra()
     if benchmark_needs_nrv_stack():
@@ -204,26 +212,50 @@ def benchmark_needs_nrv_stack() -> bool:
     return BENCHMARK in {"realistic_fascicle_nrv_gpu"}
 
 
-def install_nrv_stack() -> None:
-    conda_bin = shutil.which("conda")
-    if conda_bin is None:
-        raise RuntimeError("Could not find conda in the Kaggle environment.")
+def install_nrv_stack() -> pathlib.Path:
+    micromamba = install_micromamba()
+    env_dir = WORK_DIR / "axonscope_nrv_env"
+    env_yaml = WORK_DIR / "nrv_linux.yaml"
     run(
         [
-            conda_bin,
-            "install",
-            "-y",
-            "-c",
-            "conda-forge",
-            "mpi4py",
-            "fenics-dolfinx==0.9.0",
-            "libblas=*=*blis",
-            "python-gmsh",
-            "ipykernel",
+            "curl",
+            "-L",
+            "-o",
+            str(env_yaml),
+            "https://raw.githubusercontent.com/nrv-framework/NRV/refs/heads/master/conda/nrv_linux.yaml",
         ],
         cwd=CHECKOUT_DIR,
     )
-    run([sys.executable, "-m", "pip", "install", "nrv-py"], cwd=CHECKOUT_DIR)
+    run(
+        [
+            str(micromamba),
+            "create",
+            "-y",
+            "-p",
+            str(env_dir),
+            "-f",
+            str(env_yaml),
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    env_yaml.unlink(missing_ok=True)
+    env_python = env_dir / "bin" / "python"
+    run([str(env_python), "-m", "pip", "install", "-U", "pip"])
+    run([str(env_python), "-m", "pip", "install", "nrv-py"], cwd=CHECKOUT_DIR)
+    return env_python
+
+
+def install_micromamba() -> pathlib.Path:
+    micromamba = WORK_DIR / "micromamba" / "bin" / "micromamba"
+    if micromamba.exists():
+        return micromamba
+    micromamba.parent.mkdir(parents=True, exist_ok=True)
+    command = (
+        f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest "
+        f"| tar -xj -C {shlex.quote(str(WORK_DIR / 'micromamba'))} bin/micromamba"
+    )
+    run(["bash", "-lc", command], cwd=CHECKOUT_DIR)
+    return micromamba
 
 
 def verify_nrv_stack() -> None:
@@ -235,18 +267,18 @@ print("dolfinx:", getattr(dolfinx, "__version__", "unknown"))
 print("mpi4py import ok")
 print("nrv import ok")
 """
-    run([sys.executable, "-c", code], cwd=CHECKOUT_DIR)
+    run([python_executable(), "-c", code], cwd=CHECKOUT_DIR)
 
 
 def install_jax_gpu_extra() -> None:
     jax_version = installed_package_version("jax")
     requirement = f"jax[{JAX_CUDA_EXTRA}]=={jax_version}"
-    run([sys.executable, "-m", "pip", "install", "--upgrade", requirement], cwd=CHECKOUT_DIR)
+    run([python_executable(), "-m", "pip", "install", "--upgrade", requirement], cwd=CHECKOUT_DIR)
 
 
 def installed_package_version(package_name: str) -> str:
     command = [
-        sys.executable,
+        python_executable(),
         "-c",
         (
             "import importlib.metadata as metadata; "
@@ -267,12 +299,12 @@ print("jax devices:", jax.devices())
 if {require_gpu!r} and backend != "gpu":
     raise SystemExit(f"Expected a Kaggle GPU backend, got {{backend!r}}.")
 """.format(require_gpu=REQUIRE_GPU)
-    run([sys.executable, "-c", code], cwd=CHECKOUT_DIR)
+    run([python_executable(), "-c", code], cwd=CHECKOUT_DIR)
 
 
 def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/solvers/bench_double_cable_linear_solvers.py",
         "--out-dir",
         str(out_dir),
@@ -331,7 +363,7 @@ def run_linear(out_dir: pathlib.Path, *, smoke: bool) -> None:
 def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
     trace_dir = out_dir / "linear_pcr_soa_trace" / "jax_traces"
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/solvers/bench_double_cable_linear_solvers.py",
         "--out-dir",
         str(out_dir),
@@ -364,7 +396,7 @@ def run_linear_pcr_soa_trace(out_dir: pathlib.Path) -> None:
 
 def run_e2e(out_dir: pathlib.Path, *, smoke: bool = False, mode: str = "standard") -> None:
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/solvers/bench_double_cable_end_to_end.py",
         "--out-dir",
         str(out_dir),
@@ -473,7 +505,7 @@ def run_realistic_examples(
     progress: bool = False,
 ) -> None:
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/realistic_examples/bench_basic_examples.py",
         "--out-dir",
         str(out_dir / "realistic_examples"),
@@ -560,7 +592,7 @@ def run_population_tsim_gpu(
     result_dir = out_dir / prefix
     profile_dir = out_dir / f"{prefix}_profiles"
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/nrv_performance/run.py",
         "--suite",
         suite,
@@ -581,7 +613,7 @@ def run_realistic_fascicle_nrv_gpu(out_dir: pathlib.Path) -> None:
     result_dir = out_dir / prefix
     profile_dir = out_dir / f"{prefix}_profiles"
     command = [
-        sys.executable,
+        python_executable(),
         "benchmark/nrv_performance/run.py",
         "--suite",
         "realistic_fascicle_smoke",

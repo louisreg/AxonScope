@@ -192,13 +192,15 @@ python benchmark/kaggle/run_kernel.py \
 ```
 
 `realistic_fascicle_nrv_gpu` runs the realistic NRV LIFE/FEM fascicle smoke
-benchmark on a Kaggle GPU. This preset installs the NRV/FEniCS stack inside the
-Kaggle kernel with `conda`:
+benchmark on a Kaggle GPU. This preset bootstraps `micromamba`, downloads NRV's
+official Linux conda environment file, creates an isolated NRV env, then
+installs `nrv-py`:
 
 ```bash
-conda install -y -c conda-forge \
-  mpi4py fenics-dolfinx==0.9.0 'libblas=*=*blis' python-gmsh ipykernel
-python -m pip install nrv-py
+curl -L -o env.yaml \
+  https://raw.githubusercontent.com/nrv-framework/NRV/refs/heads/master/conda/nrv_linux.yaml
+micromamba create -y -p /kaggle/working/axonscope_nrv_env -f env.yaml
+/kaggle/working/axonscope_nrv_env/bin/python -m pip install nrv-py
 ```
 
 It then runs `benchmark/nrv_performance/run.py --suite
