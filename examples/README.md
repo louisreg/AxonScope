@@ -92,7 +92,10 @@ still runnable examples, but they explain the moving parts more explicitly.
 ## With NRV
 
 `examples/with_nrv/` is for integration with NRV, where NRV owns complex nerve
-geometry/fiber placement and AxonScope owns axon dynamics.
+geometry/fiber placement and AxonScope owns axon dynamics. Reusable handoff
+logic lives in `axonscope.integrations.nrv`; examples should call those helpers
+instead of re-implementing fiber-table extraction, LIFE/FEM footprint sampling,
+or NRV recruitment decoding.
 
 - `01_realistic_fascicle_geometry_comparison.py`: recreate NRV's bundled
   realistic fascicle-contour workflow, convert fractional NRV `node_shift`

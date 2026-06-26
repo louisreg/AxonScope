@@ -210,6 +210,10 @@ Work should start here unless the user asks otherwise.
   public point-source path is helper -> sampled footprint/drive/stimulation.
 - [x] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
   adapter-style inputs that hand AxonScope intrinsic footprints and metadata.
+- [x] Promote the stable NRV handoff helpers to `axonscope.integrations.nrv`:
+  fiber-row extraction, NRV LIFE/FEM footprint sampling into
+  `ExtracellularFootprint`, LIFE stimulation construction/update, NRV
+  recruitment-result decoding, and compact activation comparisons.
 - [x] Rename or remove user-facing fields/docs that imply AxonScope owns
   real-world placement beyond temporary analytical examples.
 - [x] Add architecture guardrails so public examples/docs cannot reintroduce
@@ -357,12 +361,10 @@ Work should start here unless the user asks otherwise.
   full Vm, probe Vm, and observer-only outputs; track peak memory, chunk
   overhead, cold/warm time, GPU utilization, result equivalence, and whether
   defaults should depend on `nt`, `Naxons`, recording mode, or backend.
-- Promote reusable NRV integration pieces out of examples when they stabilize:
-  realistic fascicle/fiber-table extraction, NRV LIFE/FEM footprint sampling
-  into AxonScope `ExtracellularStimulation`, NRV recruitment-result decoding by
-  fiber row, and compact AxonScope-versus-NRV recruitment summaries. Keep them
-  under `axonscope.integrations.nrv` so NRV still owns external geometry while
-  AxonScope owns intrinsic axon dynamics.
+- Continue hardening NRV integration only where the package contract is stable:
+  keep geometry construction in `examples/with_nrv` or benchmarks, and promote
+  future pieces only when they do not duplicate the canonical sampled-footprint
+  path already in `axonscope.integrations.nrv`.
 - Park performance optimization for now. When optimization resumes, start with
   a cold-path audit for large synthetic/GPU populations (`n=1000`): split
   `build pool`, `dispatch.build_plan`, `runtime.prepare`, and

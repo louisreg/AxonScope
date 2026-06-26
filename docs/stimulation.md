@@ -233,20 +233,31 @@ reference validation and custom analytical electrodes. Do not use it as the
 point-source quick-start path; sample point sources into typed footprints,
 drives, or stimulation first.
 
-`NRVExtracellularContext` reserves that future FEM path:
+NRV/FEM/LIFE workflows should use the adapter helpers in
+`axonscope.integrations.nrv`: NRV builds the external geometry and FEM field,
+then AxonScope receives intrinsic fiber rows, sampled footprints, drives, and
+stimulation objects.
 
 ```python
-nrv_context = axs.stimulation.NRVExtracellularContext(
-    electrodes=[electrode.with_stimulus(stimulus)],
-    medium="endoneurium_bhadra",
-    fem_model=None,
-    metadata={"source": "future NRV FEM"},
+from axonscope.integrations import nrv as axs_nrv
+
+rows = axs_nrv.extract_fiber_rows(nerve, include_unmyelinated=True)
+context = axs_nrv.sample_life_context(
+    rows[0],
+    axon=axon,
+    life_setup=life_setup,
+)
+stimulation = axs_nrv.life_stimulation_from_footprint(
+    context.footprint,
+    current=60.0 * axs.uA,
+    start_ms=0.1,
+    pulse_duration_ms=0.1,
 )
 ```
 
-It validates and carries the configuration now, but raises
-`NotImplementedError` if a solver asks it for a footprint before NRV/FEM
-evaluation is implemented.
+`NRVExtracellularContext` remains only a low-level placeholder for future direct
+FEM execution. The current supported path is adapter -> sampled
+`ExtracellularFootprint` -> `ExtracellularDrive` -> `ExtracellularStimulation`.
 
 ## Electrode Footprints
 

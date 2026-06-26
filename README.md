@@ -89,6 +89,11 @@ axs.positions      typed position selectors for analyses and criteria
 axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
 ```
 
+Optional external adapters live outside the root facade. For example,
+`axonscope.integrations.nrv` converts NRV-owned fascicle geometry, LIFE/FEM
+footprints, and NRV recruitment results into AxonScope fiber rows, sampled
+footprints, stimulation objects, and comparison summaries.
+
 ## Quick Start
 
 ```python

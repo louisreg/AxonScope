@@ -30,11 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import axonscope as axs
-from axonscope.integrations.nrv import (
-    FiberKind,
-    fiber_kind_from_nrv,
-    nrv_node_shift_to_x_shift_um,
-)
+from axonscope.integrations import nrv as axs_nrv
 from axonscope.solvers import BatchOptions
 
 
@@ -46,17 +42,6 @@ DeviceRequest = Literal["auto", "cpu", "gpu"]
 
 DEFAULT_OUT_DIR = Path("benchmark/results/nrv_performance/population_tsim_scaling")
 DEFAULT_REPORT_DIR = Path("benchmark/reports/nrv_performance")
-
-
-@dataclass(frozen=True)
-class FiberRow:
-    index: int
-    kind: FiberKind
-    diameter_um: float
-    y_um: float
-    z_um: float
-    node_shift: float
-    x_shift_um: float
 
 
 @dataclass(frozen=True)
@@ -452,12 +437,12 @@ def run_nrv(fascicle: Any, args: argparse.Namespace, *, tsim_ms: float) -> Any:
     )
 
 
-def extract_rows(fascicle: Any, *, population: PopulationKind) -> list[FiberRow]:
-    rows: list[FiberRow] = []
+def extract_rows(fascicle: Any, *, population: PopulationKind) -> list[axs_nrv.NRVFiberRow]:
+    rows: list[axs_nrv.NRVFiberRow] = []
     table = fascicle.axons.axon_pop
     for fiber_index, row in table.iterrows():
         nrv_type = int(float(row.get("types", 0)))
-        kind = fiber_kind_from_nrv(nrv_type, include_mrg=True)
+        kind = axs_nrv.fiber_kind_from_nrv(nrv_type, include_mrg=True)
         if population == "mrg" and kind != "mrg":
             continue
         if population == "rattay" and kind != "rattay":
@@ -465,25 +450,30 @@ def extract_rows(fascicle: Any, *, population: PopulationKind) -> list[FiberRow]
         diameter_um = float(row.get("diameters", 1.0))
         node_shift = float(row.get("node_shift", 0.0))
         rows.append(
-            FiberRow(
-                index=int(fiber_index),
+            axs_nrv.NRVFiberRow(
+                fascicle_id="0",
+                fiber_index=int(fiber_index),
                 kind=kind,
                 diameter_um=diameter_um,
                 y_um=float(row.get("y", 0.0)),
                 z_um=float(row.get("z", 0.0)),
                 node_shift=node_shift,
-                x_shift_um=nrv_node_shift_to_x_shift_um(
+                x_shift_um=axs_nrv.nrv_node_shift_to_x_shift_um(
                     node_shift,
                     diameter_um,
                     kind=kind,
                 ),
             )
         )
-    rows.sort(key=lambda item: item.index)
+    rows.sort(key=lambda item: item.fiber_index)
     return rows
 
 
-def build_synthetic_rows(args: argparse.Namespace, *, fiber_count: int) -> list[FiberRow]:
+def build_synthetic_rows(
+    args: argparse.Namespace,
+    *,
+    fiber_count: int,
+) -> list[axs_nrv.NRVFiberRow]:
     """Build deterministic NRV-shaped rows without importing NRV."""
 
     rng = np.random.default_rng(int(args.seed) + 10_000 * int(fiber_count))
@@ -494,7 +484,7 @@ def build_synthetic_rows(args: argparse.Namespace, *, fiber_count: int) -> list[
     )
     rng.shuffle(kinds)
     radius_um = float(args.fascicle_diameter_um) / 2.0
-    rows: list[FiberRow] = []
+    rows: list[axs_nrv.NRVFiberRow] = []
     for fiber_index, kind in enumerate(kinds):
         angle = rng.uniform(0.0, 2.0 * np.pi)
         radius = radius_um * np.sqrt(rng.uniform(0.0, 1.0))
@@ -505,21 +495,22 @@ def build_synthetic_rows(args: argparse.Namespace, *, fiber_count: int) -> list[
         )
         node_shift = float(rng.uniform(0.0, 1.0)) if kind == "mrg" else 0.0
         rows.append(
-            FiberRow(
-                index=int(fiber_index),
+            axs_nrv.NRVFiberRow(
+                fascicle_id="0",
+                fiber_index=int(fiber_index),
                 kind=kind,
                 diameter_um=diameter_um,
                 y_um=float(radius * np.cos(angle)),
                 z_um=float(radius * np.sin(angle)),
                 node_shift=node_shift,
-                x_shift_um=nrv_node_shift_to_x_shift_um(
+                x_shift_um=axs_nrv.nrv_node_shift_to_x_shift_um(
                     node_shift,
                     diameter_um,
                     kind=kind,
                 ),
             )
         )
-    rows.sort(key=lambda item: item.index)
+    rows.sort(key=lambda item: item.fiber_index)
     return rows
 
 
@@ -528,7 +519,7 @@ def synthetic_kinds(
     population: PopulationKind,
     fiber_count: int,
     percent_unmyelinated: float,
-) -> list[FiberKind]:
+) -> list[axs_nrv.FiberKind]:
     if population == "mrg":
         return ["mrg"] * int(fiber_count)
     if population == "rattay":
@@ -539,7 +530,10 @@ def synthetic_kinds(
     return ["mrg"] * mrg_count + ["rattay"] * rattay_count
 
 
-def build_axonscope_pool(args: argparse.Namespace, rows: Sequence[FiberRow]) -> list[axs.AxonInstance]:
+def build_axonscope_pool(
+    args: argparse.Namespace,
+    rows: Sequence[axs_nrv.NRVFiberRow],
+) -> list[axs.AxonInstance]:
     stimulus = axs.Stimulus.pulse(
         start=float(args.stimulus_start_ms) * axs.ms,
         duration=float(args.pulse_duration_ms) * axs.ms,
@@ -570,7 +564,7 @@ def build_axonscope_pool(args: argparse.Namespace, rows: Sequence[FiberRow]) -> 
     return pool
 
 
-def build_axonscope_axon(row: FiberRow, *, length_um: float):
+def build_axonscope_axon(row: axs_nrv.NRVFiberRow, *, length_um: float):
     diameter = max(float(row.diameter_um), 0.2) * axs.um
     if row.kind == "mrg":
         nodes = max(
@@ -850,14 +844,14 @@ def summarize_axonscope_routes(result: axs.AxonSimulationResult) -> dict[str, An
     }
 
 
-def fiber_counts(rows: Sequence[FiberRow]) -> dict[str, int]:
+def fiber_counts(rows: Sequence[axs_nrv.NRVFiberRow]) -> dict[str, int]:
     return {
         "mrg": int(sum(row.kind == "mrg" for row in rows)),
         "rattay": int(sum(row.kind == "rattay" for row in rows)),
     }
 
 
-def estimate_dense_vm_bytes(rows: Sequence[FiberRow], *, nt: int) -> int:
+def estimate_dense_vm_bytes(rows: Sequence[axs_nrv.NRVFiberRow], *, nt: int) -> int:
     bytes_per_sample = 4
     total_nx = 0
     for row in rows:

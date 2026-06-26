@@ -33,6 +33,7 @@ from rich.console import Console
 from rich.table import Table
 
 import axonscope as axs
+from axonscope.integrations import nrv as axs_nrv
 from axonscope.protocols import activation as activation_protocols
 from axonscope.timebase import simulation_step_count
 from axonscope.utils.progress_reporting import current_rss_mib
@@ -150,8 +151,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     rows = recorder.measure(
         "extract_fiber_rows",
-        lambda: example.select_rows(
-            example.extract_fiber_rows(
+        lambda: axs_nrv.select_rows(
+            axs_nrv.extract_fiber_rows(
                 nerve,
                 include_unmyelinated=bool(config.include_unmyelinated),
             ),
@@ -214,7 +215,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         activation_comparisons = recorder.measure(
             "nrv_validation_single_amplitude",
             lambda: validate_nrv_at_amplitude(
-                example,
                 nerve,
                 config,
                 simulated_rows,
@@ -520,7 +520,6 @@ def run_axonscope_recruitment(
 
 
 def validate_nrv_at_amplitude(
-    example: ModuleType,
     nerve: Any,
     config: Any,
     rows: Sequence[Any],
@@ -535,7 +534,7 @@ def validate_nrv_at_amplitude(
         unmyelinated_nseg=max(3, int(float(config.nerve_length_um) // 25)),
         myelinated_nseg_per_sec=3,
     )
-    nrv_activated = example.nrv_activation_by_row(
+    nrv_activated = axs_nrv.nrv_activation_by_row(
         nrv_result,
         nerve,
         rows,
@@ -544,18 +543,11 @@ def validate_nrv_at_amplitude(
     validation_index = int(
         np.argmin(np.abs(np.asarray(curve.amplitudes_uA, dtype=float) - validation_current_uA))
     )
-    return [
-        example.ActivationComparison(
-            row=row,
-            nrv_activated=bool(nrv_activated.get(example.row_key(row), False)),
-            axonscope_activated=bool(axonscope_active),
-        )
-        for row, axonscope_active in zip(
-            rows,
-            np.asarray(curve.activated[validation_index], dtype=bool),
-            strict=True,
-        )
-    ]
+    return axs_nrv.activation_comparisons(
+        rows,
+        nrv_activated=nrv_activated,
+        axonscope_activated=np.asarray(curve.activated[validation_index], dtype=bool),
+    )
 
 
 def build_summary(

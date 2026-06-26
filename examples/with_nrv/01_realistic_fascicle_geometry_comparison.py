@@ -35,11 +35,7 @@ from rich.console import Console
 from rich.table import Table
 
 import axonscope as axs
-from axonscope.integrations.nrv import (
-    FiberKind,
-    fiber_kind_from_nrv,
-    nrv_node_shift_to_x_shift_um,
-)
+from axonscope.integrations import nrv as axs_nrv
 from axonscope.timebase import simulation_step_count
 from axonscope.utils.progress_reporting import format_duration
 
@@ -82,64 +78,13 @@ class ExampleConfig:
 
 
 @dataclass(frozen=True)
-class RealisticFiberRow:
-    """One NRV fiber row after conversion to AxonScope layout metadata."""
-
-    fascicle_id: str
-    fiber_index: int
-    kind: FiberKind
-    diameter_um: float
-    y_um: float
-    z_um: float
-    node_shift: float
-    x_shift_um: float
-
-
-@dataclass(frozen=True)
 class LayoutComparison:
     """Geometry values used to compare NRV node-shift semantics to AxonScope."""
 
-    row: RealisticFiberRow
+    row: axs_nrv.NRVFiberRow
     node_spacing_um: float
     axonscope_nodes_um: np.ndarray
     expected_nodes_um: np.ndarray
-
-
-@dataclass(frozen=True)
-class LifeElectrodeSetup:
-    """NRV LIFE electrode context used by both NRV and AxonScope simulations."""
-
-    extra_stim: Any
-    diameter_um: float
-    length_um: float
-    x_offset_um: float
-    y_um: float
-    z_um: float
-
-
-@dataclass(frozen=True)
-class AxonScopeFiberContext:
-    """One AxonScope row with its current-independent NRV LIFE footprint."""
-
-    row: RealisticFiberRow
-    axon: Any
-    positions_um: np.ndarray
-    footprint: axs.ExtracellularFootprint
-
-
-@dataclass(frozen=True)
-class ActivationComparison:
-    """One row of fiber-by-fiber recruitment comparison."""
-
-    row: RealisticFiberRow
-    nrv_activated: bool
-    axonscope_activated: bool
-
-    @property
-    def matched(self) -> bool:
-        """Return whether NRV and AxonScope agree for this fiber."""
-
-        return bool(self.nrv_activated == self.axonscope_activated)
 
 
 def main(config: ExampleConfig | None = None) -> None:
@@ -155,15 +100,18 @@ def main(config: ExampleConfig | None = None) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.0), constrained_layout=True)
     nerve_contour, fascicle_contours, nerve = build_nrv_nerve_from_config(nrv, config)
     life_setup = attach_life_electrode(nrv, nerve, config)
-    rows = extract_fiber_rows(nerve, include_unmyelinated=config.include_unmyelinated)
-    rows = select_rows(rows, limit=config.max_fibers)
+    rows = axs_nrv.extract_fiber_rows(
+        nerve,
+        include_unmyelinated=config.include_unmyelinated,
+    )
+    rows = axs_nrv.select_rows(rows, limit=config.max_fibers)
     comparisons = compare_mrg_layouts(rows, nerve_length_um=config.nerve_length_um)
 
     print_geometry_summary(console, nerve, rows, comparisons)
     plot_fiber_map(axes[0], nerve_contour, fascicle_contours, rows, life_setup)
 
     if config.run_simulation:
-        simulated_rows = select_rows(rows, limit=config.simulate_fibers)
+        simulated_rows = axs_nrv.select_rows(rows, limit=config.simulate_fibers)
         recruitment_curve, activation_comparisons = compare_recruitment_curve(
             console,
             nerve,
@@ -427,7 +375,7 @@ def attach_life_electrode(
     nrv_module: Any,
     nerve: Any,
     config: ExampleConfig,
-) -> LifeElectrodeSetup:
+) -> axs_nrv.NRVLifeElectrodeSetup:
     """Attach the NRV-example LIFE electrode and return the configured context."""
 
     fascicle_key: Any = config.life_fascicle_id
@@ -465,7 +413,7 @@ def attach_life_electrode(
     if config.gmsh_n_core is not None:
         nerve.extra_stim.model.mesh.n_core = int(config.gmsh_n_core)
 
-    return LifeElectrodeSetup(
+    return axs_nrv.NRVLifeElectrodeSetup(
         extra_stim=nerve.extra_stim,
         diameter_um=float(config.life_diameter_um),
         length_um=float(config.life_length_um),
@@ -475,67 +423,8 @@ def attach_life_electrode(
     )
 
 
-def extract_fiber_rows(
-    nerve: Any,
-    *,
-    include_unmyelinated: bool,
-) -> list[RealisticFiberRow]:
-    """Map NRV fascicle populations to rows with AxonScope MRG node phases."""
-
-    rows: list[RealisticFiberRow] = []
-    for fascicle_id, fascicle in nerve.fascicles.items():
-        table = fascicle.axons.axon_pop
-        for fiber_index, row in table.iterrows():
-            if not nrv_fiber_is_simulated(fascicle, int(fiber_index)):
-                continue
-            nrv_type = int(float(row.get("types", 0)))
-            kind = fiber_kind_from_nrv(nrv_type, include_mrg=True)
-            if kind != "mrg" and not include_unmyelinated:
-                continue
-            diameter_um = float(row.get("diameters", 1.0))
-            node_shift = float(row.get("node_shift", 0.0))
-            rows.append(
-                RealisticFiberRow(
-                    fascicle_id=str(fascicle_id),
-                    fiber_index=int(fiber_index),
-                    kind=kind,
-                    diameter_um=diameter_um,
-                    y_um=float(row.get("y", 0.0)),
-                    z_um=float(row.get("z", 0.0)),
-                    node_shift=node_shift,
-                    x_shift_um=nrv_node_shift_to_x_shift_um(
-                        node_shift,
-                        diameter_um,
-                        kind=kind,
-                    ),
-                )
-            )
-    rows.sort(key=lambda item: (item.fascicle_id, item.fiber_index))
-    return rows
-
-
-def nrv_fiber_is_simulated(fascicle: Any, fiber_index: int) -> bool:
-    """Return whether NRV masks keep this fiber in the simulation set."""
-
-    for mask_label in getattr(fascicle, "sim_mask", ()):
-        try:
-            if not bool(fascicle.axons[mask_label].iloc[int(fiber_index)]):
-                return False
-        except Exception:
-            continue
-    return True
-
-
-def select_rows(rows: Sequence[RealisticFiberRow], *, limit: int) -> list[RealisticFiberRow]:
-    """Return all rows when limit <= 0, otherwise the first requested rows."""
-
-    if int(limit) <= 0:
-        return list(rows)
-    return list(rows[: int(limit)])
-
-
 def compare_mrg_layouts(
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     *,
     nerve_length_um: float,
 ) -> list[LayoutComparison]:
@@ -576,12 +465,12 @@ def compare_recruitment_curve(
     console: Console,
     nerve: Any,
     *,
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     config: ExampleConfig,
-    life_setup: LifeElectrodeSetup,
+    life_setup: axs_nrv.NRVLifeElectrodeSetup,
     amplitudes_uA: np.ndarray,
     validation_current_uA: float,
-) -> tuple[axs.protocols.RecruitmentCurve, list[ActivationComparison]]:
+) -> tuple[axs.protocols.RecruitmentCurve, list[axs_nrv.NRVActivationComparison]]:
     """Build an AxonScope recruitment curve and validate one amplitude with NRV."""
 
     row_list = list(rows)
@@ -628,19 +517,12 @@ def compare_recruitment_curve(
         simulation: axs.AxonInstance,
         current_magnitude: Any,
     ) -> None:
-        stimulation = simulation.extracellular_stimulation
-        if stimulation is None:
-            raise ValueError("simulation has no extracellular stimulation to update.")
-        drive = stimulation.drives[0]
-        updated = stimulation.replace_drive(
-            drive.id,
-            stimulus=axs.Stimulus.pulse(
-                start=config.stimulus_start_ms * axs.ms,
-                duration=config.pulse_duration_ms * axs.ms,
-                amplitude=-current_magnitude,
-            ),
+        axs_nrv.replace_life_current(
+            simulation,
+            current_magnitude,
+            start_ms=config.stimulus_start_ms,
+            pulse_duration_ms=config.pulse_duration_ms,
         )
-        simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
 
     axonscope_start_s = time.perf_counter()
     curve = axs.protocols.recruitment_sweep(
@@ -679,7 +561,7 @@ def compare_recruitment_curve(
         footprint_handoff_s=footprint_timings["total_s"],
         nrv_validation_s=nrv_validation_s,
     )
-    nrv_activated = nrv_activation_by_row(
+    nrv_activated = axs_nrv.nrv_activation_by_row(
         nrv_result,
         nerve,
         row_list,
@@ -689,19 +571,16 @@ def compare_recruitment_curve(
         np.argmin(np.abs(np.asarray(curve.amplitudes_uA, dtype=float) - validation_current_uA))
     )
     axonscope_validation = curve.activated[validation_index]
-    return curve, [
-        ActivationComparison(
-            row=row,
-            nrv_activated=bool(nrv_activated.get(row_key(row), False)),
-            axonscope_activated=bool(axonscope_active),
-        )
-        for row, axonscope_active in zip(row_list, axonscope_validation, strict=True)
-    ]
+    return curve, axs_nrv.activation_comparisons(
+        row_list,
+        nrv_activated=nrv_activated,
+        axonscope_activated=axonscope_validation,
+    )
 
 
 def print_recruitment_workload_summary(
     console: Console,
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     *,
     amplitudes_uA: np.ndarray,
     config: ExampleConfig,
@@ -745,36 +624,26 @@ def print_recruitment_workload_summary(
 
 
 def build_axonscope_context(
-    row: RealisticFiberRow,
+    row: axs_nrv.NRVFiberRow,
     *,
     config: ExampleConfig,
-    life_setup: LifeElectrodeSetup,
-) -> AxonScopeFiberContext:
+    life_setup: axs_nrv.NRVLifeElectrodeSetup,
+) -> axs_nrv.NRVFiberContext:
     """Build one AxonScope row and sample its NRV LIFE footprint once."""
 
     axon = build_axonscope_axon(row, config=config)
-    positions_um = axon.layout.position_values(unit=axs.um)
-    return AxonScopeFiberContext(
-        row=row,
-        axon=axon,
-        positions_um=positions_um,
-        footprint=nrv_life_footprint(
-            life_setup,
-            positions_um=positions_um,
-            row=row,
-        ),
-    )
+    return axs_nrv.sample_life_context(row, axon=axon, life_setup=life_setup)
 
 
 def build_axonscope_contexts(
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     *,
     config: ExampleConfig,
-    life_setup: LifeElectrodeSetup,
-) -> tuple[list[AxonScopeFiberContext], dict[str, float]]:
+    life_setup: axs_nrv.NRVLifeElectrodeSetup,
+) -> tuple[list[axs_nrv.NRVFiberContext], dict[str, float]]:
     """Build AxonScope rows while separating first FEM solve from cached sampling."""
 
-    contexts: list[AxonScopeFiberContext] = []
+    contexts: list[axs_nrv.NRVFiberContext] = []
     first_elapsed_s = 0.0
     cached_elapsed_s = 0.0
     total_start_s = time.perf_counter()
@@ -797,7 +666,7 @@ def build_axonscope_contexts(
 
 def print_footprint_sampling_summary(
     console: Console,
-    contexts: Sequence[AxonScopeFiberContext],
+    contexts: Sequence[axs_nrv.NRVFiberContext],
     *,
     timings: dict[str, float],
 ) -> None:
@@ -866,32 +735,30 @@ def print_simulation_timing_comparison(
 
 
 def build_axonscope_simulation_from_context(
-    context: AxonScopeFiberContext,
+    context: axs_nrv.NRVFiberContext,
     *,
     config: ExampleConfig,
     current_uA: float,
 ) -> axs.AxonInstance:
     """Build one AxonScope simulation row by attaching a new temporal stimulus."""
 
-    stimulus = axs.Stimulus.pulse(
-        start=config.stimulus_start_ms * axs.ms,
-        duration=config.pulse_duration_ms * axs.ms,
-        amplitude=-float(current_uA) * axs.uA,
-    )
-    drive = axs.ExtracellularDrive(
-        id=axs.DriveId("nrv_life"),
-        footprint=context.footprint,
-        stimulus=stimulus,
-        metadata={"source": "nrv_life_fem"},
-    )
     simulation = axs.AxonInstance(context.axon)
     simulation.add_extracellular_stimulation(
-        stimulation=axs.ExtracellularStimulation([drive])
+        stimulation=axs_nrv.life_stimulation_from_footprint(
+            context.footprint,
+            current=float(current_uA) * axs.uA,
+            start_ms=config.stimulus_start_ms,
+            pulse_duration_ms=config.pulse_duration_ms,
+        )
     )
     return simulation
 
 
-def build_axonscope_axon(row: RealisticFiberRow, *, config: ExampleConfig) -> axs.axons.Axon:
+def build_axonscope_axon(
+    row: axs_nrv.NRVFiberRow,
+    *,
+    config: ExampleConfig,
+) -> axs.axons.Axon:
     """Build the AxonScope axon template matching one NRV row."""
 
     diameter = max(float(row.diameter_um), 0.2) * axs.um
@@ -928,67 +795,6 @@ def build_axonscope_axon(row: RealisticFiberRow, *, config: ExampleConfig) -> ax
     )
 
 
-def nrv_activation_by_row(
-    nrv_result: Any,
-    nerve: Any,
-    rows: Sequence[RealisticFiberRow],
-    *,
-    t_start_ms: float,
-) -> dict[tuple[str, int], bool]:
-    """Return NRV recruitment flags keyed by (fascicle_id, fiber_index)."""
-
-    activated: dict[tuple[str, int], bool] = {}
-    sim_index_by_fascicle: dict[str, dict[int, int]] = {}
-    for row in rows:
-        fascicle_key = f"fascicle{row.fascicle_id}"
-        fascicle_result = nrv_result[fascicle_key]
-        if fascicle_key not in sim_index_by_fascicle:
-            fascicle = nrv_fascicle_by_id(nerve, row.fascicle_id)
-            sim_list = list(getattr(fascicle, "sim_list", ()))
-            sim_index_by_fascicle[fascicle_key] = {
-                int(fiber_index): int(sim_index)
-                for sim_index, fiber_index in enumerate(sim_list)
-            }
-        try:
-            sim_index = sim_index_by_fascicle[fascicle_key][int(row.fiber_index)]
-        except KeyError as exc:
-            raise RuntimeError(
-                f"NRV did not simulate fascicle={row.fascicle_id} fiber={row.fiber_index}; "
-                "check the NRV simulation masks."
-            ) from exc
-        axon_key = f"axon{sim_index}"
-        try:
-            axon_result = fascicle_result[axon_key]
-        except KeyError as exc:
-            raise RuntimeError(
-                f"NRV result for fascicle={row.fascicle_id} has no {axon_key} entry."
-            ) from exc
-        if "recruited" in axon_result:
-            activated[row_key(row)] = bool(axon_result["recruited"])
-        else:
-            activated[row_key(row)] = bool(
-                axon_result.is_recruited(vm_key="V_mem", t_start=float(t_start_ms))
-            )
-    return activated
-
-
-def nrv_fascicle_by_id(nerve: Any, fascicle_id: str) -> Any:
-    """Return an NRV fascicle by string or integer id."""
-
-    if fascicle_id in nerve.fascicles:
-        return nerve.fascicles[fascicle_id]
-    try:
-        return nerve.fascicles[int(fascicle_id)]
-    except (KeyError, ValueError) as exc:
-        raise KeyError(f"Unknown NRV fascicle id {fascicle_id!r}.") from exc
-
-
-def row_key(row: RealisticFiberRow) -> tuple[str, int]:
-    """Return the stable fiber comparison key."""
-
-    return (str(row.fascicle_id), int(row.fiber_index))
-
-
 def fascicle_sort_key(fascicle_id: str) -> tuple[int, int | str]:
     """Sort numeric NRV fascicle identifiers naturally."""
 
@@ -1000,7 +806,7 @@ def fascicle_sort_key(fascicle_id: str) -> tuple[int, int | str]:
 
 def print_activation_summary(
     console: Console,
-    comparisons: Sequence[ActivationComparison],
+    comparisons: Sequence[axs_nrv.NRVActivationComparison],
     *,
     validation_current_uA: float,
     print_limit: int,
@@ -1046,7 +852,7 @@ def print_activation_summary(
 
 def plot_activation_comparison(
     ax: Any,
-    comparisons: Sequence[ActivationComparison],
+    comparisons: Sequence[axs_nrv.NRVActivationComparison],
 ) -> None:
     """Overlay activation agreement on the existing fiber map."""
 
@@ -1085,7 +891,7 @@ def plot_recruitment_curve(
     ax: Any,
     curve: axs.protocols.RecruitmentCurve,
     *,
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     validation_current_uA: float,
 ) -> None:
     """Plot one AxonScope recruitment curve per fascicle."""
@@ -1125,7 +931,7 @@ def plot_recruitment_curve(
 def print_geometry_summary(
     console: Console,
     nerve: Any,
-    rows: Sequence[RealisticFiberRow],
+    rows: Sequence[axs_nrv.NRVFiberRow],
     comparisons: Sequence[LayoutComparison],
 ) -> None:
     """Print a compact geometry handoff report."""
@@ -1149,8 +955,8 @@ def plot_fiber_map(
     ax: Any,
     nerve_contour: np.ndarray,
     fascicle_contours: Sequence[np.ndarray],
-    rows: Sequence[RealisticFiberRow],
-    life_setup: LifeElectrodeSetup,
+    rows: Sequence[axs_nrv.NRVFiberRow],
+    life_setup: axs_nrv.NRVLifeElectrodeSetup,
 ) -> None:
     """Plot NRV contours, selected fibers, and the LIFE electrode."""
 
@@ -1186,56 +992,6 @@ def plot_fiber_map(
     ax.set_xlabel("y [um]")
     ax.set_ylabel("z [um]")
     ax.legend(loc="upper right")
-
-
-def nrv_life_footprint(
-    life_setup: LifeElectrodeSetup,
-    *,
-    positions_um: np.ndarray,
-    row: RealisticFiberRow,
-) -> axs.ExtracellularFootprint:
-    """Sample NRV's current-independent LIFE/FEM footprint for one AxonScope row."""
-
-    life_setup.extra_stim.compute_electrodes_footprints(
-        np.asarray(positions_um, dtype=float),
-        float(row.y_um),
-        float(row.z_um),
-        nrv_row_id(row),
-    )
-    values_mV_per_mA = np.asarray(
-        life_setup.extra_stim.electrodes[0].get_footprint(),
-        dtype=float,
-    ).copy()
-    life_setup.extra_stim.clear_electrodes_footprints()
-
-    return axs.ExtracellularFootprint.shared(
-        values=values_mV_per_mA,
-        positions=np.asarray(positions_um, dtype=float) * axs.um,
-        voltage_unit=axs.mV,
-        current_unit=axs.mA,
-        source_id="nrv_life_fem",
-        reference="NRV FEM LIFE footprint sampled on AxonScope intrinsic positions",
-        metadata={
-            "source": "nrv.FEM_stimulation/LIFE_electrode",
-            "life_diameter_um": life_setup.diameter_um,
-            "life_length_um": life_setup.length_um,
-            "life_x_offset_um": life_setup.x_offset_um,
-            "life_y_um": life_setup.y_um,
-            "life_z_um": life_setup.z_um,
-            "gmsh_n_core": getattr(life_setup.extra_stim.model.mesh, "n_core", None),
-            "nrv_footprint_unit": "mV/mA",
-        },
-    )
-
-
-def nrv_row_id(row: RealisticFiberRow) -> int:
-    """Return a stable integer ID for single-fiber NRV footprint sampling."""
-
-    try:
-        fascicle_id = int(row.fascicle_id)
-    except ValueError:
-        fascicle_id = 0
-    return fascicle_id * 1_000_000 + int(row.fiber_index)
 
 
 def _format_ratio(numerator: float, denominator: float) -> str:
