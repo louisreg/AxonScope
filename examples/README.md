@@ -97,14 +97,11 @@ logic lives in `axonscope.integrations.nrv`; examples should call those helpers
 instead of re-implementing fiber-table extraction, LIFE/FEM footprint sampling,
 or NRV recruitment decoding.
 
-- `01_realistic_fascicle_geometry_comparison.py`: recreate NRV's bundled
-  realistic fascicle-contour workflow, convert fractional NRV `node_shift`
-  values into AxonScope MRG `x_shift`, sample NRV's LIFE/FEM footprint into
-  AxonScope stimulation objects, build per-fascicle AxonScope recruitment
-  curves, and run one NRV validation amplitude. The script also exposes
-  `ExampleConfig.geometry_mode = "synthetic_4_fascicles"` for reproducible
-  benchmark geometry: one synthetic nerve, four circular fascicles, NRV-owned
-  fiber placement, and the same LIFE/FEM footprint handoff.
+- `01_realistic_fascicle_geometry_comparison.py`: build one synthetic NRV nerve
+  with four fascicles, sample NRV's LIFE/FEM footprint into AxonScope
+  stimulation objects, run an AxonScope recruitment sweep, and plot recruitment
+  by fascicle. NRV validation and large timing/memory comparisons live under
+  `benchmark/nrv_performance/`.
 
 ## Tutorials
 

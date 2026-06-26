@@ -229,11 +229,10 @@ python benchmark/kaggle/run_kernel.py \
   --output-file-pattern '.*axonscope_solver_results.*'
 ```
 
-Use `realistic_fascicle_nrv_gpu_full` for the same NRV/FEM/LIFE path with a
-workload comparable to the `examples/with_nrv/01_realistic_fascicle_geometry_comparison.py`
-recruitment sweep: one synthetic nerve with four fascicles, 100 axons per
-fascicle, all fibers simulated, and 21 sequential current amplitudes. It keeps
-NRV validation to one amplitude and writes the same timing/memory summaries.
+Use `realistic_fascicle_nrv_gpu_full` for the same NRV/FEM/LIFE handoff path at
+publication-benchmark scale: one synthetic nerve with four fascicles, 100 axons
+per fascicle, all fibers simulated, and 21 sequential current amplitudes. It
+keeps NRV validation to one amplitude and writes the timing/memory summaries.
 
 Closed exploration presets such as `linear_pallas_focus`, `linear_triton_focus`,
 `linear_jax_triton_focus`, `linear_cuda_ffi_focus`, and

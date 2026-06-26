@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import importlib.util
 import json
 import os
 import resource
@@ -13,7 +12,6 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Callable, Iterable, Sequence
 
 if __package__ in (None, ""):
@@ -41,7 +39,6 @@ from axonscope.utils.progress_reporting import current_rss_mib
 
 DEFAULT_OUT_DIR = Path("benchmark/results/nrv_performance/realistic_fascicle_recruitment")
 DEFAULT_REPORT_DIR = Path("benchmark/reports/nrv_performance/realistic_fascicle_recruitment")
-EXAMPLE_PATH = Path("examples/with_nrv/01_realistic_fascicle_geometry_comparison.py")
 
 
 @dataclass(frozen=True)
@@ -53,6 +50,36 @@ class StepRecord:
     rss_delta_mib: float | None
     rss_peak_mib: float | None
     maxrss_after_mib: float | None
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    nerve_diameter_um: float
+    nerve_length_um: float
+    geometry_mode: str
+    axons_per_fascicle: int
+    percent_unmyelinated: float
+    delta_trace_um: float
+    synthetic_fascicle_diameter_um: float
+    synthetic_fascicle_offset_um: float
+    fascicle_contour_epsilon_fraction: float
+    include_unmyelinated: bool
+    max_fibers: int
+    duration_ms: float
+    dt_ms: float
+    stimulus_start_ms: float
+    pulse_duration_ms: float
+    observer_time_chunk_steps: int | None
+    solver_progress: bool | str
+    recruitment_amplitudes_uA: tuple[float, ...]
+    nrv_validation_current_uA: float
+    activation_threshold_mV: float
+    unmyelinated_compartments: int
+    life_diameter_um: float
+    life_length_um: float
+    life_fascicle_id: str
+    fem_n_proc: int | None
+    gmsh_n_core: int | None
 
 
 class PeakMemorySampler:
@@ -125,8 +152,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         print_dry_run(console, args)
         return
 
-    example = load_example_module()
-    config = build_example_config(example, args)
+    config = build_benchmark_config(args)
     amplitudes_uA = np.linspace(
         float(args.amplitude_min_uA),
         float(args.amplitude_max_uA),
@@ -141,13 +167,36 @@ def main(argv: Sequence[str] | None = None) -> None:
         if config.geometry_mode == "synthetic_4_fascicles"
         else "load_and_build_histology_nrv_nerve"
     )
-    nerve_contour, fascicle_contours, nerve = recorder.measure(
+    nerve = recorder.measure(
         geometry_step_name,
-        lambda: example.build_nrv_nerve_from_config(nrv, config),
+        lambda: axs_nrv.build_nerve_from_mode(
+            nrv,
+            geometry_mode=config.geometry_mode,
+            nerve_length_um=config.nerve_length_um,
+            nerve_diameter_um=config.nerve_diameter_um,
+            axons_per_fascicle=config.axons_per_fascicle,
+            percent_unmyelinated=config.percent_unmyelinated,
+            delta_trace_um=config.delta_trace_um,
+            synthetic_fascicle_diameter_um=config.synthetic_fascicle_diameter_um,
+            synthetic_fascicle_offset_um=config.synthetic_fascicle_offset_um,
+            fascicle_epsilon_fraction=config.fascicle_contour_epsilon_fraction,
+        ),
     )
     life_setup = recorder.measure(
         "attach_life_fem_electrode",
-        lambda: example.attach_life_electrode(nrv, nerve, config),
+        lambda: axs_nrv.attach_life_fem_electrode(
+            nrv,
+            nerve,
+            nerve_length_um=config.nerve_length_um,
+            life_fascicle_id=config.life_fascicle_id,
+            life_diameter_um=config.life_diameter_um,
+            life_length_um=config.life_length_um,
+            stimulus_start_ms=config.stimulus_start_ms,
+            pulse_duration_ms=config.pulse_duration_ms,
+            validation_current_uA=config.nrv_validation_current_uA,
+            fem_n_proc=config.fem_n_proc,
+            gmsh_n_core=config.gmsh_n_core,
+        ),
     )
     rows = recorder.measure(
         "extract_fiber_rows",
@@ -168,10 +217,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     first_context = recorder.measure(
         "nrv_fem_solve_first_footprint",
-        lambda: example.build_axonscope_context(
+        lambda: axs_nrv.life_context_from_fiber_row(
             simulated_rows[0],
-            config=config,
             life_setup=life_setup,
+            nerve_length_um=config.nerve_length_um,
+            unmyelinated_compartments=config.unmyelinated_compartments,
         ),
     )
     remaining_contexts = []
@@ -179,7 +229,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         remaining_contexts = recorder.measure(
             "nrv_cached_footprint_sampling",
             lambda: [
-                example.build_axonscope_context(row, config=config, life_setup=life_setup)
+                axs_nrv.life_context_from_fiber_row(
+                    row,
+                    life_setup=life_setup,
+                    nerve_length_um=config.nerve_length_um,
+                    unmyelinated_compartments=config.unmyelinated_compartments,
+                )
                 for row in simulated_rows[1:]
             ],
         )
@@ -187,10 +242,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     pool = recorder.measure(
         "build_axonscope_pool",
         lambda: [
-            example.build_axonscope_simulation_from_context(
+            axs_nrv.life_simulation_from_context(
                 context,
-                config=config,
                 current_uA=0.0,
+                start_ms=config.stimulus_start_ms,
+                pulse_duration_ms=config.pulse_duration_ms,
             )
             for context in contexts
         ],
@@ -349,24 +405,9 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--gmsh-n-core must be >= 0.")
 
 
-def load_example_module() -> ModuleType:
-    repo_root = Path(__file__).resolve().parents[2]
-    example_path = repo_root / EXAMPLE_PATH
-    spec = importlib.util.spec_from_file_location(
-        "axonscope_with_nrv_realistic_fascicle_example",
-        example_path,
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load example module from {example_path}.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def build_example_config(example: ModuleType, args: argparse.Namespace) -> Any:
+def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
     time_chunk_steps = None if int(args.time_chunk_steps) < 0 else int(args.time_chunk_steps)
-    return example.ExampleConfig(
+    return BenchmarkConfig(
         nerve_diameter_um=float(args.nerve_diameter_um),
         nerve_length_um=float(args.nerve_length_um),
         geometry_mode=str(args.geometry_mode),
@@ -396,6 +437,10 @@ def build_example_config(example: ModuleType, args: argparse.Namespace) -> Any:
         ),
         nrv_validation_current_uA=float(args.nrv_validation_current_uA),
         activation_threshold_mV=float(args.activation_threshold_mV),
+        unmyelinated_compartments=0,
+        life_diameter_um=25.0,
+        life_length_um=1_000.0,
+        life_fascicle_id="0",
         fem_n_proc=None if int(args.fem_n_proc) == 0 else int(args.fem_n_proc),
         gmsh_n_core=None if int(args.gmsh_n_core) == 0 else int(args.gmsh_n_core),
     )
