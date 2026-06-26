@@ -3,11 +3,13 @@
 Run:
     python examples/with_nrv/01_realistic_fascicle_geometry_comparison.py
 
-This example mirrors NRV's `25_test_fit_fasc.py` workflow: contours come from
-NRV's bundled fascicle image, NRV fills the fascicles, a LIFE electrode is
-placed in the first fascicle, and AxonScope receives the resulting fiber table.
-Edit `ExampleConfig` below to change the population size, timing, or current
-grid; the default sweep uses 21 amplitudes from 0 to 300 uA.
+By default this example mirrors NRV's `25_test_fit_fasc.py` workflow: contours
+come from NRV's bundled fascicle image, NRV fills the fascicles, a LIFE
+electrode is placed in the first fascicle, and AxonScope receives the resulting
+fiber table. Set `ExampleConfig.geometry_mode = "synthetic_4_fascicles"` for the
+reproducible four-fascicle geometry used by Kaggle performance benchmarks. Edit
+`ExampleConfig` below to change the population size, timing, or current grid;
+the default sweep uses 21 amplitudes from 0 to 300 uA.
 The important handoffs are:
 
 - NRV `node_shift`, a fraction of the MRG internode spacing, becomes

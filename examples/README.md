@@ -98,7 +98,10 @@ geometry/fiber placement and AxonScope owns axon dynamics.
   realistic fascicle-contour workflow, convert fractional NRV `node_shift`
   values into AxonScope MRG `x_shift`, sample NRV's LIFE/FEM footprint into
   AxonScope stimulation objects, build per-fascicle AxonScope recruitment
-  curves, and run one NRV validation amplitude.
+  curves, and run one NRV validation amplitude. The script also exposes
+  `ExampleConfig.geometry_mode = "synthetic_4_fascicles"` for reproducible
+  benchmark geometry: one synthetic nerve, four circular fascicles, NRV-owned
+  fiber placement, and the same LIFE/FEM footprint handoff.
 
 ## Tutorials
 

@@ -416,6 +416,13 @@ Generated benchmark results live under ignored `benchmark/results/` and
 `benchmark/reports/` paths. See `benchmark/runtime/`, `benchmark/hotpaths/`,
 and `benchmark/nrv_performance/` for detailed runners.
 
+For NRV/FEM/LIFE recruitment performance on Kaggle GPU, use
+`benchmark/kaggle/run_kernel.py --benchmark realistic_fascicle_nrv_gpu_full`.
+The reproducible full preset uses one synthetic NRV nerve with four circular
+fascicles, 100 axons per fascicle, 21 sequential amplitudes, and one NRV
+validation amplitude. The June 25, 2026 P100 run is summarized in
+`docs/benchmarks/nrv_fascicle_full_kaggle_2026_06_25.md`.
+
 ## Documentation
 
 - `docs/axon_model_organization.md`: descriptive axon layer.
@@ -426,6 +433,7 @@ and `benchmark/nrv_performance/` for detailed runners.
   visualization.
 - `docs/solver_organization.md`: solver package boundaries and time grids.
 - `docs/validation.md`: fast checks and local NRV validation policy.
+- `docs/benchmarks/`: curated benchmark summaries with retained conclusions.
 - `docs/api_public_draft.md`: proposal-only API notes, not a runnable reference.
 - `docs/recorders_observers_activation_strategy.md`: observer/recruitment
   roadmap with current implementation status.
