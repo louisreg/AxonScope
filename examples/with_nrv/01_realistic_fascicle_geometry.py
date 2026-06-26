@@ -29,7 +29,7 @@ class ExampleConfig:
 
     nerve_diameter_um: float = 1_000.0
     nerve_length_um: float = 10_000.0
-    axons_per_fascicle: int = 600
+    axons_per_fascicle: int = 100
     percent_unmyelinated: float = 0.7
     delta_trace_um: float = 10.0
     fascicle_vertices: int = 50
