@@ -93,14 +93,17 @@ still runnable examples, but they explain the moving parts more explicitly.
 
 `examples/with_nrv/` is for integration with NRV, where NRV owns complex nerve
 geometry/fiber placement and AxonScope owns axon dynamics. Reusable handoff
-logic lives in `axonscope.integrations.nrv`; examples should call those helpers
-instead of re-implementing fiber-table extraction, LIFE/FEM footprint sampling,
-or NRV recruitment decoding.
+logic lives in `axonscope.integrations.nrv`; examples should use the two public
+bridges, `population_from_nrv(...)` then `footprints_from_nrv(...)`, instead of
+re-implementing fiber-table extraction, LIFE/FEM footprint sampling, or NRV
+recruitment decoding. NRV geometry, population, electrode, and FEM setup remain
+explicit NRV code in the example or benchmark, not package integration code.
 
-- `01_realistic_fascicle_geometry_comparison.py`: build one synthetic NRV nerve
-  with four fascicles, sample NRV's LIFE/FEM footprint into AxonScope
-  stimulation objects, run an AxonScope recruitment sweep, and plot recruitment
-  by fascicle. NRV validation and large timing/memory comparisons live under
+- `01_realistic_fascicle_geometry_comparison.py`: build one realistic NRV nerve
+  from the bundled histology contour image with `cv2`, sample NRV's LIFE/FEM
+  footprint into AxonScope stimulation objects, run an AxonScope recruitment
+  sweep, and plot recruitment plus activated fibers on the nerve cross-section.
+  NRV validation and large timing/memory comparisons live under
   `benchmark/nrv_performance/`.
 
 ## Tutorials

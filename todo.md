@@ -210,10 +210,12 @@ Work should start here unless the user asks otherwise.
   public point-source path is helper -> sampled footprint/drive/stimulation.
 - [x] Keep NRV and other geometry frameworks behind `examples/with_nrv/` or
   adapter-style inputs that hand AxonScope intrinsic footprints and metadata.
-- [x] Promote the stable NRV handoff helpers to `axonscope.integrations.nrv`:
-  fiber-row extraction, NRV LIFE/FEM footprint sampling into
-  `ExtracellularFootprint`, LIFE stimulation construction/update, NRV
-  recruitment-result decoding, and compact activation comparisons.
+- [x] Promote the stable NRV handoff contract to `axonscope.integrations.nrv`:
+  `population_from_nrv(...)` converts NRV fiber populations into intrinsic
+  AxonScope populations, then `footprints_from_nrv(...)` samples every NRV
+  electrode footprint for that population. Keep older per-fiber LIFE context
+  shortcuts and NRV geometry/population/electrode builders out of the
+  public/documented path.
 - [x] Rename or remove user-facing fields/docs that imply AxonScope owns
   real-world placement beyond temporary analytical examples.
 - [x] Add architecture guardrails so public examples/docs cannot reintroduce

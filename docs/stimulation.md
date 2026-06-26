@@ -234,24 +234,28 @@ point-source quick-start path; sample point sources into typed footprints,
 drives, or stimulation first.
 
 NRV/FEM/LIFE workflows should use the adapter helpers in
-`axonscope.integrations.nrv`: NRV builds the external geometry and FEM field,
-then AxonScope receives intrinsic fiber rows, sampled footprints, drives, and
-stimulation objects.
+`axonscope.integrations.nrv` through two bridges. NRV builds the external
+geometry, fiber population, electrodes, and FEM field; AxonScope receives an
+intrinsic axon population first, then sampled footprints for that population.
 
 ```python
 from axonscope.integrations import nrv as axs_nrv
 
-rows = axs_nrv.extract_fiber_rows(nerve, include_unmyelinated=True)
-context = axs_nrv.sample_life_context(
-    rows[0],
-    axon=axon,
-    life_setup=life_setup,
+# `nerve` is an already-built NRV object with its extracellular stimulation.
+axons = axs_nrv.population_from_nrv(
+    nerve,
+    nerve_length_um=10_000.0,
+    include_unmyelinated=True,
 )
-stimulation = axs_nrv.life_stimulation_from_footprint(
-    context.footprint,
-    current=60.0 * axs.uA,
-    start_ms=0.1,
-    pulse_duration_ms=0.1,
+footprints = axs_nrv.footprints_from_nrv(nerve, axons)
+pool = footprints.stimulated_population(
+    electrode_index=0,
+    stimulus=axs.Stimulus.pulse(
+        start=0.1 * axs.ms,
+        duration=0.1 * axs.ms,
+        amplitude=-60.0 * axs.uA,
+    ),
+    drive_id_prefix="nrv_life",
 )
 ```
 

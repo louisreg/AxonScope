@@ -1026,9 +1026,13 @@ Examples must:
 - keep world/anatomical placement out of `AxonInstance`; when a didactic
   point-source example needs external offsets, use `axs.analytical` helpers to
   build sampled footprints/drives before attaching stimulation;
-- when an NRV example needs reusable handoff logic, use
-  `axonscope.integrations.nrv` instead of redefining fiber rows, LIFE/FEM
-  footprint sampling, or NRV recruitment decoding inside the script;
+- when an NRV example needs reusable handoff logic, use the two-bridge contract
+  in `axonscope.integrations.nrv`: `population_from_nrv(...)` creates the
+  AxonScope population from NRV fibers, then `footprints_from_nrv(...)` samples
+  every NRV electrode footprint on that population. Do not redefine fiber-row
+  extraction, LIFE/FEM footprint sampling, or NRV recruitment decoding inside
+  examples, and do not add NRV geometry/population/electrode builders to the
+  integration module;
 - group one footprint and one stimulus into an `ExtracellularDrive`;
 - pass `ExtracellularStimulation` to simulations when using the factorized
   extracellular model;

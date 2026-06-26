@@ -169,7 +169,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     nerve = recorder.measure(
         geometry_step_name,
-        lambda: axs_nrv.build_nerve_from_mode(
+        lambda: build_nerve_from_mode(
             nrv,
             geometry_mode=config.geometry_mode,
             nerve_length_um=config.nerve_length_um,
@@ -182,9 +182,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             fascicle_epsilon_fraction=config.fascicle_contour_epsilon_fraction,
         ),
     )
-    life_setup = recorder.measure(
+    recorder.measure(
         "attach_life_fem_electrode",
-        lambda: axs_nrv.attach_life_fem_electrode(
+        lambda: attach_life_fem_electrode(
             nrv,
             nerve,
             nerve_length_um=config.nerve_length_um,
@@ -198,58 +198,58 @@ def main(argv: Sequence[str] | None = None) -> None:
             gmsh_n_core=config.gmsh_n_core,
         ),
     )
-    rows = recorder.measure(
-        "extract_fiber_rows",
-        lambda: axs_nrv.select_rows(
-            axs_nrv.extract_fiber_rows(
-                nerve,
-                include_unmyelinated=bool(config.include_unmyelinated),
-            ),
-            limit=int(config.max_fibers),
+    full_axons = recorder.measure(
+        "build_axonscope_population",
+        lambda: axs_nrv.population_from_nrv(
+            nerve,
+            nerve_length_um=config.nerve_length_um,
+            include_unmyelinated=bool(config.include_unmyelinated),
+            unmyelinated_compartments=config.unmyelinated_compartments,
+            name="nrv_realistic_fascicle",
         ),
     )
+    selected_axons = full_axons.limit(int(config.max_fibers))
+    rows = selected_axons.rows
     simulated_rows = select_simulated_rows(
         rows,
         per_fascicle=int(args.simulated_fibers_per_fascicle),
     )
     if not simulated_rows:
         raise RuntimeError("No fibers selected for the benchmark.")
+    simulated_axons = selected_axons.subset(simulated_rows)
 
-    first_context = recorder.measure(
+    first_footprints = recorder.measure(
         "nrv_fem_solve_first_footprint",
-        lambda: axs_nrv.life_context_from_fiber_row(
-            simulated_rows[0],
-            life_setup=life_setup,
-            nerve_length_um=config.nerve_length_um,
-            unmyelinated_compartments=config.unmyelinated_compartments,
+        lambda: axs_nrv.footprints_from_nrv(
+            nerve,
+            simulated_axons.limit(1),
         ),
     )
-    remaining_contexts = []
+    remaining_footprints = None
     if len(simulated_rows) > 1:
-        remaining_contexts = recorder.measure(
+        remaining_footprints = recorder.measure(
             "nrv_cached_footprint_sampling",
-            lambda: [
-                axs_nrv.life_context_from_fiber_row(
-                    row,
-                    life_setup=life_setup,
-                    nerve_length_um=config.nerve_length_um,
-                    unmyelinated_compartments=config.unmyelinated_compartments,
-                )
-                for row in simulated_rows[1:]
-            ],
+            lambda: axs_nrv.footprints_from_nrv(
+                nerve,
+                simulated_axons.subset(simulated_rows[1:]),
+            ),
         )
-    contexts = [first_context, *remaining_contexts]
+    footprints = (
+        first_footprints
+        if remaining_footprints is None
+        else first_footprints.concat(remaining_footprints)
+    )
     pool = recorder.measure(
         "build_axonscope_pool",
-        lambda: [
-            axs_nrv.life_simulation_from_context(
-                context,
-                current_uA=0.0,
+        lambda: footprints.stimulated_population(
+            electrode_index=0,
+            stimulus=life_pulse_stimulus(
+                current=0.0 * axs.uA,
                 start_ms=config.stimulus_start_ms,
                 pulse_duration_ms=config.pulse_duration_ms,
-            )
-            for context in contexts
-        ],
+            ),
+            drive_id_prefix="nrv_life",
+        ),
     )
     if bool(args.clear_jax_caches):
         clear_jax_caches()
@@ -284,7 +284,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         config,
         rows=rows,
         simulated_rows=simulated_rows,
-        contexts=contexts,
+        footprints=footprints,
         pool=pool,
         amplitudes_uA=amplitudes_uA,
         curve=curve,
@@ -419,8 +419,6 @@ def build_benchmark_config(args: argparse.Namespace) -> BenchmarkConfig:
         fascicle_contour_epsilon_fraction=float(args.fascicle_contour_epsilon_fraction),
         include_unmyelinated=True,
         max_fibers=int(args.max_fibers),
-        simulate_fibers=0,
-        run_simulation=True,
         duration_ms=float(args.duration_ms),
         dt_ms=float(args.dt_ms),
         stimulus_start_ms=float(args.stimulus_start_ms),
@@ -450,6 +448,259 @@ def solver_progress_option(args: argparse.Namespace) -> bool | str:
     if args.solver_progress == "off":
         return False
     return str(args.solver_progress)
+
+
+def build_nerve_from_mode(
+    nrv_module: Any,
+    *,
+    geometry_mode: str,
+    nerve_length_um: float,
+    nerve_diameter_um: float,
+    axons_per_fascicle: int,
+    percent_unmyelinated: float,
+    delta_trace_um: float,
+    synthetic_fascicle_diameter_um: float,
+    synthetic_fascicle_offset_um: float,
+    fascicle_epsilon_fraction: float,
+) -> Any:
+    if geometry_mode == "synthetic_4_fascicles":
+        return build_synthetic_4_fascicle_nerve(
+            nrv_module,
+            nerve_length_um=nerve_length_um,
+            nerve_diameter_um=nerve_diameter_um,
+            fascicle_diameter_um=synthetic_fascicle_diameter_um,
+            fascicle_offset_um=synthetic_fascicle_offset_um,
+            axons_per_fascicle=axons_per_fascicle,
+            percent_unmyelinated=percent_unmyelinated,
+            delta_trace_um=delta_trace_um,
+        )
+    if geometry_mode == "histology":
+        return build_histology_contour_nerve(
+            nrv_module,
+            nerve_length_um=nerve_length_um,
+            nerve_diameter_um=nerve_diameter_um,
+            axons_per_fascicle=axons_per_fascicle,
+            percent_unmyelinated=percent_unmyelinated,
+            delta_trace_um=delta_trace_um,
+            fascicle_epsilon_fraction=fascicle_epsilon_fraction,
+        )
+    raise ValueError(f"Unsupported NRV geometry mode: {geometry_mode!r}")
+
+
+def build_synthetic_4_fascicle_nerve(
+    nrv_module: Any,
+    *,
+    nerve_length_um: float,
+    nerve_diameter_um: float,
+    fascicle_diameter_um: float,
+    fascicle_offset_um: float,
+    axons_per_fascicle: int,
+    percent_unmyelinated: float,
+    delta_trace_um: float,
+) -> Any:
+    nerve = nrv_module.nerve(
+        diameter=nrv_numeric(nerve_diameter_um),
+        length=nrv_numeric(nerve_length_um),
+    )
+    for fascicle_id, center in enumerate(synthetic_fascicle_centers(fascicle_offset_um)):
+        fascicle = nrv_module.fascicle(ID=fascicle_id)
+        fascicle.set_geometry(
+            geometry=nrv_module.create_cshape(
+                center=tuple(float(value) for value in center),
+                diameter=nrv_numeric(fascicle_diameter_um),
+            )
+        )
+        nerve.add_fascicle(fascicle)
+
+    for fascicle in nerve.fascicles.values():
+        fascicle.fill(
+            n_ax=int(axons_per_fascicle),
+            percent_unmyel=float(percent_unmyelinated),
+            delta_trace=float(delta_trace_um),
+            with_node_shift=True,
+        )
+    return nerve
+
+
+def build_histology_contour_nerve(
+    nrv_module: Any,
+    *,
+    nerve_length_um: float,
+    nerve_diameter_um: float,
+    axons_per_fascicle: int,
+    percent_unmyelinated: float,
+    delta_trace_um: float,
+    fascicle_epsilon_fraction: float,
+) -> Any:
+    _, fascicle_contours = load_histology_contours(
+        nrv_module,
+        nerve_diameter_um=nerve_diameter_um,
+        fascicle_epsilon_fraction=fascicle_epsilon_fraction,
+    )
+    nerve = nrv_module.nerve(
+        diameter=nrv_numeric(nerve_diameter_um),
+        length=nrv_numeric(nerve_length_um),
+    )
+    for fascicle_id, points in enumerate(fascicle_contours):
+        geometry = nrv_module.create_cshape(vertices=np.asarray(points, dtype=float))
+        fascicle = nrv_module.fascicle(ID=fascicle_id)
+        fascicle.set_geometry(geometry=geometry)
+        nerve.add_fascicle(fascicle)
+
+    for fascicle in nerve.fascicles.values():
+        fascicle.fill(
+            n_ax=int(axons_per_fascicle),
+            percent_unmyel=float(percent_unmyelinated),
+            delta_trace=float(delta_trace_um),
+            with_node_shift=True,
+        )
+    return nerve
+
+
+def load_histology_contours(
+    nrv_module: Any,
+    *,
+    nerve_diameter_um: float,
+    fascicle_epsilon_fraction: float,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    import cv2
+
+    image_path = (
+        Path(nrv_module.__path__[0])
+        / "_misc"
+        / "geom"
+        / "smoothed_edges_white.png"
+    )
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise FileNotFoundError(f"Could not read NRV geometry image: {image_path}")
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, threshold = cv2.threshold(gray, 127, 255, 0)
+    contours, hierarchy = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None:
+        raise RuntimeError("NRV geometry image did not yield contours.")
+
+    hierarchy = hierarchy.squeeze()
+    nerve_id = 2
+    nerve_points_pix = contours[nerve_id].squeeze()
+    center_pix = np.mean(nerve_points_pix, axis=0)
+    nerve_points = nerve_points_pix - center_pix
+    radius_pix = np.max(np.abs(nerve_points))
+    scale = float(nerve_diameter_um) / (2.0 * radius_pix)
+    scale_xy = scale * np.asarray([1.0, -1.0])
+
+    fascicle_points = []
+    for index, contour in enumerate(contours):
+        if hierarchy[index, -1] == nerve_id:
+            points = simplify_cv2_contour(
+                cv2,
+                contour,
+                epsilon_fraction=fascicle_epsilon_fraction,
+            )
+            fascicle_points.append((points - center_pix) * scale_xy)
+
+    return np.asarray(nerve_points * scale_xy, dtype=float), fascicle_points
+
+
+def simplify_cv2_contour(
+    cv2_module: Any,
+    contour: Any,
+    *,
+    epsilon_fraction: float,
+) -> np.ndarray:
+    points = np.asarray(contour).squeeze()
+    if float(epsilon_fraction) > 0.0:
+        epsilon = float(epsilon_fraction) * cv2_module.arcLength(contour, True)
+        simplified = cv2_module.approxPolyDP(contour, epsilon, True).squeeze()
+        if np.asarray(simplified).ndim == 2 and len(simplified) >= 3:
+            points = np.asarray(simplified)
+    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3:
+        raise ValueError("NRV contour simplification produced an invalid polygon.")
+    if np.array_equal(points[0], points[-1]):
+        points = points[:-1]
+    return np.asarray(points, dtype=float)
+
+
+def attach_life_fem_electrode(
+    nrv_module: Any,
+    nerve: Any,
+    *,
+    nerve_length_um: float,
+    life_fascicle_id: str,
+    life_diameter_um: float,
+    life_length_um: float,
+    stimulus_start_ms: float,
+    pulse_duration_ms: float,
+    validation_current_uA: float,
+    fem_n_proc: int | None,
+    gmsh_n_core: int | None,
+) -> None:
+    fascicle_key: Any = life_fascicle_id
+    if fascicle_key not in nerve.fascicles:
+        fascicle_key = int(life_fascicle_id)
+    fascicle = nerve.fascicles[fascicle_key]
+    life_y_um, life_z_um = fascicle.center
+    life_x_offset_um = (float(nerve_length_um) - float(life_length_um)) / 2.0
+
+    extra_stim = nrv_module.FEM_stimulation(
+        endo_mat="endoneurium_ranck",
+        peri_mat="perineurium",
+        epi_mat="epineurium",
+        ext_mat="saline",
+        n_proc=fem_n_proc,
+    )
+    electrode = nrv_module.LIFE_electrode(
+        "LIFE_2",
+        float(life_diameter_um),
+        float(life_length_um),
+        life_x_offset_um,
+        life_y_um,
+        life_z_um,
+    )
+    pulse_stim = nrv_module.stimulus()
+    pulse_stim.pulse(
+        float(stimulus_start_ms),
+        -float(validation_current_uA),
+        float(pulse_duration_ms),
+    )
+    extra_stim.add_electrode(electrode, pulse_stim)
+    nerve.attach_extracellular_stimulation(extra_stim)
+    if fem_n_proc is not None:
+        nerve.extra_stim.set_n_proc(int(fem_n_proc))
+    if gmsh_n_core is not None:
+        nerve.extra_stim.model.mesh.n_core = int(gmsh_n_core)
+
+
+def life_pulse_stimulus(
+    *,
+    current: Any,
+    start_ms: float,
+    pulse_duration_ms: float,
+) -> axs.Stimulus:
+    amplitude = current if hasattr(current, "to") else float(current) * axs.uA
+    return axs.Stimulus.pulse(
+        start=float(start_ms) * axs.ms,
+        duration=float(pulse_duration_ms) * axs.ms,
+        amplitude=-amplitude,
+    )
+
+
+def synthetic_fascicle_centers(offset_um: float) -> tuple[tuple[float, float], ...]:
+    offset = float(offset_um)
+    return (
+        (offset, 0.0),
+        (0.0, offset),
+        (-offset, 0.0),
+        (0.0, -offset),
+    )
+
+
+def nrv_numeric(value: float) -> int | float:
+    numeric = float(value)
+    if numeric.is_integer():
+        return int(numeric)
+    return numeric
 
 
 def select_simulated_rows(rows: Sequence[Any], *, per_fascicle: int) -> list[Any]:
@@ -601,7 +852,7 @@ def build_summary(
     *,
     rows: Sequence[Any],
     simulated_rows: Sequence[Any],
-    contexts: Sequence[Any],
+    footprints: axs_nrv.NRVFootprints,
     pool: Sequence[Any],
     amplitudes_uA: np.ndarray,
     curve: Any,
@@ -615,7 +866,7 @@ def build_summary(
     single_count = len(simulated_rows) - mrg_count
     amplitudes_count = int(len(amplitudes_uA))
     profile_metrics = profile_report_metrics(profile_report)
-    footprint_bytes = int(footprint_storage_bytes(contexts))
+    footprint_bytes = int(footprint_storage_bytes(footprints))
     dense_vm_fp32_per_step = int(
         dense_vm_bytes(pool, nt=nt, amplitudes_count=1, bytes_per_sample=4)
     )
@@ -651,8 +902,8 @@ def build_summary(
         "observer_time_chunk_steps": None if chunk_steps is None else int(chunk_steps),
         "chunks_per_group": int(chunk_count),
         "footprint_storage_bytes": footprint_bytes,
-        "nrv_footprint_count": int(len(contexts)),
-        "nrv_cached_footprint_count": max(int(len(contexts)) - 1, 0),
+        "nrv_footprint_count": int(len(footprints)),
+        "nrv_cached_footprint_count": max(int(len(footprints)) - 1, 0),
         "estimated_factorized_footprint_bytes_per_step": footprint_bytes,
         "estimated_factorized_footprint_bytes_if_batched": int(
             footprint_bytes * amplitudes_count
@@ -786,12 +1037,12 @@ def max_optional(values: Iterable[float | None]) -> float | None:
     return max(numeric)
 
 
-def footprint_storage_bytes(contexts: Sequence[Any]) -> int:
+def footprint_storage_bytes(footprints: axs_nrv.NRVFootprints) -> int:
     total = 0
-    for context in contexts:
-        footprint = context.footprint
-        total += int(np.asarray(footprint.values_V_per_A).nbytes)
-        total += int(np.asarray(footprint.positions_um).nbytes)
+    for row_footprints in footprints.footprints:
+        for footprint in row_footprints:
+            total += int(np.asarray(footprint.values_V_per_A).nbytes)
+            total += int(np.asarray(footprint.positions_um).nbytes)
     return total
 
 

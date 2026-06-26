@@ -90,9 +90,13 @@ axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
 ```
 
 Optional external adapters live outside the root facade. For example,
-`axonscope.integrations.nrv` converts NRV-owned fascicle geometry, LIFE/FEM
-footprints, and NRV recruitment results into AxonScope fiber rows, sampled
-footprints, stimulation objects, and comparison summaries.
+`axonscope.integrations.nrv` exposes two bridges for NRV-owned workflows:
+`population_from_nrv(...)` builds an intrinsic AxonScope population from an NRV
+fiber population, then `footprints_from_nrv(...)` samples every NRV electrode
+footprint on those AxonScope axons. Stimulation and recruitment then use the
+normal AxonScope footprint/drive/protocol path. The adapter does not construct
+NRV nerves, fascicles, electrodes, or FEM models; those stay in NRV scripts,
+examples, or benchmarks.
 
 ## Quick Start
 

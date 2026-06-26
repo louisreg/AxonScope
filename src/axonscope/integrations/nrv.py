@@ -9,7 +9,6 @@ footprints, stimulation objects, and compact comparison rows.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
 import numpy as np
@@ -24,6 +23,7 @@ from axonscope.axons import (
 )
 from axonscope.axons.templates import mrg_like_node_spacing
 from axonscope.identifiers import DriveId
+from axonscope.population import AxonPopulation
 from axonscope.stimulation import (
     ExtracellularDrive,
     ExtracellularFootprint,
@@ -51,25 +51,170 @@ class NRVFiberRow:
 
 
 @dataclass(frozen=True)
-class NRVLifeElectrodeSetup:
-    """NRV LIFE/FEM object plus electrode placement metadata."""
+class NRVAxonPopulation:
+    """AxonScope population built from an NRV fiber population."""
 
-    extra_stim: Any
-    diameter_um: float
-    length_um: float
-    x_offset_um: float
-    y_um: float
-    z_um: float
+    population: AxonPopulation
+    rows: tuple[NRVFiberRow, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.population, AxonPopulation):
+            raise TypeError("population must be an AxonPopulation.")
+        rows = tuple(self.rows)
+        if len(self.population) != len(rows):
+            raise ValueError("population and rows must have the same length.")
+        object.__setattr__(self, "rows", rows)
+
+    @property
+    def axons(self) -> tuple[Axon, ...]:
+        """Descriptive AxonScope axons in NRV row order."""
+
+        return self.population.axons
+
+    @property
+    def instances(self) -> tuple[AxonInstance, ...]:
+        """Concrete AxonScope instances in NRV row order."""
+
+        return self.population.instances
+
+    def __len__(self) -> int:
+        return len(self.population)
+
+    def subset(self, rows: Sequence[NRVFiberRow]) -> "NRVAxonPopulation":
+        """Return a population subset in the requested NRV row order."""
+
+        row_tuple = tuple(rows)
+        index_by_key = {
+            row_key(row): index
+            for index, row in enumerate(self.rows)
+        }
+        instances = []
+        for row in row_tuple:
+            try:
+                index = index_by_key[row_key(row)]
+            except KeyError as exc:
+                raise KeyError(
+                    f"NRV row {row_key(row)!r} is not present in this population."
+                ) from exc
+            instances.append(self.population.instances[index])
+        return NRVAxonPopulation(
+            population=AxonPopulation(instances, name=self.population.name),
+            rows=row_tuple,
+        )
+
+    def limit(self, count: int) -> "NRVAxonPopulation":
+        """Return the first `count` rows, or all rows when `count <= 0`."""
+
+        if int(count) <= 0 or int(count) >= len(self.rows):
+            return self
+        return self.subset(self.rows[: int(count)])
 
 
 @dataclass(frozen=True)
-class NRVFiberContext:
-    """One AxonScope axon plus its current-independent NRV LIFE footprint."""
+class NRVFootprints:
+    """Footprints sampled from NRV geometry for an AxonScope population."""
 
-    row: NRVFiberRow
-    axon: Any
-    positions_um: np.ndarray
-    footprint: ExtracellularFootprint
+    population: AxonPopulation
+    rows: tuple[NRVFiberRow, ...]
+    footprints: tuple[tuple[ExtracellularFootprint, ...], ...]
+    electrode_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.population, AxonPopulation):
+            raise TypeError("population must be an AxonPopulation.")
+        rows = tuple(self.rows)
+        footprints = tuple(tuple(item) for item in self.footprints)
+        electrode_ids = tuple(str(item) for item in self.electrode_ids)
+        if len(self.population) != len(rows) or len(rows) != len(footprints):
+            raise ValueError("population, rows, and footprints must have the same length.")
+        if footprints:
+            electrode_count = len(footprints[0])
+            if any(len(item) != electrode_count for item in footprints):
+                raise ValueError("all rows must have the same number of electrode footprints.")
+            if len(electrode_ids) != electrode_count:
+                raise ValueError("electrode_ids must match the electrode footprint count.")
+        object.__setattr__(self, "rows", rows)
+        object.__setattr__(self, "footprints", footprints)
+        object.__setattr__(self, "electrode_ids", electrode_ids)
+
+    @property
+    def electrode_count(self) -> int:
+        """Number of NRV electrodes sampled for each axon."""
+
+        if not self.footprints:
+            return 0
+        return len(self.footprints[0])
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    @property
+    def axons(self) -> tuple[Axon, ...]:
+        """Descriptive AxonScope axons in NRV row order."""
+
+        return self.population.axons
+
+    @property
+    def instances(self) -> tuple[AxonInstance, ...]:
+        """Concrete AxonScope instances in NRV row order."""
+
+        return self.population.instances
+
+    def for_axon(self, index: int) -> tuple[ExtracellularFootprint, ...]:
+        """Return every electrode footprint for one AxonScope axon row."""
+
+        return self.footprints[int(index)]
+
+    def for_electrode(self, index: int = 0) -> tuple[ExtracellularFootprint, ...]:
+        """Return one electrode footprint across every AxonScope axon row."""
+
+        electrode_index = int(index)
+        return tuple(row_footprints[electrode_index] for row_footprints in self.footprints)
+
+    def stimulated_population(
+        self,
+        *,
+        electrode_index: int = 0,
+        stimulus: Stimulus,
+        drive_id_prefix: str = "nrv_electrode",
+    ) -> AxonPopulation:
+        """Attach one sampled NRV electrode footprint to each population row."""
+
+        electrode_footprints = self.for_electrode(electrode_index)
+        instances = []
+        for row_index, (instance, footprint) in enumerate(
+            zip(self.population.instances, electrode_footprints, strict=True)
+        ):
+            simulation = AxonInstance(instance.axon)
+            simulation.add_extracellular_stimulation(
+                stimulation=stimulation_from_footprint(
+                    footprint,
+                    stimulus=stimulus,
+                    drive_id=DriveId(f"{drive_id_prefix}_{int(electrode_index)}"),
+                    metadata={"nrv_row": row_index},
+                )
+            )
+            instances.append(simulation)
+        return AxonPopulation(instances, name=self.population.name)
+
+    def concat(self, *others: "NRVFootprints") -> "NRVFootprints":
+        """Concatenate footprint bridges sampled from the same NRV electrodes."""
+
+        instances = list(self.population.instances)
+        rows = list(self.rows)
+        footprints = list(self.footprints)
+        for other in others:
+            if other.electrode_ids != self.electrode_ids:
+                raise ValueError("Cannot concatenate NRV footprints from different electrodes.")
+            instances.extend(other.population.instances)
+            rows.extend(other.rows)
+            footprints.extend(other.footprints)
+        return NRVFootprints(
+            population=AxonPopulation(instances, name=self.population.name),
+            rows=tuple(rows),
+            footprints=tuple(footprints),
+            electrode_ids=self.electrode_ids,
+        )
 
 
 @dataclass(frozen=True)
@@ -87,7 +232,7 @@ class NRVActivationComparison:
         return bool(self.nrv_activated == self.axonscope_activated)
 
 
-def fiber_kind_from_nrv(nrv_type: int, *, include_mrg: bool) -> FiberKind:
+def _fiber_kind_from_nrv(nrv_type: int, *, include_mrg: bool) -> FiberKind:
     """Map NRV's fiber type code to the AxonScope template used by examples."""
 
     if int(nrv_type) == 1:
@@ -95,7 +240,7 @@ def fiber_kind_from_nrv(nrv_type: int, *, include_mrg: bool) -> FiberKind:
     return "rattay"
 
 
-def nrv_node_shift_to_x_shift_um(
+def _nrv_node_shift_to_x_shift_um(
     node_shift: float,
     diameter_um: float,
     *,
@@ -109,278 +254,8 @@ def nrv_node_shift_to_x_shift_um(
     return float(node_shift) * node_spacing_um
 
 
-def build_synthetic_4_fascicle_nerve(
-    nrv_module: Any,
-    *,
-    nerve_length_um: float,
-    nerve_diameter_um: float,
-    fascicle_diameter_um: float,
-    fascicle_offset_um: float,
-    axons_per_fascicle: int,
-    percent_unmyelinated: float,
-    delta_trace_um: float,
-) -> Any:
-    """Create one NRV nerve with four circular fascicles.
-
-    This is the reproducible geometry used by the with-NRV example and Kaggle
-    performance presets. NRV owns the geometry and fiber placement; AxonScope
-    only receives the extracted rows and sampled footprints later.
-    """
-
-    nerve = nrv_module.nerve(
-        diameter=nrv_numeric(nerve_diameter_um),
-        length=nrv_numeric(nerve_length_um),
-    )
-    for fascicle_id, center in enumerate(synthetic_fascicle_centers(fascicle_offset_um)):
-        fascicle = nrv_module.fascicle(ID=fascicle_id)
-        fascicle.set_geometry(
-            geometry=nrv_module.create_cshape(
-                center=tuple(float(value) for value in center),
-                diameter=nrv_numeric(fascicle_diameter_um),
-            )
-        )
-        nerve.add_fascicle(fascicle)
-
-    for fascicle in nerve.fascicles.values():
-        fascicle.fill(
-            n_ax=int(axons_per_fascicle),
-            percent_unmyel=float(percent_unmyelinated),
-            delta_trace=float(delta_trace_um),
-            with_node_shift=True,
-        )
-    return nerve
-
-
-def build_histology_contour_nerve(
-    nrv_module: Any,
-    *,
-    nerve_length_um: float,
-    nerve_diameter_um: float,
-    axons_per_fascicle: int,
-    percent_unmyelinated: float,
-    delta_trace_um: float,
-    fascicle_epsilon_fraction: float = 0.002,
-) -> Any:
-    """Create NRV's bundled histology-contour nerve used by comparison benches."""
-
-    _, fascicle_contours = load_histology_contours(
-        nrv_module,
-        nerve_diameter_um=nerve_diameter_um,
-        fascicle_epsilon_fraction=fascicle_epsilon_fraction,
-    )
-    nerve = nrv_module.nerve(
-        diameter=nrv_numeric(nerve_diameter_um),
-        length=nrv_numeric(nerve_length_um),
-    )
-    for fascicle_id, points in enumerate(fascicle_contours):
-        geometry = nrv_module.create_cshape(vertices=np.asarray(points, dtype=float))
-        fascicle = nrv_module.fascicle(ID=fascicle_id)
-        fascicle.set_geometry(geometry=geometry)
-        nerve.add_fascicle(fascicle)
-
-    for fascicle in nerve.fascicles.values():
-        fascicle.fill(
-            n_ax=int(axons_per_fascicle),
-            percent_unmyel=float(percent_unmyelinated),
-            delta_trace=float(delta_trace_um),
-            with_node_shift=True,
-        )
-    return nerve
-
-
-def build_nerve_from_mode(
-    nrv_module: Any,
-    *,
-    geometry_mode: str,
-    nerve_length_um: float,
-    nerve_diameter_um: float,
-    axons_per_fascicle: int,
-    percent_unmyelinated: float,
-    delta_trace_um: float,
-    synthetic_fascicle_diameter_um: float = 250.0,
-    synthetic_fascicle_offset_um: float = 250.0,
-    fascicle_epsilon_fraction: float = 0.002,
-) -> Any:
-    """Build an NRV nerve from the named geometry mode used by examples/benches."""
-
-    if geometry_mode == "synthetic_4_fascicles":
-        return build_synthetic_4_fascicle_nerve(
-            nrv_module,
-            nerve_length_um=nerve_length_um,
-            nerve_diameter_um=nerve_diameter_um,
-            fascicle_diameter_um=synthetic_fascicle_diameter_um,
-            fascicle_offset_um=synthetic_fascicle_offset_um,
-            axons_per_fascicle=axons_per_fascicle,
-            percent_unmyelinated=percent_unmyelinated,
-            delta_trace_um=delta_trace_um,
-        )
-    if geometry_mode == "histology":
-        return build_histology_contour_nerve(
-            nrv_module,
-            nerve_length_um=nerve_length_um,
-            nerve_diameter_um=nerve_diameter_um,
-            axons_per_fascicle=axons_per_fascicle,
-            percent_unmyelinated=percent_unmyelinated,
-            delta_trace_um=delta_trace_um,
-            fascicle_epsilon_fraction=fascicle_epsilon_fraction,
-        )
-    raise ValueError(f"Unsupported NRV geometry mode: {geometry_mode!r}")
-
-
-def load_histology_contours(
-    nrv_module: Any,
-    *,
-    nerve_diameter_um: float,
-    fascicle_epsilon_fraction: float = 0.002,
-) -> tuple[np.ndarray, list[np.ndarray]]:
-    """Load NRV's bundled histology image and return rescaled contours."""
-
-    import cv2
-
-    image_path = (
-        Path(nrv_module.__path__[0])
-        / "_misc"
-        / "geom"
-        / "smoothed_edges_white.png"
-    )
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise FileNotFoundError(f"Could not read NRV geometry image: {image_path}")
-
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, threshold = cv2.threshold(gray, 127, 255, 0)
-    contours, hierarchy = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if hierarchy is None:
-        raise RuntimeError("NRV geometry image did not yield contours.")
-
-    hierarchy = hierarchy.squeeze()
-    nerve_id = 2
-    nerve_points_pix = contours[nerve_id].squeeze()
-    center_pix = np.mean(nerve_points_pix, axis=0)
-    nerve_points = nerve_points_pix - center_pix
-    radius_pix = np.max(np.abs(nerve_points))
-    scale = float(nerve_diameter_um) / (2.0 * radius_pix)
-    scale_xy = scale * np.asarray([1.0, -1.0])
-    nerve_points = nerve_points * scale_xy
-
-    fascicle_points = []
-    for index, contour in enumerate(contours):
-        if hierarchy[index, -1] == nerve_id:
-            points = simplify_cv2_contour(
-                cv2,
-                contour,
-                epsilon_fraction=fascicle_epsilon_fraction,
-            )
-            fascicle_points.append((points - center_pix) * scale_xy)
-
-    return np.asarray(nerve_points, dtype=float), fascicle_points
-
-
-def simplify_cv2_contour(
-    cv2_module: Any,
-    contour: Any,
-    *,
-    epsilon_fraction: float,
-) -> np.ndarray:
-    """Return a valid open contour suitable for NRV/Gmsh polygon geometry."""
-
-    points = np.asarray(contour).squeeze()
-    if float(epsilon_fraction) > 0.0:
-        epsilon = float(epsilon_fraction) * cv2_module.arcLength(contour, True)
-        simplified = cv2_module.approxPolyDP(contour, epsilon, True).squeeze()
-        if np.asarray(simplified).ndim == 2 and len(simplified) >= 3:
-            points = np.asarray(simplified)
-    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3:
-        raise ValueError("NRV contour simplification produced an invalid polygon.")
-    if np.array_equal(points[0], points[-1]):
-        points = points[:-1]
-    return np.asarray(points, dtype=float)
-
-
-def synthetic_fascicle_centers(offset_um: float) -> tuple[tuple[float, float], ...]:
-    """Return four fascicle centers inside the synthetic nerve cross-section."""
-
-    offset = float(offset_um)
-    return (
-        (offset, 0.0),
-        (0.0, offset),
-        (-offset, 0.0),
-        (0.0, -offset),
-    )
-
-
-def nrv_numeric(value: float) -> int | float:
-    """Preserve NRV example integer parameters when configured as floats."""
-
-    numeric = float(value)
-    if numeric.is_integer():
-        return int(numeric)
-    return numeric
-
-
-def attach_life_fem_electrode(
-    nrv_module: Any,
-    nerve: Any,
-    *,
-    nerve_length_um: float,
-    life_fascicle_id: str = "0",
-    life_diameter_um: float = 25.0,
-    life_length_um: float = 1_000.0,
-    stimulus_start_ms: float = 0.1,
-    pulse_duration_ms: float = 0.1,
-    validation_current_uA: float = 60.0,
-    fem_n_proc: int | None = None,
-    gmsh_n_core: int | None = 1,
-) -> NRVLifeElectrodeSetup:
-    """Attach one NRV LIFE/FEM electrode and return its AxonScope handoff data."""
-
-    fascicle_key: Any = life_fascicle_id
-    if fascicle_key not in nerve.fascicles:
-        fascicle_key = int(life_fascicle_id)
-    fascicle = nerve.fascicles[fascicle_key]
-    life_y_um, life_z_um = fascicle.center
-    life_x_offset_um = (float(nerve_length_um) - float(life_length_um)) / 2.0
-
-    extra_stim = nrv_module.FEM_stimulation(
-        endo_mat="endoneurium_ranck",
-        peri_mat="perineurium",
-        epi_mat="epineurium",
-        ext_mat="saline",
-        n_proc=fem_n_proc,
-    )
-    electrode = nrv_module.LIFE_electrode(
-        "LIFE_2",
-        float(life_diameter_um),
-        float(life_length_um),
-        life_x_offset_um,
-        life_y_um,
-        life_z_um,
-    )
-    pulse_stim = nrv_module.stimulus()
-    pulse_stim.pulse(
-        float(stimulus_start_ms),
-        -float(validation_current_uA),
-        float(pulse_duration_ms),
-    )
-    extra_stim.add_electrode(electrode, pulse_stim)
-    nerve.attach_extracellular_stimulation(extra_stim)
-    if fem_n_proc is not None:
-        nerve.extra_stim.set_n_proc(int(fem_n_proc))
-    if gmsh_n_core is not None:
-        nerve.extra_stim.model.mesh.n_core = int(gmsh_n_core)
-
-    return NRVLifeElectrodeSetup(
-        extra_stim=nerve.extra_stim,
-        diameter_um=float(life_diameter_um),
-        length_um=float(life_length_um),
-        x_offset_um=float(life_x_offset_um),
-        y_um=float(life_y_um),
-        z_um=float(life_z_um),
-    )
-
-
-def extract_fiber_rows(
-    nerve: Any,
+def _fiber_rows_from_nrv(
+    nrv_population: Any,
     *,
     include_unmyelinated: bool,
     include_mrg: bool = True,
@@ -393,13 +268,13 @@ def extract_fiber_rows(
     """
 
     rows: list[NRVFiberRow] = []
-    for fascicle_id, fascicle in nerve.fascicles.items():
+    for fascicle_id, fascicle in _iter_nrv_fascicles(nrv_population):
         table = fascicle.axons.axon_pop
         for fiber_index, table_row in table.iterrows():
-            if not nrv_fiber_is_simulated(fascicle, int(fiber_index)):
+            if not _nrv_fiber_is_simulated(fascicle, int(fiber_index)):
                 continue
             nrv_type = int(float(table_row.get("types", 0)))
-            kind = fiber_kind_from_nrv(nrv_type, include_mrg=include_mrg)
+            kind = _fiber_kind_from_nrv(nrv_type, include_mrg=include_mrg)
             if kind != "mrg" and not include_unmyelinated:
                 continue
             diameter_um = float(table_row.get("diameters", 1.0))
@@ -413,7 +288,7 @@ def extract_fiber_rows(
                     y_um=float(table_row.get("y", 0.0)),
                     z_um=float(table_row.get("z", 0.0)),
                     node_shift=node_shift,
-                    x_shift_um=nrv_node_shift_to_x_shift_um(
+                    x_shift_um=_nrv_node_shift_to_x_shift_um(
                         node_shift,
                         diameter_um,
                         kind=kind,
@@ -424,7 +299,7 @@ def extract_fiber_rows(
     return rows
 
 
-def nrv_fiber_is_simulated(fascicle: Any, fiber_index: int) -> bool:
+def _nrv_fiber_is_simulated(fascicle: Any, fiber_index: int) -> bool:
     """Return whether NRV masks keep this fiber in the simulation set."""
 
     for mask_label in getattr(fascicle, "sim_mask", ()):
@@ -436,78 +311,121 @@ def nrv_fiber_is_simulated(fascicle: Any, fiber_index: int) -> bool:
     return True
 
 
-def select_rows(rows: Sequence[NRVFiberRow], *, limit: int) -> list[NRVFiberRow]:
-    """Return all rows when `limit <= 0`, otherwise the first requested rows."""
-
-    if int(limit) <= 0:
-        return list(rows)
-    return list(rows[: int(limit)])
-
-
-def sample_life_footprint(
-    life_setup: NRVLifeElectrodeSetup,
+def population_from_nrv(
+    nrv_population: Any,
     *,
-    positions_um: Sequence[float],
-    row: NRVFiberRow,
-    source_id: str = "nrv_life_fem",
-) -> ExtracellularFootprint:
-    """Sample NRV's current-independent LIFE/FEM footprint for one fiber row."""
+    nerve_length_um: float | None = None,
+    include_unmyelinated: bool = True,
+    include_mrg: bool = True,
+    unmyelinated_compartments: int = 0,
+    name: str | None = "nrv",
+) -> NRVAxonPopulation:
+    """Build an AxonScope population from an NRV nerve or fascicle population.
 
-    life_setup.extra_stim.compute_electrodes_footprints(
-        np.asarray(positions_um, dtype=float),
-        float(row.y_um),
-        float(row.z_um),
-        nrv_row_id(row),
+    This is the first canonical bridge: NRV defines fiber placement and
+    diameters; AxonScope receives a one-dimensional axon population. No
+    extracellular footprint is sampled here.
+    """
+
+    length_um = _resolve_nerve_length_um(nrv_population, nerve_length_um)
+    rows = _fiber_rows_from_nrv(
+        nrv_population,
+        include_unmyelinated=include_unmyelinated,
+        include_mrg=include_mrg,
     )
-    values_mV_per_mA = np.asarray(
-        life_setup.extra_stim.electrodes[0].get_footprint(),
-        dtype=float,
-    ).copy()
-    life_setup.extra_stim.clear_electrodes_footprints()
-
-    mesh = getattr(getattr(life_setup.extra_stim, "model", None), "mesh", None)
-    return ExtracellularFootprint.shared(
-        values=values_mV_per_mA,
-        positions=np.asarray(positions_um, dtype=float) * ureg.micrometer,
-        voltage_unit=ureg.millivolt,
-        current_unit=ureg.milliampere,
-        source_id=source_id,
-        reference="NRV FEM LIFE footprint sampled on AxonScope intrinsic positions",
-        metadata={
-            "source": "nrv.FEM_stimulation/LIFE_electrode",
-            "life_diameter_um": float(life_setup.diameter_um),
-            "life_length_um": float(life_setup.length_um),
-            "life_x_offset_um": float(life_setup.x_offset_um),
-            "life_y_um": float(life_setup.y_um),
-            "life_z_um": float(life_setup.z_um),
-            "gmsh_n_core": None if mesh is None else getattr(mesh, "n_core", None),
-            "nrv_footprint_unit": "mV/mA",
-        },
+    instances = [
+        AxonInstance(
+            _axon_from_fiber_row(
+                row,
+                nerve_length_um=length_um,
+                unmyelinated_compartments=unmyelinated_compartments,
+            )
+        )
+        for row in rows
+    ]
+    return NRVAxonPopulation(
+        population=AxonPopulation(instances, name=name),
+        rows=tuple(rows),
     )
 
 
-def sample_life_context(
-    row: NRVFiberRow,
+def footprints_from_nrv(
+    nrv_geometry: Any,
+    axons: NRVAxonPopulation | AxonPopulation | Sequence[AxonInstance],
     *,
-    axon: Any,
-    life_setup: NRVLifeElectrodeSetup,
-) -> NRVFiberContext:
-    """Build one AxonScope fiber context by sampling its NRV LIFE footprint."""
+    rows: Sequence[NRVFiberRow] | None = None,
+    source_id: str = "nrv_fem",
+    clear: bool = True,
+) -> NRVFootprints:
+    """Sample all NRV electrode footprints on an AxonScope population.
 
-    positions_um = np.asarray(axon.layout.position_values(unit=ureg.micrometer), dtype=float)
-    return NRVFiberContext(
-        row=row,
-        axon=axon,
-        positions_um=positions_um,
-        footprint=sample_life_footprint(
-            life_setup,
-            positions_um=positions_um,
-            row=row,
+    This is the second canonical bridge. `nrv_geometry` may be a nerve/fascicle
+    carrying `.extra_stim` or an NRV stimulation object itself. Every electrode
+    exposed by `extra_stim.electrodes` is sampled for every AxonScope row.
+    """
+
+    population, row_tuple = _resolve_population_and_rows(axons, rows)
+    extra_stim = _resolve_extra_stim(nrv_geometry)
+    electrodes = tuple(getattr(extra_stim, "electrodes", ()))
+    if not electrodes:
+        raise ValueError("NRV geometry has no electrodes to sample.")
+
+    all_footprints: list[tuple[ExtracellularFootprint, ...]] = []
+    for instance, row in zip(population.instances, row_tuple, strict=True):
+        positions_um = np.asarray(
+            instance.axon.layout.position_values(unit=ureg.micrometer),
+            dtype=float,
+        )
+        extra_stim.compute_electrodes_footprints(
+            positions_um,
+            float(row.y_um),
+            float(row.z_um),
+            nrv_row_id(row),
+        )
+        row_footprints = []
+        for electrode_index, electrode in enumerate(electrodes):
+            values_mV_per_mA = np.asarray(
+                electrode.get_footprint(),
+                dtype=float,
+            ).copy()
+            row_footprints.append(
+                ExtracellularFootprint.shared(
+                    values=values_mV_per_mA,
+                    positions=positions_um * ureg.micrometer,
+                    voltage_unit=ureg.millivolt,
+                    current_unit=ureg.milliampere,
+                    source_id=f"{source_id}:{electrode_index}",
+                    reference=(
+                        "NRV electrode footprint sampled on AxonScope intrinsic positions"
+                    ),
+                    metadata={
+                        "source": "nrv",
+                        "electrode_index": int(electrode_index),
+                        "electrode_id": _electrode_id(electrode, electrode_index),
+                        "fascicle_id": row.fascicle_id,
+                        "fiber_index": int(row.fiber_index),
+                        "fiber_y_um": float(row.y_um),
+                        "fiber_z_um": float(row.z_um),
+                        "nrv_footprint_unit": "mV/mA",
+                    },
+                )
+            )
+        all_footprints.append(tuple(row_footprints))
+        if clear and hasattr(extra_stim, "clear_electrodes_footprints"):
+            extra_stim.clear_electrodes_footprints()
+
+    return NRVFootprints(
+        population=population,
+        rows=row_tuple,
+        footprints=tuple(all_footprints),
+        electrode_ids=tuple(
+            _electrode_id(electrode, electrode_index)
+            for electrode_index, electrode in enumerate(electrodes)
         ),
     )
 
 
-def axon_from_fiber_row(
+def _axon_from_fiber_row(
     row: NRVFiberRow,
     *,
     nerve_length_um: float,
@@ -550,114 +468,22 @@ def axon_from_fiber_row(
     )
 
 
-def life_context_from_fiber_row(
-    row: NRVFiberRow,
-    *,
-    life_setup: NRVLifeElectrodeSetup,
-    nerve_length_um: float,
-    unmyelinated_compartments: int = 0,
-) -> NRVFiberContext:
-    """Build one AxonScope row and sample its NRV LIFE footprint."""
-
-    axon = axon_from_fiber_row(
-        row,
-        nerve_length_um=nerve_length_um,
-        unmyelinated_compartments=unmyelinated_compartments,
-    )
-    return sample_life_context(row, axon=axon, life_setup=life_setup)
-
-
-def life_stimulation_from_footprint(
+def stimulation_from_footprint(
     footprint: ExtracellularFootprint,
     *,
-    current: Any,
-    start_ms: float,
-    pulse_duration_ms: float,
-    drive_id: DriveId | str = DriveId("nrv_life"),
-    cathodic: bool = True,
+    stimulus: Stimulus,
+    drive_id: DriveId | str = DriveId("nrv_electrode_0"),
     metadata: Mapping[str, Any] | None = None,
 ) -> ExtracellularStimulation:
-    """Wrap a sampled NRV LIFE footprint in AxonScope stimulation objects."""
+    """Wrap one sampled NRV footprint and one AxonScope stimulus."""
 
-    stimulus = life_pulse_stimulus(
-        current=current,
-        start_ms=start_ms,
-        pulse_duration_ms=pulse_duration_ms,
-        cathodic=cathodic,
-    )
     drive = ExtracellularDrive(
         id=_drive_id(drive_id),
         footprint=footprint,
         stimulus=stimulus,
-        metadata={"source": "nrv_life_fem", **dict(metadata or {})},
+        metadata={"source": "nrv", **dict(metadata or {})},
     )
     return ExtracellularStimulation([drive])
-
-
-def life_simulation_from_context(
-    context: NRVFiberContext,
-    *,
-    current_uA: float,
-    start_ms: float,
-    pulse_duration_ms: float,
-) -> AxonInstance:
-    """Attach one sampled NRV LIFE footprint to a fresh AxonScope simulation."""
-
-    simulation = AxonInstance(context.axon)
-    simulation.add_extracellular_stimulation(
-        stimulation=life_stimulation_from_footprint(
-            context.footprint,
-            current=float(current_uA) * ureg.microampere,
-            start_ms=start_ms,
-            pulse_duration_ms=pulse_duration_ms,
-        )
-    )
-    return simulation
-
-
-def replace_life_current(
-    simulation: AxonInstance,
-    current: Any,
-    *,
-    start_ms: float,
-    pulse_duration_ms: float,
-    drive_id: DriveId | str = DriveId("nrv_life"),
-    cathodic: bool = True,
-) -> None:
-    """Replace one NRV LIFE drive stimulus on an existing AxonScope simulation."""
-
-    if simulation.extracellular_stimulation is None:
-        raise ValueError("simulation has no extracellular stimulation to update.")
-    drive_key = _drive_id(drive_id)
-    updated = simulation.extracellular_stimulation.replace_drive(
-        drive_key,
-        stimulus=life_pulse_stimulus(
-            current=current,
-            start_ms=start_ms,
-            pulse_duration_ms=pulse_duration_ms,
-            cathodic=cathodic,
-        ),
-    )
-    simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
-
-
-def life_pulse_stimulus(
-    *,
-    current: Any,
-    start_ms: float,
-    pulse_duration_ms: float,
-    cathodic: bool = True,
-) -> Stimulus:
-    """Create the LIFE pulse used by NRV/AxonScope recruitment comparisons."""
-
-    amplitude = _current_quantity(current)
-    if cathodic:
-        amplitude = -amplitude
-    return Stimulus.pulse(
-        start=float(start_ms) * ureg.millisecond,
-        duration=float(pulse_duration_ms) * ureg.millisecond,
-        amplitude=amplitude,
-    )
 
 
 def nrv_activation_by_row(
@@ -749,48 +575,96 @@ def row_key(row: NRVFiberRow) -> tuple[str, int]:
     return (str(row.fascicle_id), int(row.fiber_index))
 
 
+def _iter_nrv_fascicles(nrv_population: Any) -> tuple[tuple[Any, Any], ...]:
+    if hasattr(nrv_population, "fascicles"):
+        return tuple(nrv_population.fascicles.items())
+    if hasattr(nrv_population, "axons") and hasattr(nrv_population.axons, "axon_pop"):
+        fascicle_id = getattr(nrv_population, "ID", 0)
+        return ((fascicle_id, nrv_population),)
+    raise TypeError("nrv_population must be an NRV nerve or fascicle-like object.")
+
+
+def _resolve_nerve_length_um(nrv_population: Any, nerve_length_um: float | None) -> float:
+    if nerve_length_um is not None:
+        return float(nerve_length_um)
+    for candidate in (nrv_population, *_fascicle_values(nrv_population)):
+        for attr in ("length", "L", "L_ax", "axon_length"):
+            if hasattr(candidate, attr):
+                try:
+                    return _as_um(getattr(candidate, attr))
+                except (TypeError, ValueError):
+                    continue
+    raise ValueError("nerve_length_um is required when the NRV object has no readable length.")
+
+
+def _fascicle_values(nrv_population: Any) -> tuple[Any, ...]:
+    if hasattr(nrv_population, "fascicles"):
+        return tuple(nrv_population.fascicles.values())
+    return ()
+
+
+def _as_um(value: Any) -> float:
+    if hasattr(value, "to"):
+        return float(value.to(ureg.micrometer).magnitude)
+    return float(value)
+
+
+def _resolve_population_and_rows(
+    axons: NRVAxonPopulation | AxonPopulation | Sequence[AxonInstance],
+    rows: Sequence[NRVFiberRow] | None,
+) -> tuple[AxonPopulation, tuple[NRVFiberRow, ...]]:
+    if isinstance(axons, NRVAxonPopulation):
+        if rows is not None and tuple(rows) != axons.rows:
+            raise ValueError("rows must not conflict with the NRVAxonPopulation rows.")
+        return axons.population, axons.rows
+    population = axons if isinstance(axons, AxonPopulation) else AxonPopulation(axons)
+    if rows is None:
+        raise ValueError("rows are required when axons is not an NRVAxonPopulation.")
+    row_tuple = tuple(rows)
+    if len(population) != len(row_tuple):
+        raise ValueError("population and rows must have the same length.")
+    return population, row_tuple
+
+
+def _resolve_extra_stim(nrv_geometry: Any) -> Any:
+    if hasattr(nrv_geometry, "extra_stim"):
+        extra_stim = nrv_geometry.extra_stim
+    else:
+        extra_stim = nrv_geometry
+    if not hasattr(extra_stim, "compute_electrodes_footprints"):
+        raise TypeError(
+            "nrv_geometry must be an NRV object with extra_stim or an NRV stimulation object."
+        )
+    return extra_stim
+
+
+def _electrode_id(electrode: Any, index: int) -> str:
+    for attr in ("ID", "id", "label", "name"):
+        if hasattr(electrode, attr):
+            value = getattr(electrode, attr)
+            if value is not None:
+                return str(value)
+    return f"electrode{int(index)}"
+
+
 def _drive_id(value: DriveId | str) -> DriveId:
     if isinstance(value, DriveId):
         return value
     return DriveId(str(value))
 
 
-def _current_quantity(value: Any) -> Any:
-    if hasattr(value, "to"):
-        return value
-    return float(value) * ureg.microampere
-
-
 __all__ = [
     "FiberKind",
     "NRVActivationComparison",
-    "NRVFiberContext",
+    "NRVAxonPopulation",
     "NRVFiberRow",
-    "NRVLifeElectrodeSetup",
-    "attach_life_fem_electrode",
-    "axon_from_fiber_row",
+    "NRVFootprints",
     "activation_comparisons",
-    "build_histology_contour_nerve",
-    "build_nerve_from_mode",
-    "build_synthetic_4_fascicle_nerve",
-    "extract_fiber_rows",
-    "fiber_kind_from_nrv",
-    "life_context_from_fiber_row",
-    "life_pulse_stimulus",
-    "life_simulation_from_context",
-    "life_stimulation_from_footprint",
-    "load_histology_contours",
-    "nrv_numeric",
+    "footprints_from_nrv",
     "nrv_activation_by_row",
     "nrv_fascicle_by_id",
-    "nrv_fiber_is_simulated",
-    "nrv_node_shift_to_x_shift_um",
     "nrv_row_id",
-    "replace_life_current",
+    "population_from_nrv",
     "row_key",
-    "sample_life_context",
-    "sample_life_footprint",
-    "select_rows",
-    "simplify_cv2_contour",
-    "synthetic_fascicle_centers",
+    "stimulation_from_footprint",
 ]

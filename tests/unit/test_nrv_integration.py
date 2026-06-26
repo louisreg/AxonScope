@@ -46,7 +46,8 @@ class _FakeFascicle:
 
 
 class _FakeElectrode:
-    def __init__(self, footprint):
+    def __init__(self, footprint, *, ID="electrode"):
+        self.ID = ID
         self._footprint = np.asarray(footprint, dtype=float)
 
     def get_footprint(self):
@@ -54,11 +55,19 @@ class _FakeElectrode:
 
 
 class _FakeExtraStim:
-    def __init__(self, footprint):
-        self.electrodes = [_FakeElectrode(footprint)]
+    def __init__(self, footprints):
+        array = np.asarray(footprints, dtype=float)
+        if array.ndim == 1:
+            footprint_rows = [array]
+        else:
+            footprint_rows = list(array)
+        self.electrodes = [
+            _FakeElectrode(footprint, ID=f"e{index}")
+            for index, footprint in enumerate(footprint_rows)
+        ]
         self.model = SimpleNamespace(mesh=SimpleNamespace(n_core=1))
         self.compute_calls = []
-        self.cleared = False
+        self.clear_count = 0
 
     def compute_electrodes_footprints(self, positions, y, z, row_id):
         self.compute_calls.append(
@@ -71,7 +80,7 @@ class _FakeExtraStim:
         )
 
     def clear_electrodes_footprints(self):
-        self.cleared = True
+        self.clear_count += 1
 
 
 class _FakeAxonResult(dict):
@@ -85,7 +94,23 @@ class _FakeAxonResult(dict):
         return self._recruited
 
 
-def test_extract_fiber_rows_honors_nrv_masks_and_node_shift():
+def test_nrv_integration_exposes_only_bridge_contracts():
+    forbidden = {
+        "build_synthetic_4_fascicle_nerve",
+        "build_histology_contour_nerve",
+        "build_nerve_from_mode",
+        "attach_life_fem_electrode",
+        "NRVLifeElectrodeSetup",
+        "life_pulse_stimulus",
+        "replace_life_current",
+    }
+
+    assert forbidden.isdisjoint(set(axs_nrv.__all__))
+    for name in forbidden:
+        assert not hasattr(axs_nrv, name)
+
+
+def test_population_from_nrv_honors_nrv_masks_and_node_shift():
     fascicle = _FakeFascicle(
         [
             (0, {"types": 1, "diameters": 8.0, "y": 1.0, "z": 2.0, "node_shift": 0.25}),
@@ -96,76 +121,120 @@ def test_extract_fiber_rows_honors_nrv_masks_and_node_shift():
     )
     nerve = SimpleNamespace(fascicles={0: fascicle})
 
-    rows = axs_nrv.extract_fiber_rows(nerve, include_unmyelinated=True)
+    bridge = axs_nrv.population_from_nrv(nerve, nerve_length_um=10_000.0)
+    rows = bridge.rows
 
     assert [row.fiber_index for row in rows] == [0, 2]
     assert [row.kind for row in rows] == ["mrg", "mrg"]
     assert rows[0].fascicle_id == "0"
     assert rows[0].x_shift_um > 0.0
     assert axs_nrv.row_key(rows[0]) == ("0", 0)
-    assert axs_nrv.select_rows(rows, limit=1) == [rows[0]]
+    assert bridge.limit(1).rows == (rows[0],)
 
 
-def test_sample_life_footprint_uses_intrinsic_positions_and_nrv_metadata():
-    row = axs_nrv.NRVFiberRow(
-        fascicle_id="2",
-        fiber_index=7,
-        kind="mrg",
-        diameter_um=9.0,
-        y_um=12.0,
-        z_um=-4.0,
+def test_population_from_nrv_builds_axonscope_population_without_footprints():
+    fascicle = _FakeFascicle(
+        [
+            (0, {"types": 1, "diameters": 8.0, "y": 1.0, "z": 2.0, "node_shift": 0.25}),
+            (1, {"types": 0, "diameters": 0.7, "y": 3.0, "z": 4.0}),
+        ],
+        {"keep": [True, True]},
     )
-    extra_stim = _FakeExtraStim([1.0, 2.0, 3.0])
-    setup = axs_nrv.NRVLifeElectrodeSetup(
-        extra_stim=extra_stim,
-        diameter_um=25.0,
-        length_um=1_000.0,
-        x_offset_um=4_500.0,
-        y_um=10.0,
-        z_um=-5.0,
+    nerve = SimpleNamespace(fascicles={0: fascicle})
+
+    bridge = axs_nrv.population_from_nrv(nerve, nerve_length_um=10_000.0)
+
+    assert isinstance(bridge.population, axs.AxonPopulation)
+    assert len(bridge) == 2
+    assert [row.fiber_index for row in bridge.rows] == [0, 1]
+    assert bridge.instances[0].extracellular_stimulation is None
+    assert bridge.axons[0].n_compartments > 0
+
+
+def test_footprints_from_nrv_samples_all_electrodes_for_population_bridge():
+    rows = (
+        axs_nrv.NRVFiberRow("0", 0, "mrg", 8.0, 10.0, 20.0),
+        axs_nrv.NRVFiberRow("0", 1, "rattay", 0.8, -5.0, 3.0),
     )
-
-    footprint = axs_nrv.sample_life_footprint(
-        setup,
-        positions_um=[0.0, 10.0, 20.0],
-        row=row,
+    instances = [
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=20.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        ),
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=20.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        ),
+    ]
+    bridge = axs_nrv.NRVAxonPopulation(
+        population=axs.AxonPopulation(instances),
+        rows=rows,
     )
+    extra_stim = _FakeExtraStim([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    nerve = SimpleNamespace(extra_stim=extra_stim)
 
-    assert extra_stim.cleared
-    assert extra_stim.compute_calls[0]["row_id"] == 2_000_007
-    np.testing.assert_allclose(extra_stim.compute_calls[0]["positions"], [0.0, 10.0, 20.0])
-    np.testing.assert_allclose(footprint.positions_um, [0.0, 10.0, 20.0])
-    np.testing.assert_allclose(footprint.values_V_per_A, [1.0, 2.0, 3.0])
-    assert footprint.metadata["source"] == "nrv.FEM_stimulation/LIFE_electrode"
+    footprints = axs_nrv.footprints_from_nrv(nerve, bridge)
+
+    assert footprints.electrode_count == 2
+    assert footprints.electrode_ids == ("e0", "e1")
+    assert len(extra_stim.compute_calls) == 2
+    assert extra_stim.clear_count == 2
+    np.testing.assert_allclose(footprints.footprints[0][0].values_V_per_A, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(footprints.footprints[0][1].values_V_per_A, [4.0, 5.0, 6.0])
+
+    stimulus = axs.Stimulus.pulse(
+        start=0.1 * axs.ms,
+        duration=0.1 * axs.ms,
+        amplitude=-1.0 * axs.uA,
+    )
+    stimulated = footprints.stimulated_population(stimulus=stimulus)
+    assert isinstance(stimulated, axs.AxonPopulation)
+    assert stimulated[0].extracellular_stimulation.drives[0].footprint is footprints.footprints[0][0]
 
 
-def test_life_stimulation_and_current_replacement_use_one_drive_contract():
+def test_stimulated_population_and_current_replacement_use_one_drive_contract():
     footprint = axs.ExtracellularFootprint.shared(
         values=[1.0, 2.0, 3.0],
         positions=[0.0, 10.0, 20.0] * axs.um,
     )
-    stimulation = axs_nrv.life_stimulation_from_footprint(
-        footprint,
-        current=5.0,
-        start_ms=0.1,
-        pulse_duration_ms=0.2,
-    )
-    assert stimulation.drives[0].id == axs.DriveId("nrv_life")
-
     axon = axs.axons.HodgkinHuxley(
         length=20.0 * axs.um,
         diameter=0.5 * axs.um,
         compartments=3,
     )
-    simulation = axs.AxonInstance(axon)
-    simulation.add_extracellular_stimulation(stimulation=stimulation)
-
-    axs_nrv.replace_life_current(
-        simulation,
-        9.0 * axs.uA,
-        start_ms=0.1,
-        pulse_duration_ms=0.2,
+    rows = (axs_nrv.NRVFiberRow("0", 0, "rattay", 0.5, 0.0, 0.0),)
+    footprints = axs_nrv.NRVFootprints(
+        population=axs.AxonPopulation.single(axon),
+        rows=rows,
+        footprints=((footprint,),),
+        electrode_ids=("life",),
     )
+    population = footprints.stimulated_population(
+        stimulus=axs.Stimulus.pulse(
+            start=0.1 * axs.ms,
+            duration=0.2 * axs.ms,
+            amplitude=-5.0 * axs.uA,
+        ),
+        drive_id_prefix="nrv_life",
+    )
+    simulation = population[0]
+    assert simulation.extracellular_stimulation.drives[0].id == axs.DriveId("nrv_life_0")
+
+    updated = simulation.extracellular_stimulation.replace_drive(
+        axs.DriveId("nrv_life_0"),
+        stimulus=axs.Stimulus.pulse(
+            start=0.1 * axs.ms,
+            duration=0.2 * axs.ms,
+            amplitude=-9.0 * axs.uA,
+        ),
+    )
+    simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
 
     current_uA = simulation.extracellular_stimulation.drives[0].stimulus.evaluate(
         [0.15] * axs.ms,

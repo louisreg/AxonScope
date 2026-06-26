@@ -30,6 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import axonscope as axs
+from axonscope.axons.templates import mrg_like_node_spacing
 from axonscope.integrations import nrv as axs_nrv
 from axonscope.solvers import BatchOptions
 
@@ -442,7 +443,7 @@ def extract_rows(fascicle: Any, *, population: PopulationKind) -> list[axs_nrv.N
     table = fascicle.axons.axon_pop
     for fiber_index, row in table.iterrows():
         nrv_type = int(float(row.get("types", 0)))
-        kind = axs_nrv.fiber_kind_from_nrv(nrv_type, include_mrg=True)
+        kind = nrv_fiber_kind(nrv_type, include_mrg=True)
         if population == "mrg" and kind != "mrg":
             continue
         if population == "rattay" and kind != "rattay":
@@ -458,7 +459,7 @@ def extract_rows(fascicle: Any, *, population: PopulationKind) -> list[axs_nrv.N
                 y_um=float(row.get("y", 0.0)),
                 z_um=float(row.get("z", 0.0)),
                 node_shift=node_shift,
-                x_shift_um=axs_nrv.nrv_node_shift_to_x_shift_um(
+                x_shift_um=nrv_node_shift_to_x_shift_um(
                     node_shift,
                     diameter_um,
                     kind=kind,
@@ -503,7 +504,7 @@ def build_synthetic_rows(
                 y_um=float(radius * np.cos(angle)),
                 z_um=float(radius * np.sin(angle)),
                 node_shift=node_shift,
-                x_shift_um=axs_nrv.nrv_node_shift_to_x_shift_um(
+                x_shift_um=nrv_node_shift_to_x_shift_um(
                     node_shift,
                     diameter_um,
                     kind=kind,
@@ -1014,6 +1015,24 @@ def nrv_numeric(value: float) -> int | float:
     if numeric.is_integer():
         return int(numeric)
     return numeric
+
+
+def nrv_fiber_kind(nrv_type: int, *, include_mrg: bool) -> axs_nrv.FiberKind:
+    if int(nrv_type) == 1:
+        return "mrg" if include_mrg else "rattay"
+    return "rattay"
+
+
+def nrv_node_shift_to_x_shift_um(
+    node_shift: float,
+    diameter_um: float,
+    *,
+    kind: axs_nrv.FiberKind,
+) -> float:
+    if kind != "mrg":
+        return 0.0
+    spacing = mrg_like_node_spacing(float(diameter_um) * axs.um)
+    return float(node_shift) * float(spacing.to(axs.um).magnitude)
 
 
 def ratio(numerator: Any, denominator: Any) -> float | None:
