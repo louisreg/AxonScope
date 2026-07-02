@@ -17,7 +17,7 @@ one visible result.
   typed extracellular objects.
 - `04_extracellular_mrg_simulation.py`: stimulate one myelinated MRG axon with a
   sampled point-source footprint.
-- `05_population_pool_run.py`: run a small population with `axs.simulate_pool`.
+- `05_population_pool_run.py`: run a small population with `axs.AxonSimulation`.
 - `06_activation_velocity.py`: compare activation/velocity trends over
   diameters.
 - `07_threshold_vs_diameter.py`: estimate extracellular activation thresholds.
@@ -29,13 +29,13 @@ one visible result.
 `examples/advanced/` is organized by AxonScope subsystem. These scripts are
 still runnable examples, but they explain the moving parts more explicitly.
 
-### Object Model
+### Simulation Workflow
 
-- `object_model/01_axon_simulation_root.py`: use `AxonSimulation` as the
+- `simulation_workflow/01_axon_simulation_root.py`: use `AxonSimulation` as the
   executable root.
-- `object_model/02_axon_population.py`: build and run explicit
+- `simulation_workflow/02_axon_population.py`: build and run explicit
   `AxonPopulation` cohorts.
-- `object_model/03_pool_results.py`: inspect canonical pool results and
+- `simulation_workflow/03_pool_results.py`: inspect canonical pool results and
   per-axon views.
 
 ### Axon Models
@@ -48,6 +48,9 @@ still runnable examples, but they explain the moving parts more explicitly.
   double-cable formulations.
 - `axon_models/04_non_uniform_activation_function.py`: derive a non-uniform
   unmyelinated discretization from an activation-function proxy.
+- `axon_models/05_custom_membrane_authoring.py`: write custom membrane
+  `Model` classes with units, gates, non-gate state, diagnostics, generated-code
+  inspection, and a short simulation.
 
 ### Stimulation
 
@@ -55,6 +58,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   temporal stimuli.
 - `stimulation/02_extracellular_footprint_drive.py`: separate static
   extracellular footprints from temporal drives.
+- `stimulation/03_intracellular_plus_extracellular.py`: combine a local
+  intracellular clamp with sampled extracellular stimulation on the same axon.
 
 ### Recording And Analysis
 
@@ -75,6 +80,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   diameter and extracellular waveform parameters.
 - `protocols/02_recruitment_waveforms.py`: compare recruitment curves for
   different extracellular waveforms.
+- `protocols/03_protocol_result_views.py`: inspect protocol summaries as
+  compact text, dataframes, direct view rows, and plots without running a solver.
 
 ### Runtime
 
@@ -85,9 +92,6 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
   preparation, lowering, kernel route, and result assembly without launching
   kernels.
-- `runtime/04_cold_run_progress.py`: run the same batchable pool twice with
-  human-readable progress to make cold JAX compilation and warm execution
-  visible.
 
 ## With NRV
 
@@ -99,7 +103,7 @@ re-implementing fiber-table extraction, LIFE/FEM footprint sampling, or NRV
 recruitment decoding. NRV geometry, population, electrode, and FEM setup remain
 explicit NRV code in the example or benchmark, not package integration code.
 
-- `01_realistic_fascicle_geometry_comparison.py`: build one realistic NRV nerve
+- `01_realistic_fascicle_geometry.py`: build one realistic NRV nerve
   from the bundled histology contour image with `cv2`, sample NRV's LIFE/FEM
   footprint into AxonScope stimulation objects, run an AxonScope recruitment
   sweep, and plot recruitment plus activated fibers on the nerve cross-section.
@@ -120,6 +124,9 @@ not `examples/`:
 
 - `benchmark/runtime/benchmark_001_simple_batching.py`: compare batched and
   simulation-by-simulation execution.
+- `benchmark/hotpaths/cold_run_progress.py`: inspect, estimate, and run one
+  fixed shape twice with progress and hotpath spans to compare cold and warm
+  execution.
 - `benchmark/runtime/hotpath_observer_only_example.py`: inspect hotpath spans
   for trace-free VmRaster observer-only execution.
 - `benchmark/notebooks/`: benchmark notebooks and Colab-style runs.

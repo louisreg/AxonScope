@@ -138,6 +138,24 @@ def get_mrg_morphology(diameter: float, *, fit_all: bool = False) -> MRGMorpholo
     )
 
 
+def get_mrg_length_node_spacing(diameter: float, *, fit_all: bool = False) -> float:
+    """Return the NRV `get_length_from_nodes` spacing in micrometers.
+
+    NRV uses a separate degree-4 polynomial for `get_length_from_nodes`, while
+    `get_MRG_parameters` uses the morphology `deltax` interpolation.
+    """
+
+    diameter = float(diameter)
+
+    if diameter <= 0:
+        raise ValueError(f"fiber diameter must be positive, got {diameter}")
+
+    if not fit_all and _is_exact_tabulated_diameter(diameter):
+        return float(_tabulated_morphology(diameter).deltax)
+
+    return float(_mrg_polynomials()["deltax_length"](diameter))
+
+
 def get_mrg_morphologies(
     diameters: ArrayLike,
     *,
@@ -152,6 +170,7 @@ def get_mrg_morphologies(
 __all__ = [
     "MRGMorphology",
     "available_mrg_fiber_diameters",
+    "get_mrg_length_node_spacing",
     "get_mrg_morphologies",
     "get_mrg_morphology",
 ]

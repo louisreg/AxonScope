@@ -9,13 +9,11 @@ from axonscope import AxonInstance
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons import HodgkinHuxley
 from axonscope.analytical import PointSourceElectrode
-from axonscope.channel_models import RateTableConfig
-from axonscope.channel_models.passive import PassiveICM
+from axonscope.solvers import RateTableConfig
 from axonscope.stimulation import IntracellularContext
 from axonscope.backends.jax.runtime import (
+    compile_membrane_model,
     _membrane_runtime_cache_key,
-    _rattay_initial_gates_numpy,
-    _try_prepare_uniform_rattay_initial_arrays,
     precompute_extracellular_potential_mV,
     prepare_cable_runtime,
     prepare_extracellular_runtime,
@@ -23,18 +21,17 @@ from axonscope.backends.jax.runtime import (
     prepare_simulation_grid,
     prepare_solver_runtime,
 )
-from axonscope.channel_models.base_channel_model import CompositeICM
+from axonscope.backends.jax.membrane_program import JaxMembraneProgram
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
 from axonscope.backends.jax.stimulation_runtime import (
-    CompiledExtracellularContexts,
+    CompiledExtracellularStimulations,
     CompiledIntracellularContexts,
-    compile_extracellular_contexts,
+    compile_extracellular_stimulations,
     compile_intracellular_contexts,
 )
 from axonscope.utils import units
-from axonscope.channel_models.rattay_aberham import RattayAberhamICM
 
 
 class _UnsupportedIntracellularContext(IntracellularContext):
@@ -108,23 +105,7 @@ def test_prepare_membrane_runtime_reuses_static_runtime_for_same_signature():
     assert second is first
 
 
-def test_rattay_numpy_initial_gates_match_channel_model():
-    model = RattayAberhamICM(celsius=37.0)
-
-    for vm0 in (-80.0, -70.0, -55.0):
-        actual = _rattay_initial_gates_numpy(
-            model,
-            vm0_mV=vm0,
-            dtype=np.dtype(np.float32),
-        )
-        expected = np.asarray(
-            model.init_gates(jnp.asarray([vm0], dtype=jnp.float32))[0],
-            dtype=np.float32,
-        )
-        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-7)
-
-
-def test_prepare_rattay_composite_initial_state_uses_host_fast_path():
+def test_prepare_rattay_initial_state_uses_generic_membrane_backend():
     axon = axs.axons.RattayAberham(
         length=500.0 * axs.um,
         diameter=0.8 * axs.um,
@@ -132,21 +113,15 @@ def test_prepare_rattay_composite_initial_state_uses_host_fast_path():
     )
     runtime = prepare_membrane_runtime(axon)
 
-    assert isinstance(runtime.membrane, CompositeICM)
-    prepared = _try_prepare_uniform_rattay_initial_arrays(
-        axon,
-        runtime.membrane,
-        runtime.backend,
-        nx=runtime.Nx,
-        dtype_local=runtime.dtype,
+    assert isinstance(runtime.membrane, JaxMembraneProgram)
+    assert runtime.observable_names["currents"] == ("I_na", "I_k", "I_l")
+    assert runtime.observable_names["conductances"] == ("g_na", "g_k", "g_l")
+    np.testing.assert_allclose(
+        np.asarray(runtime.gates0),
+        np.asarray(runtime.membrane.init_gates(runtime.Vm0_mV)),
+        rtol=2e-6,
+        atol=2e-7,
     )
-
-    assert prepared is not None
-    vm0, gates0, state0, background = prepared
-    np.testing.assert_allclose(np.asarray(vm0), np.asarray(runtime.Vm0_mV))
-    np.testing.assert_allclose(np.asarray(gates0), np.asarray(runtime.gates0))
-    assert state0 == ()
-    np.testing.assert_allclose(np.asarray(background), np.asarray(runtime.background_current))
 
 
 def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_axon():
@@ -244,16 +219,16 @@ def test_prepare_membrane_runtime_keeps_initial_voltage_in_cache_key():
 
 
 def test_membrane_dtype_participates_in_static_and_runtime_cache_identity():
-    membrane32 = axs.membranes.MembraneModel(
-        "passive",
-        {"Rm": 1e4, "EL": -70.0},
+    membrane32 = axs.membranes.Passive(
+        Rm=1e4,
+        EL=-70.0,
         dtype=np.float32,
-    )
-    membrane64 = axs.membranes.MembraneModel(
-        "passive",
-        {"Rm": 1e4, "EL": -70.0},
+    ).to_membrane_model()
+    membrane64 = axs.membranes.Passive(
+        Rm=1e4,
+        EL=-70.0,
         dtype=np.float64,
-    )
+    ).to_membrane_model()
     assert membrane32._static_signature() != membrane64._static_signature()
 
     axon32 = Axon(
@@ -367,7 +342,7 @@ def test_intracellular_runtime_rejects_unknown_context_with_clear_error():
         prepare_solver_runtime(axon, tsim_ms=1.0, dt_ms=0.1)
 
 
-def test_compile_extracellular_contexts_returns_callable_collection():
+def test_compile_extracellular_stimulations_returns_callable_collection():
     axon = AxonInstance(
         HodgkinHuxley(
             length=300.0 * axs.um,
@@ -384,9 +359,9 @@ def test_compile_extracellular_contexts_returns_callable_collection():
     stim = Stimulus.pulse(start=0.2 * axs.ms, duration=0.1 * axs.ms, amplitude=10e-6)
     _attach_point_source_stimulation(axon, electrode, stim)
 
-    compiled = compile_extracellular_contexts(axon)
+    compiled = compile_extracellular_stimulations(axon)
 
-    assert isinstance(compiled, CompiledExtracellularContexts)
+    assert isinstance(compiled, CompiledExtracellularStimulations)
     assert compiled.n_compartments == axon.n_compartments
     assert np.asarray(compiled(0.25)).max() > 0.0
 
@@ -464,7 +439,7 @@ def test_prepare_solver_runtime_precomputes_extracellular_step_potentials():
             layout=Layout.single_uniform(
                 Section(
                     "axon",
-                    membrane=PassiveICM(Rm=1e4, EL=-70.0),
+                    membrane=axs.membranes.Passive(Rm=1e4, EL=-70.0),
                     diameter=units.Q_(1.0, "micrometer"),
                 ),
                 length=units.Q_(300.0, "micrometer"),

@@ -27,6 +27,11 @@ def _unit_pair(voltage_unit: Any, current_unit: Any) -> str:
     return f"{voltage} / {current}"
 
 
+def _unit_text(unit: Any) -> str:
+    label = units.unit_label(unit) or str(unit)
+    return units.short_unit_label(label) or label
+
+
 @dataclass(frozen=True, kw_only=True)
 class ExtracellularFootprint:
     """Static extracellular transfer profile.
@@ -186,6 +191,47 @@ class ExtracellularFootprint:
             and np.allclose(self.positions_um, other.positions_um)
         )
 
+    def plot(
+        self,
+        ax: Any | None = None,
+        *,
+        position_unit: Any = "micrometer",
+        voltage_unit: Any = "millivolt",
+        current_unit: Any = "microampere",
+        axon_id: AxonId | None = None,
+        label: str | None = None,
+        title: str = "Extracellular footprint",
+        grid: bool = True,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Plot this static voltage-per-current footprint."""
+
+        if ax is None:
+            import matplotlib.pyplot as plt
+
+            _, ax = plt.subplots()
+
+        x = self.position_values(unit=position_unit)
+        y = self.value_values(
+            voltage_unit=voltage_unit,
+            current_unit=current_unit,
+            axon_id=axon_id,
+        )
+        if label is None:
+            label = self.source_id
+        if label is not None:
+            plot_kwargs.setdefault("label", label)
+        plot_kwargs.setdefault("linewidth", 2.0)
+        ax.plot(x, y, **plot_kwargs)
+        ax.set_title(title)
+        ax.set_xlabel(f"Position [{_unit_text(position_unit)}]")
+        ax.set_ylabel(f"Footprint [{_unit_text(voltage_unit)}/{_unit_text(current_unit)}]")
+        if grid:
+            ax.grid(True, alpha=0.3)
+        if label is not None:
+            ax.legend(frameon=False)
+        return ax
+
 
 @dataclass(frozen=True, kw_only=True)
 class ExtracellularDrive:
@@ -227,6 +273,33 @@ class ExtracellularDrive:
         values_V = current_A[:, None] * footprint[None, :]
         unit_label = units.unit_label(voltage_unit) or "volt"
         return units.to_array(units.Q_(values_V, "volt"), unit_label, dtype=float)
+
+    def plot_footprint(
+        self,
+        ax: Any | None = None,
+        *,
+        position_unit: Any = "micrometer",
+        voltage_unit: Any = "millivolt",
+        current_unit: Any = "microampere",
+        axon_id: AxonId | None = None,
+        label: str | None = None,
+        title: str = "Extracellular footprint",
+        grid: bool = True,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Plot the static footprint used by this drive."""
+
+        return self.footprint.plot(
+            ax=ax,
+            position_unit=position_unit,
+            voltage_unit=voltage_unit,
+            current_unit=current_unit,
+            axon_id=axon_id,
+            label=str(self.id) if label is None else label,
+            title=title,
+            grid=grid,
+            **plot_kwargs,
+        )
 
 
 @dataclass(frozen=True)
@@ -367,6 +440,65 @@ class ExtracellularStimulation:
             metadata={} if metadata is None else metadata,
         )
 
+    def plot_footprints(
+        self,
+        ax: Any | None = None,
+        *,
+        position_unit: Any = "micrometer",
+        voltage_unit: Any = "millivolt",
+        current_unit: Any = "microampere",
+        axon_id: AxonId | None = None,
+        title: str = "Extracellular footprints",
+        grid: bool = True,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Plot all static footprints in this stimulation."""
+
+        if ax is None:
+            import matplotlib.pyplot as plt
+
+            _, ax = plt.subplots()
+
+        for drive in self.drives:
+            drive.plot_footprint(
+                ax=ax,
+                position_unit=position_unit,
+                voltage_unit=voltage_unit,
+                current_unit=current_unit,
+                axon_id=axon_id,
+                label=str(drive.id),
+                title=title,
+                grid=grid,
+                **plot_kwargs,
+            )
+        ax.set_title(title)
+        return ax
+
+    def plot_potential(
+        self,
+        t: ArrayLike,
+        ax: Any | None = None,
+        *,
+        axon_id: AxonId | None = None,
+        time_unit: Any = "millisecond",
+        position_unit: Any = "micrometer",
+        voltage_unit: Any = "millivolt",
+        title: str = "Extracellular potential",
+        colorbar: bool = True,
+        **imshow_kwargs: Any,
+    ) -> Any:
+        """Materialize and plot the summed extracellular potential."""
+
+        return self.potential(t, axon_id=axon_id, voltage_unit=voltage_unit).plot(
+            ax=ax,
+            time_unit=time_unit,
+            position_unit=position_unit,
+            voltage_unit=voltage_unit,
+            title=title,
+            colorbar=colorbar,
+            **imshow_kwargs,
+        )
+
 
 @dataclass(frozen=True, kw_only=True)
 class ExtracellularPotential:
@@ -425,6 +557,53 @@ class ExtracellularPotential:
 
         unit_label = units.unit_label(voltage_unit) or "volt"
         return units.to_array(units.Q_(self.values_V, "volt"), unit_label, dtype=float)
+
+    def plot(
+        self,
+        ax: Any | None = None,
+        *,
+        axon_index: int = 0,
+        time_unit: Any = "millisecond",
+        position_unit: Any = "micrometer",
+        voltage_unit: Any = "millivolt",
+        title: str = "Extracellular potential",
+        colorbar: bool = True,
+        **imshow_kwargs: Any,
+    ) -> Any:
+        """Plot this dense Vext materialization as a time-space map."""
+
+        if ax is None:
+            import matplotlib.pyplot as plt
+
+            _, ax = plt.subplots()
+
+        values = self.value_values(voltage_unit=voltage_unit)
+        if values.ndim == 3:
+            axon_index = int(axon_index)
+            if axon_index < 0 or axon_index >= values.shape[0]:
+                raise IndexError(
+                    f"axon_index {axon_index} is outside potential rows 0..{values.shape[0] - 1}."
+                )
+            values = values[axon_index]
+        if values.ndim != 2:
+            raise ValueError("ExtracellularPotential values must be 2D or 3D.")
+
+        t = self.time_values(unit=time_unit)
+        x = self.position_values(unit=position_unit)
+        imshow_kwargs.setdefault("aspect", "auto")
+        imshow_kwargs.setdefault("origin", "lower")
+        imshow_kwargs.setdefault("cmap", "coolwarm")
+        image = ax.imshow(
+            values.T,
+            extent=[float(t[0]), float(t[-1]), float(x[0]), float(x[-1])],
+            **imshow_kwargs,
+        )
+        ax.set_title(title)
+        ax.set_xlabel(f"Time [{_unit_text(time_unit)}]")
+        ax.set_ylabel(f"Position [{_unit_text(position_unit)}]")
+        if colorbar:
+            ax.figure.colorbar(image, ax=ax, label=f"Vext [{_unit_text(voltage_unit)}]")
+        return ax
 
 
 __all__ = [

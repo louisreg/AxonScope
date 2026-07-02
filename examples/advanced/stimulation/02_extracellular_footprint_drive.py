@@ -85,26 +85,21 @@ def main() -> None:
     print(f"dense potential: {potential.value_values(voltage_unit=axs.mV).shape}")
 
     # Step 8: plot the static fields and the final summed time-space map.
-    x_um = cathode_footprint.position_values(unit=axs.um)
     fig, (ax_static, ax_dynamic) = plt.subplots(1, 2, figsize=(10, 3.5))
-    ax_static.plot(x_um, cathode_footprint.value_values(voltage_unit=axs.mV, current_unit=axs.uA), label="cathode")
-    ax_static.plot(x_um, anode_footprint.value_values(voltage_unit=axs.mV, current_unit=axs.uA), label="anode")
-    ax_static.set_title("Static footprints")
-    ax_static.set_xlabel("Position [um]")
-    ax_static.set_ylabel("Footprint [mV/uA]")
-    ax_static.grid(True, alpha=0.3)
-    ax_static.legend(frameon=False)
-
-    ax_dynamic.imshow(
-        vext_mV.T,
-        aspect="auto",
-        origin="lower",
-        extent=[0.0, 2.0, x_um[0], x_um[-1]],
-        cmap="coolwarm",
+    extracellular.plot_footprints(
+        ax=ax_static,
+        position_unit=axs.um,
+        voltage_unit=axs.mV,
+        current_unit=axs.uA,
+        title="Static footprints",
     )
-    ax_dynamic.set_title("Summed Vext")
-    ax_dynamic.set_xlabel("Time [ms]")
-    ax_dynamic.set_ylabel("Position [um]")
+    potential.plot(
+        ax=ax_dynamic,
+        time_unit=axs.ms,
+        position_unit=axs.um,
+        voltage_unit=axs.mV,
+        title="Summed Vext",
+    )
     fig.tight_layout()
     plt.show()
 

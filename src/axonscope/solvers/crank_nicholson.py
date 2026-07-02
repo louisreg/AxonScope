@@ -7,7 +7,7 @@ from typing import Any
 from axonscope.backends.jax.scalar_runner import run_jax_crank_nicholson
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
-from axonscope.results.single import SimResult
+from axonscope.solvers._outputs import SolverOutput
 from axonscope.timebase import resolve_time_args
 
 from .base import Solver
@@ -31,7 +31,7 @@ class CrankNicholson(Solver):
         record_observables: bool = False,
         record_voltage: bool = True,
         observers: tuple[Any, ...] | None = None,
-    ) -> SimResult:
+    ) -> SolverOutput:
         """Execute a Crank-Nicholson simulation."""
 
         simulation = as_axon_instance(axon)
@@ -47,7 +47,7 @@ class CrankNicholson(Solver):
             record_voltage=record_voltage,
             observers=observers,
         )
-        return SimResult(
+        return SolverOutput(
             simulation.axon,
             out.Vm,
             out.t,

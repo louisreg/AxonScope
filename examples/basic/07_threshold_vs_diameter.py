@@ -121,7 +121,7 @@ def main() -> None:
             sim.add_extracellular_stimulation(stimulation=extracellular)
             rattay_pool.append(sim)
 
-        rattay_curve = axs.protocols.find_activation_threshold_curve(
+        rattay_curve = axs.protocols.find_threshold(
             tuple(rattay_pool),
             rows=rattay_diameters,
             update=lambda sim, current, pw=pulse_width: update_point_source_current(
@@ -146,14 +146,13 @@ def main() -> None:
         results["Rattay-Aberham"][pulse_us] = rattay_curve
 
         print(f"\n=== Rattay-Aberham, PW={pulse_us:.0f} us ===")
-        for diameter, threshold_uA, status in zip(
-            rattay_diameters.to(axs.um).magnitude,
-            rattay_curve.threshold_uA,
-            rattay_curve.status,
-            strict=True,
-        ):
-            value = "outside range" if np.isnan(threshold_uA) else f"{threshold_uA:.1f} uA"
-            print(f"d={diameter:>5.2f} um: {value:>14s} ({status})")
+        print(
+            rattay_curve.to_dataframe(
+                row_name="diameter_um",
+                row_unit=axs.um,
+                threshold_unit=axs.uA,
+            ).to_string(index=False)
+        )
 
         # Build the myelinated pool. Each diameter has its own MRG internode
         # spacing, so the electrode is aligned to each row's central Ranvier node.
@@ -186,7 +185,7 @@ def main() -> None:
             mrg_pool.append(sim)
 
         mrg_node_indices = tuple(int(value) for value in mrg_pool[0].node_indices)
-        mrg_curve = axs.protocols.find_activation_threshold_curve(
+        mrg_curve = axs.protocols.find_threshold(
             tuple(mrg_pool),
             rows=mrg_diameters,
             update=lambda sim, current, pw=pulse_width: update_point_source_current(
@@ -209,14 +208,13 @@ def main() -> None:
         results["MRG"][pulse_us] = mrg_curve
 
         print(f"\n=== MRG, PW={pulse_us:.0f} us ===")
-        for diameter, threshold_uA, status in zip(
-            mrg_diameters.to(axs.um).magnitude,
-            mrg_curve.threshold_uA,
-            mrg_curve.status,
-            strict=True,
-        ):
-            value = "outside range" if np.isnan(threshold_uA) else f"{threshold_uA:.1f} uA"
-            print(f"d={diameter:>5.2f} um: {value:>14s} ({status})")
+        print(
+            mrg_curve.to_dataframe(
+                row_name="diameter_um",
+                row_unit=axs.um,
+                threshold_unit=axs.uA,
+            ).to_string(index=False)
+        )
 
     # The plotting block deliberately reads from the same `results` dictionary
     # created above, so users can see the shape of the protocol output.

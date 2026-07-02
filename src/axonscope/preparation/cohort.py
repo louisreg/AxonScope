@@ -9,10 +9,10 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.preparation.runtime_batches import (
-    extracellular_context_rows,
+    extracellular_stimulation_rows,
 )
 from axonscope.solvers.axon_runtime import SolverAxon
-from axonscope.stimulation import ExtracellularContext
+from axonscope.stimulation import ExtracellularStimulation
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class PreparedCohort:
     representative: AxonInstance
     axons: tuple[AxonInstance, ...]
     solver_axons: tuple[SolverAxon, ...]
-    contexts: tuple[tuple[ExtracellularContext, ...], ...]
+    stimulations: tuple[tuple[ExtracellularStimulation, ...], ...]
     x_positions_m: np.ndarray
     axon_y_um: np.ndarray
     axon_z_um: np.ndarray
@@ -41,7 +41,7 @@ class PreparedCohort:
         axons = tuple(item.simulation for item in items)
         solver_axons = tuple(item.solver_axon for item in items)
         representative = _representative_simulation(items, int(group.nx))
-        contexts = extracellular_context_rows(axons)
+        stimulations = extracellular_stimulation_rows(axons)
         x_positions = _x_positions_from_solver_axons_m(
             axons,
             solver_axons,
@@ -59,17 +59,17 @@ class PreparedCohort:
             representative=representative,
             axons=axons,
             solver_axons=solver_axons,
-            contexts=contexts,
+            stimulations=stimulations,
             x_positions_m=x_positions,
             axon_y_um=axon_y_um,
             axon_z_um=axon_z_um,
         )
 
     @property
-    def context_count(self) -> int:
-        """Number of enabled extracellular contexts in the cohort."""
+    def extracellular_stimulation_count(self) -> int:
+        """Number of enabled extracellular stimulations in the cohort."""
 
-        return sum(len(row) for row in self.contexts)
+        return sum(len(row) for row in self.stimulations)
 
 
 def _representative_simulation(items: tuple[Any, ...], nx: int) -> AxonInstance:

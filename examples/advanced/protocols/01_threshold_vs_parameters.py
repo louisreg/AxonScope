@@ -162,7 +162,7 @@ def main() -> None:
             pool.append(simulation)
 
         # Step 7: batched threshold search returns one threshold per row.
-        curve = axs.protocols.find_activation_threshold_curve(
+        curve = axs.protocols.find_threshold(
             tuple(pool),
             rows=diameters,
             update=lambda sim, current, name=waveform: update_point_source_current(
@@ -186,14 +186,12 @@ def main() -> None:
         preview_stimuli[waveform] = build_waveform_stimulus(waveform, preview_current)
 
         print(f"\n=== Rattay-Aberham threshold: {waveform} ===")
-        for diameter_um, threshold_uA, status in zip(
-            diameters_um,
-            curve.threshold_uA,
-            curve.status,
-            strict=True,
-        ):
-            value = "outside range" if np.isnan(threshold_uA) else f"{threshold_uA:.1f} uA"
-            print(f"d={diameter_um:>4.1f} um: {value:>14s} ({status})")
+        summary = curve.to_dataframe(
+            row_name="diameter_um",
+            row_unit=axs.um,
+            threshold_unit=axs.uA,
+        )
+        print(summary.to_string(index=False))
 
     # Step 8: plot the waveform shapes and threshold curves together so users can
     # connect the temporal drive to the activation boundary.

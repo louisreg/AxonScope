@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.results.single import SimResult
+from tests.helpers import FakeSingleAxonResult
 
 
 class FakeQuantity:
@@ -27,6 +27,7 @@ class FakeQuantity:
             ("siemens / centimeter ** 2", "siemens / centimeter ** 2"): 1.0,
             ("millisiemens / centimeter ** 2", "siemens / centimeter ** 2"): 1e-3,
             ("milliampere / centimeter ** 2", "milliampere / centimeter ** 2"): 1.0,
+            ("milliampere / centimeter ** 2", "microampere / centimeter ** 2"): 1000.0,
             ("millimolar", "millimolar"): 1.0,
             ("megaohm / centimeter", "megaohm / centimeter"): 1.0,
         }
@@ -171,7 +172,7 @@ def test_analysis_accepts_quantity_like_thresholds():
     t = np.linspace(0.0, 10.0, 1001)
     vm = np.zeros((t.shape[0], 2)) - 70.0
     vm[:, 1] += np.exp(-0.5 * ((t - 5.0) / 0.1) ** 2) * 100.0
-    result = SimResult(axon=DummyAxon(), Vm=vm, t=t)
+    result = FakeSingleAxonResult(axon=DummyAxon(), Vm=vm, t=t)
 
     spike_t_ms, spike_x_um = axs.analysis.rasterize(
         result,
@@ -307,7 +308,7 @@ def test_membrane_templates_normalize_quantity_like_parameters():
         ena=FakeQuantity(0.05, "volt"),
         celsius=FakeQuantity(6.3, "degree_Celsius"),
     )
-    assert hh.params["gnabar"] == 0.12
+    assert hh.params["gnabar"] == 120.0
     assert hh.params["ena"] == 50.0
     assert hh.params["celsius"] == 6.3
 
@@ -325,7 +326,8 @@ def test_membrane_templates_normalize_quantity_like_parameters():
         pump_ko=FakeQuantity(5.6, "millimolar"),
     )
     assert tigerholm.params["diameter_um"] == 1200.0
-    assert tigerholm.params["gbar_nav17"] == pytest.approx(0.10664)
+    assert tigerholm.params["gbar_nav17"] == pytest.approx(106.64)
+    assert tigerholm.params["pump_smalla"] == pytest.approx(-4.7891)
     assert tigerholm.params["pump_ko"] == 5.6
 
 

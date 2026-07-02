@@ -3,8 +3,8 @@ import pytest
 
 import axonscope as axs
 from axonscope.results import AxonSimulationResult
-from axonscope.results.pool import CohortResult
-from axonscope.results.single import SimResult
+from axonscope.results.pool import _ResultBlock
+from tests.helpers import FakeSingleAxonResult
 
 
 class _DummyLayout:
@@ -23,14 +23,18 @@ class _DummyAxon:
         self.layout = _DummyLayout(positions_um)
 
 
-def _fake_result(*, second_peak: bool = True, include_vm: bool = True) -> SimResult:
+def _fake_result(
+    *,
+    second_peak: bool = True,
+    include_vm: bool = True,
+) -> FakeSingleAxonResult:
     t = np.linspace(0.0, 50.0, 5001)
     vm = np.full((len(t), 3), -70.0)
     vm[:, 0] += np.exp(-0.5 * ((t - 10.0) / 0.5) ** 2) * 80.0
     if second_peak:
         vm[:, 1] += np.exp(-0.5 * ((t - 30.0) / 0.5) ** 2) * 80.0
     recordings = {"Vm": vm} if include_vm else {"gates": np.zeros((len(t), 3, 1))}
-    return SimResult(
+    return FakeSingleAxonResult(
         axon=_DummyAxon([0.0, 500.0, 1000.0]),
         t=t,
         recordings=recordings,
@@ -40,7 +44,7 @@ def _fake_result(*, second_peak: bool = True, include_vm: bool = True) -> SimRes
 def _fake_pool_result() -> AxonSimulationResult:
     active = _fake_result(second_peak=True)
     silent_distal = _fake_result(second_peak=False)
-    cohort = CohortResult(
+    cohort = _ResultBlock(
         input_indices=(0, 1),
         axons=(active.axon, silent_distal.axon),
         simulations=(None, None),
@@ -69,6 +73,7 @@ def test_activation_definition_declares_requirements_and_statuses():
     analyzed = definition.evaluate(result)
 
     assert analyzed.name == "activation"
+    assert analyzed.row_label == 0
     assert analyzed.status is axs.analysis.AnalysisStatus.VALID
     assert analyzed.value is True
     assert analyzed.events[0].first_index == 1
@@ -95,6 +100,51 @@ def test_result_analyze_returns_report_with_population_denominators():
     assert report["activation"].population.n_valid == 2
     np.testing.assert_array_equal(report["activation"].values, [True, False])
     np.testing.assert_allclose(report["peak_voltage"].values, [10.0, -70.0], atol=1e-6)
+
+
+def test_analysis_report_views_format_dataframe_and_plot(capsys):
+    result = _fake_pool_result()
+    report = result.report(
+        axs.analysis.Activation(threshold=0.0 * axs.mV, target=axs.positions.CENTER),
+        axs.analysis.PeakVoltage(target=axs.positions.CENTER),
+    )
+
+    text = report.format()
+    rows = axs.analysis.views.analysis_report_rows(report)
+    dataframe = report.to_dataframe()
+
+    assert "AxonScope analysis report" in text
+    assert report.rows() == rows
+    assert report["activation"].rows() == axs.analysis.views.analysis_result_rows(
+        report["activation"]
+    )
+    assert rows[0]["analysis"] == "activation"
+    assert rows[0]["row_label"] == 0
+    assert set(dataframe["analysis"]) == {"activation", "peak_voltage"}
+    assert list(dataframe["row"]) == [0, 1, 0, 1]
+    report["activation"].print()
+    assert "activation" in capsys.readouterr().out
+
+    import matplotlib.pyplot as plt
+
+    _, ax = plt.subplots()
+    returned = report.plot(ax=ax)
+    assert returned is ax
+    assert len(ax.lines) == 2
+    _, result_ax = plt.subplots()
+    returned_result = report["peak_voltage"].plot(
+        ax=result_ax,
+        x=np.asarray([0.0, 1.0]),
+        x_label="dose",
+    )
+    assert returned_result is result_ax
+    assert len(result_ax.lines) == 1
+    returned_result = report["peak_voltage"].plot(
+        x_unit=None,
+        x_label="row label",
+    )
+    assert returned_result.get_xlabel() == "row label"
+    plt.close("all")
 
 
 def test_analysis_missing_input_is_reported_per_row():

@@ -33,7 +33,6 @@ from axonscope.analysis import (
     PeakVoltageObserver,
     SpikeCount,
 )
-from axonscope.stimulation import AnalyticalElectrode, Electrode
 from axonscope.axon_instance import AxonInstance
 from axonscope.benchmarking import (
     BenchmarkReport,
@@ -51,13 +50,13 @@ from axonscope.inspection import (
     KernelInspection,
     LoweringInspection,
     MemoryInspection,
+    MembraneSourceInspection,
     PaddingInspection,
     PlanningInspection,
     ProbeInspection,
     PreparationInspection,
     ResultAssemblyInspection,
     SimulationInspection,
-    inspect_simulation,
 )
 from axonscope.performance import (
     Device,
@@ -66,7 +65,7 @@ from axonscope.performance import (
     PrecisionPolicy,
     Runtime,
     SimulationEstimate,
-    estimate_simulation,
+    SimulationEstimateGroup,
 )
 from axonscope.population import AxonPopulation
 from axonscope.results import (
@@ -81,24 +80,21 @@ from axonscope.results import (
 )
 from axonscope.recording import Recording, RecordingPlan, RecordingSpatial
 from axonscope.signals import Signal
-from axonscope.simulation import AxonSimulation, simulate, simulate_pool
+from axonscope.simulation import AxonSimulation
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
     DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
+    RateTableConfig,
     SolverOptions,
 )
 from axonscope.stimulation import (
-    AnalyticalExtracellularContext,
-    ExtracellularContext,
     ExtracellularDrive,
     ExtracellularFootprint,
     ExtracellularPotential,
     ExtracellularStimulation,
-    ExtracellularStimulationContext,
     IntracellularContext,
     IntracellularCurrentClamp,
-    NRVExtracellularContext,
 )
 from axonscope.stimulation import Stimulus
 
@@ -190,20 +186,20 @@ __all__ = [
     "KernelInspection",
     "LoweringInspection",
     "MemoryInspection",
+    "MembraneSourceInspection",
     "PaddingInspection",
     "PlanningInspection",
     "ProbeInspection",
     "PreparationInspection",
     "ResultAssemblyInspection",
     "SimulationInspection",
-    "inspect_simulation",
     "Device",
     "ExecutionPolicy",
     "MemoryEstimateItem",
     "PrecisionPolicy",
     "Runtime",
     "SimulationEstimate",
-    "estimate_simulation",
+    "SimulationEstimateGroup",
     "AxonInstance",
     "BenchmarkReport",
     "BenchmarkSession",
@@ -214,28 +210,21 @@ __all__ = [
     "disable_benchmark",
     "enable_benchmark",
     "reset_benchmark",
-    "AnalyticalElectrode",
-    "AnalyticalExtracellularContext",
-    "Electrode",
     "BatchOptions",
     "BatchRecording",
     "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
+    "RateTableConfig",
     "SolverOptions",
-    "simulate",
-    "simulate_pool",
     "Recording",
     "RecordingPlan",
     "RecordingSpatial",
     "Signal",
     "IntracellularContext",
     "IntracellularCurrentClamp",
-    "ExtracellularContext",
     "ExtracellularDrive",
     "ExtracellularFootprint",
     "ExtracellularPotential",
     "ExtracellularStimulation",
-    "ExtracellularStimulationContext",
-    "NRVExtracellularContext",
     "VM_RASTER_OBSERVATION_KEY",
     "VmRasterResult",
     "AxonResultView",

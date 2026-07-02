@@ -1,6 +1,6 @@
 # AxonScope Architecture Guidelines
 
-Snapshot: 2026-06-23.
+Snapshot: 2026-06-29.
 
 This is the consolidated architecture reference for AxonScope. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
@@ -9,30 +9,52 @@ implementation source of truth for current behavior.
 
 Use this document to answer three questions:
 
-1. What product is AxonScope?
+1. What is AxonScope?
 2. Which concepts are public and stable?
 3. Where must solver/runtime/backend code live?
 
 Keep this file concise. Detailed experiment notes belong in `benchmark/`,
 `docs/`, or `ideas/`; active work belongs in `todo.md`; operational agent notes
-belong in `agent.md`.
+belong in `AGENTS.md`.
 
 ---
 
 # 1. Current Status
 
-AxonScope is still pre-release. Prefer a clean final design over compatibility
-with prototype APIs. Delete superseded paths rather than preserving aliases.
+AxonScope is still pre-release and currently has one active user. Prefer the
+clean final design over retrocompatibility, downstream migration paths,
+deprecated wrappers, argument aliases, or prototype APIs. Delete superseded
+paths rather than preserving shims.
 
 Current focus:
 
 - keep only retained solver routes in active runtime code;
 - preserve the public/runtime/backend boundary;
-- flatten public examples against the public API;
+- converge simulation, estimation, inspection, results, analyses, and plots on
+  one public workflow;
+- flatten public examples against the public API and make every public option
+  visible in examples or delete/archive it;
 - make runtime/device/precision policy executable;
 - make planning, batch/dispatch, preparation, lowering, execution, and result
   assembly inspectable;
-- keep benchmark/profiling experiments out of public tutorials.
+- keep benchmark/profiling experiments out of public tutorials while making the
+  supported benchmark surface documented and reproducible.
+- open the runtime-agnostic DSL/Model IR phase so membrane semantics, units,
+  states, parameters, gates, channels, and observables belong to AxonScope
+  rather than to JAX-shaped backend implementations.
+- keep membrane authoring user-facing: users define membrane models and
+  equations in ordinary Python source, not intermediate representations or
+  builder DSLs. Model IR is internal compiler vocabulary and must not become
+  required user knowledge.
+- keep built-in membrane model truth in `src/axonscope/membranes/models/`: each
+  model file owns its equations, unit-bearing defaults, public aliases, and
+  derived parameter logic. Public constructors, `model_ir`, solvers, and
+  backends must not duplicate model-family facts.
+- keep built-in axon templates out of model-parameter ownership. They may keep
+  ergonomic model-specific keyword arguments, but those arguments are forwarded
+  only to the membrane descriptor/source compiler. Axon templates must not own
+  model defaults, aliases, equations, derived parameter formulas, or unit
+  conversion contracts.
 
 ## 1.1 Phase Snapshot
 
@@ -43,7 +65,7 @@ Current focus:
 | 2 - Typed and extracellular contracts | Done | Typed signals, position selectors, cable formulation, identifiers, footprint/drive/stimulation objects. |
 | 2.5 - Hotpath evidence | Done | Opt-in benchmark spans, hotpath workload catalog, Colab GPU workflow. |
 | 3 - Planning and preparation | Done for current JAX path | Preparation signatures, prepared cohorts, footprint-oriented preparation. |
-| 4 - JAX isolation | Done for current boundary | Scalar and batch execution enter through `axonscope.backends.jax`; low-level kernels still need later ownership cleanup. |
+| 4 - JAX isolation | Done for current public execution path | Public entry points route through backend execution facades; dispatcher group execution does not import the JAX group runner directly. |
 | 5 - Canonical simulation results | Done | `AxonSimulationResult`, `AxonResultView`, `RecordingManifest`, `RecordedSignal`, internal dense storage blocks. |
 | 6 - Analyses | Done for current public layer | Real `axs.analysis`, definitions, requirements, statuses, reports, post-hoc helpers. |
 | 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
@@ -51,19 +73,20 @@ Current focus:
 | 7.6.1-7.6.2 - Hotpath/memory cleanup | Done for evidence layer | Sparse/zero inputs, compact observer outputs, runtime caches, chunking, profiler traces. |
 | 7.6.3 - Exact double-cable GPU solver | Closed | Retained choices: `auto`, `thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`. |
 | 7.6.4 - Pseudo-double validation | Standby | Harness exists under `benchmark/pseudo_double/`; not a public solver replacement. |
-| 7.6.5 - Execution envelope and Vext | In progress | Reduce prepare/dispatch/probe-plan rebuilds, dense/factorized Vext materialization, enqueue/result overhead. |
+| 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
 | 7.6.7 - VmRaster redesign | In progress | One strict threshold raster primitive, packed in solver, decoded post-hoc. |
-| 7.7 - Solver surface stabilization | In progress | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
-| 7.8 - Runtime policy and inspection | In progress | `ExecutionPolicy` controls JAX device/runtime; `inspect_simulation()` prints planning, dispatch, prepare, lowering, kernel, and result assembly. |
+| 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
+| 7.8 - Runtime policy and inspection | In progress | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; target inspection hangs from `AxonSimulation.inspect()` and explains planning, dispatch, prepare, lowering, kernel, and result assembly. |
+| 7.9 - Runtime-agnostic DSL and Model IR | Opened | Internally, `axonscope.model_ir` now owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users should only see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package; remaining P7 work is source/provenance diagnostics, generated-kernel cache polish, fusion optimization, and examples. `Runtime.NUMPY` stays reserved for the future reference solver runtime. |
+| 7.10 - NumPy/SciPy reference solver runtime | Planned | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route. |
 | 8 - Studies | Not started | Callable studies, reuse policies, retention policies, study results. |
-| 9 - Serialization and reference backend | Not started | Final schemas, NumPy reference backend, cross-backend validation. |
+| 9 - Serialization | Not started | Final schemas and persistence strategy. |
 
 ## 1.2 Active Gaps
 
-- Public execution returns one result model: `simulate(...)`, `simulate_pool(...)`,
-  and `AxonSimulation.run()` return `AxonSimulationResult`. One-axon access is
-  through `.single` or `[0]`.
+- Public execution uses one canonical workflow for one axon or 10,000 axons:
+  construct `AxonSimulation(...)`, then call `.run()`.
 - `Recording.to_plan()` now produces a backend-neutral `RecordingPlan`; the JAX
   backend lowers that plan to batch-kernel options. The remaining work is to
   broaden validation and move more result/observer boundaries out of solver
@@ -75,14 +98,24 @@ Current focus:
   Public planning, estimation, and inspection code must not import JAX-heavy
   solver numerical helpers for this contract.
 - `ExecutionPolicy` now resolves JAX device requests and validates uniform
-  precision. Precision participates in membrane/runtime cache identity; runtime
-  execution still rejects implicit casting instead of rebuilding models.
-- `inspect_simulation(...)` covers host-side planning, dispatch/batch,
-  preparation, input/observer/recording lowering, kernel routing, result
-  assembly, and detailed plots for padding, memory, probes, and assembly.
-- Factorized Vext is active for compatible static-footprint rows and remains an
-  internal lowering choice. Keep it behind dense-equivalence tests and
-  benchmark evidence.
+  precision. Runtime, device, and precision policy participate in JAX batch
+  runtime cache identity; runtime execution still rejects implicit casting
+  instead of rebuilding models.
+- `Runtime.NUMPY` is not an executable runtime yet. Passive, HH, and
+  Rattay-Aberham membrane semantics now run through Model IR with a NumPy
+  model-step oracle and JAX lowering, but a full NumPy/SciPy cable-solver
+  runtime is a separate later phase documented in `todo.md`.
+- `estimate()` and `inspect()` must follow the same public workflow as
+  execution. Prefer `AxonSimulation(...).estimate()` and
+  `AxonSimulation(...).inspect()` over a separate root helper.
+- Factorized `Vext`/`Iinj` is the active internal direction for compatible
+  static-footprint or compact-source rows. Keep it behind equivalence tests and
+  benchmark evidence, and remove dense internal routes when the factorized
+  route covers the behavior.
+- Benchmark modes, presets, flags, and names need a first-pass audit before the
+  benchmark layer is treated as product documentation. Each mode should be
+  active, validation-only, experimental, or archived; then document it or
+  remove it.
 
 ---
 
@@ -90,8 +123,11 @@ Current focus:
 
 ## 2.1 Pre-release Cleanup Policy
 
-Because AxonScope is not a stable deployed package, migrations should optimize
-for a clean final architecture.
+Because AxonScope is not a stable deployed package and currently has one active
+user, cleanup should optimize for a clean final architecture. Do not preserve
+retrocompatibility, downstream migration paths, compatibility aliases,
+deprecated wrappers, old argument names, or transition shims unless explicitly
+requested.
 
 Do:
 
@@ -100,6 +136,7 @@ Do:
 - delete superseded modules;
 - delete obsolete schemas and formats;
 - keep one implementation path per concept;
+- replace confusing interfaces directly;
 - add guardrails before risky cleanup.
 
 Do not accumulate:
@@ -107,13 +144,16 @@ Do not accumulate:
 - deprecated aliases;
 - compatibility wrappers;
 - forwarding modules;
+- migration shims;
+- downstream transition paths;
 - `Legacy*` classes;
 - duplicate scalar and population APIs;
 - duplicate result models;
 - obsolete benchmark readers;
 - temporary modules that become permanent.
 
-A migration is complete only when the replaced path is deleted.
+Cleanup is complete only when the replaced path is deleted and the examples,
+tests, docs, and guardrails teach only the retained design.
 
 ## 2.2 Product Boundary
 
@@ -251,7 +291,7 @@ geometry, electrode geometry, compiled arrays, or results.
 
 `AxonInstance` is one concrete occurrence of an `Axon`. It may contain an id,
 label, metadata, parameter overrides, initial-state overrides, and local
-intracellular or extracellular contexts.
+intracellular contexts plus an optional typed `ExtracellularStimulation`.
 
 It should not contain trajectory, electrode definitions, field geometry, or
 extracellular footprint generation logic.
@@ -264,9 +304,9 @@ details; public semantics are the same.
 
 ## 3.5 AxonSimulation
 
-`AxonSimulation` is the root executable object. It carries axons, duration,
-time step, recording, solver options, batch options, observers, execution
-policy, and progress settings.
+`AxonSimulation` is the root executable object and the target public workflow.
+It carries axons, duration, time step, recording, solver options, batch options
+where still needed, observers, execution policy, and progress settings.
 
 Accepted inputs normalize to a collection of `AxonInstance` rows:
 
@@ -291,6 +331,9 @@ analyze
 ```
 
 A single axon is the smallest population, not a separate product.
+
+`simulate(...)`, `simulate_pool(...)`, and similar root helpers are not public
+workflows. Do not reintroduce them as compatibility aliases.
 
 ---
 
@@ -398,7 +441,7 @@ Use:
 ```python
 axs.Runtime.AUTO
 axs.Runtime.JAX
-axs.Runtime.NUMPY
+axs.Runtime.NUMPY  # reserved until the future NumPy/SciPy reference solver runtime
 
 axs.Device.auto()
 axs.Device.cpu()
@@ -420,19 +463,23 @@ policy = axs.ExecutionPolicy(
     precision=axs.PrecisionPolicy.float32(),
 )
 
-result = axs.simulate(
-    simulation,
+simulation = axs.AxonSimulation(
+    axons=axon,
     duration=5 * axs.ms,
     dt=0.01 * axs.ms,
     execution_policy=policy,
 )
+
+result = simulation.run()
 single = result.single
 ```
 
 Current behavior:
 
 - `Runtime.AUTO` and `Runtime.JAX` are valid for execution;
-- `Runtime.NUMPY` is reserved for a future reference backend;
+- `Runtime.NUMPY` is reserved until the future NumPy/SciPy reference solver
+  runtime has executable behavior, docs, examples, estimates, inspection, and
+  tests; it must not be advertised as executable for current solves;
 - `Device.cpu()` and `Device.gpu(index=...)` resolve through the JAX backend or
   fail clearly;
 - uniform `float32` can execute when model dtypes match;
@@ -485,6 +532,19 @@ The solver or prepared forcing path performs the sum. The full tensor
 `Vext[axon, time, position]` must not be materialized by default when the
 footprint/drive structure is still available.
 
+The public solver-facing attachment path is exactly
+`ExtracellularFootprint` -> `ExtracellularDrive` ->
+`ExtracellularStimulation`. `ExtracellularPotential` may stay public only as an
+explicit dense imported/inspection/reference object; it is not an attachment
+API and must not become the default runtime lowering path.
+
+The old public context/electrode contract is not part of the active API.
+`Electrode`, `AnalyticalElectrode`, `ExtracellularContext`,
+`AnalyticalExtracellularContext`, `ExtracellularStimulationContext`, and
+`NRVExtracellularContext` are historical names only. Analytical point-source
+helpers may remain under `axs.analytical`, but they must produce sampled
+footprints, drives, or stimulations before solver execution.
+
 ## 5.2 ExtracellularFootprint
 
 `ExtracellularFootprint` is static and spatial. It contains no waveform and no
@@ -521,12 +581,14 @@ Immutable edits should return new objects:
 updated = extracellular.replace_drive(drive_id, stimulus=new_stimulus)
 ```
 
-## 5.5 Dense Fallback
+## 5.5 Dense Imported Potential
 
 A dense `ExtracellularPotential` remains useful for non-separable fields,
 imported external data, experimental potentials, and reference tests.
 
-It is a fallback, not the default performance representation. The planner or
+It is an explicit imported/inspection/reference object, not the default runtime
+lowering representation. Dense internal `Vext` or `Iinj` preparation routes
+should disappear once factorized equivalents cover the behavior. The planner or
 estimate path should warn when dense input memory is large.
 
 ## 5.6 External Geometry Contract
@@ -612,10 +674,20 @@ indexing, iteration, `.single`, `.signal(...)`, `recordings`, `recorded_axes`,
 Use:
 
 ```python
-run = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
+simulation = axs.AxonSimulation(
+    axons=axon,
+    duration=5 * axs.ms,
+    dt=0.01 * axs.ms,
+)
+run = simulation.run()
 result = run.single
 
-pool_run = axs.simulate_pool(pool, duration=5 * axs.ms, dt=0.01 * axs.ms)
+pool_simulation = axs.AxonSimulation(
+    axons=pool,
+    duration=5 * axs.ms,
+    dt=0.01 * axs.ms,
+)
+pool_run = pool_simulation.run()
 for row in pool_run:
     row.signal(axs.signals.Vm)
 ```
@@ -726,30 +798,33 @@ updates.
 Every major execution stage should be explainable without making diagnostics
 part of the hot path.
 
-Current public inspection:
+Target public inspection:
 
 ```python
-report = axs.inspect_simulation(
-    pool,
+simulation = axs.AxonSimulation(
+    axons=pool,
     duration=0.1 * axs.ms,
     dt=0.05 * axs.ms,
     execution_policy=policy,
 )
 
+report = simulation.inspect(print_summary=True)
 report.print()
 report.plot()
 report.plot_details()
-
-simulation.inspect(print_summary=True)
 ```
+
+Root inspection helpers should not be public paths. Keep inspection on
+`AxonSimulation.inspect()` so planning, estimate, lowering, and report objects
+share the same simulation definition.
 
 Current coverage:
 
 - planning;
 - dispatch/batch grouping;
 - prepared cohort shapes;
-- input lowering: dense/sparse/zero intracellular input, dense/factorized/zero
-  extracellular input;
+- input lowering: compact/factorized/zero intracellular input and
+  footprint/drive/factorized/explicit-dense extracellular input;
 - observer/recording lowering: retained Vm width and VmRaster/post-hoc route;
 - kernel routing: scalar or batch, cable formulation, block solver, chunks;
 - result assembly: compact cohort records, row records, observations, retained
@@ -821,7 +896,11 @@ Current boundary:
 - public simulation entry points call `axonscope.backends.execution`, which
   resolves the currently supported concrete backend without importing JAX
   adapters from `simulation.py`;
-- scalar and batch execution enter through `axonscope.backends.jax`;
+- scalar and batch execution enter concrete JAX code only through backend
+  execution facades;
+- dispatcher modules own planning, grouping, progress, and dispatch records,
+  but must not import `axonscope.backends.jax` or call the JAX group runner
+  directly;
 - fixed-step time-grid validation and solver time-argument normalization live
   in `axonscope.timebase`;
 - `axonscope.solvers` exports only the stable solver facade: solver base,
@@ -856,10 +935,12 @@ Do not expose pseudo-double, split iterative, associative-transfer, Pallas,
 Triton, JAX-Triton, CUDA FFI, or other custom-kernel candidates as public
 solver choices while they remain archived or standby evidence.
 
-`BatchOptions` and `BatchRecording` are currently public execution knobs for
-batch-kernel recording/chunking and retained solver selection. Public examples
-should import them from the root facade (`axs.BatchOptions`) rather than
-descending into `axs.solvers`.
+`BatchOptions` and `BatchRecording` are currently public advanced execution
+knobs for batch-kernel recording/chunking and retained solver selection.
+Public examples should import them from the root facade (`axs.BatchOptions`)
+rather than descending into `axs.solvers`. Longer term, replace public tuning
+exposure with a clearer execution/solver tuning surface and make
+`BatchRecording` internal once `Recording` covers the needed cases.
 
 `BatchOptions.none()` is the observer-only compact-output policy and defaults
 to `axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` to reduce cold JAX recompilation
@@ -868,21 +949,27 @@ chunk states back into the same public full-duration `VmRasterResult`; do not
 introduce a second public observer result shape. Explicit
 `time_chunk_steps=None` means unchunked.
 
-## 8.4 Factorized Vext
+## 8.4 Factorized Forcing
 
-Factorized Vext is an internal optimization. The active path is deliberately
-narrow:
+Factorized `Vext`/`Iinj` is an internal optimization direction, not a user
+mode. The active extracellular path is deliberately narrow:
 
 ```text
-current_mid_A[Nt]
-footprint_mV_per_A[B, Nx]
+current_mid_A[B, K, Nt]
+footprint_mV_per_A[B, K, Nx]
+Vstim[B, Nt, Nx] = sum_K current_mid_A * footprint_mV_per_A
 ```
 
-It is used for static-footprint single-cable VmRaster observer-only batches to
-avoid dense `Vstim[B, Nt, Nx]`.
+Squeezed rank-1 forms are allowed internally for one-drive/shared-current
+batches. The active compact path is used for static-footprint single-cable
+observer-only and recorded-Vm batches to avoid dense `Vstim[B, Nt, Nx]`.
 
-Do not expose factorized Vext as a public mode. Do not broaden it to
-double-cable without solver-equivalence tests and benchmark evidence.
+Do not expose dense/factorized as public modes. Do not keep dense internal
+preparation paths once the factorized route covers the same behavior. Do not
+silently fall back to dense `Vstim[B, Nt, Nx]` inside observer-only compact
+paths; reject unsupported stimulation shapes until a measured compact lowering
+exists. Do not broaden rank-K factorized extracellular forcing to double-cable
+without solver-equivalence tests and benchmark evidence.
 
 ## 8.5 Precision And Cache Identity
 
@@ -974,7 +1061,8 @@ Target ownership map:
 core/              units, errors, identifiers, enums, serialization helpers
 axons/             descriptive axons, sections, layouts, templates
 membranes/         runtime-independent membrane descriptions
-stimulation/       stimuli and intracellular contexts
+model_ir/          internal runtime-independent membrane semantics, validation, hashes, fusion contracts
+stimulation/       stimuli, intracellular clamps, and sampled stimulation objects
 extracellular/     footprints, drives, dense potentials, validation
 recording/         public recording specs and selectors
 signals/           typed signal descriptors and registry
@@ -993,7 +1081,7 @@ visualization/     plotting only
 Current code may still differ. Use this map to guide moves, not to justify
 empty directories.
 
-Migration reminders:
+Cleanup reminders:
 
 - move `dispatcher/plan.py` responsibilities toward `planning/`;
 - keep host-side runtime-batch row helpers in `preparation/runtime_batches.py`
@@ -1004,7 +1092,7 @@ Migration reminders:
 - keep public `recording.py` independent from solver options;
 - keep JAX membrane/solver implementation under `backends/jax`;
 - keep `solvers/` as a public facade for stable solver classes/options during
-  migration, not as a permanent catch-all for backend internals;
+  cleanup, not as a permanent catch-all for backend internals;
 - keep result-side VmRaster containers and CPU decoders out of solver modules.
 
 ---
@@ -1015,6 +1103,10 @@ Examples must:
 
 - use the public API directly;
 - avoid importing solver/backend internals in public tutorials;
+- document every public option, possibility, feature, runtime mode, inspection
+  view, analysis workflow, solver-facing user concept, and advanced knob. If a
+  feature is not worth describing in an executable example, remove or archive
+  it rather than leaving it as hidden public surface;
 - teach one concept per demo when possible;
 - write examples as executable teaching material, not as terse smoke snippets;
 - prefer a readable line-by-line flow with comments next to the relevant code;
@@ -1051,12 +1143,12 @@ Current didactic example organization:
 ```text
 examples/basic/
     compact first-pass scripts that show core AxonScope capabilities
-examples/advanced/object_model/
-    AxonSimulation, AxonPopulation, canonical pool results
+examples/advanced/simulation_workflow/
+    AxonSimulation, AxonPopulation, one/many execution, estimate/inspect/run
 examples/advanced/axon_models/
     layouts, custom axons, cable formulation
 examples/advanced/stimulation/
-    stimulation contexts, extracellular footprints, drives
+    intracellular clamps, extracellular footprints, drives, stimulations
 examples/advanced/recording_analysis/
     recording policies, typed signals/positions, analysis, VmRaster
 examples/advanced/protocols/
@@ -1071,6 +1163,10 @@ benchmark/
     profiling, CPU/GPU measurement, benchmark notebooks
 ```
 
+The old `examples/advanced/object_model/` name was too abstract. The retained
+folder is `examples/advanced/simulation_workflow/`; it teaches the one-path
+simulation model rather than a historical object taxonomy.
+
 When examples change, update together:
 
 - `examples/README.md`;
@@ -1081,26 +1177,67 @@ When examples change, update together:
 
 ---
 
-# 13. Testing And Acceptance Criteria
+# 13. Benchmark Surface
 
-## 13.1 Critical Test Classes
+Benchmark code is allowed to be richer and messier than tutorials while a
+performance question is being explored, but the supported benchmark surface must
+not be ambiguous.
+
+Before treating benchmark results as product evidence, audit:
+
+- CLI modes, presets, flags, and naming;
+- which scripts are active, validation-only, experimental, archived, or
+  generated output;
+- whether each active mode uses the retained public simulation, estimate,
+  inspection, recording, observer, and analysis APIs;
+- whether benchmark-only imports or private helpers are clearly contained under
+  `benchmark/`;
+- whether generated outputs live outside architecture/docs decisions.
+
+For every retained benchmark mode, document:
+
+- purpose and workload;
+- command line;
+- expected machine metadata: CPU, GPU, RAM, VRAM, driver/CUDA, JAX backend and
+  device, OS, Python, package versions, and important environment variables;
+- memory measurement strategy, including host profiler data where possible,
+  JAX/JAX-profiler data where relevant, and GPU VRAM reporting through
+  `jax-smi` or an equivalent tool when available;
+- JAX GPU memory behavior, including that JAX preallocates 75% of GPU VRAM by
+  default unless configured otherwise;
+- cold versus warm timing policy, cache hits/misses, `runtime.prepare`,
+  `kernel.dispatch_jax`, enqueue time, result assembly, and retained output
+  size when those claims matter.
+
+Remove or archive unclear benchmark modes instead of documenting around them.
+Do not make speed or memory claims from stale benchmark outputs.
+
+---
+
+# 14. Testing And Acceptance Criteria
+
+## 14.1 Critical Test Classes
 
 Guardrails should cover:
 
 - no JAX imports in public/descriptive layers;
+- no direct `dispatcher` imports from `axonscope.backends.jax`;
 - no geometry package dependency in core AxonScope;
 - no raw strings as preferred public API for closed/structured domains;
-- no legacy compatibility aliases;
+- no legacy compatibility aliases, migration shims, deprecated wrappers, or old
+  argument-name aliases;
 - public exports stay intentional;
 - standby solver candidates do not re-enter public options or active runtime
   helpers;
 - examples import or execute through public APIs;
-- factorized paths avoid dense `Vext` when promised;
+- every public option/feature/workflow has an executable example or is removed
+  or archived;
+- factorized paths avoid dense `Vext`/`Iinj` when promised;
 - observer-only paths do not retain full Vm unless requested;
 - online and post-hoc analyses are cross-validated;
 - stimulus-only updates reuse compatible static structures where implemented.
 
-## 13.2 Architecture Acceptance
+## 14.2 Architecture Acceptance
 
 Typed API:
 
@@ -1143,16 +1280,16 @@ Results and analyses:
 - VmRaster remains a strict packed runtime primitive surfaced through
   `VmRasterResult` and decoded into public analysis semantics.
 
-Migration:
+Cleanup:
 
 - obsolete modules are deleted;
-- forwarding compatibility aliases are removed;
+- forwarding compatibility aliases and transition shims are removed;
 - examples use public APIs directly;
 - scientific reference tests pass.
 
 ---
 
-# 14. Non-goals
+# 15. Non-goals
 
 Do not:
 
@@ -1163,11 +1300,14 @@ Do not:
 - pre-sum all drives before execution;
 - materialize `Vext[axon, time, position]` by default when footprint/drive
   structure is still available;
+- keep dense `Vext`/`Iinj` internal routes once factorized routes cover the
+  behavior;
 - create separate one-axon and population products;
 - conflate myelination and cable formulation;
 - merge analyses into raw numerical results;
 - expose backend arrays as public contracts;
-- preserve prototype compatibility;
+- preserve prototype compatibility, aliases, deprecated wrappers, or downstream
+  migration paths;
 - keep forwarding modules;
 - introduce a generic kernel IR before a real second backend;
 - create empty packages without responsibilities;
@@ -1175,7 +1315,7 @@ Do not:
 
 ---
 
-# 15. Final Target API Sketch
+# 16. Final Target API Sketch
 
 Build footprints outside AxonScope or with lightweight helpers:
 
@@ -1248,6 +1388,7 @@ AxonScope knows axons in intrinsic one-dimensional space, not nerve world space.
 External geometry packages provide spatial extracellular footprints.
 One ExtracellularDrive combines one footprint with one stimulus.
 ExtracellularStimulation aggregates all drives.
-The solver/prepared backend performs the drive sum without dense Vext by default.
+The solver/prepared backend performs forcing without dense `Vext`/`Iinj` by
+default whenever the factorized representation covers the behavior.
 Prototype APIs should be deleted once replaced.
 ```

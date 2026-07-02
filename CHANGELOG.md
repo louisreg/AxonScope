@@ -6,6 +6,94 @@ The format is inspired by Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- Made `AxonSimulation` the sole public execution, estimate, and inspection
+  entry point. User code should construct `AxonSimulation(...)` and call
+  `.run()`, `.estimate()`, or `.inspect()`.
+- Routed one-axon `AxonSimulation` runs through the same `AxonPopulation`,
+  dispatcher, and `AxonSimulationResult` lifecycle as populations. A single
+  fiber is now both `is_single` by cardinality and `is_population` by execution
+  lifecycle.
+- Reworked `AxonSimulation.estimate()` around dispatch-group estimates with
+  route, padding, recording width, observer output, retained bytes, and a
+  richer printable table.
+- Renamed pool progress completion output from dispatch-level wording to
+  simulation-run wording.
+- Moved the cold/warm progress probe to
+  `benchmark/hotpaths/cold_run_progress.py`, keeping benchmark spans out of
+  public examples while still pairing progress output with
+  `AxonSimulation.inspect()` and `AxonSimulation.estimate()`.
+- Completed the P0 extracellular naming audit: documented the
+  footprint/drive/stimulation attachment contract, kept `ExtracellularPotential`
+  as dense diagnostic/reference material only, and removed stale context wording
+  from active docs.
+- Replaced `axs.protocols.find_activation_threshold_curve(...)` with generic
+  `axs.protocols.find_threshold(...)`, supporting activation and conduction
+  block criteria plus observer-only `Recording.none()` execution.
+- Renamed `recruitment_sweep(..., amplitudes=...)` to
+  `recruitment_sweep(..., values=...)` so recruitment sweeps and threshold
+  searches share the same update/value vocabulary.
+- Split the former `protocols/activation.py` implementation into threshold,
+  recruitment, generic sweep, observer-path, progress, result, and value
+  modules while keeping `axonscope.protocols.activation` as a small facade.
+- Renamed advanced workflow examples from `examples/advanced/object_model/` to
+  `examples/advanced/simulation_workflow/`.
+- Expanded example coverage for recording probes, position selectors,
+  recruitment sweep batch options, non-uniform activation-function layouts, and
+  combined intracellular/extracellular stimulation.
+- Tightened and broadened the internal factorized `Vext` contract:
+  single-cable batches now support rank-K footprint/current lowering for
+  multi-drive stimulation, and recorded-Vm paths can consume the same compact
+  representation without materializing dense `Vstim[B,Nt,Nx]`.
+- Added a dedicated JAX input-lowering layer so batch runtime, inspection, and
+  performance estimates share the same dense/sparse/factorized input contract.
+- Added a dedicated JAX recording/observer-lowering layer so batch runtime,
+  inspection, and performance estimates share the same effective recording
+  options and VmRaster observer route.
+- Moved JAX batch result assembly into a dedicated module so `group_runner`
+  delegates trimming, compact cohort results, and post-hoc observer assembly.
+- Moved JAX double-cable shape bucketing and runtime/cohort cache storage out of
+  `group_runner` into dedicated backend modules.
+- Moved JAX runtime preparation and host-side stacking into a dedicated backend
+  module, leaving `group_runner` focused on batch orchestration.
+- Moved JAX batch benchmark metadata and memory-estimate helpers out of
+  `group_runner` into a dedicated backend metadata module.
+- Added effective backend execution context to JAX batch runtime cache identity
+  so runtime, device, and precision policy cannot reuse the wrong prepared
+  runtime.
+- Opened the runtime-agnostic DSL/Model IR phase and parked the public
+  NumPy/SciPy runtime until it has a real reference cable-solver execution
+  path. `Runtime.NUMPY` remains reserved rather than half-implemented.
+- Added the first internal `axonscope.model_ir` layer with symbolic expression
+  nodes, intrinsic declarations, immutable Model IR dataclasses, canonical
+  structural/parameterized hashes, semantic validation, Passive/HH/Rattay
+  adapters plus Sundt component and AxNode adapters, NumPy model-step
+  interpretation, JAX lowering, a `ModelIRMembrane` runtime adapter, and a
+  solver-facing fusion/pruning contract. Covered Passive, Hodgkin-Huxley,
+  Rattay-Aberham, Sundt, and AxNode public membranes now execute through Model
+  IR semantics without changing the public `AxonSimulation` API.
+- Kept the MRG AxNode/passive family batch fast path while feeding it with the
+  AxNode Model IR runtime adapter instead of the legacy `AxnodeICM` compiler
+  branch.
+- Composed Model IR-covered membrane components directly as one Model IR graph,
+  so covered `axs.membranes.Composite(...)` cases such as Rattay-Aberham plus
+  passive leak no longer route through legacy `CompositeICM`.
+- Added a top-level benchmark registry and README that classify active,
+  validation-only, experimental, archive, and generated-output benchmark
+  surfaces.
+- Expanded benchmark metadata with machine, package, JAX device, GPU/VRAM,
+  memory, and key runtime environment information.
+- Split simulation inspection into structured records, host-side builder, and
+  user-facing text/Rich/matplotlib views; refreshed the pipeline inspection
+  example with retained-Vm versus compact observer-only comparison plots.
+
+### Removed
+
+- Removed root-level `axs.simulate(...)`, `axs.simulate_pool(...)`,
+  `axs.estimate_simulation(...)`, and `axs.inspect_simulation(...)` public
+  helpers instead of keeping compatibility aliases.
+
 ### Added
 
 - Added backend-independent `Stimulus`, `IntracellularCurrentClamp`, and
@@ -66,7 +154,7 @@ The format is inspired by Keep a Changelog.
 - Added unit and NRV tests for extracellular stimulation, heterogeneous ICM
   backends, membrane dynamics delegation, MRG morphology, and MRG geometry.
 - Added runnable examples under `examples/basic/`.
-- Added `agent.md` to document project-specific development guidance and coding conventions.
+- Added `AGENTS.md` to document project-specific development guidance and coding conventions.
 - Added `colab_benchmark_cpu_vs_gpu.ipynb` for AxonScope CPU vs GPU benchmarking with JAX, AxonScope simulation workloads, and performance visualization.
 - Added Phase 0 architecture guardrail tests for the root guidelines reference,
   removed compatibility aliases/signatures, remaining raw-string public-domain
@@ -252,18 +340,18 @@ The format is inspired by Keep a Changelog.
 
 - Rewrote `README.md` as a short current API entry point and moved detailed
   batch, recording, validation, and benchmark contracts to dedicated docs.
-- Updated `agent.md` to require example updates for public API/workflow changes
+- Updated `AGENTS.md` to require example updates for public API/workflow changes
   and to prefer clean pre-release user interfaces over compatibility shims.
 - Registered root `GUIDELINES.md` as the project philosophy and master
-  product/solver architecture direction in `agent.md` and `todo.md`.
+  product/solver architecture direction in `AGENTS.md` and `todo.md`.
 - Expanded `todo.md` with the guideline-derived implementation queue through
   the object-model, typed API, extracellular footprint, planning, backend,
   result, analysis, performance, study, and serialization phases.
 - Consolidated the old benchmarking and CPU/GPU bottleneck idea documents into
   `todo.md` as the active benchmark/API cleanup plan.
-- Clarified in `GUIDELINES.md` and `agent.md` that each new advanced concept
+- Clarified in `GUIDELINES.md` and `AGENTS.md` that each new advanced concept
   or non-trivial workflow needs a runnable didactic demo in `examples/advanced/`.
-- Clarified in `agent.md` that examples should favor a line-by-line tutorial
+- Clarified in `AGENTS.md` that examples should favor a line-by-line tutorial
   flow with short comments over extra helper-function scaffolding.
 - Clarified that examples should be verbose, user-guiding demonstrations and
   should include useful plots whenever plots help connect signals, metrics,
@@ -335,9 +423,9 @@ The format is inspired by Keep a Changelog.
 - Updated simulation estimates so `Recording.none()` reports
   `recording_policy="none"` and zero retained Vm width.
 - Removed the direct JAX dependency from `simulation.py` recording filters.
-- Changed `simulate_pool(...)` to return an `AxonSimulationResult` instead of a
-  plain `list[SimResult]`, while keeping ergonomic indexing, iteration, and
-  per-axon result helpers through `AxonResultView`.
+- Changed pool execution to return an `AxonSimulationResult` instead of a plain
+  `list[SimResult]`, while keeping ergonomic indexing, iteration, and per-axon
+  result helpers through `AxonResultView`.
 - Changed public recording signals from a closed enum to descriptor objects
   under `axs.signals`; `axs.signals.Vm` now points to
   `axs.signals.MEMBRANE_VOLTAGE`.
@@ -359,8 +447,8 @@ The format is inspired by Keep a Changelog.
   analysis helpers; use `threshold_mV` and `min_distance_ms`.
 - Removed the `AxonInstance.intracellular_clamps` alias; use
   `intracellular_contexts`.
-- Removed `axs.run_batch`; use `axs.simulate_pool` as the single public pool
-  simulation wrapper.
+- Removed `axs.run_batch`; use `AxonSimulation([...]).run()` as the public pool
+  simulation workflow.
 - Changed public simulation wrappers to `duration`/`dt` keyword arguments and
   removed `duration_ms`/`dt_ms`/`tsim` compatibility names from that facade.
 - Removed `duration_ms`/`dt_ms` aliases from direct solver calls; use

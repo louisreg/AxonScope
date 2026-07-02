@@ -11,10 +11,110 @@ single-cable batch, one scalar fallback, and one padded double-cable batch.
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import numpy as np
 from rich.console import Console
 from rich.table import Table
 
 import axonscope as axs
+
+
+def _mib(values: list[int]) -> list[float]:
+    return [value / (1024**2) for value in values]
+
+
+def _observation_slots(report: axs.SimulationInspection) -> list[int]:
+    return [
+        0 if detail.observation_shape is None else int(np.prod(detail.observation_shape[1:]))
+        for detail in report.assembly_details
+    ]
+
+
+def _plot_report_comparison(
+    retained_report: axs.SimulationInspection,
+    compact_report: axs.SimulationInspection,
+) -> None:
+    labels = [str(group.group_id) for group in retained_report.dispatch_groups]
+    x = np.arange(len(labels))
+    width = 0.36
+
+    fig, axes = plt.subplots(2, 2, figsize=(13.0, 8.0), constrained_layout=True)
+    fig.suptitle("retained Vm versus compact observer-only inspection")
+    retained_report.plot(ax=axes[0, 0])
+    axes[0, 0].set_title("retained Vm route")
+    compact_report.plot(ax=axes[0, 1])
+    axes[0, 1].set_title("compact observer-only route")
+
+    memory_ax = axes[1, 0]
+    memory_ax.bar(
+        x - width / 2,
+        _mib([item.total_estimated_bytes for item in retained_report.memory]),
+        width=width,
+        label="retained Vm",
+    )
+    memory_ax.bar(
+        x + width / 2,
+        _mib([item.total_estimated_bytes for item in compact_report.memory]),
+        width=width,
+        label="compact observer-only",
+    )
+    memory_ax.set_title("estimated working memory")
+    memory_ax.set_xticks(x, labels)
+    memory_ax.set_xlabel("dispatch group")
+    memory_ax.set_ylabel("MiB")
+    memory_ax.grid(True, axis="y", alpha=0.3)
+    memory_ax.legend(frameon=False, fontsize=8)
+
+    output_ax = axes[1, 1]
+    output_ax.bar(
+        x - width / 2,
+        _mib([item.retained_public_bytes for item in retained_report.memory]),
+        width=width,
+        label="retained public",
+    )
+    output_ax.bar(
+        x + width / 2,
+        _mib([item.retained_public_bytes for item in compact_report.memory]),
+        width=width,
+        label="compact public",
+    )
+    output_ax.plot(
+        x,
+        _observation_slots(compact_report),
+        marker="o",
+        color="black",
+        linewidth=1.6,
+        label="compact observation slots",
+    )
+    output_ax.set_title("public output footprint")
+    output_ax.set_xticks(x, labels)
+    output_ax.set_xlabel("dispatch group")
+    output_ax.set_ylabel("MiB / slots")
+    output_ax.grid(True, axis="y", alpha=0.3)
+    output_ax.legend(frameon=False, fontsize=8)
+
+    details_fig, details_axes = plt.subplots(
+        2,
+        4,
+        figsize=(15.0, 7.0),
+        constrained_layout=True,
+    )
+    retained_report.plot_details(
+        axes=(
+            details_axes[0, 0],
+            details_axes[0, 1],
+            details_axes[1, 0],
+            details_axes[1, 1],
+        )
+    )
+    compact_report.plot_details(
+        axes=(
+            details_axes[0, 2],
+            details_axes[0, 3],
+            details_axes[1, 2],
+            details_axes[1, 3],
+        )
+    )
+    details_fig.suptitle("retained Vm details versus compact observer-only details")
 
 
 def main() -> None:
@@ -78,7 +178,7 @@ def main() -> None:
         )
         clamped_rows.append(axs.AxonInstance(axon))
 
-    retained_report = axs.inspect_simulation(
+    retained_simulation = axs.AxonSimulation(
         axs.AxonPopulation(clamped_rows),
         duration=duration,
         dt=dt,
@@ -86,10 +186,11 @@ def main() -> None:
         batch_options=axs.BatchOptions.full(time_chunk_steps=25),
         execution_policy=policy,
     )
+    retained_report = retained_simulation.inspect()
 
     # Step 3: build the same heterogeneous shape as an observer-only sampled
-    # extracellular pool. Compatible batch groups can keep Vext factorized and return compact
-    # VmRaster observations instead of retained Vm traces.
+    # extracellular pool. Compatible batch groups can keep Vext factorized and
+    # return compact VmRaster observations instead of retained Vm traces.
     stimulus = axs.Stimulus.pulse(
         start=0.20 * axs.ms,
         duration=0.20 * axs.ms,
@@ -141,7 +242,7 @@ def main() -> None:
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    compact_report = axs.inspect_simulation(
+    compact_simulation = axs.AxonSimulation(
         axs.AxonPopulation(extracellular_rows),
         duration=duration,
         dt=dt,
@@ -150,6 +251,7 @@ def main() -> None:
         batch_options=axs.BatchOptions.full(time_chunk_steps=25),
         execution_policy=policy,
     )
+    compact_report = compact_simulation.inspect()
 
     # Step 4: print the full retained report and a compact route comparison. The
     # same group IDs appear in both reports because the geometry mix is the same.
@@ -194,16 +296,10 @@ def main() -> None:
         )
     Console(width=120).print(comparison)
 
-    # Step 5: use the built-in inspection plots. `plot()` compares group route,
-    # spatial width, retained Vm width, and observation slots. `plot_details()`
-    # expands one report into padding, memory, probes, and result assembly.
-    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.2), constrained_layout=True)
-    retained_report.plot(ax=axes[0])
-    axes[0].set_title("retained Vm")
-    compact_report.plot(ax=axes[1])
-    axes[1].set_title("compact observer-only")
-
-    compact_report.plot_details()
+    # Step 5: compare both inspection records visually. `plot()` is a compact
+    # route summary; `plot_details()` expands padding, memory, probes, and public
+    # result assembly for each report.
+    _plot_report_comparison(retained_report, compact_report)
     plt.show()
 
 

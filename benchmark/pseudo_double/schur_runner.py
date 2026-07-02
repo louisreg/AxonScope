@@ -14,7 +14,7 @@ from jax.lax.linalg import tridiagonal_solve
 import axonscope as axs
 from axonscope.axon_instance import AxonInstance
 from axonscope.results import AxonSimulationResult
-from axonscope.results.pool import CohortResult
+from axonscope.results.pool import _ResultBlock
 from axonscope.backends.jax.runtime import prepare_solver_runtime
 
 from benchmark.pseudo_double.reductions import (
@@ -326,7 +326,7 @@ def run_schur_local_population(
 
     if t_vec is None:
         raise ValueError("at least one instance is required.")
-    cohort = CohortResult(
+    cohort = _ResultBlock(
         input_indices=tuple(row["index"] for row in rows),
         axons=tuple(row["instance"].axon for row in rows),
         simulations=tuple(row["instance"] for row in rows),

@@ -8,6 +8,7 @@ import numpy as np
 from axonscope.benchmarking import (
     SolverBenchmarkCase,
     TimingStats,
+    collect_benchmark_metadata,
     compare_benchmark_results,
     load_benchmark_results,
     run_solver_benchmark_case,
@@ -102,7 +103,25 @@ def test_write_benchmark_results(tmp_path: Path):
     results, metadata = load_benchmark_results(json_path)
     assert results[0]["case_name"] == "dummy"
     assert "python" in metadata
+    assert "environment" in metadata
+    assert "cpu" in metadata
+    assert "memory" in metadata
+    assert "environment_variables" in metadata
     assert "case_name" in csv_path.read_text(encoding="utf-8")
+
+
+def test_collect_benchmark_metadata_includes_machine_backend_and_gpu_sections():
+    metadata = collect_benchmark_metadata()
+
+    assert "python" in metadata
+    assert "git" in metadata
+    assert "environment" in metadata
+    assert "cpu" in metadata
+    assert "memory" in metadata
+    assert "gpu" in metadata
+    assert "packages" in metadata
+    assert "environment_variables" in metadata
+    assert "jax_details" in metadata or "jax_error" in metadata
 
 
 def test_visualize_benchmark_results_report(tmp_path: Path):

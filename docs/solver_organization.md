@@ -71,15 +71,15 @@ path should pass through one of the routes below.
 
 ### Scalar Route
 
-One-axon execution starts from `axs.simulate(...)` or `AxonSimulation.run(...)`
-in `simulation.py`. Unless a caller supplies another solver, the public facade
-creates `CrankNicholson`, then `CrankNicholson.solve(...)` delegates across the
-backend boundary to `backends/jax/scalar_runner.py`.
+One-axon execution starts from `AxonSimulation.run(...)` in `simulation.py`.
+Unless a caller supplies another solver, the public facade creates
+`CrankNicholson`, then `CrankNicholson.solve(...)` delegates across the backend
+boundary to `backends/jax/scalar_runner.py`.
 
 The scalar JAX route is:
 
 ```text
-AxonSimulation/run helper
+AxonSimulation.run()
   -> CrankNicholson.solve(...)
   -> run_jax_crank_nicholson(...)
   -> build_solver_axon(...)
@@ -96,12 +96,12 @@ axons with extracellular context. Scalar observer requests are lowered through
 
 ### Pool, Planning, And Fallback Route
 
-Pool execution starts from `axs.simulate_pool(...)` or population
-`AxonSimulation.run(...)`. Public orchestration stays in `simulation.py`, while
-dispatch grouping stays in `dispatcher/execution.py`:
+Pool execution starts from population `AxonSimulation.run(...)`. Public
+orchestration stays in `simulation.py`, while dispatch grouping stays in
+`dispatcher/execution.py`:
 
 ```text
-simulate_pool(...)
+AxonSimulation.run()
   -> run_pool(...)
   -> build_dispatch_plan(...)
   -> _run_batch_group(...) for supported single/double-cable batch groups
@@ -122,20 +122,22 @@ Compatible single-cable groups enter
 Preparation and lowering happen in this order:
 
 ```text
-_prepare_batch_runtime(...)
-  -> _prepared_cohort_for_group(...)
-  -> _observer_plan_for_cohort(...)
-  -> build_sparse_intracellular_current_density_batch(...)
-     or build_intracellular_current_density_batch(...)
-     or zero intracellular input
-  -> build_factorized_vstim_midpoint_batch(...)
-     or build_vstim_midpoint_batch(...)
+prepare_batch_runtime(...)
+  -> prepared_cohort_for_group(...)
+  -> lower_observers_for_cohort(...)
+  -> lower_single_cable_intracellular_input(...)
+  -> lower_single_cable_extracellular_input(...)
   -> SingleCableVStimBatchKernel
-  -> _dispatch_results_from_batch(...)
+  -> dispatch_results_from_batch(...)
 ```
 
-Sparse intracellular lowering is used for compatible current-clamp cohorts.
-Dense intracellular lowering remains the general path. When an observer-only
+`backends/jax/input_lowering.py` owns the representation decision. It wraps
+`build_sparse_intracellular_current_density_batch(...)`,
+`build_intracellular_current_density_batch(...)`,
+`build_factorized_vstim_midpoint_batch(...)`, and
+`build_vstim_midpoint_batch(...)`, then returns a `Lowered*Input` object for the
+kernel. Sparse intracellular lowering is used for compatible current-clamp
+cohorts. Dense intracellular lowering remains the general path. When a
 single-cable batch has compatible static-footprint extracellular stimulation,
 the factorized footprint path keeps the field as current samples plus
 footprints and avoids a dense `Vstim[B, Nt, Nx]` materialization. Otherwise the
@@ -149,15 +151,13 @@ Compatible double-cable groups enter
 Preparation and lowering happen in this order:
 
 ```text
-_prepare_batch_runtime(...)
-  -> _prepared_cohort_for_group(...)
-  -> _observer_plan_for_cohort(...)
-  -> build_intracellular_current_density_batch(...)
-     or zero intracellular input
-  -> build_factorized_vstim_midpoint_batch(..., include_initial_previous=True)
-     or build_vstim_midpoint_and_initial_previous_batch(...)
+prepare_batch_runtime(...)
+  -> prepared_cohort_for_group(...)
+  -> lower_observers_for_cohort(...)
+  -> lower_double_cable_intracellular_input(...)
+  -> lower_double_cable_extracellular_input(...)
   -> DoubleCableBatchKernel
-  -> _dispatch_results_from_batch(...)
+  -> dispatch_results_from_batch(...)
 ```
 
 The retained exact double-cable block solvers are `thomas`, `pcr`, `pcr_soa`,
@@ -165,27 +165,37 @@ and `pcr_adaptive`, plus public `auto` resolution. `auto` is resolved before
 kernel dispatch from the effective execution device. `pcr_adaptive` selects
 `pcr_soa` for batches up to `B=4096`, then matrix-layout `pcr` above that.
 
-Double-cable observer-only batches may use factorized footprint extracellular
-lowering when the inputs are compatible. Dense midpoint and initial-previous
-`Vstim` arrays remain the fallback for full recording or unsupported
-factorized inputs.
+Double-cable lowering uses the same `Lowered*Input` contract as single-cable,
+but a double-cable-specific strategy because the kernel needs an
+initial-previous extracellular value. It may use
+`build_factorized_vstim_midpoint_batch(..., include_initial_previous=True)` for
+observer-only shared-current rank-1 inputs. Dense midpoint and initial-previous
+`Vstim` arrays from `build_vstim_midpoint_and_initial_previous_batch(...)`
+remain the explicit fallback for full recording, rank-K double-cable inputs, or
+unsupported factorized inputs.
 
 Parameter-batched double-cable groups are allowed to contain rows with different
 local MRG phase shifts (`x_shift`) and different padded widths as long as they
-share the same membrane-family set. The dispatcher owns that grouping policy;
+share the same membrane-structure set. The dispatcher owns that grouping policy;
 the JAX backend receives a row-indexed membrane backend plus already padded
 cable/extracellular arrays.
 
-For parameter-batched groups, `_prepare_batch_runtime(...)` prepares only the
-representative fields that survive batching. It must not build a full
+For parameter-batched groups,
+`backends/jax/runtime_preparation.py::prepare_batch_runtime(...)` prepares only
+the representative fields that survive batching. It must not build a full
 representative cable/extracellular runtime just to replace it immediately with
 stacked row arrays.
+`backends/jax/runtime_caches.py` owns the bounded runtime/cohort cache storage,
+while `backends/jax/shape_bucketing.py` owns the opt-in double-cable kernel
+shape bucketing policy and metadata.
 
 ### VmRaster, Dense/Factorized Vext, And Results
 
-Public observer definitions are lowered to solver-side VmRaster plans by
-`build_vm_raster_plan(...)`. Scalar kernels and batch kernels update packed
-observer output during the scan. The public result key is strictly
+`backends/jax/recording_lowering.py` owns batch recording/observer lowering:
+it expands padded groups to the effective kernel recording policy when needed
+and lowers compatible public observer definitions to solver-side VmRaster plans
+through `build_vm_raster_plan(...)`. Scalar kernels and batch kernels update
+packed observer output during the scan. The public result key is strictly
 `observations["vm_raster"]`; activation, latency, velocity, threshold, and
 recruitment stay in post-processing. The result container and CPU unpacking live
 under `axonscope.results`, not in solver runtime modules.
@@ -200,11 +210,11 @@ Dense extracellular input is produced by `build_vstim_midpoint_batch(...)` or
 extracellular input is produced by `build_factorized_vstim_midpoint_batch(...)`
 and should remain internal to backend lowering.
 
-Scalar solver output is an internal payload converted to `AxonSimulationResult`
-at the public `simulate(...)` boundary. Batch results become `DispatchResult`
-rows or compact `DispatchCohortResult` records in
-`_dispatch_results_from_batch(...)`, then `AxonSimulationResult` in the public
-`simulate_pool(...)` boundary.
+Scalar solver output is the internal `SolverOutput` payload, converted to
+`AxonSimulationResult` at the public `AxonSimulation.run()` boundary. Batch
+outputs become private dispatch row records or compact dispatch cohort records
+in `backends/jax/batch_results.py`, then `AxonSimulationResult` at the same
+public boundary.
 
 ## Solver Options
 

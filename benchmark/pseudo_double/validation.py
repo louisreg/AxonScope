@@ -37,8 +37,8 @@ from benchmark.pseudo_double.schur_runner import (
 )
 from benchmark.pseudo_double.single_chain import (
     PseudoDoubleSingleChainConfig,
-    SegmentScaledAnalyticalExtracellularContext,
     build_pseudo_double_single_chain_mrg,
+    segment_scaled_point_source_stimulation,
     single_chain_vext_alpha,
 )
 from benchmark.pseudo_double.series_runner import (
@@ -309,22 +309,19 @@ def build_validation_population(
     for offset_um in offsets:
         instance = axs.AxonInstance(axon)
         if normalized_mode == "pseudo_double_single_myelinated_chain":
-            # Reference-only pseudo-double path: this benchmark validates a
-            # segment-scaled analytical context, not the public point-source
-            # workflow used by examples and normal benchmarks.
             local_electrode = axs.analytical.PointSourceElectrode(
                 x=electrode.x_um * axs.um,
                 y=(electrode.y_um - float(offset_um)) * axs.um,
                 z=electrode.z_um * axs.um,
                 min_distance=electrode.min_distance_um * axs.um,
             ).with_stimulus(electrode.stimulus)
-            context = SegmentScaledAnalyticalExtracellularContext(
-                electrodes=[local_electrode],
-                sigma=0.3 * axs.S_per_m,
+            stimulation = segment_scaled_point_source_stimulation(
+                local_electrode,
                 positions_um=axon.layout.position_values(unit="micrometer"),
                 alpha=single_chain_vext_alpha(axon, single_chain_config),
+                sigma=0.3 * axs.S_per_m,
             )
-            instance.add_extracellular_context(context=context)
+            instance.add_extracellular_stimulation(stimulation=stimulation)
         else:
             stimulation = axs.analytical.point_source_stimulation(
                 electrode,

@@ -8,10 +8,12 @@ coupling through the public package facade.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import inspect
 import re
 from enum import Enum
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import fields
 from pathlib import Path
 from typing import get_args, get_type_hints
 
@@ -28,7 +30,7 @@ def _python_sources(root: Path) -> Iterable[Path]:
     return sorted(path for path in root.rglob("*.py") if "__pycache__" not in path.parts)
 
 
-def _public_parameters(obj: object) -> set[str]:
+def _public_parameters(obj: Callable[..., object]) -> set[str]:
     return set(inspect.signature(obj).parameters)
 
 
@@ -55,10 +57,27 @@ def _call_name(node: ast.AST) -> str | None:
     return None
 
 
+def _attribute_root_name(node: ast.AST) -> str | None:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    while isinstance(node, ast.Subscript):
+        node = node.value
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _looks_like_matplotlib_axis(name: str) -> bool:
+    return name == "ax" or name == "axes" or name.startswith("ax_") or name.endswith("_ax")
+
+
 def test_guidelines_is_the_root_project_philosophy_reference():
     assert (REPO_ROOT / "GUIDELINES.md").is_file()
+    assert (REPO_ROOT / "AGENTS.md").is_file()
+    legacy_agent_guide = REPO_ROOT / ("agent" + ".md")
+    assert not legacy_agent_guide.exists()
 
-    for path in (REPO_ROOT / "agent.md", REPO_ROOT / "todo.md"):
+    for path in (REPO_ROOT / "AGENTS.md", REPO_ROOT / "todo.md"):
         text = path.read_text(encoding="utf-8")
         assert "GUIDELINES.md" in text
         assert "AXONSCOPE_PRODUCT_SOLVER_GUIDELINES.md" not in text
@@ -66,6 +85,10 @@ def test_guidelines_is_the_root_project_philosophy_reference():
 
 def test_public_facade_does_not_expose_removed_compatibility_aliases():
     removed_names = {
+        "estimate_simulation",
+        "inspect_simulation",
+        "simulate",
+        "simulate_pool",
         "visualization",
         "run_batch",
     }
@@ -74,6 +97,13 @@ def test_public_facade_does_not_expose_removed_compatibility_aliases():
 
     assert exposed == set()
     assert removed_names.isdisjoint(set(axs.__all__))
+
+
+def test_protocol_threshold_surface_uses_generic_find_threshold():
+    assert hasattr(axs.protocols, "find_threshold")
+    assert "find_threshold" in axs.protocols.__all__
+    assert not hasattr(axs.protocols, "find_activation_threshold_curve")
+    assert "find_activation_threshold_curve" not in axs.protocols.__all__
 
 
 def test_analysis_namespace_is_real_package_not_results_alias():
@@ -103,6 +133,265 @@ def test_recording_observer_strategy_excludes_superseded_generic_observer_design
     assert "VmRasterResult" in text
     assert "PeakVoltage" in text
     assert "post-hoc on recorded Vm" in text
+
+
+def test_public_examples_do_not_expose_model_ir_as_user_api():
+    offenders: list[str] = []
+    forbidden_text = {
+        "axonscope.model_ir",
+        "ModelIR",
+        "Model IR",
+        "intermediate representation",
+        "Intermediate Representation",
+    }
+
+    for path in _python_sources(REPO_ROOT / "examples"):
+        text = path.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "axonscope.model_ir" or alias.name.startswith(
+                        "axonscope.model_ir."
+                    ):
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level == 0 and (
+                    module == "axonscope.model_ir"
+                    or module.startswith("axonscope.model_ir.")
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+        for term in forbidden_text:
+            if term in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)} contains {term!r}")
+
+    assert offenders == []
+
+
+def test_builtin_membrane_source_files_are_standalone():
+    model_files = sorted(
+        path
+        for path in (SRC_ROOT / "membranes" / "models").glob("*.py")
+        if path.name != "__init__.py"
+    )
+
+    assert not (SRC_ROOT / "model_ir" / "models").exists()
+    assert not (SRC_ROOT / "model_ir" / "builtins.py").exists()
+    assert not (SRC_ROOT / "model_ir" / "units.py").exists()
+    assert not (SRC_ROOT / "membranes" / "authoring.py").exists()
+    assert not (SRC_ROOT / "membranes" / "models" / "common.py").exists()
+
+    offenders: list[str] = []
+    for path in model_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "axonscope.model_ir" or alias.name.startswith(
+                        "axonscope.model_ir."
+                    ):
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                imported_names = {alias.name for alias in node.names}
+                if "*" in imported_names:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                if node.level > 0:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                if (
+                    node.level == 0
+                    and (
+                        module == "axonscope.model_ir"
+                        or module.startswith("axonscope.model_ir.")
+                    )
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_human_membrane_sources_do_not_use_type_checking_placeholders():
+    source_root = SRC_ROOT / "membranes" / "models"
+    forbidden_terms = {"TYPE_CHECKING", "cast("}
+    offenders: list[str] = []
+
+    for path in _python_sources(source_root):
+        text = path.read_text(encoding="utf-8")
+        for term in forbidden_terms:
+            if term in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)} contains {term!r}")
+
+    assert offenders == []
+
+
+def test_human_membrane_sources_do_not_use_manifest_export_or_dynamics_fields():
+    source_root = SRC_ROOT / "membranes" / "models"
+    forbidden_names = {"exports", "dynamics"}
+    offenders: list[str] = []
+
+    for path in _python_sources(source_root):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for class_node in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+            for statement in class_node.body:
+                target_name: str | None = None
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target = statement.targets[0]
+                    if isinstance(target, ast.Name):
+                        target_name = target.id
+                elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+                    target_name = statement.target.id
+                if target_name in forbidden_names:
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}:{statement.lineno} declares {target_name}"
+                    )
+
+    assert offenders == []
+
+
+def test_public_builtin_membranes_are_model_classes():
+    from axonscope.membranes.model import MembraneModel
+
+    expected_kinds = {
+        "AxNode": "axnode",
+        "HodgkinHuxley": "hodgkin_huxley",
+        "Passive": "passive",
+        "RattayAberham": "rattay_aberham",
+        "Schild94": "schild94",
+        "Schild97": "schild97",
+        "Sundt": "sundt",
+        "Tigerholm": "tigerholm",
+    }
+    assert all(
+        (SRC_ROOT / "membranes" / "models" / f"{kind}.py").is_file()
+        for kind in expected_kinds.values()
+    )
+
+    offenders: list[str] = []
+    for name, kind in expected_kinds.items():
+        cls = getattr(axs.membranes, name)
+        if not issubclass(cls, axs.membranes.Model):
+            offenders.append(f"{name} does not inherit axs.membranes.Model")
+        if issubclass(cls, MembraneModel):
+            offenders.append(f"{name} still exposes internal MembraneModel inheritance")
+        if not cls.__module__.startswith("axonscope.membranes.models."):
+            offenders.append(f"{name} is still using a builtins.py bridge")
+            continue
+        if cls.kind_name() != kind:
+            offenders.append(f"{name} maps to {cls.kind_name()!r}, expected {kind!r}")
+
+    assert offenders == []
+
+
+def test_builtin_axon_model_kwargs_are_forward_only_without_local_defaults():
+    from axonscope.axons import unmyelinated
+
+    expected_forwarded_kwargs = {
+        axs.axons.HodgkinHuxley: {"gnabar", "gkbar", "gl", "el", "ena", "ek"},
+        axs.axons.RattayAberham: {"gnabar", "gkbar", "gl", "el", "ena", "ek"},
+        axs.axons.Sundt: {"gnabar", "gkdrbar", "ena", "ek", "Rm", "El"},
+        axs.axons.Tigerholm: {
+            "ena",
+            "ek",
+            "gbar_nav17",
+            "gbar_nav18",
+            "gbar_nav19",
+            "gbar_ks",
+            "gbar_kf",
+            "gbar_kdr",
+            "gbar_h",
+            "gbar_kna",
+            "nai_fixed",
+            "pump_smalla",
+            "pump_ko",
+        },
+    }
+    offenders: list[str] = []
+
+    for template, forwarded_kwargs in expected_forwarded_kwargs.items():
+        signature = inspect.signature(template)
+        for name in forwarded_kwargs:
+            parameter = signature.parameters.get(name)
+            if parameter is None:
+                offenders.append(f"{template.__name__}.{name} missing from public API")
+            elif parameter.default is not unmyelinated._UNSET:
+                offenders.append(f"{template.__name__}.{name} defines local default")
+
+    assert offenders == []
+
+
+def test_model_ir_model_family_specific_layer_is_not_reintroduced():
+    forbidden_references = (
+        "model_ir" + ".models",
+        "from " + ".models",
+        "hodgkin_huxley",
+        "rattay_aberham",
+        "schild94",
+        "schild97",
+        "tigerholm",
+        "axnode",
+        "na_hh",
+        "borg_kdr",
+    )
+    offenders: list[str] = []
+    for path in _python_sources(SRC_ROOT / "model_ir"):
+        text = path.read_text(encoding="utf-8")
+        if any(reference in text for reference in forbidden_references):
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert offenders == []
+
+
+def test_public_membrane_namespace_does_not_expose_rejected_builder_dsl():
+    rejected_names = {
+        "MembraneModel",
+        "ensure_membrane_model",
+        "membrane",
+        "parameter",
+        "gate",
+        "current",
+        "observable",
+        "model",
+        "q10",
+    }
+
+    assert rejected_names.isdisjoint(set(axs.membranes.__all__))
+    assert all(not hasattr(axs.membranes, name) for name in rejected_names - {"model"})
+    model_attribute = getattr(axs.membranes, "model", None)
+    assert model_attribute is None or inspect.ismodule(model_attribute)
+    for accepted in ("Model", "currents", "initials", "mechanism", "rates", "section", "state", "step"):
+        assert accepted in axs.membranes.__all__
+        assert hasattr(axs.membranes, accepted)
+
+
+def test_plain_python_membrane_sources_do_not_import_compiler_or_backend_internals():
+    source_root = SRC_ROOT / "membranes" / "models"
+    forbidden_prefixes = {
+        "axonscope.backends",
+        "axonscope.model_ir",
+    }
+    offenders: list[str] = []
+
+    for path in _python_sources(source_root):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(
+                        alias.name == prefix or alias.name.startswith(f"{prefix}.")
+                        for prefix in forbidden_prefixes
+                    ):
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if any(
+                    module == prefix or module.startswith(f"{prefix}.")
+                    for prefix in forbidden_prefixes
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
 
 
 def test_public_stimulation_surface_avoids_factorized_runtime_terms():
@@ -144,8 +433,6 @@ def test_public_signatures_do_not_reintroduce_old_unit_suffix_arguments():
     checks = {
         axs.AxonSimulation: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
         axs.AxonPopulation: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
-        axs.simulate: {"duration_ms", "dt_ms", "tsim"},
-        axs.simulate_pool: {"duration_ms", "dt_ms", "tsim"},
         axs.AxonInstance: {"x_offset", "x_offset_um", "y", "y_um", "z", "z_um"},
         axs.Recording: {"positions_um", "sample_dt_ms"},
         axs.analytical.PointSourceElectrode: {
@@ -220,6 +507,81 @@ def test_public_examples_and_docs_do_not_place_axon_instances_in_world_space():
             offenders.append(f"{path.relative_to(REPO_ROOT)} set_position")
         if placement_call.search(text):
             offenders.append(f"{path.relative_to(REPO_ROOT)} AxonInstance placement kwargs")
+
+    assert offenders == []
+
+
+def test_public_examples_route_generic_result_plots_through_axonscope_views():
+    allowed_axis_plots = {
+        ("examples/basic/03_point_source_footprint.py", "ax_activation"),
+        ("examples/advanced/axon_models/04_non_uniform_activation_function.py", "ax_activation"),
+        ("examples/advanced/axon_models/04_non_uniform_activation_function.py", "ax_spacing"),
+        ("examples/advanced/runtime/03_pipeline_inspection.py", "output_ax"),
+    }
+    forbidden_image_primitives = {"broken_barh", "imshow", "pcolormesh"}
+    offenders: list[str] = []
+
+    for path in _python_sources(REPO_ROOT / "examples"):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            name = node.func.attr
+            root_name = _attribute_root_name(node.func.value)
+            if name in forbidden_image_primitives:
+                offenders.append(f"{rel}:{node.lineno} {name}()")
+            elif (
+                name == "plot"
+                and root_name is not None
+                and _looks_like_matplotlib_axis(root_name)
+                and (rel, root_name) not in allowed_axis_plots
+            ):
+                offenders.append(f"{rel}:{node.lineno} {root_name}.plot()")
+
+    assert offenders == []
+
+
+def test_public_examples_do_not_reach_into_view_modules():
+    forbidden_fragments = (
+        ".results.views",
+        ".analysis.views",
+        ".protocols.views",
+        "from axonscope.results.views",
+        "from axonscope.analysis.views",
+        "from axonscope.protocols.views",
+        "from axonscope.plotting",
+        "import axonscope.plotting",
+    )
+    offenders: list[str] = []
+
+    for path in _python_sources(REPO_ROOT / "examples"):
+        rel = path.relative_to(REPO_ROOT)
+        text = path.read_text(encoding="utf-8")
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                offenders.append(f"{rel} contains {fragment}")
+
+    assert offenders == []
+
+
+def test_public_examples_do_not_use_benchmark_or_profiling_apis():
+    forbidden_fragments = (
+        "axs.benchmark(",
+        "axs.enable_benchmark(",
+        "axs.disable_benchmark(",
+        "axs.reset_benchmark(",
+        "from axonscope.benchmarking",
+        "import axonscope.benchmarking",
+    )
+    offenders: list[str] = []
+
+    for path in _python_sources(REPO_ROOT / "examples"):
+        rel = path.relative_to(REPO_ROOT)
+        text = path.read_text(encoding="utf-8")
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                offenders.append(f"{rel} contains {fragment}")
 
     assert offenders == []
 
@@ -319,13 +681,37 @@ def test_axon_formulation_uses_public_enum_not_raw_strings():
 
 
 def test_extracellular_public_contracts_are_exported():
+    attachment_names = {
+        "ExtracellularFootprint",
+        "ExtracellularDrive",
+        "ExtracellularStimulation",
+    }
+    diagnostic_names = {"ExtracellularPotential"}
+    expected_public_names = attachment_names | diagnostic_names
+    root_names = {name for name in axs.__all__ if name.startswith("Extracellular")}
+    assert root_names == expected_public_names
+    assert {
+        name for name in axs.stimulation.__all__ if name.startswith("Extracellular")
+    } == expected_public_names
+
     assert axs.AxonId is axs.identifiers.AxonId
     assert axs.DriveId is axs.identifiers.DriveId
     assert axs.ExtracellularFootprint is axs.stimulation.ExtracellularFootprint
     assert axs.ExtracellularDrive is axs.stimulation.ExtracellularDrive
     assert axs.ExtracellularStimulation is axs.stimulation.ExtracellularStimulation
-    assert axs.ExtracellularStimulationContext is axs.stimulation.ExtracellularStimulationContext
     assert axs.ExtracellularPotential is axs.stimulation.ExtracellularPotential
+    for legacy_name in (
+        "Electrode",
+        "AnalyticalElectrode",
+        "ExtracellularContext",
+        "AnalyticalExtracellularContext",
+        "ExtracellularStimulationContext",
+        "NRVExtracellularContext",
+    ):
+        assert not hasattr(axs, legacy_name)
+        assert not hasattr(axs.stimulation, legacy_name)
+        assert legacy_name not in axs.__all__
+        assert legacy_name not in axs.stimulation.__all__
     assert not hasattr(axs, "PointSourceElectrode")
     assert not hasattr(axs.stimulation, "PointSourceElectrode")
     assert "PointSourceElectrode" not in axs.__all__
@@ -333,8 +719,8 @@ def test_extracellular_public_contracts_are_exported():
     assert axs.analytical.PointSourceElectrode is not None
 
 
-def test_pool_results_use_canonical_result_model_not_lists():
-    hints = get_type_hints(axs.simulate_pool)
+def test_axon_simulation_results_use_canonical_result_model_not_lists():
+    hints = get_type_hints(axs.AxonSimulation.run)
 
     assert hints["return"] is axs.AxonSimulationResult
     assert "list[SimResult]" not in (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
@@ -342,6 +728,20 @@ def test_pool_results_use_canonical_result_model_not_lists():
     assert "AxonResultView" in axs.__all__
     assert "CohortResult" not in axs.__all__
     assert "CohortResult" not in axs.results.__all__
+
+
+def test_axon_simulation_uses_one_population_lifecycle():
+    text = (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
+    forbidden_fragments = {
+        "_run_single_simulation",
+        "_population_lifecycle",
+        "_single_result_to_public",
+        "batch_options are only valid for multi-axon",
+        "progress is only valid for multi-axon",
+    }
+
+    assert forbidden_fragments.isdisjoint(text)
+    assert "run_pool(" in text
 
 
 def test_examples_and_public_docs_teach_one_result_path():
@@ -424,16 +824,16 @@ def test_internal_modules_do_not_import_the_public_axonscope_facade():
     assert offenders == []
 
 
-def test_non_visualization_modules_do_not_import_visualization_helpers():
-    allowed = {
-        SRC_ROOT / "results" / "__init__.py",
-        SRC_ROOT / "results" / "visualization.py",
-    }
+def test_legacy_results_visualization_module_is_removed():
+    assert not (SRC_ROOT / "results" / "visualization.py").exists()
+
+    forbidden_public_names = {"visualization", "plot_raster", "rasterplot"}
+    assert forbidden_public_names.isdisjoint(set(axs.results.__all__))
+    assert all(not hasattr(axs.results, name) for name in forbidden_public_names)
+
     offenders: list[str] = []
 
     for path in _python_sources(SRC_ROOT):
-        if path in allowed:
-            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -448,6 +848,112 @@ def test_non_visualization_modules_do_not_import_visualization_helpers():
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
     assert offenders == []
+
+
+def test_inspection_records_are_separate_from_user_facing_views():
+    records = SRC_ROOT / "inspection_records.py"
+    views = SRC_ROOT / "inspection_views.py"
+    builder = SRC_ROOT / "inspection.py"
+
+    assert records.is_file()
+    assert views.is_file()
+
+    records_text = records.read_text(encoding="utf-8")
+    views_text = views.read_text(encoding="utf-8")
+    builder_text = builder.read_text(encoding="utf-8")
+
+    assert "class SimulationInspection" in records_text
+    assert "format_simulation_inspection" in views_text
+    assert "from axonscope.inspection_records import" in builder_text
+    assert "import matplotlib" not in records_text
+    assert "from rich" not in records_text
+    assert "import matplotlib" not in builder_text
+    assert "from rich" not in builder_text
+    assert "@dataclass" not in builder_text
+
+
+def test_performance_estimate_records_are_separate_from_user_facing_views():
+    records = SRC_ROOT / "performance.py"
+    views = SRC_ROOT / "performance_views.py"
+
+    assert records.is_file()
+    assert views.is_file()
+
+    records_text = records.read_text(encoding="utf-8")
+    views_text = views.read_text(encoding="utf-8")
+
+    assert "class SimulationEstimate" in records_text
+    assert "format_simulation_estimate" in views_text
+    assert "print_simulation_estimate" in views_text
+    assert "from axonscope.performance_views import format_simulation_estimate" in records_text
+    assert "from axonscope.performance_views import print_simulation_estimate" in records_text
+    assert "from rich" not in records_text
+    assert "import matplotlib" not in records_text
+    assert "from rich" in views_text
+
+
+def test_summary_like_objects_share_rows_dataframe_text_surface():
+    summary_classes = (
+        axs.AnalysisResult,
+        axs.analysis.AnalysisReport,
+        axs.results.VmRasterResult,
+        axs.protocols.ThresholdSearchResult,
+        axs.protocols.RecruitmentCurve,
+        axs.protocols.PoolSweepResult,
+        axs.protocols.ThresholdCurve,
+        axs.SimulationEstimate,
+    )
+    required = {"rows", "to_dataframe", "format", "print"}
+
+    missing: dict[str, set[str]] = {}
+    for cls in summary_classes:
+        absent = {name for name in required if not hasattr(cls, name)}
+        if absent:
+            missing[cls.__name__] = absent
+
+    assert missing == {}
+    assert "rows" not in {field.name for field in fields(axs.protocols.ThresholdCurve)}
+    assert "row_labels" in {field.name for field in fields(axs.protocols.ThresholdCurve)}
+
+
+def test_public_view_modules_use_shared_plotting_helpers():
+    view_paths = (
+        SRC_ROOT / "results" / "views.py",
+        SRC_ROOT / "analysis" / "views.py",
+        SRC_ROOT / "protocols" / "views.py",
+    )
+
+    offenders: list[str] = []
+    for path in view_paths:
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO_ROOT)
+        if "from axonscope.plotting import" not in text:
+            offenders.append(f"{rel} missing shared plotting import")
+        for forbidden in ("import matplotlib.pyplot", "plt.subplots"):
+            if forbidden in text:
+                offenders.append(f"{rel} contains {forbidden}")
+
+    plotting_text = (SRC_ROOT / "plotting.py").read_text(encoding="utf-8")
+    assert "def ensure_axis" in plotting_text
+    assert "def decorate_axis" in plotting_text
+    assert offenders == []
+
+
+def test_dispatch_progress_uses_structured_dispatch_and_backend_events():
+    progress_text = (SRC_ROOT / "dispatcher" / "progress.py").read_text(encoding="utf-8")
+    execution_text = (SRC_ROOT / "dispatcher" / "execution.py").read_text(encoding="utf-8")
+    jax_runner_text = (SRC_ROOT / "backends" / "jax" / "group_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "class ProgressEvent" in progress_text
+    assert "def emit(self, event: ProgressEvent)" in progress_text
+    assert "ProgressEvent(" in execution_text
+    assert "progress_reporter.route_group(" in execution_text
+    assert "from axonscope.dispatcher.progress import ProgressEvent" in jax_runner_text
+    assert "_emit_progress(" in jax_runner_text
+    assert "Simulation run {status}" in progress_text
+    assert "Dispatch completed" not in progress_text
 
 
 def test_descriptive_layers_do_not_import_jax_backend_directly():
@@ -521,6 +1027,23 @@ def test_protocols_do_not_import_jax_observer_runtime():
     assert offenders == []
 
 
+def test_protocol_observer_path_uses_shared_vm_raster_decoders():
+    path = SRC_ROOT / "protocols" / "observer_path.py"
+    text = path.read_text(encoding="utf-8")
+
+    forbidden_terms = {
+        ".unpack(",
+        "probe_mask",
+        "getattr(raster",
+        "raster.nt",
+        "raster.dt_ms",
+    }
+
+    assert "activation_values_from_vm_raster" in text
+    offenders = sorted(term for term in forbidden_terms if term in text)
+    assert offenders == []
+
+
 def test_vm_raster_result_container_lives_under_results_boundary():
     assert not (SRC_ROOT / "solvers" / "observer_runtime.py").exists()
 
@@ -577,6 +1100,195 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     assert offenders == []
 
 
+def test_jax_runtime_does_not_compile_stateful_legacy_composites():
+    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+
+    forbidden = {
+        "Schild94CompositeICM",
+        "Schild97CompositeICM",
+        "TigerholmCompositeICM",
+        "axonscope.channel_models.composite_models",
+    }
+
+    assert forbidden.isdisjoint(text.split())
+    for token in forbidden:
+        assert token not in text
+
+
+def test_jax_runtime_compiles_public_membranes_through_one_model_ir_route():
+    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+    forbidden = {
+        'model.kind == "axnode"',
+        'model.kind == "composite"',
+        'model.kind == "hodgkin_huxley"',
+        'model.kind == "passive"',
+        'model.kind == "rattay_aberham"',
+        'model.kind == "schild94"',
+        'model.kind == "schild97"',
+        'model.kind == "sundt"',
+        'model.kind == "tigerholm"',
+    }
+
+    assert "lower_membrane_model_with_sources(" in text
+    assert 'load_generated_modules=("jax",)' in text
+    assert sorted(term for term in forbidden if term in text) == []
+
+
+def test_jax_solver_runtime_has_no_model_family_specific_fast_paths():
+    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+    forbidden = {
+        "AxNode",
+        "HodgkinHuxley",
+        "Passive",
+        "Rattay",
+        "Schild",
+        "Sundt",
+        "Tigerholm",
+        "_rattay",
+        "rattay_aberham",
+        "is_model_ir_membrane_kind",
+    }
+
+    assert sorted(term for term in forbidden if term in text) == []
+
+
+def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_names():
+    text = (SRC_ROOT / "backends" / "jax" / "runtime_preparation.py").read_text(
+        encoding="utf-8"
+    )
+    forbidden = {
+        "AxNodePassiveFamilyMembraneBackend",
+        "axnode_initial_gates_numpy",
+        "try_stack_axnode_passive_family_membrane",
+        "_is_axnode",
+        "is_model_ir_membrane_kind",
+        'model.kind == "axnode"',
+        'model.kind == "passive"',
+        "node_model",
+        "node_count",
+    }
+
+    assert "GatedLeakStackMembraneBackend" in text
+    assert "supports_stateless_vm_only_fast_path" in text
+    assert sorted(term for term in forbidden if term in text) == []
+
+
+def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
+    adapter_path = SRC_ROOT / "backends" / "jax" / "model_ir_membrane.py"
+    runtime_text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(
+        encoding="utf-8"
+    )
+    runtime_modules = {
+        "runtime.py",
+        "membrane_backend.py",
+        "membrane_layout.py",
+        "membrane_program.py",
+    }
+
+    assert not adapter_path.exists()
+    assert "JaxMembraneProgram.from_model_ir(" in runtime_text
+    assert "lowered.model" in runtime_text
+    assert "generated_module=" in runtime_text
+    assert "ModelIRMembrane" not in runtime_text
+    for filename in runtime_modules:
+        text = (SRC_ROOT / "backends" / "jax" / filename).read_text(encoding="utf-8")
+        assert "CompiledMembrane" not in text
+    backend_text = (SRC_ROOT / "backends" / "jax" / "membrane_backend.py").read_text(
+        encoding="utf-8"
+    )
+    assert "class Gating" not in backend_text
+    assert "GFunc" not in backend_text
+    assert "RateFunc" not in backend_text
+
+
+def test_historical_membrane_packages_are_removed_from_active_source():
+    removed_package_paths = {
+        SRC_ROOT / "channel_models",
+        SRC_ROOT / "icm",
+    }
+    removed_modules = {
+        "axonscope.channel_models",
+        "axonscope.icm",
+    }
+
+    assert all(not path.exists() for path in removed_package_paths)
+    assert all(importlib.util.find_spec(module) is None for module in removed_modules)
+
+
+def test_membrane_descriptions_do_not_wrap_raw_legacy_channel_models():
+    text = (SRC_ROOT / "membranes" / "model.py").read_text(encoding="utf-8")
+
+    assert '"legacy"' not in text
+    assert "'legacy'" not in text
+    assert "IonChannelModelBase" not in text
+
+
+def test_human_membrane_sources_do_not_import_model_ir_internals():
+    offenders: list[str] = []
+    source_root = SRC_ROOT / "membranes" / "models"
+    for path in _python_sources(source_root):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "axonscope.model_ir" or alias.name.startswith(
+                        "axonscope.model_ir."
+                    ):
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module == "axonscope.model_ir" or module.startswith(
+                    "axonscope.model_ir."
+                ):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_model_ir_model_modules_are_source_adapters_not_equation_builders():
+    offenders: list[str] = []
+    forbidden_imports = {
+        "axonscope.model_ir.expressions",
+        "axonscope.model_ir.intrinsics",
+    }
+    forbidden_builders = {
+        "Current",
+        "Diagnostic",
+        "Gate",
+        "ModelIR",
+        "Observable",
+        "StateUpdate",
+        "StepProgram",
+        "literal",
+        "symbol",
+    }
+    source_root = SRC_ROOT / "model_ir" / "models"
+    for path in _python_sources(source_root):
+        if path.name == "__init__.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in forbidden_imports:
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module in forbidden_imports:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    name = node.func.attr
+                else:
+                    name = ""
+                if name in forbidden_builders:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{name}")
+
+    assert offenders == []
+
+
 def test_solver_facade_exposes_only_stable_solver_surface():
     import axonscope.solvers as solver_facade
 
@@ -586,6 +1298,7 @@ def test_solver_facade_exposes_only_stable_solver_surface():
         "BatchOptions",
         "BatchRecording",
         "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
+        "RateTableConfig",
         "SolverOptions",
         "resolve_double_cable_block_solver",
     }
@@ -622,12 +1335,15 @@ def test_solver_facade_exposes_only_stable_solver_surface():
     assert "axonscope.backends.jax.runtime" not in text
 
 
-def test_dispatcher_execution_does_not_import_concrete_jax_batch_kernels():
+def test_dispatcher_execution_does_not_import_concrete_jax_backend():
     path = SRC_ROOT / "dispatcher" / "execution.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
+        "axonscope.backends.jax",
         "axonscope.backends.jax.batch_kernels",
+        "axonscope.backends.jax.group_runner",
         "axonscope.backends.jax.runtime",
+        "axonscope.icm",
         "axonscope.icm.backends",
     }
     offenders = _jax_import_locations(path)
@@ -635,13 +1351,201 @@ def test_dispatcher_execution_does_not_import_concrete_jax_batch_kernels():
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name in forbidden_modules:
+                if alias.name in forbidden_modules or alias.name.startswith(
+                    "axonscope.backends.jax."
+                ):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if node.level == 0 and module in forbidden_modules:
+            if node.level == 0 and (
+                module in forbidden_modules
+                or module.startswith("axonscope.backends.jax.")
+            ):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
+    assert offenders == []
+
+
+def test_group_runner_routes_input_lowering_through_lowering_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(path))
+    forbidden_builder_calls = {
+        "build_factorized_vstim_midpoint_batch",
+        "build_intracellular_current_density_batch",
+        "build_sparse_intracellular_current_density_batch",
+        "build_vstim_midpoint_and_initial_previous_batch",
+        "build_vstim_midpoint_batch",
+    }
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "axonscope.backends.jax.input_batches":
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "axonscope.backends.jax.input_batches":
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.Call):
+            call_name = _call_name(node.func)
+            if call_name in forbidden_builder_calls:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{call_name}")
+
+    assert "axonscope.backends.jax.input_lowering" in text
+    assert offenders == []
+
+
+def test_group_runner_routes_recording_lowering_through_lowering_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    tree = ast.parse(text, filename=str(path))
+    forbidden_call_names = {
+        "build_vm_raster_plan",
+        "_observer_plan_for_cohort",
+        "_observers_are_vm_raster_compatible",
+        "_vm_raster_definitions",
+    }
+    forbidden_modules = {
+        "axonscope.backends.jax.observer_runtime",
+    }
+    offenders: list[str] = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in forbidden_modules:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.ImportFrom):
+            if node.module in forbidden_modules:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        elif isinstance(node, ast.Call):
+            call_name = _call_name(node.func)
+            if call_name in forbidden_call_names:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{call_name}")
+
+    assert "axonscope.backends.jax.recording_lowering" in text
+    assert "BatchRecording.full" not in text
+    assert offenders == []
+
+
+def test_group_runner_routes_batch_result_assembly_through_result_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    forbidden_terms = {
+        "DispatchCohortRecord",
+        "DispatchRowRecord",
+        "SimResult",
+        "BatchKernelResult",
+        "_dispatch_results_from_batch",
+        "_trim_batch_kernel_result",
+        "_posthoc_observations_for_row",
+    }
+
+    assert "axonscope.backends.jax.batch_results" in text
+    missing_boundary = [
+        term for term in ("dispatch_results_from_batch", "trim_batch_kernel_result")
+        if term not in text
+    ]
+    assert missing_boundary == []
+    offenders = sorted(term for term in forbidden_terms if term in text)
+    assert offenders == []
+
+
+def test_group_runner_routes_shape_bucketing_through_shape_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    forbidden_terms = {
+        "_DOUBLE_CABLE_SHAPE_BUCKETING_ENV",
+        "_DOUBLE_CABLE_BATCH_BUCKETS",
+        "_DOUBLE_CABLE_NX_BUCKET_MULTIPLE",
+        "_double_cable_kernel_group",
+        "_double_cable_shape_bucketing_enabled",
+        "_bucket_batch_size",
+        "_bucket_nx",
+        "_record_kernel_bucket_metadata",
+    }
+
+    assert "axonscope.backends.jax.shape_bucketing" in text
+    assert "double_cable_kernel_group" in text
+    assert "record_kernel_bucket_metadata" in text
+    offenders = sorted(term for term in forbidden_terms if term in text)
+    assert offenders == []
+
+
+def test_group_runner_routes_runtime_caches_through_cache_module():
+    group_runner = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    preparation = SRC_ROOT / "backends" / "jax" / "runtime_preparation.py"
+    group_runner_text = group_runner.read_text(encoding="utf-8")
+    preparation_text = preparation.read_text(encoding="utf-8")
+    forbidden_terms = {
+        "OrderedDict",
+        "_BATCH_RUNTIME_CACHE",
+        "_BATCH_STATIC_RUNTIME_CACHE",
+        "_PREPARED_COHORT_CACHE",
+        "_GROUP_RUNNER_CACHE_MAX_SIZE",
+        "_cache_get",
+        "_cache_store",
+    }
+
+    assert "axonscope.backends.jax.runtime_caches" not in group_runner_text
+    assert "axonscope.backends.jax.runtime_caches" in preparation_text
+    offenders = sorted(term for term in forbidden_terms if term in group_runner_text)
+    assert offenders == []
+
+
+def test_group_runner_routes_runtime_preparation_through_preparation_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    forbidden_terms = {
+        "CableRuntime",
+        "ExtracellularRuntime",
+        "MembraneRuntime",
+        "compile_membrane_model",
+        "prepare_membrane_runtime",
+        "prepare_simulation_grid",
+        "prepare_solver_runtime",
+        "prepare_stimulation_runtime",
+        "HeterogeneousMembraneBackend",
+        "RowIndexedMembraneBackend",
+        "GatedLeakStackMembraneBackend",
+        "_prepare_batch_runtime",
+        "_prepared_cohort_for_group",
+        "_stack_cable_runtime",
+        "_stack_membrane_runtime",
+        "_stack_extracellular_runtime",
+        "_try_stack_gated_leak_membrane",
+        "try_stack_gated_leak_membrane_from_group",
+        "_group_cm_uF_cm2",
+    }
+
+    assert "axonscope.backends.jax.runtime_preparation" in text
+    for required in (
+        "prepare_batch_runtime",
+        "prepared_cohort_for_group",
+        "representative_item",
+        "group_cm_uF_cm2",
+    ):
+        assert required in text
+    offenders = sorted(term for term in forbidden_terms if term in text)
+    assert offenders == []
+
+
+def test_group_runner_routes_benchmark_metadata_through_metadata_module():
+    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+    forbidden_terms = {
+        "_record_intracellular_lowering_metadata",
+        "_record_extracellular_lowering_metadata",
+        "_record_group_memory_estimate",
+        "_record_zero_intracellular_metadata",
+        "_default_device_memory_capacity_bytes",
+        "device_memory_capacity_bytes",
+        "memory_estimate_components_nbytes",
+    }
+
+    assert "axonscope.backends.jax.benchmark_metadata" in text
+    offenders = sorted(term for term in forbidden_terms if term in text)
     assert offenders == []
 
 
@@ -773,8 +1677,13 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "SingleCableVStimBatchKernel",
         "DoubleCableBatchKernel",
         "build_vm_raster_plan",
-        "_dispatch_results_from_batch",
-        "DispatchCohortResult",
+        "backends/jax/recording_lowering.py",
+        "backends/jax/batch_results.py",
+        "backends/jax/runtime_preparation.py",
+        "backends/jax/runtime_caches.py",
+        "backends/jax/shape_bucketing.py",
+        "dispatch_results_from_batch",
+        "compact dispatch cohort records",
         "AxonSimulationResult",
     }
 

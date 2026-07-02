@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 
 import numpy as np
 
-from axonscope.axon_instance import AxonInstance, as_axon_instance
+from axonscope.axon_instance import AxonInstance
 from axonscope.backends.execution import (
     batch_options_for_execution_context,
     batch_options_from_recording,
@@ -13,28 +13,21 @@ from axonscope.backends.execution import (
 )
 from axonscope.benchmarking.hotpaths import benchmark_span
 from axonscope.performance import ExecutionPolicy
+from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.utils import units
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
-from axonscope.recording import Recording, RecordingSpatial
+from axonscope.recording import Recording, RecordingPlan
 from axonscope.results import AxonSimulationResult
-from axonscope.results.pool import CohortResult
-from axonscope.results.single import SimResult
-from axonscope.solvers import (
-    BatchOptions,
-    CrankNicholson,
-    Solver,
-    SolverOptions,
-)
+from axonscope.solvers import BatchOptions, Solver, SolverOptions
 
 if TYPE_CHECKING:
-    from axonscope.dispatcher.results import DispatchRecord
+    from axonscope.dispatcher._records import DispatchRecord
 
 
 AxonInput: TypeAlias = Axon | AxonInstance
-AxonPoolInput: TypeAlias = AxonPopulation | Sequence[Axon | AxonInstance]
 SimulationRunResult: TypeAlias = AxonSimulationResult
 
 _RECORDING_GROUPS = (
@@ -63,9 +56,8 @@ class AxonSimulation:
     `AxonInstance` describes one concrete axon occurrence and its local
     stimulation. `AxonSimulation` collects one or more axons/instances with
     execution parameters such as duration, step size, recording policy, and
-    solver options. The current implementation delegates to the existing
-    single-axon and pool wrappers; later architecture phases can replace that
-    lowering behind this stable root object.
+    solver options. All runs are normalized through ``AxonPopulation`` so a
+    one-axon run and a many-axon run share the same dispatcher/result lifecycle.
     """
 
     def __init__(
@@ -82,10 +74,8 @@ class AxonSimulation:
         execution_policy: ExecutionPolicy | None = None,
         progress: ProgressOption = False,
     ) -> None:
-        population_lifecycle = not isinstance(axons, (Axon, AxonInstance))
         self.population = _normalize_axon_inputs(axons)
         self.axons = self.population.instances
-        self._population_lifecycle = population_lifecycle
         self.duration = duration
         self.dt = dt
         self.recording = recording
@@ -98,42 +88,26 @@ class AxonSimulation:
 
     @property
     def is_single(self) -> bool:
-        """Return whether this executable definition uses scalar execution."""
+        """Return whether this executable definition contains one axon."""
 
-        return not self._population_lifecycle
+        return self.population.is_single
 
     @property
     def is_population(self) -> bool:
-        """Return whether this executable definition uses population execution."""
+        """Return whether this definition uses the population lifecycle."""
 
-        return self._population_lifecycle
+        return True
 
     def run(self) -> SimulationRunResult:
         """Execute this simulation definition and return public results."""
 
-        if self.is_single:
-            if self.batch_options is not None:
-                raise ValueError("batch_options are only valid for multi-axon simulations.")
-            if self.progress is not False:
-                raise ValueError("progress is only valid for multi-axon simulations.")
-            return simulate(
-                self.axons[0],
-                duration=self.duration,
-                dt=self.dt,
-                solver=self.solver,
-                solver_options=self.solver_options,
-                recording=self.recording,
-                observers=self.observers,
-                execution_policy=self.execution_policy,
-            )
-
         if self.solver is not None:
             raise NotImplementedError(
-                "explicit solver objects are currently supported only for single-axon "
-                "AxonSimulation runs; use solver_options for pools."
+                "explicit solver objects are not part of the unified AxonSimulation "
+                "pipeline; use solver_options."
             )
-        return simulate_pool(
-            self.axons,
+        return _run_population_simulation(
+            self.population,
             duration=self.duration,
             dt=self.dt,
             solver_options=self.solver_options,
@@ -164,7 +138,7 @@ class AxonSimulation:
             recording=self.recording,
             batch_options=self.batch_options,
             observers=self.observers,
-            population_lifecycle=self.is_population,
+            population_lifecycle=True,
             **policy_kwargs,
         )
 
@@ -205,104 +179,37 @@ def _resolve_time(
     return resolved_duration, resolved_step
 
 
-def _resolve_solver(
-    solver: Solver | None,
-    solver_options: SolverOptions | None,
-) -> Solver:
-    """Return the explicit solver or the default public solver."""
+def _recording_as_vm_only(recording: Recording) -> RecordingPlan:
+    """Return the same output placement policy without non-Vm observable groups."""
 
-    if solver is not None and solver_options is not None:
-        raise ValueError("Provide either solver or solver_options, not both.")
-    return CrankNicholson(solver_options=solver_options) if solver is None else solver
-
-
-def _resolve_recording(recording: Recording | None) -> Recording:
-    """Return the explicit recording policy or the public default."""
-
-    return Recording() if recording is None else recording
+    plan = recording.to_plan()
+    return replace(
+        plan,
+        gates=False,
+        currents=False,
+        conductances=False,
+        state_variables=False,
+        signals=(MEMBRANE_VOLTAGE,) if recording.voltage else (),
+    )
 
 
-def _validate_single_recording(
-    recording: Recording,
-    *,
-    observers_present: bool = False,
-) -> None:
-    """Validate recording features currently supported by scalar public runs."""
+def _validate_single_row_observable_recording(recording: Recording) -> None:
+    """Validate observable groups supported by the one-row scalar fallback."""
 
-    if not recording.voltage and recording.wants_observables:
+    if not recording.voltage:
         raise NotImplementedError(
-            "single-axon observable-only recording is not supported; include Vm "
+            "single-row observable-only recording is not supported; include Vm "
             "or use Recording.none() with solver-side observers."
         )
-    if not recording.voltage and not observers_present:
-        raise NotImplementedError("Recording.none() requires solver-side observers.")
-    if recording.positions_um is not None or recording.spatial is not RecordingSpatial.FULL:
-        raise NotImplementedError("spatial single-axon recording filters are not wired yet.")
-    if recording.sample_dt_ms is not None or recording.every_n_steps is not None:
-        raise NotImplementedError("temporal single-axon recording filters are not wired yet.")
-
-
-def _filter_observable_recordings(result: SimResult, recording: Recording) -> SimResult:
-    """Keep only observable groups requested by a public ``Recording``."""
-
-    if result.recordings is None:
-        return result
-    wanted = {}
-    if recording.voltage and "Vm" in result.recordings:
-        wanted["Vm"] = result.recordings["Vm"]
-    for attr_name, result_key in _RECORDING_GROUPS:
-        if getattr(recording, attr_name) and result_key in result.recordings:
-            wanted[result_key] = result.recordings[result_key]
-    return replace(result, recordings=wanted or None)
-
-
-def _finalize_single_result(result: SimResult, recording: Recording) -> SimResult:
-    """Apply public single-run recording metadata and observable filters."""
-
-    result = _filter_observable_recordings(result, recording)
-    return replace(result, recording=recording)
-
-
-def _single_result_to_public(result: SimResult, recording: Recording) -> AxonSimulationResult:
-    """Convert one internal scalar result to the canonical public container."""
-
-    simulation = result.simulation
-    if simulation is None:
-        simulation = as_axon_instance(result.axon)
-    cohort = CohortResult(
-        input_indices=(0,),
-        axons=(result.axon,),
-        simulations=(simulation,),
-        Vm=(
-            None
-            if result.recordings is None or "Vm" not in result.recordings
-            else np.asarray(result.Vm)[None, ...]
-        ),
-        t=np.asarray(result.t),
-        diagnostics=(
-            {
-                **(result.diagnostics or {}),
-                "pool_index": 0,
-                "dispatch_method": "scalar",
-                "dispatch_batch_kind": "scalar",
-            },
-        ),
-        record_indices=(result.record_indices,),
-        recording=recording,
-        observations=result.observations,
-        recordings=(result.recordings,),
-        final_states=(result.final_state,),
-    )
-    return AxonSimulationResult((cohort,), size=1, recording=recording)
 
 
 def _filter_pool_recording(
     results: Sequence[DispatchRecord],
     recording: Recording,
 ) -> tuple[DispatchRecord, ...]:
-    """Apply spatial Vm filtering when a scalar fallback returned full traces."""
+    """Apply public recording selection to dispatcher scalar fallback rows."""
 
-    if not recording.voltage:
+    if not recording.voltage and not recording.wants_observables:
         return tuple(results)
     plan = recording.to_plan()
     filtered = []
@@ -310,80 +217,70 @@ def _filter_pool_recording(
         if hasattr(axon_result, "indices"):
             filtered.append(axon_result)
             continue
-        if axon_result.record_indices is not None:
-            filtered.append(axon_result)
-            continue
-        indices = plan.indices_for(int(axon_result.axon.n_compartments))
-        if indices is None:
-            filtered.append(axon_result)
-            continue
-        index_tuple = tuple(int(value) for value in indices)
+        vm = axon_result.Vm
+        record_indices = axon_result.record_indices
+        if recording.voltage and vm is not None and record_indices is None:
+            indices = plan.indices_for(int(axon_result.axon.n_compartments))
+            if indices is not None:
+                record_indices = tuple(int(value) for value in indices)
+                vm = np.take(np.asarray(vm), np.asarray(indices), axis=1)
+        recordings = _filter_recording_payload(
+            axon_result.recordings,
+            recording=recording,
+            vm=vm,
+        )
         filtered.append(
             replace(
                 axon_result,
-                Vm=np.take(np.asarray(axon_result.Vm), np.asarray(indices), axis=1),
-                record_indices=index_tuple,
+                Vm=vm,
+                record_indices=record_indices,
+                recordings=recordings,
             )
         )
     return tuple(filtered)
 
 
+def _filter_recording_payload(
+    recordings: dict[str, Any] | None,
+    *,
+    recording: Recording,
+    vm: Any | None,
+) -> dict[str, Any] | None:
+    """Keep only the groups requested by the public recording policy."""
+
+    if recordings is None:
+        return None
+    wanted: dict[str, Any] = {}
+    if recording.voltage:
+        if vm is not None:
+            wanted["Vm"] = vm
+        elif "Vm" in recordings:
+            wanted["Vm"] = recordings["Vm"]
+    for attr_name, result_key in _RECORDING_GROUPS:
+        if getattr(recording, attr_name) and result_key in recordings:
+            wanted[result_key] = recordings[result_key]
+    return wanted or None
+
+
 def _pool_batch_options_for_recording(
     *,
+    population: AxonPopulation,
     recording: Recording | None,
     batch_options: BatchOptions | None,
 ) -> BatchOptions | None:
     """Merge explicit public recording with lower-level batch execution knobs."""
 
+    if recording is not None and recording.wants_observables and population.is_single:
+        _validate_single_row_observable_recording(recording)
+        return batch_options_from_recording(
+            _recording_as_vm_only(recording),
+            batch_options=batch_options,
+        )
     return batch_options_from_recording(recording, batch_options=batch_options)
 
 
-def simulate(
-    axon: Axon | AxonInstance,
-    *,
-    duration: Any,
-    dt: Any,
-    solver: Solver | None = None,
-    solver_options: SolverOptions | None = None,
-    recording: Recording | None = None,
-    observers: Sequence[Any] | None = None,
-    execution_policy: ExecutionPolicy | None = None,
-) -> AxonSimulationResult:
-    """Run one axon simulation and return an ``AxonSimulationResult``.
-
-    Plain numeric durations are interpreted as milliseconds. Pint-like
-    quantities are converted at the public boundary. Passing a pure `Axon`
-    creates a no-stimulation protocol around it. Use ``result.single`` or
-    ``result[0]`` for one-axon access.
-    """
-
-    observer_defs = tuple(observers) if observers is not None else None
-    simulation = as_axon_instance(axon)
-    duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
-    active_solver = _resolve_solver(solver, solver_options)
-    rec = _resolve_recording(recording)
-    _validate_single_recording(rec, observers_present=bool(observer_defs))
-    with benchmark_span(
-        "simulation.total",
-        pool_size=1,
-        tsim_ms=duration_ms,
-        dt_ms=step_ms,
-    ):
-        with execution_context(execution_policy, instances=(simulation,)):
-            result = active_solver.solve(
-                simulation,
-                tsim=duration_ms,
-                dt=step_ms,
-                record_observables=rec.wants_observables,
-                record_voltage=rec.voltage,
-                observers=observer_defs,
-            )
-        with benchmark_span("results.to_public", pool_size=1):
-            return _single_result_to_public(_finalize_single_result(result, rec), rec)
-
-
-def simulate_pool(
-    pool: AxonPoolInput,
+def _run_population_simulation(
+    pool: AxonPopulation | Sequence[Axon | AxonInstance],
     *,
     duration: Any,
     dt: Any,
@@ -394,7 +291,7 @@ def simulate_pool(
     execution_policy: ExecutionPolicy | None = None,
     progress: ProgressOption = False,
 ) -> AxonSimulationResult:
-    """Run a pool and return the canonical ``AxonSimulationResult``.
+    """Run a population and return the canonical ``AxonSimulationResult``.
 
     Per-axon views are exposed in pool order through indexing and iteration.
     The lower-level dispatch metadata is kept in each view's ``diagnostics``
@@ -418,9 +315,11 @@ def simulate_pool(
         raise NotImplementedError("Recording.none() requires solver-side observers.")
     duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
     resolved_batch_options = _pool_batch_options_for_recording(
+        population=population,
         recording=recording,
         batch_options=batch_options,
     )
+    record_observables = bool(recording is not None and recording.wants_observables)
     with execution_context(execution_policy, instances=population.instances) as context:
         effective_batch_options = batch_options_for_execution_context(
             resolved_batch_options,
@@ -433,7 +332,9 @@ def simulate_pool(
             solver_options=solver_options,
             batch_options=effective_batch_options,
             observers=observer_defs,
+            record_observables=record_observables,
             progress=progress,
+            backend_context=context,
         )
     with benchmark_span("results.to_public", pool_size=len(population.instances)):
         if recording is not None:
@@ -444,4 +345,4 @@ def simulate_pool(
         )
 
 
-__all__ = ["AxonSimulation", "simulate", "simulate_pool"]
+__all__ = ["AxonSimulation"]

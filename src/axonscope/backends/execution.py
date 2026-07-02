@@ -11,7 +11,7 @@ from dataclasses import replace
 from typing import Any, Sequence
 
 from axonscope.performance import ExecutionPolicy
-from axonscope.recording import Recording
+from axonscope.recording import Recording, RecordingPlan
 from axonscope.solvers import BatchOptions, resolve_double_cable_block_solver
 
 
@@ -28,7 +28,7 @@ def execution_context(
 
 
 def batch_options_from_recording(
-    recording: Recording | None,
+    recording: Recording | RecordingPlan | None,
     *,
     batch_options: BatchOptions | None,
 ) -> BatchOptions | None:
@@ -62,8 +62,36 @@ def batch_options_for_execution_context(
     )
 
 
+def run_batch_group(
+    group: Any,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: Any | None,
+    observers: Sequence[Any] | None,
+    progress_callback: Any = None,
+    backend_context: Any | None = None,
+):
+    """Execute a prepared dispatch group through the active concrete backend."""
+
+    from axonscope.backends.jax.group_runner import run_jax_batch_group
+
+    return run_jax_batch_group(
+        group,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        batch_options=batch_options,
+        solver_options=solver_options,
+        observers=observers,
+        progress_callback=progress_callback,
+        backend_context=backend_context,
+    )
+
+
 __all__ = [
     "batch_options_for_execution_context",
     "batch_options_from_recording",
     "execution_context",
+    "run_batch_group",
 ]

@@ -32,7 +32,7 @@ from axonscope.backends.jax.input_batches import (
     build_vstim_midpoint_batch,
 )
 from axonscope.benchmarking import jax_profile_trace, trace_annotation
-from axonscope.channel_models import enable_rate_tables
+from axonscope.backends.jax.rate_tables import enable_rate_tables
 from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.backends.jax.batch_kernels import (
     DoubleCableBatchKernel,
@@ -45,8 +45,7 @@ from axonscope.solvers import (
 )
 from axonscope.backends.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import (
-    ExtracellularContext,
-    ExtracellularStimulationContext,
+    ExtracellularStimulation,
     Stimulus,
 )
 
@@ -57,7 +56,7 @@ Mode = Literal["single", "double"]
 @dataclass(frozen=True)
 class BatchInputs:
     axon: AxonInstance
-    context_batch: list[tuple[ExtracellularContext, ...]]
+    stimulation_batch: list[tuple[ExtracellularStimulation, ...]]
     stimulus: Stimulus
     footprint_V_per_A: np.ndarray
     x_positions_m: np.ndarray
@@ -104,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--generic-vstim",
         action="store_true",
-        help="Use the generic context-based Vstim builder instead of the footprint fast path.",
+        help="Use the generic stimulation-based Vstim builder instead of the footprint fast path.",
     )
     parser.add_argument(
         "--record",
@@ -249,7 +248,7 @@ def build_pool_inputs(
     base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
     x_positions_m = np.repeat(base_x_m[None, :], fibers, axis=0)
 
-    context_batch = []
+    stimulation_batch = []
     footprint_rows = []
     for axon_index, radial in enumerate(radial_um):
         electrode = PointSourceElectrode(
@@ -263,13 +262,12 @@ def build_pool_inputs(
             stimulus=stimulus,
             sigma=0.3 * S_per_m,
         )
-        context = ExtracellularStimulationContext(stimulation=stimulation)
-        context_batch.append((context,))
+        stimulation_batch.append((stimulation,))
         footprint_rows.append(stimulation.drives[0].footprint.values_for_axon())
 
     return BatchInputs(
         axon=axon,
-        context_batch=context_batch,
+        stimulation_batch=stimulation_batch,
         stimulus=stimulus,
         footprint_V_per_A=np.asarray(footprint_rows, dtype=float),
         x_positions_m=x_positions_m,
@@ -310,11 +308,11 @@ def run_pool_mode(
 
     with trace_annotation(f"pool/{mode}/build_vstim"):
         if use_generic_vstim:
-            vstim_builder = "generic-context"
+            vstim_builder = "generic-stimulation"
             vstim_build_s, vstim_mid = time_call(
                 lambda: build_vstim_midpoint_batch(
                     axon,
-                    pool_inputs.context_batch,
+                    pool_inputs.stimulation_batch,
                     tsim_ms=tsim_ms,
                     dt_ms=dt_ms,
                     x_positions_m=pool_inputs.x_positions_m,
@@ -335,7 +333,7 @@ def run_pool_mode(
                 previous_s, vstim_previous = time_call(
                     lambda: build_vstim_initial_previous_batch(
                         axon,
-                        pool_inputs.context_batch,
+                        pool_inputs.stimulation_batch,
                         dt_ms=dt_ms,
                         x_positions_m=pool_inputs.x_positions_m,
                     )
@@ -558,7 +556,7 @@ def print_summary(
 ) -> None:
     print("=== Pool batch demo ===")
     print(
-        f"fibers={len(pool_inputs.context_batch)} "
+        f"fibers={len(pool_inputs.stimulation_batch)} "
         f"nx={pool_inputs.axon.n_compartments} "
         f"tsim={tsim_ms:g} ms dt={dt_ms:g} ms "
         f"radial={pool_inputs.radial_um[0]:.1f}-{pool_inputs.radial_um[-1]:.1f} um "
@@ -598,7 +596,7 @@ def plot_pool(
     plt.figure(figsize=(6, 3))
     plt.bar(labels, speedups)
     plt.ylabel("Warm speedup vs scalar loop")
-    plt.title(f"Batch pool speedup ({len(pool_inputs.context_batch)} fibers)")
+    plt.title(f"Batch pool speedup ({len(pool_inputs.stimulation_batch)} fibers)")
     plt.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     plt.show()

@@ -5,7 +5,7 @@ from typing import Literal, Sequence, cast
 
 import numpy as np
 
-from axonscope.channel_models import RateTableConfig
+from axonscope.solvers.rate_tables import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
 DoubleCableBlockSolver = Literal["auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"]

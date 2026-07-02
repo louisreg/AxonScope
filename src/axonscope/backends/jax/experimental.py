@@ -25,10 +25,10 @@ from axonscope.backends.jax.runtime import (
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
-from axonscope.results.single import SimResult
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers.base import Solver
 from axonscope.solvers.crank_nicholson import CrankNicholson
+from axonscope.solvers._outputs import SolverOutput
 from axonscope.solvers.options import SolverOptions
 from axonscope.timebase import resolve_time_args, simulation_step_count
 
@@ -55,7 +55,7 @@ class CrankNicholsonVStimForcing(Solver):
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-    ) -> SimResult:
+    ) -> SolverOutput:
         simulation = as_axon_instance(axon)
         duration, step = resolve_time_args(tsim=tsim, dt=dt)
         solver_axon = build_solver_axon(simulation)
@@ -84,7 +84,7 @@ class CrankNicholsonVStimForcing(Solver):
             record_diagnostics=record_diagnostics,
             record_observables=record_observables,
         )
-        return SimResult(
+        return SolverOutput(
             simulation.axon,
             out.Vm,
             out.t,
@@ -130,7 +130,7 @@ class CrankNicholson_unoptimized(Solver):
     Notes on implementation
     -----------------------
     - Boundary conditions are sealed-end (zero-flux / Neumann).
-    - Gating variables are advanced with the exact `update_gates` CNEXP helper
+    - Gating variables are advanced through the membrane program's gate update
       over one full step before evaluating ionic currents.
     - Equivalent to the Hines method but implemented using dense matrices for
       pedagogical clarity.
@@ -155,7 +155,7 @@ class CrankNicholson_unoptimized(Solver):
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-    ) -> SimResult:
+    ) -> SolverOutput:
         """
         Run CN using dense linear algebra.
 
@@ -170,7 +170,7 @@ class CrankNicholson_unoptimized(Solver):
 
         Returns
         -------
-        SimResult
+            SolverOutput
             Voltage traces V_all and time vector t_vec.
         """
         simulation = as_axon_instance(axon)
@@ -259,7 +259,7 @@ class CrankNicholson_unoptimized(Solver):
             return (V_new, gates_new), V_new
 
         (_, _), V_all = jax.lax.scan(scan_step, (V0, gates0), jnp.arange(Nt))
-        return SimResult(simulation.axon, V_all, t_vec, simulation=simulation)
+        return SolverOutput(simulation.axon, V_all, t_vec, simulation=simulation)
 
 
 __all__ = [

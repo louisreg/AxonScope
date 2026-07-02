@@ -37,6 +37,14 @@ def _clamped_pool() -> axs.AxonPopulation:
     return axs.AxonPopulation(instances)
 
 
+def _clamped_instance() -> axs.AxonInstance:
+    return _clamped_pool()[0]
+
+
+def _inspect_simulation(axons, **kwargs):
+    return axs.AxonSimulation(axons, **kwargs).inspect()
+
+
 def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     policy = axs.ExecutionPolicy(
         runtime=axs.Runtime.JAX,
@@ -44,7 +52,7 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
         precision=axs.PrecisionPolicy.float32(),
     )
 
-    report = axs.inspect_simulation(
+    report = _inspect_simulation(
         _pool(),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
@@ -55,16 +63,24 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     assert report.planning.step_count == 2
     assert report.dispatch_groups[0].will_batch is True
     assert report.preparations[0].x_positions_shape == (2, 5)
+    assert report.membrane_sources[0].unique_membrane_count == 1
+    assert report.membrane_sources[0].kinds == ("hodgkin_huxley",)
+    assert report.membrane_sources[0].source_count == 1
+    assert set(report.membrane_sources[0].cache_statuses) <= {"hit", "miss"}
+    assert report.membrane_sources[0].cache_reasons
+    assert report.membrane_sources[0].cache_keys
     assert report.lowerings[0].intracellular_format == "zero_no_intracellular_context"
     assert report.lowerings[0].extracellular_format == "dense"
     assert report.lowerings[0].dense_vstim_shape == (2, 2, 5)
     assert report.kernels[0].kernel == "SingleCableVStimBatchKernel"
-    assert report.result_assembly[0].record_kind == "DispatchResult rows"
+    assert report.result_assembly[0].record_kind == "dispatch row records"
 
     text = report.format()
     assert "planning:" in text
     assert "dispatch/batch:" in text
     assert "prepare:" in text
+    assert "membranes:" in text
+    assert "reasons=" in text
     assert "lowering:" in text
     assert "kernel:" in text
     assert "result assembly:" in text
@@ -93,7 +109,7 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    report = axs.inspect_simulation(
+    report = _inspect_simulation(
         _clamped_pool(),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
@@ -103,7 +119,7 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
 
     lowering = report.lowerings[0]
     assert lowering.intracellular_format == "sparse_current_clamp"
-    assert lowering.extracellular_format == "zero_no_context"
+    assert lowering.extracellular_format == "zero_no_extracellular_stimulation"
     assert lowering.observer_format == "vm_raster"
     assert lowering.retained_vm_width == 0
     assert lowering.materializes_dense_vstim is False
@@ -125,7 +141,7 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
     assert memory.retained_public_mib > 0.0
 
     assembly = report.result_assembly[0]
-    assert assembly.record_kind == "DispatchCohortResult"
+    assert assembly.record_kind == "compact dispatch cohort"
     assert assembly.vm_output == "none"
     assert assembly.observation_output == 'observations["vm_raster"]'
 
@@ -142,6 +158,26 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
     assert "assembly details:" in text
 
 
+def test_inspection_reports_singleton_observer_only_batch_route():
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    report = _inspect_simulation(
+        _clamped_instance(),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[activation],
+    )
+
+    assert report.dispatch_groups[0].will_batch is True
+    assert report.lowerings[0].route == "batch"
+    assert report.kernels[0].route == "batch"
+    assert report.result_assembly[0].record_kind == "compact dispatch cohort"
+    assert report.assembly_details[0].public_rows == 1
+
+
 def test_inspection_detailed_plot_covers_padding_memory_probes_and_results():
     import matplotlib
 
@@ -152,7 +188,7 @@ def test_inspection_detailed_plot_covers_padding_memory_probes_and_results():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    report = axs.inspect_simulation(
+    report = _inspect_simulation(
         _clamped_pool(),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
@@ -174,7 +210,7 @@ def test_inspection_detailed_plot_covers_padding_memory_probes_and_results():
 
 def test_inspection_marks_unsupported_observer_only_requests():
     peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
-    report = axs.inspect_simulation(
+    report = _inspect_simulation(
         _clamped_pool(),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,

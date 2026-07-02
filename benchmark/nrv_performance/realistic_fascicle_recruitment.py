@@ -765,7 +765,7 @@ def run_axonscope_recruitment(
         current = float(amplitude_uA) * axs.uA
         for simulation in base_pool:
             update_life_current(simulation, current)
-        pool_result = axs.simulate_pool(
+        pool_result = axs.AxonSimulation(
             base_pool,
             duration=float(config.duration_ms) * axs.ms,
             dt=float(config.dt_ms) * axs.ms,
@@ -773,7 +773,7 @@ def run_axonscope_recruitment(
             batch_options=batch_options,
             observers=(activation,),
             progress=solver_progress if index == 0 else False,
-        )
+        ).run()
         return activation_protocols._activation_observations_from_pool_result(
             pool_result,
             activation,

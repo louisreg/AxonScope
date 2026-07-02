@@ -15,8 +15,8 @@ from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
 
-from axonscope.results.single import SimResult
 from axonscope.benchmarking.profiling import trace_annotation
+from axonscope.solvers._outputs import SolverOutput
 
 
 AxonFactory = Callable[[], Any]
@@ -327,7 +327,7 @@ def run_solver_benchmark_case(
         )
     rss_after = _rss_mb()
     materialize_first_s, output = _time_call_with_annotation(
-        lambda: summarize_sim_result(first_result),
+        lambda: summarize_solver_output(first_result),
         f"benchmark/{case.name}/{solver_name}/first_materialize",
     )
 
@@ -346,7 +346,7 @@ def run_solver_benchmark_case(
                 solve_kwargs=kwargs,
             )
         _time_call_with_annotation(
-            lambda result=warmup_result: summarize_sim_result(result),
+            lambda result=warmup_result: summarize_solver_output(result),
             f"benchmark/{case.name}/{solver_name}/warmup_materialize",
         )
 
@@ -368,7 +368,7 @@ def run_solver_benchmark_case(
                 solve_kwargs=kwargs,
             )
         materialize_s, _ = _time_call_with_annotation(
-            lambda result=repeat_result: summarize_sim_result(result),
+            lambda result=repeat_result: summarize_solver_output(result),
             f"benchmark/{case.name}/{solver_name}/measured_materialize",
         )
         warm_solve_times.append(elapsed_s)
@@ -463,6 +463,13 @@ def benchmark_results_document(
 
 
 def collect_benchmark_metadata() -> dict[str, Any]:
+    try:
+        from axonscope.utils.env import collect_environment_info
+
+        environment = collect_environment_info()
+    except Exception as exc:  # pragma: no cover - defensive metadata only.
+        environment = {"error": f"{type(exc).__name__}: {exc}"}
+
     metadata: dict[str, Any] = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "python": sys.version.split()[0],
@@ -471,14 +478,23 @@ def collect_benchmark_metadata() -> dict[str, Any]:
         "processor": platform.processor(),
         "numpy": np.__version__,
         "git": _git_metadata(),
+        "environment": environment,
     }
     try:
         import jax
 
         metadata["jax"] = jax.__version__
         metadata["jax_devices"] = [str(device) for device in jax.devices()]
+        metadata["jax_backend"] = jax.default_backend()
     except Exception as exc:
         metadata["jax_error"] = str(exc)
+    if isinstance(environment, dict):
+        for key in ("os", "cpu", "memory", "gpu", "packages", "environment_variables"):
+            if key in environment:
+                metadata[key] = environment[key]
+        jax_info = environment.get("jax")
+        if isinstance(jax_info, dict):
+            metadata["jax_details"] = jax_info
     return metadata
 
 
@@ -575,7 +591,7 @@ def compare_benchmark_results(
     return rows
 
 
-def summarize_sim_result(result: SimResult | Any) -> dict[str, Any]:
+def summarize_solver_output(result: SolverOutput | Any) -> dict[str, Any]:
     vm = np.asarray(result.Vm, dtype=float)
     t = np.asarray(result.t, dtype=float)
     return {

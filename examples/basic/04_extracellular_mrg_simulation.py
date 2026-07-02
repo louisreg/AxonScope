@@ -49,11 +49,13 @@ def main() -> None:
 
     # The default recording keeps full Vm, which is useful here because we want
     # to inspect several nodal traces after the run.
-    run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+    run = axs.AxonSimulation(
+        sim,
+        duration=2.0 * axs.ms,
+        dt=0.01 * axs.ms,
+    ).run()
     result = run.single
 
-    t_ms = result.time_values(unit=axs.ms)
-    vm_mV = result.voltage_values(unit=axs.mV)
     x_um = axon.layout.position_values(unit=axs.um)
 
     print(f"MRG nodes recorded: {len(node_indices)}")
@@ -68,13 +70,13 @@ def main() -> None:
     ax_layout.axvline(electrode.x_um, color="C2", linestyle="--", linewidth=1.5, label="electrode x")
     ax_layout.legend(ncol=2, frameon=False)
 
-    for idx in node_indices[:3]:
-        ax_trace.plot(t_ms, vm_mV[:, idx], label=f"node x={x_um[idx]:.0f} um")
-    ax_trace.set_xlabel("Time [ms]")
-    ax_trace.set_ylabel("Vm [mV]")
-    ax_trace.set_title("Nodal voltage traces")
-    ax_trace.grid(True, alpha=0.3)
-    ax_trace.legend()
+    result.plot_traces(
+        ax=ax_trace,
+        indices=tuple(int(index) for index in node_indices[:3]),
+        labels=tuple(f"node x={x_um[index]:.0f} um" for index in node_indices[:3]),
+        voltage_unit=axs.mV,
+        title="Nodal voltage traces",
+    )
     fig.tight_layout()
     plt.show()
 

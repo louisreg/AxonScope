@@ -43,8 +43,7 @@ def main() -> None:
         voltage_unit=axs.mV,
         current_unit=axs.uA,
     )
-    vext_mV = stimulation.evaluate(t, voltage_unit=axs.mV)
-    t_ms = np.asarray(t.to(axs.ms).magnitude, dtype=float)
+    potential = stimulation.potential(t, voltage_unit=axs.mV)
     activation_proxy = np.gradient(
         np.gradient(footprint_mV_per_uA, positions_um),
         positions_um,
@@ -52,24 +51,22 @@ def main() -> None:
 
     fig, (ax_footprint, ax_map, ax_activation) = plt.subplots(1, 3, figsize=(13, 3.5))
 
-    ax_footprint.plot(positions_um, footprint_mV_per_uA)
-    ax_footprint.axvline(electrode.x_um, color="black", linestyle="--", linewidth=1.0)
-    ax_footprint.set_xlabel("Intrinsic axon position [um]")
-    ax_footprint.set_ylabel("footprint [mV/uA]")
-    ax_footprint.set_title("Sampled footprint")
-    ax_footprint.grid(True, alpha=0.3)
-
-    image = ax_map.imshow(
-        vext_mV.T,
-        origin="lower",
-        aspect="auto",
-        extent=[t_ms[0], t_ms[-1], positions_um[0], positions_um[-1]],
-        cmap="coolwarm",
+    footprint.plot(
+        ax=ax_footprint,
+        position_unit=axs.um,
+        voltage_unit=axs.mV,
+        current_unit=axs.uA,
+        title="Sampled footprint",
     )
-    ax_map.set_xlabel("Time [ms]")
-    ax_map.set_ylabel("Intrinsic axon position [um]")
-    ax_map.set_title("Typed stimulation Vext")
-    fig.colorbar(image, ax=ax_map, label="Vext [mV]")
+    ax_footprint.axvline(electrode.x_um, color="black", linestyle="--", linewidth=1.0)
+
+    potential.plot(
+        ax=ax_map,
+        time_unit=axs.ms,
+        position_unit=axs.um,
+        voltage_unit=axs.mV,
+        title="Typed stimulation Vext",
+    )
 
     ax_activation.plot(positions_um, activation_proxy)
     ax_activation.axvline(electrode.x_um, color="black", linestyle="--", linewidth=1.0)

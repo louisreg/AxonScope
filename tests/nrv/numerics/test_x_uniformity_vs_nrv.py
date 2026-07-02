@@ -8,7 +8,7 @@ from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
-from axonscope.results.single import SimResult
+from axonscope.solvers._outputs import SolverOutput
 from tests.nrv._helpers import axonscope_x_um
 
 pytestmark = pytest.mark.nrv_numerics
@@ -33,7 +33,7 @@ ARRIVAL_TOLERANCE_MS = 0.05         # Off-site peak time difference tolerance [m
 VELOCITY_RTOL = 0.15                # Average propagation velocity tolerance
 
 
-def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SimResult:
+def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SolverOutput:
     simulation = AxonInstance(axon)
     simulation.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=T_START * ms, duration=T_PULSE * ms, amplitude=AMPLITUDE))
     solver = CrankNicholson()
@@ -46,13 +46,13 @@ def nearest_index(x: np.ndarray, position_um: float) -> int:
     return int(np.argmin(np.abs(np.asarray(x) - position_um)))
 
 
-def result_x_um(res: SimResult) -> np.ndarray:
+def result_x_um(res: SolverOutput) -> np.ndarray:
     """Return result compartment positions from the descriptive layout."""
 
     return axonscope_x_um(res.axon)
 
 
-def peak_metrics(res: SimResult, position_um: float) -> tuple[float, float]:
+def peak_metrics(res: SolverOutput, position_um: float) -> tuple[float, float]:
     """
     Return peak amplitude and its occurrence time at a fixed physical position.
 
@@ -84,7 +84,11 @@ def create_focused_non_uniform_x(L: float, Nx: int, perturbation_factor: float) 
 # 3. PLOTTING FUNCTION (COMBINED WITH GRIDSPEC)
 # ==============================================================================
 
-def plot_full_comparison(res_uniform: SimResult, res_non_uniform: SimResult, save_dir: str):
+def plot_full_comparison(
+    res_uniform: SolverOutput,
+    res_non_uniform: SolverOutput,
+    save_dir: str,
+):
     """
     Generates a single figure summarizing mesh properties and simulation results
     using GridSpec for a non-uniform 3-row layout.

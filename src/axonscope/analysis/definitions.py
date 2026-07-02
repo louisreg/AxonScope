@@ -36,6 +36,11 @@ def _result_rows(result: Any) -> tuple[Any, ...]:
     return (result,)
 
 
+def _result_row_labels(result: Any) -> tuple[Any, ...]:
+    rows = _result_rows(result)
+    return tuple(getattr(row, "index", index) for index, row in enumerate(rows))
+
+
 def _is_missing_input_error(exc: ValueError) -> bool:
     text = str(exc).lower()
     markers = (
@@ -219,6 +224,7 @@ def _evaluate_rows(
         statuses=tuple(statuses),
         messages=tuple(messages),
         unit=unit,
+        row_labels=_result_row_labels(result),
         definition=definition,
         events=tuple(events),
         input_requirements=tuple(input_requirements),

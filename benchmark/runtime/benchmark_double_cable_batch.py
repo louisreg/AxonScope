@@ -29,7 +29,7 @@ from axonscope.backends.jax.runtime import SolverRuntime, prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from benchmark.runtime.batch_utils import (
     TimingStats,
-    scaled_context_batch,
+    scaled_stimulation_batch,
     time_call,
     write_rows,
 )
@@ -139,7 +139,7 @@ def benchmark_batch_size(
     repeats: int,
     warmups: int,
 ) -> DoubleCableBatchBenchmarkRow:
-    vext_mid, vext_previous = _make_scaled_vstim_context_batch(
+    vext_mid, vext_previous = _make_scaled_vstim_stimulation_batch(
         axon,
         tsim_ms=runtime.grid.tsim_ms,
         dt_ms=runtime.grid.dt_ms,
@@ -231,24 +231,24 @@ def _run_scalar_loop(
     return jnp.stack(rows)
 
 
-def _make_scaled_vstim_context_batch(
+def _make_scaled_vstim_stimulation_batch(
     axon: HodgkinHuxley,
     *,
     tsim_ms: float,
     dt_ms: float,
     batch_size: int,
 ):
-    base_contexts = tuple(axon.extracellular_contexts)
-    context_batch = scaled_context_batch(base_contexts, batch_size=batch_size)
+    base_stimulations = tuple(axon.extracellular_stimulations)
+    stimulation_batch = scaled_stimulation_batch(base_stimulations, batch_size=batch_size)
     vext_mid = build_vstim_midpoint_batch(
         axon,
-        context_batch,
+        stimulation_batch,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
     )
     vext_previous = build_vstim_initial_previous_batch(
         axon,
-        context_batch,
+        stimulation_batch,
         dt_ms=dt_ms,
     )
     return vext_mid, vext_previous

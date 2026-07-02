@@ -5,7 +5,7 @@ from typing import Any
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.results.single import SimResult
+from axonscope.solvers._outputs import SolverOutput
 
 
 class Solver(ABC):
@@ -28,7 +28,7 @@ class Solver(ABC):
         record_observables: bool = False,
         record_voltage: bool = True,
         observers: tuple[Any, ...] | None = None,
-    ) -> SimResult:
+    ) -> SolverOutput:
         """Run a simulation and return voltage traces plus metadata."""
 
         raise NotImplementedError

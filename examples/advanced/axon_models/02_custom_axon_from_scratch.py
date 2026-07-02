@@ -110,12 +110,14 @@ def main() -> None:
     )
     sim.add_intracellular_context(context=clamp)
 
-    run = axs.simulate(sim, duration=6.0 * axs.ms, dt=0.01 * axs.ms)
+    run = axs.AxonSimulation(
+        sim,
+        duration=6.0 * axs.ms,
+        dt=0.01 * axs.ms,
+    ).run()
     result = run.single
 
     probe_positions = np.asarray([150.0, 350.0, 750.0]) * axs.um
-    peak_mV = axs.analysis.peak_voltage(result)
-    x_um = result.position_values(unit=axs.um)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True)
     ax_layout, ax_traces, ax_map, ax_peak = axes.ravel()
@@ -136,15 +138,13 @@ def main() -> None:
     )
     ax_layout.legend(frameon=False)
 
-    for position in probe_positions:
-        result.plot_trace(
-            ax=ax_traces,
-            position=position,
-            voltage_unit=axs.mV,
-            label=f"x={position.to(axs.um).magnitude:g} um",
-        )
-    ax_traces.set_title("Probe traces")
-    ax_traces.legend(frameon=False)
+    result.plot_traces(
+        ax=ax_traces,
+        positions=tuple(probe_positions),
+        labels=tuple(f"x={position.to(axs.um).magnitude:g} um" for position in probe_positions),
+        voltage_unit=axs.mV,
+        title="Probe traces",
+    )
 
     result.plot_map(
         ax=ax_map,
@@ -153,11 +153,13 @@ def main() -> None:
         title="Custom axon Vm",
     )
 
-    ax_peak.plot(x_um, peak_mV, color="C2", linewidth=2.0)
-    ax_peak.set_title("Peak voltage by compartment")
-    ax_peak.set_xlabel("Axon position x [um]")
-    ax_peak.set_ylabel("Peak Vm [mV]")
-    ax_peak.grid(True, alpha=0.3)
+    result.plot_peak_voltage(
+        ax=ax_peak,
+        position_unit=axs.um,
+        voltage_unit=axs.mV,
+        title="Peak voltage by compartment",
+        color="C2",
+    )
 
     plt.show()
 

@@ -32,7 +32,7 @@ candidate modes are:
   NODE/MYSA/FLUT/STIN chain built directly from AxonScope single-cable
   primitives. It preserves the MRG-like segment taxonomy, uses active nodes and
   passive effective internodes, and supports a segment-specific extracellular
-  alpha vector through the validation context.
+  alpha vector through typed validation stimulations.
 - `pseudo_double_series`: experimental coefficient-derived v1 candidate using
   a local axolemma/myelin RC-series reduction and a scalar tridiagonal solve.
   It keeps node compartments on the axolemmal fallback when the myelin

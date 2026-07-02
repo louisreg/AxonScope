@@ -25,14 +25,14 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
         name="point_source_extracellular",
         description=(
             "Homogeneous HH pool driven by analytical point-source extracellular "
-            "contexts; useful to expose generic Vstim preprocessing cost."
+            "stimulations; useful to expose generic Vstim preprocessing cost."
         ),
     ),
     "double_cable_extracellular": HotpathWorkload(
         name="double_cable_extracellular",
         description=(
             "Homogeneous MRG double-cable pool driven by analytical point-source "
-            "extracellular contexts; useful to expose the priority myelinated "
+            "extracellular stimulations; useful to expose the priority myelinated "
             "extracellular hotpath."
         ),
     ),
@@ -60,7 +60,7 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
     "typed_footprint_drive_matrix": HotpathWorkload(
         name="typed_footprint_drive_matrix",
         description=(
-            "Direct backend workload comparing analytical context lowering against "
+            "Direct backend workload comparing typed stimulation lowering against "
             "typed ExtracellularFootprint/ExtracellularDrive lowering."
         ),
     ),

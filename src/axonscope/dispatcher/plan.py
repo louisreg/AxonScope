@@ -54,7 +54,7 @@ class DispatchGroup:
 
     @property
     def batch_kind(self) -> str:
-        """Return the intended batch family for this group."""
+        """Return the intended batch route for this group."""
 
         prefix = "strict" if self.geometry_shared else "parameter"
         return f"{prefix}-{self.mode}-cable"
@@ -101,7 +101,7 @@ class _SolverDispatchMetadata:
     nx_signature: int | None
     membrane_signature: tuple[Any, ...]
     membrane_group_signature: tuple[Any, ...]
-    membrane_family_sequence: tuple[Any, ...]
+    membrane_structure_sequence: tuple[Any, ...]
     cable_signature: tuple[Any, ...]
 
 
@@ -257,10 +257,10 @@ def _optional_array_signature(values: Any | None) -> tuple[tuple[int, ...], str,
 def _solver_dispatch_metadata(solver_axon: SolverAxon) -> _SolverDispatchMetadata:
     mode = _resolve_mode(solver_axon)
     membrane_signature = _axon_membrane_signature(solver_axon)
-    membrane_family_sequence = _axon_membrane_family_sequence(solver_axon)
+    membrane_structure_sequence = _axon_membrane_structure_sequence(solver_axon)
     cable_signature = _axon_cable_signature(solver_axon)
     membrane_group_signature = (
-        _unique_membrane_families(membrane_family_sequence)
+        _unique_membrane_structures(membrane_structure_sequence)
         if mode == "double"
         else membrane_signature
     )
@@ -271,7 +271,7 @@ def _solver_dispatch_metadata(solver_axon: SolverAxon) -> _SolverDispatchMetadat
         nx_signature=nx_signature,
         membrane_signature=membrane_signature,
         membrane_group_signature=membrane_group_signature,
-        membrane_family_sequence=membrane_family_sequence,
+        membrane_structure_sequence=membrane_structure_sequence,
         cable_signature=cable_signature,
     )
 
@@ -317,32 +317,32 @@ def _dispatch_signature(item: DispatchItem) -> tuple[Any, ...]:
     return item.signature
 
 
-def _unique_membrane_families(signatures: Iterable[Any]) -> tuple[Any, ...]:
-    """Return an order-independent membrane-family set signature."""
+def _unique_membrane_structures(signatures: Iterable[Any]) -> tuple[Any, ...]:
+    """Return an order-independent membrane-structure set signature."""
 
     return tuple(sorted(set(signatures), key=repr))
 
 
-def _model_family_signature(model: Any) -> Any:
+def _model_structure_signature(model: Any) -> Any:
     """Return a structural membrane signature that ignores numeric parameters."""
 
     kind = getattr(model, "kind", None)
     if kind is not None:
-        component_families = tuple(
-            _model_family_signature(component)
+        component_structures = tuple(
+            _model_structure_signature(component)
             for component in getattr(model, "components", ())
         )
-        return ("membrane", kind, component_families)
+        return ("membrane", kind, component_structures)
     implementation = getattr(model, "_implementation", None)
     if implementation is not None:
-        return _model_family_signature(implementation)
+        return _model_structure_signature(implementation)
     return (model.__class__.__module__, model.__class__.__qualname__)
 
 
-def _axon_membrane_family_sequence(axon: SolverAxon) -> Any:
-    """Return per-compartment membrane families without parameter values."""
+def _axon_membrane_structure_sequence(axon: SolverAxon) -> Any:
+    """Return per-compartment membrane structures without parameter values."""
 
-    return tuple(_model_family_signature(model) for model in axon.membrane_models)
+    return tuple(_model_structure_signature(model) for model in axon.membrane_models)
 
 
 def _group_has_shared_geometry(items: Sequence[DispatchItem]) -> bool:

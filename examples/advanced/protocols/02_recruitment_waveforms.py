@@ -5,6 +5,8 @@ Run:
 
 This example focuses on recruitment protocols only. The axon pool is fixed; the
 protocol sweeps current magnitude for several temporal waveform families.
+`recruitment_sweep(...)` evaluates the sampled values sequentially, and each
+value runs the whole pool through the normal batch dispatcher.
 """
 
 from __future__ import annotations
@@ -54,6 +56,17 @@ def main() -> None:
     curves: dict[str, axs.protocols.RecruitmentCurve] = {}
     preview_stimuli: dict[str, axs.Stimulus] = {}
     show_cold_solver_progress = True
+    recording_policy = axs.Recording.probes(axs.signals.Vm, count=5)
+    batch_options = axs.BatchOptions.full(time_chunk_steps=50)
+
+    print("=== Recruitment batching policy ===")
+    print("values are sampled sequentially; the pool is batched for each value")
+    print(f"recording: {recording_policy.to_plan().spatial.value}")
+    print(f"time_chunk_steps: {batch_options.time_chunk_steps}")
+    print(
+        "observer-only alternative: recording=axs.Recording.none(), "
+        "batch_options=axs.BatchOptions.none(time_chunk_steps=...)"
+    )
 
     def build_waveform_stimulus(waveform_name: str, current_magnitude: Any) -> axs.Stimulus:
         if waveform_name == "monophasic cathodic":
@@ -150,11 +163,12 @@ def main() -> None:
                 current,
                 waveform_name=name,
             ),
-            amplitudes=amplitudes,
+            values=amplitudes,
             duration=3.0 * axs.ms,
             dt=0.02 * axs.ms,
             criterion=criterion,
-            recording=axs.Recording.probes(axs.signals.Vm, count=5),
+            recording=recording_policy,
+            batch_options=batch_options,
             progress=True,
             solver_progress="plain" if show_cold_solver_progress else False,
         )
@@ -163,13 +177,7 @@ def main() -> None:
         preview_stimuli[waveform] = build_waveform_stimulus(waveform, amplitudes[-1])
 
         print(f"\n=== Recruitment: {waveform} ===")
-        for amplitude_uA, count, fraction in zip(
-            curve.amplitudes_uA,
-            curve.count,
-            curve.fraction,
-            strict=True,
-        ):
-            print(f"{amplitude_uA:>5.1f} uA: {int(count)}/{len(pool)} fibers ({fraction:.2f})")
+        print(curve.to_dataframe(unit=axs.uA).to_string(index=False))
 
     # Step 5: plot the waveform shapes and recruitment curves together so users
     # can connect the temporal drive to the cohort response.

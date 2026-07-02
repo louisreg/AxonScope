@@ -409,6 +409,166 @@ def _run_single_cable_vstim_batch_stateful_scan(
         "membrane",
         "has_driven_extracellular",
         "stateless_vm_only",
+        "record_full",
+    ),
+)
+def _run_single_cable_factorized_vstim_batch_stateful_scan(
+    *,
+    backend,
+    membrane,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    record_full: bool,
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    dl: Array,
+    d_static: Array,
+    du: Array,
+    Cm_uF_cm2: Array,
+    I_background: Array,
+    Vm0_mV: Array,
+    gates0: Array,
+    state0: tuple[Array, ...],
+    intracellular_current_density_mid: Array,
+    extracellular_current_mid_A: Array,
+    extracellular_forcing_footprint_mV_per_A: Array,
+    record_indices: Array,
+    dt_ms: Array,
+) -> tuple[Array, Array, tuple[Array, ...], Array]:
+    """Run one recorded-Vm chunk with factorized extracellular forcing."""
+
+    def one_batch(
+        Vm0_row,
+        gates0_row,
+        state0_row,
+        lower_row,
+        diag_row,
+        upper_row,
+        dl_row,
+        d_static_row,
+        du_row,
+        Cm_row,
+        I_background_row,
+        Iinj_mid,
+        current_mid_row_A,
+        forcing_footprint_mV_per_A,
+    ):
+        def step(carry, step_inputs):
+            Iinj, current_A = step_inputs
+            Vm, gates, *extra = carry
+            extra = tuple(extra)
+            vstim_force = jnp.sum(
+                current_A[:, None] * forcing_footprint_mV_per_A,
+                axis=0,
+            )
+
+            gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            if stateless_vm_only:
+                linearization_gates = gates if has_driven_extracellular else gates_pred
+                explicit_outward_current = I_background_row
+                correction_current = jnp.zeros_like(Vm)
+            else:
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                step_plan_pred = membrane.prepare_membrane_step(
+                    V_mV=Vm,
+                    gates_prev=gates,
+                    gates_new=gates_pred,
+                    state=extra,
+                    dt=dt_ms,
+                    I_ion=Iion_pred,
+                    I_background=I_background_row,
+                )
+                linearization_gates = step_plan_pred.linearization_gates
+                if has_driven_extracellular:
+                    linearization_gates = gates
+                explicit_outward_current = step_plan_pred.explicit_outward_current
+                correction_current = step_plan_pred.correction_current
+
+            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            d = d_static_row + (dt_ms / Cm_row) * Gm
+            rhs = (
+                Vm
+                + dt_ms * vstim_force
+                + (dt_ms / Cm_row)
+                * (
+                    GE
+                    + Iinj
+                    - explicit_outward_current
+                    - correction_current
+                )
+            )
+            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+
+            if stateless_vm_only:
+                output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+                return (Vm_new, gates_pred, *extra), output
+
+            gates_new = membrane.final_gate_update(
+                gates_prev=gates,
+                V_mV_prev=Vm,
+                V_mV_new=Vm_new,
+                dt=dt_ms,
+                gates_predictor=gates_pred,
+            )
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            step_plan = membrane.prepare_membrane_step(
+                V_mV=Vm_new,
+                gates_prev=gates,
+                gates_new=gates_new,
+                state=extra,
+                dt=dt_ms,
+                I_ion=Iion_new,
+                I_background=I_background_row,
+            )
+            state_new = membrane.finalize_membrane_step(
+                V_mV_prev=Vm,
+                V_mV_new=Vm_new,
+                gates_prev=gates,
+                gates_new=gates_new,
+                state_prev=extra,
+                step_plan=step_plan,
+                dt=dt_ms,
+            )
+            output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+            return (Vm_new, gates_new, *state_new), output
+
+        final_carry, trace = jax.lax.scan(
+            step,
+            (Vm0_row, gates0_row, *state0_row),
+            (Iinj_mid, jnp.swapaxes(current_mid_row_A, 0, 1)),
+        )
+        return final_carry[0], final_carry[1], tuple(final_carry[2:]), trace
+
+    state_axes = tuple(0 for _ in state0)
+    return jax.vmap(
+        one_batch,
+        in_axes=(0, 0, state_axes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )(
+        Vm0_mV,
+        gates0,
+        state0,
+        lower,
+        diag,
+        upper,
+        dl,
+        d_static,
+        du,
+        Cm_uF_cm2,
+        I_background,
+        intracellular_current_density_mid,
+        extracellular_current_mid_A,
+        extracellular_forcing_footprint_mV_per_A,
+    )
+
+
+@partial(
+    jax.jit,
+    static_argnames=(
+        "backend",
+        "membrane",
+        "has_driven_extracellular",
+        "stateless_vm_only",
     ),
 )
 def _run_single_cable_vstim_batch_observer_scan(
@@ -854,6 +1014,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         Iinj_values_mid,
         Iinj_indices,
         Iinj_mask,
+        current_mid_row_A,
         forcing_footprint_mV_per_A,
     ):
         safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
@@ -865,7 +1026,10 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
             Iinj = jnp.zeros_like(Vm).at[safe_iinj_indices].add(
                 jnp.where(Iinj_mask, Iinj_values, 0.0)
             )
-            vstim_force = current_A * forcing_footprint_mV_per_A
+            vstim_force = jnp.sum(
+                current_A[:, None] * forcing_footprint_mV_per_A,
+                axis=0,
+            )
 
             gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
             if stateless_vm_only:
@@ -956,7 +1120,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
             (Vm0_row, gates0_row, observer_state_row, *state0_row),
             (
                 Iinj_values_mid,
-                extracellular_current_mid_A,
+                jnp.swapaxes(current_mid_row_A, 0, 1),
                 jnp.arange(
                     Iinj_values_mid.shape[0],
                     dtype=jnp.asarray(time_start_index).dtype,
@@ -985,6 +1149,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
             0,
             0,
             0,
+            0,
         ),
     )(
         Vm0_mV,
@@ -1001,6 +1166,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         intracellular_current_density_values_mid,
         intracellular_current_density_indices,
         intracellular_current_density_mask,
+        extracellular_current_mid_A,
         extracellular_forcing_footprint_mV_per_A,
     )
 
@@ -2897,6 +3063,23 @@ class SingleCableVStimBatchKernel:
                 t=grid.t_vec_ms,
                 observations=observations,
             )
+        if factorized_vext is not None and record_voltage:
+            if iinj_batch is None:
+                assert sparse_iinj is not None
+                iinj_batch = materialize_sparse_intracellular_current_density_batch(sparse_iinj)
+            out = _run_single_cable_factorized_vstim_batch_array_chunks(
+                runtime=runtime,
+                Cm_uF_cm2=jnp.asarray(self.Cm_uF_cm2, dtype=dtype_local),
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                intracellular_current_density_mid=iinj_batch,
+                extracellular_potential_mid_mV=factorized_vext,
+                record_indices=record_idx,
+                record_full=record_full,
+                time_chunk_steps=chunk_steps,
+                progress_callback=progress_callback,
+            )
+            return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
         if factorized_vext is not None and vext_batch is None:
             vext_batch = materialize_factorized_extracellular_potential_batch(
                 factorized_vext
@@ -3285,6 +3468,104 @@ def _run_single_cable_vstim_batch_array_chunks(
     return _concat_trace_chunks(chunks)
 
 
+def _run_single_cable_factorized_vstim_batch_array_chunks(
+    *,
+    runtime: SolverRuntime,
+    Cm_uF_cm2: Array,
+    has_driven_extracellular: bool,
+    stateless_vm_only: bool,
+    intracellular_current_density_mid: Array,
+    extracellular_potential_mid_mV: FactorizedExtracellularPotentialBatch,
+    record_indices: Array,
+    record_full: bool,
+    time_chunk_steps: int | None,
+    progress_callback: Callable[[int, int], None] | None,
+) -> Array:
+    membrane_runtime = runtime.membrane
+    grid = runtime.grid
+    cable = runtime.cable
+    dtype_local = membrane_runtime.dtype
+    dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
+    batch_size = extracellular_potential_mid_mV.batch_size
+    current_rows_mid_A = _factorized_current_mid_rows(
+        extracellular_potential_mid_mV,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+    lower = _as_batched_space_array(
+        "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    diag = _as_batched_space_array(
+        "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    upper = _as_batched_space_array(
+        "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
+    )
+    cm = _as_batched_scalar_or_space_array(
+        "Cm_uF_cm2",
+        Cm_uF_cm2,
+        nx=membrane_runtime.Nx,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+    background = _as_batched_space_array(
+        "I_background",
+        membrane_runtime.background_current,
+        nx=membrane_runtime.Nx,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+    forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint(
+        extracellular_potential_mid_mV.footprint_mV_per_A,
+        lower=lower,
+        upper=upper,
+        dtype_local=dtype_local,
+    )
+    Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
+    chunks = []
+
+    chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
+    for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
+        with benchmark_span(
+            "kernel.dispatch_jax",
+            mode="single",
+            variant="factorized_vstim",
+            group_size=batch_size,
+            time_chunk_steps=time_chunk_steps,
+            chunk_steps=stop - start,
+            chunk_index=chunk_index,
+            chunk_count=len(chunk_ranges),
+        ):
+            Vm, gates, state, trace = _run_single_cable_factorized_vstim_batch_stateful_scan(
+                backend=membrane_runtime.backend,
+                membrane=membrane_runtime.membrane,
+                has_driven_extracellular=has_driven_extracellular,
+                stateless_vm_only=stateless_vm_only,
+                record_full=record_full,
+                lower=lower,
+                diag=diag,
+                upper=upper,
+                dl=-dt * lower,
+                d_static=jnp.ones_like(diag) - dt * diag,
+                du=-dt * upper,
+                Cm_uF_cm2=cm,
+                I_background=background,
+                Vm0_mV=Vm,
+                gates0=gates,
+                state0=state,
+                intracellular_current_density_mid=intracellular_current_density_mid[:, start:stop],
+                extracellular_current_mid_A=current_rows_mid_A[:, :, start:stop],
+                extracellular_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
+                record_indices=record_indices,
+                dt_ms=dt,
+            )
+        chunks.append(trace)
+        if progress_callback is not None:
+            progress_callback(chunk_index, len(chunk_ranges))
+
+    return _concat_trace_chunks(chunks)
+
+
 def _run_single_cable_vstim_batch_observer_chunks(
     *,
     runtime: SolverRuntime,
@@ -3545,28 +3826,17 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
     time_chunk_steps: int | None,
     progress_callback: Callable[[int, int], None] | None,
 ) -> VmRasterState:
-    if not extracellular_potential_mid_mV.shared_current:
-        dense_vext = materialize_factorized_extracellular_potential_batch(
-            extracellular_potential_mid_mV
-        )
-        return _run_single_cable_vstim_batch_sparse_observer_chunks(
-            runtime=runtime,
-            Cm_uF_cm2=Cm_uF_cm2,
-            observers=observers,
-            has_driven_extracellular=has_driven_extracellular,
-            stateless_vm_only=stateless_vm_only,
-            intracellular_current_density_mid=intracellular_current_density_mid,
-            extracellular_potential_mid_mV=dense_vext,
-            time_chunk_steps=time_chunk_steps,
-            progress_callback=progress_callback,
-        )
-
     membrane_runtime = runtime.membrane
     grid = runtime.grid
     cable = runtime.cable
     dtype_local = membrane_runtime.dtype
     dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
     batch_size = extracellular_potential_mid_mV.batch_size
+    current_rows_mid_A = _factorized_current_mid_rows(
+        extracellular_potential_mid_mV,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
     lower = _as_batched_space_array(
         "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
     )
@@ -3606,7 +3876,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
     current_mid_A = jnp.asarray(
-        extracellular_potential_mid_mV.current_mid_A,
+        current_rows_mid_A,
         dtype=dtype_local,
     )
     forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint(
@@ -3656,7 +3926,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
                 ),
                 intracellular_current_density_indices=intracellular_current_density_mid.indices,
                 intracellular_current_density_mask=intracellular_current_density_mid.mask,
-                extracellular_current_mid_A=current_mid_A[start:stop],
+                extracellular_current_mid_A=current_mid_A[:, :, start:stop],
                 extracellular_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
                 time_start_index=jnp.asarray(
                     0 if local_observer_chunks else start,
@@ -3682,6 +3952,25 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
     return observer_state
 
 
+def _factorized_current_mid_rows(
+    batch: FactorizedExtracellularPotentialBatch,
+    *,
+    dtype_local: Any,
+    batch_size: int,
+) -> Array:
+    current = jnp.asarray(batch.current_mid_A, dtype=dtype_local)
+    if current.ndim == 1:
+        return jnp.broadcast_to(current[None, None, :], (batch_size, 1, current.shape[0]))
+    if current.ndim == 2:
+        return current[:, None, :]
+    if current.ndim == 3:
+        return current
+    raise ValueError(
+        "factorized current_mid_A must have shape (Nt,), (B, Nt), or (B, K, Nt), "
+        f"got {current.shape}."
+    )
+
+
 def _single_cable_factorized_forcing_footprint(
     footprint_mV_per_A: Array,
     *,
@@ -3694,9 +3983,27 @@ def _single_cable_factorized_forcing_footprint(
     footprint = jnp.asarray(footprint_mV_per_A, dtype=dtype_local)
     lower_rows = jnp.asarray(lower, dtype=dtype_local)
     upper_rows = jnp.asarray(upper, dtype=dtype_local)
+    if footprint.ndim == 3:
+        batch_size, drive_count, nx = footprint.shape
+        flattened = footprint.reshape((batch_size * drive_count, nx))
+        lower_rows = jnp.broadcast_to(
+            lower_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        upper_rows = jnp.broadcast_to(
+            upper_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        forcing = _single_cable_factorized_forcing_footprint(
+            flattened,
+            lower=lower_rows,
+            upper=upper_rows,
+            dtype_local=dtype_local,
+        )
+        return forcing.reshape((batch_size, drive_count, nx))
     if footprint.ndim != 2:
         raise ValueError(
-            "factorized single-cable footprints must have shape (B, Nx), "
+            "factorized single-cable footprints must have shape (B, Nx) or (B, K, Nx), "
             f"got {footprint.shape}."
         )
     out = jnp.zeros_like(footprint)
@@ -4556,37 +4863,51 @@ def _as_factorized_extracellular_potential_batch(
     footprint_mV_per_A = jnp.asarray(values.footprint_mV_per_A, dtype=dtype_local)
     if int(values.target_nx) != int(nx):
         raise ValueError(f"{name}.target_nx must be {nx}, got {values.target_nx}.")
-    if footprint_mV_per_A.ndim != 2 or footprint_mV_per_A.shape[1] != nx:
+    if footprint_mV_per_A.ndim not in {2, 3} or footprint_mV_per_A.shape[-1] != nx:
         raise ValueError(
-            f"{name}.footprint_mV_per_A must have shape (B, Nx) with Nx={nx}, "
+            f"{name}.footprint_mV_per_A must have shape (B, Nx) or "
+            f"(B, K, Nx) with Nx={nx}, "
             f"got {footprint_mV_per_A.shape}."
         )
     batch_size = int(footprint_mV_per_A.shape[0])
-    if current_mid_A.ndim == 1:
+    drive_count = 1 if footprint_mV_per_A.ndim == 2 else int(footprint_mV_per_A.shape[1])
+    if footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 1:
         if current_mid_A.shape != (nt,):
             raise ValueError(
                 f"{name}.current_mid_A must have shape (Nt,)=({nt},), "
                 f"got {current_mid_A.shape}."
             )
-    elif current_mid_A.ndim == 2:
+    elif footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 2:
         if current_mid_A.shape != (batch_size, nt):
             raise ValueError(
                 f"{name}.current_mid_A must have shape (B, Nt)="
                 f"({batch_size}, {nt}), got {current_mid_A.shape}."
             )
+    elif footprint_mV_per_A.ndim == 3 and current_mid_A.ndim == 3:
+        if current_mid_A.shape != (batch_size, drive_count, nt):
+            raise ValueError(
+                f"{name}.current_mid_A must have shape (B, K, Nt)="
+                f"({batch_size}, {drive_count}, {nt}), got {current_mid_A.shape}."
+            )
     else:
         raise ValueError(
-            f"{name}.current_mid_A must have shape (Nt,) or (B, Nt), "
-            f"got {current_mid_A.shape}."
+            f"{name}.current_mid_A shape {current_mid_A.shape} is incompatible "
+            f"with footprint shape {footprint_mV_per_A.shape}."
         )
     if current_initial_previous_A is not None:
-        if (
-            current_initial_previous_A.ndim != 0
-            and current_initial_previous_A.shape != (batch_size,)
-        ):
+        if footprint_mV_per_A.ndim == 2:
+            valid_previous = (
+                current_initial_previous_A.ndim == 0
+                or current_initial_previous_A.shape == (batch_size,)
+            )
+            expected = f"scalar or (B,)=({batch_size},)"
+        else:
+            valid_previous = current_initial_previous_A.shape == (batch_size, drive_count)
+            expected = f"(B, K)=({batch_size}, {drive_count})"
+        if not valid_previous:
             raise ValueError(
-                f"{name}.current_initial_previous_A must be scalar or have shape "
-                f"(B,)=({batch_size},), got {current_initial_previous_A.shape}."
+                f"{name}.current_initial_previous_A must have shape {expected}, "
+                f"got {current_initial_previous_A.shape}."
             )
     return FactorizedExtracellularPotentialBatch(
         current_mid_A=current_mid_A,

@@ -38,12 +38,12 @@ def main() -> None:
         )
     )
 
-    run = axs.simulate(
+    run = axs.AxonSimulation(
         simulation,
         duration=5.0 * axs.ms,
         dt=0.01 * axs.ms,
         recording=axs.Recording.voltage(),
-    )
+    ).run()
     result = run.single
 
     # Step 2: define criteria with the same threshold but different typed
@@ -105,21 +105,19 @@ def main() -> None:
 
     # Step 5: plot the traces that triggered each criterion. Criteria that did
     # not activate are skipped because they have no first index to display.
-    for label, event in events.items():
-        if event.first_index is None:
-            continue
-        t_ms, vm_mV = result.trace_values(
-            index=event.first_index,
-            time_unit=axs.ms,
-            voltage_unit=axs.mV,
-        )
-        ax_trace.plot(t_ms, vm_mV, label=label)
+    triggered = {
+        label: event
+        for label, event in events.items()
+        if event.first_index is not None
+    }
+    result.plot_traces(
+        ax=ax_trace,
+        indices=tuple(int(event.first_index) for event in triggered.values()),
+        labels=tuple(triggered),
+        voltage_unit=axs.mV,
+        title="Detected traces",
+    )
     ax_trace.axhline(0.0, color="0.3", linestyle="--", linewidth=1.0)
-    ax_trace.set_title("Detected traces")
-    ax_trace.set_xlabel("Time [ms]")
-    ax_trace.set_ylabel("Vm [mV]")
-    ax_trace.grid(True, alpha=0.3)
-    ax_trace.legend(frameon=False)
     plt.show()
 
 

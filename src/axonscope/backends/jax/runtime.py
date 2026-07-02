@@ -10,26 +10,20 @@ import numpy as np
 
 from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
-from axonscope.channel_models.axnode import AxnodeICM
-from axonscope.channel_models.base_channel_model import CompositeICM, IonChannelModelBase
-from axonscope.channel_models.borg_kdr import BorgKDRICM
-from axonscope.channel_models.composite_models import (
-    Schild94CompositeICM,
-    Schild97CompositeICM,
-    TigerholmCompositeICM,
+from axonscope.backends.jax.rate_tables import enable_rate_tables
+from axonscope.backends.jax.membrane_backend import (
+    HeterogeneousMembraneBackend,
+    MembraneBackend,
+    UniformMembraneBackend,
+    membrane_static_signature,
 )
-from axonscope.channel_models.hodgkin_huxley import HodgkinHuxleyICM
-from axonscope.channel_models.na_hh import NaHHICM
-from axonscope.channel_models.passive import PassiveICM
-from axonscope.channel_models.rattay_aberham import RattayAberhamICM
-from axonscope.channel_models.rate_tables import enable_rate_tables
-from axonscope.icm import (
+from axonscope.backends.jax.membrane_layout import (
     CompartmentMembraneLayout,
-    HeterogeneousICMBackend,
-    ICMBackend,
-    UniformICMBackend,
 )
-from axonscope.membranes import MembraneModel
+from axonscope.backends.jax.membrane_program import JaxMembraneProgram
+from axonscope.membranes.model import ensure_membrane_model
+from axonscope.membranes.compiler import lower_membrane_model_with_sources
+from axonscope.model_ir.source import SourceModelCompileResult
 from axonscope.solvers.axon_runtime import SolverAxon, build_solver_axon
 from axonscope.timebase import simulation_step_count
 
@@ -128,8 +122,8 @@ class SolverRuntime:
     extracellular: ExtracellularRuntime | None = None
 
 
-_COMPILED_MEMBRANE_CACHE: dict[tuple[Any, ...], IonChannelModelBase] = {}
-_BACKEND_CACHE: dict[tuple[Any, ...], ICMBackend] = {}
+_MEMBRANE_MODEL_CACHE: dict[tuple[Any, ...], Any] = {}
+_BACKEND_CACHE: dict[tuple[Any, ...], MembraneBackend] = {}
 _MEMBRANE_RUNTIME_CACHE: dict[tuple[Any, ...], MembraneRuntime] = {}
 _CABLE_RUNTIME_CACHE: dict[tuple[Any, ...], CableRuntime] = {}
 _EXTRACELLULAR_RUNTIME_CACHE: dict[tuple[Any, ...], ExtracellularRuntime] = {}
@@ -137,9 +131,9 @@ _SOLVER_RUNTIME_CACHE: dict[tuple[Any, ...], SolverRuntime] = {}
 
 
 def _with_rate_tables(
-    model: IonChannelModelBase,
+    model: Any,
     options: SolverOptions,
-) -> IonChannelModelBase:
+) -> Any:
     if options.rate_table_config is not None:
         enable_rate_tables(model, config=options.rate_table_config)
     return model
@@ -246,7 +240,7 @@ def _solver_runtime_cache_key(
         bool(include_extracellular),
         bool(include_area),
         bool(getattr(axon, "use_extracellular", False)),
-        bool(getattr(axon, "extracellular_contexts", ())),
+        bool(getattr(axon, "extracellular_stimulations", ())),
     )
 
 
@@ -269,82 +263,82 @@ def compile_membrane_model(
     model: Any,
     *,
     solver_options: SolverOptions | None = None,
-) -> IonChannelModelBase:
+) -> JaxMembraneProgram:
     """Compile a public membrane description to the current compute model.
 
-    Public axons carry `MembraneModel` values so they stay independent from the
-    JAX/channel-model implementation. This function is the narrow bridge from
-    that descriptive layer to the solver runtime.
+    Public axons carry membrane `Model` instances or normalized `MembraneModel`
+    descriptors so they stay independent from the JAX implementation. This
+    function is the narrow bridge from that descriptive layer to the solver
+    runtime.
     """
 
     options = _resolve_solver_options(solver_options)
-    if isinstance(model, IonChannelModelBase):
-        return _with_rate_tables(model, options)
-    if not isinstance(model, MembraneModel):
-        implementation = getattr(model, "_implementation", None)
-        if implementation is not None:
-            return compile_membrane_model(
-                implementation,
-                solver_options=options,
-            )
-        raise TypeError(f"Unsupported membrane model description: {model!r}")
+    model = ensure_membrane_model(model)
 
-    if model.kind == "legacy":
-        if model._implementation is None:
-            raise ValueError("Legacy membrane descriptions must carry an implementation.")
-        return compile_membrane_model(
-            model._implementation,
-            solver_options=options,
+    try:
+        lowered = lower_membrane_model_with_sources(
+            model,
+            load_generated_modules=("jax",),
         )
-
-    params = dict(model.params)
-    if model.kind == "passive":
-        return _with_rate_tables(PassiveICM(**params), options)
-    if model.kind == "hodgkin_huxley":
-        return _with_rate_tables(HodgkinHuxleyICM(**params), options)
-    if model.kind == "rattay_aberham":
-        return _with_rate_tables(RattayAberhamICM(**params), options)
-    if model.kind == "sundt":
-        return _with_rate_tables(
-            CompositeICM(
-                [
-                    NaHHICM(
-                        gnabar=params["gnabar"],
-                        ena=params["ena"],
-                        celsius=params["celsius"],
-                        mshift=-6.0,
-                        hshift=6.0,
-                    ),
-                    BorgKDRICM(
-                        gkdrbar=params["gkdrbar"],
-                        ek=params["ek"],
-                        celsius=params["celsius"],
-                    ),
-                    PassiveICM(Rm=params["Rm"], EL=params["El"]),
-                ]
+    except ValueError as exc:
+        raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
+    _record_membrane_source_compile_metadata(model.kind, lowered.source_results)
+    return cast(
+        JaxMembraneProgram,
+        _with_rate_tables(
+            JaxMembraneProgram.from_model_ir(
+                lowered.model,
+                dtype_local=model.dtype,
+                generated_module=_single_generated_module(
+                    lowered.source_results,
+                    target="jax",
+                ),
             ),
             options,
-        )
-    if model.kind == "tigerholm":
-        return _with_rate_tables(TigerholmCompositeICM(**params), options)
-    if model.kind == "schild94":
-        return _with_rate_tables(Schild94CompositeICM(**params), options)
-    if model.kind == "schild97":
-        return _with_rate_tables(Schild97CompositeICM(**params), options)
-    if model.kind == "axnode":
-        return _with_rate_tables(AxnodeICM(**params), options)
-    if model.kind == "composite":
-        return _with_rate_tables(
-            CompositeICM(
-                [
-                    compile_membrane_model(component, solver_options=options)
-                    for component in model.components
-                ]
-            ),
-            options,
-        )
+        ),
+    )
 
-    raise ValueError(f"Unknown membrane model kind: {model.kind!r}")
+
+def _record_membrane_source_compile_metadata(
+    kind: str,
+    source_results: tuple[SourceModelCompileResult, ...],
+) -> None:
+    if not source_results:
+        return
+    statuses = tuple(
+        "hit" if source.cache.cache_hit else "miss"
+        for source in source_results
+    )
+    reasons = tuple(source.cache.cache_reason for source in source_results)
+    keys = tuple(source.cache.key for source in source_results)
+    hashes = tuple(source.source_hash for source in source_results)
+    paths = tuple(str(source.source_path) for source in source_results)
+    loaded_targets = tuple(
+        tuple(sorted(source.cache.loaded_modules))
+        for source in source_results
+    )
+    single = len(source_results) == 1
+    record_benchmark_metadata(
+        membrane_source_cache=statuses[0] if single else statuses,
+        membrane_source_cache_all_hit=all(status == "hit" for status in statuses),
+        membrane_source_cache_reasons=reasons[0] if single else reasons,
+        membrane_source_loaded_targets=loaded_targets[0] if single else loaded_targets,
+        membrane_source_cache_keys=keys[0] if single else keys,
+        membrane_source_hashes=hashes[0] if single else hashes,
+        membrane_source_kind=kind,
+        membrane_source_paths=paths[0] if single else paths,
+        membrane_source_count=len(source_results),
+    )
+
+
+def _single_generated_module(
+    source_results: tuple[SourceModelCompileResult, ...],
+    *,
+    target: str,
+) -> Any | None:
+    if len(source_results) != 1:
+        return None
+    return source_results[0].cache.loaded_modules.get(target)
 
 
 def compile_axon_membrane(
@@ -353,7 +347,7 @@ def compile_axon_membrane(
     solver_axon: SolverAxon | None = None,
     solver_options: SolverOptions | None = None,
     membrane_signatures: tuple[Any, ...] | None = None,
-) -> IonChannelModelBase:
+) -> Any:
     """Compile the membrane description carried by an axon."""
 
     options = _resolve_solver_options(solver_options)
@@ -368,17 +362,18 @@ def compile_axon_membrane(
         membrane_signatures,
         _solver_options_cache_key(options),
     )
-    cached = _COMPILED_MEMBRANE_CACHE.get(cache_key)
+    cached = _MEMBRANE_MODEL_CACHE.get(cache_key)
     if cached is not None:
         return cached
     first_signature = membrane_signatures[0]
+    compiled: Any
     if all(signature == first_signature for signature in membrane_signatures):
         compiled = compile_membrane_model(
             membrane_models[0],
             solver_options=options,
         )
     else:
-        compiled_by_signature: dict[tuple[Any, ...], IonChannelModelBase] = {}
+        compiled_by_signature: dict[tuple[Any, ...], Any] = {}
         for model, signature in zip(membrane_models, membrane_signatures, strict=True):
             compiled_component = compiled_by_signature.get(signature)
             if compiled_component is None:
@@ -392,12 +387,12 @@ def compile_axon_membrane(
             for signature in membrane_signatures
         )
         compiled = CompartmentMembraneLayout(compiled_components).as_membrane_model()
-    _COMPILED_MEMBRANE_CACHE[cache_key] = compiled
+    _MEMBRANE_MODEL_CACHE[cache_key] = compiled
     return compiled
 
 
-def _backend_from_compiled_membrane(membrane: IonChannelModelBase, nx: int) -> ICMBackend:
-    cache_key = ("backend", membrane._static_signature(), int(nx))
+def _backend_from_membrane(membrane: Any, nx: int) -> MembraneBackend:
+    cache_key = ("backend", membrane_static_signature(membrane), int(nx))
     cached = _BACKEND_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -405,16 +400,16 @@ def _backend_from_compiled_membrane(membrane: IonChannelModelBase, nx: int) -> I
     if callable(build_backend):
         backend = build_backend()
     else:
-        backend = UniformICMBackend.from_model(membrane, int(nx))
+        backend = UniformMembraneBackend.from_model(membrane, int(nx))
     _BACKEND_CACHE[cache_key] = backend
     return backend
 
 
-def build_icm_backend_from_axon(
+def build_membrane_backend_from_axon(
     axon: Axon,
     *,
     solver_options: SolverOptions | None = None,
-) -> ICMBackend:
+) -> MembraneBackend:
     """Build the solver-side membrane backend for an axon description."""
 
     solver_axon = build_solver_axon(axon)
@@ -423,7 +418,7 @@ def build_icm_backend_from_axon(
         solver_axon=solver_axon,
         solver_options=solver_options,
     )
-    return _backend_from_compiled_membrane(membrane, int(solver_axon.n_compartments))
+    return _backend_from_membrane(membrane, int(solver_axon.n_compartments))
 
 
 def prepare_simulation_grid(tsim_ms: float, dt_ms: float, dtype_local: jnp.dtype) -> SimulationGrid:
@@ -473,7 +468,7 @@ def prepare_membrane_runtime(
         "runtime.prepare.membrane_backend",
         nx=int(solver_data.n_compartments),
     ):
-        backend = _backend_from_compiled_membrane(membrane, int(solver_data.n_compartments))
+        backend = _backend_from_membrane(membrane, int(solver_data.n_compartments))
     dtype_local = backend.dtype
     Nx = int(solver_data.n_compartments)
     with benchmark_span("runtime.prepare.membrane_init", nx=Nx):
@@ -502,25 +497,15 @@ def prepare_membrane_runtime(
 
 def _prepare_membrane_initial_arrays(
     axon: Axon,
-    membrane: IonChannelModelBase,
-    backend: ICMBackend,
+    membrane: Any,
+    backend: MembraneBackend,
     *,
     nx: int,
     dtype_local: jnp.dtype,
 ) -> tuple[Array, Array, tuple[Array, ...], Array]:
     """Prepare initial membrane arrays without unnecessary eager JAX scatter."""
 
-    rattay_initial = _try_prepare_uniform_rattay_initial_arrays(
-        axon,
-        membrane,
-        backend,
-        nx=nx,
-        dtype_local=dtype_local,
-    )
-    if rattay_initial is not None:
-        record_benchmark_metadata(membrane_init_source="rattay_numpy")
-        return rattay_initial
-    if isinstance(backend, HeterogeneousICMBackend) and not membrane.membrane_state_specs():
+    if isinstance(backend, HeterogeneousMembraneBackend) and not membrane.membrane_state_specs():
         record_benchmark_metadata(membrane_init_source="heterogeneous_numpy")
         return _prepare_heterogeneous_membrane_initial_arrays(
             axon,
@@ -536,117 +521,19 @@ def _prepare_membrane_initial_arrays(
     return Vm0, gates0, tuple(state0), background_current
 
 
-def _try_prepare_uniform_rattay_initial_arrays(
-    axon: Axon,
-    membrane: IonChannelModelBase,
-    backend: ICMBackend,
-    *,
-    nx: int,
-    dtype_local: jnp.dtype,
-) -> tuple[Array, Array, tuple[Array, ...], Array] | None:
-    """Prepare the common Rattay/Rattay+passive initial state on the host."""
-
-    if not isinstance(backend, UniformICMBackend):
-        return None
-    if int(backend.Nx) != int(nx) or membrane.membrane_state_specs():
-        return None
-    rattay = _uniform_rattay_component(membrane)
-    if rattay is None or _membrane_uses_rate_table(membrane):
-        return None
-
-    np_dtype = np.dtype(dtype_local)
-    vm0_value = float(getattr(axon, "v_init", 0.0))
-    vm0_np = np.full((int(nx),), vm0_value, dtype=np_dtype)
-    gates_row = _rattay_initial_gates_numpy(
-        rattay,
-        vm0_mV=vm0_value,
-        dtype=np_dtype,
-    )
-    gates_np = np.broadcast_to(gates_row, (int(nx), gates_row.shape[0])).copy()
-    background_np = np.zeros((int(nx),), dtype=np_dtype)
-    return (
-        jnp.asarray(vm0_np, dtype=dtype_local),
-        jnp.asarray(gates_np, dtype=dtype_local),
-        (),
-        jnp.asarray(background_np, dtype=dtype_local),
-    )
-
-
-def _uniform_rattay_component(membrane: IonChannelModelBase) -> RattayAberhamICM | None:
-    if isinstance(membrane, RattayAberhamICM):
-        return membrane
-    if not isinstance(membrane, CompositeICM):
-        return None
-    rattay_components: list[RattayAberhamICM] = []
-    for component in membrane.models:
-        if isinstance(component, RattayAberhamICM):
-            rattay_components.append(component)
-        elif not isinstance(component, PassiveICM):
-            return None
-        elif component.gate_names():
-            return None
-    if len(rattay_components) != 1:
-        return None
-    rattay = rattay_components[0]
-    if tuple(membrane.gate_names()) != tuple(rattay.gate_names()):
-        return None
-    return rattay
-
-
-def _membrane_uses_rate_table(membrane: IonChannelModelBase) -> bool:
-    if getattr(membrane, "_rate_table", None) is not None:
+def _membrane_uses_rate_table(membrane: Any) -> bool:
+    has_rate_table = getattr(membrane, "has_rate_table", False)
+    if bool(has_rate_table):
         return True
-    if isinstance(membrane, CompositeICM):
-        return any(_membrane_uses_rate_table(component) for component in membrane.models)
+    components = getattr(membrane, "models", None)
+    if components is not None:
+        return any(_membrane_uses_rate_table(component) for component in components)
     return False
-
-
-def _rattay_initial_gates_numpy(
-    model: RattayAberhamICM,
-    *,
-    vm0_mV: float,
-    dtype: np.dtype,
-) -> np.ndarray:
-    """NumPy equivalent of RattayAberhamICM.init_gates for scalar Vm0."""
-
-    v = dtype.type(vm0_mV)
-
-    def vtrap(x_value: np.generic, y_value: float) -> np.generic:
-        y = dtype.type(y_value)
-        z = x_value / y
-        if abs(float(z)) < 1e-6:
-            return y * (dtype.type(1.0) - z / dtype.type(2.0))
-        return x_value / (dtype.type(np.exp(z)) - dtype.type(1.0))
-
-    alpha_m = vtrap(
-        dtype.type(2.5) - dtype.type(0.1) * (v + dtype.type(70.0)),
-        1.0,
-    )
-    alpha_h = dtype.type(0.07) * dtype.type(
-        np.exp(-(v + dtype.type(70.0)) / dtype.type(20.0))
-    )
-    alpha_n = dtype.type(0.1) * vtrap(
-        dtype.type(1.0) - dtype.type(0.1) * (v + dtype.type(70.0)),
-        1.0,
-    )
-    beta_m = dtype.type(4.0) * dtype.type(
-        np.exp(-(v + dtype.type(70.0)) / dtype.type(18.0))
-    )
-    beta_h = dtype.type(1.0) / (
-        dtype.type(np.exp(dtype.type(3.0) - dtype.type(0.1) * (v + dtype.type(70.0))))
-        + dtype.type(1.0)
-    )
-    beta_n = dtype.type(0.125) * dtype.type(
-        np.exp(-(v + dtype.type(70.0)) / dtype.type(80.0))
-    )
-    alpha = np.asarray((alpha_m, alpha_h, alpha_n), dtype=dtype)
-    beta = np.asarray((beta_m, beta_h, beta_n), dtype=dtype)
-    return alpha / np.maximum(alpha + beta, dtype.type(1e-12))
 
 
 def _prepare_heterogeneous_membrane_initial_arrays(
     axon: Axon,
-    backend: HeterogeneousICMBackend,
+    backend: HeterogeneousMembraneBackend,
     *,
     nx: int,
     dtype_local: jnp.dtype,
@@ -749,7 +636,7 @@ def prepare_stimulation_runtime(
         intracellular_current_density=inj_fun,
         extracellular_potential_mV=vext_fun,
         has_driven_extracellular=bool(
-            use_extracellular and getattr(axon, "extracellular_contexts", ())
+            use_extracellular and getattr(axon, "extracellular_stimulations", ())
         ),
         intracellular_current_density_mid=iinj_mid,
         extracellular_potential_mid_mV=vext_mid,

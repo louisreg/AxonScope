@@ -449,7 +449,7 @@ def _run_solver_only_precomputed(
         (size, intra_runtime.grid.Nt, intra_runtime.membrane.Nx),
         dtype=intra_runtime.membrane.dtype,
     )
-    extra_vstim = _context_vstim_for_instances(
+    extra_vstim = _stimulation_vstim_for_instances(
         extra_axons,
         extra_runtime,
         duration_ms=duration_ms,
@@ -554,7 +554,7 @@ def _run_typed_footprint_drive_matrix(
     time_chunk_steps: int | None,
     jax_trace: dict[str, object],
 ) -> dict[str, object]:
-    """Compare analytical-context lowering against typed drive lowering."""
+    """Compare generic stimulation lowering against typed drive lowering."""
 
     axons = build_point_source_pool(
         size=size,
@@ -566,7 +566,7 @@ def _run_typed_footprint_drive_matrix(
     label = "typed_footprint_drive_single_point_source"
 
     for _ in range(int(warmups)):
-        context_vstim = _context_vstim_for_instances(
+        stimulation_vstim = _stimulation_vstim_for_instances(
             axons,
             runtime,
             duration_ms=duration_ms,
@@ -588,7 +588,7 @@ def _run_typed_footprint_drive_matrix(
                 "time_chunk_steps": time_chunk_steps,
             }
         )
-        benchmark_wait(context_vstim)
+        benchmark_wait(stimulation_vstim)
 
     session = axs.enable_benchmark(
         output_dir,
@@ -614,12 +614,12 @@ def _run_typed_footprint_drive_matrix(
     try:
         with _jax_profiler_trace(jax_trace, workload=workload, size=size):
             with benchmark_span(
-                "inputs.extracellular.context",
+                "inputs.extracellular.stimulation",
                 workload=workload,
                 simulation_label=label,
-                input_format="analytical_context_dense_vstim",
+                input_format="typed_stimulation_dense_vstim",
             ):
-                context_vstim = _context_vstim_for_instances(
+                stimulation_vstim = _stimulation_vstim_for_instances(
                     axons,
                     runtime,
                     duration_ms=duration_ms,
@@ -627,8 +627,8 @@ def _run_typed_footprint_drive_matrix(
                 )
                 record_benchmark_metadata(
                     **benchmark_array_metadata(
-                        "vstim_mid_context",
-                        context_vstim,
+                        "vstim_mid_stimulation",
+                        stimulation_vstim,
                         role="kernel_input",
                     )
                 )
@@ -652,7 +652,7 @@ def _run_typed_footprint_drive_matrix(
                     )
                 )
             with benchmark_span("inputs.extracellular.compare", workload=workload):
-                delta = np.asarray(context_vstim) - np.asarray(typed_vstim)
+                delta = np.asarray(stimulation_vstim) - np.asarray(typed_vstim)
                 record_benchmark_metadata(max_abs_delta_mV=float(np.max(np.abs(delta))))
             output = _run_precomputed_single_cable_case(
                 {
@@ -792,7 +792,7 @@ def _axon_z_um_for_instances(instances: Sequence[axs.AxonInstance]) -> np.ndarra
     return np.zeros((len(instances),), dtype=float)
 
 
-def _context_vstim_for_instances(
+def _stimulation_vstim_for_instances(
     instances: Sequence[axs.AxonInstance],
     runtime: object,
     *,
@@ -801,7 +801,7 @@ def _context_vstim_for_instances(
 ):
     return build_vstim_midpoint_batch(
         instances[0],
-        [instance.extracellular_context for instance in instances],
+        [instance.extracellular_stimulation for instance in instances],
         tsim_ms=duration_ms,
         dt_ms=dt_ms,
         x_positions_m=_x_positions_m_for_instances(instances),
@@ -818,27 +818,22 @@ def _typed_drive_vstim_for_instances(
     duration_ms: float,
     dt_ms: float,
 ):
-    contexts = [instance.extracellular_context for instance in instances]
-    if any(context is None for context in contexts):
-        raise ValueError("typed drive workload requires extracellular contexts.")
-    first_context = contexts[0]
-    electrode = first_context.electrodes[0]
-    stimulus = getattr(electrode, "stimulus", None)
-    if stimulus is None:
-        raise ValueError("typed drive workload requires a stimulated electrode.")
+    stimulations = [instance.extracellular_stimulation for instance in instances]
+    if any(stimulation is None for stimulation in stimulations):
+        raise ValueError("typed drive workload requires extracellular stimulations.")
+    first_stimulation = stimulations[0]
+    first_drive = first_stimulation.drives[0]
+    stimulus = first_drive.stimulus
 
     positions_um = np.asarray(
         instances[0].axon.layout.position_values(unit="micrometer"),
         dtype=float,
     )
-    x_rows_m = _x_positions_m_for_instances(instances)
     values = np.stack(
         [
-            contexts[row_index].footprint_for_electrode(
-                contexts[row_index].electrodes[0],
-                x_rows_m[row_index],
-            )
-            for row_index in range(len(instances))
+            stimulation.drives[0].footprint.values_for_axon()
+            for stimulation in stimulations
+            if stimulation is not None
         ],
         axis=0,
     )
@@ -1692,7 +1687,9 @@ def _describe_simulation(
         "diameter_um": _numeric_distribution(diameters_um),
         "compartments": _numeric_distribution(compartments),
         "intracellular_rows": sum(bool(instance.intracellular_contexts) for instance in instances),
-        "extracellular_rows": sum(instance.extracellular_context is not None for instance in instances),
+        "extracellular_rows": sum(
+            instance.extracellular_stimulation is not None for instance in instances
+        ),
         "recording_policy": _recording_policy(simulation.recording),
         "observer_names": [
             str(getattr(observer, "name", type(observer).__name__))

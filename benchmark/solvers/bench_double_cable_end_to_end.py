@@ -266,11 +266,11 @@ def run_case(
     runtime_ms = (time.perf_counter() - runtime_start) * 1e3
     actual_nx = int(runtime.membrane.Nx)
 
-    contexts = [instance.extracellular_context for instance in instances]
+    stimulations = [instance.extracellular_stimulation for instance in instances]
     vext_start = time.perf_counter()
     vext_mid = build_vstim_midpoint_batch(
         representative,
-        contexts,
+        stimulations,
         tsim_ms=case.duration_ms,
         dt_ms=case.dt_ms,
         x_positions_m=_x_positions_m_for_instances(instances),
@@ -280,7 +280,7 @@ def run_case(
     )
     vext_previous = build_vstim_initial_previous_batch(
         representative,
-        contexts,
+        stimulations,
         dt_ms=case.dt_ms,
         x_positions_m=_x_positions_m_for_instances(instances),
         axon_y_um=_axon_y_um_for_instances(instances),

@@ -31,6 +31,82 @@ class UnitSpec:
     example: str
 
 
+@dataclass(frozen=True)
+class UnitAlias:
+    """Tiny unit token used by plain-Python membrane source files."""
+
+    label: str
+
+    def __mul__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(float(other), self.label)
+        if isinstance(other, UnitAlias):
+            return UnitExpression(1.0, f"{self.label}*{other.label}")
+        if isinstance(other, UnitExpression):
+            return UnitExpression(other.magnitude, f"{self.label}*{other.unit}")
+        return NotImplemented
+
+    def __rmul__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(float(other), self.label)
+        if isinstance(other, UnitExpression):
+            return UnitExpression(other.magnitude, f"{other.unit}*{self.label}")
+        return NotImplemented
+
+    def __truediv__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, UnitAlias):
+            return UnitExpression(1.0, f"{self.label}/{other.label}")
+        if isinstance(other, UnitExpression):
+            return UnitExpression(1.0 / other.magnitude, f"{self.label}/({other.unit})")
+        if isinstance(other, int | float):
+            return UnitExpression(1.0 / float(other), self.label)
+        return NotImplemented
+
+    def __rtruediv__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(float(other), f"1/{self.label}")
+        if isinstance(other, UnitExpression):
+            return UnitExpression(other.magnitude, f"{other.unit}/{self.label}")
+        return NotImplemented
+
+    def __str__(self) -> str:
+        return self.label
+
+
+@dataclass(frozen=True)
+class UnitExpression:
+    """Runtime value produced by source-unit arithmetic in model files."""
+
+    magnitude: float
+    unit: str
+
+    def __mul__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(self.magnitude * float(other), self.unit)
+        if isinstance(other, UnitAlias):
+            return UnitExpression(self.magnitude, f"{self.unit}*{other.label}")
+        if isinstance(other, UnitExpression):
+            return UnitExpression(self.magnitude * other.magnitude, f"{self.unit}*{other.unit}")
+        return NotImplemented
+
+    def __rmul__(self, other: Any) -> "UnitExpression":
+        return self.__mul__(other)
+
+    def __truediv__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(self.magnitude / float(other), self.unit)
+        if isinstance(other, UnitAlias):
+            return UnitExpression(self.magnitude, f"{self.unit}/{other.label}")
+        if isinstance(other, UnitExpression):
+            return UnitExpression(self.magnitude / other.magnitude, f"{self.unit}/({other.unit})")
+        return NotImplemented
+
+    def __rtruediv__(self, other: Any) -> "UnitExpression":
+        if isinstance(other, int | float):
+            return UnitExpression(float(other) / self.magnitude, f"1/({self.unit})")
+        return NotImplemented
+
+
 class QuantityLike(Protocol):
     """Minimal unit-bearing scalar/array protocol accepted by AxonScope."""
 
@@ -38,6 +114,42 @@ class QuantityLike(Protocol):
 
     def to(self, unit: str) -> "QuantityLike":
         """Return this quantity converted to `unit`."""
+
+
+# Canonical compact labels used by membrane equations and compiler validation.
+DIMENSIONLESS = "1"
+VOLTAGE_MV = "mV"
+TIME_MS = "ms"
+CONDUCTANCE_DENSITY_MS_CM2 = "mS/cm2"
+CURRENT_DENSITY_UA_CM2 = "uA/cm2"
+RESISTANCE_AREA_OHM_CM2 = "ohm*cm2"
+TEMPERATURE_DEGC = "degC"
+RATE_PER_MS = "1/ms"
+RATE_PER_MS_PER_MV = "1/(ms*mV)"
+RATE_PER_MS_PER_MM = "1/(ms*mM)"
+CONCENTRATION_MM = "mM"
+CONCENTRATION_RATE_MM_PER_MS = "mM/ms"
+CONCENTRATION_PER_CURRENT_DENSITY_TIME = "mM/(uA/cm2*ms)"
+
+# Short unit aliases used by plain-Python membrane source equations.
+dimensionless = UnitAlias(DIMENSIONLESS)
+mV = UnitAlias(VOLTAGE_MV)
+ms = UnitAlias(TIME_MS)
+mS = UnitAlias("mS")
+uA = UnitAlias("uA")
+ohm = UnitAlias("ohm")
+cm2 = UnitAlias("cm2")
+mS_per_cm2 = UnitAlias(CONDUCTANCE_DENSITY_MS_CM2)
+uA_per_cm2 = UnitAlias(CURRENT_DENSITY_UA_CM2)
+ohm_cm2 = UnitAlias(RESISTANCE_AREA_OHM_CM2)
+degC = UnitAlias(TEMPERATURE_DEGC)
+per_ms = UnitAlias(RATE_PER_MS)
+per_ms_per_mV = UnitAlias(RATE_PER_MS_PER_MV)
+per_ms_per_mM = UnitAlias(RATE_PER_MS_PER_MM)
+mM = UnitAlias(CONCENTRATION_MM)
+mM_per_uA_cm2_ms = UnitAlias(CONCENTRATION_PER_CURRENT_DENSITY_TIME)
+gate = UnitAlias(DIMENSIONLESS)
+um = UnitAlias("micrometer")
 
 
 LENGTH = UnitSpec("length", "micrometer", "100.0 * axs.um or 1.0 * axs.mm")
@@ -578,11 +690,41 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "CONCENTRATION_MM",
+    "CONCENTRATION_PER_CURRENT_DENSITY_TIME",
+    "CONCENTRATION_RATE_MM_PER_MS",
+    "CONDUCTANCE_DENSITY_MS_CM2",
+    "CURRENT_DENSITY_UA_CM2",
+    "DIMENSIONLESS",
     "Q_",
+    "RATE_PER_MS",
+    "RATE_PER_MS_PER_MM",
+    "RATE_PER_MS_PER_MV",
+    "RESISTANCE_AREA_OHM_CM2",
+    "TEMPERATURE_DEGC",
+    "TIME_MS",
+    "UnitAlias",
+    "UnitExpression",
     "UnitSupportError",
+    "VOLTAGE_MV",
+    "degC",
+    "dimensionless",
     "get_unit_registry",
+    "gate",
     "has_pint",
     "is_quantity_like",
+    "cm2",
+    "mM",
+    "mM_per_uA_cm2_ms",
+    "mS",
+    "mS_per_cm2",
+    "mV",
+    "ms",
+    "ohm",
+    "ohm_cm2",
+    "per_ms",
+    "per_ms_per_mM",
+    "per_ms_per_mV",
     "quantity_unit",
     "require_axoplasmic_resistivity_ohm_um",
     "require_axial_resistivity_ohm_cm",
@@ -625,6 +767,9 @@ __all__ = [
     "to_uA_array",
     "to_um",
     "to_um_array",
+    "uA",
+    "uA_per_cm2",
+    "um",
     "unit_label",
     "ureg",
 ]

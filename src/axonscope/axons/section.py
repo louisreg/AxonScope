@@ -32,7 +32,7 @@ from axonscope.utils.validation import (
     require_non_negative,
     require_positive,
 )
-from axonscope.membranes import MembraneModel, ensure_membrane_model
+from axonscope.membranes.model import MembraneModel, Model, ensure_membrane_model
 
 
 def _default_Ra() -> units.axial_resistivity_t:
@@ -145,7 +145,7 @@ class Section:
     """
 
     name: str
-    membrane: MembraneModel
+    membrane: MembraneModel | Model
     diameter_um: float
     Ra_ohm_cm: float = field(init=False)
     Cm_uF_cm2: float = field(init=False)
@@ -200,8 +200,11 @@ class Section:
         )
         if periaxonal is not None and not isinstance(periaxonal, PeriaxonalLayer):
             raise TypeError("periaxonal must be a PeriaxonalLayer or None.")
+        if isinstance(membrane, type) and issubclass(membrane, Model):
+            membrane = membrane()
+        ensure_membrane_model(membrane)
         object.__setattr__(self, "name", normalize_non_empty_string(name, name="Section name"))
-        object.__setattr__(self, "membrane", ensure_membrane_model(membrane))
+        object.__setattr__(self, "membrane", membrane)
         object.__setattr__(self, "diameter_um", require_positive(diameter_value, name="diameter"))
         object.__setattr__(self, "Ra_ohm_cm", require_positive(Ra_value, name="Ra"))
         object.__setattr__(self, "Cm_uF_cm2", require_positive(Cm_value, name="Cm"))

@@ -22,9 +22,10 @@ the examples. In short:
 - Public construction examples should use Pint quantities at boundaries:
   `length=500 * axs.um`, `diameter=0.5 * axs.um`,
   `duration=5 * axs.ms`, and `dt=0.01 * axs.ms`.
-- `axs.AxonInstance`, `axs.AxonPopulation`, `axs.AxonSimulation`,
-  `axs.simulate(...)`, and `axs.simulate_pool(...)` are the current execution
-  entry points.
+- `axs.AxonInstance`, `axs.AxonPopulation`, and `axs.AxonSimulation` are the
+  current execution entry points. Older snippets below that use
+  `axs.simulate(...)` or `axs.simulate_pool(...)` are historical draft material,
+  not canonical API.
 - `axs.Recording.full()`, `axs.Recording.center(...)`, `axs.Recording.none()`,
   `axs.signals`, one-axon result views, `recording_manifest`, and compact
   `observations` are current result/recording concepts.
@@ -74,8 +75,6 @@ axonscope.solvers
 Advanced or semi-internal namespaces:
 
 ```text
-axonscope.channel_models
-axonscope.icm
 axonscope.dispatcher
 axonscope.backends.jax.runtime
 axonscope.backends.jax.batch_kernels
@@ -83,8 +82,8 @@ axonscope.backends.jax.kernels
 axonscope.benchmarking
 ```
 
-These can remain importable, but they should not be presented as the default
-API in tutorials.
+These may be useful while debugging internals, but they should not be presented
+as the default API in tutorials.
 
 ## Membranes
 
@@ -112,9 +111,10 @@ axs.membranes.Composite
 axs.membranes.SectionLayout
 ```
 
-The current `IonChannelModelBase` can remain the advanced base class. Public
-docs should call these objects "membrane models". Later, the custom-model DSL
-can produce objects that satisfy the same membrane-model contract.
+There is no public advanced base class for membrane semantics. Public docs
+should call these objects "membrane models"; the custom-model DSL produces
+objects that satisfy the same membrane-model contract through the internal
+compiler/runtime path.
 
 `Composite` and `SectionLayout` should mean different things:
 
@@ -312,21 +312,17 @@ extracellular attachment method for sampled fields.
 Single-axon simulation should have one simple entry point:
 
 ```python
-run = axs.simulate(
+run = axs.AxonSimulation(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
-)
+).run()
 result = run.single
 ```
 
-Advanced users can still choose a solver through the public wrapper:
-
-```python
-solver = axs.solvers.CrankNicholson()
-run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, solver=solver)
-result = run.single
-```
+Low-level solver objects remain an internal/advanced validation route. The
+canonical public execution path is `AxonSimulation(...).run()` with
+`solver_options` for supported tuning.
 
 Compatibility aliases can keep `tsim` and `dt` while public docs prefer
 unit-explicit names.
@@ -353,7 +349,7 @@ membrane model. This is the public-friendly name for the current internal
 Target API:
 
 ```python
-run = axs.simulate(
+run = axs.AxonSimulation(
     axon,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
@@ -364,7 +360,7 @@ run = axs.simulate(
         conductances=False,
         state_variables=False,
     ),
-)
+).run()
 result = run.single
 ```
 
@@ -404,7 +400,7 @@ For batch and pool runs, this same concept should map onto the existing
 batch recording machinery:
 
 ```python
-results = axs.simulate_pool(
+results = axs.AxonSimulation(
     pool,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
@@ -476,17 +472,17 @@ sim_b.add_extracellular_stimulation(
     )
 )
 
-results = axs.simulate_pool(
+results = axs.AxonSimulation(
     [sim_a, sim_b],
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
-)
+).run()
 ```
 
-`simulate_pool` should return an `AxonSimulationResult`, with dense cohorts
-internally and one `AxonResultView` per axon in input order. Dispatch metadata
-can live in each view's `diagnostics`, while the selected `Recording` policy
-lives on the pool result and views.
+`AxonSimulation.run()` should return an `AxonSimulationResult`, with dense
+cohorts internally and one `AxonResultView` per axon in input order. Dispatch
+metadata can live in each view's `diagnostics`, while the selected `Recording`
+policy lives on the pool result and views.
 
 For now, each axon should carry its own intracellular and extracellular
 contexts through its axon object. Pool-level drive helpers should stay out
@@ -494,83 +490,43 @@ of the public API unless a future batching layer genuinely needs them.
 
 The current `run_pool` can remain an advanced implementation piece. It may
 expose private dispatch result tuples for debugging, but public docs should
-present `simulate_pool([axon_a, axon_b])` first.
+present `AxonSimulation([axon_a, axon_b], ...).run()` first.
 
 ```text
-simulate_pool([axons]) -> public pool entry point
+AxonSimulation([axons], ...).run() -> public pool entry point
 ```
 
 ## Visualization And Analysis
 
-Visualization should become a first-class public layer, but it should stay
-separate from solver internals. Two use cases matter:
-
-1. plotting and inspecting simulation results;
-2. plotting and inspecting axon/fiber geometry before simulation.
-
-Proposed public namespaces:
+The current public plotting surface is deliberately small. One-axon result
+views provide the voltage trace/map helpers directly. Analysis-derived plots
+such as spike rasters live under `axs.analysis.views`.
 
 ```text
-axs.results.visualization
+axs.results.views
+axs.analysis.views
 axs.analysis
 ```
 
 ### Result Visualization
 
-Result plotting should work from one-axon result views and pool results without
-requiring users to know the internal array layout.
-
-Target API:
-
 ```python
-run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
+run = axs.AxonSimulation(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms).run()
 result = run.single
 
-axs.results.visualization.plot_voltage_trace(
-    result,
-    position=250.0 * axs.um,
-)
-
-axs.results.visualization.plot_voltage_map(result)
-axs.results.visualization.plot_raster(result, threshold_mV=-10.0)
+result.plot_trace(position=250.0 * axs.um)
+result.plot_map()
+axs.analysis.views.plot_spike_raster(result, threshold_mV=-10.0)
 ```
 
-Pool result visualization:
-
-```python
-pool_result = axs.simulate_pool(pool, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
-
-axs.results.visualization.plot_pool_peaks(pool_result)
-axs.results.visualization.plot_pool_raster(pool_result)
-```
-
-One-axon result views should stay focused on returned numerical data. Plotting
-and post-processing should live under `axs.results.visualization` and
-`axs.analysis` so analysis code can explicitly check whether `Vm` is full,
-center-only, probe-only, or otherwise filtered.
+Population results expose one-axon views through indexing, iteration, and
+`.single` for one-row runs. Plot population summaries explicitly from those
+views until a dedicated population plotting API exists.
 
 ### Geometry Visualization
 
-Geometry visualization should let users inspect the model before running an
-expensive simulation.
-
-Target API:
-
-```python
-axs.results.visualization.plot_axon_geometry(axon)
-axs.results.visualization.plot_membrane_sections(axon)
-axs.results.visualization.plot_pool_geometry(pool)
-```
-
-For myelinated axons, the visualization should show section labels such as
-`node`, `mysa`, `flut`, and `stin`, and optionally color by membrane model.
-
-For extracellular stimulation, it should eventually be possible to overlay
-electrodes and fiber positions:
-
-```python
-axs.results.visualization.plot_stimulation_geometry(pool)
-```
+Geometry plotting is currently owned by the model/layout objects, for example
+`axon.layout.plot(...)`. It is not part of result or analysis views.
 
 ### Analysis Functions
 
@@ -588,7 +544,7 @@ peaks = axs.analysis.peak_voltage(result)
 Long-term solver-side API:
 
 ```python
-run = axs.simulate(
+run = axs.AxonSimulation(
     axon,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
@@ -596,7 +552,7 @@ run = axs.simulate(
     observers=[
         axs.analysis.Activation(threshold=-10.0 * axs.mV),
     ],
-)
+).run()
 result = run.single
 ```
 
@@ -641,7 +597,7 @@ axon = axs.axons.HodgkinHuxley(
     compartments=41,
 )
 
-run = axs.simulate(sim, duration=5 * axs.ms, dt=0.01 * axs.ms)
+run = axs.AxonSimulation(sim, duration=5 * axs.ms, dt=0.01 * axs.ms).run()
 result = run.single
 ```
 
@@ -649,13 +605,13 @@ result = run.single
 
 Phase 1: public wrappers and aliases.
 
-- Add `axonscope.membranes` as a friendly wrapper over `channel_models`.
+- Add `axonscope.membranes` as the public membrane-description surface.
 - Add `axonscope.membranes.SectionLayout` as a friendly wrapper over current
   heterogeneous membrane layout internals.
 - Add `axonscope.axons.Unmyelinated` and `axonscope.axons.Myelinated` as
   instantiable modeling families, with template constructors over current axon
   classes.
-- Add `simulate` and `simulate_pool`.
+- Add `AxonSimulation` as the public execution root.
 - Add a public `Recording` object that wraps current `record_observables` and
   batch recording options.
 - Prefer clean quantity-oriented public names such as `diameter`, `duration`,

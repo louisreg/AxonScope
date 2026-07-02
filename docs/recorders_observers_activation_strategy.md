@@ -85,7 +85,7 @@ Threshold and recruitment protocols should be written against simulation
 results or public analysis definitions:
 
 - `axs.protocols.find_activation_threshold(...)`;
-- `axs.protocols.find_activation_threshold_curve(...)`;
+- `axs.protocols.find_threshold(...)`;
 - `axs.protocols.pool_sweep(...)`;
 - `axs.protocols.recruitment_sweep(...)`.
 

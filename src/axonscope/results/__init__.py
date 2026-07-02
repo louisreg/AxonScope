@@ -1,7 +1,7 @@
-"""Public simulation result containers and visualization helpers."""
+"""Public simulation result containers and view helpers."""
 
 from axonscope.results.axes import RecordedAxis
-from axonscope.results.single import (
+from axonscope.results.types import (
     ObservationDict,
     RecordingDict,
     RecordingValue,
@@ -16,17 +16,25 @@ from axonscope.results.pool import (
 from axonscope.results.vm_raster import (
     VM_RASTER_OBSERVATION_KEY,
     VmRasterResult,
+    activation_values_from_vm_raster,
     unpack_vm_raster_words,
+    vm_raster_any_active,
+    vm_raster_definition_index,
 )
 import importlib
 from typing import Any
 
 
+_VIEW_HELPERS = {
+    "plot_recorded_axes",
+}
+
+
 def __getattr__(name: str) -> Any:
-    if name == "visualization":
-        return importlib.import_module("axonscope.results.visualization")
-    if name in {"plot_raster", "rasterplot"}:
-        module = importlib.import_module("axonscope.results.visualization")
+    if name == "views":
+        return importlib.import_module("axonscope.results.views")
+    if name in _VIEW_HELPERS:
+        module = importlib.import_module("axonscope.results.views")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -42,8 +50,10 @@ __all__ = [
     "AxonSimulationResult",
     "RecordedSignal",
     "RecordingManifest",
+    "activation_values_from_vm_raster",
     "unpack_vm_raster_words",
-    "visualization",
-    "plot_raster",
-    "rasterplot",
+    "vm_raster_any_active",
+    "vm_raster_definition_index",
+    "plot_recorded_axes",
+    "views",
 ]

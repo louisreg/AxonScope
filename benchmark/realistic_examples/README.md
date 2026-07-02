@@ -2,7 +2,7 @@
 
 This benchmark runs workflow-level cases based on the public basic examples:
 
-- example 06: velocity versus diameter (`simulate_pool`)
+- example 06: velocity versus diameter (`AxonSimulation`)
 - example 07: threshold versus diameter (`find_activation_threshold_curve`)
 - example 08: recruitment curve for a mixed population (`recruitment_sweep`)
 

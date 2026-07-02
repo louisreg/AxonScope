@@ -9,7 +9,7 @@ import numpy as np
 
 from axonscope.axons.flattened import FlattenedLayout, flatten_layout
 from axonscope.axons.formulation import Formulation, infer_formulation, resolve_formulation
-from axonscope.membranes import MembraneModel
+from axonscope.membranes.model import MembraneModel
 
 if TYPE_CHECKING:
     from axonscope.axon_instance import AxonInstance

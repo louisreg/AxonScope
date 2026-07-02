@@ -16,8 +16,7 @@ treated as supported compatibility.
   style templates.
 - Intracellular current clamps and sampled extracellular stimulation, including
   analytical point-source quick-start helpers.
-- Executable `AxonSimulation` root object plus public `simulate(...)` and
-  `simulate_pool(...)` wrappers.
+- Executable `AxonSimulation` root object for one axon or populations.
 - Structured post-hoc analysis definitions with per-axon statuses, population
   denominators, and small low-level spike/raster helpers.
 - Automatic pool dispatch with scalar fallback, strict batches, parameter
@@ -26,7 +25,7 @@ treated as supported compatibility.
 
 ## Installation
 
-This repository uses a `src/` layout and Python 3.11+.
+This repository uses a `src/` layout and Python >=3.12,<3.13.
 
 ```bash
 python -m pip install -e .
@@ -69,16 +68,16 @@ axon = axs.axons.HodgkinHuxley(
 Internal implementation fields may use canonical suffixes such as
 `length_um`, `diameter_um`, or `dt_ms`; the preferred public style is
 quantity-oriented: `length`/`diameter` for axons and `duration`/`dt` for
-simulation wrappers.
+simulation definitions.
 
 Primary namespaces:
 
 ```text
 axs.axons          descriptive axon geometry and templates
 axs.membranes      runtime-independent membrane descriptions
-axs.stimulation    stimuli, electrodes, clamps, and contexts
-axs.results        AxonSimulationResult, AxonResultView, recording manifests, visualization
-axs.analysis       structured analysis definitions, statuses, reports
+axs.stimulation    stimuli, clamps, sampled extracellular stimulation
+axs.results        AxonSimulationResult, AxonResultView, recording manifests, views
+axs.analysis       structured analysis definitions, statuses, reports, analysis views
 axs.performance    simulation memory estimates and runtime/device policies
 axs.inspection     printable planning, dispatch, lowering, kernel, and result reports
 axs.protocols      threshold, sweep, and recruitment workflows
@@ -120,19 +119,18 @@ sim.add_current_clamp(
     ),
 )
 
-run = axs.simulate(
+run = axs.AxonSimulation(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
-)
+).run()
 result = run.single
 
 center = result.nearest_position_index(250.0 * axs.um)
 print(result.t.shape, result.Vm[:, center].shape)
 ```
 
-For workflows that should carry their execution settings as one object, use
-the root `AxonSimulation`:
+Execution settings live on the root `AxonSimulation` object:
 
 ```python
 simulation = axs.AxonSimulation(
@@ -153,7 +151,12 @@ policy = axs.ExecutionPolicy(
     device=axs.Device.cpu(),
     precision=axs.PrecisionPolicy.float32(),
 )
-run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms, execution_policy=policy)
+run = axs.AxonSimulation(
+    sim,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    execution_policy=policy,
+).run()
 result = run.single
 ```
 
@@ -193,7 +196,11 @@ extracellular = axs.analytical.point_source_stimulation(
 sim = axs.AxonInstance(axon)
 sim.add_extracellular_stimulation(stimulation=extracellular)
 
-run = axs.simulate(sim, duration=2.0 * axs.ms, dt=0.01 * axs.ms)
+run = axs.AxonSimulation(
+    sim,
+    duration=2.0 * axs.ms,
+    dt=0.01 * axs.ms,
+).run()
 result = run.single
 ```
 
@@ -219,21 +226,21 @@ See `docs/stimulation.md` for the stimulation model and
 
 `AxonPopulation` is the explicit public container for cohorts. It stores
 `AxonInstance` rows, preserves input order, and can contain one row when a
-workflow should still use population execution. `simulate_pool(...)` and the
-root `AxonSimulation` accept either an `AxonPopulation` or a sequence of `Axon`
-or `AxonInstance` objects. Pool runs return `AxonSimulationResult`, whose
-indexed rows are lightweight `AxonResultView` objects in population order.
+workflow should still use population execution. `AxonSimulation` accepts either
+an `AxonPopulation` or a sequence of `Axon` or `AxonInstance` objects. Runs
+return `AxonSimulationResult`, whose indexed rows are lightweight
+`AxonResultView` objects in population order.
 
 ```python
 population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
 
-results = axs.simulate_pool(
+results = axs.AxonSimulation(
     population,
     duration=1.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.Vm),
     progress=True,
-)
+).run()
 
 for result in results:
     print(result.diagnostics["dispatch_method"], result.record_indices)
@@ -246,9 +253,15 @@ vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
 Inspect grouping before a run with:
 
 ```python
-plan = axs.dispatcher.build_dispatch_plan([sim_a, sim_b])
-axs.dispatcher.print_dispatch_plan(plan)
-axs.dispatcher.plot_dispatch_plan(plan)
+inspection = axs.AxonSimulation(
+    [sim_a, sim_b],
+    duration=1.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.center(axs.signals.Vm),
+).inspect()
+
+inspection.print()
+inspection.plot()
 ```
 
 `Recording` is the public storage policy. Current single-axon runs support Vm
@@ -363,14 +376,16 @@ python examples/basic/08_recruitment_curve_population.py
 Advanced workflow examples:
 
 ```bash
-python examples/advanced/object_model/01_axon_simulation_root.py
+python examples/advanced/simulation_workflow/01_axon_simulation_root.py
 python examples/advanced/recording_analysis/01_recording_options.py
 python examples/advanced/recording_analysis/05_vmraster_observer_only.py
+python examples/advanced/stimulation/03_intracellular_plus_extracellular.py
 python examples/advanced/protocols/01_threshold_vs_parameters.py
 python examples/advanced/protocols/02_recruitment_waveforms.py
+python examples/advanced/protocols/03_protocol_result_views.py
 python examples/advanced/runtime/01_runtime_policy.py
 python examples/advanced/runtime/03_pipeline_inspection.py
-python examples/with_nrv/01_realistic_fascicle_geometry_comparison.py
+python examples/with_nrv/01_realistic_fascicle_geometry.py
 ```
 
 See `examples/README.md` for the full learning path.
@@ -418,8 +433,9 @@ python benchmark/kaggle/run_kernel.py \
   --poll-interval 60
 ```
 
-Use `simulation.estimate()` before large runs to inspect retained Vm, dense
-`Vstim`, factorized footprint, and stimulus-sample memory.
+Use `simulation.estimate()` before large runs to inspect dispatch groups,
+padding, retained Vm, observer outputs, dense `Vstim`, factorized footprints,
+and stimulus-sample memory.
 
 Generated benchmark results live under ignored `benchmark/results/` and
 `benchmark/reports/` paths. See `benchmark/runtime/`, `benchmark/hotpaths/`,
@@ -436,10 +452,11 @@ validation amplitude. The June 25, 2026 P100 run is summarized in
 
 - `docs/axon_model_organization.md`: descriptive axon layer.
 - `docs/membranes.md`: membrane model descriptions.
-- `docs/stimulation.md`: stimuli, electrodes, clamps, and contexts.
+- `docs/stimulation.md`: stimuli, current clamps, extracellular footprints,
+  drives, and stimulations.
 - `docs/pool_dispatch.md`: pool dispatch and batching behavior.
-- `docs/results_recording_analysis.md`: `Recording`, canonical results, analysis, and
-  visualization.
+- `docs/results_recording_analysis.md`: `Recording`, canonical results,
+  analysis, and plots.
 - `docs/solver_organization.md`: solver package boundaries and time grids.
 - `docs/validation.md`: fast checks and local NRV validation policy.
 - `docs/benchmarks/`: curated benchmark summaries with retained conclusions.

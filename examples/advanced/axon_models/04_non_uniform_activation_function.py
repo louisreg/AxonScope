@@ -7,6 +7,8 @@ Non-uniform layouts are ordinary descriptive layouts with explicit compartment
 centers. This example derives those centers from a point-source activating
 function proxy: compartments are denser where the sampled extracellular
 footprint has the strongest spatial curvature.
+
+The meshing idea was initially proposed by Ciotti et al 2024.
 """
 
 from __future__ import annotations
@@ -29,9 +31,9 @@ def main() -> None:
         z=90.0 * axs.um,
     )
 
-    # Step 2: sample a fine reference footprint and compute a Rattay-style
-    # activation-function proxy. The proxy is only a meshing heuristic here; it
-    # is not an activation criterion.
+    # Step 2: sample a fine reference footprint and compute a
+    # Raspopovich/Rattay-style activation-function proxy. The proxy is only a
+    # meshing heuristic here; it is not an activation criterion.
     fine_x_um = np.linspace(0.0, float(length.to(axs.um).magnitude), 1201)
     footprint_V_per_A = electrode.footprint(
         fine_x_um * 1e-6,
@@ -118,13 +120,13 @@ def main() -> None:
         simulation.add_extracellular_stimulation(stimulation=stimulation)
         simulations.append(simulation)
 
-    results = axs.simulate_pool(
+    results = axs.AxonSimulation(
         tuple(simulations),
         duration=2.5 * axs.ms,
         dt=0.01 * axs.ms,
         recording=axs.Recording.voltage(),
         progress="plain",
-    )
+    ).run()
 
     # Step 7: visualize both the meshing heuristic and the simulated response.
     fig = plt.figure(figsize=(13.0, 8.2), constrained_layout=True)
@@ -170,35 +172,25 @@ def main() -> None:
 
     vm_uniform = results[0].voltage_values(unit=axs.mV)
     vm_adaptive = results[1].voltage_values(unit=axs.mV)
-    time_ms = results[0].time_values(unit=axs.ms)
-    if time_ms.size > 1:
-        time_edges_ms = np.empty(time_ms.size + 1, dtype=float)
-        time_edges_ms[1:-1] = 0.5 * (time_ms[:-1] + time_ms[1:])
-        time_edges_ms[0] = max(0.0, time_ms[0] - 0.5 * (time_ms[1] - time_ms[0]))
-        time_edges_ms[-1] = time_ms[-1] + 0.5 * (time_ms[-1] - time_ms[-2])
-    else:
-        time_edges_ms = np.asarray([time_ms[0] - 0.5, time_ms[0] + 0.5])
     vmin = min(float(np.min(vm_uniform)), float(np.min(vm_adaptive)))
     vmax = max(float(np.max(vm_uniform)), float(np.max(vm_adaptive)))
 
-    for ax, title, vm_mV, edges_um in (
-        (ax_uniform_vm, "Uniform Vm map", vm_uniform, uniform_edges_um),
-        (ax_adaptive_vm, "Adaptive Vm map", vm_adaptive, adaptive_edges_um),
+    for result, ax, title in (
+        (results[0], ax_uniform_vm, "Uniform Vm map"),
+        (results[1], ax_adaptive_vm, "Adaptive Vm map"),
     ):
-        image = ax.pcolormesh(
-            time_edges_ms,
-            edges_um,
-            vm_mV.T,
-            shading="auto",
-            cmap="viridis",
+        result.plot_map(
+            ax=ax,
+            voltage_unit=axs.mV,
+            position_unit=axs.um,
+            title=title,
+            colorbar=False,
             vmin=vmin,
             vmax=vmax,
         )
         ax.axhline(electrode.x_um, color="white", linestyle="--", linewidth=1.0)
-        ax.set_title(title)
-        ax.set_ylabel("Intrinsic axon position [um]")
     ax_adaptive_vm.set_xlabel("Time [ms]")
-    subfig_right.colorbar(image, ax=right_axes, label="Vm [mV]")
+    subfig_right.colorbar(ax_adaptive_vm.images[-1], ax=right_axes, label="Vm [mV]")
 
     plt.show()
 

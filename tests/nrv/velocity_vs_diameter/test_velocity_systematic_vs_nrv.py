@@ -22,10 +22,10 @@ from axonscope.axons.unmyelinated import (
     Sundt,
     Tigerholm,
 )
-from axonscope.results.single import SimResult
 from axonscope.analysis import conduction_velocity
 from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
+from tests.helpers import FakeSingleAxonResult
 from tests.nrv._helpers import (
     align_rows_to_target_x,
     axonscope_x_um,
@@ -146,7 +146,11 @@ def _velocity_from_rasterized_matrix(
             return positions
 
     dummy.layout = _DummyLayout()
-    result = SimResult(dummy, np.asarray(vm_space_time, dtype=float).T, np.asarray(t_ms, dtype=float))
+    result = FakeSingleAxonResult(
+        dummy,
+        np.asarray(vm_space_time, dtype=float).T,
+        np.asarray(t_ms, dtype=float),
+    )
     return float(
         conduction_velocity(
             result,

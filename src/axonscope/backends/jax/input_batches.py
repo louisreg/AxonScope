@@ -1,7 +1,7 @@
 """JAX materialization of batched solver input tensors.
 
 The solver kernels operate on JAX arrays. This module turns prepared host rows,
-extracellular context rows, intracellular contexts, and static footprints into
+extracellular stimulation rows, intracellular contexts, and static footprints into
 backend arrays for batch execution.
 """
 
@@ -18,12 +18,11 @@ from axonscope.benchmarking.hotpaths import record_benchmark_metadata
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (
-    ExtracellularContext,
+    ExtracellularStimulation,
     IntracellularCurrentClamp,
     Stimulus,
 )
 from axonscope.backends.jax.stimulation_runtime import (
-    compile_extracellular_context,
     compile_intracellular_contexts,
     compile_stimulus,
 )
@@ -37,7 +36,7 @@ from axonscope.timebase import simulation_step_count
 
 Array = Any
 AxonLike = Axon | AxonInstance
-ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
+StimulationBatchRow = ExtracellularStimulation | Sequence[ExtracellularStimulation] | None
 FootprintEngine = Literal["numpy", "jax"]
 
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
@@ -45,7 +44,7 @@ _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 
 def build_vstim_midpoint_batch(
     axon: object,
-    contexts_batch: Sequence[ContextBatchRow],
+    stimulations_batch: Sequence[StimulationBatchRow],
     *,
     tsim_ms: float,
     dt_ms: float,
@@ -57,8 +56,8 @@ def build_vstim_midpoint_batch(
     """Build imposed extracellular potentials at solver midpoints.
 
     Returns ``Vstim[B, Nt, Nx]`` in millivolts. Each row can contain one
-    ``ExtracellularContext``, several contexts that are summed, or ``None`` for
-    a zero-field control row.
+    ``ExtracellularStimulation``, several stimulations that are summed, or
+    ``None`` for a zero-field control row.
     """
 
     dtype = _resolve_dtype(axon, dtype_local)
@@ -68,7 +67,7 @@ def build_vstim_midpoint_batch(
     ) * jnp.asarray(dt_ms, dtype=dtype)
     return build_vstim_batch(
         axon,
-        contexts_batch,
+        stimulations_batch,
         t_ms=t_mid_ms,
         x_positions_m=x_positions_m,
         axon_y_um=axon_y_um,
@@ -79,7 +78,7 @@ def build_vstim_midpoint_batch(
 
 def build_factorized_vstim_midpoint_batch(
     axon: object,
-    contexts_batch: Sequence[ContextBatchRow],
+    stimulations_batch: Sequence[StimulationBatchRow],
     *,
     tsim_ms: float,
     dt_ms: float,
@@ -89,17 +88,17 @@ def build_factorized_vstim_midpoint_batch(
     dtype_local: jnp.dtype | None = None,
     include_initial_previous: bool = False,
 ) -> FactorizedExtracellularPotentialBatch | None:
-    """Build a factorized midpoint ``Vstim`` batch when the contexts allow it.
+    """Build a factorized midpoint ``Vstim`` batch when stimulations allow it.
 
-    Supported context rows keep static spatial footprints separate from
+    Supported stimulation rows keep static spatial footprints separate from
     temporal stimuli so observer-only kernels can avoid materializing
     ``Vstim[B, Nt, Nx]``.
     """
 
-    rows = tuple(_normalize_context_row(row) for row in contexts_batch)
+    rows = tuple(_normalize_stimulation_row(row) for row in stimulations_batch)
     if not rows or not any(rows):
         return None
-    if not _can_build_context_rows_from_footprints(rows):
+    if not _can_build_stimulation_rows_from_footprints(rows):
         return None
 
     dtype = _resolve_dtype(axon, dtype_local)
@@ -136,7 +135,7 @@ def build_factorized_vstim_midpoint_batch(
 
 def build_vstim_initial_previous_batch(
     axon: object,
-    contexts_batch: Sequence[ContextBatchRow],
+    stimulations_batch: Sequence[StimulationBatchRow],
     *,
     dt_ms: float,
     x_positions_m: Array | None = None,
@@ -152,7 +151,7 @@ def build_vstim_initial_previous_batch(
     dtype = _resolve_dtype(axon, dtype_local)
     samples = build_vstim_batch(
         axon,
-        contexts_batch,
+        stimulations_batch,
         t_ms=jnp.asarray([-0.5 * dt_ms], dtype=dtype),
         x_positions_m=x_positions_m,
         axon_y_um=axon_y_um,
@@ -164,7 +163,7 @@ def build_vstim_initial_previous_batch(
 
 def build_vstim_midpoint_and_initial_previous_batch(
     axon: object,
-    contexts_batch: Sequence[ContextBatchRow],
+    stimulations_batch: Sequence[StimulationBatchRow],
     *,
     tsim_ms: float,
     dt_ms: float,
@@ -186,7 +185,7 @@ def build_vstim_midpoint_and_initial_previous_batch(
     )
     samples = build_vstim_batch(
         axon,
-        contexts_batch,
+        stimulations_batch,
         t_ms=t_all_ms,
         x_positions_m=x_positions_m,
         axon_y_um=axon_y_um,
@@ -634,7 +633,7 @@ def build_footprint_vstim_batch(
 
 def build_vstim_batch(
     axon: object,
-    contexts_batch: Sequence[ContextBatchRow],
+    stimulations_batch: Sequence[StimulationBatchRow],
     *,
     t_ms: Array,
     x_positions_m: Array | None = None,
@@ -642,15 +641,15 @@ def build_vstim_batch(
     axon_z_um: Array | None = None,
     dtype_local: jnp.dtype | None = None,
 ) -> Array:
-    """Build imposed extracellular samples for a batch of context rows.
+    """Build imposed extracellular samples for a batch of stimulation rows.
 
     ``x_positions_m`` can have shape ``(Nx,)`` for shared positions or
     ``(B, Nx)`` when each row is spatially shifted relative to the electrode.
     """
 
-    rows = tuple(_normalize_context_row(row) for row in contexts_batch)
+    rows = tuple(_normalize_stimulation_row(row) for row in stimulations_batch)
     if not rows:
-        raise ValueError("contexts_batch must contain at least one row.")
+        raise ValueError("stimulations_batch must contain at least one row.")
 
     dtype = _resolve_dtype(axon, dtype_local)
     t = jnp.asarray(t_ms, dtype=dtype)
@@ -664,7 +663,7 @@ def build_vstim_batch(
             dtype=dtype,
         )
 
-    if _can_build_context_rows_from_footprints(rows):
+    if _can_build_stimulation_rows_from_footprints(rows):
         x_rows_np = _resolve_x_positions_m_numpy(
             axon,
             x_positions_m,
@@ -712,21 +711,21 @@ def build_vstim_batch(
     return jnp.stack(vstim_rows, axis=0)
 
 
-def _can_build_context_rows_from_footprints(
-    rows: Sequence[tuple[ExtracellularContext, ...]],
+def _can_build_stimulation_rows_from_footprints(
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
 ) -> bool:
     for row in rows:
-        for ctx in row:
-            if not hasattr(ctx, "footprint_for_electrode"):
+        for stimulation in row:
+            if not isinstance(stimulation, ExtracellularStimulation):
                 return False
-            for electrode in ctx.electrodes:
-                if getattr(electrode, "stimulus", None) is None:
+            for drive in stimulation.drives:
+                if getattr(drive, "stimulus", None) is None:
                     return False
     return True
 
 
 def _build_vstim_batch_from_footprints(
-    rows: Sequence[tuple[ExtracellularContext, ...]],
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
     t_ms: Array,
     *,
     x_rows: Array,
@@ -756,12 +755,12 @@ def _build_vstim_batch_from_footprints(
     mV_per_V = np.asarray(1e3, dtype=np_dtype)
 
     for row_index, row in enumerate(rows):
-        for ctx in row:
-            for electrode in ctx.electrodes:
-                stimulus = getattr(electrode, "stimulus", None)
+        for stimulation in row:
+            for drive in stimulation.drives:
+                stimulus = getattr(drive, "stimulus", None)
                 if stimulus is None:
                     raise ValueError(
-                        "Each extracellular electrode must have an attached stimulus."
+                        "Each extracellular drive must have an attached stimulus."
                     )
                 cache_key = id(stimulus)
                 current_A = current_cache.get(cache_key)
@@ -771,21 +770,17 @@ def _build_vstim_batch_from_footprints(
                         dtype=np_dtype,
                     )
                     current_cache[cache_key] = current_A
-                footprint = np.asarray(
-                    ctx.footprint_for_electrode(
-                        electrode,
-                        x[row_index],
-                        axon_y_um=float(y[row_index]),
-                        axon_z_um=float(z[row_index]),
-                    ),
-                    dtype=np_dtype,
+                footprint = _drive_footprint_for_positions(
+                    drive,
+                    x[row_index],
+                    np_dtype=np_dtype,
                 )
                 values[row_index] += current_A[:, None] * footprint[None, :] * mV_per_V
     return jnp.asarray(values, dtype=dtype_local)
 
 
 def _try_build_footprint_vstim_batch(
-    rows: Sequence[tuple[ExtracellularContext, ...]],
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
     t_ms: np.ndarray,
     *,
     x_rows: np.ndarray,
@@ -797,7 +792,7 @@ def _try_build_footprint_vstim_batch(
     source = _compatible_footprint_rows(rows)
     if source is None:
         return None
-    contexts, electrodes, row_stimuli = source
+    stimulations, drives, row_stimuli = source
 
     current_rows_A = np.stack(
         [
@@ -807,8 +802,8 @@ def _try_build_footprint_vstim_batch(
         axis=0,
     )
     cache_key = _footprint_rows_cache_key(
-        contexts,
-        electrodes,
+        stimulations,
+        drives,
         x_rows=x_rows,
         axon_y_um=axon_y_um,
         axon_z_um=axon_z_um,
@@ -817,8 +812,8 @@ def _try_build_footprint_vstim_batch(
     footprint = _FOOTPRINT_CACHE.get(cache_key)
     if footprint is None:
         footprint = _compute_footprint_rows(
-            contexts,
-            electrodes,
+            stimulations,
+            drives,
             x_rows=x_rows,
             axon_y_um=axon_y_um,
             axon_z_um=axon_z_um,
@@ -841,7 +836,7 @@ def _try_build_footprint_vstim_batch(
 
 
 def _try_build_factorized_footprint_vstim_batch(
-    rows: Sequence[tuple[ExtracellularContext, ...]],
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
     t_ms: np.ndarray,
     *,
     t_initial_previous_ms: np.ndarray | None = None,
@@ -851,41 +846,58 @@ def _try_build_factorized_footprint_vstim_batch(
     np_dtype: np.dtype[Any],
     dtype_local: jnp.dtype,
 ) -> FactorizedExtracellularPotentialBatch | None:
-    source = _compatible_footprint_rows(rows)
+    source = _factorizable_footprint_rows(rows)
     if source is None:
         return None
-    contexts, electrodes, row_stimuli = source
-    current_rows_A = [
-        np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
-        for stimulus in row_stimuli
-    ]
-    shared_mid_current = all(
-        np.array_equal(current_rows_A[0], row) for row in current_rows_A[1:]
+    drive_rows, max_drive_count = source
+    batch_size = len(drive_rows)
+    current_rows_A = np.zeros(
+        (batch_size, max_drive_count, int(t_ms.shape[0])),
+        dtype=np_dtype,
     )
-    previous_rows_A = None
-    if t_initial_previous_ms is not None:
-        previous_rows_A = [
-            np.asarray(
-                stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+    previous_rows_A = (
+        None
+        if t_initial_previous_ms is None
+        else np.zeros((batch_size, max_drive_count), dtype=np_dtype)
+    )
+    for row_index, row in enumerate(drive_rows):
+        for drive_index, (_stimulation, _drive, stimulus) in enumerate(row):
+            current_rows_A[row_index, drive_index] = np.asarray(
+                stimulus.evaluate(t_ms, unit="ampere"),
                 dtype=np_dtype,
-            ).reshape(-1)[0]
-            for stimulus in row_stimuli
-        ]
-    shared_previous_current = previous_rows_A is None or all(
-        np.array_equal(previous_rows_A[0], row) for row in previous_rows_A[1:]
-    )
-    shared_current = shared_mid_current and shared_previous_current
-    current_A = current_rows_A[0] if shared_current else np.stack(current_rows_A, axis=0)
-    current_initial_previous_A = None
-    if previous_rows_A is not None:
-        current_initial_previous_A = (
-            np.asarray(previous_rows_A[0], dtype=np_dtype)
-            if shared_current
-            else np.asarray(previous_rows_A, dtype=np_dtype)
+            )
+            if previous_rows_A is not None:
+                previous_rows_A[row_index, drive_index] = np.asarray(
+                    stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+                    dtype=np_dtype,
+                ).reshape(-1)[0]
+
+    if max_drive_count == 1:
+        current_rows_1d_A = current_rows_A[:, 0, :]
+        shared_mid_current = all(
+            np.array_equal(current_rows_1d_A[0], row) for row in current_rows_1d_A[1:]
         )
-    cache_key = _footprint_rows_cache_key(
-        contexts,
-        electrodes,
+        previous_rows_1d_A = None if previous_rows_A is None else previous_rows_A[:, 0]
+        shared_previous_current = previous_rows_1d_A is None or all(
+            np.array_equal(previous_rows_1d_A[0], row) for row in previous_rows_1d_A[1:]
+        )
+        shared_current = shared_mid_current and shared_previous_current
+        current_A = current_rows_1d_A[0] if shared_current else current_rows_1d_A
+        current_initial_previous_A = None
+        if previous_rows_1d_A is not None:
+            current_initial_previous_A = (
+                np.asarray(previous_rows_1d_A[0], dtype=np_dtype)
+                if shared_current
+                else previous_rows_1d_A
+            )
+    else:
+        shared_current = False
+        current_A = current_rows_A
+        current_initial_previous_A = previous_rows_A
+
+    cache_key = _factorized_footprint_rows_cache_key(
+        drive_rows,
+        max_drive_count=max_drive_count,
         x_rows=x_rows,
         axon_y_um=axon_y_um,
         axon_z_um=axon_z_um,
@@ -893,12 +905,10 @@ def _try_build_factorized_footprint_vstim_batch(
     )
     footprint_V_per_A = _FOOTPRINT_CACHE.get(cache_key)
     if footprint_V_per_A is None:
-        footprint_V_per_A = _compute_footprint_rows(
-            contexts,
-            electrodes,
+        footprint_V_per_A = _compute_factorized_footprint_rows(
+            drive_rows,
+            max_drive_count=max_drive_count,
             x_rows=x_rows,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
             np_dtype=np_dtype,
         )
         _FOOTPRINT_CACHE[cache_key] = footprint_V_per_A
@@ -907,6 +917,8 @@ def _try_build_factorized_footprint_vstim_batch(
         footprint_cache_status = "hit"
 
     footprint_mV_per_A = footprint_V_per_A * np.asarray(1e3, dtype=np_dtype)
+    if max_drive_count == 1:
+        footprint_mV_per_A = footprint_mV_per_A[:, 0, :]
     dense_equivalent_nbytes = (
         int(len(rows)) * int(t_ms.shape[0]) * int(x_rows.shape[1]) * int(np_dtype.itemsize)
     )
@@ -922,6 +934,7 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_footprint_cache=footprint_cache_status,
         vstim_footprint_cache_nbytes=int(footprint_V_per_A.nbytes),
         vstim_input_format="factorized_footprint",
+        vstim_factorized_rank=int(max_drive_count),
         vstim_factorized_current_nbytes=int(current_A.nbytes),
         vstim_factorized_initial_previous_nbytes=previous_nbytes,
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
@@ -946,37 +959,103 @@ def _try_build_factorized_footprint_vstim_batch(
     )
 
 
+def _factorizable_footprint_rows(
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
+) -> tuple[tuple[tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...], ...], int] | None:
+    if not rows:
+        return None
+    drive_rows: list[tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...]] = []
+    max_drive_count = 0
+    for row in rows:
+        row_drives: list[tuple[ExtracellularStimulation, Any, Stimulus]] = []
+        for stimulation in row:
+            if not isinstance(stimulation, ExtracellularStimulation):
+                return None
+            for drive in stimulation.drives:
+                stimulus = getattr(drive, "stimulus", None)
+                if stimulus is None:
+                    return None
+                row_drives.append((stimulation, drive, stimulus))
+        max_drive_count = max(max_drive_count, len(row_drives))
+        drive_rows.append(tuple(row_drives))
+    if max_drive_count == 0:
+        return None
+    return tuple(drive_rows), int(max_drive_count)
+
+
+def _compute_factorized_footprint_rows(
+    drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
+    *,
+    max_drive_count: int,
+    x_rows: np.ndarray,
+    np_dtype: np.dtype[Any],
+) -> np.ndarray:
+    footprint = np.zeros(
+        (len(drive_rows), int(max_drive_count), int(x_rows.shape[1])),
+        dtype=np_dtype,
+    )
+    for row_index, row in enumerate(drive_rows):
+        for drive_index, (_stimulation, drive, _stimulus) in enumerate(row):
+            footprint[row_index, drive_index] = _drive_footprint_for_positions(
+                drive,
+                x_rows[row_index],
+                np_dtype=np_dtype,
+            )
+    return footprint
+
+
+def _factorized_footprint_rows_cache_key(
+    drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
+    *,
+    max_drive_count: int,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+) -> tuple[Any, ...]:
+    return (
+        "factorized_footprint_rows",
+        str(np_dtype),
+        int(max_drive_count),
+        tuple(
+            tuple((id(stimulation), id(drive)) for stimulation, drive, _stimulus in row)
+            for row in drive_rows
+        ),
+        _array_content_key(x_rows),
+        _array_content_key(axon_y_um),
+        _array_content_key(axon_z_um),
+    )
+
+
 def _compatible_footprint_rows(
-    rows: Sequence[tuple[ExtracellularContext, ...]],
+    rows: Sequence[tuple[ExtracellularStimulation, ...]],
 ) -> tuple[
-    tuple[ExtracellularContext, ...],
+    tuple[ExtracellularStimulation, ...],
     tuple[Any, ...],
     tuple[Stimulus, ...],
 ] | None:
     if not rows or any(len(row) != 1 for row in rows):
         return None
-    contexts: list[ExtracellularContext] = []
-    electrodes: list[Any] = []
+    stimulations: list[ExtracellularStimulation] = []
+    drives: list[Any] = []
     stimuli = []
     for row in rows:
-        context = row[0]
-        if len(context.electrodes) != 1:
+        stimulation = row[0]
+        if len(stimulation.drives) != 1:
             return None
-        electrode = context.electrodes[0]
-        if not hasattr(context, "footprint_for_electrode"):
-            return None
-        stimulus = getattr(electrode, "stimulus", None)
+        drive = stimulation.drives[0]
+        stimulus = getattr(drive, "stimulus", None)
         if stimulus is None:
             return None
-        contexts.append(context)
-        electrodes.append(electrode)
+        stimulations.append(stimulation)
+        drives.append(drive)
         stimuli.append(stimulus)
-    return tuple(contexts), tuple(electrodes), tuple(stimuli)
+    return tuple(stimulations), tuple(drives), tuple(stimuli)
 
 
 def _compute_footprint_rows(
-    contexts: Sequence[ExtracellularContext],
-    electrodes: Sequence[Any],
+    stimulations: Sequence[ExtracellularStimulation],
+    drives: Sequence[Any],
     *,
     x_rows: np.ndarray,
     axon_y_um: np.ndarray,
@@ -985,17 +1064,13 @@ def _compute_footprint_rows(
 ) -> np.ndarray:
     return np.stack(
         [
-            np.asarray(
-                context.footprint_for_electrode(
-                    electrode,
-                    x_rows[row_index],
-                    axon_y_um=float(axon_y_um[row_index]),
-                    axon_z_um=float(axon_z_um[row_index]),
-                ),
-                dtype=np_dtype,
+            _drive_footprint_for_positions(
+                drive,
+                x_rows[row_index],
+                np_dtype=np_dtype,
             )
-            for row_index, (context, electrode) in enumerate(
-                zip(contexts, electrodes, strict=True)
+            for row_index, (_stimulation, drive) in enumerate(
+                zip(stimulations, drives, strict=True)
             )
         ],
         axis=0,
@@ -1003,8 +1078,8 @@ def _compute_footprint_rows(
 
 
 def _footprint_rows_cache_key(
-    contexts: Sequence[ExtracellularContext],
-    electrodes: Sequence[Any],
+    stimulations: Sequence[ExtracellularStimulation],
+    drives: Sequence[Any],
     *,
     x_rows: np.ndarray,
     axon_y_um: np.ndarray,
@@ -1015,8 +1090,8 @@ def _footprint_rows_cache_key(
         "footprint_rows",
         str(np_dtype),
         tuple(
-            (id(context), id(electrode))
-            for context, electrode in zip(contexts, electrodes, strict=True)
+            (id(stimulation), id(drive))
+            for stimulation, drive in zip(stimulations, drives, strict=True)
         ),
         _array_content_key(x_rows),
         _array_content_key(axon_y_um),
@@ -1030,8 +1105,30 @@ def _array_content_key(values: np.ndarray) -> tuple[tuple[int, ...], str, str]:
     return tuple(int(dim) for dim in arr.shape), arr.dtype.str, digest
 
 
+def _drive_footprint_for_positions(
+    drive: Any,
+    x_positions_m: Array,
+    *,
+    np_dtype: np.dtype[Any],
+) -> np.ndarray:
+    footprint = drive.footprint
+    values = np.asarray(footprint.values_for_axon(), dtype=np_dtype)
+    x_um = np.asarray(x_positions_m, dtype=float) * 1e6
+    support_um = np.asarray(footprint.positions_um, dtype=float)
+    if x_um.shape == support_um.shape and np.allclose(x_um, support_um):
+        return values
+    if footprint.interpolation not in {"sampled", "linear"}:
+        raise NotImplementedError(
+            "Only sampled/linear footprint interpolation is supported by "
+            "batch extracellular lowering."
+        )
+    if np.any(np.diff(support_um) < 0.0):
+        raise ValueError("Footprint positions must be sorted for interpolation.")
+    return np.asarray(np.interp(x_um, support_um, values), dtype=np_dtype)
+
+
 def _build_vstim_row(
-    contexts: tuple[ExtracellularContext, ...],
+    stimulations: tuple[ExtracellularStimulation, ...],
     t_ms: Array,
     *,
     x_positions_row_m: Array,
@@ -1042,15 +1139,18 @@ def _build_vstim_row(
     nt = int(t_ms.shape[0])
     nx = int(x_positions_row_m.shape[0])
     vstim = jnp.zeros((nt, nx), dtype=dtype_local)
-    for ctx in contexts:
-        compiled = compile_extracellular_context(
-            ctx,
-            x_positions_row_m,
-            dtype_local=dtype_local,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
-        )
-        vstim = vstim + jax.vmap(compiled)(t_ms)
+    for stimulation in stimulations:
+        for drive in stimulation.drives:
+            footprint = jnp.asarray(
+                _drive_footprint_for_positions(
+                    drive,
+                    np.asarray(x_positions_row_m, dtype=float),
+                    np_dtype=np.dtype(dtype_local),
+                ),
+                dtype=dtype_local,
+            )
+            current = jax.vmap(compile_stimulus(drive.stimulus, dtype_local=dtype_local))(t_ms)
+            vstim = vstim + current[:, None] * footprint[None, :]
     return vstim * jnp.asarray(1e3, dtype=dtype_local)
 
 
@@ -1069,10 +1169,12 @@ def _pad_time_space_array(values: Array, *, target_nx: int) -> Array:
     return jnp.pad(arr, ((0, 0), (0, pad_count)), mode="constant")
 
 
-def _normalize_context_row(row: ContextBatchRow) -> tuple[ExtracellularContext, ...]:
+def _normalize_stimulation_row(
+    row: StimulationBatchRow,
+) -> tuple[ExtracellularStimulation, ...]:
     if row is None:
         return ()
-    if isinstance(row, ExtracellularContext):
+    if isinstance(row, ExtracellularStimulation):
         return (row,)
     return tuple(row)
 
@@ -1359,8 +1461,8 @@ def _shape_and_ndim(values: object) -> tuple[tuple[int, ...], int]:
 
 
 __all__ = [
-    "ContextBatchRow",
     "FootprintEngine",
+    "StimulationBatchRow",
     "build_intracellular_current_density_batch",
     "build_sparse_intracellular_current_density_batch",
     "build_footprint_vstim_batch",

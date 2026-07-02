@@ -2,7 +2,7 @@
 
 `axonscope.stimulation` contains backend-independent stimulation descriptions:
 temporal waveforms, sampled extracellular footprints/drives, and physical
-contexts.
+intracellular contexts.
 
 The main idea is to keep each object responsible for one physical layer:
 
@@ -18,13 +18,10 @@ from axonscope.stimulation import (
     Stimulus,
     IntracellularContext,
     IntracellularCurrentClamp,
-    ExtracellularContext,
     ExtracellularFootprint,
     ExtracellularDrive,
     ExtracellularStimulation,
-    ExtracellularStimulationContext,
     ExtracellularPotential,
-    Electrode,
 )
 
 drive_id = axs.DriveId("center contact")
@@ -35,9 +32,8 @@ Package layout:
 ```text
 src/axonscope/stimulation/
   stimuli.py       temporal waveforms
-  electrodes.py    generic stimulated electrode base contracts
   extracellular.py static footprints, drives, and dense inspection objects
-  contexts.py      intracellular contexts and extracellular adapters
+  contexts.py      intracellular contexts
   __init__.py      public facade
 ```
 
@@ -72,7 +68,7 @@ Amplitude units are preserved by the waveform and interpreted by the physical
 object that uses it:
 
 - intracellular contexts normalize waveform amplitudes to `nanoampere`;
-- extracellular electrodes normalize waveform amplitudes to `ampere`.
+- extracellular drives normalize waveform amplitudes to `ampere`.
 
 Plain amplitude numbers are interpreted in the consuming object's canonical
 unit.
@@ -93,9 +89,8 @@ axon = axs.axons.HodgkinHuxley(
 sim = axs.AxonInstance(axon)
 ```
 
-Solvers and `axs.simulate(...)` accept `sim` directly. For workflows that
-should carry duration, time step, recording, and run options together, wrap one
-or more instances in the executable root object:
+`AxonSimulation` accepts `sim` directly. It carries duration, time step,
+recording, and run options together for one or more instances:
 
 ```python
 simulation = axs.AxonSimulation(
@@ -207,6 +202,18 @@ vext_mV = extracellular.evaluate(t, voltage_unit=axs.mV)
 `ExtracellularStimulation` sums drives for inspection and attachment without
 duplicating geometry. Use `extracellular.potential(...)` only when a dense
 `ExtracellularPotential` object is useful for plotting or diagnostics.
+The same public objects own their generic inspection plots:
+
+```python
+footprint.plot(position_unit=axs.um, voltage_unit=axs.mV, current_unit=axs.uA)
+extracellular.plot_footprints(
+    position_unit=axs.um,
+    voltage_unit=axs.mV,
+    current_unit=axs.uA,
+)
+extracellular.plot_potential(t, time_unit=axs.ms, voltage_unit=axs.mV)
+extracellular.potential(t, voltage_unit=axs.mV).plot(time_unit=axs.ms)
+```
 
 For multi-source stimulation, build several drives on the same intrinsic
 position support:
@@ -227,11 +234,6 @@ updated = sim.extracellular_stimulation.replace_drive(
 )
 sim.add_extracellular_stimulation(stimulation=updated, replace=True)
 ```
-
-`AnalyticalExtracellularContext` remains available as a low-level adapter for
-reference validation and custom analytical electrodes. Do not use it as the
-point-source quick-start path; sample point sources into typed footprints,
-drives, or stimulation first.
 
 NRV/FEM/LIFE workflows should use the adapter helpers in
 `axonscope.integrations.nrv` through two bridges. NRV builds the external
@@ -259,9 +261,10 @@ pool = footprints.stimulated_population(
 )
 ```
 
-`NRVExtracellularContext` remains only a low-level placeholder for future direct
-FEM execution. The current supported path is adapter -> sampled
-`ExtracellularFootprint` -> `ExtracellularDrive` -> `ExtracellularStimulation`.
+There is no public `NRVExtracellularContext` placeholder. A future direct
+NumPy/SciPy/FEM lowering phase can add executable integration when it is ready;
+today the supported path is adapter -> sampled `ExtracellularFootprint` ->
+`ExtracellularDrive` -> `ExtracellularStimulation`.
 
 ## Electrode Footprints
 
@@ -289,8 +292,9 @@ backend boundary in `axonscope.backends.jax.stimulation_runtime`:
 - `Stimulus` becomes a JAX-ready temporal callable;
 - `IntracellularContext` objects become a current-density injection callable
   through `compile_intracellular_contexts(...)`;
-- `ExtracellularContext` objects become a summed imposed-potential callable
-  through `compile_extracellular_contexts(...)`.
+- `ExtracellularStimulation` objects become imposed-potential callables through
+  `compile_extracellular_stimulations(...)`, or dense/factorized Vstim tensors
+  for batch execution.
 
 This keeps the public stimulation package independent from runtime choices such
 as single axon solving, pool batches, JAX compilation, or precomputed footprint

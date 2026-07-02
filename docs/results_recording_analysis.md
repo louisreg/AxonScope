@@ -9,8 +9,9 @@ This layer has three separate responsibilities:
   statuses and population denominators.
 - `axonscope.analysis` also provides lower-level rasterization and velocity
   helpers used by plotting and validation workflows.
-- `axonscope.results.visualization` provides plotting helpers for returned
-  arrays.
+- `axonscope.results.views` provides raw result value/plot helpers, and
+  `axonscope.analysis.views` provides analysis-derived plots such as spike
+  rasters.
 
 Keeping these responsibilities separate matters because a result may not contain
 the full `Vm[Nt, Nx]` matrix. Pool runs can record only the center compartment
@@ -19,20 +20,20 @@ without materializing the whole voltage movie.
 
 ## Recording
 
-`Recording` is a public storage policy. It is passed to `simulate` or
-`simulate_pool`, not attached to the axon model.
+`Recording` is a public storage policy. It is passed to `AxonSimulation`, not
+attached to the axon model.
 
 ```python
 recording = axs.Recording(
     signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
 )
 
-run = axs.simulate(
+run = axs.AxonSimulation(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=recording,
-)
+).run()
 result = run.single
 ```
 
@@ -49,15 +50,15 @@ Current support:
 
 Current solver handling:
 
-- `axs.simulate(...)` validates the public `Recording`, forwards
-  `record_observables=True` to the scalar solver when observable groups are
-  requested, then filters the internal scalar recording payload to the requested
-  groups before wrapping it in the canonical public result.
-- `axs.simulate_pool(...)` translates public pool Vm recording policies to a
-  backend-neutral `RecordingPlan`, then the JAX backend lowers that plan to
-  solver-level `BatchRecording`. Scalar fallback rows are filtered after the
-  solve so public `record_indices` match the requested center/probe/index
-  columns.
+- `AxonSimulation.run()` validates the public `Recording`, forwards
+  `record_observables=True` to the scalar route when observable groups are
+  requested, then filters the internal scalar recording payload to the
+  requested groups before wrapping it in the canonical public result.
+- Population `AxonSimulation.run()` translates public pool Vm recording
+  policies to a backend-neutral `RecordingPlan`, then the JAX backend lowers
+  that plan to solver-level `BatchRecording`. Scalar fallback rows are filtered
+  after the solve so public `record_indices` match the requested
+  center/probe/index columns.
 - Low-level solvers and batch kernels still receive numerical flags/options;
   they do not own the user-facing `Recording` contract.
 
@@ -97,7 +98,11 @@ recording = axs.Recording(
 All public execution returns `AxonSimulationResult`, including one-axon runs:
 
 ```python
-run = axs.simulate(sim, duration=5.0 * axs.ms, dt=0.01 * axs.ms)
+run = axs.AxonSimulation(
+    sim,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+).run()
 result = run.single      # or run[0]
 
 result.t               # time samples in ms, shape (Nt,)
@@ -140,12 +145,12 @@ Pool runs return the same `AxonSimulationResult` container. Indexing or
 iterating over it gives one `AxonResultView` per simulated row:
 
 ```python
-results = axs.simulate_pool(
+results = axs.AxonSimulation(
     pool,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.Vm),
-)
+).run()
 
 for result in results:
     assert result.Vm.shape[1] == 1
@@ -178,6 +183,35 @@ Public result surface audit:
 | `VmRasterResult` | compact observer-only threshold raster stored under `observations["vm_raster"]`. |
 | `AnalysisReport` and protocol summaries | separate scientific interpretations of results; they do not mutate or merge into raw numerical result objects. |
 
+View/rendering helpers are intentionally separate from data containers:
+`axs.results.views` owns one-axon value extraction and Vm plots,
+`axs.analysis.views` owns analysis/report formatting, dataframe export, and
+simple scalar report plots, and `axs.protocols.views` owns threshold,
+recruitment, and generic sweep summaries. Methods such as
+`result.plot_trace()`, `result.plot_traces()`, `results.plot_traces()`,
+`result.plot_recorded_axis()`, `raster.plot()`, `report.to_dataframe()`,
+`analysis_result.plot()`, `curve.plot()`, and `curve.plot_groups()` remain
+ergonomic facades over those view modules.
+
+The view modules share a small plotting helper layer for Matplotlib axis
+creation, unit-aware labels, titles, grids, and legends. Plot semantics stay
+domain-owned: raw simulation plots are named by signal or concept, summary
+objects expose `plot()` only when there is a clear default visualization, and
+example-specific scientific plots remain in examples.
+
+Summary-like objects use one table contract:
+
+- `rows()` returns tuple-of-dict rows without requiring pandas.
+- `to_dataframe()` wraps the same rows when pandas is available.
+- `format()` and `print()` produce compact human-readable text.
+- `plot()` is available only when the object has a clear default plot.
+
+This applies to analysis results/reports, protocol summaries, VmRaster
+summaries, and simulation estimates. Raw simulation arrays remain raw arrays;
+they are inspected through direct value helpers such as `voltage_values(...)`,
+`trace_values(...)`, or `signal(...)` rather than forced into one generic
+dataframe.
+
 The lower-level `run_pool` path returns private dispatch records. Those
 containers keep `index`, `group_id`, and `method` before the public wrapper
 converts the pool into `AxonSimulationResult`.
@@ -205,6 +239,36 @@ Each public analysis definition declares requirements such as required signals,
 positions, supported formulations, and algorithm version. Analysis results keep
 values and statuses side by side, so missing inputs or undetermined metrics are
 not hidden as anonymous NaNs.
+
+Status vocabularies are intentionally scoped:
+
+- `AnalysisStatus` belongs to `AnalysisResult` rows. It answers whether a
+  scientific metric is valid, missing required inputs, not applicable,
+  numerically failed, or undetermined.
+- Protocol statuses belong to protocol summaries. For example,
+  `axs.protocols.ThresholdStatus` uses `threshold`, `below_range`, and
+  `above_range` to describe a bisection outcome relative to the supplied
+  bounds.
+
+Do not compare protocol statuses to `AnalysisStatus`. A protocol may use
+analysis definitions or keep analysis events in its history, but the protocol
+result status describes the outer search or sweep, not the validity of a
+single analysis metric.
+
+When a protocol produces a per-row scientific metric, it can expose an explicit
+analysis view without losing the richer protocol object:
+
+```python
+curve = axs.protocols.find_threshold(...)
+threshold_metric = curve.to_analysis_result()
+
+recruitment = axs.protocols.recruitment_sweep(...)
+first_activation = recruitment.to_analysis_result()
+```
+
+The protocol object keeps search history, sampled values, and protocol status.
+The derived `AnalysisResult` keeps values, `AnalysisStatus`, unit, population
+denominators, and row labels for report/table workflows.
 
 Low-level helpers live under the same `axs.analysis` namespace.
 
@@ -254,21 +318,17 @@ observers and the current solver-side observer path.
 
 ## Visualization
 
-Shared plotting helpers live under `axs.results.visualization` and consume the
-same analysis helpers. One-axon views expose direct plot methods for common
-voltage trace/map workflows.
+Shared plotting helpers live under the retained view modules. One-axon views
+expose direct plot methods for common voltage trace/map workflows, while
+analysis-derived plots live under `axs.analysis.views`.
 
 ```python
-ax = axs.results.visualization.plot_raster(
+ax = axs.analysis.views.plot_spike_raster(
     result,
     threshold_mV=-10.0,
     min_distance_ms=1.0,
 )
 ```
-
-Future plotting helpers should follow the same rule: they can consume
-`AxonResultView`, `AxonSimulationResult`, axon models, or dispatcher outputs,
-and should reuse the same position/recording guardrails.
 
 ## Online Vm Observers
 
@@ -308,7 +368,7 @@ owns the packed-bit update loop, but CPU unpacking and result-side helpers live
 with public results.
 
 ```python
-run = axs.simulate(
+run = axs.AxonSimulation(
     sim,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
@@ -316,7 +376,7 @@ run = axs.simulate(
     observers=[
         axs.analysis.Activation(threshold=-20.0 * axs.mV),
     ],
-)
+).run()
 result = run.single
 ```
 

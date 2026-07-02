@@ -9,6 +9,7 @@ from axonscope.solvers.options import (
     SolverOptions,
     resolve_double_cable_block_solver,
 )
+from axonscope.solvers.rate_tables import RateTableConfig
 
 __all__ = [
     "Solver",
@@ -16,6 +17,7 @@ __all__ = [
     "BatchOptions",
     "BatchRecording",
     "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
+    "RateTableConfig",
     "SolverOptions",
     "resolve_double_cable_block_solver",
 ]

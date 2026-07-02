@@ -159,13 +159,13 @@ def test_validation_population_builds_exact_and_surrogate_formulations():
     assert series[0].axon.resolved_formulation == "double-cable"
     assert split[0].axon.resolved_formulation == "single-cable"
     assert schur[0].axon.resolved_formulation == "double-cable"
-    assert exact[0].extracellular_context is not None
-    assert surrogate[0].extracellular_context is not None
-    assert effective[0].extracellular_context is not None
-    assert single_chain[0].extracellular_context is not None
-    assert series[0].extracellular_context is not None
-    assert split[0].extracellular_context is not None
-    assert schur[0].extracellular_context is not None
+    assert exact[0].extracellular_stimulation is not None
+    assert surrogate[0].extracellular_stimulation is not None
+    assert effective[0].extracellular_stimulation is not None
+    assert single_chain[0].extracellular_stimulation is not None
+    assert series[0].extracellular_stimulation is not None
+    assert split[0].extracellular_stimulation is not None
+    assert schur[0].extracellular_stimulation is not None
 
 
 def test_pseudo_double_configs_are_json_friendly():

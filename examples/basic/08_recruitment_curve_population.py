@@ -170,7 +170,7 @@ def main() -> None:
     curve = axs.protocols.recruitment_sweep(
         tuple(pool),
         update=update_point_source_current,
-        amplitudes=current_steps,
+        values=current_steps,
         duration=4.0 * axs.ms,
         dt=0.025 * axs.ms,
         criterion=criterion,
@@ -192,26 +192,10 @@ def main() -> None:
     )
 
     print("\n=== Recruitment curve ===")
-    total_fibers = int(families_arr.shape[0])
-    unmyelinated_total = int(np.sum(families_arr == "unmyelinated"))
-    myelinated_total = int(np.sum(families_arr == "myelinated"))
-    for amplitude_uA, activated in zip(
-        curve.amplitudes.to(axs.uA).magnitude,
-        curve.activated,
-        strict=True,
-    ):
-        total = int(np.sum(activated))
-        unmyelinated = int(np.sum(activated[families_arr == "unmyelinated"]))
-        myelinated = int(np.sum(activated[families_arr == "myelinated"]))
-        print(
-            f"{amplitude_uA:>6.1f} uA: "
-            f"{total:>3d}/{total_fibers:<3d} total, "
-            f"{unmyelinated:>2d}/{unmyelinated_total:<2d} unmyelinated, "
-            f"{myelinated:>2d}/{myelinated_total:<2d} myelinated"
-        )
+    print(curve.to_dataframe(unit=axs.uA).to_string(index=False))
 
-    # The population plot uses the first sampled current that activated each
-    # fiber as a rough threshold-like color. Non-activated fibers are gray.
+    # The population plot colors each fiber by the first sampled current that
+    # activated it. Non-activated fibers are gray.
     y_um = np.concatenate(
         [
             np.asarray(unmyelinated_y.to(axs.um).magnitude, dtype=float),
@@ -224,8 +208,8 @@ def main() -> None:
             np.asarray(myelinated_z.to(axs.um).magnitude, dtype=float),
         ]
     )
-    threshold_like_uA = curve.threshold_like_uA
-    finite_thresholds = threshold_like_uA[np.isfinite(threshold_like_uA)]
+    first_activation_uA = curve.first_activation_uA
+    finite_thresholds = first_activation_uA[np.isfinite(first_activation_uA)]
     if finite_thresholds.size:
         color_min = float(np.min(finite_thresholds))
         color_max = float(np.max(finite_thresholds))
@@ -262,7 +246,7 @@ def main() -> None:
         scatter = ax_population.scatter(
             y_um[mask],
             z_um[mask],
-            c=threshold_like_uA[mask],
+            c=first_activation_uA[mask],
             marker=marker,
             s=marker_size,
             cmap=cmap,
@@ -289,33 +273,12 @@ def main() -> None:
     ax_population.legend(loc="upper right", fontsize=8)
     fig.colorbar(scatter, ax=ax_population, label="first activating sample [uA]")
 
-    amplitudes_uA = curve.amplitudes.to(axs.uA).magnitude
-    ax_curve.plot(
-        amplitudes_uA,
-        curve.fraction,
-        marker="o",
-        linewidth=2.0,
-        label="all fibers",
+    curve.plot_groups(
+        families_arr,
+        ax=ax_curve,
+        unit=axs.uA,
     )
-    for family, linestyle in (
-        ("unmyelinated", "--"),
-        ("myelinated", ":"),
-    ):
-        mask = families_arr == family
-        fraction = np.mean(curve.activated[:, mask], axis=1)
-        ax_curve.plot(
-            amplitudes_uA,
-            fraction,
-            marker="o",
-            linestyle=linestyle,
-            label=family,
-        )
-    ax_curve.set_xlabel("point-source current magnitude [uA]")
-    ax_curve.set_ylabel("recruited fraction")
-    ax_curve.set_ylim(-0.05, 1.05)
     ax_curve.set_title("Recruitment")
-    ax_curve.grid(True, alpha=0.3)
-    ax_curve.legend()
     plt.show()
 
 

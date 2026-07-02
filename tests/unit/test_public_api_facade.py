@@ -4,6 +4,10 @@ import pytest
 import axonscope as axs
 
 
+def _run_simulation(axons, **kwargs):
+    return axs.AxonSimulation(axons, **kwargs).run()
+
+
 def test_public_results_expose_one_canonical_path():
     assert not hasattr(axs, "SimResult")
     assert not hasattr(axs.results, "SimResult")
@@ -32,7 +36,7 @@ def test_public_unmyelinated_template_and_simulate():
         ),
     )
 
-    run = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
+    run = _run_simulation(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms)
     result = run.single
 
     assert isinstance(run, axs.AxonSimulationResult)
@@ -83,7 +87,7 @@ def test_public_axon_is_descriptive_and_simulation_owns_protocol():
     assert sim.intracellular_contexts[0] is clamp
 
 
-def test_public_simulation_owns_one_extracellular_context():
+def test_public_simulation_owns_one_extracellular_stimulation():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -105,16 +109,17 @@ def test_public_simulation_owns_one_extracellular_context():
     sim.add_extracellular_stimulation(stimulation=stimulation)
 
     assert sim.extracellular_stimulation is stimulation
-    assert isinstance(sim.extracellular_context, axs.ExtracellularStimulationContext)
-    assert sim.extracellular_contexts == (sim.extracellular_context,)
+    assert sim.extracellular_stimulations == (stimulation,)
+    assert not hasattr(sim, "extracellular_context")
+    assert not hasattr(sim, "extracellular_contexts")
     assert sim.use_extracellular
     assert not hasattr(sim, "clear_extracellular_contexts")
+    assert not hasattr(sim, "clear_extracellular_context")
 
-    sim.clear_extracellular_context()
+    sim.clear_extracellular_stimulation()
 
-    assert sim.extracellular_context is None
     assert sim.extracellular_stimulation is None
-    assert sim.extracellular_contexts == ()
+    assert sim.extracellular_stimulations == ()
     assert not sim.use_extracellular
 
 
@@ -127,7 +132,7 @@ def test_public_simulate_rejects_partial_final_time_step():
     )
 
     with pytest.raises(ValueError, match="integer multiple"):
-        axs.simulate(axon, duration=0.1 * axs.ms, dt=0.03 * axs.ms)
+        _run_simulation(axon, duration=0.1 * axs.ms, dt=0.03 * axs.ms)
 
 
 def test_public_recording_full_requests_observables():
@@ -138,7 +143,7 @@ def test_public_recording_full_requests_observables():
         celsius=6.3 * axs.degC,
     )
 
-    run = axs.simulate(
+    run = _run_simulation(
         axon,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -153,7 +158,7 @@ def test_public_recording_full_requests_observables():
     assert "conductances" in result.recordings
 
 
-def test_scalar_observer_only_run_returns_compact_observations_without_vm():
+def test_observer_only_run_returns_compact_observations_without_vm():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -174,8 +179,8 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
         target=axs.positions.CENTER,
     )
 
-    recorded = axs.simulate(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms).single
-    compact = axs.simulate(
+    recorded = _run_simulation(sim, duration=0.1 * axs.ms, dt=0.05 * axs.ms).single
+    compact = _run_simulation(
         sim,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -190,7 +195,7 @@ def test_scalar_observer_only_run_returns_compact_observations_without_vm():
     raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
     assert raster.names == ("activation",)
     assert raster.words.shape == (1, 1, 1, 1)
-    probe_index = int(np.asarray(raster.original_indices)[0, 0])
+    probe_index = int(np.asarray(raster.original_indices).reshape(-1)[0])
     np.testing.assert_array_equal(
         raster.unpack()[0, 0, 0],
         np.asarray(recorded.Vm)[:, probe_index] >= -80.0,
@@ -208,7 +213,7 @@ def test_solver_side_peak_voltage_observer_is_not_supported():
     peak = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
 
     with pytest.raises(NotImplementedError, match="threshold-style Vm"):
-        axs.simulate(
+        _run_simulation(
             sim,
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -241,13 +246,13 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    recorded = axs.simulate_pool(
+    recorded = _run_simulation(
         axons,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.center(),
     )
-    compact = axs.simulate_pool(
+    compact = _run_simulation(
         axons,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -306,13 +311,13 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
         threshold=-80.0 * axs.mV,
         target=axs.positions.ALL,
     )
-    recorded = axs.simulate_pool(
+    recorded = _run_simulation(
         axons,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording(signals=axs.signals.Vm),
     )
-    compact = axs.simulate_pool(
+    compact = _run_simulation(
         axons,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -378,7 +383,7 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     )
     axs.enable_benchmark("/tmp/axonscope-zero-vstim-test", print_summary=False, save=False)
     try:
-        compact = axs.simulate_pool(
+        compact = _run_simulation(
             axons,
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -396,7 +401,7 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     ]
     assert len(extracellular_events) == 1
     metadata = extracellular_events[0].metadata
-    assert metadata["input_format"] == "zero_no_context"
+    assert metadata["input_format"] == "zero_no_extracellular_stimulation"
     assert "vstim_mid" not in metadata
     assert metadata["skipped_dense_vstim_shape"] == [2, 2, 11]
 
@@ -433,7 +438,7 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
 
     axs.enable_benchmark("/tmp/axonscope-zero-iinj-test", print_summary=False, save=False)
     try:
-        result = axs.simulate_pool(
+        result = _run_simulation(
             axons,
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -469,7 +474,7 @@ def test_public_recording_signals_filter_single_result():
         celsius=6.3 * axs.degC,
     )
 
-    run = axs.simulate(
+    run = _run_simulation(
         axon,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -506,7 +511,7 @@ def test_public_single_recording_requires_voltage_with_observables():
     )
 
     with pytest.raises(NotImplementedError, match="observable-only recording"):
-        axs.simulate(
+        _run_simulation(
             axon,
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -514,7 +519,7 @@ def test_public_single_recording_requires_voltage_with_observables():
         )
 
 
-def test_public_single_recording_spatial_filter_is_explicitly_unwired():
+def test_public_single_recording_spatial_filter_uses_population_lifecycle():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -522,13 +527,16 @@ def test_public_single_recording_spatial_filter_is_explicitly_unwired():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="spatial single-axon"):
-        axs.simulate(
-            axon,
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording.center(axs.signals.Vm),
-        )
+    run = _run_simulation(
+        axon,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
+    )
+    result = run.single
+
+    assert result.Vm.shape == (2, 1)
+    assert result.record_indices == (5,)
 
 
 def test_public_generic_unmyelinated_from_membrane():
@@ -574,7 +582,7 @@ def test_public_pool_accepts_simulation_protocols():
             celsius=6.3 * axs.degC,
         )
     )
-    result = axs.simulate_pool(
+    result = _run_simulation(
         [axon_a, axon_b],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -585,7 +593,7 @@ def test_public_pool_accepts_simulation_protocols():
     assert result[1].simulation is axon_b
 
 
-def test_public_simulate_pool_accepts_unit_duration_and_dt():
+def test_public_axon_simulation_pool_accepts_unit_duration_and_dt():
     axon = axs.AxonInstance(
         axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
@@ -595,7 +603,7 @@ def test_public_simulate_pool_accepts_unit_duration_and_dt():
         )
     )
 
-    result = axs.simulate_pool(
+    result = _run_simulation(
         [axon],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -605,7 +613,7 @@ def test_public_simulate_pool_accepts_unit_duration_and_dt():
     assert result[0].Vm.shape == (2, 11)
 
 
-def test_public_simulate_pool_returns_canonical_result():
+def test_public_axon_simulation_pool_returns_canonical_result():
     axon_model = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -616,7 +624,7 @@ def test_public_simulate_pool_returns_canonical_result():
     axon_b = axs.AxonInstance(axon_model)
     recording = axs.Recording.center(axs.signals.Vm)
 
-    result = axs.simulate_pool(
+    result = _run_simulation(
         [axon_a, axon_b],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -676,7 +684,7 @@ def test_public_simulate_pool_returns_canonical_result():
         _ = result.single
 
 
-def test_public_simulate_pool_single_view_and_heterogeneous_rows():
+def test_public_axon_simulation_pool_single_view_and_heterogeneous_rows():
     short_axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -690,7 +698,7 @@ def test_public_simulate_pool_single_view_and_heterogeneous_rows():
         celsius=6.3 * axs.degC,
     )
 
-    one = axs.simulate_pool(
+    one = _run_simulation(
         [short_axon],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -698,7 +706,7 @@ def test_public_simulate_pool_single_view_and_heterogeneous_rows():
     assert one.single.axon is short_axon
     assert one.single.Vm.shape == (2, 11)
 
-    mixed = axs.simulate_pool(
+    mixed = _run_simulation(
         [short_axon, long_axon],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -748,7 +756,7 @@ def test_public_axon_population_rejects_empty_and_invalid_entries():
         axs.AxonPopulation([object()])
 
 
-def test_public_simulate_pool_accepts_axon_population():
+def test_public_axon_simulation_pool_accepts_axon_population():
     population = axs.AxonPopulation.single(
         axs.axons.HodgkinHuxley(
             length=100.0 * axs.um,
@@ -758,7 +766,7 @@ def test_public_simulate_pool_accepts_axon_population():
         )
     )
 
-    result = axs.simulate_pool(
+    result = _run_simulation(
         population,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -791,7 +799,7 @@ def test_public_root_axon_simulation_runs_single_instance():
 
     assert isinstance(run, axs.AxonSimulationResult)
     assert simulation.is_single
-    assert not simulation.is_population
+    assert simulation.is_population
     assert result.simulation is instance
     assert result.recording is recording
     assert result.Vm.shape == (2, 11)
@@ -818,7 +826,7 @@ def test_public_root_axon_simulation_keeps_one_row_population_lifecycle():
 
     assert simulation.population is population
     assert simulation.is_population
-    assert not simulation.is_single
+    assert simulation.is_single
     assert len(results) == 1
     assert results[0].simulation is population[0]
     assert results[0].diagnostics["dispatch_method"] == "scalar"
@@ -863,21 +871,15 @@ def test_public_root_axon_simulation_rejects_empty_population():
         axs.AxonSimulation([], duration=0.1 * axs.ms, dt=0.05 * axs.ms)
 
 
-def test_public_root_axon_simulation_rejects_pool_solver_object():
-    first = axs.axons.HodgkinHuxley(
-        length=100.0 * axs.um,
-        diameter=0.5 * axs.um,
-        compartments=11,
-        celsius=6.3 * axs.degC,
-    )
-    second = axs.axons.HodgkinHuxley(
+def test_public_root_axon_simulation_rejects_solver_object():
+    axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
         compartments=11,
         celsius=6.3 * axs.degC,
     )
     simulation = axs.AxonSimulation(
-        [first, second],
+        axon,
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         solver=axs.solvers.CrankNicholson(),
@@ -895,7 +897,7 @@ def test_public_pool_recording_center_maps_to_batch_recording():
         celsius=6.3 * axs.degC,
     )
 
-    result = axs.simulate_pool(
+    result = _run_simulation(
         [axon],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
@@ -907,8 +909,14 @@ def test_public_pool_recording_center_maps_to_batch_recording():
     assert fiber_result.record_indices == (5,)
 
 
-def test_public_pool_recording_rejects_observable_groups():
-    axon = axs.axons.HodgkinHuxley(
+def test_public_multi_row_pool_recording_rejects_observable_groups():
+    first = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    second = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
         compartments=11,
@@ -916,16 +924,16 @@ def test_public_pool_recording_rejects_observable_groups():
     )
 
     with pytest.raises(NotImplementedError, match="pool recording currently supports Vm only"):
-        axs.simulate_pool(
-            [axon],
+        _run_simulation(
+            [first, second],
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
             recording=axs.Recording.full(),
         )
 
     with pytest.raises(NotImplementedError, match="pool recording currently supports Vm only"):
-        axs.simulate_pool(
-            [axon],
+        _run_simulation(
+            [first, second],
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
             recording=axs.Recording.only(axs.signals.GATES),
@@ -941,7 +949,7 @@ def test_public_pool_recording_rejects_unwired_filters():
     )
 
     with pytest.raises(NotImplementedError, match="position-based batch recording"):
-        axs.simulate_pool(
+        _run_simulation(
             [axon],
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -949,7 +957,7 @@ def test_public_pool_recording_rejects_unwired_filters():
         )
 
     with pytest.raises(NotImplementedError, match="temporal recording subsampling"):
-        axs.simulate_pool(
+        _run_simulation(
             [axon],
             duration=0.1 * axs.ms,
             dt=0.05 * axs.ms,
@@ -965,7 +973,7 @@ def test_public_pool_recording_indices_maps_to_batch_recording():
         celsius=6.3 * axs.degC,
     )
 
-    result = axs.simulate_pool(
+    result = _run_simulation(
         [axon],
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,

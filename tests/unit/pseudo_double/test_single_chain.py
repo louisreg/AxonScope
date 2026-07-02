@@ -5,8 +5,8 @@ import numpy as np
 from benchmark.pseudo_double.single_chain import (
     PseudoDoubleSegmentType,
     PseudoDoubleSingleChainConfig,
-    SegmentScaledAnalyticalExtracellularContext,
     build_pseudo_double_single_chain_mrg,
+    segment_scaled_point_source_stimulation,
     single_chain_segment_counts,
     single_chain_segment_type,
     single_chain_vext_alpha,
@@ -59,7 +59,7 @@ def test_single_chain_alpha_vector_is_segment_specific():
     np.testing.assert_allclose(np.unique(alpha), np.asarray([0.8, 1.2, 1.6, 2.0]))
 
 
-def test_segment_scaled_context_multiplies_footprint():
+def test_segment_scaled_stimulation_multiplies_footprint():
     import axonscope as axs
 
     electrode = axs.analytical.PointSourceElectrode(
@@ -67,16 +67,16 @@ def test_segment_scaled_context_multiplies_footprint():
         z=100.0 * axs.um,
         stimulus=axs.Stimulus.constant(1.0 * axs.uA),
     )
-    scaled = SegmentScaledAnalyticalExtracellularContext(
-        electrodes=[electrode],
-        sigma=0.3 * axs.S_per_m,
+    scaled = segment_scaled_point_source_stimulation(
+        electrode,
         positions_um=(0.0, 10.0, 20.0),
         alpha=(1.0, 0.5, 0.25),
+        sigma=0.3 * axs.S_per_m,
     )
     x_m = np.asarray([0.0, 10e-6, 20e-6])
     base = electrode.footprint_for_axon(x_m, sigma_S_m=0.3)
 
     np.testing.assert_allclose(
-        scaled.footprint_for_electrode(electrode, x_m),
+        scaled.drives[0].footprint.values_for_axon(),
         base * np.asarray([1.0, 0.5, 0.25]),
     )

@@ -1,5 +1,8 @@
 """Public scientific analysis definitions and result containers."""
 
+import importlib
+from typing import Any
+
 from axonscope.analysis.core import (
     AnalysisDefinition,
     AnalysisInputRequirement,
@@ -37,6 +40,13 @@ from axonscope.analysis.posthoc import (
     recorded_positions_um,
 )
 
+
+def __getattr__(name: str) -> Any:
+    if name == "views":
+        return importlib.import_module("axonscope.analysis.views")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "Activation",
     "ActivationCriterion",
@@ -64,4 +74,5 @@ __all__ = [
     "peak_voltage",
     "rasterize",
     "recorded_positions_um",
+    "views",
 ]

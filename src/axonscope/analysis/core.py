@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, TextIO
 
 import numpy as np
 
@@ -87,6 +87,7 @@ class AnalysisResult:
     statuses: Sequence[AnalysisStatus]
     messages: Sequence[str] = ()
     unit: Any | None = None
+    row_labels: Sequence[Any] = ()
     definition: Any | None = None
     events: Sequence[Any | None] = ()
     input_requirements: Sequence[AnalysisInputRequirement | None] = ()
@@ -98,6 +99,12 @@ class AnalysisResult:
             values = values.reshape(1)
         if values.shape[0] != len(statuses):
             raise ValueError("values and statuses must have the same leading length.")
+
+        row_labels = tuple(self.row_labels)
+        if not row_labels:
+            row_labels = tuple(range(len(statuses)))
+        if len(row_labels) != len(statuses):
+            raise ValueError("row_labels must be empty or match statuses length.")
 
         messages = tuple(str(message) for message in self.messages)
         if not messages:
@@ -119,6 +126,7 @@ class AnalysisResult:
 
         object.__setattr__(self, "values", values)
         object.__setattr__(self, "statuses", statuses)
+        object.__setattr__(self, "row_labels", row_labels)
         object.__setattr__(self, "messages", messages)
         object.__setattr__(self, "events", events)
         object.__setattr__(self, "input_requirements", requirements)
@@ -153,6 +161,27 @@ class AnalysisResult:
         return value.item() if hasattr(value, "item") else value
 
     @property
+    def row_label(self) -> Any:
+        """Row label for a one-axon result."""
+
+        if len(self.row_labels) != 1:
+            raise ValueError("row_label is only defined for one-axon analysis results.")
+        return self.row_labels[0]
+
+    def row_values(self, *, unit: Any | None = None) -> np.ndarray:
+        """Return row labels as floats when possible."""
+
+        from axonscope.utils import units
+
+        if unit is not None:
+            unit_label = units.unit_label(unit) or str(unit)
+            return units.to_array(list(self.row_labels), unit_label, dtype=float)
+        try:
+            return np.asarray(self.row_labels, dtype=float)
+        except (TypeError, ValueError):
+            return np.arange(len(self.row_labels), dtype=float)
+
+    @property
     def missing_input_requirements(self) -> tuple[AnalysisInputRequirement, ...]:
         """Structured requirements for rows that could not be analyzed."""
 
@@ -161,6 +190,41 @@ class AnalysisResult:
             for status, requirement in zip(self.statuses, self.input_requirements, strict=True)
             if status is AnalysisStatus.MISSING_INPUT and requirement is not None
         )
+
+    def rows(self) -> tuple[dict[str, Any], ...]:
+        """Return row dictionaries for dataframe/text views."""
+
+        from axonscope.analysis.views import analysis_result_rows
+
+        return analysis_result_rows(self)
+
+    def to_dataframe(self) -> Any:
+        """Return this analysis result as a pandas DataFrame."""
+
+        from axonscope.analysis.views import analysis_result_to_dataframe
+
+        return analysis_result_to_dataframe(self)
+
+    def format(self) -> str:
+        """Return a compact text representation."""
+
+        from axonscope.analysis.views import format_analysis_result
+
+        return format_analysis_result(self)
+
+    def print(self, file: TextIO | None = None) -> None:
+        """Print a compact text representation."""
+
+        from axonscope.analysis.views import print_analysis_result
+
+        print_analysis_result(self, file=file)
+
+    def plot(self, ax: Any | None = None, **plot_kwargs: Any) -> Any:
+        """Plot scalar numeric analysis values by row or caller-supplied x."""
+
+        from axonscope.analysis.views import plot_analysis_result
+
+        return plot_analysis_result(self, ax=ax, **plot_kwargs)
 
 
 @dataclass(frozen=True)
@@ -189,6 +253,41 @@ class AnalysisReport:
         """Analysis names in report order."""
 
         return tuple(result.name for result in self.analyses)
+
+    def rows(self) -> tuple[dict[str, Any], ...]:
+        """Return row dictionaries for dataframe/text views."""
+
+        from axonscope.analysis.views import analysis_report_rows
+
+        return analysis_report_rows(self)
+
+    def format(self) -> str:
+        """Return a compact text report."""
+
+        from axonscope.analysis.views import format_analysis_report
+
+        return format_analysis_report(self)
+
+    def print(self, file: TextIO | None = None) -> None:
+        """Print a compact text report."""
+
+        from axonscope.analysis.views import print_analysis_report
+
+        print_analysis_report(self, file=file)
+
+    def to_dataframe(self) -> Any:
+        """Return this report as a pandas DataFrame."""
+
+        from axonscope.analysis.views import analysis_report_to_dataframe
+
+        return analysis_report_to_dataframe(self)
+
+    def plot(self, ax: Any | None = None, **plot_kwargs: Any) -> Any:
+        """Plot scalar numeric analysis values by row."""
+
+        from axonscope.analysis.views import plot_analysis_report
+
+        return plot_analysis_report(self, ax=ax, **plot_kwargs)
 
 
 class AnalysisDefinition(Protocol):

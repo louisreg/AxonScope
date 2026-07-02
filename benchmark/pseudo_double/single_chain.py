@@ -76,56 +76,60 @@ class PseudoDoubleSingleChainConfig:
         }
 
 
-@dataclass(frozen=True, kw_only=True)
-class SegmentScaledAnalyticalExtracellularContext(axs.AnalyticalExtracellularContext):
-    """Reference-only context whose analytical footprint is scaled by alpha(x).
+def segment_scaled_point_source_stimulation(
+    electrode: axs.analytical.PointSourceElectrode,
+    *,
+    positions_um: Sequence[float],
+    alpha: Sequence[float],
+    sigma: object,
+    drive_id: str = "segment_scaled_point_source",
+) -> axs.ExtracellularStimulation:
+    """Build a pseudo-double point-source stimulation scaled by alpha(x).
 
-    This belongs to the pseudo-double validation benchmark. It is intentionally
-    not the public point-source route; user-facing point-source workflows should
-    sample `axs.analytical.point_source_stimulation(...)` instead.
+    This belongs to the pseudo-double validation benchmark. It samples the
+    public point-source helper, then applies the experimental segment coupling
+    directly to the typed footprint consumed by solvers.
     """
 
-    positions_um: Sequence[float]
-    alpha: Sequence[float]
+    if not isinstance(electrode, axs.analytical.PointSourceElectrode):
+        raise TypeError("electrode must be a PointSourceElectrode.")
+    if electrode.stimulus is None:
+        raise ValueError("electrode must carry an attached stimulus.")
+    positions = np.asarray(positions_um, dtype=float)
+    scale = np.asarray(alpha, dtype=float)
+    if positions.ndim != 1 or scale.ndim != 1:
+        raise ValueError("positions_um and alpha must be one-dimensional.")
+    if positions.shape != scale.shape:
+        raise ValueError("positions_um and alpha must have the same shape.")
+    if positions.size < 2:
+        raise ValueError("at least two positions are required.")
+    if not np.all(np.diff(positions) > 0.0):
+        raise ValueError("positions_um must be strictly increasing.")
+    if not np.all(np.isfinite(scale)):
+        raise ValueError("alpha must contain finite values.")
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        positions = np.asarray(self.positions_um, dtype=float)
-        alpha = np.asarray(self.alpha, dtype=float)
-        if positions.ndim != 1 or alpha.ndim != 1:
-            raise ValueError("positions_um and alpha must be one-dimensional.")
-        if positions.shape != alpha.shape:
-            raise ValueError("positions_um and alpha must have the same shape.")
-        if positions.size < 2:
-            raise ValueError("at least two positions are required.")
-        if not np.all(np.diff(positions) > 0.0):
-            raise ValueError("positions_um must be strictly increasing.")
-        if not np.all(np.isfinite(alpha)):
-            raise ValueError("alpha must contain finite values.")
-        object.__setattr__(self, "positions_um", tuple(float(value) for value in positions))
-        object.__setattr__(self, "alpha", tuple(float(value) for value in alpha))
-
-    def footprint_for_electrode(
-        self,
+    base = axs.analytical.point_source_footprint(
         electrode,
-        x_positions_m,
-        *,
-        axon_y_um=0.0,
-        axon_z_um=0.0,
-    ) -> np.ndarray:
-        base = super().footprint_for_electrode(
-            electrode,
-            x_positions_m,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
-        )
-        x_um = np.asarray(x_positions_m, dtype=float) * 1e6
-        alpha = np.interp(
-            x_um,
-            np.asarray(self.positions_um, dtype=float),
-            np.asarray(self.alpha, dtype=float),
-        )
-        return np.asarray(base, dtype=float) * alpha
+        positions * axs.um,
+        sigma=sigma,
+    )
+    footprint = axs.ExtracellularFootprint.shared(
+        values=base.values_for_axon() * scale,
+        positions=positions * axs.um,
+        source_id=base.source_id,
+        metadata={
+            **dict(base.metadata),
+            "builder": "benchmark.pseudo_double.segment_scaled_point_source_stimulation",
+            "segment_scaled": True,
+        },
+    )
+    drive = axs.ExtracellularDrive(
+        id=axs.DriveId(drive_id),
+        footprint=footprint,
+        stimulus=electrode.stimulus,
+        metadata={"source": "pseudo_double_segment_scaled_point_source"},
+    )
+    return axs.ExtracellularStimulation([drive])
 
 
 def build_pseudo_double_single_chain_mrg(
@@ -282,8 +286,13 @@ def _membrane_for_segment(
 ):
     if key == "node":
         return axs.membranes.AxNode(
-            gl_S_cm2=_DEFAULT_NODE_GL_S_CM2 * config.gleak_scale_node,
-            el_mV=_DEFAULT_NODE_EL_MV,
+            gl=(
+                _DEFAULT_NODE_GL_S_CM2
+                * 1e3
+                * config.gleak_scale_node
+                * axs.mS_per_cm2
+            ),
+            el=_DEFAULT_NODE_EL_MV * axs.mV,
         )
     leak_mS_cm2 = _effective_leak_mS_cm2(geometry, index, key, config)
     return axs.membranes.Passive(
@@ -295,8 +304,8 @@ def _membrane_for_segment(
 __all__ = [
     "PseudoDoubleSegmentType",
     "PseudoDoubleSingleChainConfig",
-    "SegmentScaledAnalyticalExtracellularContext",
     "build_pseudo_double_single_chain_mrg",
+    "segment_scaled_point_source_stimulation",
     "single_chain_segment_counts",
     "single_chain_segment_type",
     "single_chain_vext_alpha",

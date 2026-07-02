@@ -31,6 +31,7 @@ from axonscope.utils.validation import (
 from axonscope.axons.layout import Layout, LayoutElement
 from axonscope.axons.section import PeriaxonalLayer, Section
 from axonscope.axons.templates._mrg_morphology import (
+    get_mrg_length_node_spacing,
     get_mrg_morphology,
 )
 from axonscope.membranes import SectionLayout
@@ -156,7 +157,8 @@ def mrg_like_length_from_nodes(
     """
 
     nodes = _normalize_nodes(nodes)
-    deltax = mrg_like_node_spacing(diameter, fit_all=fit_all)
+    diameter_um = units.require_length_um(diameter, name="diameter")
+    deltax = get_mrg_length_node_spacing(diameter_um, fit_all=fit_all)
     shift_um = 0.0 if x_shift is None else units.require_length_um(x_shift, name="x_shift")
     phase_um = float(shift_um) % float(deltax)
     return float(math.ceil(phase_um + deltax * (nodes - 1)))
@@ -482,10 +484,10 @@ def default_mrg_like_membranes(
     )
     return SectionLayout(
         node=membrane_specs.AxNode(
-            ena_mV=ena,
-            ek_mV=ek,
-            el_mV=node_el,
-            celsius=temperature,
+            ena=ena,
+            ek=ek,
+            el=node_el,
+            temperature=temperature,
         ),
         mysa=_passive_from_leak(_leak_for_section(geometry, "MYSA"), internode_el),
         flut=_passive_from_leak(_leak_for_section(geometry, "FLUT"), internode_el),

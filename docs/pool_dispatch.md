@@ -1,8 +1,7 @@
 # Pool Dispatch
 
-Pool simulation can be run directly with `simulate_pool(...)` or through the
-executable `AxonSimulation` root object. `AxonPopulation` is the explicit
-public container for cohorts:
+Pool simulation runs through the executable `AxonSimulation` root object.
+`AxonPopulation` is the explicit public container for cohorts:
 
 ```python
 import axonscope as axs
@@ -11,18 +10,6 @@ sim_a = axs.AxonInstance(axon_a)
 sim_b = axs.AxonInstance(axon_b)
 population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
 
-results = axs.simulate_pool(
-    population,
-    duration=5.0 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.center(axs.signals.Vm),
-    progress=True,
-)
-```
-
-The equivalent root-object form is:
-
-```python
 simulation = axs.AxonSimulation(
     population,
     duration=5.0 * axs.ms,
@@ -49,8 +36,8 @@ AxonSimulation or AxonPopulation
   -> AxonSimulationResult with dense cohorts and per-axon views
 ```
 
-`simulate_pool` returns an `AxonSimulationResult`. Indexing or iterating over it
-returns one `AxonResultView` per input item, in the same order:
+`AxonSimulation.run()` returns an `AxonSimulationResult`. Indexing or iterating
+over it returns one `AxonResultView` per input item, in the same order:
 
 ```python
 for result in results:
@@ -149,14 +136,14 @@ dispatch_results = run_pool(
 ```
 
 Use this path for debugging dispatcher metadata. Tutorials should prefer
-`simulate_pool`.
+`AxonSimulation`.
 
 Solver-level knobs are passed as solver options. Batch memory/recording knobs
 are passed separately as batch options:
 
 ```python
 import axonscope as axs
-from axonscope.channel_models import RateTableConfig
+from axonscope.solvers import RateTableConfig
 
 dispatch_results = run_pool(
     [sim_a, sim_b],
@@ -210,15 +197,21 @@ The intended per-row differences in a batch are cable geometry, attached
 stimulation contexts, intracellular contexts, local extracellular footprints,
 and, for padded double-cable groups, the number of compartments and intrinsic
 layout phase (`MRG(..., x_shift=...)`). Per-row membrane parameter values are
-not batched yet; if the membrane family set differs, the dispatcher keeps rows
-in separate groups.
+prepared through row runtimes when the backend supports it; if the membrane
+structure set differs, the dispatcher keeps rows in separate groups.
 
 Inspect plans before running a pool with:
 
 ```python
-plan = axs.dispatcher.build_dispatch_plan(simulations)
-axs.dispatcher.print_dispatch_plan(plan)
-axs.dispatcher.plot_dispatch_plan(plan)
+inspection = axs.AxonSimulation(
+    simulations,
+    duration=5.0 * axs.ms,
+    dt=0.01 * axs.ms,
+    recording=axs.Recording.center(axs.signals.Vm),
+).inspect()
+
+inspection.print()
+inspection.plot()
 ```
 
 Progress reporting is optional. `progress=True` uses Rich, while
@@ -232,14 +225,14 @@ kernels cannot stream from inside one compiled scan; for finer solver progress,
 run chunked batches:
 
 ```python
-results = axs.simulate_pool(
+results = axs.AxonSimulation(
     simulations,
     duration=10.0 * axs.ms,
     dt=0.005 * axs.ms,
     batch_options=axs.BatchOptions.full(time_chunk_steps=200),
     recording=axs.Recording.voltage(),
     progress=True,
-)
+).run()
 ```
 
 Plain output is intentionally compact, for example:
@@ -257,36 +250,38 @@ group   g0 1/2 batch-single-cable (rows=3, Nx=101)
   kernel  g0 1/2  solving JAX kernel
   kernel  g0 1/2  completed JAX kernel
   result  g0 1/2  assemble batch output (output=observations)
-done    g0
+Simulation run completed: total=..., cold_start=..., rss=...
 ```
 
-The old precomputed global extracellular API and policy-specific public batch
-paths have been removed. Runtime-batch construction now starts from
-already-attached axon contexts or precomputed electrode footprints, then passes
-numeric arrays to solver kernels.
+The old precomputed global extracellular API, public context/electrode
+adapters, and policy-specific public batch paths have been removed.
+Runtime-batch construction now starts from attached
+`ExtracellularStimulation` objects and sampled intrinsic footprints, then
+passes numeric arrays to solver kernels.
 
 Advanced users should inspect this lowering through dispatch plans, benchmark
-spans, or the planned pipeline inspection surface rather than importing
-backend input builders or solver kernels directly from public examples. The
-current JAX tensor builders live behind the JAX backend boundary and are not a
-stable user API.
+spans, or `AxonSimulation.inspect()` rather than importing backend input
+builders or solver kernels directly from public examples. The current JAX
+tensor builders live behind the JAX backend boundary and are not a stable user
+API.
 
-This boundary is intentional: `dispatcher` knows about public axons, contexts,
-local footprints, and grouping policy; `solvers` know about arrays, time
+This boundary is intentional: public simulation and dispatcher code know about
+public axons, intracellular contexts, extracellular stimulations, sampled
+footprints, and grouping policy; backend code knows about arrays, time
 integration, and numerical state.
 
 ## Module Responsibilities
 
 Current files:
 
-- `simulation.py`: public `simulate` and `simulate_pool` wrappers;
+- `simulation.py`: public `AxonSimulation` orchestration;
 - `dispatcher/plan.py`: normalization, compatibility signatures, and groups;
 - `dispatcher/execution.py`: scalar/batch execution and `run_pool`;
 - `dispatcher/inspection.py`: text and Matplotlib inspection helpers for
   dispatch plans;
-- `preparation/runtime_batches.py`: host-side builders for batched solver inputs from
-  intracellular contexts, extracellular contexts, intrinsic positions, and
-  electrode footprints.
+- `preparation/runtime_batches.py`: host-side builders for batched solver inputs
+  from intracellular contexts, extracellular stimulations, sampled footprints,
+  and intrinsic positions.
 - `solvers/options.py`: solver-owned numerical options, batch execution
   options, and batch Vm retention policies.
 

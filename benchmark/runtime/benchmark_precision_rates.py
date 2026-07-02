@@ -313,7 +313,7 @@ def _solve_case_once(
     rate_mode: str,
     rate_table_step_mV: float,
 ) -> tuple[float, np.ndarray, int]:
-    from axonscope.channel_models import enable_rate_tables
+    from axonscope.backends.jax.rate_tables import enable_rate_tables
     from axonscope.solvers import CrankNicholson
 
     axon = _build_case(spec.name)

@@ -20,6 +20,7 @@ from axonscope.utils.units import (
     voltage_t,
 )
 from axonscope.utils.validation import normalize_positive_int
+from axonscope.membranes.model import MembraneModel, Model
 from .. import membranes
 
 
@@ -27,6 +28,7 @@ _DEFAULT_Ra = units.Q_(100.0, "ohm * centimeter")
 _DEFAULT_Cm = units.Q_(1.0, "microfarad / centimeter ** 2")
 _DEFAULT_HH_Ra = units.Q_(200.0, "ohm * centimeter")
 _DEFAULT_SCHILD_Cm = units.Q_(1.326291192, "microfarad / centimeter ** 2")
+_UNSET = object()
 
 
 def _quantity_um(value: float | np.ndarray) -> length_t:
@@ -77,16 +79,20 @@ def _validate_geometry(
     )
 
 
-def _passive_leak(g_pas: Any, e_pas: Any) -> membranes.MembraneModel:
+def _passive_leak(g_pas: Any, e_pas: Any) -> Model:
     conductance = units.to_S_per_cm2(g_pas)
     if conductance <= 0.0:
         raise ValueError("g_pas must be strictly positive when include_passive_leak=True.")
     return membranes.Passive(Rm=1.0 / conductance, EL=e_pas)
 
 
+def _provided_model_params(**params: Any) -> dict[str, Any]:
+    return {name: value for name, value in params.items() if value is not _UNSET}
+
+
 def _single_section_model(
     *,
-    membrane: membranes.MembraneModel,
+    membrane: Model | MembraneModel,
     length: length_t | None,
     diameter: length_t,
     compartments: int | None,
@@ -126,7 +132,7 @@ class Unmyelinated(Axon):
         self,
         *,
         layout: Layout | None = None,
-        membrane: membranes.MembraneModel | None = None,
+        membrane: Model | MembraneModel | None = None,
         formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
         length: length_t | None = None,
         diameter: length_t | None = None,
@@ -218,12 +224,12 @@ class HodgkinHuxley(Unmyelinated):
         Ra: axial_resistivity_t = _DEFAULT_HH_Ra,
         Cm: capacitance_density_t = _DEFAULT_Cm,
         v_init: voltage_t = units.Q_(-67.5, "millivolt"),
-        gnabar: Any = 0.12,
-        gkbar: Any = 0.036,
-        gl: Any = 0.0003,
-        el: Any = -54.3,
-        ena: Any = 50.0,
-        ek: Any = -77.0,
+        gnabar: Any = _UNSET,
+        gkbar: Any = _UNSET,
+        gl: Any = _UNSET,
+        el: Any = _UNSET,
+        ena: Any = _UNSET,
+        ek: Any = _UNSET,
         celsius: temperature_t = units.Q_(6.3, "degree_Celsius"),
         include_passive_leak: bool = False,
         g_pas: Any = 0.001,
@@ -249,10 +255,9 @@ class HodgkinHuxley(Unmyelinated):
             Membrane capacitance density in microfarad / centimeter^2.
         v_init:
             Initial membrane potential in millivolts.
-        gnabar, gkbar, gl:
-            Sodium, potassium, and leak conductance densities in S/cm^2.
-        el, ena, ek:
-            Reversal potentials in millivolts.
+        gnabar, gkbar, gl, el, ena, ek:
+            Optional Hodgkin-Huxley model overrides forwarded to
+            `membranes/models/hodgkin_huxley.py`.
         celsius:
             Model temperature in degrees Celsius.
         include_passive_leak:
@@ -265,12 +270,14 @@ class HodgkinHuxley(Unmyelinated):
 
         celsius = _quantity_degC(celsius, name="celsius")
         hh_model = membranes.HodgkinHuxley(
-            gnabar=gnabar,
-            gkbar=gkbar,
-            gl=gl,
-            el=el,
-            ena=ena,
-            ek=ek,
+            **_provided_model_params(
+                gnabar=gnabar,
+                gkbar=gkbar,
+                gl=gl,
+                el=el,
+                ena=ena,
+                ek=ek,
+            ),
             celsius=celsius,
         )
         membrane = (
@@ -305,12 +312,12 @@ class RattayAberham(Unmyelinated):
         Cm: capacitance_density_t = _DEFAULT_Cm,
         Ra: axial_resistivity_t = _DEFAULT_Ra,
         v_init: voltage_t = units.Q_(-70.0, "millivolt"),
-        gnabar: Any = 0.12,
-        gkbar: Any = 0.036,
-        gl: Any = 0.0003,
-        el: Any = -59.4,
-        ena: Any = 50.0,
-        ek: Any = -82.0,
+        gnabar: Any = _UNSET,
+        gkbar: Any = _UNSET,
+        gl: Any = _UNSET,
+        el: Any = _UNSET,
+        ena: Any = _UNSET,
+        ek: Any = _UNSET,
         celsius: temperature_t = units.Q_(37.0, "degree_Celsius"),
         include_passive_leak: bool = True,
         g_pas: Any = 0.001,
@@ -329,10 +336,9 @@ class RattayAberham(Unmyelinated):
             Axial resistivity in ohm * centimeter.
         v_init:
             Initial membrane potential in millivolts.
-        gnabar, gkbar, gl:
-            Sodium, potassium, and leak conductance densities in S/cm^2.
-        el, ena, ek:
-            Reversal potentials in millivolts.
+        gnabar, gkbar, gl, el, ena, ek:
+            Optional Rattay-Aberham model overrides forwarded to
+            `membranes/models/rattay_aberham.py`.
         celsius:
             Model temperature in degrees Celsius.
         include_passive_leak:
@@ -345,12 +351,14 @@ class RattayAberham(Unmyelinated):
 
         celsius = _quantity_degC(celsius, name="celsius")
         rattay = membranes.RattayAberham(
-            gnabar=gnabar,
-            gkbar=gkbar,
-            gl=gl,
-            el=el,
-            ena=ena,
-            ek=ek,
+            **_provided_model_params(
+                gnabar=gnabar,
+                gkbar=gkbar,
+                gl=gl,
+                el=el,
+                ena=ena,
+                ek=ek,
+            ),
             celsius=celsius,
         )
         membrane = (
@@ -386,12 +394,12 @@ class Sundt(Unmyelinated):
         Ra: axial_resistivity_t = _DEFAULT_Ra,
         v_init: voltage_t = units.Q_(-60.0, "millivolt"),
         celsius: temperature_t = units.Q_(37.0, "degree_Celsius"),
-        gnabar: Any = 0.04,
-        gkdrbar: Any = 0.04,
-        ena: Any = 45.0,
-        ek: Any = -90.0,
-        Rm: Any = 10000.0,
-        El: Any = -70.0,
+        gnabar: Any = _UNSET,
+        gkdrbar: Any = _UNSET,
+        ena: Any = _UNSET,
+        ek: Any = _UNSET,
+        Rm: Any = _UNSET,
+        El: Any = _UNSET,
         formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Sundt unmyelinated axon.
@@ -408,12 +416,9 @@ class Sundt(Unmyelinated):
             Initial membrane potential in millivolts.
         celsius:
             Model temperature in degrees Celsius.
-        gnabar, gkdrbar:
-            Sodium and delayed-rectifier potassium conductance densities in S/cm^2.
-        ena, ek, El:
-            Reversal potentials in millivolts.
-        Rm:
-            Passive membrane resistance in ohm * cm^2.
+        gnabar, gkdrbar, ena, ek, Rm, El:
+            Optional Sundt model overrides forwarded to
+            `membranes/models/sundt.py`.
         formulation:
             Cable formulation, normally `"single-cable"`.
         """
@@ -421,13 +426,15 @@ class Sundt(Unmyelinated):
         celsius = _quantity_degC(celsius, name="celsius")
         super().__init__(
             membrane=membranes.Sundt(
+                **_provided_model_params(
+                    gnabar=gnabar,
+                    gkdrbar=gkdrbar,
+                    ena=ena,
+                    ek=ek,
+                    Rm=Rm,
+                    El=El,
+                ),
                 celsius=celsius,
-                gnabar=gnabar,
-                gkdrbar=gkdrbar,
-                ena=ena,
-                ek=ek,
-                Rm=Rm,
-                El=El,
             ),
             length=length,
             diameter=diameter,
@@ -455,19 +462,19 @@ class Tigerholm(Unmyelinated):
         Ra: axial_resistivity_t = units.Q_(35.5, "ohm * centimeter"),
         v_init: voltage_t = units.Q_(-62.0, "millivolt"),
         celsius: temperature_t = units.Q_(37.0, "degree_Celsius"),
-        ena: Any = 71.5,
-        ek: Any = -87.0,
-        gbar_nav17: Any = 0.10664,
-        gbar_nav18: Any = 0.24271,
-        gbar_nav19: Any = 9.4779e-05,
-        gbar_ks: Any = 0.0069733,
-        gbar_kf: Any = 0.012756,
-        gbar_kdr: Any = 0.018002,
-        gbar_h: Any = 0.0025377,
-        gbar_kna: Any = 0.00042,
-        nai_fixed: Any = 11.4,
-        pump_smalla: Any = -0.0047891,
-        pump_ko: Any = 5.6,
+        ena: Any = _UNSET,
+        ek: Any = _UNSET,
+        gbar_nav17: Any = _UNSET,
+        gbar_nav18: Any = _UNSET,
+        gbar_nav19: Any = _UNSET,
+        gbar_ks: Any = _UNSET,
+        gbar_kf: Any = _UNSET,
+        gbar_kdr: Any = _UNSET,
+        gbar_h: Any = _UNSET,
+        gbar_kna: Any = _UNSET,
+        nai_fixed: Any = _UNSET,
+        pump_smalla: Any = _UNSET,
+        pump_ko: Any = _UNSET,
         formulation: CableFormulation | None = CableFormulation.SINGLE_CABLE,
     ) -> None:
         """Create a Tigerholm et al. C-fiber axon.
@@ -484,14 +491,10 @@ class Tigerholm(Unmyelinated):
             Initial membrane potential in millivolts.
         celsius:
             Model temperature in degrees Celsius.
-        ena, ek:
-            Sodium and potassium reversal potentials in millivolts.
-        gbar_nav17, gbar_nav18, gbar_nav19, gbar_ks, gbar_kf, gbar_kdr, gbar_h, gbar_kna:
-            Channel conductance densities in S/cm^2.
-        nai_fixed, pump_ko:
-            Concentrations in millimolar.
-        pump_smalla:
-            Na/K pump current-density coefficient in mA/cm^2.
+        ena, ek, gbar_nav17, gbar_nav18, gbar_nav19, gbar_ks, gbar_kf, gbar_kdr,
+        gbar_h, gbar_kna, nai_fixed, pump_smalla, pump_ko:
+            Optional Tigerholm model overrides forwarded to
+            `membranes/models/tigerholm.py`.
         formulation:
             Cable formulation, normally `"single-cable"`.
         """
@@ -499,21 +502,23 @@ class Tigerholm(Unmyelinated):
         celsius = _quantity_degC(celsius, name="celsius")
         super().__init__(
             membrane=membranes.Tigerholm(
-                diameter=diameter,
+                **_provided_model_params(
+                    ena=ena,
+                    ek=ek,
+                    gbar_nav17=gbar_nav17,
+                    gbar_nav18=gbar_nav18,
+                    gbar_nav19=gbar_nav19,
+                    gbar_ks=gbar_ks,
+                    gbar_kf=gbar_kf,
+                    gbar_kdr=gbar_kdr,
+                    gbar_h=gbar_h,
+                    gbar_kna=gbar_kna,
+                    nai_fixed=nai_fixed,
+                    pump_smalla=pump_smalla,
+                    pump_ko=pump_ko,
+                ),
+                diameter_um=diameter,
                 celsius=celsius,
-                ena=ena,
-                ek=ek,
-                gbar_nav17=gbar_nav17,
-                gbar_nav18=gbar_nav18,
-                gbar_nav19=gbar_nav19,
-                gbar_ks=gbar_ks,
-                gbar_kf=gbar_kf,
-                gbar_kdr=gbar_kdr,
-                gbar_h=gbar_h,
-                gbar_kna=gbar_kna,
-                nai_fixed=nai_fixed,
-                pump_smalla=pump_smalla,
-                pump_ko=pump_ko,
             ),
             length=length,
             diameter=diameter,
@@ -565,8 +570,8 @@ class Schild94(Unmyelinated):
         v_init = _quantity_mV(v_init, name="v_init")
         super().__init__(
             membrane=membranes.Schild94(
-                diameter=diameter,
-                temp_c=temperature,
+                diameter_um=diameter,
+                celsius=temperature,
                 vinit_mV=v_init,
             ),
             length=length,
@@ -619,8 +624,8 @@ class Schild97(Unmyelinated):
         v_init = _quantity_mV(v_init, name="v_init")
         super().__init__(
             membrane=membranes.Schild97(
-                diameter=diameter,
-                temp_c=temperature,
+                diameter_um=diameter,
+                celsius=temperature,
                 vinit_mV=v_init,
             ),
             length=length,

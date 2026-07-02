@@ -66,6 +66,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         pool_memory.main(runner_argv)
         return
+    if suite.runner == "model_codegen":
+        from benchmark.runtime import model_codegen
+
+        model_codegen.main(runner_argv)
+        return
 
     raise ValueError(f"Unsupported runtime runner: {suite.runner}")
 

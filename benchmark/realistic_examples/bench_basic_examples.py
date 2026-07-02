@@ -794,12 +794,12 @@ def build_example06(case: WorkflowCase) -> tuple[Any, ...]:
 def run_example06(case: WorkflowCase, pool: tuple[Any, ...]) -> dict[str, Any]:
     import axonscope as axs
 
-    results = axs.simulate_pool(
+    results = axs.AxonSimulation(
         pool,
         duration=case.duration_ms * axs.ms,
         dt=case.dt_ms * axs.ms,
         progress=False,
-    )
+    ).run()
     speeds = [float(axs.analysis.conduction_velocity(result)) for result in results]
     return {
         "speed_mean_m_s": float(statistics.fmean(speeds)) if speeds else 0.0,

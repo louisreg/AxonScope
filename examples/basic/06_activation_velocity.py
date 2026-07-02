@@ -4,7 +4,7 @@ Run:
     python examples/basic/06_activation_velocity.py
 
 Axons are built explicitly, then AxonScope automatically batches compatible
-simulations when ``axs.simulate_pool`` is called.
+simulations when ``axs.AxonSimulation(...).run()`` is called.
 """
 
 from __future__ import annotations
@@ -73,24 +73,26 @@ def main() -> None:
 
     # Pool execution keeps the public code simple. Compatible rows are batched
     # internally; the user still receives one result view per input axon.
-    hh_results = axs.simulate_pool(
+    hh_results = axs.AxonSimulation(
         hh_simulations,
         duration=10.0 * axs.ms,
         dt=0.001 * axs.ms,
         progress="plain",
-    )
-    mrg_results = axs.simulate_pool(
+    ).run()
+    mrg_results = axs.AxonSimulation(
         mrg_simulations,
         duration=5.0 * axs.ms,
         dt=0.001 * axs.ms,
         progress="plain",
-    )
+    ).run()
 
-    # The low-level analysis helper reads recorded Vm and estimates conduction
-    # velocity. A failed propagation would show up as NaN or an analysis error
-    # in a richer workflow.
-    hh_speeds = [axs.analysis.conduction_velocity(result) for result in hh_results]
-    mrg_speeds = [axs.analysis.conduction_velocity(result) for result in mrg_results]
+    # The structured analysis layer reads recorded Vm, keeps statuses, and
+    # exposes the same text/dataframe/plot surface used by reports.
+    velocity = axs.analysis.ConductionVelocity()
+    hh_velocity = hh_results.analyze(velocity)
+    mrg_velocity = mrg_results.analyze(velocity)
+    hh_speeds = hh_velocity.values.astype(float)
+    mrg_speeds = mrg_velocity.values.astype(float)
 
     print("\n=== HH unmyelinated ===")
     for diameter, speed in zip(hh_diameters, hh_speeds, strict=True):
@@ -101,12 +103,23 @@ def main() -> None:
         print(f"d={diameter.to(axs.um).magnitude:>5.2f} um: {speed:>8.3f} m/s")
 
     fig, ax = plt.subplots(figsize=(6.5, 4.2), constrained_layout=True)
-    ax.loglog(hh_diameters.to(axs.um).magnitude, hh_speeds, "o-", label="HH")
-    ax.loglog(mrg_diameters.to(axs.um).magnitude, mrg_speeds, "o-", label="MRG")
-    ax.set_xlabel("diameter (um)")
-    ax.set_ylabel("velocity (m/s)")
+    hh_velocity.plot(
+        ax=ax,
+        x=hh_diameters.to(axs.um).magnitude,
+        x_label="diameter [um]",
+        y_label="velocity [m/s]",
+        label="HH",
+    )
+    mrg_velocity.plot(
+        ax=ax,
+        x=mrg_diameters.to(axs.um).magnitude,
+        x_label="diameter [um]",
+        y_label="velocity [m/s]",
+        label="MRG",
+    )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.set_title("Conduction velocity versus diameter")
-    ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     plt.show()
 

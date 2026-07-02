@@ -221,9 +221,13 @@ def test_mrg_x_shift_phases_node_positions_without_world_coordinates():
 
 
 def test_mrg_non_tabulated_node_count_uses_actual_morphology_spacing():
+    expected_length = axs.axons.mrg_like_length_from_nodes(2.52 * axs.um, 47)
+    expected_nodes = axs.axons.mrg_like_nodes_from_length(2.52 * axs.um, expected_length * axs.um)
+
     axon = axs.axons.MRG(diameter=2.52 * axs.um, nodes=47)
 
-    assert axon.nodes == 47
+    assert axon.length == pytest.approx(expected_length + 1.0)
+    assert axon.nodes == expected_nodes
 
 
 def test_unmyelinated_template_requires_length_units():

@@ -8,19 +8,19 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.stimulation import ExtracellularContext
+from axonscope.stimulation import ExtracellularStimulation
 
 AxonLike = Axon | AxonInstance
-ContextBatchRow = ExtracellularContext | Sequence[ExtracellularContext] | None
+StimulationBatchRow = ExtracellularStimulation | Sequence[ExtracellularStimulation] | None
 
 
-def extracellular_context_rows(
+def extracellular_stimulation_rows(
     axons: Sequence[AxonLike],
-) -> tuple[tuple[ExtracellularContext, ...], ...]:
-    """Return one enabled extracellular-context row per axon."""
+) -> tuple[tuple[ExtracellularStimulation, ...], ...]:
+    """Return one enabled extracellular-stimulation row per axon."""
 
     return tuple(
-        tuple(axon.extracellular_contexts)
+        tuple(axon.extracellular_stimulations)
         if bool(getattr(axon, "use_extracellular", False))
         else ()
         for axon in axons
@@ -53,17 +53,25 @@ def axon_transverse_positions_um(axons: Sequence[AxonLike]) -> tuple[np.ndarray,
     return y, z
 
 
-def scale_extracellular_contexts(
-    contexts: Sequence[ExtracellularContext],
+def scale_extracellular_stimulations(
+    stimulations: Sequence[ExtracellularStimulation],
     scale: float,
-) -> tuple[ExtracellularContext, ...]:
-    """Return contexts with their current amplitudes scaled by ``scale``."""
+) -> tuple[ExtracellularStimulation, ...]:
+    """Return stimulations with their current amplitudes scaled by ``scale``."""
 
     return tuple(
-        ctx.with_electrodes(
-            tuple(electrode.with_scaled_stimulus(scale) for electrode in ctx.electrodes)
+        ExtracellularStimulation(
+            tuple(
+                drive.__class__(
+                    id=drive.id,
+                    footprint=drive.footprint,
+                    stimulus=drive.stimulus.scaled(scale),
+                    metadata=drive.metadata,
+                )
+                for drive in stimulation.drives
+            )
         )
-        for ctx in contexts
+        for stimulation in stimulations
     )
 
 
@@ -86,9 +94,9 @@ def _pad_numpy_space_array(values: np.ndarray, *, target_nx: int) -> np.ndarray:
 
 __all__ = [
     "AxonLike",
-    "ContextBatchRow",
+    "StimulationBatchRow",
     "axon_transverse_positions_um",
-    "extracellular_context_rows",
-    "scale_extracellular_contexts",
+    "extracellular_stimulation_rows",
+    "scale_extracellular_stimulations",
     "x_positions_batch_m",
 ]

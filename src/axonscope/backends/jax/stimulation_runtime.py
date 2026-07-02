@@ -1,9 +1,9 @@
 """Runtime compilation of stimulation descriptions for JAX solvers.
 
 Public stimulation objects are descriptive and unit-aware. This module is the
-solver boundary: it converts stimuli, current clamps, and extracellular
-contexts into small JAX callables and precomputed arrays with explicit numeric
-units.
+solver boundary: it converts stimuli, current clamps, and sampled extracellular
+stimulation into small JAX callables and precomputed arrays with explicit
+numeric units.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.stimulation import (
-    ExtracellularContext,
+    ExtracellularStimulation,
     IntracellularContext,
     IntracellularCurrentClamp,
 )
@@ -63,10 +63,10 @@ def _intracellular_contexts_from_axon(axon) -> tuple[IntracellularContext, ...]:
     return tuple(getattr(axon, "intracellular_contexts", ()))
 
 
-def _extracellular_contexts_from_axon(axon) -> tuple[ExtracellularContext, ...]:
-    """Return extracellular contexts from a simulation-like object."""
+def _extracellular_stimulations_from_axon(axon) -> tuple[ExtracellularStimulation, ...]:
+    """Return extracellular stimulations from a simulation-like object."""
 
-    return tuple(getattr(axon, "extracellular_contexts", ()))
+    return tuple(getattr(axon, "extracellular_stimulations", ()))
 
 
 @dataclass(frozen=True)
@@ -108,49 +108,52 @@ def compile_stimulus(stimulus: Stimulus, dtype_local: jnp.dtype | None = None) -
 
 
 @dataclass(frozen=True)
-class CompiledElectrode:
-    """JAX-ready stimulated electrode with a precomputed spatial footprint."""
+class CompiledExtracellularDrive:
+    """JAX-ready extracellular drive with a precomputed spatial footprint."""
 
     footprint_V_per_A: jnp.ndarray
     stimulus: JaxStimulus
 
     def __call__(self, t_ms):
-        """Return this electrode's Vext contribution in volts at `t_ms`."""
+        """Return this drive's Vext contribution in volts at `t_ms`."""
 
         return self.stimulus(t_ms) * self.footprint_V_per_A
 
 
 @dataclass(frozen=True)
-class CompiledExtracellularContext:
-    """JAX-ready extracellular context with precomputed electrode footprints."""
+class CompiledExtracellularStimulation:
+    """JAX-ready sampled extracellular stimulation."""
 
-    electrodes: tuple[CompiledElectrode, ...]
+    drives: tuple[CompiledExtracellularDrive, ...]
 
     def __call__(self, t_ms):
         """Return summed extracellular potential in volts at `t_ms`."""
 
-        if not self.electrodes:
-            raise ValueError("CompiledExtracellularContext requires at least one electrode.")
-        total = jnp.zeros_like(self.electrodes[0].footprint_V_per_A)
-        for electrode in self.electrodes:
-            total = total + electrode(t_ms)
+        if not self.drives:
+            raise ValueError("CompiledExtracellularStimulation requires at least one drive.")
+        total = jnp.zeros_like(self.drives[0].footprint_V_per_A)
+        for drive in self.drives:
+            total = total + drive(t_ms)
         return total
 
 
 @dataclass(frozen=True)
-class CompiledExtracellularContexts:
-    """JAX-ready collection of extracellular contexts for one axon."""
+class CompiledExtracellularStimulations:
+    """JAX-ready collection of extracellular stimulations for one axon."""
 
     n_compartments: int
     dtype_local: Any
-    contexts: tuple[CompiledExtracellularContext, ...]
+    stimulations: tuple[CompiledExtracellularStimulation, ...]
 
     def __call__(self, t_ms):
         """Return summed extracellular potential in millivolts at `t_ms`."""
 
         vext = jnp.zeros((self.n_compartments,), dtype=self.dtype_local)
-        for ctx in self.contexts:
-            vext = vext + ctx(t_ms).astype(self.dtype_local) * self.dtype_local(1e3)
+        for stimulation in self.stimulations:
+            vext = (
+                vext
+                + stimulation(t_ms).astype(self.dtype_local) * self.dtype_local(1e3)
+            )
         return vext
 
 
@@ -174,49 +177,38 @@ class CompiledIntracellularContexts:
         return jnp.sum(densities[:, None] * self.basis, axis=0)
 
 
-def compile_extracellular_context(
-    ctx: ExtracellularContext,
+def compile_extracellular_stimulation(
+    stimulation: ExtracellularStimulation,
     x_positions_m: ArrayLike,
     dtype_local: jnp.dtype | None = None,
-    *,
-    axon_y_um: float = 0.0,
-    axon_z_um: float = 0.0,
-) -> CompiledExtracellularContext:
-    """Precompute all electrode footprints for one axon.
+) -> CompiledExtracellularStimulation:
+    """Precompute all drive footprints for one axon.
 
     Parameters
     ----------
-    ctx:
-        Extracellular context containing stimulated electrodes.
+    stimulation:
+        Sampled extracellular stimulation containing one or more drives.
     x_positions_m:
         Intrinsic axial sample positions in meters.
     dtype_local:
         JAX dtype used for compiled arrays.
-    axon_y_um, axon_z_um:
-        Optional analytical offsets for helpers that still evaluate a global
-        point source. Core simulation instances do not own these coordinates.
     """
     if dtype_local is None:
         dtype_local = jnp.float32
-    electrodes = []
-    for electrode in ctx.electrodes:
-        stimulus = getattr(electrode, "stimulus", None)
+    compiled_drives = []
+    for drive in stimulation.drives:
+        stimulus = getattr(drive, "stimulus", None)
         if stimulus is None:
-            raise ValueError("Each extracellular electrode must have an attached stimulus.")
-        fp = ctx.footprint_for_electrode(
-            electrode,
-            x_positions_m,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
-        )
-        electrodes.append(
-            CompiledElectrode(
+            raise ValueError("Each extracellular drive must have an attached stimulus.")
+        fp = _drive_footprint_for_positions(drive, x_positions_m)
+        compiled_drives.append(
+            CompiledExtracellularDrive(
                 footprint_V_per_A=jnp.asarray(fp, dtype=dtype_local),
                 stimulus=compile_stimulus(stimulus, dtype_local=dtype_local),
             )
         )
-    return CompiledExtracellularContext(
-        electrodes=tuple(electrodes),
+    return CompiledExtracellularStimulation(
+        drives=tuple(compiled_drives),
     )
 
 
@@ -286,40 +278,57 @@ def compile_intracellular_contexts(
     )
 
 
-def compile_extracellular_contexts(
+def _drive_footprint_for_positions(drive: Any, x_positions_m: ArrayLike) -> np.ndarray:
+    footprint = drive.footprint
+    values = np.asarray(footprint.values_for_axon(), dtype=float)
+    x_um = np.asarray(x_positions_m, dtype=float) * 1e6
+    support_um = np.asarray(footprint.positions_um, dtype=float)
+    if x_um.shape == support_um.shape and np.allclose(x_um, support_um):
+        return values
+    if footprint.interpolation not in {"sampled", "linear"}:
+        raise NotImplementedError(
+            "Only sampled/linear footprint interpolation is supported by "
+            "scalar extracellular lowering."
+        )
+    if np.any(np.diff(support_um) < 0.0):
+        raise ValueError("Footprint positions must be sorted for interpolation.")
+    return np.asarray(np.interp(x_um, support_um, values), dtype=float)
+
+
+def compile_extracellular_stimulations(
     axon,
     dtype_local: jnp.dtype | None = None,
     *,
     solver_axon: "SolverAxon | None" = None,
-) -> CompiledExtracellularContexts:
-    """Compile all extracellular contexts attached to one axon."""
+) -> CompiledExtracellularStimulations:
+    """Compile all extracellular stimulations attached to one axon."""
 
     solver_data = _resolve_solver_axon(axon, solver_axon)
     if dtype_local is None:
         dtype_local = _axon_dtype(axon, solver_axon=solver_data)
-    contexts = _extracellular_contexts_from_axon(axon)
+    stimulations = _extracellular_stimulations_from_axon(axon)
     Nx = solver_data.n_compartments
 
-    if not contexts:
-        return CompiledExtracellularContexts(
+    if not stimulations:
+        return CompiledExtracellularStimulations(
             n_compartments=Nx,
             dtype_local=dtype_local,
-            contexts=(),
+            stimulations=(),
         )
 
     x_positions_m = jnp.asarray(solver_data.x_um, dtype=dtype_local) * dtype_local(1e-6)
-    compiled_contexts = tuple(
-        compile_extracellular_context(
-            ctx,
+    compiled_stimulations = tuple(
+        compile_extracellular_stimulation(
+            stimulation,
             x_positions_m,
             dtype_local=dtype_local,
         )
-        for ctx in contexts
+        for stimulation in stimulations
     )
-    return CompiledExtracellularContexts(
+    return CompiledExtracellularStimulations(
         n_compartments=Nx,
         dtype_local=dtype_local,
-        contexts=compiled_contexts,
+        stimulations=compiled_stimulations,
     )
 
 
@@ -341,25 +350,25 @@ def build_extracellular_potential_fn(
     *,
     solver_axon: "SolverAxon | None" = None,
 ):
-    """Compile extracellular contexts into an imposed-potential function.
+    """Compile extracellular stimulation into an imposed-potential function.
 
     The returned callable maps time in milliseconds to Vext in millivolts, one
-    value per compartment. If no extracellular context is attached, the
+    value per compartment. If no extracellular stimulation is attached, the
     callable returns zeros.
     """
-    return compile_extracellular_contexts(axon, solver_axon=solver_axon)
+    return compile_extracellular_stimulations(axon, solver_axon=solver_axon)
 
 
 __all__ = [
-    "CompiledElectrode",
-    "CompiledExtracellularContexts",
-    "CompiledExtracellularContext",
+    "CompiledExtracellularDrive",
+    "CompiledExtracellularStimulations",
+    "CompiledExtracellularStimulation",
     "CompiledIntracellularContexts",
     "JaxStimulus",
     "build_extracellular_potential_fn",
     "build_intracellular_current_density_fn",
-    "compile_extracellular_context",
-    "compile_extracellular_contexts",
+    "compile_extracellular_stimulation",
+    "compile_extracellular_stimulations",
     "compile_intracellular_contexts",
     "compile_stimulus",
     "compartment_surface_area_cm2",

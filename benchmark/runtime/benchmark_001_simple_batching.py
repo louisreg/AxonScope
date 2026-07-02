@@ -3,10 +3,10 @@
 The benchmark compares:
 
 1. Batch:
-       one simulate_pool(...) call containing every simulation.
+       one AxonSimulation(...).run() call containing every simulation.
 
 2. Simulation by simulation:
-       one simulate_pool(...) call per simulation, using singleton pools.
+       one AxonSimulation(...).run() call per simulation, using singleton pools.
 
 Simulation construction and plotting are excluded from the timings.
 
@@ -83,12 +83,12 @@ def run_single_pool_batch(
     """Run every simulation in a single pool dispatch."""
 
     return tuple(
-        axs.simulate_pool(
+        axs.AxonSimulation(
             simulations,
             duration=duration,
             dt=dt,
             recording=recording,
-        )
+        ).run()
     )
 
 
@@ -102,12 +102,12 @@ def run_sim_by_sim(
     """Run simulations sequentially through singleton pool dispatches."""
 
     return tuple(
-        axs.simulate_pool(
+        axs.AxonSimulation(
             (simulation,),
             duration=duration,
             dt=dt,
             recording=recording,
-        )[0]
+        ).run()[0]
         for simulation in simulations
     )
 

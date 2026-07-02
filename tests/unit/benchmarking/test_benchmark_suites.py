@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+from benchmark.registry import BENCHMARK_SURFACES, surfaces_by_status
 from benchmark.nrv_performance.realistic_fascicle_recruitment import profile_report_metrics
 from benchmark.nrv_performance.run import suite_argv as nrv_performance_suite_argv
 from benchmark.nrv_performance.suites import NRV_PERFORMANCE_SUITES
@@ -26,6 +27,19 @@ def test_nrv_performance_suites_include_smoke_and_forward_args():
     assert argv[-2:] == ["--dt", "0.02"]
     assert argv[argv.index("--out-dir") + 1] == "out"
     assert argv[argv.index("--prefix") + 1] == "prefix"
+
+
+def test_benchmark_surface_registry_classifies_active_archive_and_outputs():
+    surfaces = {surface.path: surface for surface in BENCHMARK_SURFACES}
+
+    assert surfaces["benchmark/runtime"].status == "active"
+    assert surfaces["benchmark/hotpaths"].status == "active"
+    assert surfaces["benchmark/solvers"].status == "validation-only"
+    assert surfaces["benchmark/triton_solver"].status == "archive"
+    assert surfaces["benchmark/results"].status == "generated-output"
+    assert surfaces["benchmark/reports"].status == "generated-output"
+    assert surfaces_by_status("active")
+    assert surfaces_by_status("archive")
 
 
 def test_nrv_mrg_extracellular_perf_suite_has_warm_repeats():
@@ -98,6 +112,23 @@ def test_runtime_pool_memory_suite_is_registered_and_forwardable():
     assert argv[argv.index("--fibers") + 1] == "128"
     assert argv[argv.index("--nx") + 1] == "201"
     assert argv[-2:] == ["--scenarios", "full"]
+
+
+def test_runtime_model_codegen_suite_is_registered_and_forwardable():
+    suite = RUNTIME_SUITES["model_codegen"]
+
+    argv = runtime_suite_argv(
+        suite,
+        out_dir=Path("runtime-out"),
+        prefix="models",
+        extra_args=("--", "--warm-repeats", "1"),
+    )
+
+    assert suite.runner == "model_codegen"
+    assert argv[:2] == ["--models", "builtins"]
+    assert argv[argv.index("--out-dir") + 1] == "runtime-out"
+    assert argv[argv.index("--prefix") + 1] == "models"
+    assert argv[-2:] == ["--warm-repeats", "1"]
 
 
 def test_realistic_fascicle_profile_metrics_flatten_nbytes_components():

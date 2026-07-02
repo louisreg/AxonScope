@@ -612,7 +612,7 @@ def run_axonscope(
         recording = axs.Recording(signals=axs.signals.Vm)
         time_chunk_steps = None if int(args.time_chunk_steps) <= 0 else int(args.time_chunk_steps)
         batch_options = BatchOptions.full(time_chunk_steps=time_chunk_steps)
-    return axs.simulate_pool(
+    return axs.AxonSimulation(
         pool,
         duration=float(tsim_ms) * axs.ms,
         dt=float(args.dt_ms) * axs.ms,
@@ -621,7 +621,7 @@ def run_axonscope(
         batch_options=batch_options,
         execution_policy=axonscope_execution_policy(args),
         progress=bool(args.progress),
-    )
+    ).run()
 
 
 def axonscope_execution_policy(args: argparse.Namespace) -> axs.ExecutionPolicy | None:

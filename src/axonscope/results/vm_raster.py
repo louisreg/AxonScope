@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any, TextIO
 
 import numpy as np
 
@@ -175,10 +176,106 @@ class VmRasterResult:
             row_aware=row_aware,
         )
 
+    @classmethod
+    def from_result(cls, result: Any, *definitions: Any) -> "VmRasterResult":
+        """Pack threshold-style Vm analyses from a dense recorded result.
+
+        This is the post-hoc twin of the solver-side observer path: it uses the
+        same definition names, probe selectors, thresholds, metadata tables, and
+        little-endian ``uint32`` bit layout. The packed bits represent raw
+        ``Vm >= threshold`` windows; analysis-specific blanking is applied by
+        the analysis/protocol layer when those bits are interpreted.
+        """
+
+        raster_definitions = _normalize_vm_raster_definitions(definitions)
+        rows = _result_rows_for_vm_raster(result)
+        packed_rows = [
+            _vm_raster_from_single_result(cls, row, raster_definitions)
+            for row in rows
+        ]
+        if len(packed_rows) == 1:
+            return packed_rows[0]
+        return cls.concat_batch(packed_rows)
+
+    @classmethod
+    def from_vm(cls, result: Any, *definitions: Any) -> "VmRasterResult":
+        """Alias for :meth:`from_result` for call sites emphasizing dense Vm."""
+
+        return cls.from_result(result, *definitions)
+
     def unpack(self) -> np.ndarray:
         """Unpack words to a boolean array with shape ``(B, R, P, nt)``."""
 
         return unpack_vm_raster_words(self.words, nt=self.nt)
+
+    def definition_index(self, name_or_definition: Any) -> int:
+        """Return the raster-definition index for a name or definition object."""
+
+        return vm_raster_definition_index(self, name_or_definition)
+
+    def any_active(
+        self,
+        name_or_definition: Any,
+        *,
+        blanking: Any | None = None,
+    ) -> np.ndarray:
+        """Return per-batch activation flags for one raster definition."""
+
+        return vm_raster_any_active(
+            self,
+            name_or_definition,
+            blanking=blanking,
+        )
+
+    def rows(self) -> tuple[dict[str, Any], ...]:
+        """Return row dictionaries for dataframe/text views."""
+
+        from axonscope.results.views import vm_raster_rows
+
+        return vm_raster_rows(self)
+
+    def to_dataframe(self) -> Any:
+        """Return this raster summary as a pandas DataFrame."""
+
+        from axonscope.results.views import vm_raster_to_dataframe
+
+        return vm_raster_to_dataframe(self)
+
+    def format(self) -> str:
+        """Return a compact text representation."""
+
+        from axonscope.results.views import format_vm_raster
+
+        return format_vm_raster(self)
+
+    def print(self, file: TextIO | None = None) -> None:
+        """Print a compact text representation."""
+
+        from axonscope.results.views import print_vm_raster
+
+        print_vm_raster(self, file=file)
+
+    def plot(
+        self,
+        ax: Any | None = None,
+        *,
+        row: int = 0,
+        time_unit: Any = "millisecond",
+        title: str = "VmRaster threshold windows",
+        grid: bool = True,
+    ) -> Any:
+        """Plot threshold-crossing windows stored in this packed raster."""
+
+        from axonscope.results.views import plot_vm_raster
+
+        return plot_vm_raster(
+            self,
+            ax=ax,
+            row=row,
+            time_unit=time_unit,
+            title=title,
+            grid=grid,
+        )
 
 
 def _slice_row_aware_metadata(values: Any, row: int, row_aware: bool) -> Any:
@@ -290,8 +387,302 @@ def unpack_vm_raster_words(words: Any, *, nt: int | None = None) -> np.ndarray:
     return unpacked
 
 
+def vm_raster_definition_index(raster: Any, name_or_definition: Any) -> int:
+    """Return the definition index in a ``VmRasterResult``."""
+
+    name = str(getattr(name_or_definition, "name", name_or_definition))
+    names = tuple(getattr(raster, "names", ()))
+    try:
+        return names.index(name)
+    except ValueError as exc:
+        raise KeyError(f"VmRaster definition {name!r} is not present.") from exc
+
+
+def vm_raster_any_active(
+    raster: Any,
+    name_or_definition: Any,
+    *,
+    blanking: Any | None = None,
+) -> np.ndarray:
+    """Return whether each batch row has any active sample for one definition."""
+
+    raster_index = vm_raster_definition_index(raster, name_or_definition)
+    bits = np.asarray(raster.unpack(), dtype=bool)
+    if bits.ndim != 4:
+        raise ValueError(f"VmRaster output must unpack to (B, R, P, Nt), got {bits.shape}.")
+    row_bits = bits[:, raster_index]
+
+    probe_mask = _probe_mask_for_definition(
+        raster,
+        raster_index=raster_index,
+        batch_size=row_bits.shape[0],
+        probe_count=row_bits.shape[1],
+    )
+    blanking_ms = None if blanking is None else _blanking_ms(blanking)
+    if blanking_ms is not None and blanking_ms > 0.0:
+        times_ms = (np.arange(int(raster.nt), dtype=float) + 1.0) * float(raster.dt_ms)
+        row_bits = row_bits[:, :, times_ms >= blanking_ms]
+    return np.any(row_bits & probe_mask[:, :, None], axis=(1, 2))
+
+
+def activation_values_from_vm_raster(raster: Any, activation: Any) -> np.ndarray:
+    """Return activation flags decoded from a named VmRaster definition."""
+
+    try:
+        return vm_raster_any_active(
+            raster,
+            activation,
+            blanking=getattr(activation, "blanking", None),
+        )
+    except KeyError as exc:
+        raise RuntimeError("activation observer result is missing from VmRaster output.") from exc
+
+
+def _probe_mask_for_definition(
+    raster: Any,
+    *,
+    raster_index: int,
+    batch_size: int,
+    probe_count: int,
+) -> np.ndarray:
+    mask = np.asarray(getattr(raster, "probe_mask", True), dtype=bool)
+    if mask.ndim == 3:
+        selected = mask[:, int(raster_index)]
+    elif mask.ndim == 2:
+        selected = np.broadcast_to(mask[int(raster_index)], (int(batch_size), int(probe_count)))
+    elif mask.ndim == 1:
+        selected = np.broadcast_to(mask, (int(batch_size), int(probe_count)))
+    else:
+        selected = np.broadcast_to(mask, (int(batch_size), int(probe_count)))
+    return np.asarray(selected, dtype=bool)
+
+
+def _blanking_ms(value: Any) -> float:
+    from axonscope.utils import units
+
+    return units.to_ms(value)
+
+
+def _normalize_vm_raster_definitions(definitions: Sequence[Any]) -> tuple[Any, ...]:
+    if (
+        len(definitions) == 1
+        and isinstance(definitions[0], Sequence)
+        and not isinstance(definitions[0], (str, bytes))
+    ):
+        definitions = tuple(definitions[0])
+    raster_definitions = tuple(definitions)
+    if not raster_definitions:
+        raise ValueError("VmRasterResult.from_result requires at least one definition.")
+
+    names = tuple(str(getattr(definition, "name", "")) for definition in raster_definitions)
+    if any(not name for name in names):
+        raise ValueError("VmRaster definitions must expose a non-empty name.")
+    if len(set(names)) != len(names):
+        raise ValueError("VmRaster definition names must be unique.")
+    return raster_definitions
+
+
+def _result_rows_for_vm_raster(result: Any) -> tuple[Any, ...]:
+    try:
+        getattr(result, "Vm")
+    except AttributeError:
+        try:
+            rows = tuple(result)
+        except TypeError:
+            rows = (result,)
+        if not rows:
+            raise ValueError("VmRasterResult.from_result requires at least one result row.")
+        return rows
+    return (result,)
+
+
+def _vm_raster_from_single_result(
+    cls: type[VmRasterResult],
+    row: Any,
+    definitions: tuple[Any, ...],
+) -> VmRasterResult:
+    vm = _dense_vm_mV(row)
+    time_ms = _dense_time_ms(row)
+    positions_um = _dense_positions_um(row, expected_width=vm.shape[1])
+    original_indices = _dense_original_indices(row, expected_width=vm.shape[1])
+    dt_ms = _uniform_dt_ms(time_ms)
+
+    selected_by_definition: list[np.ndarray] = []
+    thresholds_mV: list[float] = []
+    for definition in definitions:
+        _require_vm_raster_definition(definition)
+        target = getattr(definition, "target")
+        selected = _select_vm_raster_columns(
+            target,
+            positions_um=positions_um,
+            original_indices=original_indices,
+        )
+        selected_by_definition.append(selected)
+        thresholds_mV.append(_threshold_mV(definition))
+
+    nt = int(vm.shape[0])
+    probe_width = max(int(selected.size) for selected in selected_by_definition)
+    bits = np.zeros((len(definitions), probe_width, nt), dtype=bool)
+    probe_indices = np.zeros((len(definitions), probe_width), dtype=np.int32)
+    probe_mask = np.zeros((len(definitions), probe_width), dtype=bool)
+    selected_original_indices = np.full((len(definitions), probe_width), -1, dtype=np.int32)
+    selected_positions_um = np.full((len(definitions), probe_width), np.nan, dtype=float)
+
+    for definition_index, (selected, threshold_mV) in enumerate(
+        zip(selected_by_definition, thresholds_mV, strict=True)
+    ):
+        count = int(selected.size)
+        probe_indices[definition_index, :count] = selected
+        probe_mask[definition_index, :count] = True
+        selected_original_indices[definition_index, :count] = original_indices[selected]
+        selected_positions_um[definition_index, :count] = positions_um[selected]
+        bits[definition_index, :count, :] = vm[:, selected].T >= float(threshold_mV)
+
+    return cls(
+        words=_pack_vm_raster_bits(bits)[None, ...],
+        nt=nt,
+        dt_ms=dt_ms,
+        definitions=definitions,
+        names=tuple(str(definition.name) for definition in definitions),
+        probe_indices=probe_indices,
+        probe_mask=probe_mask,
+        original_indices=selected_original_indices,
+        positions_um=selected_positions_um,
+        thresholds_mV=np.asarray(thresholds_mV, dtype=float),
+        row_aware=False,
+    )
+
+
+def _dense_vm_mV(row: Any) -> np.ndarray:
+    try:
+        values = row.voltage_values(unit="millivolt")
+    except AttributeError:
+        try:
+            values = row.Vm
+        except AttributeError as exc:
+            raise ValueError("VmRasterResult.from_result requires dense Vm recordings.") from exc
+    vm = np.asarray(values, dtype=float)
+    if vm.ndim != 2:
+        raise ValueError(f"dense Vm must be 2D (time, position), got shape {vm.shape}.")
+    if vm.shape[0] == 0 or vm.shape[1] == 0:
+        raise ValueError("dense Vm must include at least one time and position sample.")
+    return vm
+
+
+def _dense_time_ms(row: Any) -> np.ndarray:
+    try:
+        values = row.time_values(unit="millisecond")
+    except AttributeError:
+        try:
+            values = row.t
+        except AttributeError as exc:
+            raise ValueError("VmRasterResult.from_result requires a result time vector.") from exc
+    time_ms = np.asarray(values, dtype=float)
+    if time_ms.ndim != 1 or time_ms.size == 0:
+        raise ValueError("result time vector must be a non-empty 1D array.")
+    return time_ms
+
+
+def _dense_positions_um(row: Any, *, expected_width: int) -> np.ndarray:
+    try:
+        values = row.position_values(unit="micrometer")
+    except AttributeError as exc:
+        raise ValueError(
+            "VmRasterResult.from_result requires recorded position metadata."
+        ) from exc
+    positions_um = np.asarray(values, dtype=float)
+    if positions_um.shape != (int(expected_width),):
+        raise ValueError("recorded positions must match dense Vm columns.")
+    return positions_um
+
+
+def _dense_original_indices(row: Any, *, expected_width: int) -> np.ndarray:
+    try:
+        values = row.recorded_axis.index_values()
+    except AttributeError:
+        values = getattr(row, "record_indices", None)
+        if values is None:
+            values = np.arange(int(expected_width), dtype=np.int32)
+    original_indices = np.asarray(values, dtype=np.int32)
+    if original_indices.shape != (int(expected_width),):
+        raise ValueError("recorded original indices must match dense Vm columns.")
+    return original_indices
+
+
+def _uniform_dt_ms(time_ms: np.ndarray) -> float:
+    if time_ms.shape[0] == 1:
+        return 0.0
+    steps = np.diff(time_ms)
+    dt_ms = float(np.median(steps))
+    if dt_ms <= 0.0:
+        raise ValueError("VmRasterResult.from_result requires increasing result times.")
+    if not np.allclose(steps, dt_ms, rtol=1e-4, atol=max(1e-9, abs(dt_ms) * 1e-6)):
+        raise ValueError("VmRasterResult.from_result requires a uniform result time step.")
+    return dt_ms
+
+
+def _require_vm_raster_definition(definition: Any) -> None:
+    from axonscope.positions import PositionSelector
+    from axonscope.signals import MEMBRANE_VOLTAGE, Signal
+
+    if not hasattr(definition, "threshold") or not hasattr(definition, "target"):
+        raise NotImplementedError(
+            "VmRasterResult.from_result supports threshold-style Vm definitions only."
+        )
+    signal = getattr(definition, "signal", MEMBRANE_VOLTAGE)
+    if not isinstance(signal, Signal) or signal.id != MEMBRANE_VOLTAGE.id:
+        raise NotImplementedError("VmRasterResult.from_result supports membrane voltage only.")
+    if not isinstance(getattr(definition, "target"), PositionSelector):
+        raise TypeError("VmRaster definitions must use axonscope PositionSelector targets.")
+
+
+def _threshold_mV(definition: Any) -> float:
+    from axonscope.utils import units
+
+    return units.to_mV(getattr(definition, "threshold"))
+
+
+def _select_vm_raster_columns(
+    target: Any,
+    *,
+    positions_um: np.ndarray,
+    original_indices: np.ndarray,
+) -> np.ndarray:
+    valid_columns = np.flatnonzero(original_indices >= 0)
+    if valid_columns.size == 0:
+        raise ValueError("VmRasterResult.from_result found no valid recorded positions.")
+    selected_local = target.columns(
+        positions_um=positions_um[valid_columns],
+        original_indices=original_indices[valid_columns],
+    )
+    selected = valid_columns[np.asarray(selected_local, dtype=np.int32)]
+    if selected.size == 0:
+        raise ValueError("VmRaster target selects no positions.")
+    return selected.astype(np.int32, copy=False)
+
+
+def _pack_vm_raster_bits(bits: np.ndarray) -> np.ndarray:
+    values = np.asarray(bits, dtype=bool)
+    nt = int(values.shape[-1])
+    word_count = (nt + 31) // 32
+    words = np.zeros(values.shape[:-1] + (word_count,), dtype=np.uint32)
+    for word_index in range(word_count):
+        start = word_index * 32
+        stop = min(start + 32, nt)
+        block = values[..., start:stop].astype(np.uint32)
+        weights = np.left_shift(
+            np.uint32(1),
+            np.arange(stop - start, dtype=np.uint32),
+        )
+        words[..., word_index] = np.sum(block * weights, axis=-1, dtype=np.uint32)
+    return words
+
+
 __all__ = [
     "VM_RASTER_OBSERVATION_KEY",
     "VmRasterResult",
+    "activation_values_from_vm_raster",
     "unpack_vm_raster_words",
+    "vm_raster_any_active",
+    "vm_raster_definition_index",
 ]

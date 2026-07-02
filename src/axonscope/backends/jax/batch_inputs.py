@@ -94,12 +94,14 @@ class FactorizedExtracellularPotentialBatch:
     """Static-footprint extracellular potential without the dense time-space tensor.
 
     ``current_mid_A`` stores the dynamic stimulus samples with shape ``(Nt,)``
-    for a shared waveform or ``(B, Nt)`` for row-specific waveforms.
+    for a shared single-drive waveform, ``(B, Nt)`` for row-specific
+    single-drive waveforms, or ``(B, K, Nt)`` for row-specific multi-drive
+    waveforms.
     ``current_initial_previous_A`` optionally stores the ``t=-dt/2`` sample
     used by double-cable batches. ``footprint_mV_per_A`` stores the static
-    spatial footprint with shape ``(B, Nx)``. The dense midpoint potential is
-    their product:
-    ``Vstim[B, Nt, Nx] = current_mid_A * footprint_mV_per_A``.
+    spatial footprint with shape ``(B, Nx)`` or ``(B, K, Nx)``. The dense
+    midpoint potential is their product, summed over the optional drive axis:
+    ``Vstim[B, Nt, Nx] = sum_K current_mid_A * footprint_mV_per_A``.
     """
 
     current_mid_A: Array
@@ -115,24 +117,39 @@ class FactorizedExtracellularPotentialBatch:
         footprint_shape = tuple(
             int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
         )
-        if len(current_shape) not in {1, 2}:
-            raise ValueError("current_mid_A must have shape (Nt,) or (B, Nt).")
-        if len(footprint_shape) != 2:
-            raise ValueError("footprint_mV_per_A must have shape (B, Nx).")
-        if len(current_shape) == 2 and current_shape[0] != footprint_shape[0]:
+        if len(footprint_shape) not in {2, 3}:
+            raise ValueError("footprint_mV_per_A must have shape (B, Nx) or (B, K, Nx).")
+        batch_size = footprint_shape[0]
+        drive_count = 1 if len(footprint_shape) == 2 else footprint_shape[1]
+        if len(current_shape) not in {1, 2, 3}:
+            raise ValueError("current_mid_A must have shape (Nt,), (B, Nt), or (B, K, Nt).")
+        if len(footprint_shape) == 2 and len(current_shape) == 3:
+            raise ValueError("rank-K current_mid_A requires footprint_mV_per_A shape (B, K, Nx).")
+        if len(footprint_shape) == 3 and len(current_shape) != 3:
+            raise ValueError("rank-K footprint_mV_per_A requires current_mid_A shape (B, K, Nt).")
+        if len(current_shape) == 2 and current_shape[0] != batch_size:
             raise ValueError(
                 "current_mid_A batch size must match footprint_mV_per_A, "
                 f"got {current_shape} and {footprint_shape}."
             )
+        if len(current_shape) == 3 and current_shape[:2] != (batch_size, drive_count):
+            raise ValueError(
+                "current_mid_A batch/drive axes must match footprint_mV_per_A, "
+                f"got {current_shape} and {footprint_shape}."
+            )
         if self.current_initial_previous_A is not None:
-            if len(previous_shape) not in {0, 1}:
-                raise ValueError("current_initial_previous_A must be scalar or have shape (B,).")
-            if len(previous_shape) == 1 and previous_shape[0] != footprint_shape[0]:
+            if len(footprint_shape) == 3:
+                valid_previous_shapes = {(batch_size, drive_count)}
+            else:
+                valid_previous_shapes = {(), (batch_size,)}
+            if previous_shape not in valid_previous_shapes:
                 raise ValueError(
-                    "current_initial_previous_A batch size must match footprint_mV_per_A, "
-                    f"got {previous_shape} and {footprint_shape}."
+                    "current_initial_previous_A must be scalar or shape (B,) "
+                    "for rank-1 batches, and shape (B, K) for rank-K batches; "
+                    f"got {previous_shape} for footprint shape {footprint_shape}."
                 )
-        if int(self.target_nx) != footprint_shape[1]:
+        footprint_width = footprint_shape[-1]
+        if int(self.target_nx) != footprint_width:
             raise ValueError(
                 "target_nx must match footprint_mV_per_A width, "
                 f"got target_nx={self.target_nx} and shape {footprint_shape}."
@@ -148,11 +165,22 @@ class FactorizedExtracellularPotentialBatch:
         return int(self.footprint_mV_per_A.shape[0])
 
     @property
+    def drive_count(self) -> int:
+        """Maximum number of factorized drives per row."""
+
+        shape = getattr(self.footprint_mV_per_A, "shape", ())
+        return 1 if len(shape) == 2 else int(shape[1])
+
+    @property
     def step_count(self) -> int:
         """Number of midpoint time samples."""
 
         current = self.current_mid_A
-        return int(current.shape[0] if len(current.shape) == 1 else current.shape[1])
+        if len(current.shape) == 1:
+            return int(current.shape[0])
+        if len(current.shape) == 2:
+            return int(current.shape[1])
+        return int(current.shape[2])
 
     @property
     def shared_current(self) -> bool:
@@ -168,11 +196,15 @@ def materialize_factorized_extracellular_potential_batch(
 
     current_mid_A = jnp.asarray(batch.current_mid_A)
     footprint = jnp.asarray(batch.footprint_mV_per_A)
-    if current_mid_A.ndim == 1:
-        current = current_mid_A[None, :, None]
-    else:
-        current = current_mid_A[:, :, None]
-    return current * footprint[:, None, :]
+    if footprint.ndim == 2:
+        if current_mid_A.ndim == 1:
+            current = current_mid_A[None, :, None]
+        else:
+            current = current_mid_A[:, :, None]
+        return current * footprint[:, None, :]
+    if current_mid_A.ndim != 3:
+        raise ValueError("rank-K factorized Vstim requires current_mid_A shape (B, K, Nt).")
+    return jnp.sum(current_mid_A[:, :, :, None] * footprint[:, :, None, :], axis=1)
 
 
 def materialize_factorized_extracellular_potential_initial_previous(
@@ -184,11 +216,18 @@ def materialize_factorized_extracellular_potential_initial_previous(
         raise ValueError("current_initial_previous_A is required.")
     current_previous_A = jnp.asarray(batch.current_initial_previous_A)
     footprint = jnp.asarray(batch.footprint_mV_per_A)
-    if current_previous_A.ndim == 0:
-        current = current_previous_A
-    else:
-        current = current_previous_A[:, None]
-    return current * footprint
+    if footprint.ndim == 2:
+        if current_previous_A.ndim == 0:
+            current = current_previous_A
+        else:
+            current = current_previous_A[:, None]
+        return current * footprint
+    if current_previous_A.ndim != 2:
+        raise ValueError(
+            "rank-K factorized previous Vstim requires current_initial_previous_A "
+            "shape (B, K)."
+        )
+    return jnp.sum(current_previous_A[:, :, None] * footprint, axis=1)
 
 
 __all__ = [

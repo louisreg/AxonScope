@@ -114,8 +114,8 @@ def _rich_event_details(event: ProgressEvent) -> str:
         extracellular = details.get("extracellular")
         if intracellular or extracellular:
             parts.append(f"{intracellular or '-'} -> {extracellular or '-'}")
-        if "contexts" in details:
-            parts.append(f"contexts={details['contexts']}")
+        if "stimulations" in details:
+            parts.append(f"stimulations={details['stimulations']}")
     elif event.stage == "kernel":
         if details.get("recording"):
             parts.append(f"recording={details['recording']}")
@@ -355,10 +355,10 @@ class DispatchProgress:
         if self._rich is not None:
             self._rich.console.print(
                 f"[dim]{progress_timestamp()}[/dim] "
-                f"[bold]Dispatch {status}[/bold] [dim]{summary}[/dim]"
+                f"[bold]Simulation run {status}[/bold] [dim]{summary}[/dim]"
             )
         elif self._use_plain:
-            print(f"{progress_timestamp()} Dispatch {status}: {summary}", flush=True)
+            print(f"{progress_timestamp()} Simulation run {status}: {summary}", flush=True)
 
     def start_group(self, group: Any) -> None:
         """Mark one dispatch group as running."""

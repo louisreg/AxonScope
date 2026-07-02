@@ -92,19 +92,26 @@ def test_kaggle_gpu_jax_extra_matches_installed_jax_version(monkeypatch):
     monkeypatch.setattr(kaggle_bench, "run", fake_run)
     monkeypatch.setattr(kaggle_bench, "installed_package_version", lambda name: "0.10.1")
     monkeypatch.setattr(kaggle_bench, "JAX_CUDA_EXTRA", "cuda12")
+    monkeypatch.setattr(kaggle_bench, "configure_cuda_library_path", lambda: None)
+    monkeypatch.setattr(kaggle_bench, "print_cuda_package_diagnostics", lambda: None)
 
     kaggle_bench.install_jax_gpu_extra()
 
-    assert commands == [
-        [
-            kaggle_bench.sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "jax[cuda12]==0.10.1",
-        ]
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[:6] == [
+        kaggle_bench.sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--no-cache-dir",
     ]
+    assert "jax==0.10.1" in command
+    assert "jaxlib==0.10.1" in command
+    assert "jax[cuda12]==0.10.1" in command
+    assert "jax-cuda12-plugin[with_cuda]==0.10.1" in command
+    assert "nvidia-cublas-cu12" in command
 
 
 def test_kaggle_smoke_commands_are_small(tmp_path, monkeypatch):

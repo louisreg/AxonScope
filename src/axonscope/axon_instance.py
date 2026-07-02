@@ -8,9 +8,7 @@ import numpy as np
 
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (
-    ExtracellularContext,
     ExtracellularStimulation,
-    ExtracellularStimulationContext,
     IntracellularContext,
     IntracellularCurrentClamp,
     Stimulus,
@@ -41,7 +39,6 @@ class AxonInstance:
             raise TypeError("axon must be an axonscope.axons.Axon instance.")
         self.axon = axon
         self.intracellular_contexts: list[IntracellularContext] = []
-        self.extracellular_context: ExtracellularContext | None = None
         self.extracellular_stimulation: ExtracellularStimulation | None = None
         self.Veinit = units.to_mV(0.0)
         self._use_extracellular_override: bool | None = None
@@ -66,7 +63,10 @@ class AxonInstance:
 
         if self._use_extracellular_override is not None:
             return bool(self._use_extracellular_override)
-        return self.axon.resolved_formulation == "double-cable" or self.extracellular_context is not None
+        return (
+            self.axon.resolved_formulation == "double-cable"
+            or self.extracellular_stimulation is not None
+        )
 
     @use_extracellular.setter
     def use_extracellular(self, value: bool) -> None:
@@ -115,45 +115,6 @@ class AxonInstance:
 
         self.intracellular_contexts.clear()
 
-    def add_extracellular_context(
-        self,
-        *,
-        context: ExtracellularContext,
-        replace: bool = False,
-        enable: bool = True,
-    ) -> None:
-        """Attach an extracellular stimulation context.
-
-        Parameters
-        ----------
-        context:
-            Extracellular context containing one or more stimulated electrodes.
-        replace:
-            Replace the existing context. If false, adding a second
-            extracellular context raises an error; put multiple electrodes in
-            one `ExtracellularContext` instead.
-        enable:
-            Force-enable extracellular solver handling.
-        """
-
-        if not isinstance(context, ExtracellularContext):
-            raise TypeError("context must be an axonscope.stimulation.ExtracellularContext.")
-
-        if self.extracellular_context is not None and not replace:
-            raise ValueError(
-                "AxonInstance accepts one extracellular context. "
-                "Use ExtracellularContext(electrodes=[...]) for multiple electrodes, "
-                "or pass replace=True."
-            )
-        self.extracellular_context = context
-        self.extracellular_stimulation = (
-            context.stimulation
-            if isinstance(context, ExtracellularStimulationContext)
-            else None
-        )
-        if enable:
-            self._use_extracellular_override = True
-
     def add_extracellular_stimulation(
         self,
         *,
@@ -173,24 +134,27 @@ class AxonInstance:
             raise TypeError(
                 "stimulation must be an axonscope.stimulation.ExtracellularStimulation."
             )
-        self.add_extracellular_context(
-            context=ExtracellularStimulationContext(stimulation=stimulation),
-            replace=replace,
-            enable=enable,
-        )
+        if self.extracellular_stimulation is not None and not replace:
+            raise ValueError(
+                "AxonInstance accepts one extracellular stimulation. "
+                "Use ExtracellularStimulation([...]) for multiple drives, "
+                "or pass replace=True."
+            )
+        self.extracellular_stimulation = stimulation
+        if enable:
+            self._use_extracellular_override = True
 
     @property
-    def extracellular_contexts(self) -> tuple[ExtracellularContext, ...]:
-        """Return the optional extracellular context as a runtime tuple."""
+    def extracellular_stimulations(self) -> tuple[ExtracellularStimulation, ...]:
+        """Return the optional extracellular stimulation as a runtime tuple."""
 
-        if self.extracellular_context is None:
+        if self.extracellular_stimulation is None:
             return ()
-        return (self.extracellular_context,)
+        return (self.extracellular_stimulation,)
 
-    def clear_extracellular_context(self) -> None:
-        """Remove the extracellular stimulation context."""
+    def clear_extracellular_stimulation(self) -> None:
+        """Remove the extracellular stimulation."""
 
-        self.extracellular_context = None
         self.extracellular_stimulation = None
         self._use_extracellular_override = None
 
@@ -266,13 +230,18 @@ class AxonInstance:
             * 1e-6
         )
         vext = np.zeros((self.axon.n_compartments,), dtype=self.dtype)
-        for ctx in self.extracellular_contexts:
-            sample_mV = ctx.evaluate(
-                x_positions_m,
+        for stimulation in self.extracellular_stimulations:
+            sample_mV = stimulation.evaluate(
                 [t_value_ms],
                 voltage_unit="millivolt",
-                position_unit="meter",
             )[0]
+            if sample_mV.shape != x_positions_m.shape:
+                x_um = x_positions_m * 1e6
+                sample_mV = np.interp(
+                    x_um,
+                    np.asarray(stimulation.positions_um, dtype=float),
+                    np.asarray(sample_mV, dtype=float),
+                )
             vext = vext + sample_mV.astype(vext.dtype)
         return vext
 

@@ -14,19 +14,17 @@ import numpy as np
 
 from axonscope.identifiers import AxonId, DriveId
 from axonscope.stimulation import (
-    AnalyticalElectrode,
     ExtracellularDrive,
     ExtracellularFootprint,
     ExtracellularStimulation,
     Stimulus,
 )
-from axonscope.stimulation.electrodes import _normalize_stimulus
 from axonscope.stimulation.stimuli import ArrayLike
 from axonscope.utils import units
 
 
 @dataclass(frozen=True, init=False)
-class PointSourceElectrode(AnalyticalElectrode):
+class PointSourceElectrode:
     """Analytical point source in a homogeneous infinite medium.
 
     This is a convenience helper, not a solver/runtime concept. Use
@@ -39,6 +37,7 @@ class PointSourceElectrode(AnalyticalElectrode):
     y_um: float
     z_um: float
     min_distance_um: float = 1e-3
+    stimulus: Stimulus | None = None
 
     def __init__(
         self,
@@ -70,8 +69,37 @@ class PointSourceElectrode(AnalyticalElectrode):
             else units.require_length_um(min_distance, name="min_distance"),
         )
         if stimulus is not None:
-            stimulus = _normalize_stimulus(stimulus)
+            if not isinstance(stimulus, Stimulus):
+                raise TypeError("stimulus must be an axonscope.stimulation.Stimulus.")
+            stimulus = stimulus.as_unit("ampere")
         object.__setattr__(self, "stimulus", stimulus)
+
+    def with_stimulus(self, stimulus: Stimulus) -> "PointSourceElectrode":
+        """Return a copy with `stimulus` attached as an ampere waveform."""
+
+        if not isinstance(stimulus, Stimulus):
+            raise TypeError("stimulus must be an axonscope.stimulation.Stimulus.")
+        return PointSourceElectrode(
+            x=units.Q_(self.x_um, "micrometer"),
+            y=units.Q_(self.y_um, "micrometer"),
+            z=units.Q_(self.z_um, "micrometer"),
+            min_distance=units.Q_(self.min_distance_um, "micrometer"),
+            stimulus=stimulus,
+        )
+
+    def with_scaled_stimulus(self, scale: float) -> "PointSourceElectrode":
+        """Return a copy whose attached stimulus is multiplied by `scale`."""
+
+        if self.stimulus is None:
+            raise ValueError("PointSourceElectrode has no attached stimulus to scale.")
+        return self.with_stimulus(self.stimulus.scaled(float(scale)))
+
+    def set_stimulus(self, stimulus: Stimulus) -> None:
+        """Attach `stimulus` in place for legacy notebook convenience."""
+
+        if not isinstance(stimulus, Stimulus):
+            raise TypeError("stimulus must be an axonscope.stimulation.Stimulus.")
+        object.__setattr__(self, "stimulus", stimulus.as_unit("ampere"))
 
     @property
     def x0_m(self) -> float:

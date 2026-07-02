@@ -5,7 +5,6 @@ import axonscope as axs
 from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import Stimulus
 from axonscope.stimulation import (
-    ExtracellularContext,
     IntracellularContext,
     IntracellularCurrentClamp,
 )
@@ -241,9 +240,15 @@ def test_physical_contexts_assign_canonical_current_units():
     assert np.allclose(clamp.current.y, stim.y)
 
     electrode = PointSourceElectrode(x=0.0 * axs.um, z=1000.0 * axs.um, stimulus=stim)
-    context = ExtracellularContext(electrodes=[electrode])
-    assert context.electrodes[0].stimulus.y_unit == "ampere"
-    assert np.allclose(context.electrodes[0].stimulus.y, stim.y)
+    drive = axs.analytical.point_source_drive(
+        electrode,
+        np.asarray([0.0]) * axs.um,
+        sigma=0.3 * axs.S_per_m,
+    )
+    assert electrode.stimulus is not None
+    assert electrode.stimulus.y_unit == "ampere"
+    assert drive.stimulus.y_unit == "ampere"
+    assert np.allclose(drive.stimulus.y, stim.y)
 
 
 # ==========================================================

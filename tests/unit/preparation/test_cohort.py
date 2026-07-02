@@ -22,7 +22,7 @@ def test_prepared_cohort_collects_group_rows():
     assert cohort.nx == 11
     assert cohort.axons == (axon_a, axon_b)
     assert cohort.solver_axons[0] is cohort.solver_axons[1]
-    assert cohort.contexts == ((), ())
+    assert cohort.stimulations == ((), ())
     assert np.asarray(cohort.x_positions_m).shape == (2, 11)
     np.testing.assert_allclose(cohort.axon_y_um, [0.0, 0.0])
     np.testing.assert_allclose(cohort.axon_z_um, [0.0, 0.0])

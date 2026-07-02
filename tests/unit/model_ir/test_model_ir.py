@@ -1,0 +1,1406 @@
+from __future__ import annotations
+
+import ast
+import importlib.util
+from dataclasses import replace
+from pathlib import Path
+
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+import axonscope as axs
+from axonscope import membranes
+from axonscope.benchmarking.hotpaths import benchmark_span
+from axonscope.backends.jax.membrane_backend import (
+    HeterogeneousMembraneBackend,
+    UniformMembraneBackend,
+)
+from axonscope.backends.jax.membrane_program import JaxMembraneProgram
+from axonscope.backends.jax.runtime import compile_membrane_model
+from axonscope.membranes.compiler import lower_membrane_model_to_ir
+from axonscope.membranes.model import MembraneModel
+from axonscope.model_ir import (
+    Current,
+    Diagnostic,
+    Gate,
+    Input,
+    LinearizationGateSource,
+    ModelIR,
+    ModelValidationError,
+    Observable,
+    Parameter,
+    QuantitySpec,
+    SemanticRole,
+    SourceModelCompileError,
+    assert_valid_model_ir,
+    call,
+    compile_model_source_file,
+    derive_model_step_contract,
+    literal,
+    membrane_program_from_model_ir,
+    model_ir_from_json,
+    parameterized_hash,
+    State,
+    StateUpdate,
+    StepProgram,
+    structural_hash,
+    symbol,
+)
+import axonscope.model_ir.source as source_compiler
+from axonscope.model_ir.interpreter import NumpyModelInterpreter
+from axonscope.model_ir.intrinsics import exp
+from axonscope.solvers.rate_tables import RateTableConfig
+from axonscope.utils.units import (
+    CONDUCTANCE_DENSITY_MS_CM2,
+    CURRENT_DENSITY_UA_CM2,
+    DIMENSIONLESS,
+    RATE_PER_MS,
+    RESISTANCE_AREA_OHM_CM2,
+    VOLTAGE_MV,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+MODEL_IR_ROOT = REPO_ROOT / "src" / "axonscope" / "model_ir"
+PASSIVE_SOURCE = REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / "passive.py"
+HH_SOURCE = REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / "hodgkin_huxley.py"
+TIGERHOLM_SOURCE = REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / "tigerholm.py"
+SCHILD94_SOURCE = REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / "schild94.py"
+SCHILD97_SOURCE = REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / "schild97.py"
+
+
+def _source_model(name: str, params: dict[str, float] | None = None) -> ModelIR:
+    return compile_model_source_file(
+        REPO_ROOT / "src" / "axonscope" / "membranes" / "models" / f"{name}.py",
+        parameter_defaults=params or {},
+    ).model
+
+
+def test_model_ir_package_has_no_jax_imports():
+    offenders: list[str] = []
+    for path in sorted(MODEL_IR_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "jax" or alias.name.startswith("jax."):
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level == 0 and (module == "jax" or module.startswith("jax.")):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_passive_model_ir_is_valid_and_exposes_fusion_terms():
+    model = _source_model("passive")
+    assert model.name == "passive"
+    assert [current.name for current in model.currents] == ["I_l"]
+    assert [parameter.name for parameter in model.parameters] == ["Rm", "EL"]
+    assert model.parameters[0].quantity.unit == RESISTANCE_AREA_OHM_CM2
+    assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+    assert len(model.metadata["source_hash"]) == 40
+    provenance = model.metadata["source_provenance"]
+    assert provenance["contract"] == model.metadata["source_contract"]
+    assert provenance["compiler"] == model.metadata["source_compiler"]
+    assert provenance["source_hash"] == model.metadata["source_hash"]
+    assert provenance["function_names"] == ("leak",)
+    with pytest.raises(TypeError):
+        model.metadata["x"] = "mutating metadata is not allowed"
+
+    contract = derive_model_step_contract(model, requested_observables=("g_l",))
+
+    assert contract.total_outward_current == "sum(currents) + background_current"
+    assert contract.total_conductance == "sum(current.conductance)"
+    assert contract.conductance_reversal_sum == "sum(current.conductance * current.reversal)"
+    assert contract.pruning.retain_observables == ("g_l",)
+    assert contract.supports_single_cable_fusion
+    assert contract.supports_double_cable_fusion
+
+
+def test_membrane_program_exposes_backend_neutral_runtime_contract():
+    model = lower_membrane_model_to_ir(
+        membranes.Composite(
+            [
+                membranes.RattayAberham(),
+                membranes.Passive(Rm=1000.0, EL=-70.0),
+            ]
+        )
+    )
+    program = membrane_program_from_model_ir(model)
+
+    assert program.name == "composite"
+    assert program.gate_state_names == ("m", "h", "n")
+    assert program.membrane_state_names == ()
+    assert program.raw_current_names == ("I_na", "I_k", "I_l", "I_l")
+    assert program.current_names == ("I_na", "I_k", "I_l")
+    assert program.current_groups == ((0,), (1,), (2, 3))
+    assert program.raw_conductance_names == ("g_na", "g_k", "g_l", "g_l")
+    assert program.conductance_names == ("g_na", "g_k", "g_l")
+    assert program.conductance_groups == ((0,), (1,), (2, 3))
+    assert program.conductance_parameter_names == ("gnabar", "gkbar", "gl", "gl")
+    assert program.diagnostic_names == ()
+    assert program.final_gate_update_mode == "post_solve_voltage"
+    assert program.source_provenance["kind"] == "composite"
+    assert len(program.source_provenance["components"]) == 2
+    assert program.structural_hash == structural_hash(model)
+    assert program.parameterized_hash == parameterized_hash(model)
+
+    source_program = membrane_program_from_model_ir(
+        lower_membrane_model_to_ir(membranes.HodgkinHuxley())
+    )
+    assert source_program.source_provenance["source_hash"]
+    assert source_program.codegen_cache["key"]
+
+
+def test_passive_plain_python_source_codegen_cache(tmp_path):
+    first = compile_model_source_file(
+        PASSIVE_SOURCE,
+        parameter_defaults={"Rm": 20_000.0, "EL": -65.0},
+        cache_root=tmp_path,
+    )
+    second = compile_model_source_file(
+        PASSIVE_SOURCE,
+        parameter_defaults={"Rm": 30_000.0, "EL": -60.0},
+        cache_root=tmp_path,
+    )
+
+    assert first.source_hash == second.source_hash
+    assert first.cache.cache_hit is False
+    assert first.cache.cache_reason == "manifest_missing"
+    assert second.cache.cache_hit is True
+    assert second.cache.cache_reason == "manifest_match"
+    assert first.cache.key == second.cache.key
+    assert first.model.metadata["codegen_cache"] == second.model.metadata["codegen_cache"]
+    assert first.model.metadata["codegen_cache"]["key"] == first.cache.key
+    assert "cache_hit" not in first.model.metadata["codegen_cache"]
+    assert structural_hash(first.model) == structural_hash(second.model)
+    assert (first.cache.directory / "manifest.json").is_file()
+    assert (first.cache.directory / "source_snapshot.py").is_file()
+    assert (first.cache.directory / "graph.json").is_file()
+    assert (first.cache.directory / "optimized_graph.json").is_file()
+    jax_source = (first.cache.directory / "jax_model.py").read_text(encoding="utf-8")
+    numpy_source = (first.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+
+    assert "import jax.numpy as xp" in jax_source
+    assert "import numpy as xp" in numpy_source
+    assert "ARG_NAMES = ('Vm', 'Rm', 'EL')" in jax_source
+    assert "OUTPUT_NAMES = ('I_l', 'g_l')" in jax_source
+    assert "def model_step(Vm, Rm, EL):" in jax_source
+    assert "g_l = (1000.0 / Rm)" in jax_source
+
+    interpreter = NumpyModelInterpreter(first.model)
+    V = np.asarray([-80.0, -65.0, -40.0], dtype=np.float32)
+    gates = interpreter.init_gates(V)
+    expected_conductance = np.full((3, 1), 0.05, dtype=np.float32)
+    expected_current = 0.05 * (V - (-65.0))
+
+    np.testing.assert_allclose(interpreter.conductances(gates), expected_conductance)
+    np.testing.assert_allclose(interpreter.currents(V, gates), expected_current)
+
+
+def test_source_codegen_cache_hit_loads_graph_without_ast_parse(tmp_path, monkeypatch):
+    first = compile_model_source_file(
+        PASSIVE_SOURCE,
+        parameter_defaults={"Rm": 20_000.0, "EL": -65.0},
+        cache_root=tmp_path,
+    )
+
+    def fail_parse(*args, **kwargs):
+        raise AssertionError("cache hit should not parse source AST")
+
+    monkeypatch.setattr(source_compiler.ast, "parse", fail_parse)
+    second = compile_model_source_file(
+        PASSIVE_SOURCE,
+        parameter_defaults={"Rm": 30_000.0, "EL": -60.0},
+        cache_root=tmp_path,
+        load_generated_modules=("numpy",),
+    )
+
+    assert second.cache.cache_hit is True
+    assert second.cache.cache_reason == "manifest_match"
+    assert second.cache.loaded_modules["numpy"].CACHE_KEY == first.cache.key
+    assert second.source_hash == first.source_hash
+    assert second.model.parameters[0].default == 30_000.0
+    assert second.model.parameters[1].default == -60.0
+    assert structural_hash(second.model) == structural_hash(first.model)
+
+
+def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):
+    compiled = compile_model_source_file(PASSIVE_SOURCE, cache_root=tmp_path)
+
+    restored = model_ir_from_json(
+        (compiled.cache.directory / "optimized_graph.json").read_text(encoding="utf-8")
+    )
+    expected = replace(
+        compiled.model,
+        metadata={
+            key: value
+            for key, value in compiled.model.metadata.items()
+            if key != "codegen_cache"
+        },
+    )
+
+    assert restored.name == compiled.model.name
+    assert restored.metadata["source_hash"] == compiled.model.metadata["source_hash"]
+    assert structural_hash(restored) == structural_hash(expected)
+    assert parameterized_hash(restored) == parameterized_hash(expected)
+
+
+def test_jax_membrane_program_uses_generated_model_step_for_currents(tmp_path):
+    compiled = compile_model_source_file(
+        PASSIVE_SOURCE,
+        cache_root=tmp_path,
+        load_generated_modules=("jax",),
+    )
+    module = compiled.cache.loaded_modules["jax"]
+    original_model_step = module.model_step
+
+    def fake_model_step(Vm, Rm, EL):
+        _ = Rm, EL
+        return jnp.full_like(Vm, 7.0), jnp.full_like(Vm, 3.0)
+
+    module.model_step = fake_model_step
+    try:
+        membrane = JaxMembraneProgram.from_model_ir(
+            compiled.model,
+            generated_module=module,
+        )
+        V = jnp.asarray([-80.0, -65.0, -40.0], dtype=jnp.float32)
+        gates = jnp.zeros((3, 0), dtype=jnp.float32)
+
+        assert membrane.uses_generated_model_step
+        np.testing.assert_allclose(
+            np.asarray(membrane.ionic_current_trace_matrix(V, gates)),
+            np.full((3, 1), 7.0, dtype=np.float32),
+        )
+        np.testing.assert_allclose(
+            np.asarray(membrane.currents(V, gates)),
+            np.full((3,), 7.0, dtype=np.float32),
+        )
+    finally:
+        module.model_step = original_model_step
+
+
+def test_source_parameter_defaults_must_include_units_for_dimensioned_values(tmp_path):
+    source = tmp_path / "bad_units.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+
+class BadUnits(Model):
+    model_kind = "bad_units"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0):
+        I_l: CurrentDensity = Vm - EL
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SourceModelCompileError, match="must specify unit 'mV'"):
+        compile_model_source_file(source)
+
+
+def test_source_parameter_defaults_accept_top_level_axonscope_units(tmp_path):
+    source = tmp_path / "top_level_units.py"
+    source.write_text(
+        """
+import axonscope as axs
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, ResistanceArea, Voltage
+
+class TopLevelUnits(axs.membranes.Model):
+    model_kind = "top_level_units"
+
+    Rm: ResistanceArea = 1.0e4 * axs.ohm_cm2
+    EL: Voltage = -70.0 * axs.mV
+
+    @axs.membranes.currents
+    def currents(self, Vm: Voltage):
+        g_l: ConductanceDensity = 1.0 / self.Rm
+        I_l: CurrentDensity = g_l * (Vm - self.EL)
+        return I_l, g_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+    assert compiled.model.name == "top_level_units"
+    assert [parameter.name for parameter in compiled.model.parameters] == ["Rm", "EL"]
+
+
+def test_source_compiler_topologically_orders_equations(tmp_path):
+    source = tmp_path / "out_of_order.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, ResistanceArea, Voltage
+from axonscope.utils.units import cm2, mV, ohm
+
+class OutOfOrder(Model):
+    model_kind = "out_of_order"
+
+    @currents
+    def currents(self, Vm: Voltage, Rm: ResistanceArea = 1.0e4 * ohm * cm2, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = g_l * (Vm - EL)
+        g_l: ConductanceDensity = 1.0 / Rm
+        return I_l, g_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(source, cache_root=tmp_path / "cache")
+    generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+
+    assert compiled.model.name == "out_of_order"
+    assert generated.index("g_l =") < generated.index("I_l =")
+
+
+def test_source_compiler_reports_unknown_equation_dependencies(tmp_path):
+    source = tmp_path / "unknown_dependency.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class UnknownDependency(Model):
+    model_kind = "unknown_dependency"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = missing_current
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match=r"line \d+, column \d+: Unknown symbol\(s\).*missing_current",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_reports_equation_cycles(tmp_path):
+    source = tmp_path / "cycle.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class Cycle(Model):
+    model_kind = "cycle"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        a: CurrentDensity = b
+        b: CurrentDensity = a
+        I_l: CurrentDensity = a
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="Cycle detected in equation dependencies: a -> b -> a",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_rejects_duplicate_equation_assignments(tmp_path):
+    source = tmp_path / "duplicate_assignment.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, ResistanceArea, Voltage
+from axonscope.utils.units import cm2, mV, ohm
+
+class DuplicateAssignment(Model):
+    model_kind = "duplicate_assignment"
+
+    @currents
+    def currents(self, Vm: Voltage, Rm: ResistanceArea = 1.0e4 * ohm * cm2, EL: Voltage = -70.0 * mV):
+        g_l: ConductanceDensity = 1.0 / Rm
+        g_l: ConductanceDensity = 2.0 / Rm
+        I_l: CurrentDensity = g_l * (Vm - EL)
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="Duplicate equation assignment 'g_l'; first defined",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_rejects_duplicate_exports(tmp_path):
+    source = tmp_path / "duplicate_export.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class DuplicateExport(Model):
+    model_kind = "duplicate_export"
+
+    @currents(outputs=("I_l", "I_l"))
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = Vm - EL
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="Duplicate @currents currents name 'I_l'",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_rejects_manifest_export_fields(tmp_path):
+    source = tmp_path / "manifest_export.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class ManifestExport(Model):
+    model_kind = "manifest_export"
+    exports = {"currents": ("I_l",)}
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = Vm - EL
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match=r"ManifestExport\.exports is no longer supported",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_reports_unsupported_helpers_with_source_location(tmp_path):
+    source = tmp_path / "unsupported_helper.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class UnsupportedHelper(Model):
+    model_kind = "unsupported_helper"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = unsupported_helper(Vm - EL)
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match=r"line \d+, column \d+: Unsupported equation helper 'unsupported_helper'",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_hh_plain_python_source_codegen_keeps_equations_executable(tmp_path):
+    compiled = compile_model_source_file(HH_SOURCE, cache_root=tmp_path)
+
+    assert compiled.model.name == "hodgkin_huxley"
+    assert [state.name for state in compiled.model.states] == ["m", "h", "n"]
+    assert [gate.state for gate in compiled.model.gates] == ["m", "h", "n"]
+    assert compiled.cache.cache_hit is False
+
+    numpy_source = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+    assert "ARG_NAMES = ('Vm', 'm', 'h', 'n', 'gnabar', 'gkbar', 'gl', 'el', 'ena', 'ek')" in numpy_source
+    assert "OUTPUT_NAMES = ('I_na', 'I_k', 'I_l', 'g_na', 'g_k', 'g_l')" in numpy_source
+    assert "def model_step(Vm, m, h, n, gnabar, gkbar, gl, el, ena, ek):" in numpy_source
+    assert "alpha_m =" not in numpy_source
+
+    spec = importlib.util.spec_from_file_location(
+        "axonscope_test_hh_numpy_model",
+        compiled.cache.directory / "numpy_model.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    interpreter = NumpyModelInterpreter(compiled.model, dtype=np.float64)
+    V = -65.0
+    gates = interpreter.init_gates([V])[0]
+    params = {parameter.name: parameter.default for parameter in compiled.model.parameters}
+    values = module.model_step(
+        V,
+        float(gates[0]),
+        float(gates[1]),
+        float(gates[2]),
+        params["gnabar"],
+        params["gkbar"],
+        params["gl"],
+        params["el"],
+        params["ena"],
+        params["ek"],
+    )
+
+    expected_currents = interpreter.current_matrix([V], gates.reshape(1, 3))[0]
+    expected_conductances = interpreter.conductances(gates.reshape(1, 3))[0]
+    np.testing.assert_allclose(values[:3], expected_currents, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(values[3:], expected_conductances, rtol=1e-12, atol=1e-12)
+
+
+def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
+    compiled = compile_model_source_file(TIGERHOLM_SOURCE, cache_root=tmp_path)
+    model = compiled.model
+
+    assert model.name == "tigerholm"
+    assert compiled.function_name == "initials,nav17,nav18,nav19,ks,kf,kdr,hcn,currents,step"
+    assert model.metadata["source_function"] == compiled.function_name
+    assert model.metadata["display_name"] == "Tigerholm C-fiber"
+    assert model.metadata["internal_outputs"] == (
+        "i_na_dyn",
+        "i_k_dyn",
+        "total_outward_current",
+        "explicit_outward_current",
+        "correction_current",
+    )
+    assert model.metadata["states"]["nai"]["description"] == (
+        "Intracellular sodium concentration."
+    )
+    spec = importlib.util.spec_from_file_location(
+        "axonscope_test_tigerholm_source",
+        TIGERHOLM_SOURCE,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source_class = module.Tigerholm
+    assert source_class.kind_name() == "tigerholm"
+    assert tuple(
+        getattr(getattr(source_class, name), "__axonscope_section__")
+        for name in (
+            "initials",
+            "nav17",
+            "nav18",
+            "nav19",
+            "ks",
+            "kf",
+            "kdr",
+            "hcn",
+            "currents",
+            "step",
+        )
+    ) == (
+        "initials",
+        "mechanism:nav17",
+        "mechanism:nav18",
+        "mechanism:nav19",
+        "mechanism:ks",
+        "mechanism:kf",
+        "mechanism:kdr",
+        "mechanism:hcn",
+        "currents",
+        "step",
+    )
+    assert [current.name for current in model.currents] == [
+        "I_na",
+        "I_na",
+        "I_na",
+        "I_k",
+        "I_k",
+        "I_k",
+        "I_k",
+        "I_k",
+    ]
+    assert [observable.name for observable in model.observables] == ["g_na", "g_k", "w_kna"]
+    state_names = [state.name for state in model.states]
+    assert all(name in state_names for name in ("nai", "nao", "ki", "ko"))
+    assert model.step_program is not None
+    assert [update.state for update in model.step_program.prepare_state_updates] == [
+        "nai",
+        "nao",
+        "ki",
+        "ko",
+    ]
+
+    generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+    assert "def q10(base, celsius, reference):" in generated
+    assert "def alpha_from_inf_tau(x_inf, tau):" in generated
+    assert "return I_na_nav17, I_na_nav18, I_na_nav19" in generated
+
+
+def test_schild_sources_export_full_calcium_step_program(tmp_path):
+    cases = (
+        (SCHILD94_SOURCE, "schild94", 15),
+        (SCHILD97_SOURCE, "schild97", 14),
+    )
+    for source, name, gate_count in cases:
+        compiled = compile_model_source_file(source, cache_root=tmp_path)
+        model = compiled.model
+        assert model.name == name
+        assert name + ".py" in model.metadata["source"]
+        assert model.metadata["family"] == "schild"
+        assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+        assert next(
+            parameter for parameter in model.parameters if parameter.name == "diameter_um"
+        ).quantity.unit == "micrometer"
+        module = __import__(
+            f"axonscope.membranes.models.{name}",
+            fromlist=["Schild94" if name == "schild94" else "Schild97", "derive_parameters"],
+        )
+        source_class = getattr(module, "Schild94" if name == "schild94" else "Schild97")
+        assert callable(module.derive_parameters)
+        assert not hasattr(source_class, "parameter_defaults")
+        assert [current.name for current in model.currents] == [
+            "I_na",
+            "I_ca",
+            "I_na",
+            "I_na",
+            "I_k",
+            "I_k",
+            "I_k",
+            "I_ca",
+            "I_ca",
+        ]
+        assert [observable.name for observable in model.observables] == ["g_na", "g_k", "g_ca"]
+        assert len(model.gates) == gate_count
+        assert model.step_program is not None
+        assert model.step_program.prepare_gate_source is LinearizationGateSource.PREVIOUS
+        assert model.step_program.linearization_gate_source is LinearizationGateSource.PREVIOUS
+        assert [update.state for update in model.step_program.prepare_state_updates] == [
+            "cai",
+            "Oc",
+            "cao",
+        ]
+        assert [update.state for update in model.step_program.finalize_state_updates] == [
+            "c_kca",
+            "cai",
+            "Oc",
+            "cao",
+        ]
+        assert [diagnostic.name for diagnostic in model.step_program.diagnostics] == [
+            "I_na_total_uAcm2",
+            "I_k_total_uAcm2",
+            "I_ca_total_uAcm2",
+            "I_total_rhs_uAcm2",
+        ]
+        interpreter = NumpyModelInterpreter(model, dtype=np.float64)
+        low, high = interpreter.init_membrane_state([-80.0, -40.0])[-1]
+        assert low != pytest.approx(high)
+        generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+        assert "Vm_prev" not in generated
+        assert "I_ion" not in generated
+        assert "OUTPUT_NAMES" in generated
+
+
+def test_schild_public_descriptors_compile_source_and_keep_dynamic_kca_initial():
+    for public_model, expected_source in (
+        (
+            membranes.Schild94(
+                diameter=0.8 * axs.um,
+                temperature=36.0 * axs.degC,
+                v_init=-50.0 * axs.mV,
+            ),
+            "schild94.py",
+        ),
+        (
+            membranes.Schild97(
+                diameter=0.8 * axs.um,
+                temperature=36.0 * axs.degC,
+                v_init=-50.0 * axs.mV,
+            ),
+            "schild97.py",
+        ),
+    ):
+        model = lower_membrane_model_to_ir(public_model)
+        assert expected_source in model.metadata["source"]
+        assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+        c_kca = next(state for state in model.states if state.name == "c_kca")
+        assert c_kca.initial is not None
+        interpreter = NumpyModelInterpreter(model, dtype=np.float64)
+        low, high = interpreter.init_membrane_state([-80.0, -40.0])[-1]
+
+        assert low != pytest.approx(high)
+        assert model.step_program is not None
+        assert model.step_program.prepare_gate_source is LinearizationGateSource.PREVIOUS
+
+
+def test_hh_model_ir_keeps_gates_currents_and_observables_visible():
+    model = _source_model("hodgkin_huxley")
+
+    assert [state.name for state in model.states] == ["m", "h", "n"]
+    assert [gate.state for gate in model.gates] == ["m", "h", "n"]
+    assert [current.name for current in model.currents] == ["I_na", "I_k", "I_l"]
+    assert [observable.name for observable in model.observables] == ["g_na", "g_k", "g_l"]
+    assert_valid_model_ir(model)
+
+
+def test_rattay_model_ir_keeps_specific_rates_visible():
+    model = _source_model("rattay_aberham")
+
+    assert model.name == "rattay_aberham"
+    assert [state.name for state in model.states] == ["m", "h", "n"]
+    assert [current.name for current in model.currents] == ["I_na", "I_k", "I_l"]
+    assert model.metadata["final_gate_update"] == "post_solve_voltage"
+    assert_valid_model_ir(model)
+
+
+def test_sundt_component_model_irs_keep_rates_visible():
+    na_model = _source_model("na_hh")
+    k_model = _source_model("borg_kdr")
+    sundt = _source_model("sundt")
+
+    assert [state.name for state in na_model.states] == ["m", "h"]
+    assert [current.name for current in na_model.currents] == ["I_na"]
+    assert [state.name for state in k_model.states] == ["n", "l"]
+    assert [current.name for current in k_model.currents] == ["I_k"]
+    assert sundt.name == "sundt"
+    assert [state.name for state in sundt.states] == ["m", "h", "n", "l"]
+    assert [current.name for current in sundt.currents] == ["I_na", "I_k", "I_l"]
+    assert sundt.metadata["final_gate_update"] == "post_solve_voltage"
+    assert "sundt.py" in sundt.metadata["source"]
+    assert sundt.metadata["display_name"] == "Sundt composite membrane"
+    assert_valid_model_ir(na_model)
+    assert_valid_model_ir(k_model)
+    assert_valid_model_ir(sundt)
+
+
+def test_axnode_model_ir_keeps_rates_currents_and_observables_visible():
+    model = _source_model("axnode")
+
+    assert model.name == "axnode"
+    assert [state.name for state in model.states] == ["mp", "m", "h", "s"]
+    assert [current.name for current in model.currents] == ["I_nap", "I_na", "I_k", "I_l"]
+    assert [observable.name for observable in model.observables] == [
+        "g_nap",
+        "g_na",
+        "g_k",
+        "g_l",
+    ]
+    assert "final_gate_update" not in model.metadata
+    assert_valid_model_ir(model)
+
+
+def test_membrane_descriptions_can_be_adapted_to_model_ir():
+    assert lower_membrane_model_to_ir(membranes.Passive()).name == "passive"
+    assert lower_membrane_model_to_ir(membranes.HodgkinHuxley()).name == "hodgkin_huxley"
+    assert lower_membrane_model_to_ir(membranes.RattayAberham()).name == "rattay_aberham"
+    assert lower_membrane_model_to_ir(membranes.Sundt()).name == "sundt"
+    assert lower_membrane_model_to_ir(membranes.AxNode()).name == "axnode"
+    assert lower_membrane_model_to_ir(membranes.Schild94(diameter=0.8 * axs.um)).name == "schild94"
+    assert lower_membrane_model_to_ir(membranes.Schild97(diameter=0.8 * axs.um)).name == "schild97"
+
+    custom = lower_membrane_model_to_ir(
+        membranes.HodgkinHuxley(gl=1.0 * axs.mS_per_cm2, ek=-80.0 * axs.mV)
+    )
+    defaults = {parameter.name: parameter.default for parameter in custom.parameters}
+
+    assert defaults["gl"] == pytest.approx(1.0)
+    assert defaults["ek"] == pytest.approx(-80.0)
+
+
+def test_descriptor_values_affect_parameterized_hash_not_structure():
+    base = lower_membrane_model_to_ir(membranes.HodgkinHuxley(gl=0.3 * axs.mS_per_cm2))
+    changed = lower_membrane_model_to_ir(membranes.HodgkinHuxley(gl=1.0 * axs.mS_per_cm2))
+
+    assert structural_hash(base) == structural_hash(changed)
+    assert parameterized_hash(base) != parameterized_hash(changed)
+
+    passive_base = lower_membrane_model_to_ir(membranes.Passive(Rm=1e4))
+    passive_changed = lower_membrane_model_to_ir(membranes.Passive(Rm=2e4))
+
+    assert structural_hash(passive_base) == structural_hash(passive_changed)
+    assert parameterized_hash(passive_base) != parameterized_hash(passive_changed)
+
+
+def test_structural_hash_excludes_dynamic_parameter_values():
+    model = _source_model("passive")
+    changed_parameter = Parameter(
+        model.parameters[0].name,
+        model.parameters[0].quantity,
+        variability=model.parameters[0].variability,
+        default=2e4,
+    )
+    changed = replace(model, parameters=(changed_parameter, model.parameters[1]))
+
+    assert structural_hash(model) == structural_hash(changed)
+    assert parameterized_hash(model) != parameterized_hash(changed)
+
+
+def test_validation_rejects_dimensional_intrinsic_arguments():
+    Vm = symbol("Vm")
+    model = ModelIR(
+        name="bad_exp",
+        inputs=(
+            Input(
+                "Vm",
+                QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+            ),
+        ),
+        observables=(
+            Observable(
+                "bad",
+                exp(Vm),
+                QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.DIMENSIONLESS),
+            ),
+        ),
+    )
+
+    with pytest.raises(ModelValidationError, match="requires dimensionless"):
+        assert_valid_model_ir(model)
+
+
+def test_validation_rejects_unsupported_intrinsics():
+    x = symbol("x")
+    model = ModelIR(
+        name="bad_intrinsic",
+        inputs=(
+            Input(
+                "x",
+                QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.DIMENSIONLESS),
+            ),
+        ),
+        observables=(
+            Observable(
+                "bad",
+                call("jax_exp", x),
+                QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.DIMENSIONLESS),
+            ),
+        ),
+    )
+
+    with pytest.raises(ModelValidationError, match="unsupported intrinsic"):
+        assert_valid_model_ir(model)
+
+
+def test_numpy_interpreter_passive_membrane_primitives_are_analytic():
+    model = _source_model("passive", {"Rm": 2e4, "EL": -65.0})
+    interpreter = NumpyModelInterpreter(model)
+    V = np.asarray([-80.0, -65.0, -40.0], dtype=np.float32)
+    gates = interpreter.init_gates(V)
+    expected_conductance = np.full((3, 1), 0.05, dtype=np.float32)
+    expected_current = 0.05 * (V - (-65.0))
+
+    np.testing.assert_allclose(gates, np.zeros((3, 0), dtype=np.float32))
+    np.testing.assert_allclose(interpreter.conductances(gates), expected_conductance)
+    np.testing.assert_allclose(interpreter.currents(V, gates), expected_current)
+
+
+def test_jax_membrane_program_matches_numpy_interpreter_for_hh_and_rattay():
+    V = np.linspace(-85.0, 35.0, 9, dtype=np.float32)
+    cases = (
+        membranes.HodgkinHuxley(),
+        membranes.RattayAberham(),
+    )
+
+    for public_model in cases:
+        model = lower_membrane_model_to_ir(public_model)
+        interpreter = NumpyModelInterpreter(model)
+        membrane = compile_membrane_model(public_model)
+        assert isinstance(membrane, JaxMembraneProgram)
+        V_jax = jnp.asarray(V, dtype=jnp.float32)
+        gates_np = interpreter.init_gates(V)
+        gates_jax = membrane.init_gates(V_jax)
+        alpha_np, beta_np = interpreter.rate_constants(V)
+
+        np.testing.assert_allclose(np.asarray(membrane.alpha_funcs(V_jax)), alpha_np, rtol=1e-6)
+        np.testing.assert_allclose(np.asarray(membrane.beta_funcs(V_jax)), beta_np, rtol=1e-6)
+        np.testing.assert_allclose(np.asarray(gates_jax), gates_np, rtol=1e-6)
+        np.testing.assert_allclose(
+            np.asarray(membrane.conductances(gates_jax)),
+            interpreter.conductances(gates_np),
+            rtol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(membrane.currents(V_jax, gates_jax)),
+            interpreter.currents(V, gates_np),
+            rtol=1e-6,
+            atol=5e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(membrane.cn_gate_update(gates_jax, V_jax, 0.01)),
+            interpreter.gate_update(gates_np, V, 0.01),
+            rtol=1e-6,
+        )
+
+
+def test_jax_membrane_program_keeps_auxiliary_states_separate_from_gates():
+    Vm = symbol("Vm")
+    m = symbol("m")
+    c = symbol("c")
+    gbar = symbol("gbar")
+    E = symbol("E")
+    dynamic_E = E + literal(5.0, unit=VOLTAGE_MV) * c
+    current = gbar * m * (Vm - dynamic_E)
+    model = assert_valid_model_ir(
+        ModelIR(
+            name="aux_state_current",
+            inputs=(Input("Vm", QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE)),),
+            parameters=(
+                Parameter(
+                    "gbar",
+                    QuantitySpec(
+                        unit=CONDUCTANCE_DENSITY_MS_CM2,
+                        role=SemanticRole.CONDUCTANCE_DENSITY,
+                    ),
+                    default=0.3,
+                ),
+                Parameter(
+                    "E",
+                    QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                    default=-70.0,
+                ),
+            ),
+            states=(
+                State("m", QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.GATE)),
+                State(
+                    "c",
+                    QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.DIMENSIONLESS),
+                    initial=literal(2.0),
+                ),
+            ),
+            gates=(
+                Gate(
+                    "m",
+                    state="m",
+                    alpha=literal(0.1, unit=RATE_PER_MS),
+                    beta=literal(0.2, unit=RATE_PER_MS),
+                ),
+            ),
+            currents=(
+                Current(
+                    "I_aux",
+                    current=current,
+                    conductance=gbar * m,
+                    reversal=dynamic_E,
+                    quantity=QuantitySpec(
+                        unit=CURRENT_DENSITY_UA_CM2,
+                        role=SemanticRole.CURRENT_DENSITY,
+                    ),
+                ),
+            ),
+            observables=(
+                Observable(
+                    "dynamic_E",
+                    dynamic_E,
+                    QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                ),
+            ),
+        )
+    )
+    contract = derive_model_step_contract(model)
+    interpreter = NumpyModelInterpreter(model)
+    membrane = JaxMembraneProgram.from_model_ir(model)
+    V = jnp.asarray([-70.0, -60.0], dtype=jnp.float32)
+    gates = membrane.init_gates(V)
+    state = membrane.init_membrane_state(2, jnp.float32, V)
+
+    assert membrane.gate_names() == ("m",)
+    assert membrane.membrane_state_names() == ("c",)
+    np.testing.assert_allclose(np.asarray(gates), np.full((2, 1), 1.0 / 3.0))
+    np.testing.assert_allclose(np.asarray(state[0]), np.full((2,), 2.0))
+
+    expected_current = 0.3 * (1.0 / 3.0) * (np.asarray(V) - (-60.0))
+    np.testing.assert_allclose(
+        np.asarray(membrane.ionic_current_trace_matrix(V, gates, state)[:, 0]),
+        expected_current,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(membrane.lowering.observable_matrix("dynamic_E", gates, state=state)),
+        np.full((2,), -60.0, dtype=np.float32),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        interpreter.currents(np.asarray(V), np.asarray(gates), state=state),
+        expected_current,
+        rtol=1e-6,
+    )
+
+
+def test_model_ir_step_program_drives_prepare_finalize_and_diagnostics():
+    Vm = symbol("Vm")
+    m = symbol("m")
+    bias = symbol("bias")
+    gbar = symbol("gbar")
+    E = symbol("E")
+    I_aux = symbol("I_aux")
+    I_ion = symbol("I_ion")
+    I_background = symbol("I_background")
+    current = gbar * m * (Vm - E)
+    current_quantity = QuantitySpec(
+        unit=CURRENT_DENSITY_UA_CM2,
+        role=SemanticRole.CURRENT_DENSITY,
+    )
+    model = assert_valid_model_ir(
+        ModelIR(
+            name="stateful_step_program",
+            inputs=(Input("Vm", QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE)),),
+            parameters=(
+                Parameter(
+                    "gbar",
+                    QuantitySpec(
+                        unit=CONDUCTANCE_DENSITY_MS_CM2,
+                        role=SemanticRole.CONDUCTANCE_DENSITY,
+                    ),
+                    default=0.3,
+                ),
+                Parameter(
+                    "E",
+                    QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                    default=-70.0,
+                ),
+            ),
+            states=(
+                State("m", QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.GATE)),
+                State(
+                    "bias",
+                    current_quantity,
+                    initial=literal(0.0, unit=CURRENT_DENSITY_UA_CM2),
+                ),
+            ),
+            gates=(
+                Gate(
+                    "m",
+                    state="m",
+                    alpha=literal(0.1, unit=RATE_PER_MS),
+                    beta=literal(0.2, unit=RATE_PER_MS),
+                ),
+            ),
+            currents=(
+                Current(
+                    "I_aux",
+                    current=current,
+                    conductance=gbar * m,
+                    reversal=E,
+                    quantity=current_quantity,
+                ),
+            ),
+            step_program=StepProgram(
+                prepare_state_updates=(StateUpdate("bias", I_aux),),
+                finalize_state_updates=(
+                    StateUpdate(
+                        "bias",
+                        literal(0.0, unit=CURRENT_DENSITY_UA_CM2),
+                    ),
+                ),
+                total_outward_current=I_background + I_ion + bias,
+                explicit_outward_current=I_background + bias,
+                correction_current=bias * literal(0.25),
+                linearization_gate_source=LinearizationGateSource.PREVIOUS,
+                diagnostics=(Diagnostic("bias_current", bias, current_quantity),),
+            ),
+        )
+    )
+    contract = derive_model_step_contract(model)
+    interpreter = NumpyModelInterpreter(model)
+    membrane = JaxMembraneProgram.from_model_ir(model)
+    V = jnp.asarray([-60.0, -50.0], dtype=jnp.float32)
+    gates_prev = jnp.full((2, 1), 0.25, dtype=jnp.float32)
+    gates_new = membrane.init_gates(V)
+    state0 = membrane.init_membrane_state(2, jnp.float32, V)
+    I_background_values = jnp.full((2,), 0.5, dtype=jnp.float32)
+    I_ion_values = membrane.currents(V, gates_new, state0)
+
+    plan = membrane.prepare_membrane_step(
+        V,
+        gates_prev,
+        gates_new,
+        state0,
+        0.01,
+        I_ion_values,
+        I_background_values,
+    )
+    state_final = membrane.finalize_membrane_step(
+        V,
+        V + 1.0,
+        gates_prev,
+        gates_new,
+        state0,
+        plan,
+        0.01,
+    )
+    diagnostics = membrane.compute_step_diagnostics(
+        V,
+        V + 1.0,
+        gates_prev,
+        gates_new,
+        state0,
+        state_final,
+        plan,
+        I_ion_values,
+    )
+
+    expected_current = np.asarray([1.0, 2.0], dtype=np.float32)
+    assert contract.total_outward_current == "step.total_outward_current"
+    assert contract.explicit_outward_current == "step.explicit_outward_current"
+    assert contract.correction_current == "step.correction_current"
+    assert contract.linearization_state == ("previous_gates",)
+    np.testing.assert_allclose(np.asarray(I_ion_values), expected_current, rtol=1e-6)
+    np.testing.assert_allclose(np.asarray(plan.state[0]), expected_current, rtol=1e-6)
+    np.testing.assert_allclose(np.asarray(plan.linearization_gates), np.asarray(gates_prev))
+    np.testing.assert_allclose(
+        np.asarray(plan.total_outward_current),
+        0.5 + expected_current,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(plan.explicit_outward_current),
+        np.full((2,), 0.5, dtype=np.float32),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(plan.correction_current),
+        np.zeros((2,), dtype=np.float32),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(np.asarray(state_final[0]), np.zeros((2,), dtype=np.float32))
+    assert membrane.diagnostic_names() == ("bias_current",)
+    np.testing.assert_allclose(np.asarray(diagnostics[0]), expected_current, rtol=1e-6)
+
+    np_plan = interpreter.prepare_membrane_step(
+        np.asarray(V),
+        np.asarray(gates_prev),
+        np.asarray(gates_new),
+        tuple(np.asarray(value) for value in state0),
+        0.01,
+        np.asarray(I_ion_values),
+        np.asarray(I_background_values),
+    )
+    np.testing.assert_allclose(np_plan.total_outward_current, plan.total_outward_current)
+    np.testing.assert_allclose(np_plan.correction_current, plan.correction_current)
+
+
+def test_model_ir_step_program_rejects_gate_state_updates():
+    Vm = symbol("Vm")
+    m = symbol("m")
+    gbar = symbol("gbar")
+    E = symbol("E")
+    current_quantity = QuantitySpec(
+        unit=CURRENT_DENSITY_UA_CM2,
+        role=SemanticRole.CURRENT_DENSITY,
+    )
+
+    with pytest.raises(ModelValidationError, match="cannot update gate state"):
+        assert_valid_model_ir(
+            ModelIR(
+                name="bad_gate_update",
+                inputs=(
+                    Input(
+                        "Vm",
+                        QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                    ),
+                ),
+                parameters=(
+                    Parameter(
+                        "gbar",
+                        QuantitySpec(
+                            unit=CONDUCTANCE_DENSITY_MS_CM2,
+                            role=SemanticRole.CONDUCTANCE_DENSITY,
+                        ),
+                        default=0.3,
+                    ),
+                    Parameter(
+                        "E",
+                        QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                        default=-70.0,
+                    ),
+                ),
+                states=(State("m", QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.GATE)),),
+                gates=(
+                    Gate(
+                        "m",
+                        state="m",
+                        alpha=literal(0.1, unit=RATE_PER_MS),
+                        beta=literal(0.2, unit=RATE_PER_MS),
+                    ),
+                ),
+                currents=(
+                    Current(
+                        "I_aux",
+                        current=gbar * m * (Vm - E),
+                        conductance=gbar * m,
+                        reversal=E,
+                        quantity=current_quantity,
+                    ),
+                ),
+                step_program=StepProgram(
+                    prepare_state_updates=(StateUpdate("m", literal(0.0)),),
+                ),
+            )
+        )
+
+
+def test_jax_membrane_program_sundt_primitives_are_well_formed():
+    public_model = membranes.Sundt()
+    membrane = compile_membrane_model(public_model)
+    V = jnp.linspace(-90.0, 30.0, 11, dtype=jnp.float32)
+
+    assert isinstance(membrane, JaxMembraneProgram)
+    assert membrane.gate_names() == ("m", "h", "n", "l")
+    assert membrane.current_names() == ("I_na", "I_k", "I_l")
+    assert membrane.conductance_names() == ("g_na", "g_k", "g_l")
+
+    gates = membrane.init_gates(V)
+    assert gates.shape == (11, 4)
+    assert membrane.g_bar.shape == (3,)
+    assert membrane.E_rev.shape == (3,)
+    np.testing.assert_allclose(np.asarray(membrane.g_bar), [40.0, 40.0, 0.1], rtol=1e-6)
+    assert np.isfinite(np.asarray(membrane.alpha_funcs(V))).all()
+    assert np.isfinite(np.asarray(membrane.beta_funcs(V))).all()
+    assert np.isfinite(np.asarray(membrane.conductances(gates))).all()
+    assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
+    assert np.isfinite(np.asarray(membrane.cn_gate_update(gates, V, 0.01))).all()
+
+
+def test_jax_membrane_program_axnode_primitives_are_well_formed():
+    membrane = compile_membrane_model(membranes.AxNode())
+    V = jnp.linspace(-100.0, 40.0, 13, dtype=jnp.float32)
+
+    assert isinstance(membrane, JaxMembraneProgram)
+    assert membrane.gate_names() == ("mp", "m", "h", "s")
+    assert membrane.current_names() == ("I_nap", "I_na", "I_k", "I_l")
+    assert membrane.conductance_names() == ("g_nap", "g_na", "g_k", "g_l")
+    assert membrane.supports_stateless_vm_only_fast_path()
+
+    gates = membrane.init_gates(V)
+    assert gates.shape == (13, 4)
+    assert membrane.g_bar.shape == (4,)
+    assert membrane.E_rev.shape == (4,)
+    assert np.isfinite(np.asarray(membrane.alpha_funcs(V))).all()
+    assert np.isfinite(np.asarray(membrane.beta_funcs(V))).all()
+    assert np.isfinite(np.asarray(membrane.conductances(gates))).all()
+    assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
+    assert np.isfinite(np.asarray(membrane.cn_gate_update(gates, V, 0.01))).all()
+
+
+def test_compile_membrane_model_uses_dsl_for_covered_public_builtins():
+    for model in (
+        membranes.Passive(),
+        membranes.HodgkinHuxley(),
+        membranes.RattayAberham(),
+        membranes.Sundt(),
+        membranes.AxNode(),
+        membranes.Tigerholm(diameter=1.0 * axs.um),
+        membranes.Schild94(diameter=0.8 * axs.um),
+        membranes.Schild97(diameter=0.8 * axs.um),
+    ):
+        compiled = compile_membrane_model(model)
+        assert isinstance(compiled, JaxMembraneProgram)
+        assert compiled.uses_generated_model_step
+
+
+def test_compile_membrane_model_reports_source_cache_status_to_benchmark(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    public_model = MembraneModel("passive", {})
+    axs.enable_benchmark(tmp_path / "benchmark", print_summary=False, save=False)
+    try:
+        with benchmark_span("compile_membrane"):
+            compile_membrane_model(public_model)
+        with benchmark_span("compile_membrane"):
+            compile_membrane_model(public_model)
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert report is not None
+    events = [event for event in report.events if event.name == "compile_membrane"]
+    assert [event.metadata["membrane_source_cache"] for event in events] == [
+        "miss",
+        "hit",
+    ]
+    assert [event.metadata["membrane_source_cache_reasons"] for event in events] == [
+        "manifest_missing",
+        "manifest_match",
+    ]
+    assert all(event.metadata["membrane_source_kind"] == "passive" for event in events)
+    assert all(event.metadata["membrane_source_count"] == 1 for event in events)
+    assert all(event.metadata["membrane_source_loaded_targets"] == ["jax"] for event in events)
+    assert events[0].metadata["membrane_source_cache_keys"] == events[1].metadata[
+        "membrane_source_cache_keys"
+    ]
+
+
+def test_compile_membrane_model_returns_direct_jax_program_contract():
+    model = lower_membrane_model_to_ir(membranes.HodgkinHuxley())
+    runtime = JaxMembraneProgram.from_model_ir(model)
+    membrane = compile_membrane_model(membranes.HodgkinHuxley())
+    V = jnp.linspace(-80.0, 20.0, 5, dtype=jnp.float32)
+
+    assert isinstance(membrane, JaxMembraneProgram)
+    assert membrane.static_signature() == runtime.static_signature()
+    np.testing.assert_allclose(
+        np.asarray(membrane.init_gates(V)),
+        np.asarray(runtime.init_gates(V)),
+        rtol=1e-6,
+    )
+
+    returned = membrane.enable_rate_table(config=RateTableConfig(step_mV=1.0))
+
+    assert returned is membrane
+    assert membrane.has_rate_table
+    assert membrane.rate_table_config == RateTableConfig(step_mV=1.0)
+
+
+def test_membrane_backends_consume_jax_program_directly():
+    hh = JaxMembraneProgram.from_model_ir(
+        lower_membrane_model_to_ir(membranes.HodgkinHuxley())
+    )
+    passive = JaxMembraneProgram.from_model_ir(
+        lower_membrane_model_to_ir(membranes.Passive())
+    )
+
+    uniform = UniformMembraneBackend.from_model(hh, nx=3)
+    heterogeneous = HeterogeneousMembraneBackend.from_models([hh, passive, passive])
+
+    assert isinstance(uniform.ion_channel, JaxMembraneProgram)
+    assert uniform.ion_channel is hh
+    assert all(isinstance(model, JaxMembraneProgram) for model in heterogeneous.membrane_models)
+    assert heterogeneous.membrane_models[0] is hh
+    assert heterogeneous.membrane_models[1] is passive
+
+
+def test_composite_of_model_ir_components_compiles_without_legacy_composite():
+    public_model = membranes.Composite(
+        [
+            membranes.RattayAberham(),
+            membranes.Passive(Rm=1000.0, EL=-70.0),
+        ]
+    )
+    membrane = compile_membrane_model(public_model)
+    V = jnp.linspace(-85.0, 20.0, 7, dtype=jnp.float32)
+
+    assert isinstance(membrane, JaxMembraneProgram)
+    assert membrane.gate_names() == ("m", "h", "n")
+    assert membrane.current_names() == ("I_na", "I_k", "I_l")
+    assert membrane.conductance_names() == ("g_na", "g_k", "g_l")
+
+    gates = membrane.init_gates(V)
+    assert gates.shape == (7, 3)
+    assert membrane.g_bar.shape == membrane.E_rev.shape
+    assert membrane.g_bar.shape[0] >= len(membrane.conductance_names())
+    assert np.isfinite(np.asarray(membrane.conductances(gates))).all()
+    assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
+    assert np.isfinite(np.asarray(membrane.conductance_trace_matrix(gates))).all()
+    assert np.isfinite(np.asarray(membrane.ionic_current_trace_matrix(V, gates))).all()

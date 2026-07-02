@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from axonscope.axons.section import PeriaxonalLayer
-from axonscope.membranes import MembraneModel
+from axonscope.membranes.model import MembraneModel, ensure_membrane_model
 
 if TYPE_CHECKING:
     from axonscope.axons.layout import Layout
@@ -168,7 +168,7 @@ def _flatten_x_centers(layout: "Layout") -> FlattenedLayout:
         diam_um=np.full((count,), section.diameter_um, dtype=np.float32),
         Ra_ohm_cm=np.full((count,), section.Ra_ohm_cm, dtype=np.float32),
         Cm_uF_cm2=np.full((count,), section.Cm_uF_cm2, dtype=np.float32),
-        membrane_models=tuple(section.membrane for _ in range(count)),
+        membrane_models=tuple(ensure_membrane_model(section.membrane) for _ in range(count)),
         section_names=tuple(section.name for _ in range(count)),
         section_indices=np.zeros((count,), dtype=np.int32),
         section_tags=tuple(section.tags for _ in range(count)),
@@ -202,7 +202,10 @@ def _flatten_elements(layout: "Layout") -> FlattenedLayout:
         diam.extend(float(section.diameter_um) for _ in range(element.compartments))
         Ra.extend(float(section.Ra_ohm_cm) for _ in range(element.compartments))
         Cm.extend(float(section.Cm_uF_cm2) for _ in range(element.compartments))
-        membranes.extend(section.membrane for _ in range(element.compartments))
+        membranes.extend(
+            ensure_membrane_model(section.membrane)
+            for _ in range(element.compartments)
+        )
         names.extend(section.name for _ in range(element.compartments))
         section_indices.extend(section_index for _ in range(element.compartments))
         tags.extend(section.tags for _ in range(element.compartments))

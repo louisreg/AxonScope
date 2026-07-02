@@ -6,7 +6,6 @@ from axonscope import (
     AnalysisInputRequirement,
     AnalysisResult,
     AnalysisStatus,
-    AnalyticalExtracellularContext,
     AssemblyDetailInspection,
     AxonInstance,
     AxonPopulation,
@@ -24,10 +23,12 @@ from axonscope import (
     LoweringInspection,
     MemoryInspection,
     MemoryEstimateItem,
+    MembraneSourceInspection,
     PaddingInspection,
     PeakVoltageObserver,
     PrecisionPolicy,
     ProbeInspection,
+    RateTableConfig,
     RecordingPlan,
     ResultAssemblyInspection,
     SimulationInspection,
@@ -36,6 +37,7 @@ from axonscope import (
     Signal,
     SignalId,
     SimulationEstimate,
+    SimulationEstimateGroup,
     Stimulus,
     VM_RASTER_OBSERVATION_KEY,
     VmRasterResult,
@@ -43,17 +45,12 @@ from axonscope import (
     benchmark_report,
     disable_benchmark,
     enable_benchmark,
-    estimate_simulation,
-    inspect_simulation,
     preparation,
     reset_benchmark,
-    simulate_pool,
     um,
 )
-from axonscope import analysis, analytical, positions, results, signals
+from axonscope import analysis, analytical, membranes, positions, results, signals
 from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, mrg_like_length_from_nodes
-from axonscope.channel_models import IonChannelModelBase, MembraneStateSpec, PassiveICM
-from axonscope.icm import CompartmentMembraneLayout, HeterogeneousICMBackend
 from axonscope.solvers import (
     CrankNicholson,
 )
@@ -66,11 +63,14 @@ def test_public_package_imports_are_available():
     assert analysis.ActivationObserver is ActivationObserver
     assert analysis.PeakVoltageObserver is PeakVoltageObserver
     assert analysis.AnalysisInputRequirement is AnalysisInputRequirement
+    assert analysis.views.plot_spike_raster is not None
     assert not hasattr(results, "analysis")
+    assert not hasattr(results, "visualization")
+    assert not hasattr(results, "plot_raster")
+    assert not hasattr(results, "rasterplot")
     assert Activation is __import__("axonscope").analysis.Activation
     assert AnalysisResult is __import__("axonscope").analysis.AnalysisResult
     assert AnalysisStatus.VALID.value == "VALID"
-    assert results.visualization.plot_raster is not None
     assert not hasattr(__import__("axonscope"), "PointSourceElectrode")
     assert not hasattr(__import__("axonscope").stimulation, "PointSourceElectrode")
     electrode = analytical.PointSourceElectrode(
@@ -84,15 +84,25 @@ def test_public_package_imports_are_available():
         sigma=0.3 * __import__("axonscope").S_per_m,
     )
     assert stimulation.drives[0].id.value == "point_source"
-    assert (
-        AnalyticalExtracellularContext
-        is __import__("axonscope").stimulation.AnalyticalExtracellularContext
-    )
+    for legacy_name in (
+        "Electrode",
+        "AnalyticalElectrode",
+        "ExtracellularContext",
+        "AnalyticalExtracellularContext",
+        "ExtracellularStimulationContext",
+        "NRVExtracellularContext",
+    ):
+        assert not hasattr(__import__("axonscope"), legacy_name)
+        assert not hasattr(__import__("axonscope").stimulation, legacy_name)
     assert isinstance(
         IntracellularCurrentClamp(position=0.0 * um, current=Stimulus.constant(0.0)),
         IntracellularContext,
     )
-    assert simulate_pool is not None
+    root = __import__("axonscope")
+    assert not hasattr(root, "simulate")
+    assert not hasattr(root, "simulate_pool")
+    assert not hasattr(root, "estimate_simulation")
+    assert not hasattr(root, "inspect_simulation")
     assert isinstance(signals.MEMBRANE_VOLTAGE, Signal)
     assert signals.Vm is signals.MEMBRANE_VOLTAGE
     assert signals.MEMBRANE_VOLTAGE.id == SignalId("membrane_voltage")
@@ -115,6 +125,7 @@ def test_public_package_imports_are_available():
     assert KernelInspection is not None
     assert LoweringInspection is not None
     assert MemoryInspection is not None
+    assert MembraneSourceInspection is not None
     assert PaddingInspection is not None
     assert Device.auto().kind == "auto"
     assert ExecutionPolicy(device=Device.cpu()).device == Device.cpu()
@@ -124,24 +135,39 @@ def test_public_package_imports_are_available():
     assert ResultAssemblyInspection is not None
     assert Runtime.AUTO.value == "auto"
     assert SimulationEstimate is not None
+    assert SimulationEstimateGroup is not None
     assert SimulationInspection is not None
     assert VM_RASTER_OBSERVATION_KEY == "vm_raster"
     assert VmRasterResult is not None
-    assert estimate_simulation is not None
-    assert inspect_simulation is not None
     assert benchmark is not None
     assert benchmark_report is not None
     assert disable_benchmark is not None
     assert enable_benchmark is not None
     assert reset_benchmark is not None
     assert preparation.extracellular_stimulation_signature is not None
+    assert membranes.GeneratedCodeFileInspection is not None
+    assert membranes.GeneratedMembraneCodeInspection is not None
+    assert membranes.GeneratedMembraneCodeReport is not None
+    assert membranes.GeneratedTargetExplanation is not None
+    assert membranes.MembraneEquationDependency is not None
+    assert membranes.MembraneModelExplanation is not None
+    assert membranes.MembraneSourceExplanation is not None
+    assert membranes.MembraneSourceSection is not None
+    assert membranes.MembraneSourceSymbol is not None
+    assert membranes.MembraneStateUpdateExplanation is not None
+    assert membranes.MembraneStepExplanation is not None
+    assert membranes.explain is not None
+    assert membranes.inspect_generated_code is not None
+    assert not hasattr(membranes, "MembraneModel")
+    assert not hasattr(membranes, "ensure_membrane_model")
+    assert issubclass(membranes.HodgkinHuxley, membranes.Model)
+    hh_membrane = membranes.HodgkinHuxley(celsius=6.3 * __import__("axonscope").degC)
+    assert isinstance(hh_membrane, membranes.Model)
+    assert hh_membrane.kind == "hodgkin_huxley"
+    assert hh_membrane.params["celsius"] == 6.3
     assert HodgkinHuxley is not None
     assert RattayAberham is not None
     assert MRG is not None
     assert CrankNicholson is not None
-    assert IonChannelModelBase is not None
-    assert PassiveICM is not None
-    assert MembraneStateSpec("x").name == "x"
-    assert CompartmentMembraneLayout is not None
-    assert HeterogeneousICMBackend is not None
+    assert RateTableConfig(step_mV=1.0).step_mV == 1.0
     assert mrg_like_length_from_nodes(10.0 * um, 3) > 0.0

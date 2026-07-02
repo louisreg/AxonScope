@@ -1,7 +1,7 @@
 """Run AxonScope on a realistic NRV histology-contour nerve.
 
 Run:
-    python examples/with_nrv/01_realistic_fascicle_geometry_comparison.py
+    python examples/with_nrv/01_realistic_fascicle_geometry.py
 
 NRV owns the external geometry, fiber placement, and LIFE/FEM footprint
 sampling. AxonScope receives intrinsic axon layouts plus sampled
@@ -163,7 +163,7 @@ def main(config: ExampleConfig | None = None) -> None:
     curve = axs.protocols.recruitment_sweep(
         pool,
         update=update_life_current,
-        amplitudes=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
+        values=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
         duration=config.duration_ms * axs.ms,
         dt=config.dt_ms * axs.ms,
         criterion=activation,
@@ -178,16 +178,13 @@ def main(config: ExampleConfig | None = None) -> None:
     fig, ax = plt.subplots(figsize=(7.0, 4.5), constrained_layout=True)
     row_fascicles = np.asarray([row.fascicle_id for row in footprints.rows], dtype=object)
     activated = np.asarray(curve.activated, dtype=bool)
-    for fascicle_id in sorted(set(row_fascicles.tolist()), key=_fascicle_sort_key):
-        mask = row_fascicles == fascicle_id
-        recruitment = np.sum(activated[:, mask], axis=1) / float(np.sum(mask))
-        ax.plot(curve.amplitudes_uA, recruitment, marker="o", label=f"fasc {fascicle_id}")
-    ax.set_xlabel("LIFE current amplitude [uA]")
-    ax.set_ylabel("Recruitment fraction")
-    ax.set_ylim(-0.03, 1.03)
+    curve.plot_groups(
+        np.asarray([f"fasc {value}" for value in row_fascicles], dtype=object),
+        ax=ax,
+        unit=axs.uA,
+        include_total=False,
+    )
     ax.set_title("AxonScope recruitment on NRV-generated fibers")
-    ax.grid(True, alpha=0.3)
-    ax.legend(frameon=False)
 
     snapshot_index = len(curve.amplitudes_uA) // 2
     snapshot_amplitude_uA = float(curve.amplitudes_uA[snapshot_index])

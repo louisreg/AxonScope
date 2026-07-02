@@ -206,8 +206,6 @@ Defines:
 Defines:
 
 - `AxonSimulation`
-- `simulate`
-- `simulate_pool`
 
 `src/axonscope/solvers/axon_runtime.py`
 

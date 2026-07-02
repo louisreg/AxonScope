@@ -13,7 +13,7 @@ import axonscope as axs
 def main() -> None:
     # This example is the smallest population workflow:
     # one shared electrode, five axons at different y positions, and one
-    # `simulate_pool(...)` call that preserves the input order in the result.
+    # `AxonSimulation(...).run()` call that preserves the input order in the result.
     length = 100.0 * axs.um
     dt = 0.01 * axs.ms
     duration = 20.0 * axs.ms
@@ -59,13 +59,13 @@ def main() -> None:
 
     # `Recording.center(...)` keeps one Vm column per axon. That is a good first
     # population default: the output is small, but each row still has a trace.
-    results = axs.simulate_pool(
+    results = axs.AxonSimulation(
         simulations,
         duration=duration,
         dt=dt,
         recording=axs.Recording.center(axs.signals.Vm),
         progress=True,
-    )
+    ).run()
 
     # The result is ordered like the input pool, so we can zip the positions and
     # result rows directly.
@@ -107,18 +107,13 @@ def main() -> None:
     ax_pool.legend()
     fig.colorbar(scatter, ax=ax_pool, label="Peak center Vm [mV]")
 
-    for y_um, result in zip(y_positions_um, results, strict=True):
-        t_ms, vm_mV = result.trace_values(
-            index=0,
-            time_unit=axs.ms,
-            voltage_unit=axs.mV,
-        )
-        ax_traces.plot(t_ms, vm_mV, label=f"y={y_um:.0f} um")
-    ax_traces.set_xlabel("Time [ms]")
-    ax_traces.set_ylabel("Center Vm [mV]")
-    ax_traces.set_title("simulate_pool keeps input order")
-    ax_traces.grid(True, alpha=0.3)
-    ax_traces.legend()
+    results.plot_traces(
+        ax=ax_traces,
+        index=0,
+        labels=tuple(f"y={y_um:.0f} um" for y_um in y_positions_um),
+        voltage_unit=axs.mV,
+        title="AxonSimulation keeps input order",
+    )
     fig.tight_layout()
     plt.show()
 

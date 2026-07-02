@@ -21,6 +21,7 @@ def test_collect_environment_info_has_expected_sections():
         "disk",
         "packages",
         "jax",
+        "gpu",
         "mlx",
         "environment_variables",
         "git",
@@ -90,9 +91,21 @@ def test_jax_section_has_stable_shape():
     if info["jax"]["available"]:
         assert "default_backend" in info["jax"]
         assert "devices" in info["jax"]
+        assert "device_details" in info["jax"]
         assert isinstance(info["jax"]["devices"], list)
+        assert isinstance(info["jax"]["device_details"], list)
     else:
         assert "error" in info["jax"]
+
+
+def test_gpu_section_has_stable_shape():
+    info = collect_environment_info()
+
+    assert "available" in info["gpu"]
+    assert info["gpu"].get("source") == "nvidia-smi"
+    if info["gpu"]["available"]:
+        assert "devices" in info["gpu"]
+        assert isinstance(info["gpu"]["devices"], list)
 
 
 def test_mlx_section_has_stable_shape():
@@ -116,8 +129,12 @@ def test_environment_variables_section():
         "VECLIB_MAXIMUM_THREADS",
         "XLA_FLAGS",
         "JAX_PLATFORM_NAME",
+        "JAX_PLATFORMS",
         "JAX_ENABLE_X64",
         "CUDA_VISIBLE_DEVICES",
+        "XLA_PYTHON_CLIENT_PREALLOCATE",
+        "XLA_PYTHON_CLIENT_MEM_FRACTION",
+        "XLA_PYTHON_CLIENT_ALLOCATOR",
     ]
 
     for var in expected_vars:

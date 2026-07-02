@@ -256,7 +256,7 @@ def test_hotpath_build_simulation_uses_public_root_object():
     assert isinstance(simulation, axs.AxonSimulation)
     assert simulation.is_population
     assert len(simulation.axons) == 2
-    assert all(instance.extracellular_context is not None for instance in simulation.axons)
+    assert all(instance.extracellular_stimulation is not None for instance in simulation.axons)
 
 
 def test_hotpath_double_cable_extracellular_uses_mrg_double_cable_rows():
@@ -276,7 +276,7 @@ def test_hotpath_double_cable_extracellular_uses_mrg_double_cable_rows():
     assert {
         instance.axon.resolved_formulation for instance in simulation.axons
     } == {"double-cable"}
-    assert all(instance.extracellular_context is not None for instance in simulation.axons)
+    assert all(instance.extracellular_stimulation is not None for instance in simulation.axons)
 
 
 def test_hotpath_double_cable_observer_uses_mrg_observer_only_rows():
@@ -298,7 +298,7 @@ def test_hotpath_double_cable_observer_uses_mrg_observer_only_rows():
     assert {
         instance.axon.resolved_formulation for instance in simulation.axons
     } == {"double-cable"}
-    assert all(instance.extracellular_context is not None for instance in simulation.axons)
+    assert all(instance.extracellular_stimulation is not None for instance in simulation.axons)
 
 
 def test_hotpath_footprint_reuse_workload_builds_repeated_simulations():
@@ -314,7 +314,10 @@ def test_hotpath_footprint_reuse_workload_builds_repeated_simulations():
 
     assert len(simulations) == 3
     assert all(isinstance(simulation, axs.AxonSimulation) for simulation in simulations)
-    assert all(simulation.estimate().metadata["context_count"] == 2 for simulation in simulations)
+    assert all(
+        simulation.estimate().metadata["extracellular_stimulation_count"] == 2
+        for simulation in simulations
+    )
 
 
 def test_hotpath_realistic_population_mixes_models_and_geometry():
@@ -335,7 +338,7 @@ def test_hotpath_realistic_population_mixes_models_and_geometry():
     assert model_names == {"HodgkinHuxley", "RattayAberham"}
     assert len(diameters) > 1
     assert len(compartment_counts) > 1
-    assert any(instance.extracellular_context is not None for instance in simulation.axons)
+    assert any(instance.extracellular_stimulation is not None for instance in simulation.axons)
 
 
 def test_hotpath_matrix_builds_labeled_coverage_scenarios():
@@ -356,7 +359,7 @@ def test_hotpath_matrix_builds_labeled_coverage_scenarios():
     ]
     assert not simulations[2].recording.voltage
     assert simulations[2].observers is not None
-    assert any(instance.extracellular_context is not None for instance in simulations[3].axons)
+    assert any(instance.extracellular_stimulation is not None for instance in simulations[3].axons)
     assert {type(instance.axon).__name__ for instance in simulations[4].axons} == {
         "HodgkinHuxley",
         "RattayAberham",
@@ -382,8 +385,8 @@ def test_path_comparison_matrix_builds_controlled_path_scenarios():
     ]
     assert not simulations[3].recording.voltage
     assert simulations[3].observers is not None
-    assert all(instance.extracellular_context is None for instance in simulations[0].axons)
-    assert any(instance.extracellular_context is not None for instance in simulations[4].axons)
+    assert all(instance.extracellular_stimulation is None for instance in simulations[0].axons)
+    assert any(instance.extracellular_stimulation is not None for instance in simulations[4].axons)
     assert not simulations[7].recording.voltage
     assert simulations[7].observers is not None
     assert {

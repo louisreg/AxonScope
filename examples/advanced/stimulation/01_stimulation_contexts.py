@@ -25,7 +25,6 @@ def main() -> None:
     positions = axon.layout.position_values(unit=axs.um) * axs.um
     center_x = positions[axon.n_compartments // 2]
     t = np.linspace(0.0, 1.6, 161) * axs.ms
-    t_ms = np.asarray(t.to(axs.ms).magnitude, dtype=float)
 
     # Step 2: one helper geometry can generate several drives by pairing the
     # same sampled footprint with different temporal stimuli.
@@ -94,30 +93,26 @@ def main() -> None:
     for label, stimulation in cases:
         simulation = axs.AxonInstance(axon)
         simulation.add_extracellular_stimulation(stimulation=stimulation)
-        run = axs.simulate(
+        run = axs.AxonSimulation(
             simulation,
             duration=1.6 * axs.ms,
             dt=0.02 * axs.ms,
-        )
+        ).run()
         result = run.single
         results.append((label, stimulation, result))
 
     # Step 5: plot the imposed extracellular field and the membrane response at
     # the center compartment.
-    x_um = np.asarray(positions.to(axs.um).magnitude, dtype=float)
     fig, axes = plt.subplots(2, 3, figsize=(13, 6), constrained_layout=True)
     for col, (label, stimulation, result) in enumerate(results):
-        values_mV = stimulation.evaluate(t, voltage_unit=axs.mV)
-        axes[0, col].imshow(
-            values_mV.T,
-            aspect="auto",
-            origin="lower",
-            extent=[t_ms[0], t_ms[-1], x_um[0], x_um[-1]],
-            cmap="coolwarm",
+        stimulation.plot_potential(
+            t,
+            ax=axes[0, col],
+            time_unit=axs.ms,
+            position_unit=axs.um,
+            voltage_unit=axs.mV,
+            title=label,
         )
-        axes[0, col].set_title(label)
-        axes[0, col].set_xlabel("Time [ms]")
-        axes[0, col].set_ylabel("Position [um]")
 
         result.plot_trace(
             ax=axes[1, col],

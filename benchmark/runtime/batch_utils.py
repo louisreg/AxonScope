@@ -11,8 +11,8 @@ from typing import Callable, Sequence
 import numpy as np
 
 from axonscope.benchmarking import collect_benchmark_metadata
-from axonscope.stimulation import ExtracellularContext
-from axonscope.preparation.runtime_batches import scale_extracellular_contexts
+from axonscope.stimulation import ExtracellularStimulation
+from axonscope.preparation.runtime_batches import scale_extracellular_stimulations
 
 
 @dataclass(frozen=True)
@@ -37,18 +37,18 @@ class TimingStats:
         )
 
 
-def scaled_context_batch(
-    contexts: Sequence[ExtracellularContext],
+def scaled_stimulation_batch(
+    stimulations: Sequence[ExtracellularStimulation],
     *,
     batch_size: int,
     start: float = 0.5,
     stop: float = 1.5,
-) -> list[tuple[ExtracellularContext, ...]]:
-    """Build a simple amplitude sweep over one shared context set."""
+) -> list[tuple[ExtracellularStimulation, ...]]:
+    """Build a simple amplitude sweep over one shared stimulation set."""
 
     scales = np.linspace(start, stop, batch_size)
     return [
-        scale_extracellular_contexts(contexts, float(scale))
+        scale_extracellular_stimulations(stimulations, float(scale))
         for scale in scales
     ]
 

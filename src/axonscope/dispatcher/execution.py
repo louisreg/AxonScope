@@ -4,7 +4,7 @@ from typing import Any, Sequence
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.backends.jax.group_runner import run_jax_batch_group
+from axonscope.backends.execution import run_batch_group
 from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import (
@@ -13,9 +13,13 @@ from axonscope.dispatcher.progress import (
     ProgressOption,
     emit_initial_progress,
 )
-from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
-from axonscope.results.single import SimResult
+from axonscope.dispatcher._records import (
+    DispatchCohortRecord,
+    DispatchRecord,
+    DispatchRowRecord,
+)
 from axonscope.solvers import BatchOptions, CrankNicholson, SolverOptions
+from axonscope.solvers._outputs import SolverOutput
 from axonscope.utils import units
 
 
@@ -27,11 +31,13 @@ def run_pool(
     solver_options: SolverOptions | None = None,
     batch_options: BatchOptions | None = None,
     observers: Sequence[Any] | None = None,
+    record_observables: bool = False,
     progress: ProgressOption = False,
+    backend_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run an axon pool and return raw dispatch records.
 
-    Public code should generally call ``axonscope.simulate_pool`` so these raw
+    Public code should generally call ``AxonSimulation(...).run()`` so these raw
     dispatch records are converted to public cohort results. Batched observer-
     only groups may remain a single compact record instead of one record per
     input axon. Plain numeric times are interpreted as milliseconds; Pint-like
@@ -63,7 +69,9 @@ def run_pool(
             solver_options=solver_options,
             batch_options=batch_options,
             observers=tuple(observers) if observers is not None else None,
+            record_observables=bool(record_observables),
             progress=progress,
+            backend_context=backend_context,
         )
 
 
@@ -75,7 +83,9 @@ def _run_pool_checked(
     solver_options: SolverOptions | None,
     batch_options: BatchOptions | None,
     observers: tuple[Any, ...] | None,
+    record_observables: bool,
     progress: ProgressOption,
+    backend_context: Any | None,
 ) -> tuple[DispatchRecord, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
     emit_initial_progress(progress, rows=len(axons), message="building dispatch plan")
@@ -116,6 +126,7 @@ def _run_pool_checked(
                         solver_options=solver_options,
                         observers=observers,
                         progress_callback=progress_reporter.kernel_callback(group),
+                        backend_context=backend_context,
                     )
                 else:
                     progress_reporter.route_group(
@@ -145,6 +156,7 @@ def _run_pool_checked(
                         dt_ms=dt_ms,
                         solver_options=solver_options,
                         observers=observers,
+                        record_observables=record_observables,
                         record_voltage=resolved_batch_options.recording.mode != "none",
                     )
                     if callback is not None:
@@ -173,7 +185,7 @@ def _run_pool_checked(
             for result in group_results:
                 indices = (
                     result.indices
-                    if isinstance(result, DispatchCohortResult)
+                    if isinstance(result, DispatchCohortRecord)
                     else (result.index,)
                 )
                 for index in indices:
@@ -197,8 +209,9 @@ def _run_scalar_group(
     dt_ms: float,
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
+    record_observables: bool,
     record_voltage: bool,
-) -> tuple[DispatchResult, ...]:
+) -> tuple[DispatchRowRecord, ...]:
     """Execute a dispatch group through scalar solves."""
 
     solver = CrankNicholson(solver_options=solver_options)
@@ -209,6 +222,7 @@ def _run_scalar_group(
                 item.simulation,
                 tsim=tsim_ms,
                 dt=dt_ms,
+                record_observables=record_observables,
                 record_voltage=record_voltage,
                 observers=observers,
             ),
@@ -268,10 +282,11 @@ def _run_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
+    backend_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
-    """Execute one compatible group through the JAX batch backend."""
+    """Execute one compatible group through the active backend facade."""
 
-    return run_jax_batch_group(
+    return run_batch_group(
         group,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
@@ -279,18 +294,19 @@ def _run_batch_group(
         solver_options=solver_options,
         observers=observers,
         progress_callback=progress_callback,
+        backend_context=backend_context,
     )
 
 
 def _dispatch_result_from_sim(
     item: DispatchItem,
-    sim: SimResult,
+    sim: SolverOutput,
     *,
     group_id: int,
-) -> DispatchResult:
+) -> DispatchRowRecord:
     """Convert an internal scalar solver result to a raw dispatch row."""
 
-    return DispatchResult(
+    return DispatchRowRecord(
         index=item.index,
         axon=item.simulation.axon,
         simulation=item.simulation,
@@ -299,7 +315,9 @@ def _dispatch_result_from_sim(
         group_id=group_id,
         method="scalar",
         record_indices=None,
+        recordings=sim.recordings,
         observations=sim.observations,
+        final_state=sim.final_state,
         group_size=1,
         batch_kind="scalar",
         geometry_shared=True,
@@ -308,8 +326,5 @@ def _dispatch_result_from_sim(
 
 
 __all__ = [
-    "DispatchCohortResult",
-    "DispatchRecord",
-    "DispatchResult",
     "run_pool",
 ]

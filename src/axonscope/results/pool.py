@@ -12,15 +12,19 @@ from axonscope.axons.axon import Axon
 from axonscope.analysis.core import AnalysisResult
 from axonscope.results.axes import RecordedAxis
 from axonscope.results.common import SingleAxonResultMixin
-from axonscope.results.single import ObservationDict, RecordingDict, ResultArray
+from axonscope.results.types import ObservationDict, RecordingDict, ResultArray
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 
 if TYPE_CHECKING:
-    from axonscope.dispatcher.results import DispatchCohortResult, DispatchRecord, DispatchResult
+    from axonscope.dispatcher._records import (
+        DispatchCohortRecord,
+        DispatchRecord,
+        DispatchRowRecord,
+    )
     from axonscope.recording import Recording
 
 
-def _dispatch_diagnostics(result: DispatchResult) -> dict[str, Any]:
+def _dispatch_diagnostics(result: DispatchRowRecord) -> dict[str, Any]:
     """Return public diagnostics carried by one dispatched pool row."""
 
     return {
@@ -34,7 +38,7 @@ def _dispatch_diagnostics(result: DispatchResult) -> dict[str, Any]:
     }
 
 
-def _dispatch_cohort_diagnostics(result: DispatchCohortResult) -> tuple[dict[str, Any], ...]:
+def _dispatch_cohort_diagnostics(result: DispatchCohortRecord) -> tuple[dict[str, Any], ...]:
     """Return public diagnostics carried by one compact dispatched cohort."""
 
     return tuple(
@@ -48,6 +52,32 @@ def _dispatch_cohort_diagnostics(result: DispatchCohortResult) -> tuple[dict[str
             "dispatch_has_padding": result.has_padding,
         }
         for index in result.indices
+    )
+
+
+def _recording_value_signature(value: Any) -> tuple[Any, ...]:
+    """Return a grouping signature for one recorded value."""
+
+    if isinstance(value, dict):
+        return (
+            "dict",
+            tuple(
+                (key, _recording_value_signature(value[key]))
+                for key in sorted(value)
+            ),
+        )
+    array = np.asarray(value)
+    return ("array", tuple(array.shape), str(array.dtype))
+
+
+def _recordings_signature(recordings: RecordingDict | None) -> tuple[Any, ...] | None:
+    """Return a grouping signature for a per-row recording dictionary."""
+
+    if recordings is None:
+        return None
+    return tuple(
+        (key, _recording_value_signature(recordings[key]))
+        for key in sorted(recordings)
     )
 
 
@@ -68,6 +98,7 @@ def _slice_analysis_result(result: AnalysisResult, row: int) -> AnalysisResult:
         statuses=(result.statuses[row],),
         messages=(result.messages[row],),
         unit=result.unit,
+        row_labels=(result.row_labels[row],),
         definition=result.definition,
         events=(result.events[row],),
         input_requirements=(result.input_requirements[row],),
@@ -97,6 +128,7 @@ def _merge_analysis_results(results: Sequence[AnalysisResult]) -> AnalysisResult
         statuses=tuple(status for result in results for status in result.statuses),
         messages=tuple(message for result in results for message in result.messages),
         unit=first.unit,
+        row_labels=tuple(label for result in results for label in result.row_labels),
         definition=first.definition,
         events=tuple(event for result in results for event in result.events),
         input_requirements=tuple(
@@ -122,7 +154,7 @@ def _merge_observation_results(results: Sequence[Any]) -> Any:
 
 
 def _merge_dispatch_observations(
-    rows: Sequence[DispatchResult],
+    rows: Sequence[DispatchRowRecord],
 ) -> ObservationDict | None:
     """Merge per-dispatch-row observations into one cohort dictionary."""
 
@@ -165,7 +197,7 @@ class RecordedSignal:
 
 
 @dataclass(frozen=True)
-class CohortResult:
+class _ResultBlock:
     """Internal dense result block for compatible pool rows.
 
     ``Vm`` is indexed as ``(axon, time, recorded_position)``. ``input_indices``
@@ -192,10 +224,10 @@ class CohortResult:
 
 
 def _cohort_from_dispatch_cohort(
-    result: DispatchCohortResult,
+    result: DispatchCohortRecord,
     *,
     recording: Recording | None,
-) -> CohortResult:
+) -> _ResultBlock:
     """Convert one compact dispatch cohort to a public result cohort."""
 
     if len(result.record_indices) != len(result.indices):
@@ -205,7 +237,7 @@ def _cohort_from_dispatch_cohort(
         final_states = tuple(None for _ in result.indices)
     if len(final_states) != len(result.indices):
         raise ValueError("cohort final_states must align with cohort input indices.")
-    return CohortResult(
+    return _ResultBlock(
         input_indices=tuple(int(index) for index in result.indices),
         axons=tuple(result.axons),
         simulations=tuple(result.simulations),
@@ -230,7 +262,7 @@ class RecordingManifest:
     @classmethod
     def from_cohorts(
         cls,
-        cohorts: Sequence[CohortResult],
+        cohorts: Sequence[_ResultBlock],
         *,
         policy: Recording | None = None,
     ) -> RecordingManifest:
@@ -301,7 +333,7 @@ class AxonResultView(SingleAxonResultMixin):
     index: int
 
     @property
-    def _cohort_row(self) -> tuple[CohortResult, int]:
+    def _cohort_row(self) -> tuple[_ResultBlock, int]:
         return self.parent._cohort_row(self.index)
 
     @property
@@ -429,7 +461,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 
     def __init__(
         self,
-        _cohorts: Sequence[CohortResult],
+        _cohorts: Sequence[_ResultBlock],
         *,
         size: int,
         recording: Recording | None = None,
@@ -457,17 +489,17 @@ class AxonSimulationResult(Sequence[AxonResultView]):
             raise ValueError("AxonSimulationResult requires at least one dispatch result.")
 
         cohorts = []
-        groups: dict[tuple[Any, ...], list[DispatchResult]] = {}
+        groups: dict[tuple[Any, ...], list[DispatchRowRecord]] = {}
         size = 0
         for record in records:
             if hasattr(record, "indices"):
-                cohort_record = cast("DispatchCohortResult", record)
+                cohort_record = cast("DispatchCohortRecord", record)
                 cohorts.append(
                     _cohort_from_dispatch_cohort(cohort_record, recording=recording)
                 )
                 size += len(cohort_record.indices)
                 continue
-            row = cast("DispatchResult", record)
+            row = cast("DispatchRowRecord", record)
             vm = None if row.Vm is None else np.asarray(row.Vm)
             t = np.asarray(row.t)
             record_indices = None if row.record_indices is None else tuple(row.record_indices)
@@ -477,6 +509,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                 None if vm is None else str(vm.dtype),
                 str(t.dtype),
                 record_indices,
+                _recordings_signature(row.recordings),
                 tuple(sorted((row.observations or {}).keys())),
                 id(row.observations) if row.observations_are_batched else None,
             )
@@ -491,7 +524,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
             )
             first = grouped_rows[0]
             cohorts.append(
-                CohortResult(
+                _ResultBlock(
                     input_indices=tuple(int(row.index) for row in grouped_rows),
                     axons=tuple(row.axon for row in grouped_rows),
                     simulations=tuple(row.simulation for row in grouped_rows),
@@ -501,6 +534,11 @@ class AxonSimulationResult(Sequence[AxonResultView]):
                     record_indices=tuple(row.record_indices for row in grouped_rows),
                     recording=recording,
                     observations=_merge_dispatch_observations(grouped_rows),
+                    recordings=(
+                        tuple(row.recordings for row in grouped_rows)
+                        if any(row.recordings is not None for row in grouped_rows)
+                        else None
+                    ),
                     final_states=tuple(row.final_state for row in grouped_rows),
                 )
             )
@@ -523,7 +561,7 @@ class AxonSimulationResult(Sequence[AxonResultView]):
             raise ValueError(f"missing pool result indices: {missing}.")
         return tuple(value for value in lookup if value is not None)
 
-    def _cohort_row(self, index: int) -> tuple[CohortResult, int]:
+    def _cohort_row(self, index: int) -> tuple[_ResultBlock, int]:
         normalized = int(index)
         if normalized < 0:
             normalized += self.size
@@ -667,6 +705,38 @@ class AxonSimulationResult(Sequence[AxonResultView]):
         return AnalysisReport(
             simulation_result=self,
             analyses=(analyzed,),
+        )
+
+    def plot_traces(
+        self,
+        ax: Any | None = None,
+        *,
+        position: Any | None = None,
+        index: int | None = None,
+        labels: Sequence[str] | None = None,
+        time_unit: Any = "millisecond",
+        voltage_unit: Any = "millivolt",
+        title: str = "Population Vm traces",
+        grid: bool = True,
+        legend: bool = True,
+        **plot_kwargs: Any,
+    ) -> Any:
+        """Plot one membrane-voltage trace per population row."""
+
+        from axonscope.results.views import plot_population_traces
+
+        return plot_population_traces(
+            self,
+            ax=ax,
+            position=position,
+            index=index,
+            labels=labels,
+            time_unit=time_unit,
+            voltage_unit=voltage_unit,
+            title=title,
+            grid=grid,
+            legend=legend,
+            **plot_kwargs,
         )
 
 

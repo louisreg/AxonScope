@@ -129,6 +129,18 @@ RUNTIME_SUITES: dict[str, RuntimeSuite] = {
             "0",
         ),
     ),
+    "model_codegen": RuntimeSuite(
+        name="model_codegen",
+        description="Class-based membrane model source/codegen cold and warm cache benchmark.",
+        runner="model_codegen",
+        args=("--models", "builtins", "--warm-repeats", "3"),
+    ),
+    "model_codegen_all": RuntimeSuite(
+        name="model_codegen_all",
+        description="Built-in plus custom membrane model source/codegen benchmark.",
+        runner="model_codegen",
+        args=("--models", "all", "--warm-repeats", "3"),
+    ),
     "reference_solvers": RuntimeSuite(
         name="reference_solvers",
         description="Focused HH benchmark for optimized CN against the dense reference solver.",

@@ -12,7 +12,7 @@ from axonscope.benchmarking.benchmark import (
     load_benchmark_results,
     run_solver_benchmark_case,
     run_solver_benchmark_suite,
-    summarize_sim_result,
+    summarize_solver_output,
     write_benchmark_results,
 )
 from axonscope.benchmarking.hotpaths import (
@@ -64,7 +64,7 @@ __all__ = [
     "reset_benchmark",
     "run_solver_benchmark_case",
     "run_solver_benchmark_suite",
-    "summarize_sim_result",
+    "summarize_solver_output",
     "trace_annotation",
     "write_benchmark_results",
 ]

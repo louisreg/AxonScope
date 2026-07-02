@@ -3,8 +3,9 @@
 Run:
     python examples/advanced/recording_analysis/01_recording_options.py
 
-This script covers the two public recording questions that belong together:
-which typed signals are requested, and how much of each signal is retained.
+This script covers the public recording questions that belong together: which
+typed signals are requested, which spatial columns are retained, and where
+probe/index recordings sit on the fiber.
 """
 
 from __future__ import annotations
@@ -48,12 +49,12 @@ def main() -> None:
             amplitude=0.8 * axs.nA,
         ),
     )
-    full_run = axs.simulate(
+    full_run = axs.AxonSimulation(
         full_instance,
         duration=2.0 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.full(),
-    )
+    ).run()
     full_result = full_run.single
 
     # Step 3: run a shorter solve that explicitly asks for Vm and gates only.
@@ -72,12 +73,12 @@ def main() -> None:
             amplitude=0.8 * axs.nA,
         ),
     )
-    gates_only_run = axs.simulate(
+    gates_only_run = axs.AxonSimulation(
         gates_instance,
         duration=0.2 * axs.ms,
         dt=0.001 * axs.ms,
         recording=axs.Recording.only(axs.signals.Vm, axs.signals.GATES),
-    )
+    ).run()
     gates_only_result = gates_only_run.single
 
     # Step 4: build a small pool. Pool recording policies currently control the
@@ -132,8 +133,10 @@ def main() -> None:
 
     # Step 5: create four public Recording objects and inspect their plans before
     # solving. The plan is backend-neutral and answers "which columns are kept?".
+    # Recording.none() is shown in 05_vmraster_observer_only.py because it is
+    # useful when solver-side observers replace stored Vm traces.
     recording_modes = {
-        "full": axs.Recording.voltage(),
+        "voltage": axs.Recording.voltage(),
         "center": axs.Recording.center(axs.signals.Vm),
         "probes": axs.Recording.probes(axs.signals.Vm, count=5),
         "indices": axs.Recording.indices([0, 10, 20], axs.signals.Vm),
@@ -146,12 +149,12 @@ def main() -> None:
     # Step 6: run the same pool with each policy. This makes retained Vm width
     # differences visible while keeping the scientific setup fixed.
     pool_results = {
-        label: axs.simulate_pool(
+        label: axs.AxonSimulation(
             pool,
             duration=0.2 * axs.ms,
             dt=0.001 * axs.ms,
             recording=recording,
-        )
+        ).run()
         for label, recording in recording_modes.items()
     }
 
@@ -191,13 +194,13 @@ def main() -> None:
             f"record_indices={first.record_indices}"
         )
 
-    # Step 9: plot Vm, observable groups, and the retained pool widths together.
+    # Step 9: plot Vm, observable groups, retained widths, and retained
+    # positions together. The probe plot is the important check: "probes" means
+    # evenly spaced compartment indices, while "indices" means the exact
+    # original compartment indices supplied by the user.
     center_index = full_result.nearest_position_index(50.0 * axs.um)
-    t_ms = full_result.time_values(unit=axs.ms)
-    recordings = full_result.recordings or {}
-
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7), constrained_layout=True)
-    ax_vm, ax_gates, ax_currents, ax_widths = axes.ravel()
+    fig, axes = plt.subplots(2, 3, figsize=(14, 7), constrained_layout=True)
+    ax_vm, ax_gates, ax_currents, ax_widths, ax_locations, ax_pool_trace = axes.ravel()
 
     full_result.plot_trace(
         ax=ax_vm,
@@ -206,21 +209,23 @@ def main() -> None:
         title="Center Vm",
     )
 
-    for name, values in recordings.get("gates", {}).items():
-        ax_gates.plot(t_ms, np.asarray(values)[:, center_index], label=name)
-    ax_gates.set_title("Center gates")
-    ax_gates.set_xlabel("Time [ms]")
-    ax_gates.set_ylabel("Gate value")
-    ax_gates.grid(True, alpha=0.3)
-    ax_gates.legend(frameon=False)
+    full_result.plot_recording_group(
+        "gates",
+        ax=ax_gates,
+        index=center_index,
+        time_unit=axs.ms,
+        title="Center gates",
+        ylabel="Gate value",
+    )
 
-    for name, values in recordings.get("currents", {}).items():
-        ax_currents.plot(t_ms, np.asarray(values)[:, center_index], label=name)
-    ax_currents.set_title("Center current densities")
-    ax_currents.set_xlabel("Time [ms]")
-    ax_currents.set_ylabel("Current density [mA/cm2]")
-    ax_currents.grid(True, alpha=0.3)
-    ax_currents.legend(frameon=False)
+    full_result.plot_recording_group(
+        "currents",
+        ax=ax_currents,
+        index=center_index,
+        time_unit=axs.ms,
+        title="Center current densities",
+        ylabel="Current density [mA/cm2]",
+    )
 
     labels = tuple(pool_results)
     widths = [np.asarray(results[0].Vm).shape[1] for results in pool_results.values()]
@@ -229,6 +234,24 @@ def main() -> None:
     ax_widths.set_ylabel("Recorded compartments")
     ax_widths.set_ylim(0, max(widths) + 2)
     ax_widths.grid(True, axis="y", alpha=0.3)
+
+    axs.results.plot_recorded_axes(
+        pool_results,
+        ax=ax_locations,
+        position_unit=axs.um,
+        title="Where Vm is retained",
+    )
+
+    for label, results in pool_results.items():
+        first = results[0]
+        first.plot_trace(
+            ax=ax_pool_trace,
+            index=np.asarray(first.Vm).shape[1] // 2,
+            voltage_unit=axs.mV,
+            label=label,
+            title="First pool row, retained trace",
+        )
+    ax_pool_trace.legend(frameon=False, fontsize=8)
     plt.show()
 
 

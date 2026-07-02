@@ -89,6 +89,16 @@ python benchmark/hotpaths/run.py \
   --prefix compile_log_probe
 ```
 
+Run the small public-workflow cold/warm progress probe:
+
+```bash
+python benchmark/hotpaths/cold_run_progress.py
+```
+
+This probe keeps the same `AxonSimulation(...).inspect()`, `.estimate()`, and
+`.run()` lifecycle as public runtime examples, but belongs here because it uses
+`axs.benchmark(...)` and compares cold versus warm timings.
+
 Run a longer trace-free kernel-scaling probe:
 
 ```bash
@@ -257,12 +267,12 @@ packaging regressions, then `kernel_observer_long` and
 | Name | Purpose |
 | --- | --- |
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
-| `point_source_extracellular` | HH population driven by analytical point-source extracellular contexts. Stresses the current generic `Vstim` preprocessing path tracked in the benchmark/CPU-GPU section of `todo.md`. |
-| `double_cable_extracellular` | MRG double-cable population driven by analytical point-source extracellular contexts. Stresses the priority myelinated extracellular path before Phase 8 study/reuse APIs. |
+| `point_source_extracellular` | HH population driven by analytical point-source extracellular stimulations. Stresses the current generic `Vstim` preprocessing path tracked in the benchmark/CPU-GPU section of `todo.md`. |
+| `double_cable_extracellular` | MRG double-cable population driven by analytical point-source extracellular stimulations. Stresses the priority myelinated extracellular path before Phase 8 study/reuse APIs. |
 | `double_cable_observer` | Same MRG double-cable extracellular population with threshold-style observers, `Recording.none()`, and packed VmRaster output. Compares retained center traces against observer-only output. |
 | `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
 | `solver_only_precomputed` | Direct backend workload with runtime and inputs prepared before timing. Separates kernel throughput from dispatch planning and input materialization for single-cable intra/extra rows. |
-| `typed_footprint_drive_matrix` | Direct backend workload comparing analytical-context lowering against typed `ExtracellularFootprint`/`ExtracellularDrive` lowering, then executing the typed-drive dense `Vstim` path. |
+| `typed_footprint_drive_matrix` | Direct backend workload comparing typed stimulation lowering against typed `ExtracellularFootprint`/`ExtracellularDrive` lowering, then executing the typed-drive dense `Vstim` path. |
 | `observer_only` | HH population with threshold-style observers, `Recording.none()`, empty `vm_shapes`, and `vm_raster` in the manifest. Verifies the no-retained-Vm path. |
 | `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
 | `hotpath_matrix` | Compact matrix for center/probes recording, observer-only retention, point-source extracellular input, and mixed-population execution. Useful as the Phase 7.6 coverage run before deeper CPU/GPU work. |
