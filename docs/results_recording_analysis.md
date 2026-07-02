@@ -332,9 +332,9 @@ ax = axs.analysis.views.plot_spike_raster(
 
 ## Online Vm Observers
 
-Activation and peak-voltage analyses can create lightweight online observers
-that consume membrane-voltage chunks and finalize to the same `AnalysisResult`
-shape as post-hoc definitions:
+Activation analyses can create lightweight online observers that consume
+membrane-voltage chunks and finalize to the same `AnalysisResult` shape as
+post-hoc definitions. `PeakVoltage` remains a post-hoc analysis on recorded Vm:
 
 ```python
 activation = axs.analysis.Activation(

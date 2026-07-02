@@ -30,7 +30,6 @@ from axonscope.analysis import (
     ConductionVelocity,
     Latency,
     PeakVoltage,
-    PeakVoltageObserver,
     SpikeCount,
 )
 from axonscope.axon_instance import AxonInstance
@@ -176,7 +175,6 @@ __all__ = [
     "ConductionVelocity",
     "Latency",
     "PeakVoltage",
-    "PeakVoltageObserver",
     "SpikeCount",
     "AxonId",
     "DriveId",

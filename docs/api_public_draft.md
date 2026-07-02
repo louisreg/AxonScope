@@ -1,7 +1,8 @@
 # Public API Draft
 
-Status on 2026-06-16: this is a proposal/roadmap document with one current-API
-snapshot near the top. Treat the sections after **Implemented Today** as design
+Status on 2026-07-02: this is a proposal/roadmap document with a small
+current-API snapshot near the top. It is not the canonical public API
+reference. Treat the sections after **Implemented Today** as historical design
 intent unless the surrounding text explicitly says they are implemented today.
 For current runnable examples, prefer `README.md`, `examples/basic/`,
 `examples/advanced/`, and the non-draft pages under `docs/`.
@@ -29,10 +30,10 @@ the examples. In short:
 - `axs.Recording.full()`, `axs.Recording.center(...)`, `axs.Recording.none()`,
   `axs.signals`, one-axon result views, `recording_manifest`, and compact
   `observations` are current result/recording concepts.
-- `axs.analysis.Activation`, `axs.analysis.PeakVoltage`, and their observer
-  aliases are current analysis concepts. Solver-side observer execution exists
-  for homogeneous single- and double-cable batch paths; broader observer kinds
-  and public study orchestration remain roadmap work.
+- `axs.analysis.Activation`, `axs.analysis.Latency`, and
+  `axs.analysis.ConductionBlock` can feed the strict VmRaster observer-only
+  route. `axs.analysis.PeakVoltage` remains post-hoc on recorded Vm until a
+  dedicated benchmarked solver-side design is accepted.
 - `axs.SolverOptions` exposes current solver choices. Pseudo-double-cable
   options are standby research artifacts, not recommended public API.
 
@@ -57,8 +58,8 @@ The public API should make it natural to:
 - attach intracellular and extracellular stimulation contexts through an
   `AxonInstance` after axon construction;
 - run either one axon or a pool/batch of related simulation conditions;
-- keep low-level JAX runtimes and kernels available for advanced users without
-  making them the first user experience.
+- keep backend internals inspectable for development without presenting
+  low-level JAX runtimes and kernels as user-facing APIs.
 
 ## Namespaces
 

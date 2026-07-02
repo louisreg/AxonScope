@@ -421,14 +421,11 @@ class PeakVoltage:
         positions: Any,
         original_indices: Any | None = None,
     ) -> Any:
-        """Create an online observer for streamed Vm chunks."""
+        """Raise because peak voltage is a post-hoc analysis."""
 
-        from axonscope.analysis.observers import PeakVoltageObserver
-
-        return PeakVoltageObserver(
-            self,
-            positions=positions,
-            original_indices=original_indices,
+        raise NotImplementedError(
+            "PeakVoltage is post-hoc on recorded Vm. Use result.analyze("
+            "axs.analysis.PeakVoltage(...)) or axs.analysis.peak_voltage(result)."
         )
 
     def _evaluate_one(self, row: Any) -> tuple[float, AnalysisStatus, str, None]:

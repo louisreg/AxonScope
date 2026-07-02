@@ -15,10 +15,7 @@ from axonscope.analysis.core import (
     MissingAnalysisInputError,
     analyze,
 )
-from axonscope.analysis.observers import (
-    ActivationObserver,
-    PeakVoltageObserver,
-)
+from axonscope.analysis.observers import ActivationObserver
 from axonscope.analysis.activation import (
     ActivationCriterion,
     ActivationEvent,
@@ -65,7 +62,6 @@ __all__ = [
     "MissingAnalysisInputError",
     "PeakVoltage",
     "ActivationObserver",
-    "PeakVoltageObserver",
     "SpikeCount",
     "average_velocity",
     "analyze",

@@ -288,9 +288,10 @@ The supported P7 authoring subset is intentionally small:
   time with source locations when available.
 
 Unsupported in P7: arbitrary Python side effects, loops, mutation, dynamic
-attribute creation, class-level `exports`/`dynamics`, public `MembraneModel`
-construction, direct imports from `axonscope.model_ir`, backend-local extension
-classes, and stateful `Composite` components. See
+attribute creation, class-level `exports`/`dynamics`, manual construction of
+the internal `MembraneModel` descriptor, direct imports from
+`axonscope.model_ir`, backend-local extension classes, and stateful
+`Composite` components. See
 `examples/advanced/axon_models/05_custom_membrane_authoring.py` for the accepted
 class style.
 

@@ -4,7 +4,7 @@ AxonScope models an axon as a descriptive object first. Solver arrays are
 derived only when a solver asks for them.
 
 ```text
-MembraneModel -> Section -> Layout -> Axon -> AxonInstance/AxonPopulation -> AxonSimulation -> solver runtime
+axs.membranes.Model -> Section -> Layout -> Axon -> AxonInstance/AxonPopulation -> AxonSimulation -> solver runtime
 ```
 
 The important split is:
@@ -67,11 +67,13 @@ layout = axs.axons.Layout.single_uniform(
 
 ## Public Objects
 
-`MembraneModel`
+`axs.membranes.Model`
 
-A runtime-independent membrane description from `axonscope.membranes`. It can
-be a built-in membrane, a composite membrane, or later a DSL-generated membrane.
-It does not know about solvers, batches, JAX, or time stepping.
+A runtime-independent public membrane model from `axonscope.membranes`. It can
+be a built-in membrane class, a user-authored class-based membrane model, or a
+composite membrane. It does not know about solvers, batches, JAX, or time
+stepping. The internal `MembraneModel` descriptor is compiler/runtime plumbing,
+not a user-facing modeling concept.
 
 `Section`
 

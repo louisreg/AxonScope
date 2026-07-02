@@ -302,8 +302,8 @@ velocity_m_s = axs.analysis.conduction_velocity(result)
 spike_t_ms, spike_x_um = axs.analysis.rasterize(result, threshold_mV=-10.0)
 ```
 
-Activation and peak-voltage definitions can also create lightweight online Vm
-observers for chunked traces:
+Activation definitions can also create lightweight online Vm observers for
+chunked traces. `PeakVoltage` remains a post-hoc analysis on recorded Vm:
 
 ```python
 observer = axs.analysis.Activation(threshold=-20.0 * axs.mV).online_observer(

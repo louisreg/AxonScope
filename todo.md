@@ -42,7 +42,7 @@ Fresh local validation from the 2026-07-02 audit:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-585 passed, 1 skipped in 268.00s
+587 passed, 1 skipped in 424.89s
 ```
 
 ## Non-Negotiables
@@ -64,22 +64,22 @@ pytest -q tests/unit --tb=short
 
 ### P0 - Post-P7 Consistency
 
-- [ ] Rewrite `CHANGELOG.md` Unreleased so it reflects the actual post-P7
+- [x] Rewrite `CHANGELOG.md` Unreleased so it reflects the actual post-P7
   state. Remove or rewrite entries that still present deleted/rejected paths as
   current additions, including `ModelIRMembrane`, `CompositeICM`,
   `ExtracellularContext`, `axonscope.icm`, broad solver-side
   `PeakVoltageObserver`, and obsolete example names.
-- [ ] Decide the public status of `PeakVoltageObserver`:
+- [x] Decide the public status of `PeakVoltageObserver`:
   - privatize/remove it from `axs` and `axs.analysis`, then update tests and
     docs.
-- [ ] Clean public docs that still present `MembraneModel` as a user-facing
+- [x] Clean public docs that still present `MembraneModel` as a user-facing
   concept. Public wording should prefer "membrane model" and
   `axs.membranes.Model`; `MembraneModel` is an internal normalized descriptor.
-- [ ] Audit `docs/api_public_draft.md`: either mark it more explicitly as
+- [x] Audit `docs/api_public_draft.md`: either mark it more explicitly as
   historical/proposal material or trim/update sections that conflict with the
   current public API.
-- [ ] Keep proposal docs clearly labeled when they show future APIs.
-- [ ] Update guardrails after the `PeakVoltageObserver` decision so tests
+- [x] Keep proposal docs clearly labeled when they show future APIs.
+- [x] Update guardrails after the `PeakVoltageObserver` decision so tests
   encode the accepted public surface.
 
 ### P1 - Benchmark Surface Flattening
@@ -144,6 +144,10 @@ performance claims.
 - [ ] Refaire `README.md` après la stabilisation post-P7: présenter l'API
   actuelle, le workflow `AxonSimulation`, les membranes class-based, la
   stratégie benchmark, et pointer vers les exemples/docs à jour.
+- [ ] Faire une mise à plat manuelle de `docs/`, `GUIDELINES.md` et
+  `AGENTS.md`: relire les textes comme un utilisateur, supprimer le bruit
+  historique, garder les règles opérationnelles utiles, et vérifier que les
+  pages roadmap/proposal ne ressemblent pas à de la documentation courante.
 - [ ] Write real notebook tutorials under `examples/tutorials/` following the
   indexed mini-course sequence.
 - [ ] Add a didactic basic example for high-frequency block after block

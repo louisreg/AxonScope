@@ -25,7 +25,6 @@ from axonscope import (
     MemoryEstimateItem,
     MembraneSourceInspection,
     PaddingInspection,
-    PeakVoltageObserver,
     PrecisionPolicy,
     ProbeInspection,
     RateTableConfig,
@@ -61,7 +60,8 @@ def test_public_package_imports_are_available():
     assert analysis.rasterize is not None
     assert analysis.ActivationCriterion is not None
     assert analysis.ActivationObserver is ActivationObserver
-    assert analysis.PeakVoltageObserver is PeakVoltageObserver
+    assert not hasattr(analysis, "PeakVoltageObserver")
+    assert not hasattr(__import__("axonscope"), "PeakVoltageObserver")
     assert analysis.AnalysisInputRequirement is AnalysisInputRequirement
     assert analysis.views.plot_spike_raster is not None
     assert not hasattr(results, "analysis")

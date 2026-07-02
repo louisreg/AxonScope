@@ -167,61 +167,6 @@ class ActivationObserver(_SelectedVmObserver):
         )
 
 
-class PeakVoltageObserver(_SelectedVmObserver):
-    """Online observer equivalent of `axs.analysis.PeakVoltage`."""
-
-    def __init__(
-        self,
-        definition: Any,
-        *,
-        positions: Any,
-        original_indices: Any | None = None,
-    ) -> None:
-        super().__init__(
-            target=definition.target,
-            positions=positions,
-            original_indices=original_indices,
-        )
-        self.definition = definition
-        self._peak_mV: float | None = None
-
-    @property
-    def requirements(self) -> Any:
-        """Input requirements inherited from the analysis definition."""
-
-        return self.definition.requirements
-
-    def update(self, time: Any, values: Any) -> "PeakVoltageObserver":
-        """Consume one time chunk of membrane-voltage samples."""
-
-        _, vm_mV = _chunk(time, values, width=self.positions_um.shape[0])
-        peak_mV = float(np.max(vm_mV[:, self.columns]))
-        if self._peak_mV is None or peak_mV > self._peak_mV:
-            self._peak_mV = peak_mV
-        return self
-
-    def finalize(self) -> AnalysisResult:
-        """Return the observer result."""
-
-        if self._peak_mV is None:
-            return AnalysisResult(
-                name=self.definition.name,
-                values=np.asarray([np.nan]),
-                statuses=(AnalysisStatus.UNDETERMINED,),
-                messages=("observer received no samples.",),
-                unit="millivolt",
-                definition=self.definition,
-            )
-        return AnalysisResult(
-            name=self.definition.name,
-            values=np.asarray([self._peak_mV]),
-            statuses=(AnalysisStatus.VALID,),
-            unit="millivolt",
-            definition=self.definition,
-        )
-
-
 __all__ = [
     "ActivationObserver",
-    "PeakVoltageObserver",
 ]

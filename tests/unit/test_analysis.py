@@ -214,20 +214,12 @@ def test_activation_online_observer_cross_validates_posthoc_result():
     assert online.events[0].first_time_ms == pytest.approx(posthoc.events[0].first_time_ms)
 
 
-def test_peak_voltage_online_observer_cross_validates_posthoc_result():
+def test_peak_voltage_online_observer_is_not_public_api():
     result = _fake_result()
     definition = axs.analysis.PeakVoltage(target=axs.positions.CENTER)
-    observer = definition.online_observer(
-        positions=result.position_values(unit=axs.um) * axs.um,
-        original_indices=result.record_indices,
-    )
 
-    observer.update(result.t[:1500] * axs.ms, result.Vm[:1500] * axs.mV)
-    observer.update(result.t[1500:] * axs.ms, result.Vm[1500:] * axs.mV)
-    online = observer.finalize()
-    posthoc = result.analyze(definition)
-
-    assert isinstance(observer, axs.analysis.PeakVoltageObserver)
-    assert observer.requirements == definition.requirements
-    assert online.value == pytest.approx(posthoc.value)
-    assert online.status is posthoc.status
+    with pytest.raises(NotImplementedError, match="PeakVoltage is post-hoc"):
+        definition.online_observer(
+            positions=result.position_values(unit=axs.um) * axs.um,
+            original_indices=result.record_indices,
+        )

@@ -115,6 +115,14 @@ def test_analysis_namespace_is_real_package_not_results_alias():
     assert "analysis" in axs.__all__
 
 
+def test_peak_voltage_observer_is_not_public_surface():
+    assert not hasattr(axs, "PeakVoltageObserver")
+    assert not hasattr(axs.analysis, "PeakVoltageObserver")
+    assert "PeakVoltageObserver" not in axs.__all__
+    assert "PeakVoltageObserver" not in axs.analysis.__all__
+    assert axs.analysis.PeakVoltage is axs.PeakVoltage
+
+
 def test_recording_observer_strategy_excludes_superseded_generic_observer_design():
     text = (REPO_ROOT / "docs" / "recorders_observers_activation_strategy.md").read_text(
         encoding="utf-8"
