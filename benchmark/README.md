@@ -58,8 +58,9 @@ The retained command list is mirrored in `benchmark/registry.py`.
 | `python benchmark/runtime/run.py --suite vstim_batch` | hotpath-diagnostic | Batch-kernel diagnostic for imposed-Vstim input paths. |
 | `python benchmark/runtime/run.py --suite double_cable_batch` | hotpath-diagnostic | Batch-kernel diagnostic for double-cable runtime paths. |
 | `python benchmark/runtime/run.py --suite pool_memory` | hotpath-diagnostic | Pool memory/runtime probe for retained-output policies. |
-| `python benchmark/runtime/run.py --suite model_codegen` | model-codegen | Built-in class-based membrane source/codegen cache timing. |
-| `python benchmark/runtime/run.py --suite model_codegen_all` | model-codegen | Built-in plus custom membrane source/codegen cache timing. |
+| `python benchmark/runtime/run.py --suite model_codegen` | model-codegen | Built-in source/codegen cache and model-step smoke timing. |
+| `python benchmark/runtime/run.py --suite model_codegen_simulations` | model-codegen | Tiny public AxonSimulation first/warm timings for class-based templates. |
+| `python benchmark/runtime/run.py --suite model_codegen_all` | model-codegen | Built-in plus custom codegen, model-step, and template simulation timing. |
 | `python benchmark/runtime/run.py --suite reference_solvers` | validation-only | Focused optimized-vs-dense HH solver comparison. |
 | `python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke` | hotpath-diagnostic | Compact stage coverage before deeper CPU/GPU profiling. |
 | `python benchmark/hotpaths/run.py --workload path_comparison_matrix --sizes 1 --jax-log-compiles --prefix cold_path_probe` | hotpath-diagnostic | Cold-start and compile-log evidence for first-call claims. |
@@ -105,23 +106,32 @@ Run runtime memory scenarios:
 python benchmark/runtime/run.py --suite pool_memory
 ```
 
-Run the post-P7 membrane model source/codegen cache benchmark:
+Run the post-P7 membrane model source/codegen and model-step smoke benchmark:
 
 ```bash
 python benchmark/runtime/run.py --suite model_codegen
 ```
 
-Run built-in plus custom membrane model codegen cases:
+Run public template simulations for the new class-based membrane families:
+
+```bash
+python benchmark/runtime/run.py --suite model_codegen_simulations
+```
+
+Run built-in plus custom membrane model codegen, model-step, and simulation cases:
 
 ```bash
 python benchmark/runtime/run.py --suite model_codegen_all
 ```
 
 Use `model_codegen` when the question is source compilation, generated-code
-cache behavior, source hash stability, or class-based membrane model overhead.
-Use the other runtime/hotpath/NRV suites when the question includes cable
-solving, dispatch, input lowering, result assembly, external comparison, or
-GPU behavior.
+cache behavior, source hash stability, generated NumPy/JAX model-step overhead,
+or the built-in class-based membrane smoke path. Use
+`model_codegen_simulations` when the question is first/warm public
+`AxonSimulation` timing for HH, Rattay-Aberham, Sundt, Tigerholm,
+Schild94/Schild97, or MRG/AxNode templates. Use the other runtime/hotpath/NRV
+suites when the question includes broader cable solving, dispatch, input
+lowering, result assembly, external comparison, or GPU behavior.
 
 List NRV/performance suites:
 
@@ -215,6 +225,13 @@ Hotpath trace `metadata.json` files include the effective compute backend
 (`cpu`, `gpu`, `tpu`, or `unknown`), detected CPU/GPU model names when exposed
 by the host, OS details, host RAM, package versions, JAX devices, and the
 runtime environment variables listed above.
+
+Model-codegen benchmark JSON files contain separate `codegen_rows`,
+`model_step_rows`, `simulation_rows`, and `correctness_rows` arrays. The runner
+also writes sibling CSV files with `_codegen`, `_model_steps`, `_simulations`,
+and `_correctness` suffixes. Treat timings as usable only when the relevant
+correctness rows are `ok`; generated JAX is checked against generated NumPy,
+and mappable generated outputs are checked against the NumPy interpreter.
 
 By default, JAX may preallocate a large fraction of GPU memory, commonly 75% on
 the standard GPU allocator. A benchmark report must record any allocator or

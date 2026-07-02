@@ -109,12 +109,17 @@ BENCHMARK_SURFACES: tuple[BenchmarkSurface, ...] = (
             BenchmarkCommand(
                 command="python benchmark/runtime/run.py --suite model_codegen",
                 kind="model-codegen",
-                purpose="Built-in class-based membrane model source/codegen cache timing.",
+                purpose="Built-in source/codegen cache and model-step smoke timing.",
+            ),
+            BenchmarkCommand(
+                command="python benchmark/runtime/run.py --suite model_codegen_simulations",
+                kind="model-codegen",
+                purpose="Tiny public AxonSimulation first/warm timings for class-based templates.",
             ),
             BenchmarkCommand(
                 command="python benchmark/runtime/run.py --suite model_codegen_all",
                 kind="model-codegen",
-                purpose="Built-in plus custom membrane source/codegen cache timing.",
+                purpose="Built-in plus custom codegen, model-step, and template simulation timing.",
             ),
             BenchmarkCommand(
                 command="python benchmark/runtime/run.py --suite reference_solvers",

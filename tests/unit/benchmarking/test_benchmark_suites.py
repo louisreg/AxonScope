@@ -9,6 +9,11 @@ from benchmark.nrv_performance.run import suite_argv as nrv_performance_suite_ar
 from benchmark.nrv_performance.suites import NRV_PERFORMANCE_SUITES
 from benchmark.runtime.run import suite_argv as runtime_suite_argv
 from benchmark.runtime.suites import RUNTIME_SUITES
+from benchmark.runtime.model_codegen import (
+    run_model_step_benchmark,
+    select_cases,
+    select_simulation_cases,
+)
 
 
 EXPECTED_COMMAND_KINDS = {
@@ -151,9 +156,52 @@ def test_runtime_model_codegen_suite_is_registered_and_forwardable():
 
     assert suite.runner == "model_codegen"
     assert argv[:2] == ["--models", "builtins"]
+    assert "--simulation-cases" in argv
+    assert argv[argv.index("--simulation-cases") + 1] == "none"
     assert argv[argv.index("--out-dir") + 1] == "runtime-out"
     assert argv[argv.index("--prefix") + 1] == "models"
     assert argv[-2:] == ["--warm-repeats", "1"]
+
+
+def test_runtime_model_codegen_simulation_suite_is_registered_and_forwardable():
+    suite = RUNTIME_SUITES["model_codegen_simulations"]
+
+    argv = runtime_suite_argv(
+        suite,
+        out_dir=Path("runtime-out"),
+        prefix="model-sims",
+        extra_args=("--", "--simulation-warm-repeats", "0"),
+    )
+
+    assert suite.runner == "model_codegen"
+    assert argv[:2] == ["--models", "passive"]
+    assert "--no-model-steps" in argv
+    assert argv[argv.index("--simulation-cases") + 1] == "representative"
+    assert argv[-2:] == ["--simulation-warm-repeats", "0"]
+
+
+def test_model_codegen_case_selection_and_passive_step_benchmark(tmp_path, monkeypatch):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+
+    rows, correctness = run_model_step_benchmark(
+        select_cases(["passive"]),
+        repeats=1,
+        node_count=3,
+    )
+
+    assert {row.target for row in rows} == {
+        "numpy_interpreter",
+        "generated_numpy",
+        "generated_jax",
+        "jax_runtime_lowering",
+    }
+    assert all(row.status == "ok" for row in rows)
+    assert {row.target for row in correctness} == {
+        "generated_jax_vs_numpy",
+        "generated_numpy_vs_interpreter",
+    }
+    assert all(row.status == "ok" for row in correctness)
+    assert select_simulation_cases(["smoke"])[0].name == "hh_template"
 
 
 def test_realistic_fascicle_profile_metrics_flatten_nbytes_components():

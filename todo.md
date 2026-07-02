@@ -186,18 +186,18 @@ performance claims.
   `Schild94`, and `Schild97`.
 - [x] Measure cold compile/cache miss, warm cache hit, generated files, source
   hash, cache key, and cache reason for built-in and custom model classes.
-- [ ] Add first-run and warm `AxonSimulation` timings for representative
+- [x] Add first-run and warm `AxonSimulation` timings for representative
   model-template runs separately from pure codegen/cache timings.
-- [ ] Include small deterministic model-step benchmarks for generated NumPy,
+- [x] Include small deterministic model-step benchmarks for generated NumPy,
   generated JAX, NumPy interpreter, and JAX runtime lowering where practical.
-- [ ] Include short public `AxonSimulation` runs for representative axon
+- [x] Include short public `AxonSimulation` runs for representative axon
   templates using the new model classes:
   HH, Rattay-Aberham, Sundt, Tigerholm, Schild94/Schild97, and MRG/AxNode.
 - [x] Include at least one custom user-defined `axs.membranes.Model` benchmark
   from `examples/advanced/axon_models/05_custom_membrane_authoring.py`.
 - [x] Compare cold versus warm behavior with an empty codegen cache and a
   populated codegen cache. Record cache status and cache reason in metadata.
-- [ ] Verify benchmark correctness with targeted model-step equivalence and
+- [x] Verify benchmark correctness with targeted model-step equivalence and
   small Vm/activation comparisons before using timings.
 - [x] Decide which benchmark command becomes the smoke command for P7 model
   performance regressions.
@@ -386,9 +386,9 @@ ledger in this TODO.
 - P7: class-based public membrane models, source compiler, generated JAX/NumPy
   model-step artifacts, generated-code cache/reporting, direct
   `JaxMembraneProgram` execution, and old membrane-stack deletion are complete.
-- Benchmark surface classification, post-P7 flattening, model-codegen metadata
-  contract, and benchmark memory observability are complete; next benchmark
-  work starts with P2 new model coverage.
+- Benchmark surface classification, post-P7 flattening, benchmark memory
+  observability, and P2 model-codegen/model-step/template-simulation coverage
+  are complete; next cleanup work starts with P3 documentation and examples.
 
 ## Key References
 

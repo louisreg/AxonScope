@@ -17,6 +17,9 @@ The format is inspired by Keep a Changelog.
   currents, and observables instead.
 - Flattened benchmark documentation around current benchmark surfaces, including
   model-codegen cold/warm runs for built-in and custom membrane models.
+- Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
+  correctness rows, and tiny public `AxonSimulation` first/warm runs for the
+  new class-based membrane template families.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain
