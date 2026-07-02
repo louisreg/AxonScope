@@ -11,6 +11,18 @@ from benchmark.runtime.run import suite_argv as runtime_suite_argv
 from benchmark.runtime.suites import RUNTIME_SUITES
 
 
+EXPECTED_COMMAND_KINDS = {
+    "public-runtime",
+    "hotpath-diagnostic",
+    "model-codegen",
+    "validation-only",
+    "external-comparison",
+    "remote-GPU",
+    "archive",
+    "generated-output",
+}
+
+
 def test_nrv_performance_suites_include_smoke_and_forward_args():
     suite = NRV_PERFORMANCE_SUITES["smoke"]
 
@@ -40,6 +52,19 @@ def test_benchmark_surface_registry_classifies_active_archive_and_outputs():
     assert surfaces["benchmark/reports"].status == "generated-output"
     assert surfaces_by_status("active")
     assert surfaces_by_status("archive")
+
+    for surface in BENCHMARK_SURFACES:
+        assert surface.commands
+        assert surface.command_kinds
+        for command in surface.commands:
+            assert command.command
+            assert command.kind in EXPECTED_COMMAND_KINDS
+            assert command.purpose
+
+    assert "model-codegen" in surfaces["benchmark/runtime"].command_kinds
+    assert surfaces["benchmark/hotpaths"].command_kinds == ("hotpath-diagnostic",)
+    assert surfaces["benchmark/kaggle"].command_kinds == ("remote-GPU", "generated-output")
+    assert surfaces["benchmark/results"].command_kinds == ("generated-output",)
 
 
 def test_nrv_mrg_extracellular_perf_suite_has_warm_repeats():

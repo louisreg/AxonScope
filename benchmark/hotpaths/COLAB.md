@@ -73,9 +73,9 @@ Available notebook cases:
   adaptive PCR policy and CPU runs resolve to Thomas. It includes sizes
   `100/300/600/2000` for the longer CPU/GPU comparison after the PCR result.
 - `kernel_double_cable_observer_auto_long`: same MRG double-cable extracellular
-  trace, but uses `Recording.none()` plus solver-side `PeakVoltage` and
-  `Activation` observers at sizes `100/300/600/2000`. Use this to compare
-  retained center traces against compact observer-only output on GPU.
+  trace, but uses `Recording.none()` plus compact VmRaster threshold probes at
+  sizes `100/300/600/2000`. Use this to compare retained center traces against
+  compact observer-only output on GPU.
 - `kernel_double_cable_observer_auto_trace`: focused GPU-only JAX profiler
   capture for the observer-only auto path at sizes `600/2000`. It enables
   `--jax-trace` and Perfetto trace export for GPU only, so the downloaded

@@ -39,8 +39,8 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
     "double_cable_observer": HotpathWorkload(
         name="double_cable_observer",
         description=(
-            "Homogeneous MRG double-cable extracellular pool with solver-side "
-            "Activation/Latency VmRaster observers and no retained Vm trace."
+            "Homogeneous MRG double-cable extracellular pool with compact "
+            "VmRaster threshold probes and no retained Vm trace."
         ),
     ),
     "footprint_reuse_sweep": HotpathWorkload(
@@ -67,8 +67,8 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
     "observer_only": HotpathWorkload(
         name="observer_only",
         description=(
-            "Homogeneous HH pool with solver-side Activation/Latency VmRaster observers "
-            "and no retained Vm trace; useful to verify Phase 7.5 memory behavior."
+            "Homogeneous HH pool with compact VmRaster threshold probes and no "
+            "retained Vm trace; useful to verify Phase 7.5 memory behavior."
         ),
     ),
     "realistic_mixed_population": HotpathWorkload(

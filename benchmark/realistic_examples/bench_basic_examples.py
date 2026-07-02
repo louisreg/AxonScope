@@ -218,8 +218,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="full",
         help=(
             "Recording policy for example 08 recruitment. Use center to retain a "
-            "single Vm column, or observer_only to benchmark compact solver-side "
-            "activation decisions instead of stored Vm."
+            "single Vm column, or observer_only to benchmark compact VmRaster "
+            "activation summaries instead of stored Vm."
         ),
     )
     parser.add_argument(

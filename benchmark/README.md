@@ -8,29 +8,84 @@ depend on benchmark internals.
 
 The lifecycle registry lives in `benchmark/registry.py`.
 
-| Surface | Status | Use |
+| Surface | Status | Command classes | Use |
+| --- | --- | --- | --- |
+| `benchmark/runtime/` | active | public-runtime, hotpath-diagnostic, model-codegen, validation-only | Named runtime suites for supported public execution paths. |
+| `benchmark/hotpaths/` | active | hotpath-diagnostic | Cold/warm, lowering, memory, and dispatch diagnostics. |
+| `benchmark/nrv_performance/` | active | external-comparison, hotpath-diagnostic, public-runtime | AxonScope-vs-NRV and realistic fascicle performance suites. |
+| `benchmark/realistic_examples/` | active | public-runtime | Public workflow-level benchmarks. |
+| `benchmark/kaggle/` | active | remote-GPU, generated-output | Remote GPU wrapper for active suites. |
+| `benchmark/solvers/` | validation-only | validation-only | Retained double-cable solver timing and agreement checks. |
+| `benchmark/pseudo_double/` | experimental | validation-only | Standby pseudo-double evidence, not a public route. |
+| `benchmark/archived_solver_spikes/` | archive | archive | Historical solver candidates. |
+| `benchmark/triton_solver/` | archive | archive | Historical Triton candidate. |
+| `benchmark/jax_triton_solver/` | archive | archive | Historical JAX-Triton candidate. |
+| `benchmark/cuda_ffi_solver/` | archive | archive | Historical CUDA FFI candidate. |
+| `benchmark/cute_dsl/` | archive | archive | Historical CuTe DSL candidate. |
+| `benchmark/notebooks/` | archive | archive | Notebook snapshots only. |
+| `benchmark/reports/` | generated-output | generated-output | Generated reports and figures; some retained summaries are tracked. |
+| `benchmark/results/` | generated-output | generated-output | Raw benchmark outputs. |
+
+`benchmark/results/` is ignored by git and must never be used as architecture
+source material. New generated `benchmark/reports/` files are also ignored, but
+tracked report summaries may be cited only after a fresh review. For new claims,
+summarize retained evidence in tracked docs, changelog notes, or TODO entries
+instead of editing raw output directories.
+
+## Command Classes
+
+Use these labels consistently in docs and reports:
+
+- `public-runtime`: supported AxonScope runtime or public workflow timing.
+- `hotpath-diagnostic`: stage-level dispatch, lowering, memory, or kernel probe.
+- `model-codegen`: class-based membrane source/codegen/cache timing.
+- `validation-only`: solver/scientific agreement evidence, not a public runtime API.
+- `external-comparison`: AxonScope-vs-NRV or NRV/FEM handoff timing.
+- `remote-GPU`: Kaggle/Colab wrapper for GPU evidence outside the local machine.
+- `archive`: retained historical code or notebooks, never fresh claim material.
+- `generated-output`: generated metadata, reports, figures, or raw output files.
+
+## Retained Commands
+
+The retained command list is mirrored in `benchmark/registry.py`.
+
+| Command | Class | Use |
 | --- | --- | --- |
-| `benchmark/runtime/` | active | Named runtime suites for supported public execution paths. |
-| `benchmark/hotpaths/` | active | Cold/warm, lowering, memory, and dispatch diagnostics. |
-| `benchmark/nrv_performance/` | active | AxonScope-vs-NRV and realistic fascicle performance suites. |
-| `benchmark/realistic_examples/` | active | Public workflow-level benchmarks. |
-| `benchmark/kaggle/` | active | Remote GPU wrapper for active suites. |
-| `benchmark/solvers/` | validation-only | Retained double-cable solver timing and agreement checks. |
-| `benchmark/pseudo_double/` | experimental | Standby pseudo-double evidence, not a public route. |
-| `benchmark/archived_solver_spikes/` | archive | Historical solver candidates. |
-| `benchmark/triton_solver/` | archive | Historical Triton candidate. |
-| `benchmark/jax_triton_solver/` | archive | Historical JAX-Triton candidate. |
-| `benchmark/cuda_ffi_solver/` | archive | Historical CUDA FFI candidate. |
-| `benchmark/cute_dsl/` | archive | Historical CuTe DSL candidate. |
-| `benchmark/notebooks/` | archive | Notebook snapshots only. |
-| `benchmark/reports/` | generated-output | Generated reports and figures. |
-| `benchmark/results/` | generated-output | Raw benchmark outputs. |
+| `python benchmark/runtime/run.py --suite smoke` | public-runtime | Fast supported-runtime smoke before broader timing runs. |
+| `python benchmark/runtime/run.py --suite full` | public-runtime | Default supported runtime matrix with warm repeats. |
+| `python benchmark/runtime/run.py --suite profiled` | hotpath-diagnostic | Runtime matrix with a JAX profiler output directory. |
+| `python benchmark/runtime/run.py --suite vstim_forcing` | public-runtime | Supported single-cable imposed-Vstim path comparison. |
+| `python benchmark/runtime/run.py --suite vstim_batch` | hotpath-diagnostic | Batch-kernel diagnostic for imposed-Vstim input paths. |
+| `python benchmark/runtime/run.py --suite double_cable_batch` | hotpath-diagnostic | Batch-kernel diagnostic for double-cable runtime paths. |
+| `python benchmark/runtime/run.py --suite pool_memory` | hotpath-diagnostic | Pool memory/runtime probe for retained-output policies. |
+| `python benchmark/runtime/run.py --suite model_codegen` | model-codegen | Built-in class-based membrane source/codegen cache timing. |
+| `python benchmark/runtime/run.py --suite model_codegen_all` | model-codegen | Built-in plus custom membrane source/codegen cache timing. |
+| `python benchmark/runtime/run.py --suite reference_solvers` | validation-only | Focused optimized-vs-dense HH solver comparison. |
+| `python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke` | hotpath-diagnostic | Compact stage coverage before deeper CPU/GPU profiling. |
+| `python benchmark/hotpaths/run.py --workload path_comparison_matrix --sizes 1 --jax-log-compiles --prefix cold_path_probe` | hotpath-diagnostic | Cold-start and compile-log evidence for first-call claims. |
+| `python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke --memory-trace all --memory-top-n 10 --jax-device-memory-profile --prefix memory_map_smoke` | hotpath-diagnostic | Per-stage time+memory map for optimization targeting. |
+| `python benchmark/hotpaths/run.py --workload double_cable_observer --sizes 100 300 600 2000 --duration 10.0 --dt 0.01 --compartments 51 --warmups 1 --double-cable-block-solver auto` | hotpath-diagnostic | MRG double-cable VmRaster compact-output scaling probe. |
+| `python benchmark/nrv_performance/run.py --suite smoke --dry-run` | external-comparison | Expand the smallest AxonScope-vs-NRV performance grid. |
+| `python benchmark/nrv_performance/run.py --suite full` | external-comparison | Full HH/MRG AxonScope-vs-NRV performance grid. |
+| `python benchmark/nrv_performance/run.py --suite mrg_extracellular_perf` | external-comparison | Focused MRG extracellular warm-runtime comparison. |
+| `python benchmark/nrv_performance/run.py --suite population_cold_path_smoke` | hotpath-diagnostic | AxonScope-only cold/warm point-source timing with hotpath reports. |
+| `python benchmark/nrv_performance/run.py --suite population_tsim` | external-comparison | Point-source population AxonScope-vs-NRV timing. |
+| `python benchmark/nrv_performance/run.py --suite population_tsim_gpu` | public-runtime | Synthetic AxonScope population timing with explicit GPU execution policy. |
+| `python benchmark/nrv_performance/run.py --suite population_tsim_gpu_1000` | public-runtime | Large synthetic AxonScope GPU population timing. |
+| `python benchmark/nrv_performance/run.py --suite realistic_fascicle_smoke` | external-comparison | Small NRV LIFE/FEM handoff and AxonScope recruitment profile. |
+| `python benchmark/nrv_performance/run.py --suite realistic_fascicle_synthetic_full` | external-comparison | Full-size synthetic NRV LIFE/FEM handoff profile. |
+| `python benchmark/realistic_examples/bench_basic_examples.py --preset smoke --repeats 1` | public-runtime | Workflow-level public-example smoke timing. |
+| `python benchmark/realistic_examples/bench_basic_examples.py --preset stress --platforms cpu gpu --profile` | public-runtime | CPU/GPU public-workflow stress pass with hotpath profiles. |
+| `python benchmark/solvers/bench_double_cable_linear_solvers.py --dry-run` | validation-only | Retained double-cable linear solver timing matrix preview. |
+| `python benchmark/solvers/bench_double_cable_end_to_end.py --dry-run` | validation-only | Retained double-cable end-to-end timing matrix preview. |
+| `python benchmark/solvers/validate_double_cable_solver_agreement.py --dry-run` | validation-only | Agreement harness for retained solver-route changes. |
+| `python benchmark/solvers/profile_double_cable_linear_solvers.py --help` | validation-only | Focused trace helper for retained linear-solver diagnostics. |
+| `python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --benchmark population_tsim_gpu --machine-shape NvidiaTeslaP100` | remote-GPU | Run the synthetic population GPU validation preset remotely. |
+| `python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --benchmark realistic_fascicle_nrv_gpu --machine-shape NvidiaTeslaP100` | remote-GPU | Run the NRV LIFE/FEM handoff smoke on a remote GPU. |
+| `python benchmark/kaggle/prepare_kernel_metadata.py --username YOUR_KAGGLE_USERNAME --benchmark smoke` | generated-output | Generate Kaggle metadata/config files before remote submission. |
 
-`benchmark/results/` and `benchmark/reports/` are ignored by git. Do not make
-architecture decisions by editing files there; summarize retained evidence in
-tracked docs or TODO entries.
-
-## Active Commands
+Archive and generated-output surfaces are classed in the surface map rather than
+promoted as retained runnable commands.
 
 List runtime suites:
 

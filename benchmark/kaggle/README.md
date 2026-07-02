@@ -157,8 +157,8 @@ batches exceed Kaggle's LLVM compile memory.
 `realistic_stress_single_vm` is the fairer CPU/GPU comparison when recruitment
 does not need full spatial traces: example 08 records a single center Vm column
 instead of full `Vm`, while examples 06/07 keep their established recordings.
-`realistic_stress_observer_gpu` runs the compact solver-side observer path on
-GPU only. The first P100 attempt was interrupted during the 50-fiber recruitment
+`realistic_stress_observer_gpu` runs the compact VmRaster output path on GPU
+only. The first P100 attempt was interrupted during the 50-fiber recruitment
 case before a timing row was produced; the Kaggle UI timestamp on that log line
 was not a case duration. A later attempt on `926a8ce` revealed that
 observer-only was still using the retained-Vm `B >= 2048` batch-native threshold,

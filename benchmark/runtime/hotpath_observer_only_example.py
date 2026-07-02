@@ -4,7 +4,7 @@ Run:
     python benchmark/runtime/hotpath_observer_only_example.py
 
 This diagnostic mode estimates array memory before execution, then times the
-major execution stages. Here the simulation keeps a packed solver-side VmRaster
+major execution stages. Here the simulation keeps compact VmRaster output
 instead of storing the full Vm[time, position] trace.
 """
 
@@ -48,7 +48,7 @@ def main() -> None:
         ),
     )
 
-    # Step 3: choose threshold/probe definitions for the solver-side VmRaster.
+    # Step 3: choose threshold/probe definitions for compact VmRaster output.
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,

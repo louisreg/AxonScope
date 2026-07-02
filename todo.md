@@ -153,17 +153,17 @@ Goal: make benchmark commands and outputs clear enough that new model/compiler
 performance claims are reproducible and not mixed with old solver-spike
 evidence. Do this after P0.5 has defined the time+memory observability contract.
 
-- [ ] Re-audit every active benchmark entry point after P7:
+- [x] Re-audit every active benchmark entry point after P7:
   `benchmark/runtime`, `benchmark/hotpaths`, `benchmark/nrv_performance`,
   `benchmark/realistic_examples`, `benchmark/kaggle`, and
   `benchmark/solvers`.
-- [ ] For each benchmark command, label it as one of: public-runtime,
+- [x] For each benchmark command, label it as one of: public-runtime,
   hotpath-diagnostic, model-codegen, validation-only, external-comparison,
   remote-GPU, archive, or generated-output.
 - [x] Update `benchmark/registry.py` and `benchmark/README.md` so the active
   benchmark surface is flat, current, and names the retained command for each
   use case.
-- [ ] Remove stale benchmark wording that mentions deleted public paths,
+- [x] Remove stale benchmark wording that mentions deleted public paths,
   broad solver-side observer designs, or pre-P7 membrane implementations as
   current behavior.
 - [x] Define a standard benchmark result directory and metadata contract for
@@ -171,7 +171,7 @@ evidence. Do this after P0.5 has defined the time+memory observability contract.
   `AXONSCOPE_MODEL_CODEGEN_CACHE`, cache hit/miss state, source hash, cache key,
   model kind, model class, runtime route, recording policy, and cold/warm
   timing labels.
-- [ ] Keep `benchmark/results/` ignored and out of architecture decisions;
+- [x] Keep `benchmark/results/` ignored and out of architecture decisions;
   summarize retained evidence in tracked docs or changelog notes only after
   fresh runs.
 
@@ -386,9 +386,9 @@ ledger in this TODO.
 - P7: class-based public membrane models, source compiler, generated JAX/NumPy
   model-step artifacts, generated-code cache/reporting, direct
   `JaxMembraneProgram` execution, and old membrane-stack deletion are complete.
-- Benchmark surface classification exists in `benchmark/registry.py` and
-  `benchmark/README.md`; it now needs a post-P7 flattening pass and
-  model-codegen benchmark coverage.
+- Benchmark surface classification, post-P7 flattening, model-codegen metadata
+  contract, and benchmark memory observability are complete; next benchmark
+  work starts with P2 new model coverage.
 
 ## Key References
 

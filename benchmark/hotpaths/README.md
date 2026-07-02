@@ -140,7 +140,7 @@ python benchmark/hotpaths/run.py \
 The automatic policy resolves to adaptive PCR on GPU and Thomas elsewhere, and
 the manifest records both the requested and resolved solver choices.
 
-Run the same double-cable probe with solver-side VmRaster output:
+Run the same double-cable probe with compact VmRaster output:
 
 ```bash
 python benchmark/hotpaths/run.py \
@@ -154,9 +154,9 @@ python benchmark/hotpaths/run.py \
 ```
 
 This keeps the same MRG extracellular setup but uses `Recording.none()` with
-threshold-style observers instead of retaining a center Vm trace. The solver
-returns packed `vm_raster` words; activation/latency-style summaries are
-post-processing.
+VmRaster threshold probes instead of retaining a center Vm trace. The solver
+returns packed `observations["vm_raster"]` words; activation/latency-style
+summaries are post-processing.
 
 Capture a JAX profiler timeline for the same GPU-oriented path:
 
@@ -269,11 +269,11 @@ packaging regressions, then `kernel_observer_long` and
 | `intracellular_only` | HH population with intracellular clamps only. Separates dispatch, runtime preparation, input materialization, kernel enqueue/wait, and result packaging without extracellular-field construction. |
 | `point_source_extracellular` | HH population driven by analytical point-source extracellular stimulations. Stresses the current generic `Vstim` preprocessing path tracked in the benchmark/CPU-GPU section of `todo.md`. |
 | `double_cable_extracellular` | MRG double-cable population driven by analytical point-source extracellular stimulations. Stresses the priority myelinated extracellular path before Phase 8 study/reuse APIs. |
-| `double_cable_observer` | Same MRG double-cable extracellular population with threshold-style observers, `Recording.none()`, and packed VmRaster output. Compares retained center traces against observer-only output. |
+| `double_cable_observer` | Same MRG double-cable extracellular population with VmRaster threshold probes, `Recording.none()`, and packed `observations["vm_raster"]` output. Compares retained center traces against observer-only output. |
 | `footprint_reuse_sweep` | Repeated point-source pool runs with fixed geometry and changing stimulus amplitude. Measures the current cost of missing footprint/stimulus-only reuse and gives Phase 7.5/8 a baseline. |
 | `solver_only_precomputed` | Direct backend workload with runtime and inputs prepared before timing. Separates kernel throughput from dispatch planning and input materialization for single-cable intra/extra rows. |
 | `typed_footprint_drive_matrix` | Direct backend workload comparing typed stimulation lowering against typed `ExtracellularFootprint`/`ExtracellularDrive` lowering, then executing the typed-drive dense `Vstim` path. |
-| `observer_only` | HH population with threshold-style observers, `Recording.none()`, empty `vm_shapes`, and `vm_raster` in the manifest. Verifies the no-retained-Vm path. |
+| `observer_only` | HH population with VmRaster threshold probes, `Recording.none()`, empty `vm_shapes`, and `vm_raster` in the manifest. Verifies the no-retained-Vm path. |
 | `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
 | `hotpath_matrix` | Compact matrix for center/probes recording, observer-only retention, point-source extracellular input, and mixed-population execution. Useful as the Phase 7.6 coverage run before deeper CPU/GPU work. |
 | `path_comparison_matrix` | Controlled matrix for Phase 7.6.1: single-cable intra center/probes/full/observer, single-cable point-source extra center/probes/full/observer, and MRG double-cable point-source extra center/full. Useful to compare path families before optimizing. |

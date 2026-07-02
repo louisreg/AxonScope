@@ -7,8 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
-import numpy as np
-
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(repo_root / "src"))
@@ -29,6 +27,7 @@ SCENARIOS = (
     "center_chunked",
     "probes_chunked",
 )
+FLOAT32_BYTES = 4
 
 
 @dataclass(frozen=True)
@@ -187,8 +186,7 @@ def run_scenario(
         options=options,
     )
 
-    ion_channel = getattr(pool_inputs.axon, "ion_channel", None)
-    dtype_bytes = np.dtype(getattr(ion_channel, "dtype", np.float32)).itemsize
+    dtype_bytes = FLOAT32_BYTES
     recorded_width = options.recording.width_for(pool_inputs.axon.n_compartments)
     effective_chunk = timing.nt if time_chunk_steps is None else min(time_chunk_steps, timing.nt)
     vstim_peak_elements = timing.fibers * effective_chunk * timing.nx
