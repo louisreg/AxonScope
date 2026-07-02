@@ -517,7 +517,91 @@ def _collect_benchmark_metadata(output_dir: Path) -> dict[str, Any]:
         )
     except Exception as exc:  # pragma: no cover - defensive metadata only.
         metadata["jax_metadata_error"] = f"{type(exc).__name__}: {exc}"
+    try:
+        from axonscope.utils.env import collect_environment_info
+
+        environment = collect_environment_info()
+    except Exception as exc:  # pragma: no cover - defensive metadata only.
+        metadata["environment_error"] = f"{type(exc).__name__}: {exc}"
+    else:
+        metadata.update(_environment_benchmark_metadata(environment))
     return _json_safe_dict(metadata)
+
+
+def _environment_benchmark_metadata(environment: Mapping[str, Any]) -> dict[str, Any]:
+    """Return benchmark-oriented machine/backend metadata."""
+
+    os_info = _mapping(environment.get("os"))
+    cpu_info = _mapping(environment.get("cpu"))
+    memory_info = _mapping(environment.get("memory"))
+    gpu_info = _mapping(environment.get("gpu"))
+    jax_info = _mapping(environment.get("jax"))
+    backend = jax_info.get("default_backend")
+    devices = tuple(
+        _mapping(device) for device in _sequence(jax_info.get("device_details"))
+    )
+    device_platforms = tuple(
+        str(device.get("platform"))
+        for device in devices
+        if device.get("platform") is not None
+    )
+    device_kinds = tuple(
+        str(device.get("device_kind"))
+        for device in devices
+        if device.get("device_kind") is not None
+    )
+    gpu_devices = tuple(_mapping(device) for device in _sequence(gpu_info.get("devices")))
+    gpu_models = tuple(
+        str(device.get("name"))
+        for device in gpu_devices
+        if device.get("name") is not None
+    )
+
+    return {
+        "environment": environment,
+        "os": os_info,
+        "cpu": cpu_info,
+        "memory": memory_info,
+        "gpu": gpu_info,
+        "packages": _mapping(environment.get("packages")),
+        "environment_variables": _mapping(environment.get("environment_variables")),
+        "git": _mapping(environment.get("git")),
+        "jax_details": jax_info,
+        "compute_backend": backend,
+        "compute_device_class": _device_class(
+            str(backend) if backend is not None else None,
+            device_platforms,
+        ),
+        "compute_device_platforms": list(device_platforms),
+        "compute_device_models": list(device_kinds),
+        "host_os": os_info.get("platform"),
+        "host_ram_total_gb": memory_info.get("total_gb"),
+        "host_ram_available_gb": memory_info.get("available_gb"),
+        "cpu_model": cpu_info.get("model"),
+        "gpu_models": list(gpu_models),
+    }
+
+
+def _device_class(backend: str | None, platforms: Sequence[str]) -> str:
+    labels = {backend.lower()} if backend else set()
+    labels.update(platform.lower() for platform in platforms)
+    if labels & {"gpu", "cuda", "rocm"}:
+        return "gpu"
+    if "tpu" in labels:
+        return "tpu"
+    if "cpu" in labels:
+        return "cpu"
+    return "unknown"
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _sequence(value: Any) -> Sequence[Any]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return value
+    return ()
 
 
 def _array_metadata(array: Any, *, role: str | None, session: BenchmarkSession) -> dict[str, Any]:

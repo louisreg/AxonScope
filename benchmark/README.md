@@ -137,6 +137,11 @@ Benchmark JSON metadata should include:
   `XLA_PYTHON_CLIENT_PREALLOCATE`, `XLA_PYTHON_CLIENT_MEM_FRACTION`, and
   `XLA_PYTHON_CLIENT_ALLOCATOR`.
 
+Hotpath trace `metadata.json` files include the effective compute backend
+(`cpu`, `gpu`, `tpu`, or `unknown`), detected CPU/GPU model names when exposed
+by the host, OS details, host RAM, package versions, JAX devices, and the
+runtime environment variables listed above.
+
 By default, JAX may preallocate a large fraction of GPU memory, commonly 75% on
 the standard GPU allocator. A benchmark report must record any allocator or
 preallocation environment override before comparing VRAM or memory pressure.

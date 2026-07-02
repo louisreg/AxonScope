@@ -45,6 +45,18 @@ def test_hotpath_session_records_nested_events_and_writes_files(tmp_path):
 
     first_event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
     assert first_event["name"] == "inputs.intracellular"
+    metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["compute_device_class"] in {"cpu", "gpu", "tpu", "unknown"}
+    assert "compute_backend" in metadata
+    assert "compute_device_models" in metadata
+    assert "host_os" in metadata
+    assert "host_ram_total_gb" in metadata
+    assert "cpu_model" in metadata
+    assert "gpu_models" in metadata
+    assert "os" in metadata
+    assert "cpu" in metadata
+    assert "memory" in metadata
+    assert "gpu" in metadata
     assert benchmark_report(print_report=False) is None
 
 

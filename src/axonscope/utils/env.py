@@ -74,6 +74,7 @@ def _cpu_info() -> dict[str, Any]:
         cpu_freq = None
 
     return {
+        "model": _cpu_model_name(),
         "logical_cores": psutil.cpu_count(logical=True),
         "physical_cores": psutil.cpu_count(logical=False),
         "frequency_mhz": {
@@ -85,6 +86,35 @@ def _cpu_info() -> dict[str, Any]:
         else None,
         "load_average": os.getloadavg() if hasattr(os, "getloadavg") else None,
     }
+
+
+def _cpu_model_name() -> str | None:
+    """Return a best-effort CPU model name for benchmark metadata."""
+
+    if sys.platform == "darwin":
+        value = _run_command(["sysctl", "-n", "machdep.cpu.brand_string"])
+        if value:
+            return value
+    if sys.platform.startswith("linux"):
+        try:
+            text = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            text = ""
+        for line in text.splitlines():
+            if line.lower().startswith("model name"):
+                _, _, value = line.partition(":")
+                value = value.strip()
+                if value:
+                    return value
+        value = _run_command(["lscpu"])
+        if value:
+            for line in value.splitlines():
+                if line.lower().startswith("model name"):
+                    _, _, model = line.partition(":")
+                    model = model.strip()
+                    if model:
+                        return model
+    return platform.processor() or platform.machine() or None
 
 
 def _memory_info() -> dict[str, Any]:
