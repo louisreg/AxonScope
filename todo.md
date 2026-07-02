@@ -82,11 +82,76 @@ pytest -q tests/unit --tb=short
 - [x] Update guardrails after the `PeakVoltageObserver` decision so tests
   encode the accepted public surface.
 
+### P0.5 - Benchmarking And Memory Profiling Observability
+
+Goal: before flattening P1 benchmark commands, make sure AxonScope can explain
+where time and memory go at each simulation stage. A useful benchmark report
+must map both timings and measured memory pressure across planning, dispatch,
+preparation, input lowering, kernel enqueue/wait, and result assembly.
+
+Audit on 2026-07-02:
+
+- [x] Inventory existing benchmark/profiling tools:
+  `src/axonscope/benchmarking/hotpaths.py` records nested timing events to
+  `events.jsonl`, `summary.csv`, and `metadata.json`; public execution already
+  emits spans for `dispatch.build_plan`, `runtime.prepare`,
+  `inputs.positions`, `observer.plan`, `inputs.intracellular`,
+  `inputs.extracellular`, `kernel.enqueue`, `kernel.wait`,
+  `results.split_batch`, and `results.to_public`.
+- [x] Inventory current JAX profiling support:
+  `benchmark/runtime/benchmark_solver.py` can wrap a run with
+  `jax.profiler.start_trace`; `benchmark/hotpaths/run.py` can capture JAX
+  traces around the whole run or kernel spans; `trace_annotation(...)` labels
+  benchmark calls.
+- [x] Inventory current memory evidence:
+  `AxonSimulation.estimate()`, `record_group_memory_estimate(...)`, and
+  `benchmark/runtime/pool_memory.py` estimate tensor sizes; benchmark metadata
+  includes array shape/dtype/device/nbytes, JAX device `memory_stats()` when
+  exposed, process/host metadata, and `nvidia-smi` GPU/VRAM snapshots when
+  available.
+- [x] Record the main gap: current benchmark events do not measure per-span
+  Python/RSS allocation deltas, `tracemalloc` peaks, NumPy host allocation
+  pressure, or JAX device-memory snapshots/profiles. Estimated tensor bytes are
+  useful for planning, but they are not measured peak memory.
+- [ ] Add opt-in measured memory tracing to `BenchmarkSession`:
+  per-span start/end RSS via `psutil`, `tracemalloc` current/peak deltas for
+  Python/NumPy-visible allocations, and optional top allocation frames with a
+  small configurable `--memory-top-n`.
+- [ ] Add optional device-memory tracing:
+  best-effort JAX device `memory_stats()` snapshots, `nvidia-smi` snapshots
+  for CUDA machines, and optional JAX device memory profiles using
+  `jax.profiler.save_device_memory_profile(...)` after `block_until_ready()`.
+  Keep `.prof` artifacts under the benchmark result directory and record the
+  pprof/XProf instructions in metadata/docs. Official reference:
+  https://docs.jax.dev/en/latest/device_memory_profiling.html
+- [ ] Add benchmark CLI flags across active runners, starting with
+  `benchmark/hotpaths/run.py`:
+  `--memory-trace {off,rss,tracemalloc,device,all}`,
+  `--memory-top-n`, `--jax-device-memory-profile`, and a way to restrict
+  device-memory profile capture to selected stages such as `kernel.wait` or
+  `simulation.pool.total`.
+- [ ] Extend benchmark outputs:
+  keep `events.jsonl` backward-compatible while adding memory fields to event
+  metadata; write a `memory_summary.csv` grouped by span name with timing,
+  RSS delta/peak, `tracemalloc` delta/peak, device-memory before/after when
+  available, estimated tensor bytes, and retained output bytes.
+- [ ] Add a smoke benchmark that produces a full time+memory map for one small
+  public `AxonSimulation` population and one observer-only run; compare
+  measured memory with `AxonSimulation.estimate()` and flag large unexplained
+  gaps rather than treating estimates as truth.
+- [ ] Add unit tests for memory tracing with synthetic allocations, disabled
+  tracing, missing `psutil`/device stats fallbacks, JSON/CSV schema stability,
+  and JAX profile metadata when JAX exposes the profiler.
+- [ ] Update `benchmark/README.md` after implementation so users know which
+  tool answers each question: timing spans, host Python/NumPy allocation
+  tracing, RSS/process memory, JAX/XLA device memory profiles, and remote GPU
+  VRAM snapshots.
+
 ### P1 - Benchmark Surface Flattening
 
 Goal: make benchmark commands and outputs clear enough that new model/compiler
 performance claims are reproducible and not mixed with old solver-spike
-evidence.
+evidence. Do this after P0.5 has defined the time+memory observability contract.
 
 - [ ] Re-audit every active benchmark entry point after P7:
   `benchmark/runtime`, `benchmark/hotpaths`, `benchmark/nrv_performance`,
