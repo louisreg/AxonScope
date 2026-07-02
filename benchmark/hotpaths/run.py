@@ -163,6 +163,39 @@ def main(argv: Sequence[str] | None = None) -> None:
             "dispatch, input preparation, kernel execution, and result packaging."
         ),
     )
+    parser.add_argument(
+        "--memory-trace",
+        choices=("off", "rss", "tracemalloc", "device", "all"),
+        default="off",
+        help=(
+            "Record measured per-span memory metadata. rss samples process RSS, "
+            "tracemalloc samples Python/NumPy-visible allocations, device "
+            "samples JAX device memory_stats and nvidia-smi when available."
+        ),
+    )
+    parser.add_argument(
+        "--memory-top-n",
+        type=int,
+        default=0,
+        help="Include the top N tracemalloc allocation deltas per span.",
+    )
+    parser.add_argument(
+        "--jax-device-memory-profile",
+        action="store_true",
+        help=(
+            "Save JAX device memory .prof artifacts for selected spans. The "
+            "default selected stage is kernel.wait, after block_until_ready()."
+        ),
+    )
+    parser.add_argument(
+        "--jax-device-memory-profile-stage",
+        action="append",
+        default=None,
+        help=(
+            "Stage name for JAX device memory profile capture. Repeat to select "
+            "several stages, or pass 'all'. Defaults to kernel.wait."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -180,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--time-chunk-steps must be >= 1.")
     if args.sweep_repeats < 1:
         raise ValueError("--sweep-repeats must be >= 1.")
+    if args.memory_top_n < 0:
+        raise ValueError("--memory-top-n must be >= 0.")
 
     runs = planned_runs(args.workload, resolve_sizes(args.preset, args.sizes))
     if args.dry_run:
@@ -202,6 +237,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         requested_dir=args.jax_trace_dir,
         enabled=jax_trace_enabled,
     )
+    benchmark_options = _benchmark_options(args)
     manifest = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "preset": args.preset,
@@ -226,6 +262,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             "jax_trace_dir": None if jax_trace_root is None else str(jax_trace_root),
             "jax_trace_create_perfetto": bool(args.jax_trace_create_perfetto),
             "jax_trace_scope": args.jax_trace_scope,
+            "memory_trace": args.memory_trace,
+            "memory_top_n": int(args.memory_top_n),
+            "jax_device_memory_profile": bool(args.jax_device_memory_profile),
+            "jax_device_memory_profile_stages": _profile_stages_for_metadata(args),
         },
         "jax_compile_logging": jax_compile_logging,
         "runs": [],
@@ -254,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     create_perfetto_trace=bool(args.jax_trace_create_perfetto),
                     scope=args.jax_trace_scope,
                 ),
+                benchmark_options=benchmark_options,
             )
             manifest["runs"].append(run_record)
             print(
@@ -290,6 +331,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             output_dir,
             print_summary=False,
             sync_device=bool(args.sync_device),
+            **benchmark_options,
         )
         session.metadata.update(
             {
@@ -373,6 +415,7 @@ def run_direct_workload(
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
     jax_trace: dict[str, object],
+    benchmark_options: dict[str, object],
 ) -> dict[str, object]:
     """Run a backend-level hotpath workload that bypasses public dispatch."""
 
@@ -392,6 +435,7 @@ def run_direct_workload(
             jax_log_compiles=jax_log_compiles,
             time_chunk_steps=time_chunk_steps,
             jax_trace=jax_trace,
+            benchmark_options=benchmark_options,
         )
     if workload == "typed_footprint_drive_matrix":
         return _run_typed_footprint_drive_matrix(
@@ -409,8 +453,30 @@ def run_direct_workload(
             jax_log_compiles=jax_log_compiles,
             time_chunk_steps=time_chunk_steps,
             jax_trace=jax_trace,
+            benchmark_options=benchmark_options,
         )
     raise ValueError(f"Unknown direct hotpath workload: {workload!r}.")
+
+
+def _benchmark_options(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "memory_trace": args.memory_trace,
+        "memory_top_n": int(args.memory_top_n),
+        "jax_device_memory_profile": bool(args.jax_device_memory_profile),
+        "jax_device_memory_profile_stages": _profile_stages_for_session(args),
+    }
+
+
+def _profile_stages_for_session(args: argparse.Namespace) -> tuple[str, ...] | None:
+    stages = args.jax_device_memory_profile_stage
+    if stages is None:
+        return None
+    return tuple(str(stage) for stage in stages)
+
+
+def _profile_stages_for_metadata(args: argparse.Namespace) -> list[str]:
+    stages = _profile_stages_for_session(args)
+    return ["kernel.wait"] if stages is None else list(stages)
 
 
 def _run_solver_only_precomputed(
@@ -429,6 +495,7 @@ def _run_solver_only_precomputed(
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
     jax_trace: dict[str, object],
+    benchmark_options: dict[str, object],
 ) -> dict[str, object]:
     """Run kernels with runtime and inputs prepared before benchmarking."""
 
@@ -492,6 +559,7 @@ def _run_solver_only_precomputed(
         output_dir,
         print_summary=False,
         sync_device=bool(sync_device),
+        **benchmark_options,
     )
     session.metadata.update(
         {
@@ -553,6 +621,7 @@ def _run_typed_footprint_drive_matrix(
     jax_log_compiles: bool,
     time_chunk_steps: int | None,
     jax_trace: dict[str, object],
+    benchmark_options: dict[str, object],
 ) -> dict[str, object]:
     """Compare generic stimulation lowering against typed drive lowering."""
 
@@ -594,6 +663,7 @@ def _run_typed_footprint_drive_matrix(
         output_dir,
         print_summary=False,
         sync_device=bool(sync_device),
+        **benchmark_options,
     )
     session.metadata.update(
         {

@@ -109,6 +109,25 @@ python benchmark/hotpaths/run.py \
   --prefix cold_path_probe
 ```
 
+Run a small time+memory map before optimizing a stage:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload hotpath_matrix \
+  --preset smoke \
+  --memory-trace all \
+  --memory-top-n 10 \
+  --jax-device-memory-profile \
+  --prefix memory_map_smoke
+```
+
+This writes per-stage timing to `events.jsonl`/`summary.csv`, measured memory
+metadata into each event, aggregate memory rows to `memory_summary.csv`, and
+JAX device-memory `.prof` artifacts for selected stages under
+`device_memory_profiles/`. `memory_summary.csv` keeps estimated tensor bytes
+next to measured RSS/device deltas and adds `memory_estimate_gap_note` when a
+large measured delta exceeds the retained tensor estimate.
+
 ## Validation-Only Solver Commands
 
 Use these for retained double-cable solver evidence, not as user-facing runtime
@@ -151,6 +170,11 @@ preallocation environment override before comparing VRAM or memory pressure.
 Current memory evidence layers:
 
 - host RSS and process peak RSS for workflow-level benchmarks;
+- opt-in per-span RSS, `tracemalloc`, JAX device `memory_stats()`, and
+  `nvidia-smi` snapshots in hotpath traces through `--memory-trace`;
+- optional JAX device memory `.prof` artifacts through
+  `--jax-device-memory-profile` after synchronization-oriented stages such as
+  `kernel.wait`;
 - planned tensor estimates from `AxonSimulation.estimate()` and hotpath
   metadata;
 - JAX array shape/dtype/device metadata for kernel inputs and outputs;
@@ -158,7 +182,9 @@ Current memory evidence layers:
   available.
 
 Future memory work may add `memray`, a dedicated sampling profiler, or `jax-smi`
-integration. Do not treat estimated tensor bytes as measured peak memory.
+integration. Do not treat estimated tensor bytes as measured peak memory; use
+`memory_summary.csv` to compare estimates against measured RSS/tracemalloc/device
+signals.
 
 ## Claims Policy
 

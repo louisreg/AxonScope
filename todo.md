@@ -113,36 +113,36 @@ Audit on 2026-07-02:
   Python/RSS allocation deltas, `tracemalloc` peaks, NumPy host allocation
   pressure, or JAX device-memory snapshots/profiles. Estimated tensor bytes are
   useful for planning, but they are not measured peak memory.
-- [ ] Add opt-in measured memory tracing to `BenchmarkSession`:
+- [x] Add opt-in measured memory tracing to `BenchmarkSession`:
   per-span start/end RSS via `psutil`, `tracemalloc` current/peak deltas for
   Python/NumPy-visible allocations, and optional top allocation frames with a
   small configurable `--memory-top-n`.
-- [ ] Add optional device-memory tracing:
+- [x] Add optional device-memory tracing:
   best-effort JAX device `memory_stats()` snapshots, `nvidia-smi` snapshots
   for CUDA machines, and optional JAX device memory profiles using
   `jax.profiler.save_device_memory_profile(...)` after `block_until_ready()`.
   Keep `.prof` artifacts under the benchmark result directory and record the
   pprof/XProf instructions in metadata/docs. Official reference:
   https://docs.jax.dev/en/latest/device_memory_profiling.html
-- [ ] Add benchmark CLI flags across active runners, starting with
+- [x] Add benchmark CLI flags across active runners, starting with
   `benchmark/hotpaths/run.py`:
   `--memory-trace {off,rss,tracemalloc,device,all}`,
   `--memory-top-n`, `--jax-device-memory-profile`, and a way to restrict
   device-memory profile capture to selected stages such as `kernel.wait` or
   `simulation.pool.total`.
-- [ ] Extend benchmark outputs:
+- [x] Extend benchmark outputs:
   keep `events.jsonl` backward-compatible while adding memory fields to event
   metadata; write a `memory_summary.csv` grouped by span name with timing,
   RSS delta/peak, `tracemalloc` delta/peak, device-memory before/after when
   available, estimated tensor bytes, and retained output bytes.
-- [ ] Add a smoke benchmark that produces a full time+memory map for one small
+- [x] Add a smoke benchmark that produces a full time+memory map for one small
   public `AxonSimulation` population and one observer-only run; compare
   measured memory with `AxonSimulation.estimate()` and flag large unexplained
   gaps rather than treating estimates as truth.
-- [ ] Add unit tests for memory tracing with synthetic allocations, disabled
+- [x] Add unit tests for memory tracing with synthetic allocations, disabled
   tracing, missing `psutil`/device stats fallbacks, JSON/CSV schema stability,
   and JAX profile metadata when JAX exposes the profiler.
-- [ ] Update `benchmark/README.md` after implementation so users know which
+- [x] Update `benchmark/README.md` after implementation so users know which
   tool answers each question: timing spans, host Python/NumPy allocation
   tracing, RSS/process memory, JAX/XLA device memory profiles, and remote GPU
   VRAM snapshots.
