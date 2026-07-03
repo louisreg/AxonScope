@@ -34,7 +34,8 @@ Current state:
 - `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
   solver-side design is accepted.
 - P3 is paused after current-docs cleanup. P9 has started with a short
-  cold-run micro baseline before any larger P8 runtime project.
+  cold-run micro baseline and scalar/batch span coverage normalization before
+  any larger P8 runtime project.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -283,7 +284,7 @@ path.
   model-codegen correctness `16/16 ok`; `cold_run_micro` covers retained Vm,
   observer-only VmRaster, and point-source extracellular paths in about 5.3 s
   total on local CPU.
-- [ ] Normalize hotpath span coverage across scalar retained-Vm and
+- [x] Normalize hotpath span coverage across scalar retained-Vm and
   batch/observer routes so preparation, input lowering, kernel enqueue/wait,
   and result assembly are comparable in cold-run reports.
 - [ ] Add a rotated or one-case-per-process cold comparison only if independent

@@ -30,6 +30,7 @@ Raw outputs:
 
 - `benchmark/results/runtime/model_codegen_20260703_155255.*`
 - `benchmark/results/hotpaths/cold_run_micro_20260703/`
+- `benchmark/results/hotpaths/cold_run_micro_scalar_spans_20260703/`
 
 ## Environment
 
@@ -121,16 +122,39 @@ RSS highlights:
   independent cold comparison between path families because all cases run in
   one Python/JAX process. The first case absorbs one-time import/runtime/cache
   effects.
-- Scalar retained-Vm paths still expose less span detail than the observer-only
-  batch path. The observer-only case shows `runtime.prepare`, input lowering,
-  `kernel.enqueue`, `kernel.dispatch_jax`, `kernel.wait`, and result split
-  spans; the retained scalar cases mostly show dispatch/runtime membrane spans.
+- The first baseline exposed a scalar retained-Vm instrumentation gap: retained
+  scalar cases mostly showed dispatch/runtime membrane spans, while the
+  observer-only batch path exposed preparation, input lowering, enqueue/wait,
+  and result assembly. The follow-up run below closes that gap.
+
+## Follow-Up: Scalar Span Coverage
+
+After normalizing scalar retained-Vm instrumentation, the same command with
+`--prefix cold_run_micro_scalar_spans_20260703` produced 45 events. All three
+micro cases now emit the standard hotpath stages: `runtime.prepare`,
+`inputs.positions`, `observer.plan`, `inputs.intracellular`,
+`inputs.extracellular`, `kernel.enqueue`, `kernel.wait`, and
+`results.split_batch`.
+
+Selected aggregate spans from
+`benchmark/results/hotpaths/cold_run_micro_scalar_spans_20260703/`:
+
+| Span | Count | Total | Max |
+| --- | ---: | ---: | ---: |
+| `simulation.case` | 3 | 5000.181 ms | 2888.173 ms |
+| `simulation.pool.total` | 3 | 4995.506 ms | 2884.706 ms |
+| `dispatch.group.total` | 3 | 4994.076 ms | 2883.901 ms |
+| `runtime.prepare` | 3 | 3170.018 ms | 2548.836 ms |
+| `kernel.enqueue` | 3 | 1770.014 ms | 723.042 ms |
+| `observer.plan` | 3 | 27.393 ms | 27.353 ms |
+| `inputs.intracellular` | 3 | 1.570 ms | 1.391 ms |
+| `inputs.positions` | 3 | 0.452 ms | 0.213 ms |
+| `inputs.extracellular` | 3 | 0.238 ms | 0.149 ms |
+| `kernel.wait` | 3 | 0.179 ms | 0.113 ms |
+| `results.split_batch` | 3 | 0.111 ms | 0.053 ms |
 
 ## Next P9 Work
 
-- Normalize span coverage across scalar retained-Vm and batch/observer paths so
-  cold-run reports can compare preparation, input lowering, kernel enqueue/wait,
-  and result assembly consistently.
 - Add a rotated or one-case-per-process cold comparison if independent path
   cold-start timing becomes important.
 - Investigate first-call JAX runtime lowering and kernel dispatch before

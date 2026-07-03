@@ -157,7 +157,7 @@ def _run_pool_checked(
                         solver_options=solver_options,
                         observers=observers,
                         record_observables=record_observables,
-                        record_voltage=resolved_batch_options.recording.mode != "none",
+                        recording_mode=resolved_batch_options.recording.mode,
                     )
                     if callback is not None:
                         callback(
@@ -210,13 +210,14 @@ def _run_scalar_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     record_observables: bool,
-    record_voltage: bool,
+    recording_mode: str,
 ) -> tuple[DispatchRowRecord, ...]:
     """Execute a dispatch group through scalar solves."""
 
     solver = CrankNicholson(solver_options=solver_options)
-    return tuple(
-        _dispatch_result_from_sim(
+    record_voltage = recording_mode != "none"
+    solved_rows = [
+        (
             item,
             solver.solve(
                 item.simulation,
@@ -226,10 +227,24 @@ def _run_scalar_group(
                 record_voltage=record_voltage,
                 observers=observers,
             ),
-            group_id=group.group_id,
         )
         for item in group.items
-    )
+    ]
+    with benchmark_span(
+        "results.split_batch",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=recording_mode,
+        route="scalar",
+    ):
+        return tuple(
+            _dispatch_result_from_sim(
+                item,
+                sim,
+                group_id=group.group_id,
+            )
+            for item, sim in solved_rows
+        )
 
 
 def _can_run_batch_group(

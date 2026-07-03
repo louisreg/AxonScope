@@ -699,6 +699,62 @@ def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_d
     assert "vstim_mid" not in metadata
 
 
+def test_scalar_retained_vm_emits_standard_hotpath_spans():
+    axon = _hh_axon(nx=11, amp_nA=0.1)
+
+    axs.enable_benchmark(
+        "/tmp/axonscope-scalar-hotpath-span-test",
+        print_summary=False,
+        save=False,
+    )
+    try:
+        result = run_pool(
+            [axon],
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert result[0].Vm is not None
+    assert report is not None
+    names = [event.name for event in report.events]
+    for name in (
+        "runtime.prepare",
+        "inputs.positions",
+        "observer.plan",
+        "inputs.intracellular",
+        "inputs.extracellular",
+        "kernel.enqueue",
+        "kernel.wait",
+        "results.split_batch",
+    ):
+        assert name in names
+
+    scalar_events = [
+        event
+        for event in report.events
+        if event.name in {"kernel.enqueue", "kernel.wait", "inputs.extracellular"}
+    ]
+    assert scalar_events
+    assert all(event.metadata["route"] == "scalar" for event in scalar_events)
+
+    extracellular_event = next(
+        event for event in report.events if event.name == "inputs.extracellular"
+    )
+    metadata = extracellular_event.metadata
+    assert metadata["input_format"] == "dense_precomputed"
+    assert metadata["extracellular_stimulation_count"] == 1
+    assert "vstim_mid" in metadata
+
+    result_event = next(
+        event for event in report.events if event.name == "results.split_batch"
+    )
+    assert result_event.metadata["recording_mode"] == "center"
+
+
 def test_double_cable_batch_extracellular_stack_matches_row_runtime():
     axons = [
         _passive_double_cable_axon(amp_nA=0.1, compartments=11),

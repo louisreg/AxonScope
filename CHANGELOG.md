@@ -21,6 +21,9 @@ The format is inspired by Keep a Changelog.
   P9 cold-run baseline for retained Vm, VmRaster observer-only, and
   point-source extracellular paths, with the first CPU baseline recorded under
   `docs/benchmarks/`.
+- Normalized scalar retained-Vm benchmark spans with batch/observer routes so
+  cold-run reports include comparable runtime preparation, input lowering,
+  kernel enqueue/wait, and result assembly stages.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.
