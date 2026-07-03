@@ -95,8 +95,11 @@ Current focus:
   `VmRasterResult` and CPU unpacking under `results`. Solver/backend code owns
   only plan lowering and packed bit updates.
 - Fixed-step time-grid validation lives in backend-neutral `axonscope.timebase`.
-  Public planning, estimation, and inspection code must not import JAX-heavy
-  solver numerical helpers for this contract.
+  Public planning, estimation, and inspection code must not import concrete
+  `axonscope.backends.jax.*` helpers directly. Backend-specific estimate and
+  inspection facts route through `axonscope.backends.execution`, which delegates
+  to backend-owned benchmark support such as `backends/jax/benchmark.py`
+  without forcing device transfers.
 - `ExecutionPolicy` now resolves JAX device requests and validates uniform
   precision. Runtime, device, and precision policy participate in JAX batch
   runtime cache identity; runtime execution still rejects implicit casting

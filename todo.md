@@ -14,7 +14,8 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-02 after the P7 class-based membrane-model closeout audit.
+Updated on 2026-07-03 after the P4/P5 backend-boundary and validation-policy
+cleanup.
 
 Current state:
 
@@ -33,9 +34,8 @@ Current state:
   recruitment summaries are post-processing.
 - `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
   solver-side design is accepted.
-- The next useful work is post-P7 repository stabilization, benchmark
-  flattening for the new membrane models, and documentation cleanup before
-  starting a major P8 runtime project.
+- The next useful work is P3 documentation/examples cleanup before starting a
+  major P8 runtime project.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -225,19 +225,23 @@ performance claims.
 
 ### P4 - Backend Boundary For Inspection And Estimates
 
-- [ ] Decide whether `inspection.py` and `performance.py` may import
+- [x] Decide whether `inspection.py` and `performance.py` may import
   `axonscope.backends.jax.*` directly, or whether input/recording lowering
   summaries should move behind a backend inspection/estimate facade.
-- [ ] If the current inspection remains JAX-specific, label that explicitly in
-  docs and inspection records.
-- [ ] If a facade is preferred, route planning, estimate, and inspection through
+- [x] If the current inspection remains JAX-specific, label that explicitly in
+  docs and inspection records. Decision: not needed for the public modules;
+  JAX-specific details now live behind the backend benchmark facade.
+- [x] If a facade is preferred, route planning, estimate, and inspection through
   the same backend boundary used by execution without forcing device transfers.
+  The JAX backend exposes host-side benchmark support in
+  `src/axonscope/backends/jax/benchmark.py`, delegated through
+  `axonscope.backends.execution`.
 
 ### P5 - Validation Policy
 
-- [ ] Run NRV validation only for numerical behavior changes.
-- [ ] Re-run hotpath/realistic benchmarks only when making performance claims.
-- [ ] Preserve the fast local acceptance loop: compileall, focused unit tests,
+- [x] Run NRV validation only for numerical behavior changes.
+- [x] Re-run hotpath/realistic benchmarks only when making performance claims.
+- [x] Preserve the fast local acceptance loop: compileall, focused unit tests,
   architecture guardrails, and example smoke/import tests.
 
 ## Next Major Phases
@@ -388,7 +392,10 @@ ledger in this TODO.
   `JaxMembraneProgram` execution, and old membrane-stack deletion are complete.
 - Benchmark surface classification, post-P7 flattening, benchmark memory
   observability, and P2 model-codegen/model-step/template-simulation coverage
-  are complete; next cleanup work starts with P3 documentation and examples.
+  are complete.
+- P4/P5 are complete: public estimate/inspection modules use the backend
+  execution boundary for backend-owned benchmark support, and validation policy
+  now separates fast acceptance, NRV, and performance benchmark evidence.
 
 ## Key References
 

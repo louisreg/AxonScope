@@ -20,6 +20,13 @@ The format is inspired by Keep a Changelog.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.
+- Routed public simulation estimates and pipeline inspection through the
+  backend execution boundary for backend-owned benchmark support, instead of
+  importing concrete JAX lowering helpers from `performance.py` and
+  `inspection.py`.
+- Clarified validation policy: NRV runs are required for numerical behavior
+  changes, while hotpath/realistic benchmarks are required only for performance
+  claims.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain

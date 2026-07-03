@@ -1066,23 +1066,36 @@ def test_vm_raster_result_container_lives_under_results_boundary():
     assert "def unpack_vm_raster_words" in results_text
 
 
-def test_public_planning_helpers_do_not_import_jax_numerical_helpers():
-    forbidden = "axonscope.backends.jax.common"
+def test_public_estimate_and_inspection_route_backend_details_through_facade():
+    forbidden_prefix = "axonscope.backends.jax"
     offenders: list[str] = []
 
     for path in (SRC_ROOT / "performance.py", SRC_ROOT / "inspection.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        text = path.read_text(encoding="utf-8")
+        tree = ast.parse(text, filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == forbidden:
+                    if alias.name == forbidden_prefix or alias.name.startswith(
+                        f"{forbidden_prefix}."
+                    ):
                         offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
-                if node.level == 0 and module == forbidden:
+                if node.level == 0 and (
+                    module == forbidden_prefix
+                    or module.startswith(f"{forbidden_prefix}.")
+                ):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+        assert "axonscope.backends.execution" in text
+
+    backend_benchmark = SRC_ROOT / "backends" / "jax" / "benchmark.py"
+    backend_text = backend_benchmark.read_text(encoding="utf-8")
 
     assert offenders == []
+    assert "benchmark_plan_input_lowering" in backend_text
+    assert "benchmark_lower_recording_options" in backend_text
+    assert "benchmark_membrane_output_names" in backend_text
 
 
 def test_jax_runtime_modules_live_under_backend_boundary():

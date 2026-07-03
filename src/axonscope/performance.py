@@ -11,11 +11,13 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
-from axonscope.backends.jax.input_lowering import plan_input_lowering
-from axonscope.backends.jax.recording_lowering import (
-    lower_batch_recording_options,
-    observer_output_label,
-    vm_raster_definitions,
+from axonscope.backends.execution import (
+    batch_options_from_recording,
+    benchmark_lower_recording_options,
+    benchmark_membrane_output_names,
+    benchmark_observer_output_label,
+    benchmark_plan_input_lowering,
+    benchmark_vm_raster_definitions,
 )
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
 from axonscope.population import AxonPopulation
@@ -494,8 +496,6 @@ def _estimate_batch_options(
     recording: Recording | None,
     batch_options: BatchOptions | None,
 ) -> BatchOptions:
-    from axonscope.backends.execution import batch_options_from_recording
-
     options = BatchOptions.full() if batch_options is None else batch_options
     if recording is not None and recording.wants_observables and population.is_single:
         if not recording.voltage:
@@ -536,12 +536,12 @@ def _estimate_dispatch_group(
     dtype = np.dtype(precision.solver_dtype)
     state_dtype = np.dtype(precision.state_dtype)
     can_batch = _can_batch_group(group, batch_options=batch_options, observers=observers)
-    kernel_options = lower_batch_recording_options(
+    kernel_options = benchmark_lower_recording_options(
         group,
         batch_options,
         observers=observers,
     )
-    observer_output = observer_output_label(
+    observer_output = benchmark_observer_output_label(
         observers,
         recording_mode=kernel_options.recording.mode,
     )
@@ -550,7 +550,7 @@ def _estimate_dispatch_group(
     stimulation_rows = _stimulation_rows(simulations)
     has_extracellular = any(stimulation_rows)
     if can_batch:
-        planned = plan_input_lowering(
+        planned = benchmark_plan_input_lowering(
             group_mode=group.mode,
             axons=simulations,
             stimulation_rows=stimulation_rows,
@@ -930,7 +930,7 @@ def _vm_raster_nbytes(
     step_count: int,
     observers: tuple[Any, ...] | None,
 ) -> int:
-    definitions = vm_raster_definitions(observers)
+    definitions = benchmark_vm_raster_definitions(observers)
     if not definitions:
         return 0
     max_probe_count = 0
@@ -1037,15 +1037,7 @@ def _observable_group_counts(
 
 
 def _call_name_tuple(model: Any, method_name: str) -> tuple[str, ...]:
-    method = getattr(model, method_name, None)
-    if not callable(method):
-        from axonscope.backends.jax.runtime import compile_membrane_model
-
-        model = compile_membrane_model(model)
-        method = getattr(model, method_name, None)
-    if not callable(method):
-        return ()
-    return tuple(str(name) for name in method())
+    return benchmark_membrane_output_names(model, method_name)
 
 
 def _coerce_runtime(value: Runtime) -> Runtime:

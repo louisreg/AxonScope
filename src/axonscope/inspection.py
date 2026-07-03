@@ -8,12 +8,12 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.backends.execution import batch_options_from_recording
-from axonscope.backends.jax.input_lowering import plan_input_lowering
-from axonscope.backends.jax.recording_lowering import (
-    lower_batch_recording_options,
-    observers_are_vm_raster_compatible,
-    vm_raster_definitions,
+from axonscope.backends.execution import (
+    batch_options_from_recording,
+    benchmark_lower_recording_options,
+    benchmark_observers_are_vm_raster_compatible,
+    benchmark_plan_input_lowering,
+    benchmark_vm_raster_definitions,
 )
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
 from axonscope.inspection_records import (
@@ -267,7 +267,7 @@ def _inspect_lowering(
     batch_options: BatchOptions,
     observers: tuple[Any, ...] | None,
 ) -> LoweringInspection:
-    vm_raster_supported = observers_are_vm_raster_compatible(observers)
+    vm_raster_supported = benchmark_observers_are_vm_raster_compatible(observers)
     if not _can_batch(group, batch_options=batch_options, observers=observers):
         retained_width = group.nx if batch_options.recording.mode != "none" else 0
         if observers is None:
@@ -293,7 +293,7 @@ def _inspect_lowering(
         )
 
     cohort = PreparedCohort.from_dispatch_group(group)
-    kernel_options = lower_batch_recording_options(
+    kernel_options = benchmark_lower_recording_options(
         group,
         batch_options,
         observers=observers,
@@ -303,7 +303,7 @@ def _inspect_lowering(
         and kernel_options.recording.mode == "none"
         and vm_raster_supported
     )
-    planned = plan_input_lowering(
+    planned = benchmark_plan_input_lowering(
         group_mode=group.mode,
         axons=cohort.axons,
         stimulation_rows=cohort.stimulations,
@@ -348,7 +348,7 @@ def _inspect_probes(
     observers: tuple[Any, ...] | None,
     batch_options: BatchOptions,
 ) -> ProbeInspection:
-    definitions = vm_raster_definitions(observers)
+    definitions = benchmark_vm_raster_definitions(observers)
     if not definitions:
         return ProbeInspection(
             group_id=int(group.group_id),
@@ -495,7 +495,7 @@ def _inspect_result_assembly(
             observations = "none"
         elif (
             batch_options.recording.mode == "none"
-            and observers_are_vm_raster_compatible(observers)
+            and benchmark_observers_are_vm_raster_compatible(observers)
         ):
             observations = 'observations["vm_raster"]'
         elif batch_options.recording.mode == "none":
@@ -510,7 +510,7 @@ def _inspect_result_assembly(
             public_result="AxonSimulationResult row",
         )
 
-    kernel_options = lower_batch_recording_options(
+    kernel_options = benchmark_lower_recording_options(
         group,
         batch_options,
         observers=observers,
@@ -519,7 +519,7 @@ def _inspect_result_assembly(
     observer_only = (
         observers is not None
         and kernel_options.recording.mode == "none"
-        and observers_are_vm_raster_compatible(observers)
+        and benchmark_observers_are_vm_raster_compatible(observers)
     )
     if observer_only:
         return ResultAssemblyInspection(
@@ -553,7 +553,7 @@ def _inspect_assembly_details(
     observers: tuple[Any, ...] | None,
     probes: ProbeInspection | None = None,
 ) -> AssemblyDetailInspection:
-    kernel_options = lower_batch_recording_options(
+    kernel_options = benchmark_lower_recording_options(
         group,
         batch_options,
         observers=observers,
@@ -580,7 +580,7 @@ def _inspect_assembly_details(
         if (
             probes.packed_shape is not None
             and kernel_options.recording.mode == "none"
-            and observers_are_vm_raster_compatible(observers)
+            and benchmark_observers_are_vm_raster_compatible(observers)
         )
         else None
     )
