@@ -261,10 +261,10 @@ pool = footprints.stimulated_population(
 )
 ```
 
-There is no public `NRVExtracellularContext` placeholder. A future direct
-NumPy/SciPy/FEM lowering phase can add executable integration when it is ready;
-today the supported path is adapter -> sampled `ExtracellularFootprint` ->
-`ExtracellularDrive` -> `ExtracellularStimulation`.
+There is no public `NRVExtracellularContext` placeholder. Direct NumPy/SciPy/FEM
+lowering is not a current public API; the supported path is adapter -> sampled
+`ExtracellularFootprint` -> `ExtracellularDrive` ->
+`ExtracellularStimulation`.
 
 ## Electrode Footprints
 
@@ -284,18 +284,17 @@ placement, pass offsets to `axs.analytical.point_source_footprint(...)`,
 `point_source_drive(...)`, or `point_source_stimulation(...)`. Solver execution
 then sees only intrinsic axon positions and sampled footprints.
 
-## Solver Boundary
+## Runtime Boundary
 
-Stimulation objects stay descriptive. JAX runtime compilation lives under the
-backend boundary in `axonscope.backends.jax.stimulation_runtime`:
+Stimulation objects stay descriptive. During execution, the selected backend
+lowers them into numerical callables or tensors:
 
-- `Stimulus` becomes a JAX-ready temporal callable;
-- `IntracellularContext` objects become a current-density injection callable
-  through `compile_intracellular_contexts(...)`;
-- `ExtracellularStimulation` objects become imposed-potential callables through
-  `compile_extracellular_stimulations(...)`, or dense/factorized Vstim tensors
-  for batch execution.
+- `Stimulus` becomes a temporal waveform representation;
+- `IntracellularContext` objects become current-density injection inputs;
+- `ExtracellularStimulation` objects become imposed-potential inputs, including
+  dense or factorized footprint tensors when a batch route can use them.
 
-This keeps the public stimulation package independent from runtime choices such
-as single axon solving, pool batches, JAX compilation, or precomputed footprint
+Public examples and docs should treat that lowering as backend-owned. This keeps
+the public stimulation package independent from runtime choices such as
+single-axon solving, pool batches, JAX compilation, or precomputed footprint
 tensors.

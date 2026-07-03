@@ -35,6 +35,9 @@ The format is inspired by Keep a Changelog.
   long architecture-plan pages are labelled as historical/proposal material.
 - Audited public examples after benchmark flattening and added a README path
   guard so benchmark/profiling material remains under `benchmark/`.
+- Cleaned current user-facing docs for membranes, stimulation, recording,
+  analysis, and pool dispatch so they describe public concepts first and keep
+  backend/compiler lowering behind explicit internal boundaries.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain

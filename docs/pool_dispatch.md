@@ -156,8 +156,8 @@ dispatch_results = run_pool(
 )
 ```
 
-Observer-only pool runs (`Recording.none()` plus solver-side observers, or
-`BatchOptions.none()`) use a stable default chunk size of
+Observer-only pool runs (`Recording.none()` plus compatible solver-side
+threshold observers, or `BatchOptions.none()`) use a stable default chunk size of
 `axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps. This reduces first-call JAX
 recompilation across duration sweeps because the compiled observer kernel sees
 a stable time-axis shape. The backend writes a local packed VmRaster state for
@@ -261,9 +261,8 @@ passes numeric arrays to solver kernels.
 
 Advanced users should inspect this lowering through dispatch plans, benchmark
 spans, or `AxonSimulation.inspect()` rather than importing backend input
-builders or solver kernels directly from public examples. The current JAX
-tensor builders live behind the JAX backend boundary and are not a stable user
-API.
+builders or solver kernels directly from public examples. Tensor builders live
+behind the backend boundary and are not a stable user API.
 
 This boundary is intentional: public simulation and dispatcher code know about
 public axons, intracellular contexts, extracellular stimulations, sampled
@@ -301,6 +300,7 @@ solvers/
   options.py        solver and batch execution options
 ```
 
-Use `axonscope.dispatcher` for dispatch. Import advanced batch-input builders
-from `axonscope.preparation.runtime_batches` so the dispatch surface stays
+Use `axonscope.dispatcher` for dispatch. Keep direct imports from
+`axonscope.preparation.runtime_batches` inside internal tests, benchmark tools,
+or deliberate runtime-assembly debugging so the public dispatch surface stays
 small.

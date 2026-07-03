@@ -5,11 +5,12 @@ descriptions.
 
 Membrane objects are descriptive. They do not own JAX functions, solver
 backends, time stepping, or compiled state. Solvers translate covered built-ins
-through AxonScope's internal compiler/runtime path. Public code should not
-import or construct compiler objects to describe a membrane.
+and supported custom classes through AxonScope's internal compiler/runtime path.
+Public code should not import or construct compiler/runtime objects to describe
+a membrane.
 
 ```text
-axs.membranes.Model -> axon Section/Layout -> flattening -> internal MembraneModel -> solver runtime
+axs.membranes.Model -> axon Section/Layout -> source compiler -> backend runtime
 ```
 
 ## Public Surface
@@ -54,7 +55,7 @@ The package layout mirrors these responsibilities:
 
 ```text
 src/axonscope/membranes/
-  model.py           Model, internal MembraneModel descriptor, decorators
+  model.py           Model base class, runtime descriptors, decorators
   builtins.py        public re-exports of source-backed model classes
   compiler.py        internal source loader and public-parameter normalizer
   models/*.py        one standalone source of truth per built-in model
@@ -71,11 +72,10 @@ defaults; it only re-exports the public classes.
 ## Units
 
 Most scalar membrane parameters may be passed as plain numbers in AxonScope's
-canonical membrane units. Pint quantities are accepted and converted through
-the compiler boundary. Geometry-like public parameters such as `diameter` must
-carry length units. `Model.params` reports the normalized plain-float values;
-the internal `MembraneModel` descriptor carries those values into solver
-preparation.
+canonical membrane units. Pint quantities are accepted and converted at the
+public construction boundary. Geometry-like public parameters such as
+`diameter` must carry length units. `Model.params` reports the normalized
+plain-float values that solver preparation receives after validation.
 
 Canonical units:
 
@@ -212,15 +212,15 @@ Conceptually, this is still one membrane description for one section. Spatial
 length and compartment count live in `Layout`. The solver composes supported
 components through the internal compiler path with aggregated public current
 and conductance names. Unsupported components fail at compile time; public
-composites do not fall back to a legacy composite backend.
+composites do not fall back to a separate old composite runtime path.
 
 ## Custom Membranes
 
 Custom membrane authoring uses the same class shape as built-ins: subclass
 `axs.membranes.Model`, declare typed parameter fields, write equation sections
 as plain Python methods, and pass an instance anywhere a membrane is accepted.
-AxonScope compiles the class source into its internal graph and generated
-runtime artifacts.
+AxonScope compiles the class source into a backend-ready semantic graph and
+generated runtime artifacts.
 
 The rejected builder-style surface and the old module-level
 `model = Model(...)` manifest are gone. Users define models, not Model IR. The
@@ -267,7 +267,7 @@ to mark public currents, public observables, and retained internal values. Use
 to map state updates and solver diagnostics. Built-in model files should not
 use class-level `exports = {...}` or `dynamics = {...}` manifests.
 
-The supported P7 authoring subset is intentionally small:
+The current authoring subset is intentionally small:
 
 - model classes inherit `axs.membranes.Model`;
 - model parameters are annotated class fields with unit-bearing defaults;
@@ -287,11 +287,10 @@ The supported P7 authoring subset is intentionally small:
   duplicate assignments, cycles, and stale manifest fields fail at compile
   time with source locations when available.
 
-Unsupported in P7: arbitrary Python side effects, loops, mutation, dynamic
+Currently unsupported: arbitrary Python side effects, loops, mutation, dynamic
 attribute creation, class-level `exports`/`dynamics`, manual construction of
-the internal `MembraneModel` descriptor, direct imports from
-`axonscope.model_ir`, backend-local extension classes, and stateful
-`Composite` components. See
+internal runtime descriptors, direct imports from `axonscope.model_ir`,
+backend-local extension classes, and stateful `Composite` components. See
 `examples/advanced/axon_models/05_custom_membrane_authoring.py` for the accepted
 class style.
 
@@ -324,24 +323,23 @@ axon = axs.axons.Myelinated(layout=template.layout(membranes=section_membranes))
 compute layouts. That responsibility stays in backend preparation and JAX
 membrane lowering.
 
-## Boundary With The JAX Backend
+## Runtime Boundary
 
 Public axon construction must use `axonscope.membranes` descriptions. Passive,
-Hodgkin-Huxley, Rattay-Aberham, Sundt, AxNode, Tigerholm, Schild, and
-supported composites compile through AxonScope's internal compiler path and
-the current JAX membrane program contract.
+Hodgkin-Huxley, Rattay-Aberham, Sundt, AxNode, Tigerholm, Schild, and supported
+composites compile through AxonScope's internal compiler path before reaching
+the active backend runtime.
 
-The runtime bridge is structural: solver kernels consume `JaxMembraneProgram`
-through membrane backends that expose only solver-facing terms such as gate
-updates, ionic current, conductance linearization, state updates, diagnostics,
-and traces. These backend/runtime classes are not public extension points. New
-custom membrane semantics should wait for the plain-Python source compiler
-instead of using backend-local classes or temporary builder surfaces.
+The runtime bridge is structural: backend kernels consume solver-facing terms
+such as gate updates, ionic current, conductance linearization, state updates,
+diagnostics, and traces. Backend/runtime classes are not public extension
+points. New custom membrane semantics should go through the plain-Python source
+compiler instead of backend-local classes or temporary builder surfaces.
 
-P7's generated-execution boundary is semantic, not the final performance
+The generated-execution boundary is semantic, not the final performance
 ceiling. Generated model-step modules already cover currents, conductances,
 state prepare/finalize updates, diagnostics, observable pruning, and source
 cache inspection for the supported class subset. Direct cable-solver kernel
 fusion, more aggressive common-subexpression elimination, and target-specific
-layout rewrites may use a stricter optimized representation after compilation,
-even if that representation no longer looks like the public `Model` class.
+layout rewrites may use stricter optimized representations after compilation,
+even if those representations no longer look like the public `Model` class.

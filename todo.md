@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-03 after the P3 public-examples audit.
+Updated on 2026-07-03 after the P3 current-docs cleanup.
 
 Current state:
 
@@ -33,7 +33,7 @@ Current state:
   recruitment summaries are post-processing.
 - `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
   solver-side design is accepted.
-- The next useful work is the remaining P3 documentation/examples cleanup
+- The next useful work is the remaining P3 tutorial/docstring/Sphinx cleanup
   before starting a major P8 runtime project.
 
 Fresh local validation from the 2026-07-02 audit:

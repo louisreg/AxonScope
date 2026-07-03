@@ -39,14 +39,15 @@ result = run.single
 
 Current support:
 
-- single-axon runs always return `Vm`;
-- single-axon runs can include observable groups such as `gates`, `currents`,
-  and `conductances` alongside `Vm`;
+- default runs retain `Vm` unless `Recording.none()` is requested with
+  solver-side observers;
+- single-row runs can include observable groups such as `gates`, `currents`,
+  and `conductances`, but those observable recordings must include `Vm`;
 - pool runs currently support `Vm` recording with `full`, `center`, `probes`,
   or explicit compartment `indices` spatial modes;
 - `Recording.none()` is supported when solver-side observers are supplied;
-- single-axon spatial filters, position-based recording, temporal subsampling,
-  and pool observable groups are explicit future work.
+- position-based recording, temporal subsampling, observable-only single-row
+  recording, and pool observable groups are not wired to execution yet.
 
 Current solver handling:
 
@@ -314,7 +315,7 @@ event.first_position_um
 ```
 
 These criteria are CPU/post-hoc companions to the lightweight online Vm
-observers and the current solver-side observer path.
+observers and to the strict solver-side VmRaster path.
 
 ## Visualization
 
