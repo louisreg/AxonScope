@@ -363,7 +363,12 @@ def main(argv: Sequence[str] | None = None) -> None:
                 workload=run.workload,
                 size=run.size,
             ):
-                result_batches = tuple(simulation.run() for simulation in simulations)
+                result_batches = _run_labeled_simulations(
+                    simulations,
+                    labels=simulation_labels,
+                    workload=run.workload,
+                    size=run.size,
+                )
         finally:
             report = axs.disable_benchmark(print_summary=bool(args.print_summary))
 
@@ -456,6 +461,27 @@ def run_direct_workload(
             benchmark_options=benchmark_options,
         )
     raise ValueError(f"Unknown direct hotpath workload: {workload!r}.")
+
+
+def _run_labeled_simulations(
+    simulations: Sequence[axs.AxonSimulation],
+    *,
+    labels: Sequence[str],
+    workload: str,
+    size: int,
+) -> tuple[axs.AxonSimulationResult, ...]:
+    """Run public simulations under case-level benchmark labels."""
+
+    results = []
+    for label, simulation in zip(labels, simulations, strict=True):
+        with benchmark_span(
+            "simulation.case",
+            workload=workload,
+            simulation_label=label,
+            size=int(size),
+        ):
+            results.append(simulation.run())
+    return tuple(results)
 
 
 def _benchmark_options(args: argparse.Namespace) -> dict[str, object]:
@@ -1208,6 +1234,14 @@ def build_simulations(
             compartments=compartments,
             length_um=length_um,
         )
+    elif workload == "cold_run_micro":
+        return build_cold_run_micro_matrix(
+            size=size,
+            compartments=compartments,
+            length_um=length_um,
+            duration_ms=duration_ms,
+            dt_ms=dt_ms,
+        )
     elif workload == "point_source_extracellular":
         instances = build_point_source_pool(
             size=size,
@@ -1311,6 +1345,66 @@ def build_simulations(
     return (
         axs.AxonSimulation(
             axs.AxonPopulation(instances),
+            duration=duration_ms * axs.ms,
+            dt=dt_ms * axs.ms,
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
+    )
+
+
+def build_cold_run_micro_matrix(
+    *,
+    size: int,
+    compartments: int,
+    length_um: float,
+    duration_ms: float,
+    dt_ms: float,
+) -> tuple[axs.AxonSimulation, ...]:
+    """Return the short P9 cold-run baseline matrix."""
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    latency = axs.analysis.Latency(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+        name="latency_center",
+    )
+    return (
+        axs.AxonSimulation(
+            axs.AxonPopulation(
+                build_intracellular_pool(
+                    size=size,
+                    compartments=compartments,
+                    length_um=length_um,
+                )
+            ),
+            duration=duration_ms * axs.ms,
+            dt=dt_ms * axs.ms,
+            recording=axs.Recording.center(axs.signals.Vm),
+        ),
+        axs.AxonSimulation(
+            axs.AxonPopulation(
+                build_intracellular_pool(
+                    size=size,
+                    compartments=compartments,
+                    length_um=length_um,
+                )
+            ),
+            duration=duration_ms * axs.ms,
+            dt=dt_ms * axs.ms,
+            recording=axs.Recording.none(),
+            observers=[activation, latency],
+        ),
+        axs.AxonSimulation(
+            axs.AxonPopulation(
+                build_point_source_pool(
+                    size=size,
+                    compartments=compartments,
+                    length_um=length_um,
+                )
+            ),
             duration=duration_ms * axs.ms,
             dt=dt_ms * axs.ms,
             recording=axs.Recording.center(axs.signals.Vm),
@@ -1702,6 +1796,13 @@ def _mrg_nodes_for_target_compartments(compartments: int) -> int:
 
 
 def _simulation_labels(workload: str, count: int) -> tuple[str, ...]:
+    if workload == "cold_run_micro":
+        labels = (
+            "single_intracellular_center",
+            "single_intracellular_observer_none",
+            "single_point_source_center",
+        )
+        return labels[:count]
     if workload == "hotpath_matrix":
         labels = (
             "homogeneous_center",

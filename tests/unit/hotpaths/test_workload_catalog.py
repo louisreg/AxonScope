@@ -19,6 +19,7 @@ from benchmark.hotpaths.run import (
 
 def test_hotpath_catalog_lists_phase25_workloads():
     assert set(HOTPATH_WORKLOADS) == {
+        "cold_run_micro",
         "footprint_reuse_sweep",
         "intracellular_only",
         "double_cable_extracellular",
@@ -40,6 +41,7 @@ def test_hotpath_runner_prints_list(capsys):
 
     out = capsys.readouterr().out
     assert "intracellular_only" in out
+    assert "cold_run_micro" in out
     assert "point_source_extracellular" in out
     assert "double_cable_extracellular" in out
     assert "scale" in out
@@ -52,6 +54,8 @@ def test_hotpath_runner_dry_run_expands_all_workloads(capsys):
     assert lines == [
         "intracellular_only size=2",
         "intracellular_only size=3",
+        "cold_run_micro size=2",
+        "cold_run_micro size=3",
         "point_source_extracellular size=2",
         "point_source_extracellular size=3",
         "double_cable_extracellular size=2",
@@ -81,6 +85,7 @@ def test_hotpath_runner_dry_run_keeps_registry_order(capsys):
     lines = capsys.readouterr().out.splitlines()
     assert lines == [
         "intracellular_only size=1",
+        "cold_run_micro size=1",
         "point_source_extracellular size=1",
         "double_cable_extracellular size=1",
         "double_cable_observer size=1",
@@ -230,6 +235,7 @@ def test_hotpath_size_and_run_resolution():
     assert single[0].size == 2
     assert [run.workload for run in planned_runs("all", (1,))] == [
         "intracellular_only",
+        "cold_run_micro",
         "point_source_extracellular",
         "double_cable_extracellular",
         "double_cable_observer",
@@ -241,6 +247,48 @@ def test_hotpath_size_and_run_resolution():
         "hotpath_matrix",
         "path_comparison_matrix",
     ]
+
+
+def test_cold_run_micro_builds_short_p9_baseline_matrix():
+    simulations = build_simulations(
+        "cold_run_micro",
+        size=2,
+        compartments=5,
+        length_um=40.0,
+        duration_ms=0.1,
+        dt_ms=0.05,
+    )
+
+    assert len(simulations) == 3
+    assert all(isinstance(simulation, axs.AxonSimulation) for simulation in simulations)
+    assert simulations[0].recording.spatial.value == "center"
+    assert simulations[0].recording.voltage
+    assert all(instance.extracellular_stimulation is None for instance in simulations[0].axons)
+    assert not simulations[1].recording.voltage
+    assert simulations[1].observers is not None
+    assert any(instance.extracellular_stimulation is not None for instance in simulations[2].axons)
+
+    metadata = _describe_simulations(
+        _simulation_labels("cold_run_micro", len(simulations)),
+        simulations,
+    )
+    assert metadata[0]["comparison_axes"] == {
+        "path_family": "single_intracellular",
+        "stimulation": "intracellular_current_clamp",
+        "recording_spatial": "center",
+        "recording_voltage": True,
+        "observer_mode": "none",
+    }
+    assert metadata[1]["comparison_axes"] == {
+        "path_family": "single_intracellular",
+        "stimulation": "intracellular_current_clamp",
+        "recording_spatial": "none",
+        "recording_voltage": False,
+        "observer_mode": "solver_side",
+    }
+    assert metadata[2]["comparison_axes"]["path_family"] == (
+        "single_point_source_extracellular"
+    )
 
 
 def test_hotpath_build_simulation_uses_public_root_object():

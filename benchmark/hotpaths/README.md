@@ -79,6 +79,24 @@ Run the Phase 7.6 compact coverage matrix:
 python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke
 ```
 
+Run the short P9 cold-run baseline before broader first-call profiling:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload cold_run_micro \
+  --sizes 1 \
+  --duration 1.0 \
+  --dt 0.02 \
+  --warmups 0 \
+  --memory-trace rss \
+  --prefix cold_run_micro
+```
+
+This micro-matrix covers three public execution paths in one run:
+intracellular retained Vm, intracellular observer-only VmRaster, and
+point-source extracellular retained Vm. Use it when `hotpath_matrix --preset
+smoke --memory-trace all` is too heavy for a short local baseline.
+
 Run a cold-start diagnostic with JAX compile logging enabled:
 
 ```bash
@@ -275,6 +293,7 @@ packaging regressions, then `kernel_observer_long` and
 | `typed_footprint_drive_matrix` | Direct backend workload comparing typed stimulation lowering against typed `ExtracellularFootprint`/`ExtracellularDrive` lowering, then executing the typed-drive dense `Vstim` path. |
 | `observer_only` | HH population with VmRaster threshold probes, `Recording.none()`, empty `vm_shapes`, and `vm_raster` in the manifest. Verifies the no-retained-Vm path. |
 | `realistic_mixed_population` | Mixed HH/Rattay-Aberham population with varied diameters, compartment counts, intracellular clamps, and some analytical extracellular rows. Stresses heterogeneous dispatch, preparation, fallback, and result packaging. |
+| `cold_run_micro` | Tiny P9 cold-start matrix for retained Vm, observer-only VmRaster, and point-source extracellular paths. Useful as the short local baseline before broader matrices. |
 | `hotpath_matrix` | Compact matrix for center/probes recording, observer-only retention, point-source extracellular input, and mixed-population execution. Useful as the Phase 7.6 coverage run before deeper CPU/GPU work. |
 | `path_comparison_matrix` | Controlled matrix for Phase 7.6.1: single-cable intra center/probes/full/observer, single-cable point-source extra center/probes/full/observer, and MRG double-cable point-source extra center/full. Useful to compare path families before optimizing. |
 

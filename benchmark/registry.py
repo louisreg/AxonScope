@@ -142,6 +142,18 @@ BENCHMARK_SURFACES: tuple[BenchmarkSurface, ...] = (
             ),
             BenchmarkCommand(
                 command=(
+                    "python benchmark/hotpaths/run.py --workload cold_run_micro "
+                    "--sizes 1 --duration 1.0 --dt 0.02 --warmups 0 "
+                    "--memory-trace rss --prefix cold_run_micro"
+                ),
+                kind="hotpath-diagnostic",
+                purpose=(
+                    "Short local P9 cold-run baseline covering retained Vm, "
+                    "VmRaster observer-only, and point-source extracellular paths."
+                ),
+            ),
+            BenchmarkCommand(
+                command=(
                     "python benchmark/hotpaths/run.py --workload path_comparison_matrix "
                     "--sizes 1 --jax-log-compiles --prefix cold_path_probe"
                 ),

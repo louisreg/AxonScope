@@ -17,6 +17,10 @@ The format is inspired by Keep a Changelog.
   currents, and observables instead.
 - Flattened benchmark documentation around current benchmark surfaces, including
   model-codegen cold/warm runs for built-in and custom membrane models.
+- Added `benchmark/hotpaths/run.py --workload cold_run_micro` as a short local
+  P9 cold-run baseline for retained Vm, VmRaster observer-only, and
+  point-source extracellular paths, with the first CPU baseline recorded under
+  `docs/benchmarks/`.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

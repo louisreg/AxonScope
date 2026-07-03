@@ -21,6 +21,14 @@ HOTPATH_WORKLOADS: dict[str, HotpathWorkload] = {
             "dispatch/runtime/kernel cost from extracellular field construction."
         ),
     ),
+    "cold_run_micro": HotpathWorkload(
+        name="cold_run_micro",
+        description=(
+            "Tiny cold-start matrix covering intracellular retained Vm, "
+            "observer-only VmRaster, and point-source extracellular retained Vm. "
+            "Use this as the short local P9 baseline before broader hotpath runs."
+        ),
+    ),
     "point_source_extracellular": HotpathWorkload(
         name="point_source_extracellular",
         description=(

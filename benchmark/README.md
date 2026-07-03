@@ -63,6 +63,7 @@ The retained command list is mirrored in `benchmark/registry.py`.
 | `python benchmark/runtime/run.py --suite model_codegen_all` | model-codegen | Built-in plus custom codegen, model-step, and template simulation timing. |
 | `python benchmark/runtime/run.py --suite reference_solvers` | validation-only | Focused optimized-vs-dense HH solver comparison. |
 | `python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke` | hotpath-diagnostic | Compact stage coverage before deeper CPU/GPU profiling. |
+| `python benchmark/hotpaths/run.py --workload cold_run_micro --sizes 1 --duration 1.0 --dt 0.02 --warmups 0 --memory-trace rss --prefix cold_run_micro` | hotpath-diagnostic | Short local P9 cold-run baseline covering retained Vm, VmRaster observer-only, and point-source extracellular paths. |
 | `python benchmark/hotpaths/run.py --workload path_comparison_matrix --sizes 1 --jax-log-compiles --prefix cold_path_probe` | hotpath-diagnostic | Cold-start and compile-log evidence for first-call claims. |
 | `python benchmark/hotpaths/run.py --workload hotpath_matrix --preset smoke --memory-trace all --memory-top-n 10 --jax-device-memory-profile --prefix memory_map_smoke` | hotpath-diagnostic | Per-stage time+memory map for optimization targeting. |
 | `python benchmark/hotpaths/run.py --workload double_cable_observer --sizes 100 300 600 2000 --duration 10.0 --dt 0.01 --compartments 51 --warmups 1 --double-cable-block-solver auto` | hotpath-diagnostic | MRG double-cable VmRaster compact-output scaling probe. |
@@ -165,6 +166,20 @@ python benchmark/hotpaths/run.py --list
 ```
 
 Run a cold-path profile before making first-call performance claims:
+
+```bash
+python benchmark/hotpaths/run.py \
+  --workload cold_run_micro \
+  --sizes 1 \
+  --duration 1.0 \
+  --dt 0.02 \
+  --warmups 0 \
+  --memory-trace rss \
+  --prefix cold_run_micro
+```
+
+Run the broader compile-log matrix only after the short baseline points to a
+first-call issue worth expanding:
 
 ```bash
 python benchmark/hotpaths/run.py \
