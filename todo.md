@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-03 after the README rewrite.
+Updated on 2026-07-03 after the P3 README and docs/guidelines/agents cleanup.
 
 Current state:
 
@@ -208,7 +208,7 @@ performance claims.
 - [x] Refaire `README.md` après la stabilisation post-P7: présenter l'API
   actuelle, le workflow `AxonSimulation`, les membranes class-based, la
   stratégie benchmark, et pointer vers les exemples/docs à jour.
-- [ ] Faire une mise à plat manuelle de `docs/`, `GUIDELINES.md` et
+- [x] Faire une mise à plat manuelle de `docs/`, `GUIDELINES.md` et
   `AGENTS.md`: relire les textes comme un utilisateur, supprimer le bruit
   historique, garder les règles opérationnelles utiles, et vérifier que les
   pages roadmap/proposal ne ressemblent pas à de la documentation courante.

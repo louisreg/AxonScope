@@ -1,11 +1,13 @@
 # AxonScope Architecture Cleanup Plan
 
-Status: draft plan for cleanup work, created on 2026-06-26.
+Status on 2026-07-03: historical cleanup plan. Many P0-P5 items described
+below are now complete or superseded. Use `README.md`, `GUIDELINES.md`,
+`todo.md`, `benchmark/README.md`, and the active examples for current behavior.
 
-This document turns the current architecture audit into an execution plan. It is
-not a record of completed work. `GUIDELINES.md` remains the target architecture
-reference, while `src/`, `tests/`, examples, and benchmark reports remain the
-source of truth for current behavior.
+This document is retained as an audit trail for the post-P7 cleanup. It is not
+the active checklist. `GUIDELINES.md` remains the target architecture reference,
+while `src/`, `tests/`, examples, and fresh benchmark reports remain the source
+of truth for current behavior.
 
 The goal is to converge the repository toward:
 
@@ -61,22 +63,20 @@ one canonical public result model, with internal execution result blocks.
 
 ### 1.2 Backend boundary reality
 
+Current public simulation, estimate, and inspection entry points route concrete
+backend details through `axonscope.backends.execution`. The historical notes
+below explain why that boundary was added.
+
 The public simulation layer mostly respects the target boundary:
 
 - `simulation.py` enters through `axonscope.backends.execution`.
 - backend-heavy JAX runtime and kernels live under `backends/jax`.
 - timebase and public recording concepts are mostly backend-neutral.
 
-There are still boundary exceptions:
-
-- `inspection.py` imports JAX recording lowering directly.
-- public planning/inspection helpers still expose or accept solver-side batch
-  concepts in a few places.
-
 The dispatcher group-runner exception has been removed: dispatch planning now
 delegates concrete batch execution through `axonscope.backends.execution`.
-Inspection still needs the same boundary cleanup or an explicit JAX-inspection
-label.
+The later P4 cleanup also moved estimate/inspection lowering summaries behind
+the same backend boundary.
 
 ### 1.3 Extracellular stimulation reality
 

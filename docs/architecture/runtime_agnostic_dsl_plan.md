@@ -1,6 +1,11 @@
 # Runtime-Agnostic DSL And Model IR Plan
 
-This is the active implementation plan for the runtime-agnostic model DSL.
+Status on 2026-07-03: architecture plan and implementation history. The P7
+membrane cleanup described here is complete for the current JAX path. Use
+`docs/membranes.md`, `README.md`, and the active examples for user-facing
+membrane authoring. Use `GUIDELINES.md` and `todo.md` for current architecture
+direction and remaining work.
+
 The long-form rationale lives in
 `ideas/AXONSCOPE_RUNTIME_AGNOSTIC_DSL_ARCHITECTURE.md`.
 

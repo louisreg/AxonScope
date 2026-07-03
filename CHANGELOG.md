@@ -30,6 +30,9 @@ The format is inspired by Keep a Changelog.
 - Rewrote the README around the current public `AxonSimulation` workflow,
   class-based membrane models, validation policy, benchmark surface, and
   executable learning path.
+- Flattened the agent and architecture guidance: `AGENTS.md` now keeps only
+  operational rules, `GUIDELINES.md` reflects the current P0-P5 state, and
+  long architecture-plan pages are labelled as historical/proposal material.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain

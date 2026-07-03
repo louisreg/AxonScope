@@ -1,6 +1,6 @@
 # AxonScope Architecture Guidelines
 
-Snapshot: 2026-06-29.
+Snapshot: 2026-07-03.
 
 This is the consolidated architecture reference for AxonScope. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
@@ -26,22 +26,21 @@ clean final design over retrocompatibility, downstream migration paths,
 deprecated wrappers, argument aliases, or prototype APIs. Delete superseded
 paths rather than preserving shims.
 
-Current focus:
+Current focus after the P0-P5 cleanup:
 
 - keep only retained solver routes in active runtime code;
 - preserve the public/runtime/backend boundary;
 - converge simulation, estimation, inspection, results, analyses, and plots on
   one public workflow;
-- flatten public examples against the public API and make every public option
-  visible in examples or delete/archive it;
-- make runtime/device/precision policy executable;
+- flatten public examples and docs against the public API, then make every
+  public option visible in examples or delete/archive it;
 - make planning, batch/dispatch, preparation, lowering, execution, and result
   assembly inspectable;
 - keep benchmark/profiling experiments out of public tutorials while making the
-  supported benchmark surface documented and reproducible.
-- open the runtime-agnostic DSL/Model IR phase so membrane semantics, units,
-  states, parameters, gates, channels, and observables belong to AxonScope
-  rather than to JAX-shaped backend implementations.
+  supported benchmark surface documented and reproducible;
+- keep membrane semantics, units, states, parameters, gates, channels, and
+  observables owned by AxonScope rather than by JAX-shaped backend
+  implementations;
 - keep membrane authoring user-facing: users define membrane models and
   equations in ordinary Python source, not intermediate representations or
   builder DSLs. Model IR is internal compiler vocabulary and must not become
@@ -75,10 +74,10 @@ Current focus:
 | 7.6.4 - Pseudo-double validation | Standby | Harness exists under `benchmark/pseudo_double/`; not a public solver replacement. |
 | 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
-| 7.6.7 - VmRaster redesign | In progress | One strict threshold raster primitive, packed in solver, decoded post-hoc. |
+| 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
 | 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
-| 7.8 - Runtime policy and inspection | In progress | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; target inspection hangs from `AxonSimulation.inspect()` and explains planning, dispatch, prepare, lowering, kernel, and result assembly. |
-| 7.9 - Runtime-agnostic DSL and Model IR | Opened | Internally, `axonscope.model_ir` now owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users should only see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package; remaining P7 work is source/provenance diagnostics, generated-kernel cache polish, fusion optimization, and examples. `Runtime.NUMPY` stays reserved for the future reference solver runtime. |
+| 7.8 - Runtime policy and inspection | Done for current JAX path | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; `AxonSimulation.inspect()` explains planning, dispatch, preparation, lowering, kernel, and result assembly through the backend boundary. |
+| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `Runtime.NUMPY` stays reserved for the future reference solver runtime. |
 | 7.10 - NumPy/SciPy reference solver runtime | Planned | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route. |
 | 8 - Studies | Not started | Callable studies, reuse policies, retention policies, study results. |
 | 9 - Serialization | Not started | Final schemas and persistence strategy. |
@@ -115,10 +114,12 @@ Current focus:
   static-footprint or compact-source rows. Keep it behind equivalence tests and
   benchmark evidence, and remove dense internal routes when the factorized
   route covers the behavior.
-- Benchmark modes, presets, flags, and names need a first-pass audit before the
-  benchmark layer is treated as product documentation. Each mode should be
-  active, validation-only, experimental, or archived; then document it or
-  remove it.
+- Benchmark modes, presets, flags, and names are documented in
+  `benchmark/README.md`. Treat fresh benchmark outputs as evidence only when
+  the command, machine metadata, git state, and validation context are recorded.
+- Remaining post-P7 cleanup is mainly documentation/examples: keep proposal
+  pages clearly labelled, remove stale future snippets from user docs, and
+  make the examples learning path match the current public API.
 
 ---
 
