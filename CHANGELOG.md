@@ -33,6 +33,8 @@ The format is inspired by Keep a Changelog.
 - Flattened the agent and architecture guidance: `AGENTS.md` now keeps only
   operational rules, `GUIDELINES.md` reflects the current P0-P5 state, and
   long architecture-plan pages are labelled as historical/proposal material.
+- Audited public examples after benchmark flattening and added a README path
+  guard so benchmark/profiling material remains under `benchmark/`.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain

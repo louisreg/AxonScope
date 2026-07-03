@@ -122,11 +122,11 @@ simulation to population protocols and NRV integration.
 Timing, memory, profiling, and reproducibility scripts live under `benchmark/`,
 not `examples/`:
 
-- `benchmark/runtime/benchmark_001_simple_batching.py`: compare batched and
-  simulation-by-simulation execution.
-- `benchmark/hotpaths/cold_run_progress.py`: inspect, estimate, and run one
-  fixed shape twice with progress and hotpath spans to compare cold and warm
-  execution.
-- `benchmark/runtime/hotpath_observer_only_example.py`: inspect hotpath spans
-  for trace-free VmRaster observer-only execution.
-- `benchmark/notebooks/`: benchmark notebooks and Colab-style runs.
+- `benchmark/README.md`: supported benchmark surface and retained commands.
+- `benchmark/runtime/run.py`: named public-runtime and model-codegen suites.
+- `benchmark/hotpaths/run.py`: cold/warm, lowering, memory, and dispatch
+  diagnostics.
+- `benchmark/nrv_performance/run.py`: AxonScope-vs-NRV and realistic fascicle
+  performance suites.
+- `benchmark/notebooks/`: archived notebook snapshots only; use current CLI
+  runners for new evidence.

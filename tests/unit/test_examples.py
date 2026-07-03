@@ -96,3 +96,16 @@ def test_benchmark_scripts_are_outside_examples_and_importable():
 
     assert callable(hotpath.main)
     assert callable(simple_batching.main)
+
+
+def test_examples_readme_references_existing_learning_and_benchmark_paths():
+    readme = EXAMPLES_ROOT / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    referenced_paths = sorted(
+        set(re.findall(r"`((?:examples|benchmark)/[^`]+)`", text))
+    )
+
+    assert referenced_paths
+    for reference in referenced_paths:
+        path = REPO_ROOT / reference.rstrip("/")
+        assert path.exists(), f"{readme.relative_to(REPO_ROOT)} references missing {reference}"

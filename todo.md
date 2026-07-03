@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-03 after the P3 README and docs/guidelines/agents cleanup.
+Updated on 2026-07-03 after the P3 public-examples audit.
 
 Current state:
 
@@ -219,7 +219,7 @@ performance claims.
   failure, and true conduction block.
 - [ ] Prepare proper Sphinx documentation.
 - [ ] Do/update all public docstrings.
-- [ ] Audit public examples after benchmark flattening so examples remain
+- [x] Audit public examples after benchmark flattening so examples remain
   public-API-only and benchmark/profiling material stays under `benchmark/`.
 
 ### P4 - Backend Boundary For Inspection And Estimates
