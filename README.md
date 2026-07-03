@@ -1,37 +1,38 @@
 # AxonScope
 
-AxonScope is a pre-release Python framework for peripheral nerve axon
-simulations. It focuses on explicit physical units, descriptive axon/stimulation
-objects, validated solver behavior, and batch-ready execution paths for axon
-pools.
+AxonScope is a pre-release Python framework for one-dimensional peripheral
+nerve axon simulations. It focuses on explicit physical units, descriptive
+axon and stimulation objects, validated solver behavior, and batch-ready
+execution for axon pools.
 
-The API is still being stabilized before publication. Prefer the current clean
-public names shown here and in `examples/`; old temporary aliases should not be
-treated as supported compatibility.
+The public API is still evolving before publication. Use the current names in
+this README and in `examples/` as the supported surface; old temporary aliases
+are not kept for compatibility.
 
-## Capabilities
+## What AxonScope Owns
 
-- Unmyelinated and myelinated one-dimensional axon descriptions.
-- Hodgkin-Huxley, Rattay-Aberham, Sundt, Tigerholm, Schild94/Schild97, and MRG
-  style templates.
-- Intracellular current clamps and sampled extracellular stimulation, including
-  analytical point-source quick-start helpers.
-- Executable `AxonSimulation` root object for one axon or populations.
-- Structured post-hoc analysis definitions with per-axon statuses, population
-  denominators, and small low-level spike/raster helpers.
-- Automatic pool dispatch with scalar fallback, strict batches, parameter
-  batches, and padded double-cable batches.
-- Fast unit tests and optional NRV validation tests.
+AxonScope owns:
+
+- one-dimensional axon descriptions and membrane dynamics;
+- intracellular clamps and sampled extracellular footprints along axons;
+- simulation execution through `AxonSimulation`;
+- recording, results, analysis, thresholds, recruitment, sweeps, inspection,
+  validation, and performance evidence.
+
+AxonScope does not own nerve/fascicle geometry, histology segmentation, 3D axon
+trajectories, electrode CAD, surgical placement, or FEM field solving. External
+tools should produce sampled extracellular footprints; AxonScope combines those
+footprints with temporal stimuli and runs the cable and membrane dynamics.
 
 ## Installation
 
-This repository uses a `src/` layout and Python >=3.12,<3.13.
+AxonScope uses Python `>=3.12,<3.13` and a `src/` layout.
 
 ```bash
 python -m pip install -e .
 ```
 
-Optional extras:
+Useful extras:
 
 ```bash
 python -m pip install -e ".[examples]"
@@ -40,64 +41,10 @@ python -m pip install -e ".[benchmark]"
 python -m pip install -e ".[dev,nrv]"
 ```
 
-The `nrv` extra installs Python-side helper dependencies only. A working local
-NRV/NEURON setup is still required for `tests/nrv`.
+The `nrv` extra installs Python-side helper dependencies only. Running
+`tests/nrv` still requires a working local NRV/NEURON setup.
 
-## Public API Shape
-
-AxonScope separates descriptive models from simulation protocols and numerical
-execution:
-
-```text
-membranes/axons/stimulation -> AxonInstance/AxonPopulation -> AxonSimulation/run -> results
-```
-
-Use short physical names with Pint quantities at public boundaries:
-
-```python
-import axonscope as axs
-
-axon = axs.axons.HodgkinHuxley(
-    length=500.0 * axs.um,
-    diameter=0.5 * axs.um,
-    compartments=41,
-    celsius=6.3 * axs.degC,
-)
-```
-
-Internal implementation fields may use canonical suffixes such as
-`length_um`, `diameter_um`, or `dt_ms`; the preferred public style is
-quantity-oriented: `length`/`diameter` for axons and `duration`/`dt` for
-simulation definitions.
-
-Primary namespaces:
-
-```text
-axs.axons          descriptive axon geometry and templates
-axs.membranes      runtime-independent membrane descriptions
-axs.stimulation    stimuli, clamps, sampled extracellular stimulation
-axs.results        AxonSimulationResult, AxonResultView, recording manifests, views
-axs.analysis       structured analysis definitions, statuses, reports, analysis views
-axs.performance    simulation memory estimates and runtime/device policies
-axs.inspection     printable planning, dispatch, lowering, kernel, and result reports
-axs.protocols      threshold, sweep, and recruitment workflows
-axs.dispatcher     pool dispatch inspection and advanced execution helpers
-axs.solvers        stable solver facade, solver options, and batch execution knobs
-axs.signals        typed, extensible recording signal descriptors
-axs.positions      typed position selectors for analyses and criteria
-axs.identifiers    opaque identifiers such as AxonId, DriveId, and SignalId
-```
-
-Optional external adapters live outside the root facade. For example,
-`axonscope.integrations.nrv` exposes two bridges for NRV-owned workflows:
-`population_from_nrv(...)` builds an intrinsic AxonScope population from an NRV
-fiber population, then `footprints_from_nrv(...)` samples every NRV electrode
-footprint on those AxonScope axons. Stimulation and recruitment then use the
-normal AxonScope footprint/drive/protocol path. The adapter does not construct
-NRV nerves, fascicles, electrodes, or FEM models; those stay in NRV scripts,
-examples, or benchmarks.
-
-## Quick Start
+## First Simulation
 
 ```python
 import axonscope as axs
@@ -109,8 +56,8 @@ axon = axs.axons.HodgkinHuxley(
     celsius=6.3 * axs.degC,
 )
 
-sim = axs.AxonInstance(axon)
-sim.add_current_clamp(
+instance = axs.AxonInstance(axon)
+instance.add_current_clamp(
     position=250.0 * axs.um,
     current=axs.Stimulus.pulse(
         start=1.0 * axs.ms,
@@ -119,156 +66,140 @@ sim.add_current_clamp(
     ),
 )
 
-run = axs.AxonSimulation(
-    sim,
+result = axs.AxonSimulation(
+    instance,
     duration=5.0 * axs.ms,
     dt=0.01 * axs.ms,
-).run()
-result = run.single
+).run().single
 
 center = result.nearest_position_index(250.0 * axs.um)
 print(result.t.shape, result.Vm[:, center].shape)
 ```
 
-Execution settings live on the root `AxonSimulation` object:
+Run the executable version:
 
-```python
-simulation = axs.AxonSimulation(
-    sim,
-    duration=5.0 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.full(),
-)
-run = simulation.run()
-result = run.single
+```bash
+python examples/basic/01_first_intracellular_simulation.py
 ```
 
-Runtime/device/precision requests use the typed public execution policy:
+## Current Public Shape
 
-```python
-policy = axs.ExecutionPolicy(
-    runtime=axs.Runtime.JAX,
-    device=axs.Device.cpu(),
-    precision=axs.PrecisionPolicy.float32(),
-)
-run = axs.AxonSimulation(
-    sim,
-    duration=5.0 * axs.ms,
-    dt=0.01 * axs.ms,
-    execution_policy=policy,
-).run()
-result = run.single
+The main workflow is:
+
+```text
+membranes + axons + stimulation
+        -> AxonInstance or AxonPopulation
+        -> AxonSimulation(...).run()
+        -> AxonSimulationResult / AxonResultView
 ```
 
-Pipeline planning can be printed before launching solver kernels:
+Primary public namespaces:
 
-```python
-simulation.inspect(print_summary=True)
+```text
+axs.axons          axon geometry, layouts, templates
+axs.membranes      class-based membrane models and equation authoring
+axs.stimulation    stimuli, clamps, footprints, drives, stimulations
+axs.recording      recording policies through axs.Recording
+axs.results        canonical simulation results and VmRaster containers
+axs.analysis       post-hoc analyses and solver-side VmRaster definitions
+axs.protocols      thresholds, sweeps, recruitment workflows
+axs.performance    estimates, runtime/device/precision policy
+axs.inspection     host-side planning and pipeline inspection reports
+axs.integrations   optional bridges such as NRV handoff helpers
 ```
 
-## Extracellular Stimulation
+Public arguments use Pint quantities: `length`, `diameter`, `duration`, `dt`,
+`current`, `threshold`, and similar physical names. Internal implementation
+fields may use canonical suffixes such as `_um`, `_ms`, or `_mV`.
+
+## Axons And Membrane Models
+
+Built-in axon templates include Hodgkin-Huxley, Rattay-Aberham, Sundt,
+Tigerholm, Schild94, Schild97, and MRG/AxNode-style myelinated templates.
+
+Built-in membrane model truth lives in `src/axonscope/membranes/models/`.
+User-authored membranes are plain Python classes. Put custom model classes in a
+`.py` file so source inspection and generated-code caching can read their
+definition:
 
 ```python
-axon = axs.axons.MRG(
-    diameter=10.0 * axs.um,
-    nodes=5,
-    compartments={"node": 1, "MYSA": 1, "FLUT": 2, "STIN": 4},
-)
-center_x = axon.layout.position_values(unit=axs.um)[axon.n_compartments // 2] * axs.um
+from axonscope.membranes.types import CurrentDensity, ResistanceArea, Voltage
 
-electrode = axs.analytical.PointSourceElectrode(
-    x=center_x,
-    z=500.0 * axs.um,
-)
+
+class DemoLeak(axs.membranes.Model):
+    model_kind = "demo_leak"
+
+    Rm: ResistanceArea = 10_000.0 * axs.ohm_cm2
+    EL: Voltage = -70.0 * axs.mV
+
+    @axs.membranes.currents
+    def currents(self, Vm: Voltage):
+        I_l: CurrentDensity = (Vm - self.EL) / self.Rm
+        return I_l
+```
+
+Start with:
+
+```bash
+python examples/advanced/axon_models/05_custom_membrane_authoring.py
+```
+
+See `docs/membranes.md` for the membrane-authoring contract.
+
+## Stimulation
+
+Intracellular current clamps attach to an `AxonInstance`. Extracellular
+stimulation is represented as sampled one-dimensional footprints plus temporal
+stimuli:
+
+```python
 stimulus = axs.Stimulus.biphasic(
     start=0.5 * axs.ms,
     cathodic_amplitude=80.0 * axs.uA,
     cathodic_duration=0.05 * axs.ms,
     interphase=0.02 * axs.ms,
 )
-extracellular = axs.analytical.point_source_stimulation(
+
+electrode = axs.analytical.PointSourceElectrode(
+    x=250.0 * axs.um,
+    z=500.0 * axs.um,
+)
+
+stimulation = axs.analytical.point_source_stimulation(
     electrode,
     axon.layout.position_values(unit=axs.um) * axs.um,
     sigma=0.3 * axs.S_per_m,
     stimulus=stimulus,
 )
 
-sim = axs.AxonInstance(axon)
-sim.add_extracellular_stimulation(stimulation=extracellular)
-
-run = axs.AxonSimulation(
-    sim,
-    duration=2.0 * axs.ms,
-    dt=0.01 * axs.ms,
-).run()
-result = run.single
+instance.add_extracellular_stimulation(stimulation=stimulation)
 ```
 
-MRG layouts can phase the repeated node motif along their local
-one-dimensional axis, for example when importing NRV node-shifted fiber tables:
+The analytical point-source helper is a quick-start path. For realistic
+workflows, external tools such as NRV/FEM should generate the field footprint,
+then AxonScope should receive sampled footprint values. See `docs/stimulation.md`
+and `examples/with_nrv/01_realistic_fascicle_geometry.py`.
+
+## Populations, Recording, And Results
+
+`AxonSimulation` accepts one `AxonInstance`, a sequence of axons/instances, or
+an explicit `AxonPopulation`.
 
 ```python
-axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5, x_shift=80.0 * axs.um)
-```
-
-`x_shift` sets the intrinsic distance from the axon start to the first node
-start. It changes local compartment/node positions only; it is not an
-`AxonInstance` world coordinate.
-
-Point-source geometry is a quick-start helper under `axs.analytical`. It is
-sampled into an `ExtracellularFootprint`, paired with a stimulus as an
-`ExtracellularDrive`, and attached as `ExtracellularStimulation`.
-
-See `docs/stimulation.md` for the stimulation model and
-`docs/axon_model_organization.md` for axon geometry/layout details.
-
-## Pools And Recording
-
-`AxonPopulation` is the explicit public container for cohorts. It stores
-`AxonInstance` rows, preserves input order, and can contain one row when a
-workflow should still use population execution. `AxonSimulation` accepts either
-an `AxonPopulation` or a sequence of `Axon` or `AxonInstance` objects. Runs
-return `AxonSimulationResult`, whose indexed rows are lightweight
-`AxonResultView` objects in population order.
-
-```python
-population = axs.AxonPopulation([sim_a, sim_b], name="demo pool")
+population = axs.AxonPopulation([instance_a, instance_b], name="demo")
 
 results = axs.AxonSimulation(
     population,
     duration=1.0 * axs.ms,
     dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.Vm),
-    progress=True,
 ).run()
 
-for result in results:
-    print(result.diagnostics["dispatch_method"], result.record_indices)
-
-center_vm = results.signal(axs.signals.Vm)
-first_row = results.axon(0)
-vm_manifest = results.recording_manifest.signal(axs.signals.Vm)
+for row in results:
+    print(row.axon_id, row.record_indices, row.Vm.shape)
 ```
 
-Inspect grouping before a run with:
-
-```python
-inspection = axs.AxonSimulation(
-    [sim_a, sim_b],
-    duration=1.0 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.center(axs.signals.Vm),
-).inspect()
-
-inspection.print()
-inspection.plot()
-```
-
-`Recording` is the public storage policy. Current single-axon runs support Vm
-and selected observable groups; pool runs currently support Vm retention modes
-such as full, center, probes, and explicit indices.
-Signals are descriptors rather than a closed enum, so custom signal descriptors
-can be added later without changing the recording API.
+Recording policies control retained output:
 
 ```python
 full = axs.Recording.full()
@@ -277,192 +208,117 @@ probes = axs.Recording.probes(axs.signals.Vm, count=8)
 indices = axs.Recording.indices([0, 10, 20], axs.signals.Vm)
 ```
 
-See `docs/pool_dispatch.md` and `docs/results_recording_analysis.md` for the
-full contracts.
+For trace-free threshold-style observer runs, use compatible analysis
+definitions with `Recording.none()`. The solver returns packed VmRaster output
+under `observations["vm_raster"]`; activation, latency, velocity, thresholds,
+and recruitment summaries remain result-side post-processing.
 
-## Analysis And Protocols
+See `docs/results_recording_analysis.md` and `docs/pool_dispatch.md`.
 
-Structured post-hoc analysis definitions live under `axs.analysis` and consume
-one-axon result views or whole `AxonSimulationResult` objects:
+## Runtime, Estimates, And Inspection
+
+Runtime selection uses typed public values:
 
 ```python
-report = result.report(
-    axs.analysis.Activation(threshold=-20.0 * axs.mV, target=axs.positions.DISTAL),
-    axs.analysis.PeakVoltage(target=axs.positions.CENTER),
+policy = axs.ExecutionPolicy(
+    runtime=axs.Runtime.JAX,
+    device=axs.Device.cpu(),
+    precision=axs.PrecisionPolicy.float32(),
 )
-
-activation = report["activation"]
-print(activation.values, activation.statuses, activation.population.n_valid)
 ```
 
-Low-level helpers live in the same `axs.analysis` namespace:
-
-```python
-velocity_m_s = axs.analysis.conduction_velocity(result)
-spike_t_ms, spike_x_um = axs.analysis.rasterize(result, threshold_mV=-10.0)
-```
-
-Activation definitions can also create lightweight online Vm observers for
-chunked traces. `PeakVoltage` remains a post-hoc analysis on recorded Vm:
-
-```python
-observer = axs.analysis.Activation(threshold=-20.0 * axs.mV).online_observer(
-    positions=result.position_values(unit=axs.um) * axs.um,
-)
-observer.update(result.time_values(unit=axs.ms) * axs.ms, result.Vm * axs.mV)
-activation = observer.finalize()
-```
-
-For compact solver-side threshold reductions, pass compatible analysis
-definitions as simulation observers. `Recording.none()` keeps the result
-trace-free and returns packed VmRaster observations:
+Estimate and inspect before large runs:
 
 ```python
 simulation = axs.AxonSimulation(
     population,
-    duration=1.0 * axs.ms,
-    dt=0.01 * axs.ms,
-    recording=axs.Recording.none(),
-    observers=[
-        axs.analysis.Activation(
-            threshold=-20.0 * axs.mV,
-            target=axs.positions.CENTER,
-        ),
-    ],
-)
-results = simulation.run()
-raster = results.observations[axs.VM_RASTER_OBSERVATION_KEY]
-```
-
-Repeated stimulation workflows live in `axs.protocols`:
-
-```python
-threshold = axs.protocols.find_activation_threshold(
-    simulation_factory=lambda current: make_simulation(current),
-    bounds=(1.0 * axs.uA, 500.0 * axs.uA),
     duration=2.0 * axs.ms,
     dt=0.01 * axs.ms,
-    criterion=axs.analysis.ActivationCriterion(threshold=-20.0 * axs.mV),
-)
-```
-
-The equivalent executable-root form is:
-
-```python
-simulation = axs.AxonSimulation(
-    population,
-    duration=1.0 * axs.ms,
-    dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.Vm),
+    execution_policy=policy,
 )
-results = simulation.run()
+
+estimate = simulation.estimate()
+inspection = simulation.inspect(print_summary=True)
 ```
+
+These reports are host-side planning tools. They route backend-specific lowering
+facts through the backend execution boundary and do not run solver kernels by
+default.
 
 ## Examples
 
-Examples are the executable learning path. Keep them in sync with API changes.
+Examples are executable documentation:
 
 ```bash
 python examples/basic/01_first_intracellular_simulation.py
-python examples/basic/02_stimuli_and_units.py
 python examples/basic/03_point_source_footprint.py
-python examples/basic/04_extracellular_mrg_simulation.py
 python examples/basic/05_population_pool_run.py
-python examples/basic/06_activation_velocity.py
-python examples/basic/07_threshold_vs_diameter.py
 python examples/basic/08_recruitment_curve_population.py
-```
-
-Advanced workflow examples:
-
-```bash
-python examples/advanced/simulation_workflow/01_axon_simulation_root.py
-python examples/advanced/recording_analysis/01_recording_options.py
-python examples/advanced/recording_analysis/05_vmraster_observer_only.py
-python examples/advanced/stimulation/03_intracellular_plus_extracellular.py
-python examples/advanced/protocols/01_threshold_vs_parameters.py
-python examples/advanced/protocols/02_recruitment_waveforms.py
-python examples/advanced/protocols/03_protocol_result_views.py
-python examples/advanced/runtime/01_runtime_policy.py
 python examples/advanced/runtime/03_pipeline_inspection.py
-python examples/with_nrv/01_realistic_fascicle_geometry.py
+python examples/advanced/recording_analysis/05_vmraster_observer_only.py
+python examples/advanced/protocols/02_recruitment_waveforms.py
 ```
 
-See `examples/README.md` for the full learning path.
+See `examples/README.md` for the full learning path. Benchmark and profiling
+material lives under `benchmark/`, not under public examples.
 
 ## Tests And Validation
 
-Fast unit suite:
+Fast local checks:
 
 ```bash
+git diff --check
+MPLBACKEND=Agg python -m compileall -q src tests/unit
 MPLBACKEND=Agg python -m pytest -q tests/unit --tb=short
 ```
 
-Optional NRV validation suite:
+Optional NRV validation:
 
 ```bash
 MPLBACKEND=Agg python -m pytest -q tests/nrv --tb=short
 ```
 
-NRV validation requires a local NRV-ready environment. Record only fresh, dated
-validation results. See `docs/validation.md`.
+Run NRV validation when numerical behavior, solver semantics, stimulation
+semantics, membrane dynamics, or NRV integration changes. Do not record stale
+NRV pass counts. See `docs/validation.md`.
 
 ## Benchmarks
 
-Benchmarks are for performance measurement, not correctness validation. Use
-`tests/nrv` for scientific validation first.
+Benchmarks provide reproducible performance evidence, not scientific
+correctness validation.
 
 ```bash
 python benchmark/runtime/run.py --list
 python benchmark/runtime/run.py --suite smoke
-python benchmark/runtime/environment_info_demo.py
+python benchmark/runtime/run.py --suite model_codegen
+python benchmark/runtime/run.py --suite model_codegen_simulations
 python benchmark/hotpaths/run.py --list
-python benchmark/hotpaths/run.py --workload all --preset smoke
 python benchmark/nrv_performance/run.py --list
 ```
 
-GPU validation on Kaggle uses the same population timing runner in AxonScope-only
-mode, with a synthetic NRV-shaped population so the Kaggle worker does not need
-NRV installed:
+Use:
 
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --benchmark population_tsim_gpu \
-  --machine-shape NvidiaTeslaP100 \
-  --poll-interval 60
-```
+- `model_codegen` for membrane source/codegen cache and model-step smoke timing;
+- `model_codegen_simulations` for first/warm public template simulations;
+- `hotpaths` only when making timing or memory optimization claims;
+- `tests/nrv` for scientific validation before AxonScope-vs-NRV comparisons.
 
-Use `simulation.estimate()` before large runs to inspect dispatch groups,
-padding, retained Vm, observer outputs, dense `Vstim`, factorized footprints,
-and stimulus-sample memory.
+Generated outputs live under ignored `benchmark/results/` and
+`benchmark/reports/`. See `benchmark/README.md`.
 
-Generated benchmark results live under ignored `benchmark/results/` and
-`benchmark/reports/` paths. See `benchmark/runtime/`, `benchmark/hotpaths/`,
-and `benchmark/nrv_performance/` for detailed runners.
+## Documentation Map
 
-For NRV/FEM/LIFE recruitment performance on Kaggle GPU, use
-`benchmark/kaggle/run_kernel.py --benchmark realistic_fascicle_nrv_gpu_full`.
-The reproducible full preset uses one synthetic NRV nerve with four circular
-fascicles, 100 axons per fascicle, 21 sequential amplitudes, and one NRV
-validation amplitude. The June 25, 2026 P100 run is summarized in
-`docs/benchmarks/nrv_fascicle_full_kaggle_2026_06_25.md`.
-
-## Documentation
-
-- `docs/axon_model_organization.md`: descriptive axon layer.
-- `docs/membranes.md`: membrane model descriptions.
-- `docs/stimulation.md`: stimuli, current clamps, extracellular footprints,
-  drives, and stimulations.
-- `docs/pool_dispatch.md`: pool dispatch and batching behavior.
-- `docs/results_recording_analysis.md`: `Recording`, canonical results,
-  analysis, and plots.
-- `docs/solver_organization.md`: solver package boundaries and time grids.
-- `docs/validation.md`: fast checks and local NRV validation policy.
-- `docs/benchmarks/`: curated benchmark summaries with retained conclusions.
-- `docs/api_public_draft.md`: proposal-only API notes, not a runnable reference.
-- `docs/recorders_observers_activation_strategy.md`: observer/recruitment
-  roadmap with current implementation status.
+- `GUIDELINES.md`: project philosophy and target architecture.
+- `todo.md`: living cleanup and roadmap checklist.
+- `docs/axon_model_organization.md`: axon descriptions and layouts.
+- `docs/membranes.md`: membrane model authoring.
+- `docs/stimulation.md`: stimuli, footprints, drives, and stimulations.
+- `docs/results_recording_analysis.md`: results, recording, analysis, plots.
+- `docs/pool_dispatch.md`: populations, dispatch, batching.
+- `docs/solver_organization.md`: solver and backend boundaries.
+- `docs/validation.md`: fast checks and NRV validation policy.
+- `benchmark/README.md`: supported benchmark surface.
 
 ## Changelog
 

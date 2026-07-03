@@ -27,6 +27,9 @@ The format is inspired by Keep a Changelog.
 - Clarified validation policy: NRV runs are required for numerical behavior
   changes, while hotpath/realistic benchmarks are required only for performance
   claims.
+- Rewrote the README around the current public `AxonSimulation` workflow,
+  class-based membrane models, validation policy, benchmark surface, and
+  executable learning path.
 - Clarified that observer-only solver execution is the strict VmRaster route:
   threshold-style definitions can produce `observations["vm_raster"]`, while
   activation, latency, velocity, thresholds, and recruitment summaries remain

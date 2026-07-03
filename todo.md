@@ -14,8 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-03 after the P4/P5 backend-boundary and validation-policy
-cleanup.
+Updated on 2026-07-03 after the README rewrite.
 
 Current state:
 
@@ -34,8 +33,8 @@ Current state:
   recruitment summaries are post-processing.
 - `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
   solver-side design is accepted.
-- The next useful work is P3 documentation/examples cleanup before starting a
-  major P8 runtime project.
+- The next useful work is the remaining P3 documentation/examples cleanup
+  before starting a major P8 runtime project.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -206,7 +205,7 @@ performance claims.
 
 ### P3 - Documentation And Examples
 
-- [ ] Refaire `README.md` après la stabilisation post-P7: présenter l'API
+- [x] Refaire `README.md` après la stabilisation post-P7: présenter l'API
   actuelle, le workflow `AxonSimulation`, les membranes class-based, la
   stratégie benchmark, et pointer vers les exemples/docs à jour.
 - [ ] Faire une mise à plat manuelle de `docs/`, `GUIDELINES.md` et
