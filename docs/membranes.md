@@ -138,8 +138,8 @@ axon = axs.axons.HodgkinHuxley(
 
 Generated-code inspection starts from the public membrane model. It reports the
 source file, source hash, generated-code cache key, manifest, cache hit/miss
-reason, and generated files without exposing the internal representation as a
-user API.
+reason, generated graph hashes, and generated files without exposing the
+internal representation as a user API.
 
 ```python
 import axonscope as axs

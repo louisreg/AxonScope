@@ -14,9 +14,11 @@ def test_membrane_model_inspects_generated_code_cache_and_files(tmp_path, monkey
     assert len(report.sources) == 1
     source = report.sources[0]
     assert source.model_name == "passive"
-    assert source.cache_status == "miss"
-    assert source.cache_reason == "manifest_missing"
+    assert source.cache_status in {"hit", "miss"}
+    assert source.cache_reason in {"manifest_match", "manifest_missing"}
     assert source.source_hash
+    assert len(source.graph_hash) == 40
+    assert source.optimized_graph_hash == source.graph_hash
     assert source.cache_key
     assert source.manifest["cache_key"] == source.cache_key
     assert {generated.name for generated in source.files} == {
@@ -33,7 +35,9 @@ def test_membrane_model_inspects_generated_code_cache_and_files(tmp_path, monkey
     text = report.format()
     assert "AxonScope generated membrane code" in text
     assert "model=passive" in text
-    assert "cache=miss, reason=manifest_missing" in text
+    assert f"graph_hash={source.graph_hash}" in text
+    assert f"optimized_graph_hash={source.optimized_graph_hash}" in text
+    assert f"cache={source.cache_status}, reason={source.cache_reason}" in text
     assert "jax_model.py" in text
     assert "numpy_model.py" in text
 

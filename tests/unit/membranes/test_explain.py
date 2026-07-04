@@ -29,6 +29,8 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
     assert source.model_name == "passive"
     assert source.cache_status in {"hit", "miss"}
     assert source.cache_reason in {"manifest_match", "manifest_missing"}
+    assert len(source.graph_hash) == 40
+    assert source.optimized_graph_hash == source.graph_hash
     assert source.function_names == ("leak",)
     assert source.generated_targets == ("jax", "numpy")
     assert [symbol.name for symbol in source.inputs] == ["Vm"]
@@ -52,6 +54,8 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
     assert "model=passive" in text
     assert "components=(passive:passive)" in text
     assert "recording_outputs=" in text
+    assert f"graph_hash={source.graph_hash}" in text
+    assert f"optimized_graph_hash={source.optimized_graph_hash}" in text
     assert "generated model_step targets" in text
     assert "Rm(resistance_area" in text
 

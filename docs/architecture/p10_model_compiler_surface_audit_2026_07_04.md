@@ -129,6 +129,12 @@ component labels, their model kinds, public recording names, and the
 current/conductance names that aggregate duplicate physical terms. The source
 blocks still show model-file-local names and generated target details.
 
+Generated-code and explain reports now include content hashes for `graph.json`
+and `optimized_graph.json`. These are report-time artifact hashes rather than
+cache-key inputs, so old caches do not need migration. Broader target identity
+still needs backend lowering keys, static-shape/recording policy, precision,
+optimization-level, and dependency-hash details.
+
 ## Next P10 Slices
 
 1. Extend `explain()` and generated-artifact identity around optimization,

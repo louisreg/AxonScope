@@ -72,6 +72,8 @@ The format is inspired by Keep a Changelog.
 - Extended `axs.membranes.explain()` with a model-level component and recording
   output summary, including composite labels and current/conductance aggregate
   names.
+- Added generated `graph.json` and `optimized_graph.json` content hashes to
+  membrane generated-code and explanation reports.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

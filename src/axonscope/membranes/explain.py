@@ -124,6 +124,8 @@ class MembraneSourceExplanation:
     model_name: str
     source_path: str
     source_hash: str
+    graph_hash: str
+    optimized_graph_hash: str
     function_names: tuple[str, ...]
     cache_status: str
     cache_reason: str
@@ -245,6 +247,8 @@ def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
                 f"  {source.model_name}:",
                 f"    source={source.source_path}",
                 f"    source_hash={source.source_hash}",
+                f"    graph_hash={source.graph_hash}",
+                f"    optimized_graph_hash={source.optimized_graph_hash}",
                 f"    functions={source.function_names!r}",
                 (
                     f"    cache={source.cache_status}, reason={source.cache_reason}, "
@@ -345,6 +349,8 @@ def _explain_source(source: GeneratedMembraneCodeInspection) -> MembraneSourceEx
         model_name=source.model_name,
         source_path=source.source_path,
         source_hash=source.source_hash,
+        graph_hash=source.graph_hash,
+        optimized_graph_hash=source.optimized_graph_hash,
         function_names=function_names,
         cache_status=source.cache_status,
         cache_reason=source.cache_reason,

@@ -36,6 +36,8 @@ class GeneratedMembraneCodeInspection:
     model_name: str
     source_path: str
     source_hash: str
+    graph_hash: str
+    optimized_graph_hash: str
     function_name: str
     cache_status: str
     cache_reason: str
@@ -124,6 +126,8 @@ def format_generated_membrane_code_report(
                 f"  {source.model_name}:",
                 f"    source={source.source_path}",
                 f"    source_hash={source.source_hash}",
+                f"    graph_hash={source.graph_hash}",
+                f"    optimized_graph_hash={source.optimized_graph_hash}",
                 (
                     f"    cache={source.cache_status}, reason={source.cache_reason}, "
                     f"key={source.cache_key}"
@@ -167,6 +171,10 @@ def _inspect_source_result(
         model_name=str(result.model.name),
         source_path=str(result.source_path),
         source_hash=str(result.source_hash),
+        graph_hash=_file_identity_hash(result.cache.directory / "graph.json"),
+        optimized_graph_hash=_file_identity_hash(
+            result.cache.directory / "optimized_graph.json"
+        ),
         function_name=str(result.function_name),
         cache_status="hit" if result.cache.cache_hit else "miss",
         cache_reason=str(result.cache.cache_reason),
@@ -205,6 +213,14 @@ def _read_manifest(path: Path) -> Mapping[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _file_identity_hash(path: Path) -> str:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return hashlib.blake2b(data, digest_size=20).hexdigest()
 
 
 def _include_file(name: str, requested_files: tuple[str, ...] | None) -> bool:

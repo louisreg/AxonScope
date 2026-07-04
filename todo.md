@@ -390,6 +390,10 @@ between P7 model authoring and P11 JAX solver optimization.
   internal graph hash, optimized graph hash, backend lowering key, static
   shapes, recording policy, parameter specialization, dtype/precision,
   optimization level, compiler/helper versions, and dependency hashes.
+  - [x] Expose generated `graph.json` and `optimized_graph.json` content hashes
+    in `inspect_generated_code()` and `explain()` reports.
+  - [ ] Add backend lowering key, static-shape/recording policy, precision,
+    optimization-level, and dependency-hash details.
 - [ ] Define target-specific lowering hooks for JAX and future NumPy intrinsics
   while keeping scientific semantics target-neutral.
 - [ ] Make recording-aware output pruning part of the compiler plan:
