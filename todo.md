@@ -368,6 +368,13 @@ between P7 model authoring and P11 JAX solver optimization.
 - [ ] Extend semantic validation to purity/source provenance, unsupported
   helper calls, duplicate exports, duplicate observable names, and
   recording/output compatibility.
+  - [x] Validate current linearization terms: conductance expressions must be
+    conductance density and reversal expressions must be voltage.
+  - [x] Validate source metadata consistency for source-backed models:
+    `source_outputs`, `source_provenance`, `source_sections`, and
+    `source_mechanisms`.
+  - [ ] Keep generic duplicate-observable aggregation and public recording
+    output semantics explicit before exposing custom observables broadly.
 - [ ] Make `explain()` and compiler reports useful to humans: show public model
   names, equations, gates, currents, observables, generated targets, cache
   identity, and optimization summaries without exposing Model IR as required

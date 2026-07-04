@@ -56,6 +56,9 @@ The format is inspired by Keep a Changelog.
 - Preserved source section and `@mechanism(...)` boundaries in compiled
   membrane metadata and exposed mechanism assignments/dependencies through
   `axs.membranes.explain()`.
+- Tightened Model IR semantic validation for current linearization terms and
+  source-backed metadata consistency, including `source_outputs`,
+  `source_provenance`, `source_sections`, and `source_mechanisms`.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

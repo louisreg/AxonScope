@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from axonscope.utils.units import (
+    CONDUCTANCE_DENSITY_MS_CM2,
     CURRENT_DENSITY_UA_CM2,
     DIMENSIONLESS,
     RATE_PER_MS,
@@ -44,6 +47,7 @@ def validate_model_ir(
     registry: IntrinsicRegistry = DEFAULT_INTRINSICS,
 ) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
+    _validate_source_metadata(model, issues)
     env = _environment(model, issues)
 
     for state in model.states:
@@ -101,8 +105,36 @@ def validate_model_ir(
                     "current quantity must be an outward current density",
                 )
             )
-        _infer(current.conductance, env, registry, issues, f"current.{current.name}.conductance")
-        _infer(current.reversal, env, registry, issues, f"current.{current.name}.reversal")
+        conductance_spec = _infer(
+            current.conductance,
+            env,
+            registry,
+            issues,
+            f"current.{current.name}.conductance",
+        )
+        if conductance_spec.unit != CONDUCTANCE_DENSITY_MS_CM2:
+            issues.append(
+                ValidationIssue(
+                    f"current.{current.name}.conductance",
+                    f"conductance expression has unit {conductance_spec.unit!r}, "
+                    f"expected {CONDUCTANCE_DENSITY_MS_CM2!r}",
+                )
+            )
+        reversal_spec = _infer(
+            current.reversal,
+            env,
+            registry,
+            issues,
+            f"current.{current.name}.reversal",
+        )
+        if reversal_spec.unit != VOLTAGE_MV:
+            issues.append(
+                ValidationIssue(
+                    f"current.{current.name}.reversal",
+                    f"reversal expression has unit {reversal_spec.unit!r}, "
+                    f"expected {VOLTAGE_MV!r}",
+                )
+            )
 
     for observable in model.observables:
         spec = _infer(
@@ -118,6 +150,223 @@ def validate_model_ir(
         _validate_step_program(model, env, registry, issues)
 
     return tuple(issues)
+
+
+def _validate_source_metadata(model: ModelIR, issues: list[ValidationIssue]) -> None:
+    metadata = model.metadata
+    if not isinstance(metadata, Mapping):
+        return
+    _validate_source_outputs(metadata.get("source_outputs"), issues)
+    _validate_source_provenance(metadata, issues)
+    source_sections = _validate_source_section_metadata(
+        metadata.get("source_sections"),
+        path="metadata.source_sections",
+        issues=issues,
+    )
+    source_mechanisms = _validate_source_section_metadata(
+        metadata.get("source_mechanisms"),
+        path="metadata.source_mechanisms",
+        issues=issues,
+        require_mechanism_name=False,
+    )
+    if source_sections is not None and source_mechanisms is not None:
+        mechanism_names = {
+            str(section.get("mechanism"))
+            for section in source_sections
+            if isinstance(section.get("mechanism"), str)
+        }
+        mechanism_names.update(
+            str(section["name"]).split(":", 1)[1]
+            for section in source_sections
+            if isinstance(section.get("name"), str)
+            and str(section["name"]).startswith("mechanism:")
+        )
+        for index, mechanism in enumerate(source_mechanisms):
+            name = mechanism.get("name")
+            if isinstance(name, str) and name not in mechanism_names:
+                issues.append(
+                    ValidationIssue(
+                        f"metadata.source_mechanisms[{index}]",
+                        f"references unknown source mechanism {name!r}",
+                    )
+                )
+
+
+def _validate_source_outputs(value: Any, issues: list[ValidationIssue]) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        issues.append(
+            ValidationIssue(
+                "metadata.source_outputs",
+                "source_outputs must be a mapping",
+            )
+        )
+        return
+    groups: dict[str, tuple[str, ...]] = {}
+    for key in ("currents", "observables", "all"):
+        names = _metadata_string_tuple(
+            value.get(key),
+            path=f"metadata.source_outputs.{key}",
+            issues=issues,
+        )
+        if names is None:
+            continue
+        groups[key] = names
+        duplicate = _first_duplicate_name(names)
+        if duplicate is not None:
+            issues.append(
+                ValidationIssue(
+                    f"metadata.source_outputs.{key}",
+                    f"duplicate source output name {duplicate!r}",
+                )
+            )
+    if "currents" in groups and "observables" in groups:
+        overlap = sorted(set(groups["currents"]) & set(groups["observables"]))
+        if overlap:
+            issues.append(
+                ValidationIssue(
+                    "metadata.source_outputs",
+                    "current and observable source outputs overlap: "
+                    + ", ".join(overlap),
+                )
+            )
+    if all(key in groups for key in ("currents", "observables", "all")):
+        expected = (*groups["currents"], *groups["observables"])
+        if groups["all"] != expected:
+            issues.append(
+                ValidationIssue(
+                    "metadata.source_outputs.all",
+                    "must equal currents followed by observables",
+                )
+            )
+
+
+def _validate_source_provenance(
+    metadata: Mapping[str, Any],
+    issues: list[ValidationIssue],
+) -> None:
+    provenance = metadata.get("source_provenance")
+    source_keys = {
+        "source_contract": "contract",
+        "source_compiler": "compiler",
+        "source_hash": "source_hash",
+        "source_path": "path",
+    }
+    has_source_metadata = (
+        any(key in metadata for key in source_keys)
+        or "source_function" in metadata
+    )
+    if not has_source_metadata and provenance is None:
+        return
+    if not isinstance(provenance, Mapping):
+        issues.append(
+            ValidationIssue(
+                "metadata.source_provenance",
+                "source-backed models must carry a source_provenance mapping",
+            )
+        )
+        return
+    for metadata_key, provenance_key in source_keys.items():
+        metadata_value = metadata.get(metadata_key)
+        provenance_value = provenance.get(provenance_key)
+        if metadata_value is None or provenance_value is None:
+            continue
+        if str(metadata_value) != str(provenance_value):
+            issues.append(
+                ValidationIssue(
+                    f"metadata.source_provenance.{provenance_key}",
+                    f"does not match metadata.{metadata_key}",
+                )
+            )
+    source_function = metadata.get("source_function")
+    if source_function is not None:
+        expected = tuple(
+            name for name in str(source_function).split(",") if name
+        )
+        actual = _metadata_string_tuple(
+            provenance.get("function_names"),
+            path="metadata.source_provenance.function_names",
+            issues=issues,
+        )
+        if actual is not None and actual != expected:
+            issues.append(
+                ValidationIssue(
+                    "metadata.source_provenance.function_names",
+                    "does not match metadata.source_function",
+                )
+            )
+    provenance_sections = provenance.get("sections")
+    if provenance_sections is not None:
+        _validate_source_section_metadata(
+            provenance_sections,
+            path="metadata.source_provenance.sections",
+            issues=issues,
+        )
+
+
+def _validate_source_section_metadata(
+    value: Any,
+    *,
+    path: str,
+    issues: list[ValidationIssue],
+    require_mechanism_name: bool = True,
+) -> tuple[Mapping[str, Any], ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        issues.append(ValidationIssue(path, "must be a sequence of mappings"))
+        return None
+    sections: list[Mapping[str, Any]] = []
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        if not isinstance(item, Mapping):
+            issues.append(ValidationIssue(item_path, "must be a mapping"))
+            continue
+        sections.append(item)
+        for key in ("name", "function"):
+            if not isinstance(item.get(key), str) or not item.get(key):
+                issues.append(ValidationIssue(f"{item_path}.{key}", "must be a string"))
+        for key in ("assignments", "depends_on"):
+            _metadata_string_tuple(
+                item.get(key),
+                path=f"{item_path}.{key}",
+                issues=issues,
+            )
+        if (
+            require_mechanism_name
+            and "mechanism" in item
+            and not isinstance(item.get("mechanism"), str)
+        ):
+            issues.append(ValidationIssue(f"{item_path}.mechanism", "must be a string"))
+    return tuple(sections)
+
+
+def _metadata_string_tuple(
+    value: Any,
+    *,
+    path: str,
+    issues: list[ValidationIssue],
+) -> tuple[str, ...] | None:
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        issues.append(ValidationIssue(path, "must be a sequence of strings"))
+        return None
+    names: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            issues.append(ValidationIssue(f"{path}[{index}]", "must be a string"))
+            continue
+        names.append(item)
+    return tuple(names)
+
+
+def _first_duplicate_name(values: tuple[str, ...]) -> str | None:
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            return value
+        seen.add(value)
+    return None
 
 
 def assert_valid_model_ir(

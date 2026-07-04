@@ -1248,6 +1248,101 @@ def test_validation_rejects_unsupported_intrinsics():
         assert_valid_model_ir(model)
 
 
+def test_validation_rejects_wrong_current_linearization_units():
+    Vm = symbol("Vm")
+    gbar = symbol("gbar")
+    E = symbol("E")
+    current = gbar * (Vm - E)
+    model = ModelIR(
+        name="bad_current_terms",
+        inputs=(Input("Vm", QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE)),),
+        parameters=(
+            Parameter(
+                "gbar",
+                QuantitySpec(
+                    unit=CONDUCTANCE_DENSITY_MS_CM2,
+                    role=SemanticRole.CONDUCTANCE_DENSITY,
+                ),
+                default=0.3,
+            ),
+            Parameter(
+                "E",
+                QuantitySpec(unit=VOLTAGE_MV, role=SemanticRole.VOLTAGE),
+                default=-70.0,
+            ),
+        ),
+        currents=(
+            Current(
+                "I_bad",
+                current=current,
+                conductance=E,
+                reversal=gbar,
+                quantity=QuantitySpec(
+                    unit=CURRENT_DENSITY_UA_CM2,
+                    role=SemanticRole.CURRENT_DENSITY,
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ModelValidationError,
+        match=r"current\.I_bad\.conductance.*expected 'mS/cm2'.*"
+        r"current\.I_bad\.reversal.*expected 'mV'",
+    ):
+        assert_valid_model_ir(model)
+
+
+def test_validation_rejects_inconsistent_source_outputs_metadata():
+    model = _source_model("passive")
+    metadata = dict(model.metadata)
+    metadata["source_outputs"] = {
+        "all": ("I_l", "g_l", "g_l"),
+        "currents": ("I_l",),
+        "observables": ("g_l", "g_l"),
+    }
+
+    with pytest.raises(
+        ModelValidationError,
+        match=r"metadata\.source_outputs\.observables.*duplicate source output name 'g_l'",
+    ):
+        assert_valid_model_ir(replace(model, metadata=metadata))
+
+
+def test_validation_rejects_inconsistent_source_provenance_metadata():
+    model = _source_model("passive")
+    metadata = dict(model.metadata)
+    provenance = dict(metadata["source_provenance"])
+    provenance["source_hash"] = "not-the-source-hash"
+    metadata["source_provenance"] = provenance
+
+    with pytest.raises(
+        ModelValidationError,
+        match=r"metadata\.source_provenance\.source_hash.*does not match",
+    ):
+        assert_valid_model_ir(replace(model, metadata=metadata))
+
+
+def test_validation_rejects_unknown_source_mechanism_metadata():
+    model = _source_model("sundt")
+    metadata = dict(model.metadata)
+    metadata["source_mechanisms"] = (
+        *metadata["source_mechanisms"],
+        {
+            "name": "missing",
+            "function": "missing_rates",
+            "assignments": (),
+            "depends_on": (),
+        },
+    )
+
+    with pytest.raises(
+        ModelValidationError,
+        match=r"metadata\.source_mechanisms\[2\].*unknown source mechanism 'missing'",
+    ):
+        assert_valid_model_ir(replace(model, metadata=metadata))
+
+
 def test_numpy_interpreter_passive_membrane_primitives_are_analytic():
     model = _source_model("passive", {"Rm": 2e4, "EL": -65.0})
     interpreter = NumpyModelInterpreter(model)
