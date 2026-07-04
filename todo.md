@@ -373,8 +373,10 @@ between P7 model authoring and P11 JAX solver optimization.
   - [x] Validate source metadata consistency for source-backed models:
     `source_outputs`, `source_provenance`, `source_sections`, and
     `source_mechanisms`.
-  - [ ] Keep generic duplicate-observable aggregation and public recording
-    output semantics explicit before exposing custom observables broadly.
+  - [x] Keep generic duplicate-observable aggregation and public recording
+    output semantics explicit before exposing custom observables broadly:
+    public gate/state/generic-observable names are component-qualified, while
+    current/conductance groups remain the only automatic aggregates.
 - [ ] Make `explain()` and compiler reports useful to humans: show public model
   names, equations, gates, currents, observables, generated targets, cache
   identity, and optimization summaries without exposing Model IR as required
@@ -398,8 +400,10 @@ between P7 model authoring and P11 JAX solver optimization.
 - [ ] Extend generated execution into the full fusion path beyond the
   P7-supported class subset: composite generated programs, more aggressive
   recording-aware pruning, and direct solver-kernel fusion.
-- [ ] Define duplicate-name aggregation semantics for generic observables before
-  exposing custom observables as public recording outputs.
+- [x] Define duplicate-name aggregation semantics for generic observables before
+  exposing custom observables as public recording outputs. `Composite` now uses
+  component labels as the public namespace; duplicate component kinds require
+  explicit labels, and generic observables are not silently aggregated.
 - [ ] Update affected docs and examples in the same work: membrane docs,
   runtime-agnostic DSL plan, custom membrane authoring example, model-codegen
   benchmark docs, and changelog.

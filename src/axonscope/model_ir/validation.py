@@ -47,6 +47,7 @@ def validate_model_ir(
     registry: IntrinsicRegistry = DEFAULT_INTRINSICS,
 ) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
+    _validate_component_metadata(model, issues)
     _validate_source_metadata(model, issues)
     env = _environment(model, issues)
 
@@ -150,6 +151,94 @@ def validate_model_ir(
         _validate_step_program(model, env, registry, issues)
 
     return tuple(issues)
+
+
+def _validate_component_metadata(model: ModelIR, issues: list[ValidationIssue]) -> None:
+    metadata = model.metadata
+    if not isinstance(metadata, Mapping):
+        return
+    labels = metadata.get("component_labels")
+    if labels is not None:
+        normalized = _metadata_string_tuple(
+            labels,
+            path="metadata.component_labels",
+            issues=issues,
+        )
+        if normalized is not None:
+            duplicate = _first_duplicate_name(normalized)
+            if duplicate is not None:
+                issues.append(
+                    ValidationIssue(
+                        "metadata.component_labels",
+                        f"duplicate component label {duplicate!r}",
+                    )
+                )
+    public_names = metadata.get("component_public_names")
+    if public_names is not None and not isinstance(public_names, Mapping):
+        issues.append(
+            ValidationIssue(
+                "metadata.component_public_names",
+                "component_public_names must be a mapping",
+            )
+        )
+        return
+    if not isinstance(public_names, Mapping):
+        public_names = {}
+    state_names = {state.name for state in model.states}
+    observable_names = {observable.name for observable in model.observables}
+    for group, known_names in (
+        ("states", state_names),
+        ("observables", observable_names),
+    ):
+        entries = _metadata_string_pairs(
+            public_names.get(group),
+            path=f"metadata.component_public_names.{group}",
+            issues=issues,
+        )
+        if entries is None:
+            continue
+        duplicate_internal = _first_duplicate_name(
+            tuple(internal for internal, _ in entries)
+        )
+        if duplicate_internal is not None:
+            issues.append(
+                ValidationIssue(
+                    f"metadata.component_public_names.{group}",
+                    f"duplicate internal name {duplicate_internal!r}",
+                )
+            )
+        duplicate_public = _first_duplicate_name(
+            tuple(public for _, public in entries)
+        )
+        if duplicate_public is not None:
+            issues.append(
+                ValidationIssue(
+                    f"metadata.component_public_names.{group}",
+                    f"duplicate public name {duplicate_public!r}",
+                )
+            )
+        for internal, _ in entries:
+            if internal not in known_names:
+                issues.append(
+                    ValidationIssue(
+                        f"metadata.component_public_names.{group}",
+                        f"references unknown {group[:-1]} {internal!r}",
+                    )
+                )
+    gate_trace_names = _metadata_string_tuple(
+        metadata.get("gate_trace_observables", ()),
+        path="metadata.gate_trace_observables",
+        issues=issues,
+    )
+    if gate_trace_names is not None:
+        for name in gate_trace_names:
+            if name not in observable_names:
+                issues.append(
+                    ValidationIssue(
+                        "metadata.gate_trace_observables",
+                        f"references unknown observable {name!r}",
+                    )
+                )
 
 
 def _validate_source_metadata(model: ModelIR, issues: list[ValidationIssue]) -> None:
@@ -358,6 +447,31 @@ def _metadata_string_tuple(
             continue
         names.append(item)
     return tuple(names)
+
+
+def _metadata_string_pairs(
+    value: Any,
+    *,
+    path: str,
+    issues: list[ValidationIssue],
+) -> tuple[tuple[str, str], ...] | None:
+    if value is None:
+        return ()
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        issues.append(ValidationIssue(path, "must be a sequence of string pairs"))
+        return None
+    pairs: list[tuple[str, str]] = []
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        if isinstance(item, str) or not isinstance(item, Sequence) or len(item) != 2:
+            issues.append(ValidationIssue(item_path, "must be a string pair"))
+            continue
+        internal, public = item
+        if not isinstance(internal, str) or not isinstance(public, str):
+            issues.append(ValidationIssue(item_path, "must contain strings"))
+            continue
+        pairs.append((internal, public))
+    return tuple(pairs)
 
 
 def _first_duplicate_name(values: tuple[str, ...]) -> str | None:

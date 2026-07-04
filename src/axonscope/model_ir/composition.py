@@ -15,6 +15,7 @@ def compose_model_ir(
     components: tuple[ModelIR, ...],
     *,
     name: str = "composite",
+    component_labels: tuple[str, ...] | None = None,
 ) -> ModelIR:
     """Return one Model IR graph for membrane components in parallel."""
 
@@ -22,7 +23,10 @@ def compose_model_ir(
         raise ValueError("compose_model_ir requires at least one component.")
     if len(components) == 1:
         return components[0]
-    stateful_components = tuple(component.name for component in components if component.step_program)
+    labels = _component_labels(components, component_labels)
+    stateful_components = tuple(
+        component.name for component in components if component.step_program
+    )
     if stateful_components:
         raise ValueError(
             "Composing Model IR step programs is not defined yet; "
@@ -41,19 +45,27 @@ def compose_model_ir(
     gates: list[Gate] = []
     currents: list[Current] = []
     observables: list[Observable] = []
+    state_public_names: dict[str, str] = {}
+    observable_public_names: dict[str, str] = {}
+    gate_trace_observables: list[str] = []
     metadata: dict[str, Any] = {
         "source": "axonscope.model_ir.compose_model_ir",
         "components": tuple(component.name for component in components),
+        "component_labels": labels,
         "source_provenance": {
             "kind": "composite",
             "components": tuple(
                 dict(
                     component.metadata.get(
                         "source_provenance",
-                        {"name": component.name, "source": component.metadata.get("source")},
+                        {
+                            "name": component.name,
+                            "source": component.metadata.get("source"),
+                        },
                     )
+                    | {"component_label": labels[index]}
                 )
-                for component in components
+                for index, component in enumerate(components)
             ),
         },
     }
@@ -64,18 +76,47 @@ def compose_model_ir(
         metadata["final_gate_update"] = "post_solve_voltage"
 
     for index, component in enumerate(components):
+        label = labels[index]
         renames = _symbol_renames(component, symbol_counts, prefix=f"c{index}__")
+        observable_renames = {
+            observable.name: f"{label}__{observable.name}"
+            for observable in component.observables
+        }
         parameters.extend(
             _rename_parameter(parameter, renames)
             for parameter in component.parameters
         )
-        states.extend(_rename_state(state, renames) for state in component.states)
+        for state in component.states:
+            renamed_state = _rename_state(state, renames)
+            states.append(renamed_state)
+            state_public_names[renamed_state.name] = _qualified_public_name(
+                label,
+                state.name,
+            )
         gates.extend(_rename_gate(gate, renames) for gate in component.gates)
         currents.extend(_rename_current(current, renames) for current in component.currents)
-        observables.extend(
-            _rename_observable(observable, renames)
-            for observable in component.observables
+        for observable in component.observables:
+            renamed_observable = _rename_observable(
+                observable,
+                renames,
+                name=observable_renames[observable.name],
+            )
+            observables.append(renamed_observable)
+            observable_public_names[renamed_observable.name] = _qualified_public_name(
+                label,
+                observable.name,
+            )
+        gate_trace_observables.extend(
+            observable_renames[name]
+            for name in component.metadata.get("gate_trace_observables", ())
+            if name in observable_renames
         )
+    metadata["component_public_names"] = {
+        "states": tuple(state_public_names.items()),
+        "observables": tuple(observable_public_names.items()),
+    }
+    if gate_trace_observables:
+        metadata["gate_trace_observables"] = tuple(gate_trace_observables)
 
     return assert_valid_model_ir(
         ModelIR(
@@ -89,6 +130,30 @@ def compose_model_ir(
             metadata=metadata,
         )
     )
+
+
+def _component_labels(
+    components: tuple[ModelIR, ...],
+    explicit: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if explicit is not None:
+        labels = tuple(str(label) for label in explicit)
+        if len(labels) != len(components):
+            raise ValueError("component_labels must match Model IR components.")
+        if len(set(labels)) != len(labels):
+            raise ValueError("component_labels must be unique.")
+        return labels
+    labels = tuple(component.name for component in components)
+    if len(set(labels)) != len(labels):
+        raise ValueError(
+            "compose_model_ir needs explicit component_labels when component "
+            "names are duplicated."
+        )
+    return labels
+
+
+def _qualified_public_name(label: str, name: str) -> str:
+    return f"{label}.{name}"
 
 
 def _merge_inputs(components: tuple[ModelIR, ...]) -> tuple[Input, ...]:
@@ -156,9 +221,15 @@ def _rename_current(current: Current, renames: dict[str, str]) -> Current:
     )
 
 
-def _rename_observable(observable: Observable, renames: dict[str, str]) -> Observable:
+def _rename_observable(
+    observable: Observable,
+    renames: dict[str, str],
+    *,
+    name: str | None = None,
+) -> Observable:
     return replace(
         observable,
+        name=observable.name if name is None else name,
         expression=rewrite_symbols(observable.expression, renames),
     )
 

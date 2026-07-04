@@ -120,7 +120,11 @@ def test_cranknicholson_can_record_generic_membrane_observables():
 
     assert res.recordings is not None
     assert set(res.recordings) == {"Vm", "gates", "currents", "conductances"}
-    assert set(res.recordings["gates"]) == {"m", "h", "n"}
+    assert set(res.recordings["gates"]) == {
+        "hodgkin_huxley.m",
+        "hodgkin_huxley.h",
+        "hodgkin_huxley.n",
+    }
     assert set(res.recordings["currents"]) == {"I_na", "I_k", "I_l"}
     assert set(res.recordings["conductances"]) == {"g_na", "g_k", "g_l"}
 

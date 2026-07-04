@@ -191,10 +191,10 @@ one section.
 
 ```python
 membrane = axs.membranes.Composite(
-    [
-        axs.membranes.HodgkinHuxley(celsius=6.3 * axs.degC),
-        axs.membranes.Passive(Rm=10_000.0 * axs.ohm_cm2, EL=-70.0 * axs.mV),
-    ]
+    {
+        "hh": axs.membranes.HodgkinHuxley(celsius=6.3 * axs.degC),
+        "leak": axs.membranes.Passive(Rm=10_000.0 * axs.ohm_cm2, EL=-70.0 * axs.mV),
+    }
 )
 
 section = axs.axons.Section(
@@ -213,6 +213,28 @@ length and compartment count live in `Layout`. The solver composes supported
 components through the internal compiler path with aggregated public current
 and conductance names. Unsupported components fail at compile time; public
 composites do not fall back to a separate old composite runtime path.
+
+Composite component labels are part of the public recording identity. A mapping
+is the clearest form when labels matter:
+
+```python
+membrane = axs.membranes.Composite(
+    {
+        "passive_weak": axs.membranes.Passive(Rm=20_000.0 * axs.ohm_cm2),
+        "passive_strong": axs.membranes.Passive(Rm=5_000.0 * axs.ohm_cm2),
+    }
+)
+```
+
+For a non-ambiguous sequence, AxonScope derives labels from the component model
+kind. If a sequence contains the same model kind twice, construction fails and
+requires explicit labels. Labels must be stable snake_case identifiers.
+
+Public gate, state, and generic-observable recording names are qualified by the
+component label, for example `rattay_aberham.m` or `passive_weak.g_l`.
+Currents and conductances keep their semantic aggregate names such as `I_l` and
+`g_l`; duplicate current/conductance components are summed under those names
+instead of exposed as arbitrary suffixed columns.
 
 ## Custom Membranes
 

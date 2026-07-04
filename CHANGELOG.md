@@ -59,6 +59,11 @@ The format is inspired by Keep a Changelog.
 - Tightened Model IR semantic validation for current linearization terms and
   source-backed metadata consistency, including `source_outputs`,
   `source_provenance`, `source_sections`, and `source_mechanisms`.
+- Made composite recording identity explicit: `Composite` accepts labelled
+  mappings, duplicate component kinds in sequences now require explicit labels,
+  public gate/state/generic-observable names are qualified as
+  `component_label.name`, and current/conductance groups remain the only
+  automatic duplicate-name aggregates.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

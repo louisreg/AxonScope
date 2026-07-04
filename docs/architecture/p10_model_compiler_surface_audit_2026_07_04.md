@@ -54,10 +54,11 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
   versions, and dependency hashes.
 - Recording-aware output pruning is visible in reports, but still needs to be
   treated as a compiler plan before backend lowering.
-- Semantic validation now checks current linearization term units and
-  source-backed metadata consistency. Generic duplicate-observable aggregation
-  remains a separate open design point before custom observables become broad
-  public recording outputs.
+- Semantic validation now checks current linearization term units,
+  source-backed metadata consistency, and component-qualified public names for
+  composite states/observables. Generic recording outputs use qualified
+  component names; physical currents/conductances keep explicit aggregate
+  semantics.
 - Backend-neutral optimization closeout remains open: CSE, unused diagnostic
   pruning, optimized-graph hashes, and before/after summaries.
 - JAX-specific fusion closeout remains open: generated conductance terms,
@@ -116,6 +117,12 @@ wrong current linearization terms. `source_outputs` must be internally
 consistent, source provenance must match the top-level source metadata, source
 sections/mechanisms must have well-formed names and dependencies, and current
 conductance/reversal expressions must carry `mS/cm2` and `mV` respectively.
+
+Composite recording identity is explicit. Public `Composite({...})` mappings
+provide component labels, non-ambiguous sequences derive labels from model
+kind, and duplicate model kinds in a sequence fail early. Public gate, state,
+and generic-observable names are qualified as `component_label.name`; current
+and conductance groups remain the only automatic duplicate-name aggregates.
 
 ## Next P10 Slices
 

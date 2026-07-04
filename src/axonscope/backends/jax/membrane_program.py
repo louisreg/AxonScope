@@ -250,7 +250,8 @@ class JaxMembraneProgram:
 
     def membrane_state_specs(self) -> tuple[MembraneStateSpec, ...]:
         return tuple(
-            MembraneStateSpec(name) for name in self.program.membrane_state_names
+            MembraneStateSpec(name)
+            for name in self.program.membrane_state_display_names
         )
 
     def membrane_state_names(self) -> tuple[str, ...]:

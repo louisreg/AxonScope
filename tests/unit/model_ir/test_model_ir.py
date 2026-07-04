@@ -133,6 +133,11 @@ def test_membrane_program_exposes_backend_neutral_runtime_contract():
 
     assert program.name == "composite"
     assert program.gate_state_names == ("m", "h", "n")
+    assert program.gate_names == (
+        "rattay_aberham.m",
+        "rattay_aberham.h",
+        "rattay_aberham.n",
+    )
     assert program.membrane_state_names == ()
     assert program.raw_current_names == ("I_na", "I_k", "I_l", "I_l")
     assert program.current_names == ("I_na", "I_k", "I_l")
@@ -153,6 +158,37 @@ def test_membrane_program_exposes_backend_neutral_runtime_contract():
     )
     assert source_program.source_provenance["source_hash"]
     assert source_program.codegen_cache["key"]
+
+
+def test_composite_requires_labels_for_duplicate_component_kinds():
+    with pytest.raises(ValueError, match="explicit component labels"):
+        membranes.Composite([membranes.Passive(), membranes.Passive()])
+
+    public_model = membranes.Composite(
+        {
+            "passive_weak": membranes.Passive(Rm=20_000.0, EL=-70.0),
+            "passive_strong": membranes.Passive(Rm=5_000.0, EL=-65.0),
+        }
+    )
+    model = lower_membrane_model_to_ir(public_model)
+    program = membrane_program_from_model_ir(model)
+
+    assert model.metadata["component_labels"] == ("passive_weak", "passive_strong")
+    assert model.metadata["component_public_names"]["observables"] == (
+        ("passive_weak__g_l", "passive_weak.g_l"),
+        ("passive_strong__g_l", "passive_strong.g_l"),
+    )
+    assert [observable.name for observable in model.observables] == [
+        "passive_weak__g_l",
+        "passive_strong__g_l",
+    ]
+    assert program.observable_display_names == (
+        "passive_weak.g_l",
+        "passive_strong.g_l",
+    )
+    assert program.raw_current_names == ("I_l", "I_l")
+    assert program.current_names == ("I_l",)
+    assert program.conductance_names == ("g_l",)
 
 
 def test_passive_plain_python_source_codegen_cache(tmp_path):
@@ -1343,6 +1379,21 @@ def test_validation_rejects_unknown_source_mechanism_metadata():
         assert_valid_model_ir(replace(model, metadata=metadata))
 
 
+def test_validation_rejects_inconsistent_component_public_names_metadata():
+    model = _source_model("passive")
+    metadata = dict(model.metadata)
+    metadata["component_public_names"] = {
+        "observables": (("missing_g_l", "passive.g_l"),),
+    }
+    metadata["gate_trace_observables"] = ("missing_g_l",)
+
+    with pytest.raises(
+        ModelValidationError,
+        match=r"component_public_names\.observables.*unknown observable 'missing_g_l'",
+    ):
+        assert_valid_model_ir(replace(model, metadata=metadata))
+
+
 def test_numpy_interpreter_passive_membrane_primitives_are_analytic():
     model = _source_model("passive", {"Rm": 2e4, "EL": -65.0})
     interpreter = NumpyModelInterpreter(model)
@@ -1465,8 +1516,8 @@ def test_jax_membrane_program_keeps_auxiliary_states_separate_from_gates():
     gates = membrane.init_gates(V)
     state = membrane.init_membrane_state(2, jnp.float32, V)
 
-    assert membrane.gate_names() == ("m",)
-    assert membrane.membrane_state_names() == ("c",)
+    assert membrane.gate_names() == ("aux_state_current.m",)
+    assert membrane.membrane_state_names() == ("aux_state_current.c",)
     np.testing.assert_allclose(np.asarray(gates), np.full((2, 1), 1.0 / 3.0))
     np.testing.assert_allclose(np.asarray(state[0]), np.full((2,), 2.0))
 
@@ -1707,7 +1758,7 @@ def test_jax_membrane_program_sundt_primitives_are_well_formed():
     V = jnp.linspace(-90.0, 30.0, 11, dtype=jnp.float32)
 
     assert isinstance(membrane, JaxMembraneProgram)
-    assert membrane.gate_names() == ("m", "h", "n", "l")
+    assert membrane.gate_names() == ("sundt.m", "sundt.h", "sundt.n", "sundt.l")
     assert membrane.current_names() == ("I_na", "I_k", "I_l")
     assert membrane.conductance_names() == ("g_na", "g_k", "g_l")
 
@@ -1728,7 +1779,7 @@ def test_jax_membrane_program_axnode_primitives_are_well_formed():
     V = jnp.linspace(-100.0, 40.0, 13, dtype=jnp.float32)
 
     assert isinstance(membrane, JaxMembraneProgram)
-    assert membrane.gate_names() == ("mp", "m", "h", "s")
+    assert membrane.gate_names() == ("axnode.mp", "axnode.m", "axnode.h", "axnode.s")
     assert membrane.current_names() == ("I_nap", "I_na", "I_k", "I_l")
     assert membrane.conductance_names() == ("g_nap", "g_na", "g_k", "g_l")
     assert membrane.supports_stateless_vm_only_fast_path()
@@ -1844,7 +1895,11 @@ def test_composite_of_model_ir_components_compiles_without_legacy_composite():
     V = jnp.linspace(-85.0, 20.0, 7, dtype=jnp.float32)
 
     assert isinstance(membrane, JaxMembraneProgram)
-    assert membrane.gate_names() == ("m", "h", "n")
+    assert membrane.gate_names() == (
+        "rattay_aberham.m",
+        "rattay_aberham.h",
+        "rattay_aberham.n",
+    )
     assert membrane.current_names() == ("I_na", "I_k", "I_l")
     assert membrane.conductance_names() == ("g_na", "g_k", "g_l")
 

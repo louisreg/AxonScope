@@ -39,6 +39,8 @@ class MembraneProgram:
     membrane_state_names: tuple[str, ...]
     gate_trace_observable_names: tuple[str, ...]
     gate_names: tuple[str, ...]
+    membrane_state_display_names: tuple[str, ...]
+    observable_display_names: tuple[str, ...]
     raw_current_names: tuple[str, ...]
     raw_conductance_names: tuple[str, ...]
     current_names: tuple[str, ...]
@@ -70,6 +72,37 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
     gate_trace_observable_names = tuple(
         str(name) for name in model.metadata.get("gate_trace_observables", ())
     )
+    state_display_names = _component_public_name_map(model, "states")
+    observable_display_names = _component_public_name_map(model, "observables")
+    default_label = str(model.metadata.get("component_label", model.name))
+    public_gate_state_names = tuple(
+        state_display_names.get(
+            gate.state,
+            _qualified_public_name(default_label, gate.state),
+        )
+        for gate in model.gates
+    )
+    public_gate_trace_observable_names = tuple(
+        observable_display_names.get(
+            name,
+            _qualified_public_name(default_label, name),
+        )
+        for name in gate_trace_observable_names
+    )
+    public_membrane_state_names = tuple(
+        state_display_names.get(
+            state_name,
+            _qualified_public_name(default_label, state_name),
+        )
+        for state_name in membrane_state_names
+    )
+    public_observable_names = tuple(
+        observable_display_names.get(
+            observable.name,
+            _qualified_public_name(default_label, observable.name),
+        )
+        for observable in model.observables
+    )
     raw_current_names = tuple(current.name for current in model.currents)
     raw_conductance_names = tuple(
         conductance_name(name) for name in raw_current_names
@@ -94,7 +127,9 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
         gate_state_names=gate_state_names,
         membrane_state_names=membrane_state_names,
         gate_trace_observable_names=gate_trace_observable_names,
-        gate_names=(*gate_state_names, *gate_trace_observable_names),
+        gate_names=(*public_gate_state_names, *public_gate_trace_observable_names),
+        membrane_state_display_names=public_membrane_state_names,
+        observable_display_names=public_observable_names,
         raw_current_names=raw_current_names,
         raw_conductance_names=raw_conductance_names,
         current_names=current_groups.names,
@@ -111,6 +146,31 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
         structural_hash=_structural_hash(model),
         parameterized_hash=_parameterized_hash(model),
     )
+
+
+def _component_public_name_map(model: ModelIR, group: str) -> dict[str, str]:
+    names = model.metadata.get("component_public_names", {})
+    if not isinstance(names, Mapping):
+        return {}
+    entries = names.get(group, ())
+    if isinstance(entries, str):
+        return {}
+    try:
+        pairs = tuple(entries)
+    except TypeError:
+        return {}
+    out: dict[str, str] = {}
+    for entry in pairs:
+        try:
+            internal, public = entry
+        except (TypeError, ValueError):
+            continue
+        out[str(internal)] = str(public)
+    return out
+
+
+def _qualified_public_name(label: str, name: str) -> str:
+    return f"{label}.{name}"
 
 
 def conductance_name(current_name: str) -> str:

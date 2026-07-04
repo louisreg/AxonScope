@@ -367,6 +367,19 @@ def _metadata_from_data(data: Any) -> dict[str, Any]:
         for key in ("all", "currents", "observables"):
             if isinstance(source_outputs.get(key), list):
                 source_outputs[key] = tuple(source_outputs[key])
+    if isinstance(metadata.get("component_labels"), list):
+        metadata["component_labels"] = tuple(metadata["component_labels"])
+    component_public_names = metadata.get("component_public_names")
+    if isinstance(component_public_names, dict):
+        for key in ("states", "observables"):
+            values = component_public_names.get(key)
+            if isinstance(values, list):
+                component_public_names[key] = tuple(
+                    tuple(item) if isinstance(item, list) else item
+                    for item in values
+                )
+    if isinstance(metadata.get("gate_trace_observables"), list):
+        metadata["gate_trace_observables"] = tuple(metadata["gate_trace_observables"])
     for key in ("source_sections", "source_mechanisms"):
         values = metadata.get(key)
         if isinstance(values, list):

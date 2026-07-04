@@ -124,7 +124,10 @@ def lower_membrane_model_with_sources(
             components.append(lowered.model)
             source_results.extend(lowered.source_results)
         return MembraneLoweringResult(
-            model=compose_model_ir(tuple(components)),
+            model=compose_model_ir(
+                tuple(components),
+                component_labels=model.component_labels or None,
+            ),
             source_results=tuple(source_results),
         )
 
