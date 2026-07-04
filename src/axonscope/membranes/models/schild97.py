@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from axonscope.membranes.model import Model, currents, initials, mechanism, state, step
-from axonscope.membranes.math import alpha_from_inf_tau, beta_from_inf_tau, clip, exp, log, maximum, q10, where
+from axonscope.membranes.math import clip, exp, log, maximum, q10, rates_from_tau_inf, where
 from axonscope.membranes.types import (
     Concentration,
     ConcentrationPerCurrentDensityTime,
@@ -170,16 +170,14 @@ class Schild97(Model):
             + 0.21 * ms
         ) / qt_m_naf
         inf_m_naf: Dimensionless = 1.0 / (1.0 + exp((-31.62 * mV - Vm) / (6.98 * mV)))
-        alpha_m_naf: Rate = alpha_from_inf_tau(inf_m_naf, maximum(tau_m_naf, 1e-9 * ms))
-        beta_m_naf: Rate = beta_from_inf_tau(inf_m_naf, maximum(tau_m_naf, 1e-9 * ms))
+        alpha_m_naf, beta_m_naf = rates_from_tau_inf(inf_m_naf, maximum(tau_m_naf, 1e-9 * ms))
 
         tau_h_naf: Time = (
             18.0 * ms * exp(-((0.043 * ((Vm + 62.5 * mV) / (1.0 * mV))) ** 2))
             + 1.35 * ms
         ) / qt_h_naf
         inf_h_naf: Dimensionless = 1.0 / (1.0 + exp((-65.99 * mV - Vm) / (-5.97 * mV)))
-        alpha_h_naf: Rate = alpha_from_inf_tau(inf_h_naf, maximum(tau_h_naf, 1e-9 * ms))
-        beta_h_naf: Rate = beta_from_inf_tau(inf_h_naf, maximum(tau_h_naf, 1e-9 * ms))
+        alpha_h_naf, beta_h_naf = rates_from_tau_inf(inf_h_naf, maximum(tau_h_naf, 1e-9 * ms))
         self.keep(alpha_m_naf, beta_m_naf, alpha_h_naf, beta_h_naf)
 
 
@@ -194,16 +192,14 @@ class Schild97(Model):
             + 0.26 * ms
         ) / qt_m_nas
         inf_m_nas: Dimensionless = 1.0 / (1.0 + exp((-11.29 * mV - Vm) / (5.54 * mV)))
-        alpha_m_nas: Rate = alpha_from_inf_tau(inf_m_nas, maximum(tau_m_nas, 1e-9 * ms))
-        beta_m_nas: Rate = beta_from_inf_tau(inf_m_nas, maximum(tau_m_nas, 1e-9 * ms))
+        alpha_m_nas, beta_m_nas = rates_from_tau_inf(inf_m_nas, maximum(tau_m_nas, 1e-9 * ms))
 
         tau_h_nas: Time = (
             10.75 * ms * exp(-((0.067 * ((Vm + 13.5 * mV) / (1.0 * mV))) ** 2))
             + 3.15 * ms
         ) / qt_h_nas
         inf_h_nas: Dimensionless = 1.0 / (1.0 + exp((-31.0 * mV - Vm) / (-5.20 * mV)))
-        alpha_h_nas: Rate = alpha_from_inf_tau(inf_h_nas, maximum(tau_h_nas, 1e-9 * ms))
-        beta_h_nas: Rate = beta_from_inf_tau(inf_h_nas, maximum(tau_h_nas, 1e-9 * ms))
+        alpha_h_nas, beta_h_nas = rates_from_tau_inf(inf_h_nas, maximum(tau_h_nas, 1e-9 * ms))
         self.keep(alpha_m_nas, beta_m_nas, alpha_h_nas, beta_h_nas)
 
 
@@ -221,8 +217,7 @@ class Schild97(Model):
         beta_n_kd_raw: Rate = (0.125 / ms) * exp((Vm + 55.0 * mV) / (-2.5 * mV))
         inf_n_kd: Dimensionless = 1.0 / (1.0 + exp((Vm + 17.62 * mV) / (-18.38 * mV)))
         tau_n_kd: Time = (1.0 / maximum(alpha_n_kd_raw + beta_n_kd_raw, 1e-9 / ms) + 1.0 * ms) / qt_n_kd
-        alpha_n_kd: Rate = alpha_from_inf_tau(inf_n_kd, maximum(tau_n_kd, 1e-9 * ms))
-        beta_n_kd: Rate = beta_from_inf_tau(inf_n_kd, maximum(tau_n_kd, 1e-9 * ms))
+        alpha_n_kd, beta_n_kd = rates_from_tau_inf(inf_n_kd, maximum(tau_n_kd, 1e-9 * ms))
         self.keep(alpha_n_kd, beta_n_kd)
 
 
@@ -236,16 +231,14 @@ class Schild97(Model):
             + 2.5 * ms
         ) / qt_ka
         inf_p_ka: Dimensionless = 1.0 / (1.0 + exp((Vm + 31.0 * mV) / (-28.0 * mV)))
-        alpha_p_ka: Rate = alpha_from_inf_tau(inf_p_ka, maximum(tau_p_ka, 1e-9 * ms))
-        beta_p_ka: Rate = beta_from_inf_tau(inf_p_ka, maximum(tau_p_ka, 1e-9 * ms))
+        alpha_p_ka, beta_p_ka = rates_from_tau_inf(inf_p_ka, maximum(tau_p_ka, 1e-9 * ms))
 
         tau_q_ka: Time = (
             100.0 * ms * exp(-((0.035 * ((Vm + 30.0 * mV) / (1.0 * mV))) ** 2))
             + 10.5 * ms
         ) / qt_ka
         inf_q_ka: Dimensionless = 1.0 / (1.0 + exp((Vm + 61.0 * mV) / (7.0 * mV)))
-        alpha_q_ka: Rate = alpha_from_inf_tau(inf_q_ka, maximum(tau_q_ka, 1e-9 * ms))
-        beta_q_ka: Rate = beta_from_inf_tau(inf_q_ka, maximum(tau_q_ka, 1e-9 * ms))
+        alpha_q_ka, beta_q_ka = rates_from_tau_inf(inf_q_ka, maximum(tau_q_ka, 1e-9 * ms))
         self.keep(alpha_p_ka, beta_p_ka, alpha_q_ka, beta_q_ka)
 
 
@@ -259,13 +252,11 @@ class Schild97(Model):
             + 2.5 * ms
         ) / qt_kds
         inf_x_kds: Dimensionless = 1.0 / (1.0 + exp((Vm + 42.59 * mV) / (-14.68 * mV)))
-        alpha_x_kds: Rate = alpha_from_inf_tau(inf_x_kds, maximum(tau_x_kds, 1e-9 * ms))
-        beta_x_kds: Rate = beta_from_inf_tau(inf_x_kds, maximum(tau_x_kds, 1e-9 * ms))
+        alpha_x_kds, beta_x_kds = rates_from_tau_inf(inf_x_kds, maximum(tau_x_kds, 1e-9 * ms))
 
         inf_y1_kds: Dimensionless = 1.0 / (1.0 + exp((Vm + 51.0 * mV) / (7.0 * mV)))
         tau_y1_kds: Time = (7500.0 * ms) / qt_kds
-        alpha_y1_kds: Rate = alpha_from_inf_tau(inf_y1_kds, maximum(tau_y1_kds, 1e-9 * ms))
-        beta_y1_kds: Rate = beta_from_inf_tau(inf_y1_kds, maximum(tau_y1_kds, 1e-9 * ms))
+        alpha_y1_kds, beta_y1_kds = rates_from_tau_inf(inf_y1_kds, maximum(tau_y1_kds, 1e-9 * ms))
         self.keep(alpha_x_kds, beta_x_kds, alpha_y1_kds, beta_y1_kds)
 
 
@@ -279,16 +270,14 @@ class Schild97(Model):
             + 0.395 * ms
         ) / qt_can
         inf_d_can: Dimensionless = 1.0 / (1.0 + exp((Vm + 13.0 * mV) / (-4.5 * mV)))
-        alpha_d_can: Rate = alpha_from_inf_tau(inf_d_can, maximum(tau_d_can, 1e-9 * ms))
-        beta_d_can: Rate = beta_from_inf_tau(inf_d_can, maximum(tau_d_can, 1e-9 * ms))
+        alpha_d_can, beta_d_can = rates_from_tau_inf(inf_d_can, maximum(tau_d_can, 1e-9 * ms))
 
         tau_f1_can: Time = (
             33.5 * ms * exp(-((0.0395 * ((Vm + 30.0 * mV) / (1.0 * mV))) ** 2))
             + 5.0 * ms
         ) / qt_can
         inf_f1_can: Dimensionless = 1.0 / (1.0 + exp((Vm + 13.0 * mV) / (25.0 * mV)))
-        alpha_f1_can: Rate = alpha_from_inf_tau(inf_f1_can, maximum(tau_f1_can, 1e-9 * ms))
-        beta_f1_can: Rate = beta_from_inf_tau(inf_f1_can, maximum(tau_f1_can, 1e-9 * ms))
+        alpha_f1_can, beta_f1_can = rates_from_tau_inf(inf_f1_can, maximum(tau_f1_can, 1e-9 * ms))
 
         tau_f2_can: Time = (
             225.0 * ms * exp(-((0.0275 * ((Vm + 40.0 * mV) / (1.0 * mV))) ** 2))
@@ -300,8 +289,7 @@ class Schild97(Model):
             0.0,
             1.0,
         )
-        alpha_f2_can: Rate = alpha_from_inf_tau(inf_f2_can, maximum(tau_f2_can, 1e-9 * ms))
-        beta_f2_can: Rate = beta_from_inf_tau(inf_f2_can, maximum(tau_f2_can, 1e-9 * ms))
+        alpha_f2_can, beta_f2_can = rates_from_tau_inf(inf_f2_can, maximum(tau_f2_can, 1e-9 * ms))
         self.keep(alpha_d_can, beta_d_can, alpha_f1_can, beta_f1_can, alpha_f2_can, beta_f2_can)
 
 
@@ -316,16 +304,14 @@ class Schild97(Model):
             + 2.5 * ms
         ) / qt_d_cat
         inf_d_cat: Dimensionless = 1.0 / (1.0 + exp((Vm + 47.0 * mV) / (-5.75 * mV)))
-        alpha_d_cat: Rate = alpha_from_inf_tau(inf_d_cat, maximum(tau_d_cat, 1e-9 * ms))
-        beta_d_cat: Rate = beta_from_inf_tau(inf_d_cat, maximum(tau_d_cat, 1e-9 * ms))
+        alpha_d_cat, beta_d_cat = rates_from_tau_inf(inf_d_cat, maximum(tau_d_cat, 1e-9 * ms))
 
         tau_f_cat: Time = (
             103.0 * ms * exp(-((0.050 * ((Vm + 58.0 * mV) / (1.0 * mV))) ** 2))
             + 12.5 * ms
         ) / qt_f_cat
         inf_f_cat: Dimensionless = 1.0 / (1.0 + exp((Vm + 61.0 * mV) / (6.0 * mV)))
-        alpha_f_cat: Rate = alpha_from_inf_tau(inf_f_cat, maximum(tau_f_cat, 1e-9 * ms))
-        beta_f_cat: Rate = beta_from_inf_tau(inf_f_cat, maximum(tau_f_cat, 1e-9 * ms))
+        alpha_f_cat, beta_f_cat = rates_from_tau_inf(inf_f_cat, maximum(tau_f_cat, 1e-9 * ms))
         self.keep(alpha_d_cat, beta_d_cat, alpha_f_cat, beta_f_cat)
 
 

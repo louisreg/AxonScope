@@ -345,9 +345,10 @@ between P7 model authoring and P11 JAX solver optimization.
   - [x] Add `boltzmann(x, midpoint, slope)` across public membrane math,
     internal intrinsics, semantic validation, generated NumPy/JAX code, NumPy
     interpreter, JAX lowering, docs, and tests.
-  - [ ] Decide whether `rates_from_tau_inf` should become a tuple-valued helper
-    or whether the existing scalar `alpha_from_inf_tau` /
-    `beta_from_inf_tau` helpers are the canonical public surface.
+  - [x] Make `rates_from_tau_inf(x_inf, tau)` the canonical public helper for
+    tau/inf gates. Source models now use
+    `alpha_x, beta_x = rates_from_tau_inf(x_inf, tau)`, and the compiler lowers
+    that tuple assignment to scalar internal alpha/beta expressions.
   - [ ] Define the unit and sign contracts for `nernst` plus concentration /
     current conversion helpers before exposing them.
 - [ ] Decide whether public authoring needs explicit syntax for currents whose

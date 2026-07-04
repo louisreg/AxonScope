@@ -290,9 +290,11 @@ The current authoring subset is intentionally small:
 Supported equation helpers currently live in `axonscope.membranes.math`:
 `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
 `where`, `tanh`, `sigmoid`, `boltzmann`, `vtrap`, `q10`,
-`alpha_from_inf_tau`, `beta_from_inf_tau`, and `safe_exp`.
+`rates_from_tau_inf`, and `safe_exp`.
 `boltzmann(x, midpoint, slope)` uses the signed-slope convention
 `1 / (1 + exp((x - midpoint) / slope))`.
+`alpha_x, beta_x = rates_from_tau_inf(x_inf, tau_x)` expands a steady-state
+gate value and time constant into the corresponding forward/backward rates.
 
 Currently unsupported: arbitrary Python side effects, loops, mutation, dynamic
 attribute creation, class-level `exports`/`dynamics`, manual construction of

@@ -595,6 +595,100 @@ def test_boltzmann_intrinsic_matches_numpy_and_jax_lowering():
     np.testing.assert_allclose(np.asarray(jax_values), expected, rtol=1e-6)
 
 
+def test_source_compiler_supports_rates_from_tau_inf_tuple_assignment(tmp_path):
+    source = tmp_path / "tau_inf_gate.py"
+    source.write_text(
+        """
+from axonscope.membranes.math import rates_from_tau_inf
+from axonscope.membranes.model import Model, currents, rates
+from axonscope.membranes.types import (
+    ConductanceDensity,
+    CurrentDensity,
+    Dimensionless,
+    Gate,
+    Time,
+    Voltage,
+)
+from axonscope.utils.units import cm2, mS, ms, mV
+
+class TauInfGate(Model):
+    model_kind = "tau_inf_gate"
+
+    gbar: ConductanceDensity = 1.0 * mS / cm2
+    E: Voltage = -70.0 * mV
+
+    @rates
+    def rates(self, Vm: Voltage):
+        m_inf: Dimensionless = 0.25
+        tau_m: Time = 2.0 * ms
+        alpha_m, beta_m = rates_from_tau_inf(m_inf, tau_m)
+        self.keep(alpha_m, beta_m)
+
+    @currents
+    def currents(self, Vm: Voltage, m: Gate):
+        g_l: ConductanceDensity = self.gbar * m
+        I_l: CurrentDensity = g_l * (Vm - self.E)
+        return I_l, g_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(source, cache_root=tmp_path / "cache")
+    generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+
+    assert "def rates_from_tau_inf(x_inf, tau):" in generated
+
+    interpreter = NumpyModelInterpreter(compiled.model, dtype=np.float64)
+    alpha, beta = interpreter.rate_constants(np.asarray([-65.0], dtype=np.float64))
+
+    np.testing.assert_allclose(alpha[:, 0], [0.125], rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(beta[:, 0], [0.375], rtol=1e-12, atol=1e-12)
+
+
+def test_source_compiler_rejects_scalar_rates_from_tau_inf_use(tmp_path):
+    source = tmp_path / "bad_tau_inf_gate.py"
+    source.write_text(
+        """
+from axonscope.membranes.math import rates_from_tau_inf
+from axonscope.membranes.model import Model, currents, rates
+from axonscope.membranes.types import (
+    ConductanceDensity,
+    CurrentDensity,
+    Dimensionless,
+    Gate,
+    Time,
+    Voltage,
+)
+from axonscope.utils.units import cm2, mS, ms, mV
+
+class BadTauInfGate(Model):
+    model_kind = "bad_tau_inf_gate"
+
+    gbar: ConductanceDensity = 1.0 * mS / cm2
+    E: Voltage = -70.0 * mV
+
+    @rates
+    def rates(self, Vm: Voltage):
+        m_inf: Dimensionless = 0.25
+        tau_m: Time = 2.0 * ms
+        alpha_m = rates_from_tau_inf(m_inf, tau_m)
+
+    @currents
+    def currents(self, Vm: Voltage, m: Gate):
+        g_l: ConductanceDensity = self.gbar * m
+        I_l: CurrentDensity = g_l * (Vm - self.E)
+        return I_l, g_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match=r"rates_from_tau_inf\(\.\.\.\) returns alpha and beta",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
 def test_hh_plain_python_source_codegen_keeps_equations_executable(tmp_path):
     compiled = compile_model_source_file(HH_SOURCE, cache_root=tmp_path)
 
@@ -717,6 +811,7 @@ def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
     generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
     assert "def q10(base, celsius, reference):" in generated
     assert "def alpha_from_inf_tau(x_inf, tau):" in generated
+    assert "def rates_from_tau_inf(x_inf, tau):" in generated
     assert "return I_na_nav17, I_na_nav18, I_na_nav19" in generated
 
 

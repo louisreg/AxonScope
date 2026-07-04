@@ -35,6 +35,10 @@ The format is inspired by Keep a Changelog.
   `boltzmann(x, midpoint, slope)` membrane helper across public authoring,
   semantic validation, generated NumPy/JAX code, the NumPy interpreter, JAX
   lowering, docs, and tests.
+- Made `rates_from_tau_inf(x_inf, tau)` the canonical public tau/inf gate
+  helper. Built-in Tigerholm and Schild source models now use tuple assignment,
+  while the source compiler lowers the helper to scalar internal alpha/beta
+  expressions.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.
@@ -74,9 +78,9 @@ The format is inspired by Keep a Changelog.
 
 ### Validation
 
-- Fast local validation from the post-P7 audit:
+- Fast local validation from the current P10 helper/compiler pass:
   `python -m compileall -q src tests/unit` and
-  `pytest -q tests/unit --tb=short` passed with `587 passed, 1 skipped`.
+  `pytest -q tests/unit --tb=short` passed with `604 passed, 1 skipped`.
 - NRV validation should be recorded here only after a fresh NRV-ready run.
 
 ## [0.2.0] - 2025-11-25

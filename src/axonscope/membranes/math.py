@@ -59,6 +59,10 @@ def beta_from_inf_tau(x_inf: Any, tau: Any) -> Any:
     return (1.0 - x_inf) / tau
 
 
+def rates_from_tau_inf(x_inf: Any, tau: Any) -> tuple[Any, Any]:
+    return alpha_from_inf_tau(x_inf, tau), beta_from_inf_tau(x_inf, tau)
+
+
 def safe_exp(x: Any) -> Any:
     if x < -100.0:
         return 0.0
@@ -92,8 +96,6 @@ def vtrap(x: Any, y: Any) -> Any:
 
 __all__ = [
     "abs",
-    "alpha_from_inf_tau",
-    "beta_from_inf_tau",
     "boltzmann",
     "clip",
     "exp",
@@ -104,6 +106,7 @@ __all__ = [
     "minimum",
     "pow",
     "q10",
+    "rates_from_tau_inf",
     "safe_exp",
     "sigmoid",
     "sqrt",

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from axonscope.membranes.model import Model, currents, initials, mechanism, state, step
 from axonscope.membranes.math import (
-    alpha_from_inf_tau,
-    beta_from_inf_tau,
     exp,
     log,
     maximum,
     q10,
+    rates_from_tau_inf,
     where,
 )
 from axonscope.membranes.types import (
@@ -149,8 +148,7 @@ class Tigerholm(Model):
         tau_h_nav18: Time = 1.218 * ms + 42.043 * ms * exp(
             -(((Vm + 38.1 * mV) / (15.19 * mV)) ** 2) / 2.0
         )
-        alpha_h_nav18: Rate = alpha_from_inf_tau(h_inf_nav18, tau_h_nav18) * qt_nav18
-        beta_h_nav18: Rate = beta_from_inf_tau(h_inf_nav18, tau_h_nav18) * qt_nav18
+        alpha_h_nav18, beta_h_nav18 = rates_from_tau_inf(h_inf_nav18, tau_h_nav18 / qt_nav18)
         s_inf_nav18: Dimensionless = 1.0 / (
             1.0 + exp((Vm + 45.0 * mV) / (8.0 * mV))
         )
@@ -234,10 +232,8 @@ class Tigerholm(Model):
         a_ks: Rate = (0.00395 / ms) * exp((Vm + 30.0 * mV) / (40.0 * mV))
         b_ks: Rate = (0.00395 / ms) * exp(-((Vm + 30.0 * mV) / (20.0 * mV)))
         tau_nf_ks: Time = 1.0 / maximum(a_ks + b_ks, 1e-12 / ms)
-        alpha_ns_ks: Rate = alpha_from_inf_tau(n_inf_ks, tau_ns_ks) * qt_ks
-        beta_ns_ks: Rate = beta_from_inf_tau(n_inf_ks, tau_ns_ks) * qt_ks
-        alpha_nf_ks: Rate = alpha_from_inf_tau(n_inf_ks, tau_nf_ks) * qt_ks
-        beta_nf_ks: Rate = beta_from_inf_tau(n_inf_ks, tau_nf_ks) * qt_ks
+        alpha_ns_ks, beta_ns_ks = rates_from_tau_inf(n_inf_ks, tau_ns_ks / qt_ks)
+        alpha_nf_ks, beta_nf_ks = rates_from_tau_inf(n_inf_ks, tau_nf_ks / qt_ks)
         self.keep(
             alpha_ns_ks,
             beta_ns_ks,
@@ -269,10 +265,8 @@ class Tigerholm(Model):
             + 50.0 * ms * exp(-(((Vm + 40.0 * mV) / (40.0 * mV)) ** 2) / 2.0),
             5.0 * ms,
         )
-        alpha_m_kf: Rate = alpha_from_inf_tau(m_inf_kf, tau_m_kf) * qt_kf
-        beta_m_kf: Rate = beta_from_inf_tau(m_inf_kf, tau_m_kf) * qt_kf
-        alpha_h_kf: Rate = alpha_from_inf_tau(h_inf_kf, tau_h_kf) * qt_kf
-        beta_h_kf: Rate = beta_from_inf_tau(h_inf_kf, tau_h_kf) * qt_kf
+        alpha_m_kf, beta_m_kf = rates_from_tau_inf(m_inf_kf, tau_m_kf / qt_kf)
+        alpha_h_kf, beta_h_kf = rates_from_tau_inf(h_inf_kf, tau_h_kf / qt_kf)
         self.keep(
             alpha_m_kf,
             beta_m_kf,
@@ -298,8 +292,7 @@ class Tigerholm(Model):
             0.000688 + 1.0 / maximum(exp1_kdr + exp2_kdr, 1e-12)
         )
         tau_kdr: Time = where(Vm >= -31.0 * mV, tau_high_kdr, tau_low_kdr)
-        alpha_n_kdr: Rate = alpha_from_inf_tau(n_inf_kdr, tau_kdr) * qt_kdr
-        beta_n_kdr: Rate = beta_from_inf_tau(n_inf_kdr, tau_kdr) * qt_kdr
+        alpha_n_kdr, beta_n_kdr = rates_from_tau_inf(n_inf_kdr, tau_kdr / qt_kdr)
         self.keep(
             alpha_n_kdr,
             beta_n_kdr,
@@ -324,10 +317,8 @@ class Tigerholm(Model):
             140.0 * ms + 50.0 * ms * exp((Vm + 25.0 * mV) / (-20.0 * mV)),
             250.0 * ms + 12.0 * ms * exp((Vm + 240.0 * mV) / (50.0 * mV)),
         )
-        alpha_ns_h: Rate = alpha_from_inf_tau(n_inf_h, tau_ns_h) * qt_h
-        beta_ns_h: Rate = beta_from_inf_tau(n_inf_h, tau_ns_h) * qt_h
-        alpha_nf_h: Rate = alpha_from_inf_tau(n_inf_h, tau_nf_h) * qt_h
-        beta_nf_h: Rate = beta_from_inf_tau(n_inf_h, tau_nf_h) * qt_h
+        alpha_ns_h, beta_ns_h = rates_from_tau_inf(n_inf_h, tau_ns_h / qt_h)
+        alpha_nf_h, beta_nf_h = rates_from_tau_inf(n_inf_h, tau_nf_h / qt_h)
         self.keep(
             alpha_ns_h,
             beta_ns_h,

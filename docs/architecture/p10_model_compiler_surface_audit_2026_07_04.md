@@ -34,12 +34,12 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
   mutation, loops, object construction, hidden globals, dynamic imports, and
   side-effect-oriented code still need clearer user messages.
 - The helper surface is not yet fully flat. Scalar helpers exist for common
-  math and gate-rate conversion, but Nernst/concentration/current conversion
-  helpers need a deliberate unit contract before becoming public.
-- The TODO name `rates_from_tau_inf` conflicts with the implemented scalar
-  helpers `alpha_from_inf_tau` and `beta_from_inf_tau`. P10 should decide
-  whether to keep the explicit scalar names, add tuple-valued syntax, or expose
-  both with one canonical public story.
+  math, and tau/inf gate conversion is exposed publicly as
+  `rates_from_tau_inf`; Nernst/concentration/current conversion helpers still
+  need a deliberate unit contract before becoming public.
+- `rates_from_tau_inf` is now the canonical public tau/inf helper. Model source
+  uses tuple assignment, while the compiler lowers that syntax to scalar
+  internal alpha/beta expressions.
 - Conductance/reversal inference still expects the readable linear form
   `I_x = g_x * (Vm - E_x)`. Currents whose conductance or reversal cannot be
   inferred need either explicit public syntax or fail-fast diagnostics.
@@ -72,14 +72,23 @@ tests. The convention is:
 The signed slope keeps activation and inactivation forms explicit without
 adding duplicate helper names.
 
+The tuple helper `rates_from_tau_inf(x_inf, tau)` is now supported in source
+model assignments:
+
+```python
+alpha_m, beta_m = rates_from_tau_inf(m_inf, tau_m)
+```
+
+The compiler lowers the tuple assignment to scalar internal alpha/beta
+expressions, so the rest of the Model IR and backend lowering paths remain
+scalar.
+
 ## Next P10 Slices
 
 1. Tighten diagnostics for rejected source constructs.
-2. Decide the public rate-helper story around `alpha_from_inf_tau`,
-   `beta_from_inf_tau`, and possible `rates_from_tau_inf` tuple syntax.
-3. Define Nernst and concentration/current conversion helpers with units before
+2. Define Nernst and concentration/current conversion helpers with units before
    exposing them.
-4. Add explicit current metadata syntax or a stricter diagnostic for
+3. Add explicit current metadata syntax or a stricter diagnostic for
    non-inferable conductance/reversal terms.
-5. Extend `explain()` and generated-artifact identity around optimization,
+4. Extend `explain()` and generated-artifact identity around optimization,
    recording policy, dtype/precision, and target-specialized lowering.

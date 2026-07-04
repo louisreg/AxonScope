@@ -41,7 +41,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v11"
+SOURCE_COMPILER_VERSION = "source_codegen.v12"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 STEP_SPECIAL_SYMBOL_UNITS = {
     "Vm_prev": units.VOLTAGE_MV,
@@ -1302,22 +1302,9 @@ def _collect_assignment_records(functions: tuple[ast.FunctionDef, ...]) -> tuple
                     _validate_keep_call(statement.value)
                     keep_calls.append(statement.value)
                 continue
-            target = _assignment_name(statement)
-            if target is not None:
-                value = _assignment_value(statement)
-                if value is None:
-                    raise _source_error(
-                        statement,
-                        "Annotated membrane assignments must define a value.",
-                    )
-                records.append(
-                    _AssignmentRecord(
-                        name=target,
-                        value=value,
-                        statement=statement,
-                        function_name=function.name,
-                    )
-                )
+            assignment_records = _assignment_records(statement, function_name=function.name)
+            if assignment_records is not None:
+                records.extend(assignment_records)
                 continue
             if isinstance(statement, ast.Return):
                 _ = statement
@@ -1328,6 +1315,88 @@ def _collect_assignment_records(functions: tuple[ast.FunctionDef, ...]) -> tuple
             )
     _validate_keep_references(keep_calls, tuple(records))
     return tuple(records)
+
+
+def _assignment_records(
+    statement: ast.stmt,
+    *,
+    function_name: str,
+) -> tuple[_AssignmentRecord, ...] | None:
+    rates_targets = _rates_from_tau_inf_targets(statement)
+    if rates_targets is not None:
+        alpha_name, beta_name, value = rates_targets
+        if len(value.args) != 2 or value.keywords:
+            raise _source_error(
+                value,
+                "rates_from_tau_inf(...) expects exactly two positional arguments: "
+                "x_inf and tau.",
+            )
+        alpha_value = _direct_helper_call_ast("alpha_from_inf_tau", value.args, value)
+        beta_value = _direct_helper_call_ast("beta_from_inf_tau", value.args, value)
+        return (
+            _AssignmentRecord(
+                name=alpha_name,
+                value=alpha_value,
+                statement=statement,
+                function_name=function_name,
+            ),
+            _AssignmentRecord(
+                name=beta_name,
+                value=beta_value,
+                statement=statement,
+                function_name=function_name,
+            ),
+        )
+    target = _assignment_name(statement)
+    if target is None:
+        return None
+    value = _assignment_value(statement)
+    if value is None:
+        raise _source_error(
+            statement,
+            "Annotated membrane assignments must define a value.",
+        )
+    return (
+        _AssignmentRecord(
+            name=target,
+            value=value,
+            statement=statement,
+            function_name=function_name,
+        ),
+    )
+
+
+def _rates_from_tau_inf_targets(statement: ast.stmt) -> tuple[str, str, ast.Call] | None:
+    if not isinstance(statement, ast.Assign):
+        return None
+    if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Tuple | ast.List):
+        return None
+    target = statement.targets[0]
+    if not (
+        isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == "rates_from_tau_inf"
+    ):
+        raise _source_error(
+            statement,
+            "Tuple assignments are only supported for "
+            "`alpha_x, beta_x = rates_from_tau_inf(x_inf, tau)`.",
+        )
+    if len(target.elts) != 2 or not all(isinstance(item, ast.Name) for item in target.elts):
+        raise _source_error(
+            target,
+            "rates_from_tau_inf(...) must be assigned to exactly two local names.",
+        )
+    alpha_name = target.elts[0].id
+    beta_name = target.elts[1].id
+    return alpha_name, beta_name, statement.value
+
+
+def _direct_helper_call_ast(name: str, args: list[ast.AST], source: ast.AST) -> ast.Call:
+    return ast.copy_location(
+        ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=list(args), keywords=[]),
+        source,
+    )
 
 
 def _assignment_name(statement: ast.stmt) -> str | None:
@@ -1964,6 +2033,11 @@ class _ExpressionCompiler:
         if not isinstance(node.func, ast.Name):
             raise SourceModelCompileError("Only direct helper calls are supported in equations.")
         name = node.func.id
+        if name == "rates_from_tau_inf":
+            raise SourceModelCompileError(
+                "rates_from_tau_inf(...) returns alpha and beta; assign it as "
+                "`alpha_x, beta_x = rates_from_tau_inf(x_inf, tau)`."
+            )
         if name not in DEFAULT_INTRINSICS:
             raise SourceModelCompileError(f"Unsupported equation helper {name!r}.")
         if node.keywords:
@@ -2461,6 +2535,8 @@ def _generated_module_source(
         "    return x_inf / tau\n\n"
         "def beta_from_inf_tau(x_inf, tau):\n"
         "    return (1.0 - x_inf) / tau\n\n"
+        "def rates_from_tau_inf(x_inf, tau):\n"
+        "    return alpha_from_inf_tau(x_inf, tau), beta_from_inf_tau(x_inf, tau)\n\n"
         "def safe_exp(x):\n"
         "    return xp.where(x < -100.0, 0.0, xp.exp(x))\n\n"
         "def vtrap(x, y):\n"
