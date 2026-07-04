@@ -469,6 +469,143 @@ class DuplicateExport(Model):
         compile_model_source_file(source, cache_root=tmp_path / "cache")
 
 
+def test_source_compiler_supports_explicit_current_terms(tmp_path):
+    source = tmp_path / "explicit_current_terms.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Voltage
+from axonscope.utils.units import cm2, mS, mV, uA
+
+class ExplicitCurrentTerms(Model):
+    model_kind = "explicit_current_terms"
+
+    @currents(
+        outputs=("I_drive",),
+        conductances={"I_drive": "g_drive"},
+        reversals={"I_drive": "E_drive"},
+    )
+    def currents(self, Vm: Voltage, E_drive: Voltage = -55.0 * mV):
+        g_drive: ConductanceDensity = 0.2 * mS / cm2
+        offset: CurrentDensity = 0.0 * uA / cm2
+        I_drive: CurrentDensity = g_drive * (Vm - E_drive) + offset
+        return I_drive
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(source, cache_root=tmp_path / "cache")
+    model = compiled.model
+
+    assert model.currents[0].name == "I_drive"
+
+    interpreter = NumpyModelInterpreter(model, dtype=np.float64)
+    V = np.asarray([-75.0, -55.0, -35.0], dtype=np.float64)
+    gates = interpreter.init_gates(V)
+
+    np.testing.assert_allclose(
+        interpreter.conductances(gates),
+        np.full((3, 1), 0.2, dtype=np.float64),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        interpreter.current_matrix(V, gates)[:, 0],
+        0.2 * (V + 55.0),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    g_total, ge_total = interpreter.membrane_conductance_terms(gates)
+    np.testing.assert_allclose(g_total, 0.2, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(ge_total, -11.0, rtol=1e-12, atol=1e-12)
+
+
+def test_source_compiler_rejects_incomplete_explicit_current_terms(tmp_path):
+    source = tmp_path / "incomplete_current_terms.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Voltage
+from axonscope.utils.units import cm2, mS, mV
+
+class IncompleteCurrentTerms(Model):
+    model_kind = "incomplete_current_terms"
+
+    @currents(outputs=("I_l",), conductances={"I_l": "g_l"})
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        g_l: ConductanceDensity = 0.1 * mS / cm2
+        I_l: CurrentDensity = g_l * (Vm - EL)
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="must define both conductance and reversal",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_rejects_unknown_explicit_current_terms(tmp_path):
+    source = tmp_path / "unknown_current_terms.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Voltage
+from axonscope.utils.units import cm2, mS, mV
+
+class UnknownCurrentTerms(Model):
+    model_kind = "unknown_current_terms"
+
+    @currents(
+        outputs=("I_l",),
+        conductances={"I_missing": "g_l"},
+        reversals={"I_missing": "EL"},
+    )
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        g_l: ConductanceDensity = 0.1 * mS / cm2
+        I_l: CurrentDensity = g_l * (Vm - EL)
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="references unknown current output\\(s\\): I_missing",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_reports_explicit_terms_for_non_linear_current(tmp_path):
+    source = tmp_path / "non_linear_current_terms.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Voltage
+from axonscope.utils.units import cm2, mS, mV, uA
+
+class NonLinearCurrentTerms(Model):
+    model_kind = "non_linear_current_terms"
+
+    @currents(outputs=("I_l",))
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        g_l: ConductanceDensity = 0.1 * mS / cm2
+        offset: CurrentDensity = 0.0 * uA / cm2
+        I_l: CurrentDensity = g_l * (Vm - EL) + offset
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        SourceModelCompileError,
+        match="Use the linear form `I_x = g_x \\* \\(Vm - E_x\\)` or declare",
+    ):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
 def test_source_compiler_rejects_manifest_export_fields(tmp_path):
     source = tmp_path / "manifest_export.py"
     source.write_text(

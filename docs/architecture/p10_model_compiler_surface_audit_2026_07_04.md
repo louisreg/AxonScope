@@ -41,9 +41,10 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
 - `rates_from_tau_inf` is now the canonical public tau/inf helper. Model source
   uses tuple assignment, while the compiler lowers that syntax to scalar
   internal alpha/beta expressions.
-- Conductance/reversal inference still expects the readable linear form
+- Conductance/reversal inference still accepts the readable linear form
   `I_x = g_x * (Vm - E_x)`. Currents whose conductance or reversal cannot be
-  inferred need either explicit public syntax or fail-fast diagnostics.
+  inferred can now declare explicit source metadata with
+  `@currents(conductances={"I_x": "g_x"}, reversals={"I_x": "E_x"})`.
 - Mechanism boundaries are preserved in source sections, but optimization and
   generated-program reports should make those boundaries more visible.
 - Generated-artifact identity is still mostly source/cache oriented. The full
@@ -82,12 +83,15 @@ Rejected Python constructs now fail with specific messages instead of the old
 generic unsupported-statement fallback for the common authoring mistakes P10
 identified.
 
+Currents whose conductance/reversal terms cannot be inferred from the simple
+linear form now have explicit source syntax on `@currents(...)`. Both
+`conductances` and `reversals` are required for each current, and the compiler
+rejects unknown current names before lowering.
+
 ## Next P10 Slices
 
 1. Audit concentration/current conversion formulas. Keep model-family-specific
    electrochemical helpers local, following the Schild pattern in
    `src/axonscope/membranes/models/schild_common.py`.
-2. Add explicit current metadata syntax or a stricter diagnostic for
-   non-inferable conductance/reversal terms.
-3. Extend `explain()` and generated-artifact identity around optimization,
+2. Extend `explain()` and generated-artifact identity around optimization,
    recording policy, dtype/precision, and target-specialized lowering.

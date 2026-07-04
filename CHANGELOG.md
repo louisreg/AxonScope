@@ -49,6 +49,10 @@ The format is inspired by Keep a Changelog.
   functions, I/O/side-effect calls, arbitrary NumPy/JAX calls, object
   construction, and hidden-global reads now report targeted source-location
   errors.
+- Added explicit membrane-source current metadata through
+  `@currents(conductances=..., reversals=...)` for currents whose
+  conductance/reversal terms cannot be inferred from the simple
+  `I_x = g_x * (Vm - E_x)` form.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

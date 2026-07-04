@@ -237,12 +237,14 @@ def _source_program(
     export_groups = _declared_model_export_groups(scope)
     dynamics = _declared_model_dynamics(scope)
     exported_returns = export_groups["currents"] + export_groups["observables"]
+    current_terms = _current_term_exports(export_groups)
     if declaration is None:
         function = _find_function(scope, function_name)
         metadata = _infer_model_metadata(
             source_path,
             functions=(function,),
             returns=exported_returns or None,
+            current_terms=current_terms,
             declared_states=declared_states,
             dynamics=dynamics,
         )
@@ -269,6 +271,7 @@ def _source_program(
                 if "returns" in declaration
                 else exported_returns
             ),
+            current_terms=current_terms,
             name=declaration.get("name"),
             declared_states=declared_states,
             dynamics=dynamics,
@@ -349,11 +352,13 @@ def _model_state_declaration(node: ast.AST, *, label: str) -> dict[str, Any]:
     return values
 
 
-def _declared_model_export_groups(tree: ast.Module) -> dict[str, tuple[str, ...]]:
-    groups: dict[str, list[str]] = {
+def _declared_model_export_groups(tree: ast.Module) -> dict[str, Any]:
+    groups: dict[str, Any] = {
         "currents": [],
         "observables": [],
         "internal": [],
+        "conductances": {},
+        "reversals": {},
     }
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
@@ -361,11 +366,14 @@ def _declared_model_export_groups(tree: ast.Module) -> dict[str, tuple[str, ...]
             if decorator is not None:
                 _merge_currents_decorator_exports(groups, decorator)
     _validate_export_groups(groups)
-    return {name: tuple(values) for name, values in groups.items()}
+    return {
+        name: tuple(values) if isinstance(values, list) else dict(values)
+        for name, values in groups.items()
+    }
 
 
 def _merge_currents_decorator_exports(
-    groups: dict[str, list[str]],
+    groups: dict[str, Any],
     decorator: ast.Call,
 ) -> None:
     if decorator.args:
@@ -381,14 +389,23 @@ def _merge_currents_decorator_exports(
             )
         elif keyword.arg == "internal":
             groups["internal"].extend(_name_tuple(keyword.value, label="@currents.internal"))
+        elif keyword.arg == "conductances":
+            groups["conductances"].update(
+                _name_mapping(keyword.value, label="@currents.conductances")
+            )
+        elif keyword.arg == "reversals":
+            groups["reversals"].update(
+                _name_mapping(keyword.value, label="@currents.reversals")
+            )
         else:
             raise SourceModelCompileError(
                 f"Unsupported @currents(...) keyword {keyword.arg!r}."
             )
 
 
-def _validate_export_groups(groups: dict[str, list[str]]) -> None:
-    for group_name, values in groups.items():
+def _validate_export_groups(groups: dict[str, Any]) -> None:
+    for group_name in ("currents", "observables", "internal"):
+        values = groups[group_name]
         duplicate = _first_duplicate(values)
         if duplicate is not None:
             raise SourceModelCompileError(
@@ -402,6 +419,19 @@ def _validate_export_groups(groups: dict[str, list[str]]) -> None:
             "@currents(...) cannot expose the same expression as both current "
             "and observable: " + ", ".join(overlap)
         )
+
+
+def _current_term_exports(groups: dict[str, Any]) -> dict[str, dict[str, str]]:
+    conductances: dict[str, str] = groups.get("conductances", {})
+    reversals: dict[str, str] = groups.get("reversals", {})
+    current_names = sorted(set(conductances) | set(reversals))
+    return {
+        name: {
+            **({"conductance": conductances[name]} if name in conductances else {}),
+            **({"reversal": reversals[name]} if name in reversals else {}),
+        }
+        for name in current_names
+    }
 
 
 def _first_duplicate(values: list[str] | tuple[str, ...]) -> str | None:
@@ -492,7 +522,7 @@ def _set_dynamics_key(
 def _merge_source_metadata_descriptions(
     metadata: dict[str, Any],
     declared_states: dict[str, dict[str, Any]],
-    export_groups: dict[str, tuple[str, ...]],
+    export_groups: dict[str, Any],
 ) -> None:
     source_metadata = dict(metadata.get("metadata", {}))
     state_docs = {
@@ -868,18 +898,29 @@ def _name_reference(node: ast.AST, *, label: str) -> str:
         return node.value
     if isinstance(node, ast.Name):
         return node.id
-    raise SourceModelCompileError(f"model.{label} must be a name or string.")
+    raise SourceModelCompileError(f"{_model_metadata_label(label)} must be a name or string.")
 
 
 def _name_mapping(node: ast.AST, *, label: str) -> dict[str, str]:
     if not isinstance(node, ast.Dict):
-        raise SourceModelCompileError(f"model.{label} must be a dictionary.")
+        raise SourceModelCompileError(f"{_model_metadata_label(label)} must be a dictionary.")
     mapping: dict[str, str] = {}
     for key, value in zip(node.keys, node.values, strict=True):
         if key is None:
-            raise SourceModelCompileError(f"model.{label} cannot use ** unpacking.")
-        mapping[_name_reference(key, label=label)] = _name_reference(value, label=label)
+            raise SourceModelCompileError(
+                f"{_model_metadata_label(label)} cannot use ** unpacking."
+            )
+        key_name = _name_reference(key, label=label)
+        if key_name in mapping:
+            raise SourceModelCompileError(
+                f"Duplicate {_model_metadata_label(label)} key {key_name!r}."
+            )
+        mapping[key_name] = _name_reference(value, label=label)
     return mapping
+
+
+def _model_metadata_label(label: str) -> str:
+    return label if label.startswith("@") else f"model.{label}"
 
 
 def _metadata_value(node: ast.AST) -> Any:
@@ -921,6 +962,7 @@ def _infer_model_metadata(
     *,
     functions: tuple[ast.FunctionDef, ...],
     returns: tuple[str, ...] | None,
+    current_terms: dict[str, dict[str, str]] | None = None,
     name: str | None = None,
     declared_states: dict[str, dict[str, Any]] | None = None,
     dynamics: dict[str, Any] | None = None,
@@ -976,6 +1018,7 @@ def _infer_model_metadata(
             currents[name] = {**spec, "name": _public_current_name(name)}
         else:
             observables[name] = spec
+    _apply_explicit_current_terms(currents, current_terms or {})
     if not currents:
         raise SourceModelCompileError(
             "Plain Python membrane source must return at least one I_* current."
@@ -996,6 +1039,31 @@ def _infer_model_metadata(
         **({"step": step} if step else {}),
         **({"state_initials": dynamics["initials"]} if dynamics and "initials" in dynamics else {}),
     }
+
+
+def _apply_explicit_current_terms(
+    currents: dict[str, dict[str, Any]],
+    current_terms: dict[str, dict[str, str]],
+) -> None:
+    unknown = sorted(set(current_terms) - set(currents))
+    if unknown:
+        raise SourceModelCompileError(
+            "@currents(conductances=..., reversals=...) references unknown "
+            "current output(s): " + ", ".join(unknown)
+        )
+    for current_name, terms in current_terms.items():
+        missing = [
+            key
+            for key in ("conductance", "reversal")
+            if key not in terms
+        ]
+        if missing:
+            raise SourceModelCompileError(
+                "@currents explicit current metadata for "
+                f"{current_name!r} must define both conductance and reversal."
+            )
+        currents[current_name]["conductance"] = terms["conductance"]
+        currents[current_name]["reversal"] = terms["reversal"]
 
 
 def _function_parameters(function: ast.FunctionDef) -> tuple[ast.arg, ...]:
@@ -1976,7 +2044,8 @@ def _infer_linear_current_terms(current: Expression) -> tuple[Expression, Expres
                 return conductance, voltage_term.right
     raise SourceModelCompileError(
         "Cannot infer conductance/reversal from current expression. "
-        "Use the linear form `I_x = g_x * (Vm - E_x)`."
+        "Use the linear form `I_x = g_x * (Vm - E_x)` or declare "
+        "`@currents(conductances={\"I_x\": \"g_x\"}, reversals={\"I_x\": \"E_x\"})`."
     )
 
 

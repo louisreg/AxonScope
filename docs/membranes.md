@@ -267,6 +267,28 @@ to mark public currents, public observables, and retained internal values. Use
 to map state updates and solver diagnostics. Built-in model files should not
 use class-level `exports = {...}` or `dynamics = {...}` manifests.
 
+Most current terms are inferred from the simple linear form
+`I_x = g_x * (Vm - E_x)`. If a current has the same conductance/reversal
+semantics but cannot be written in that exact form, declare the terms explicitly
+on the currents section:
+
+```python
+@axs.membranes.currents(
+    outputs=("I_drive",),
+    conductances={"I_drive": "g_drive"},
+    reversals={"I_drive": "E_drive"},
+)
+def currents(self, Vm: Voltage):
+    g_drive: ConductanceDensity = 0.2 * axs.mS_per_cm2
+    E_drive: Voltage = -55.0 * axs.mV
+    bias: CurrentDensity = 0.0 * axs.uA_per_cm2
+    I_drive: CurrentDensity = g_drive * (Vm - E_drive) + bias
+    return I_drive
+```
+
+The explicit conductance and reversal symbols must be produced by the same
+model source, or be declared parameters/inputs with compatible units.
+
 The current authoring subset is intentionally small:
 
 - model classes inherit `axs.membranes.Model`;
