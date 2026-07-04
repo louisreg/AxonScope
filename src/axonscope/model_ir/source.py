@@ -41,7 +41,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v13"
+SOURCE_COMPILER_VERSION = "source_codegen.v14"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -172,6 +172,7 @@ def compile_model_source_file(
     model = _build_model_ir(
         metadata,
         assignments=assignments,
+        functions=program.functions,
         source_path=source_path,
         function_name=",".join(program.function_names),
         source_hash=source_hash,
@@ -1762,6 +1763,7 @@ def _build_model_ir(
     metadata: dict[str, Any],
     *,
     assignments: dict[str, Expression],
+    functions: tuple[ast.FunctionDef, ...],
     source_path: Path,
     function_name: str,
     source_hash: str,
@@ -1806,6 +1808,7 @@ def _build_model_ir(
         for observable_name, observable_spec in metadata.get("observables", {}).items()
     )
     step_program = _step_program_from_spec(metadata.get("step"), env)
+    source_sections = _source_section_metadata(functions)
     model = ModelIR(
         name=name,
         inputs=inputs,
@@ -1821,6 +1824,7 @@ def _build_model_ir(
             "source_contract": SOURCE_CONTRACT_VERSION,
             "source_hash": source_hash,
             "source_function": function_name,
+            "source_mechanisms": _source_mechanism_metadata(source_sections),
             "source_outputs": {
                 "all": _exported_return_names(metadata),
                 "currents": tuple(
@@ -1840,12 +1844,89 @@ def _build_model_ir(
                 "intrinsics": DEFAULT_INTRINSICS.names(),
                 "path": str(source_path),
                 "schema": MODEL_IR_SCHEMA_VERSION,
+                "sections": source_sections,
                 "source_hash": source_hash,
             },
+            "source_sections": source_sections,
             **dict(metadata.get("metadata", {})),
         },
     )
     return assert_valid_model_ir(model)
+
+
+def _source_section_metadata(
+    functions: tuple[ast.FunctionDef, ...],
+) -> tuple[dict[str, Any], ...]:
+    records_by_function: dict[str, list[_AssignmentRecord]] = {
+        function.name: []
+        for function in functions
+    }
+    for function in functions:
+        for statement in function.body:
+            if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant):
+                continue
+            if isinstance(statement, ast.Expr) and _is_model_method_call(
+                statement.value,
+                "keep",
+            ):
+                continue
+            records = _assignment_records(statement, function_name=function.name)
+            if records is not None:
+                records_by_function[function.name].extend(records)
+                continue
+            if isinstance(statement, ast.Return):
+                break
+    sections: list[dict[str, Any]] = []
+    for function in functions:
+        records = tuple(records_by_function[function.name])
+        assignments = tuple(record.name for record in records)
+        local_names = set(assignments)
+        dependency_names = sorted(
+            {
+                dependency
+                for record in records
+                for dependency in _expression_dependency_names(record.value)
+                if dependency not in local_names
+            }
+        )
+        section_name = _function_section_name(function)
+        section: dict[str, Any] = {
+            "name": section_name,
+            "function": function.name,
+            "assignments": assignments,
+            "depends_on": tuple(dependency_names),
+        }
+        if section_name.startswith("mechanism:"):
+            section["mechanism"] = section_name.split(":", 1)[1]
+        sections.append(section)
+    return tuple(sections)
+
+
+def _function_section_name(function: ast.FunctionDef) -> str:
+    for decorator in function.decorator_list:
+        section_name = _decorator_section_name(decorator)
+        if section_name is not None:
+            return section_name
+    return function.name
+
+
+def _source_mechanism_metadata(
+    source_sections: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    mechanisms: list[dict[str, Any]] = []
+    for section in source_sections:
+        mechanism_name = section.get("mechanism")
+        if not isinstance(mechanism_name, str):
+            continue
+        mechanisms.append(
+            {
+                "name": mechanism_name,
+                "function": section["function"],
+                "assignments": tuple(section.get("assignments", ())),
+                "depends_on": tuple(section.get("depends_on", ())),
+            }
+        )
+    return tuple(mechanisms)
 
 
 def _with_codegen_cache_metadata(model: ModelIR, cache: GeneratedCodeCache) -> ModelIR:

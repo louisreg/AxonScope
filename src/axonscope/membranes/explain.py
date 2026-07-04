@@ -73,6 +73,18 @@ class MembraneSourceSection:
 
 
 @dataclass(frozen=True, slots=True)
+class MembraneMechanismExplanation:
+    """One named membrane mechanism preserved from source sections."""
+
+    name: str
+    function_name: str
+    docstring: str | None
+    arguments: tuple[str, ...]
+    assignments: tuple[str, ...]
+    external_dependencies: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GeneratedTargetExplanation:
     """What one generated backend target keeps for its model_step function."""
 
@@ -109,6 +121,7 @@ class MembraneSourceExplanation:
     source_outputs: Mapping[str, tuple[str, ...]]
     internal_outputs: tuple[str, ...]
     sections: tuple[MembraneSourceSection, ...]
+    mechanisms: tuple[MembraneMechanismExplanation, ...]
     targets: tuple[GeneratedTargetExplanation, ...]
 
 
@@ -200,6 +213,23 @@ def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
             if section.docstring:
                 first_line = section.docstring.splitlines()[0].strip()
                 lines.append(f"        doc={first_line}")
+        if source.mechanisms:
+            lines.append("    mechanisms:")
+            for mechanism in source.mechanisms:
+                lines.extend(
+                    [
+                        f"      {mechanism.name} ({mechanism.function_name}):",
+                        f"        args={mechanism.arguments!r}",
+                        f"        assigns={_format_names(mechanism.assignments)}",
+                        (
+                            "        external_dependencies="
+                            f"{_format_names(mechanism.external_dependencies)}"
+                        ),
+                    ]
+                )
+                if mechanism.docstring:
+                    first_line = mechanism.docstring.splitlines()[0].strip()
+                    lines.append(f"        doc={first_line}")
         lines.append("    generated model_step targets:")
         for target in source.targets:
             lines.extend(
@@ -265,6 +295,7 @@ def _explain_source(source: GeneratedMembraneCodeInspection) -> MembraneSourceEx
             for name in compiled_model.metadata.get("internal_outputs", ())
         ),
         sections=sections,
+        mechanisms=_source_mechanisms(sections),
         targets=targets,
     )
 
@@ -391,6 +422,35 @@ def _source_sections(
             )
         )
     return tuple(sections)
+
+
+def _source_mechanisms(
+    sections: tuple[MembraneSourceSection, ...],
+) -> tuple[MembraneMechanismExplanation, ...]:
+    mechanisms: list[MembraneMechanismExplanation] = []
+    for section in sections:
+        if not section.name.startswith("mechanism:"):
+            continue
+        local_names = set(section.assignments)
+        dependencies = tuple(
+            dict.fromkeys(
+                dependency
+                for equation in section.dependencies
+                for dependency in equation.depends_on
+                if dependency not in local_names
+            )
+        )
+        mechanisms.append(
+            MembraneMechanismExplanation(
+                name=section.name.split(":", 1)[1],
+                function_name=section.function_name,
+                docstring=section.docstring,
+                arguments=section.arguments,
+                assignments=section.assignments,
+                external_dependencies=dependencies,
+            )
+        )
+    return tuple(mechanisms)
 
 
 def _source_functions(tree: ast.Module, *, model_name: str) -> dict[str, ast.FunctionDef]:
@@ -738,6 +798,7 @@ def _format_expression(expression: Expression) -> str:
 __all__ = [
     "GeneratedTargetExplanation",
     "MembraneEquationDependency",
+    "MembraneMechanismExplanation",
     "MembraneModelExplanation",
     "MembraneSourceExplanation",
     "MembraneSourceSection",

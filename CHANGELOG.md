@@ -53,6 +53,9 @@ The format is inspired by Keep a Changelog.
   `@currents(conductances=..., reversals=...)` for currents whose
   conductance/reversal terms cannot be inferred from the simple
   `I_x = g_x * (Vm - E_x)` form.
+- Preserved source section and `@mechanism(...)` boundaries in compiled
+  membrane metadata and exposed mechanism assignments/dependencies through
+  `axs.membranes.explain()`.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

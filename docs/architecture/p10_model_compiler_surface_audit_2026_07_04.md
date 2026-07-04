@@ -45,8 +45,9 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
   `I_x = g_x * (Vm - E_x)`. Currents whose conductance or reversal cannot be
   inferred can now declare explicit source metadata with
   `@currents(conductances={"I_x": "g_x"}, reversals={"I_x": "E_x"})`.
-- Mechanism boundaries are preserved in source sections, but optimization and
-  generated-program reports should make those boundaries more visible.
+- Mechanism boundaries are preserved in source sections, compiled metadata, and
+  generated-program reports. `explain()` now aggregates `@mechanism(...)`
+  sections with their produced assignments and external dependencies.
 - Generated-artifact identity is still mostly source/cache oriented. The full
   target-specialized identity should include graph hashes, lowering key, static
   shapes, recording policy, dtype/precision, optimization level, helper
@@ -98,6 +99,13 @@ justifies a public membrane helper today, so the current policy is:
 Schild-family duplication belongs in `schild_common.py`, Tigerholm-specific
 logic stays inline in `tigerholm.py`, and public helpers should wait for at
 least two independent families needing the same operation.
+
+Mechanism sections are now preserved as first-class report metadata:
+`source_sections` records every source section, `source_mechanisms` records
+named `@mechanism(...)` groups, and `explain()` prints a `mechanisms:` block
+with assignments plus dependencies outside each mechanism boundary. This keeps
+the authoring shape visible for future optimization/fusion work without making
+Model IR a user-facing concept.
 
 ## Next P10 Slices
 

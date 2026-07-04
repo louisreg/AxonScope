@@ -359,10 +359,12 @@ between P7 model authoring and P11 JAX solver optimization.
   cannot be inferred from `I_x = g_x * (Vm - E_x)`. Use
   `@currents(conductances={"I_x": "g_x"}, reversals={"I_x": "E_x"})`; both
   terms are required and must reference current outputs/source symbols.
-- [ ] Extend mechanism semantics beyond ordered sections: expose
+- [x] Extend mechanism semantics beyond ordered sections: expose
   mechanism-level dependencies in reports, preserve boundaries for
   optimization/fusion, and apply the same readable shape to complex built-ins
-  where useful.
+  where useful. Source compilation now records `source_sections` and
+  `source_mechanisms`, and `explain()` reports each mechanism's assignments and
+  external dependencies.
 - [ ] Extend semantic validation to purity/source provenance, unsupported
   helper calls, duplicate exports, duplicate observable names, and
   recording/output compatibility.

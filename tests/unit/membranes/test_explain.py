@@ -72,6 +72,48 @@ def test_membrane_explain_reuses_generated_cache_and_reports_model_step_pruning(
     assert "pruned_from_model_step" in text
 
 
+def test_membrane_explain_reports_mechanism_boundaries(tmp_path, monkeypatch):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    model = axs.membranes.Sundt()
+
+    report = model.explain()
+
+    source = report.sources[0]
+    assert [mechanism.name for mechanism in source.mechanisms] == [
+        "na_hh",
+        "borg_kdr",
+    ]
+    assert isinstance(source.mechanisms[0], axs.membranes.MembraneMechanismExplanation)
+
+    na_hh = source.mechanisms[0]
+    assert na_hh.function_name == "na_hh_rates"
+    assert "alpha_m" in na_hh.assignments
+    assert "beta_h" in na_hh.assignments
+    assert {"Vm", "celsius", "mshift", "hshift", "ishift"}.issubset(
+        set(na_hh.external_dependencies)
+    )
+
+    borg = source.mechanisms[1]
+    assert borg.function_name == "borg_kdr_rates"
+    assert "alpha_n" in borg.assignments
+    assert "beta_l" in borg.assignments
+    assert {"Vm", "celsius", "vhalfn", "vhalfl"}.issubset(
+        set(borg.external_dependencies)
+    )
+
+    metadata_mechanisms = source.metadata["source_mechanisms"]
+    assert [entry["name"] for entry in metadata_mechanisms] == ["na_hh", "borg_kdr"]
+    assert metadata_mechanisms[0]["function"] == "na_hh_rates"
+    assert "alpha_m" in metadata_mechanisms[0]["assignments"]
+    assert source.metadata["source_provenance"]["sections"][0]["name"] == "mechanism:na_hh"
+
+    text = report.format()
+    assert "mechanisms:" in text
+    assert "na_hh (na_hh_rates)" in text
+    assert "borg_kdr (borg_kdr_rates)" in text
+    assert "external_dependencies=" in text
+
+
 def test_membrane_explain_reports_stateful_step_program(tmp_path, monkeypatch):
     monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
     model = axs.membranes.Schild94(diameter=0.8 * axs.um)

@@ -367,7 +367,26 @@ def _metadata_from_data(data: Any) -> dict[str, Any]:
         for key in ("all", "currents", "observables"):
             if isinstance(source_outputs.get(key), list):
                 source_outputs[key] = tuple(source_outputs[key])
+    for key in ("source_sections", "source_mechanisms"):
+        values = metadata.get(key)
+        if isinstance(values, list):
+            metadata[key] = tuple(_metadata_sequence_entry(item) for item in values)
+        elif isinstance(values, tuple):
+            metadata[key] = tuple(_metadata_sequence_entry(item) for item in values)
+    sections = provenance.get("sections") if isinstance(provenance, dict) else None
+    if isinstance(sections, list):
+        provenance["sections"] = tuple(_metadata_sequence_entry(item) for item in sections)
     return metadata
+
+
+def _metadata_sequence_entry(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    entry = dict(data)
+    for key in ("assignments", "depends_on"):
+        if isinstance(entry.get(key), list):
+            entry[key] = tuple(entry[key])
+    return entry
 
 
 def _plain_data(data: Any) -> Any:
