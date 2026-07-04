@@ -338,9 +338,10 @@ between P7 model authoring and P11 JAX solver optimization.
 - [x] Tighten rejected Python construct diagnostics for mutation,
   data-dependent Python loops, I/O, dynamic imports, object construction inside
   equations, arbitrary NumPy/JAX calls, hidden global state, and side effects.
-- [ ] Complete and document the public helper surface:
+- [x] Complete and document the public helper surface:
   `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
-  `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, and `rates_from_tau_inf`.
+  `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, `rates_from_tau_inf`, and
+  `safe_exp`.
   - [x] Make `rates_from_tau_inf(x_inf, tau)` the canonical public helper for
     tau/inf gates. Source models now use
     `alpha_x, beta_x = rates_from_tau_inf(x_inf, tau)`, and the compiler lowers
