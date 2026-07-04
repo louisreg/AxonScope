@@ -44,6 +44,11 @@ The format is inspired by Keep a Changelog.
 - Factored the duplicated Schild-family Nernst calculation into the private
   `axonscope.membranes.models.schild_common` module instead of promoting it to
   the public membrane-helper surface.
+- Tightened membrane source compiler diagnostics for rejected Python constructs:
+  loops, statement-level conditionals, mutation, imports inside equation
+  functions, I/O/side-effect calls, arbitrary NumPy/JAX calls, object
+  construction, and hidden-global reads now report targeted source-location
+  errors.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.
@@ -85,7 +90,7 @@ The format is inspired by Keep a Changelog.
 
 - Fast local validation from the current P10 helper/compiler pass:
   `python -m compileall -q src tests/unit` and
-  `pytest -q tests/unit --tb=short` passed with `602 passed, 1 skipped`.
+  `pytest -q tests/unit --tb=short` passed with `611 passed, 1 skipped`.
 - NRV validation should be recorded here only after a fresh NRV-ready run.
 
 ## [0.2.0] - 2025-11-25

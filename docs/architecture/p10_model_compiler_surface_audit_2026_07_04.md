@@ -30,9 +30,10 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
 
 ## Gaps
 
-- Rejected-source diagnostics have line/column support for many failures, but
-  mutation, loops, object construction, hidden globals, dynamic imports, and
-  side-effect-oriented code still need clearer user messages.
+- Rejected-source diagnostics now give targeted source-location messages for
+  mutation, loops, statement-level conditionals, imports inside equation
+  functions, arbitrary NumPy/JAX calls, object construction, hidden globals,
+  I/O, and side effects.
 - The helper surface is intentionally conservative. Scalar helpers exist for
   common math, and tau/inf gate conversion is exposed publicly as
   `rates_from_tau_inf`. Model-specific formulas should stay in the model source
@@ -58,7 +59,7 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
   programs or explicit fail-fast boundaries, and avoiding unrequested
   intermediate transport.
 
-## First Slice Done
+## Completed Slices
 
 The candidate scalar `boltzmann(x, midpoint, slope)` helper was rejected for
 the public surface because no built-in model, public example, or benchmark uses
@@ -77,13 +78,16 @@ The compiler lowers the tuple assignment to scalar internal alpha/beta
 expressions, so the rest of the Model IR and backend lowering paths remain
 scalar.
 
+Rejected Python constructs now fail with specific messages instead of the old
+generic unsupported-statement fallback for the common authoring mistakes P10
+identified.
+
 ## Next P10 Slices
 
-1. Tighten diagnostics for rejected source constructs.
-2. Audit concentration/current conversion formulas. Keep model-family-specific
+1. Audit concentration/current conversion formulas. Keep model-family-specific
    electrochemical helpers local, following the Schild pattern in
    `src/axonscope/membranes/models/schild_common.py`.
-3. Add explicit current metadata syntax or a stricter diagnostic for
+2. Add explicit current metadata syntax or a stricter diagnostic for
    non-inferable conductance/reversal terms.
-4. Extend `explain()` and generated-artifact identity around optimization,
+3. Extend `explain()` and generated-artifact identity around optimization,
    recording policy, dtype/precision, and target-specialized lowering.

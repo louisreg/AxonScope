@@ -522,6 +522,131 @@ class UnsupportedHelper(Model):
         compile_model_source_file(source, cache_root=tmp_path / "cache")
 
 
+@pytest.mark.parametrize(
+    ("body", "match"),
+    (
+        (
+            """
+I_l: CurrentDensity = Vm - EL
+for _ in range(2):
+    I_l = I_l
+""",
+            r"line \d+, column \d+: Data-dependent Python loops are not supported",
+        ),
+        (
+            """
+I_l: CurrentDensity = Vm - EL
+if Vm > EL:
+    I_l = I_l
+""",
+            r"line \d+, column \d+: Data-dependent Python if statements are not supported",
+        ),
+        (
+            """
+I_l: CurrentDensity = Vm - EL
+self.cached = I_l
+""",
+            r"line \d+, column \d+: Mutation of attributes or indexed values is not supported",
+        ),
+        (
+            """
+I_l: CurrentDensity = Vm - EL
+I_l += Vm - EL
+""",
+            r"line \d+, column \d+: Mutation and augmented assignments are not supported",
+        ),
+        (
+            """
+import numpy as np
+I_l: CurrentDensity = Vm - EL
+""",
+            r"line \d+, column \d+: Imports inside membrane equation functions are not supported",
+        ),
+        (
+            """
+I_l: CurrentDensity = Vm - EL
+print(I_l)
+""",
+            r"line \d+, column \d+: I/O and side-effecting calls like print",
+        ),
+    ),
+)
+def test_source_compiler_reports_rejected_statement_kinds(tmp_path, body, match):
+    source = tmp_path / "bad_statement.py"
+    indented = "\n".join(
+        "        " + line if line else ""
+        for line in body.strip("\n").splitlines()
+    )
+    source.write_text(
+        f"""
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class BadStatement(Model):
+    model_kind = "bad_statement"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+{indented}
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SourceModelCompileError, match=match):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+@pytest.mark.parametrize(
+    ("imports", "expression", "match"),
+    (
+        (
+            "import numpy as np",
+            "np.exp(Vm - EL)",
+            r"line \d+, column \d+: Arbitrary NumPy/JAX calls are not supported",
+        ),
+        (
+            "",
+            "CurrentDensity(Vm - EL)",
+            r"line \d+, column \d+: Object construction inside membrane equations is not supported",
+        ),
+        (
+            "GLOBAL_OFFSET = 1.0",
+            "Vm - EL + GLOBAL_OFFSET",
+            r"line \d+, column \d+: Unknown symbol\(s\).*cannot read hidden globals",
+        ),
+    ),
+)
+def test_source_compiler_reports_rejected_expression_kinds(
+    tmp_path,
+    imports,
+    expression,
+    match,
+):
+    source = tmp_path / "bad_expression.py"
+    source.write_text(
+        f"""
+{imports}
+from axonscope.membranes.model import Model, currents
+from axonscope.membranes.types import CurrentDensity, Voltage
+from axonscope.utils.units import mV
+
+class BadExpression(Model):
+    model_kind = "bad_expression"
+
+    @currents
+    def currents(self, Vm: Voltage, EL: Voltage = -70.0 * mV):
+        I_l: CurrentDensity = {expression}
+        return I_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SourceModelCompileError, match=match):
+        compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
 def test_source_compiler_supports_rates_from_tau_inf_tuple_assignment(tmp_path):
     source = tmp_path / "tau_inf_gate.py"
     source.write_text(

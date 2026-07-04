@@ -335,7 +335,7 @@ between P7 model authoring and P11 JAX solver optimization.
   custom membrane examples, and model-codegen benchmarks against the desired
   public vocabulary and optimization contract. Initial audit recorded in
   `docs/architecture/p10_model_compiler_surface_audit_2026_07_04.md`.
-- [ ] Tighten rejected Python construct diagnostics for mutation,
+- [x] Tighten rejected Python construct diagnostics for mutation,
   data-dependent Python loops, I/O, dynamic imports, object construction inside
   equations, arbitrary NumPy/JAX calls, hidden global state, and side effects.
 - [ ] Complete and document the public helper surface:

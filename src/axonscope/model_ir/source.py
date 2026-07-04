@@ -43,6 +43,25 @@ from .validation import assert_valid_model_ir
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
 SOURCE_COMPILER_VERSION = "source_codegen.v13"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
+_SIDE_EFFECT_CALLS = {
+    "__import__",
+    "breakpoint",
+    "compile",
+    "eval",
+    "exec",
+    "input",
+    "open",
+    "print",
+}
+_PYTHON_CONSTRUCTOR_CALLS = {
+    "dict",
+    "frozenset",
+    "list",
+    "object",
+    "set",
+    "tuple",
+}
+_ARRAY_RUNTIME_MODULES = {"jax", "jnp", "np", "numpy"}
 STEP_SPECIAL_SYMBOL_UNITS = {
     "Vm_prev": units.VOLTAGE_MV,
     "Vm_new": units.VOLTAGE_MV,
@@ -1309,12 +1328,81 @@ def _collect_assignment_records(functions: tuple[ast.FunctionDef, ...]) -> tuple
             if isinstance(statement, ast.Return):
                 _ = statement
                 break
-            raise _source_error(
-                statement,
-                f"Unsupported statement in membrane equations: {statement.__class__.__name__}.",
-            )
+            raise _unsupported_statement_error(statement)
     _validate_keep_references(keep_calls, tuple(records))
     return tuple(records)
+
+
+def _unsupported_statement_error(statement: ast.stmt) -> SourceModelCompileError:
+    return _source_error(statement, _unsupported_statement_message(statement))
+
+
+def _unsupported_statement_message(statement: ast.stmt) -> str:
+    if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
+        return (
+            "Data-dependent Python loops are not supported in membrane equations. "
+            "Write compiler-visible algebra with supported helpers instead."
+        )
+    if isinstance(statement, ast.If):
+        return (
+            "Data-dependent Python if statements are not supported in membrane "
+            "equations. Use a conditional expression or where(...)."
+        )
+    if isinstance(statement, (ast.Import, ast.ImportFrom)):
+        return (
+            "Imports inside membrane equation functions are not supported. "
+            "Import units and supported helpers at module scope."
+        )
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return "Context managers are not supported in membrane equations."
+    if isinstance(statement, ast.Try):
+        return "try/except blocks are not supported in membrane equations."
+    if isinstance(statement, ast.AugAssign):
+        return (
+            "Mutation and augmented assignments are not supported in membrane "
+            "equations. Bind a new local expression instead."
+        )
+    if isinstance(statement, ast.Delete):
+        return "Deleting local names or object state is not supported in membrane equations."
+    if isinstance(statement, ast.Raise):
+        return "Raising exceptions from membrane equations is not supported."
+    if isinstance(statement, ast.Assert):
+        return "Assertions inside membrane equations are not supported."
+    if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+        call_message = _unsupported_call_statement_message(statement.value)
+        if call_message is not None:
+            return call_message
+    return f"Unsupported statement in membrane equations: {statement.__class__.__name__}."
+
+
+def _unsupported_call_statement_message(node: ast.Call) -> str | None:
+    name = _call_name(node.func)
+    if name in _SIDE_EFFECT_CALLS:
+        return (
+            f"I/O and side-effecting calls like {name}(...) are not supported "
+            "in membrane equations."
+        )
+    if _call_base_name(node.func) in _ARRAY_RUNTIME_MODULES:
+        return (
+            "Arbitrary NumPy/JAX calls are not supported in membrane equations. "
+            "Use supported helpers from axonscope.membranes.math."
+        )
+    if isinstance(node.func, ast.Attribute) and node.func.attr in {
+        "append",
+        "clear",
+        "extend",
+        "insert",
+        "pop",
+        "remove",
+        "setdefault",
+        "sort",
+        "update",
+    }:
+        return (
+            "Mutation and side-effecting method calls are not supported in "
+            "membrane equations."
+        )
+    return None
 
 
 def _assignment_records(
@@ -1403,10 +1491,29 @@ def _assignment_name(statement: ast.stmt) -> str | None:
     if isinstance(statement, ast.Assign):
         if len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
             return statement.targets[0].id
+        if len(statement.targets) == 1 and isinstance(
+            statement.targets[0],
+            (ast.Attribute, ast.Subscript),
+        ):
+            raise _source_error(
+                statement.targets[0],
+                (
+                    "Mutation of attributes or indexed values is not supported in "
+                    "membrane equations. Assign one local name instead."
+                ),
+            )
         raise _source_error(statement, "Membrane equation assignments must target one local name.")
     if isinstance(statement, ast.AnnAssign):
         if isinstance(statement.target, ast.Name):
             return statement.target.id
+        if isinstance(statement.target, (ast.Attribute, ast.Subscript)):
+            raise _source_error(
+                statement.target,
+                (
+                    "Mutation of attributes or indexed values is not supported in "
+                    "annotated membrane assignments. Assign one local name instead."
+                ),
+            )
         raise _source_error(statement, "Annotated membrane assignments must target one local name.")
     return None
 
@@ -1453,6 +1560,9 @@ def _topological_assignment_order(
                 (
                     f"Unknown symbol(s) in equation assignment {record.name!r}: "
                     + ", ".join(unknown)
+                    + ". Membrane equations cannot read hidden globals; use model "
+                    "parameters, function arguments, units, or previous local "
+                    "assignments."
                 ),
             )
         local_dependencies[record.name] = tuple(
@@ -1937,7 +2047,11 @@ class _ExpressionCompiler:
             unit = _unit_name(node)
             if unit is not None:
                 return literal(1.0, unit=unit)
-            raise SourceModelCompileError(f"Unknown symbol {node.id!r}.")
+            raise SourceModelCompileError(
+                f"Unknown symbol {node.id!r}. Membrane equations cannot read "
+                "hidden globals; use model parameters, function arguments, units, "
+                "or previous local assignments."
+            )
         if isinstance(node, ast.Attribute):
             self_symbol = self._self_symbol(node)
             if self_symbol is not None:
@@ -2031,8 +2145,26 @@ class _ExpressionCompiler:
 
     def _call(self, node: ast.Call) -> Expression:
         if not isinstance(node.func, ast.Name):
-            raise SourceModelCompileError("Only direct helper calls are supported in equations.")
+            if _call_base_name(node.func) in _ARRAY_RUNTIME_MODULES:
+                raise SourceModelCompileError(
+                    "Arbitrary NumPy/JAX calls are not supported in membrane "
+                    "equations. Use supported helpers from axonscope.membranes.math."
+                )
+            raise SourceModelCompileError(
+                "Only direct helper calls from axonscope.membranes.math are "
+                "supported in equations."
+            )
         name = node.func.id
+        if name in _SIDE_EFFECT_CALLS:
+            raise SourceModelCompileError(
+                f"I/O and side-effecting calls like {name}(...) are not supported "
+                "in membrane equations."
+            )
+        if name in _PYTHON_CONSTRUCTOR_CALLS or name[:1].isupper():
+            raise SourceModelCompileError(
+                f"Object construction inside membrane equations is not supported "
+                f"({name}(...)). Use compiler-visible scalar assignments instead."
+            )
         if name == "rates_from_tau_inf":
             raise SourceModelCompileError(
                 "rates_from_tau_inf(...) returns alpha and beta; assign it as "
@@ -2043,6 +2175,25 @@ class _ExpressionCompiler:
         if node.keywords:
             raise SourceModelCompileError("Equation helper calls cannot use keyword arguments.")
         return call(name, *(self.expression(arg) for arg in node.args))
+
+
+def _call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _call_name(node.value)
+        if prefix is None:
+            return node.attr
+        return f"{prefix}.{node.attr}"
+    return None
+
+
+def _call_base_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return _call_base_name(node.value)
+    return None
 
 
 def _source_hash(tree: ast.Module, *, metadata: dict[str, Any]) -> str:
