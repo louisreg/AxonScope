@@ -41,7 +41,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v12"
+SOURCE_COMPILER_VERSION = "source_codegen.v13"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 STEP_SPECIAL_SYMBOL_UNITS = {
     "Vm_prev": units.VOLTAGE_MV,
@@ -2527,8 +2527,6 @@ def _generated_module_source(
         "gate = 1.0\n\n"
         "def sigmoid(x):\n"
         "    return 1.0 / (1.0 + xp.exp(-x))\n\n"
-        "def boltzmann(x, midpoint, slope):\n"
-        "    return 1.0 / (1.0 + xp.exp((x - midpoint) / slope))\n\n"
         "def q10(base, celsius, reference):\n"
         "    return xp.power(base, (celsius - reference) / 10.0)\n\n"
         "def alpha_from_inf_tau(x_inf, tau):\n"

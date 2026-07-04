@@ -340,17 +340,19 @@ between P7 model authoring and P11 JAX solver optimization.
   equations, arbitrary NumPy/JAX calls, hidden global state, and side effects.
 - [ ] Complete and document the public helper surface:
   `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
-  `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, `boltzmann`,
-  `rates_from_tau_inf`, `nernst`, and concentration/current conversion helpers.
-  - [x] Add `boltzmann(x, midpoint, slope)` across public membrane math,
-    internal intrinsics, semantic validation, generated NumPy/JAX code, NumPy
-    interpreter, JAX lowering, docs, and tests.
+  `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, and `rates_from_tau_inf`.
   - [x] Make `rates_from_tau_inf(x_inf, tau)` the canonical public helper for
     tau/inf gates. Source models now use
     `alpha_x, beta_x = rates_from_tau_inf(x_inf, tau)`, and the compiler lowers
     that tuple assignment to scalar internal alpha/beta expressions.
-  - [ ] Define the unit and sign contracts for `nernst` plus concentration /
-    current conversion helpers before exposing them.
+  - [x] Reject/defer `boltzmann` as a public helper for now: no built-in model,
+    example, or benchmark uses it directly.
+  - [x] Reject `nernst` as a public helper for now: current need is
+    Schild-family-specific; shared Schild 94/97 Nernst logic now lives in
+    `src/axonscope/membranes/models/schild_common.py`.
+  - [ ] Audit concentration/current conversion formulas before exposing any
+    helper; keep them model-local unless at least two independent model
+    families need the same public operation.
 - [ ] Decide whether public authoring needs explicit syntax for currents whose
   conductance/reversal cannot be inferred from `I_x = g_x * (Vm - E_x)`.
 - [ ] Extend mechanism semantics beyond ordered sections: expose

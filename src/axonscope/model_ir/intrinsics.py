@@ -59,14 +59,6 @@ DEFAULT_INTRINSICS = IntrinsicRegistry(
         Intrinsic("minimum", 2, "matching_args", "minimum", "minimum"),
         Intrinsic("pow", 2, "pow", "power", "power"),
         Intrinsic(
-            "boltzmann",
-            3,
-            "boltzmann",
-            "boltzmann",
-            "boltzmann",
-            note="x, midpoint, slope -> 1 / (1 + exp((x - midpoint) / slope)).",
-        ),
-        Intrinsic(
             "alpha_from_inf_tau",
             2,
             "dimensionless_over_time_to_rate",
@@ -159,10 +151,6 @@ def minimum(left: Any, right: Any) -> Call:
 
 def pow_(left: Any, right: Any) -> Call:
     return call("pow", left, right)
-
-
-def boltzmann(x: Any, midpoint: Any, slope: Any) -> Call:
-    return call("boltzmann", x, midpoint, slope)
 
 
 def q10(base: Any, celsius: Any, reference: Any) -> Call:

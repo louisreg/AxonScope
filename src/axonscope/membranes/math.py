@@ -43,10 +43,6 @@ def pow(left: Any, right: Any) -> Any:
     return builtins.pow(left, right)
 
 
-def boltzmann(x: Any, midpoint: Any, slope: Any) -> Any:
-    return 1.0 / (1.0 + math.exp((x - midpoint) / slope))
-
-
 def q10(base: Any, celsius: Any, reference: Any) -> Any:
     return base ** ((celsius - reference) / 10.0)
 
@@ -96,7 +92,6 @@ def vtrap(x: Any, y: Any) -> Any:
 
 __all__ = [
     "abs",
-    "boltzmann",
     "clip",
     "exp",
     "expm1",

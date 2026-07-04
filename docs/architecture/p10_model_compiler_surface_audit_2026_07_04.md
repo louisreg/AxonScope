@@ -33,10 +33,10 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
 - Rejected-source diagnostics have line/column support for many failures, but
   mutation, loops, object construction, hidden globals, dynamic imports, and
   side-effect-oriented code still need clearer user messages.
-- The helper surface is not yet fully flat. Scalar helpers exist for common
-  math, and tau/inf gate conversion is exposed publicly as
-  `rates_from_tau_inf`; Nernst/concentration/current conversion helpers still
-  need a deliberate unit contract before becoming public.
+- The helper surface is intentionally conservative. Scalar helpers exist for
+  common math, and tau/inf gate conversion is exposed publicly as
+  `rates_from_tau_inf`. Model-specific formulas should stay in the model source
+  or in a model-family common module rather than becoming global helpers.
 - `rates_from_tau_inf` is now the canonical public tau/inf helper. Model source
   uses tuple assignment, while the compiler lowers that syntax to scalar
   internal alpha/beta expressions.
@@ -60,17 +60,11 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
 
 ## First Slice Done
 
-The scalar `boltzmann(x, midpoint, slope)` helper is now supported across the
-public membrane math surface, internal intrinsic registry, semantic validation,
-NumPy interpreter, JAX lowering, generated NumPy/JAX model-step code, and unit
-tests. The convention is:
-
-```text
-1 / (1 + exp((x - midpoint) / slope))
-```
-
-The signed slope keeps activation and inactivation forms explicit without
-adding duplicate helper names.
+The candidate scalar `boltzmann(x, midpoint, slope)` helper was rejected for
+the public surface because no built-in model, public example, or benchmark uses
+it directly. Source models should keep one-off sigmoid/Boltzmann-like formulas
+inline until the same operation is needed by multiple independent model
+families.
 
 The tuple helper `rates_from_tau_inf(x_inf, tau)` is now supported in source
 model assignments:
@@ -86,8 +80,9 @@ scalar.
 ## Next P10 Slices
 
 1. Tighten diagnostics for rejected source constructs.
-2. Define Nernst and concentration/current conversion helpers with units before
-   exposing them.
+2. Audit concentration/current conversion formulas. Keep model-family-specific
+   electrochemical helpers local, following the Schild pattern in
+   `src/axonscope/membranes/models/schild_common.py`.
 3. Add explicit current metadata syntax or a stricter diagnostic for
    non-inferable conductance/reversal terms.
 4. Extend `explain()` and generated-artifact identity around optimization,

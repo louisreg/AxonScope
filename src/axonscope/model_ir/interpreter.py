@@ -645,9 +645,6 @@ def _call_intrinsic(name: str, args: list[Any], *, dtype: np.dtype) -> Any:
         return np.minimum(args[0], args[1])
     if name == "pow":
         return np.power(args[0], args[1])
-    if name == "boltzmann":
-        one = dtype.type(1.0)
-        return one / (one + np.exp((args[0] - args[1]) / args[2]))
     if name == "q10":
         return np.power(args[0], (args[1] - args[2]) / dtype.type(10.0))
     if name == "alpha_from_inf_tau":

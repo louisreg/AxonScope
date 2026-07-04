@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from axonscope.membranes.model import Model, currents, initials, mechanism, state, step
 from axonscope.membranes.math import clip, exp, log, maximum, q10, rates_from_tau_inf, where
+from axonscope.membranes.models.schild_common import nernst_mV
 from axonscope.membranes.types import (
     Concentration,
     ConcentrationPerCurrentDensityTime,
@@ -43,9 +44,9 @@ def derive_parameters(
     celsius: float = 37.0,
     vinit_mV: float = -48.0,
 ) -> dict[str, float]:
-    ena = _nernst_mV(celsius, 1.0, _NAO_MM, _NAI_MM)
-    ek = _nernst_mV(celsius, 1.0, _KO_MM, _KI_MM)
-    eca_static = _nernst_mV(celsius, 2.0, _CAO0_MM, _CAI0_MM) - 78.7
+    ena = nernst_mV(celsius, 1.0, _NAO_MM, _NAI_MM)
+    ek = nernst_mV(celsius, 1.0, _KO_MM, _KI_MM)
+    eca_static = nernst_mV(celsius, 2.0, _CAO0_MM, _CAI0_MM) - 78.7
     rt_f = 8314.0 * (celsius + 273.15) / 96500.0
 
     radius_cm = diameter_um / 2.0 * 1e-4
@@ -102,10 +103,6 @@ def derive_parameters(
         "inca0": inca0,
         "background_current": i_nak_pump + ica_pump + inca0,
     }
-
-
-def _nernst_mV(temp_c: float, z: float, outside_mM: float, inside_mM: float) -> float:
-    return 8314.0 * (temp_c + 273.15) / (z * 96500.0) * math.log(outside_mM / inside_mM)
 
 
 class Schild97(Model):
