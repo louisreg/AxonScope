@@ -330,6 +330,10 @@ def _infer_intrinsic(
         if args[2].unit != TEMPERATURE_DEGC:
             issues.append(ValidationIssue(path, "q10 reference argument must be degC"))
         return QuantitySpec(unit=DIMENSIONLESS, shape=args[1].shape, dtype=args[1].dtype)
+    if name == "boltzmann":
+        _require_same_quantity(args[0], args[1], issues, path)
+        _require_same_quantity(args[0], args[2], issues, path)
+        return QuantitySpec(unit=DIMENSIONLESS, shape=args[0].shape, dtype=args[0].dtype)
     if name in {"alpha_from_inf_tau", "beta_from_inf_tau"}:
         if not is_dimensionless(args[0].unit):
             issues.append(ValidationIssue(path, f"{name} steady-state value must be dimensionless"))

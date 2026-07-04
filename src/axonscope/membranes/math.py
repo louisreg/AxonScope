@@ -43,6 +43,10 @@ def pow(left: Any, right: Any) -> Any:
     return builtins.pow(left, right)
 
 
+def boltzmann(x: Any, midpoint: Any, slope: Any) -> Any:
+    return 1.0 / (1.0 + math.exp((x - midpoint) / slope))
+
+
 def q10(base: Any, celsius: Any, reference: Any) -> Any:
     return base ** ((celsius - reference) / 10.0)
 
@@ -90,6 +94,7 @@ __all__ = [
     "abs",
     "alpha_from_inf_tau",
     "beta_from_inf_tau",
+    "boltzmann",
     "clip",
     "exp",
     "expm1",

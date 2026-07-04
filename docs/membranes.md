@@ -287,6 +287,13 @@ The current authoring subset is intentionally small:
   duplicate assignments, cycles, and stale manifest fields fail at compile
   time with source locations when available.
 
+Supported equation helpers currently live in `axonscope.membranes.math`:
+`exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
+`where`, `tanh`, `sigmoid`, `boltzmann`, `vtrap`, `q10`,
+`alpha_from_inf_tau`, `beta_from_inf_tau`, and `safe_exp`.
+`boltzmann(x, midpoint, slope)` uses the signed-slope convention
+`1 / (1 + exp((x - midpoint) / slope))`.
+
 Currently unsupported: arbitrary Python side effects, loops, mutation, dynamic
 attribute creation, class-level `exports`/`dynamics`, manual construction of
 internal runtime descriptors, direct imports from `axonscope.model_ir`,

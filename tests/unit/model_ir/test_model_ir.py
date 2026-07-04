@@ -17,6 +17,7 @@ from axonscope.backends.jax.membrane_backend import (
     UniformMembraneBackend,
 )
 from axonscope.backends.jax.membrane_program import JaxMembraneProgram
+from axonscope.backends.jax.model_ir_lowering import evaluate_expression_jax
 from axonscope.backends.jax.runtime import compile_membrane_model
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
 from axonscope.membranes.model import MembraneModel
@@ -48,8 +49,8 @@ from axonscope.model_ir import (
     symbol,
 )
 import axonscope.model_ir.source as source_compiler
-from axonscope.model_ir.interpreter import NumpyModelInterpreter
-from axonscope.model_ir.intrinsics import exp
+from axonscope.model_ir.interpreter import NumpyModelInterpreter, evaluate_expression_np
+from axonscope.model_ir.intrinsics import boltzmann, exp
 from axonscope.solvers.rate_tables import RateTableConfig
 from axonscope.utils.units import (
     CONDUCTANCE_DENSITY_MS_CM2,
@@ -520,6 +521,78 @@ class UnsupportedHelper(Model):
         match=r"line \d+, column \d+: Unsupported equation helper 'unsupported_helper'",
     ):
         compile_model_source_file(source, cache_root=tmp_path / "cache")
+
+
+def test_source_compiler_supports_boltzmann_helper(tmp_path):
+    source = tmp_path / "boltzmann_leak.py"
+    source.write_text(
+        """
+from axonscope.membranes.math import boltzmann
+from axonscope.membranes.model import Model, section
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Voltage
+from axonscope.utils.units import cm2, mS, mV
+
+class BoltzmannLeak(Model):
+    model_kind = "boltzmann_leak"
+
+    gbar: ConductanceDensity = 2.0 * mS / cm2
+    vhalf: Voltage = -40.0 * mV
+    slope: Voltage = 5.0 * mV
+    EL: Voltage = -70.0 * mV
+
+    @section("leak")
+    def leak(self, Vm: Voltage):
+        g_l: ConductanceDensity = self.gbar * boltzmann(Vm, self.vhalf, self.slope)
+        I_l: CurrentDensity = g_l * (Vm - self.EL)
+        return I_l, g_l
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(source, cache_root=tmp_path / "cache")
+    generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
+
+    assert "def boltzmann(x, midpoint, slope):" in generated
+    assert "boltzmann(Vm, vhalf, slope)" in generated
+
+    spec = importlib.util.spec_from_file_location(
+        "axonscope_test_boltzmann_numpy_model",
+        compiled.cache.directory / "numpy_model.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    interpreter = NumpyModelInterpreter(compiled.model, dtype=np.float64)
+    V = np.asarray([-45.0, -35.0], dtype=np.float64)
+    gates = np.zeros((V.shape[0], 0), dtype=np.float64)
+    currents = interpreter.current_matrix(V, gates)
+    generated_args = dict(Vm=V, gbar=2.0, vhalf=-40.0, slope=5.0, EL=-70.0)
+    generated_i, generated_g = module.model_step(
+        *(generated_args[name] for name in module.ARG_NAMES)
+    )
+    expected_g = 2.0 / (1.0 + np.exp((V - (-40.0)) / 5.0))
+    expected_i = expected_g * (V - (-70.0))
+
+    np.testing.assert_allclose(generated_g, expected_g, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(generated_i, expected_i, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(currents[:, 0], expected_i, rtol=1e-12, atol=1e-12)
+
+
+def test_boltzmann_intrinsic_matches_numpy_and_jax_lowering():
+    expr = boltzmann(symbol("Vm"), -40.0, 5.0)
+    values = np.asarray([-45.0, -40.0, -35.0], dtype=np.float64)
+    expected = 1.0 / (1.0 + np.exp((values - (-40.0)) / 5.0))
+
+    np_values = evaluate_expression_np(expr, {"Vm": values}, dtype=np.dtype(np.float64))
+    jax_values = evaluate_expression_jax(
+        expr,
+        {"Vm": jnp.asarray(values, dtype=jnp.float32)},
+        dtype=jnp.float32,
+    )
+
+    np.testing.assert_allclose(np_values, expected, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(jax_values), expected, rtol=1e-6)
 
 
 def test_hh_plain_python_source_codegen_keeps_equations_executable(tmp_path):

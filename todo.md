@@ -329,11 +329,12 @@ Goal: flatten the public membrane/model authoring surface and the internal
 compiler/runtime contracts before deeper solver work. This is the active bridge
 between P7 model authoring and P11 JAX solver optimization.
 
-- [ ] Audit `src/axonscope/membranes/`, `src/axonscope/model_ir/`,
+- [x] Audit `src/axonscope/membranes/`, `src/axonscope/model_ir/`,
   `src/axonscope/backends/jax/model_ir_lowering.py`,
   `src/axonscope/backends/jax/membrane_program.py`, generated-code cache code,
   custom membrane examples, and model-codegen benchmarks against the desired
-  public vocabulary and optimization contract.
+  public vocabulary and optimization contract. Initial audit recorded in
+  `docs/architecture/p10_model_compiler_surface_audit_2026_07_04.md`.
 - [ ] Tighten rejected Python construct diagnostics for mutation,
   data-dependent Python loops, I/O, dynamic imports, object construction inside
   equations, arbitrary NumPy/JAX calls, hidden global state, and side effects.
@@ -341,6 +342,14 @@ between P7 model authoring and P11 JAX solver optimization.
   `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
   `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, `boltzmann`,
   `rates_from_tau_inf`, `nernst`, and concentration/current conversion helpers.
+  - [x] Add `boltzmann(x, midpoint, slope)` across public membrane math,
+    internal intrinsics, semantic validation, generated NumPy/JAX code, NumPy
+    interpreter, JAX lowering, docs, and tests.
+  - [ ] Decide whether `rates_from_tau_inf` should become a tuple-valued helper
+    or whether the existing scalar `alpha_from_inf_tau` /
+    `beta_from_inf_tau` helpers are the canonical public surface.
+  - [ ] Define the unit and sign contracts for `nernst` plus concentration /
+    current conversion helpers before exposing them.
 - [ ] Decide whether public authoring needs explicit syntax for currents whose
   conductance/reversal cannot be inferred from `I_x = g_x * (Vm - E_x)`.
 - [ ] Extend mechanism semantics beyond ordered sections: expose

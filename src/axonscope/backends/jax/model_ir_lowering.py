@@ -704,6 +704,9 @@ def _call_intrinsic(name: str, args: list[Any], *, dtype: jnp.dtype) -> Any:
         return jnp.minimum(args[0], args[1])
     if name == "pow":
         return jnp.power(args[0], args[1])
+    if name == "boltzmann":
+        one = jnp.asarray(1.0, dtype=dtype)
+        return one / (one + jnp.exp((args[0] - args[1]) / args[2]))
     if name == "q10":
         return jnp.power(args[0], (args[1] - args[2]) / jnp.asarray(10.0, dtype=dtype))
     if name == "alpha_from_inf_tau":

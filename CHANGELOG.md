@@ -31,6 +31,10 @@ The format is inspired by Keep a Changelog.
 - Reprioritized the roadmap so the NumPy/SciPy reference runtime is a future
   bonus while the active path is model/compiler surface cleanup followed by
   realistic benchmark evidence and optimization of the current JAX solver.
+- Started P10 model/compiler cleanup with a first audit note and added the
+  `boltzmann(x, midpoint, slope)` membrane helper across public authoring,
+  semantic validation, generated NumPy/JAX code, the NumPy interpreter, JAX
+  lowering, docs, and tests.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.
