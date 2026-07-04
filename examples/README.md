@@ -51,6 +51,8 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `axon_models/05_custom_membrane_authoring.py`: write custom membrane
   `Model` classes with units, gates, non-gate state, diagnostics, generated-code
   inspection, and a short simulation.
+- `axon_models/06_composite_recording_names.py`: label `Composite` components
+  and inspect the resulting recording names.
 
 ### Stimulation
 

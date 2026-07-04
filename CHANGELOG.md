@@ -6,6 +6,11 @@ The format is inspired by Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Added an advanced axon-model example showing labelled `Composite` membrane
+  components and the resulting public recording names.
+
 ### Changed
 
 - Closed the post-P7 membrane-model cleanup around class-based
