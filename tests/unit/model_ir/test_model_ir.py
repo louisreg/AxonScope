@@ -115,9 +115,27 @@ def test_passive_model_ir_is_valid_and_exposes_fusion_terms():
     assert contract.total_outward_current == "sum(currents) + background_current"
     assert contract.total_conductance == "sum(current.conductance)"
     assert contract.conductance_reversal_sum == "sum(current.conductance * current.reversal)"
+    assert contract.pruning.solver_output_names == ("I_l",)
     assert contract.pruning.retain_observables == ("g_l",)
+    assert contract.pruning.recording_output_names == ("observables.g_l",)
     assert contract.supports_single_cable_fusion
     assert contract.supports_double_cable_fusion
+
+    recording_contract = derive_model_step_contract(
+        model,
+        requested_observables=("g_l",),
+        record_gates=True,
+        record_currents=True,
+        record_conductances=True,
+    )
+    assert recording_contract.pruning.retain_gates == ()
+    assert recording_contract.pruning.retain_currents == ("I_l",)
+    assert recording_contract.pruning.retain_conductances == ("I_l",)
+    assert recording_contract.pruning.recording_output_names == (
+        "currents.I_l",
+        "conductances.I_l",
+        "observables.g_l",
+    )
 
 
 def test_membrane_program_exposes_backend_neutral_runtime_contract():
@@ -1284,6 +1302,36 @@ def test_validation_rejects_unsupported_intrinsics():
         assert_valid_model_ir(model)
 
 
+def test_validation_rejects_duplicate_recording_output_names():
+    x = symbol("x")
+    quantity = QuantitySpec(unit=DIMENSIONLESS, role=SemanticRole.DIMENSIONLESS)
+    observable_model = ModelIR(
+        name="duplicate_observable",
+        inputs=(Input("x", quantity),),
+        observables=(
+            Observable("trace", x, quantity),
+            Observable("trace", x, quantity),
+        ),
+    )
+
+    with pytest.raises(ModelValidationError, match="duplicate observable name 'trace'"):
+        assert_valid_model_ir(observable_model)
+
+    diagnostic_model = ModelIR(
+        name="duplicate_diagnostic",
+        inputs=(Input("x", quantity),),
+        step_program=StepProgram(
+            diagnostics=(
+                Diagnostic("trace", x, quantity),
+                Diagnostic("trace", x, quantity),
+            ),
+        ),
+    )
+
+    with pytest.raises(ModelValidationError, match="duplicate diagnostic name 'trace'"):
+        assert_valid_model_ir(diagnostic_model)
+
+
 def test_validation_rejects_wrong_current_linearization_units():
     Vm = symbol("Vm")
     gbar = symbol("gbar")
@@ -1657,6 +1705,7 @@ def test_model_ir_step_program_drives_prepare_finalize_and_diagnostics():
     assert contract.explicit_outward_current == "step.explicit_outward_current"
     assert contract.correction_current == "step.correction_current"
     assert contract.linearization_state == ("previous_gates",)
+    assert contract.pruning.solver_output_names == ("I_aux",)
     np.testing.assert_allclose(np.asarray(I_ion_values), expected_current, rtol=1e-6)
     np.testing.assert_allclose(np.asarray(plan.state[0]), expected_current, rtol=1e-6)
     np.testing.assert_allclose(np.asarray(plan.linearization_gates), np.asarray(gates_prev))
@@ -1678,6 +1727,25 @@ def test_model_ir_step_program_drives_prepare_finalize_and_diagnostics():
     np.testing.assert_allclose(np.asarray(state_final[0]), np.zeros((2,), dtype=np.float32))
     assert membrane.diagnostic_names() == ("bias_current",)
     np.testing.assert_allclose(np.asarray(diagnostics[0]), expected_current, rtol=1e-6)
+
+    diagnostic_contract = derive_model_step_contract(
+        model,
+        record_gates=True,
+        record_currents=True,
+        record_state=True,
+        record_diagnostics=True,
+    )
+    assert diagnostic_contract.pruning.retain_gates == ("m",)
+    assert diagnostic_contract.pruning.retain_currents == ("I_aux",)
+    assert diagnostic_contract.pruning.retain_state == ("m", "bias")
+    assert diagnostic_contract.pruning.retain_recorded_state == ("bias",)
+    assert diagnostic_contract.pruning.retain_diagnostics == ("bias_current",)
+    assert diagnostic_contract.pruning.recording_output_names == (
+        "gates.m",
+        "currents.I_aux",
+        "states.bias",
+        "diagnostics.bias_current",
+    )
 
     np_plan = interpreter.prepare_membrane_step(
         np.asarray(V),
@@ -1839,6 +1907,11 @@ def test_compile_membrane_model_reports_source_cache_status_to_benchmark(
     ]
     assert all(event.metadata["membrane_source_kind"] == "passive" for event in events)
     assert all(event.metadata["membrane_source_count"] == 1 for event in events)
+    assert all(
+        event.metadata["membrane_source_generated_module_policy"]
+        == "single_source_loaded"
+        for event in events
+    )
     assert all(event.metadata["membrane_source_loaded_targets"] == ["jax"] for event in events)
     assert events[0].metadata["membrane_source_cache_keys"] == events[1].metadata[
         "membrane_source_cache_keys"
@@ -1895,6 +1968,7 @@ def test_composite_of_model_ir_components_compiles_without_legacy_composite():
     V = jnp.linspace(-85.0, 20.0, 7, dtype=jnp.float32)
 
     assert isinstance(membrane, JaxMembraneProgram)
+    assert not membrane.uses_generated_model_step
     assert membrane.gate_names() == (
         "rattay_aberham.m",
         "rattay_aberham.h",

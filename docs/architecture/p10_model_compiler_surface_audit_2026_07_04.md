@@ -135,6 +135,39 @@ cache-key inputs, so old caches do not need migration. Broader target identity
 still needs backend lowering keys, static-shape/recording policy, precision,
 optimization-level, and dependency-hash details.
 
+Generated source target selection now goes through explicit target specs. JAX
+and NumPy currently share the same `xp` intrinsic prelude with target-specific
+imports, but the compiler no longer hard-codes imports and helper bindings
+inside the main module-source builder. This keeps scientific expression
+semantics target-neutral while leaving a single place for future target-specific
+intrinsic lowering.
+
+The backend-neutral model-step contract now separates solver-required generated
+outputs from recording-requested output groups. `OutputPruningPlan` records the
+current solver dependency on current outputs while naming requested gates,
+currents, conductances, membrane state, generic observables, and diagnostics as
+group-qualified recording outputs. The current JAX runtime still computes full
+observable groups when `record_observables=True`; P11 can lower the finer plan
+into actual transport and allocation pruning.
+
+Generated-target explanations now include a report-time backend lowering key
+plus cache/source identity, static-shape policy, recording policy, precision
+policy, optimization level, compiler/contract versions, helper identity, and a
+dependency hash. Parameters are reported as runtime-overridable defaults rather
+than value-specialized generated code. This is intentionally descriptive for
+P10: the cache key itself is still source/target based, while future
+runtime-specialized lowering can decide which of these report fields become
+invalidation inputs.
+
+Model IR validation now rejects duplicate generic recording output names for
+observables and step diagnostics. Duplicate current/conductance names remain
+allowed only through their explicit physical aggregation semantics.
+
+The JAX runtime now reports why a generated model step is or is not active for
+compiled membranes. Single-source models expose `single_source_loaded` when the
+JAX generated module is present; multi-source composites expose
+`multi_source_fallback` until a generated composite program exists.
+
 ## Next P10 Slices
 
 1. Extend `explain()` and generated-artifact identity around optimization,

@@ -127,6 +127,13 @@ class _AssignmentRecord:
     function_name: str
 
 
+@dataclass(frozen=True, slots=True)
+class _CodegenTargetSpec:
+    target: str
+    import_line: str
+    intrinsic_prelude: str
+
+
 def compile_model_source_file(
     path: str | os.PathLike[str],
     *,
@@ -2771,12 +2778,7 @@ def _generated_module_source(
     key: str,
     source_hash: str,
 ) -> str:
-    if target == "jax":
-        import_line = "import jax.numpy as xp"
-    elif target == "numpy":
-        import_line = "import numpy as xp"
-    else:
-        raise ValueError(f"Unknown codegen target {target!r}.")
+    target_spec = _target_codegen_spec(target)
     output_names = _exported_return_names(metadata)
     selected_assignments = _required_output_assignments(
         assignments,
@@ -2800,50 +2802,71 @@ def _generated_module_source(
         f"CACHE_KEY = {key!r}\n"
         f"OUTPUT_NAMES = {output_names!r}\n"
         f"SOURCE_HASH = {source_hash!r}\n"
-        f"TARGET = {target!r}\n"
-        f"{import_line}\n\n"
-        "exp = xp.exp\n"
-        "expm1 = xp.expm1\n"
-        "log = xp.log\n"
-        "log1p = xp.log1p\n"
-        "sqrt = xp.sqrt\n"
-        "abs = xp.abs\n"
-        "minimum = xp.minimum\n"
-        "maximum = xp.maximum\n"
-        "clip = xp.clip\n"
-        "where = xp.where\n"
-        "tanh = xp.tanh\n\n"
-        "dimensionless = 1.0\n"
-        "mV = 1.0\n"
-        "ms = 1.0\n"
-        "mS_per_cm2 = 1.0\n"
-        "uA_per_cm2 = 1.0\n"
-        "ohm_cm2 = 1.0\n"
-        "degC = 1.0\n"
-        "per_ms = 1.0\n"
-        "per_ms_per_mV = 1.0\n"
-        "per_ms_per_mM = 1.0\n"
-        "mM = 1.0\n"
-        "mM_per_uA_cm2_ms = 1.0\n"
-        "gate = 1.0\n\n"
-        "def sigmoid(x):\n"
-        "    return 1.0 / (1.0 + xp.exp(-x))\n\n"
-        "def q10(base, celsius, reference):\n"
-        "    return xp.power(base, (celsius - reference) / 10.0)\n\n"
-        "def alpha_from_inf_tau(x_inf, tau):\n"
-        "    return x_inf / tau\n\n"
-        "def beta_from_inf_tau(x_inf, tau):\n"
-        "    return (1.0 - x_inf) / tau\n\n"
-        "def rates_from_tau_inf(x_inf, tau):\n"
-        "    return alpha_from_inf_tau(x_inf, tau), beta_from_inf_tau(x_inf, tau)\n\n"
-        "def safe_exp(x):\n"
-        "    return xp.where(x < -100.0, 0.0, xp.exp(x))\n\n"
-        "def vtrap(x, y):\n"
-        "    z = x / y\n"
-        "    return xp.where(xp.abs(z) < 1e-6, y * (1.0 - z / 2.0), x / (xp.exp(z) - 1.0))\n\n"
+        f"TARGET = {target_spec.target!r}\n"
+        f"{target_spec.import_line}\n\n"
+        f"{target_spec.intrinsic_prelude}"
         f"def model_step({args}):\n"
         f"{body}\n"
     )
+
+
+def _target_codegen_spec(target: str) -> _CodegenTargetSpec:
+    if target == "jax":
+        return _CodegenTargetSpec(
+            target="jax",
+            import_line="import jax.numpy as xp",
+            intrinsic_prelude=_XP_INTRINSIC_PRELUDE,
+        )
+    if target == "numpy":
+        return _CodegenTargetSpec(
+            target="numpy",
+            import_line="import numpy as xp",
+            intrinsic_prelude=_XP_INTRINSIC_PRELUDE,
+        )
+    raise ValueError(f"Unknown codegen target {target!r}.")
+
+
+_XP_INTRINSIC_PRELUDE = (
+    "exp = xp.exp\n"
+    "expm1 = xp.expm1\n"
+    "log = xp.log\n"
+    "log1p = xp.log1p\n"
+    "sqrt = xp.sqrt\n"
+    "abs = xp.abs\n"
+    "minimum = xp.minimum\n"
+    "maximum = xp.maximum\n"
+    "clip = xp.clip\n"
+    "where = xp.where\n"
+    "tanh = xp.tanh\n\n"
+    "dimensionless = 1.0\n"
+    "mV = 1.0\n"
+    "ms = 1.0\n"
+    "mS_per_cm2 = 1.0\n"
+    "uA_per_cm2 = 1.0\n"
+    "ohm_cm2 = 1.0\n"
+    "degC = 1.0\n"
+    "per_ms = 1.0\n"
+    "per_ms_per_mV = 1.0\n"
+    "per_ms_per_mM = 1.0\n"
+    "mM = 1.0\n"
+    "mM_per_uA_cm2_ms = 1.0\n"
+    "gate = 1.0\n\n"
+    "def sigmoid(x):\n"
+    "    return 1.0 / (1.0 + xp.exp(-x))\n\n"
+    "def q10(base, celsius, reference):\n"
+    "    return xp.power(base, (celsius - reference) / 10.0)\n\n"
+    "def alpha_from_inf_tau(x_inf, tau):\n"
+    "    return x_inf / tau\n\n"
+    "def beta_from_inf_tau(x_inf, tau):\n"
+    "    return (1.0 - x_inf) / tau\n\n"
+    "def rates_from_tau_inf(x_inf, tau):\n"
+    "    return alpha_from_inf_tau(x_inf, tau), beta_from_inf_tau(x_inf, tau)\n\n"
+    "def safe_exp(x):\n"
+    "    return xp.where(x < -100.0, 0.0, xp.exp(x))\n\n"
+    "def vtrap(x, y):\n"
+    "    z = x / y\n"
+    "    return xp.where(xp.abs(z) < 1e-6, y * (1.0 - z / 2.0), x / (xp.exp(z) - 1.0))\n\n"
+)
 
 
 def _model_step_arg_names(

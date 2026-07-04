@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,6 +92,18 @@ class GeneratedTargetExplanation:
 
     target: str
     path: str
+    backend_lowering_key: str
+    cache_key: str
+    source_hash: str
+    compiler_version: str
+    contract_version: str
+    parameter_specialization: str
+    helper_identity_hash: str
+    dependency_hash: str
+    static_shape_policy: str
+    recording_policy: str
+    precision_policy: str
+    optimization_level: str
     arg_names: tuple[str, ...]
     output_names: tuple[str, ...]
     retained_assignments: tuple[str, ...]
@@ -311,6 +325,23 @@ def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
                 [
                     f"      {target.target}:",
                     f"        path={target.path}",
+                    f"        backend_lowering_key={target.backend_lowering_key}",
+                    f"        cache_key={target.cache_key}",
+                    (
+                        "        identity="
+                        f"compiler:{target.compiler_version}, "
+                        f"contract:{target.contract_version}, "
+                        f"parameters:{target.parameter_specialization}, "
+                        f"helpers:{target.helper_identity_hash}, "
+                        f"dependencies:{target.dependency_hash}"
+                    ),
+                    (
+                        "        policies="
+                        f"static_shape:{target.static_shape_policy}, "
+                        f"recording:{target.recording_policy}, "
+                        f"precision:{target.precision_policy}, "
+                        f"optimization:{target.optimization_level}"
+                    ),
                     f"        args={_format_names(target.arg_names)}",
                     f"        outputs={_format_names(target.output_names)}",
                     f"        retained_assignments={_format_names(target.retained_assignments)}",
@@ -343,7 +374,11 @@ def _explain_source(source: GeneratedMembraneCodeInspection) -> MembraneSourceEx
             for assignment in section.assignments
         )
     )
-    targets = _target_explanations(source, all_assignments=all_assignments)
+    targets = _target_explanations(
+        source,
+        compiled_model=compiled_model,
+        all_assignments=all_assignments,
+    )
     source_outputs = _source_outputs(compiled_model)
     return MembraneSourceExplanation(
         model_name=source.model_name,
@@ -700,16 +735,80 @@ def _assignment_value(statement: ast.stmt) -> ast.AST | None:
 def _target_explanations(
     source: GeneratedMembraneCodeInspection,
     *,
+    compiled_model: ModelIR,
     all_assignments: tuple[str, ...],
 ) -> tuple[GeneratedTargetExplanation, ...]:
     targets: list[GeneratedTargetExplanation] = []
+    provenance = compiled_model.metadata.get("source_provenance", {})
+    intrinsics = ()
+    if isinstance(provenance, Mapping):
+        raw_intrinsics = provenance.get("intrinsics", ())
+        if not isinstance(raw_intrinsics, str):
+            intrinsics = tuple(str(name) for name in raw_intrinsics)
     for generated in source.files:
         if generated.name not in {"jax_model.py", "numpy_model.py"}:
             continue
         tree = _parse_source(generated.path)
-        target = _literal_constant(tree, "TARGET") or generated.name.removesuffix("_model.py")
+        target = _literal_constant(tree, "TARGET") or generated.name.removesuffix(
+            "_model.py"
+        )
         arg_names = _literal_tuple_constant(tree, "ARG_NAMES")
         output_names = _literal_tuple_constant(tree, "OUTPUT_NAMES")
+        cache_key = str(_literal_constant(tree, "CACHE_KEY") or source.cache_key)
+        source_hash = str(_literal_constant(tree, "SOURCE_HASH") or source.source_hash)
+        compiler_version = str(
+            source.manifest.get(
+                "compiler",
+                compiled_model.metadata.get("source_compiler", "unknown"),
+            )
+        )
+        contract_version = str(
+            source.manifest.get(
+                "contract",
+                compiled_model.metadata.get("source_contract", "unknown"),
+            )
+        )
+        parameter_specialization = _parameter_specialization(compiled_model)
+        helper_identity_hash = _identity_hash(
+            {
+                "compiler": compiler_version,
+                "contract": contract_version,
+                "intrinsics": intrinsics,
+            }
+        )
+        dependency_hash = _identity_hash(
+            {
+                "compiler": compiler_version,
+                "contract": contract_version,
+                "graph_hash": source.graph_hash,
+                "helper_identity_hash": helper_identity_hash,
+                "optimized_graph_hash": source.optimized_graph_hash,
+                "source_hash": source_hash,
+                "target": str(target),
+            }
+        )
+        static_shape_policy = "runtime_node_count"
+        recording_policy = "all_source_outputs"
+        precision_policy = "runtime_backend_dtype"
+        optimization_level = _optimization_level(source)
+        backend_lowering_key = _backend_lowering_key(
+            target=str(target),
+            cache_key=cache_key,
+            source_hash=source_hash,
+            graph_hash=source.graph_hash,
+            optimized_graph_hash=source.optimized_graph_hash,
+            arg_names=arg_names,
+            output_names=output_names,
+            compiler_version=compiler_version,
+            contract_version=contract_version,
+            parameter_specialization=parameter_specialization,
+            helper_identity_hash=helper_identity_hash,
+            dependency_hash=dependency_hash,
+            static_shape_policy=static_shape_policy,
+            recording_policy=recording_policy,
+            precision_policy=precision_policy,
+            optimization_level=optimization_level,
+        )
         retained = _function_assignment_names(tree, function_name="model_step")
         retained_or_output = set(retained) | set(output_names)
         pruned = tuple(name for name in all_assignments if name not in retained_or_output)
@@ -717,6 +816,18 @@ def _target_explanations(
             GeneratedTargetExplanation(
                 target=str(target),
                 path=generated.path,
+                backend_lowering_key=backend_lowering_key,
+                cache_key=cache_key,
+                source_hash=source_hash,
+                compiler_version=compiler_version,
+                contract_version=contract_version,
+                parameter_specialization=parameter_specialization,
+                helper_identity_hash=helper_identity_hash,
+                dependency_hash=dependency_hash,
+                static_shape_policy=static_shape_policy,
+                recording_policy=recording_policy,
+                precision_policy=precision_policy,
+                optimization_level=optimization_level,
                 arg_names=arg_names,
                 output_names=output_names,
                 retained_assignments=retained,
@@ -724,6 +835,68 @@ def _target_explanations(
             )
         )
     return tuple(targets)
+
+
+def _parameter_specialization(model: ModelIR) -> str:
+    if model.parameters:
+        return "runtime_overridable_defaults"
+    return "none"
+
+
+def _optimization_level(source: GeneratedMembraneCodeInspection) -> str:
+    if source.graph_hash and source.graph_hash == source.optimized_graph_hash:
+        return "identity"
+    return "optimized_graph"
+
+
+def _identity_hash(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha1(encoded).hexdigest()
+
+
+def _backend_lowering_key(
+    *,
+    target: str,
+    cache_key: str,
+    source_hash: str,
+    graph_hash: str,
+    optimized_graph_hash: str,
+    arg_names: tuple[str, ...],
+    output_names: tuple[str, ...],
+    compiler_version: str,
+    contract_version: str,
+    parameter_specialization: str,
+    helper_identity_hash: str,
+    dependency_hash: str,
+    static_shape_policy: str,
+    recording_policy: str,
+    precision_policy: str,
+    optimization_level: str,
+) -> str:
+    payload = {
+        "arg_names": arg_names,
+        "cache_key": cache_key,
+        "compiler_version": compiler_version,
+        "contract_version": contract_version,
+        "dependency_hash": dependency_hash,
+        "graph_hash": graph_hash,
+        "helper_identity_hash": helper_identity_hash,
+        "optimization_level": optimization_level,
+        "optimized_graph_hash": optimized_graph_hash,
+        "output_names": output_names,
+        "parameter_specialization": parameter_specialization,
+        "precision_policy": precision_policy,
+        "recording_policy": recording_policy,
+        "source_hash": source_hash,
+        "static_shape_policy": static_shape_policy,
+        "target": target,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha1(encoded).hexdigest()
 
 
 def _literal_tuple_constant(tree: ast.Module, name: str) -> tuple[str, ...]:

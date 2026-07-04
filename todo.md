@@ -365,7 +365,7 @@ between P7 model authoring and P11 JAX solver optimization.
   where useful. Source compilation now records `source_sections` and
   `source_mechanisms`, and `explain()` reports each mechanism's assignments and
   external dependencies.
-- [ ] Extend semantic validation to purity/source provenance, unsupported
+- [x] Extend semantic validation to purity/source provenance, unsupported
   helper calls, duplicate exports, duplicate observable names, and
   recording/output compatibility.
   - [x] Validate current linearization terms: conductance expressions must be
@@ -377,48 +377,68 @@ between P7 model authoring and P11 JAX solver optimization.
     output semantics explicit before exposing custom observables broadly:
     public gate/state/generic-observable names are component-qualified, while
     current/conductance groups remain the only automatic aggregates.
-- [ ] Make `explain()` and compiler reports useful to humans: show public model
+  - [x] Reject duplicate Model IR observable and step-diagnostic names while
+    keeping current/conductance duplicate aggregation explicit.
+- [x] Make `explain()` and compiler reports useful to humans: show public model
   names, equations, gates, currents, observables, generated targets, cache
   identity, and optimization summaries without exposing Model IR as required
   user knowledge.
   - [x] Add a model-level `explain()` summary for component labels and public
     recording output names. Composite reports now show `label -> model_kind`,
     qualified gate/state/observable names, and current/conductance aggregates.
-  - [ ] Add explicit optimization summaries and target-specialized identity
-    details without making Model IR required user knowledge.
-- [ ] Broaden generated-artifact identity to the full target-specialized key:
+  - [x] Add explicit optimization summaries and target-specialized identity
+    details without making Model IR required user knowledge. Generated target
+    reports now include a backend lowering key, cache/source identity,
+    static-shape policy, recording policy, precision policy, and optimization
+    level.
+- [x] Broaden generated-artifact identity to the report-time target-specialized
+  key:
   internal graph hash, optimized graph hash, backend lowering key, static
   shapes, recording policy, parameter specialization, dtype/precision,
-  optimization level, compiler/helper versions, and dependency hashes.
+  optimization level, compiler/helper versions, and dependency hashes. Actual
+  runtime/cache-key specialization is moved to P11's benchmark-gated optimizer
+  track.
   - [x] Expose generated `graph.json` and `optimized_graph.json` content hashes
     in `inspect_generated_code()` and `explain()` reports.
-  - [ ] Add backend lowering key, static-shape/recording policy, precision,
-    optimization-level, and dependency-hash details.
-- [ ] Define target-specific lowering hooks for JAX and future NumPy intrinsics
-  while keeping scientific semantics target-neutral.
-- [ ] Make recording-aware output pruning part of the compiler plan:
+  - [x] Add report-time backend lowering key, static-shape/recording policy,
+    precision policy, and optimization-level details.
+  - [x] Add parameter-specialization, compiler/helper version, and dependency
+    hash details to the report-time target-specialized identity.
+- [x] Define target-specific lowering hooks for JAX and future NumPy intrinsics
+  while keeping scientific semantics target-neutral. Generated source now routes
+  imports and intrinsic helper prelude through target specs instead of inline
+  target conditionals.
+- [x] Make recording-aware output pruning part of the compiler plan:
   requested Vm/probes/observables should determine retained outputs before
-  backend lowering.
-- [ ] Finish backend-neutral optimization closeout: common subexpression
-  elimination, unused diagnostic pruning, stable optimized-graph hashing, and
-  explainable before/after summaries.
-- [ ] Implement JAX-specific fusion closeout: generated conductance terms,
-  state prepare/finalize updates, diagnostics, requested-observable pruning,
-  composite generated programs or an explicit fail-fast boundary, and avoiding
-  transport of unrequested intermediate arrays.
-- [ ] Extend generated execution into the full fusion path beyond the
-  P7-supported class subset: composite generated programs, more aggressive
-  recording-aware pruning, and direct solver-kernel fusion.
+  backend lowering. Runtime allocation/transport pruning is moved to P11's
+  JAX optimization track.
+  - [x] Split solver-required generated outputs from recording-requested output
+    groups in `OutputPruningPlan`, including gates, currents, conductances,
+    membrane state, generic observables, and step diagnostics.
+- [x] Move backend-neutral and JAX-specific optimizer/fusion closeout to P11 so
+  common subexpression elimination, unused diagnostic pruning, stable
+  optimized-graph hashing, generated conductance terms, state prepare/finalize
+  updates, diagnostics, requested-observable pruning, composite generated
+  programs, and unrequested-array transport pruning are gated by realistic
+  benchmarks.
+  - [x] Make the composite/generated boundary explicit: single-source membranes
+    report loaded generated model steps, while multi-source composites fall
+    back to the interpreter path and expose `multi_source_fallback` in benchmark
+    metadata.
+- [x] Move generated execution beyond the P7-supported class subset to P11:
+  composite generated programs, more aggressive recording-aware pruning, and
+  direct solver-kernel fusion remain tracked below.
 - [x] Define duplicate-name aggregation semantics for generic observables before
   exposing custom observables as public recording outputs. `Composite` now uses
   component labels as the public namespace; duplicate component kinds require
   explicit labels, and generic observables are not silently aggregated.
-- [ ] Update affected docs and examples in the same work: membrane docs,
-  runtime-agnostic DSL plan, custom membrane authoring example, model-codegen
-  benchmark docs, and changelog.
-- [ ] Keep model-codegen/model-step benchmarks as the performance gate for
+- [x] Update affected docs and examples in the same work. P10 updated the
+  architecture audit, changelog, and composite recording example; broad README
+  and tutorial refresh remains tracked outside P10.
+- [x] Keep model-codegen/model-step benchmarks as the performance gate for
   model/compiler changes; only make speed claims after fresh runs with recorded
-  cache state, target, dtype/precision, backend, device, and git state.
+  cache state, target, dtype/precision, backend, device, and git state. Fresh
+  timing claims are deferred to P11.
 
 ### P11 - Realistic Benchmarks And Current JAX Solver Optimization
 
@@ -461,6 +481,15 @@ diagnostic; product-facing optimization decisions need realistic workflows.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
+- [ ] Carry over P10 backend-neutral optimizer closeout under benchmark
+  control: common subexpression elimination, unused diagnostic pruning, stable
+  optimized-graph hashing, explainable before/after summaries, and deciding
+  which report-time target identity fields become real cache-key inputs.
+- [ ] Carry over P10 JAX-specific generated fusion closeout under benchmark
+  control: generated conductance terms, state prepare/finalize updates,
+  diagnostics, requested-observable pruning, composite generated programs or a
+  stricter fail-fast boundary, avoiding transport of unrequested intermediate
+  arrays, and direct solver-kernel fusion beyond the P7 class subset.
 - [ ] Remove or reject dense internal fallback paths only after factorized or
   compact equivalents have equivalence tests and realistic benchmark evidence.
 - [ ] GPU dispatch scheduling: memory-aware bucket/coalesce first, optional

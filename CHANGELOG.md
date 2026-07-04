@@ -74,6 +74,19 @@ The format is inspired by Keep a Changelog.
   names.
 - Added generated `graph.json` and `optimized_graph.json` content hashes to
   membrane generated-code and explanation reports.
+- Centralized generated-source target specs so JAX/NumPy imports and intrinsic
+  helper bindings are selected through target lowering hooks.
+- Split model-step pruning plans into solver-required generated outputs and
+  group-qualified recording outputs for future recording-aware lowering.
+- Added report-time generated-target lowering identity to membrane
+  explanations, including backend lowering key, recording/static-shape,
+  precision, optimization, parameter-specialization, helper-identity, and
+  dependency-hash fields.
+- Rejected duplicate Model IR observable and step-diagnostic names while
+  preserving explicit current/conductance aggregation semantics.
+- Exposed generated model-step activation policy in benchmark metadata so
+  single-source generated paths and multi-source composite fallbacks are
+  distinguishable.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

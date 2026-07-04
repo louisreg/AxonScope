@@ -128,10 +128,24 @@ def test_membrane_explain_reuses_generated_cache_and_reports_model_step_pruning(
     assert "alpha_m" in jax_target.pruned_from_model_step
     assert "q10" in jax_target.pruned_from_model_step
     assert "g_na" in jax_target.retained_assignments
+    assert len(jax_target.backend_lowering_key) == 40
+    assert jax_target.cache_key == source.cache_key
+    assert jax_target.compiler_version == source.metadata["source_compiler"]
+    assert jax_target.contract_version == source.metadata["source_contract"]
+    assert jax_target.parameter_specialization == "runtime_overridable_defaults"
+    assert len(jax_target.helper_identity_hash) == 40
+    assert len(jax_target.dependency_hash) == 40
+    assert jax_target.static_shape_policy == "runtime_node_count"
+    assert jax_target.recording_policy == "all_source_outputs"
+    assert jax_target.precision_policy == "runtime_backend_dtype"
+    assert jax_target.optimization_level == "identity"
 
     text = report.format()
     assert "rates (rates)" in text
     assert "currents (currents)" in text
+    assert "backend_lowering_key" in text
+    assert "parameters:runtime_overridable_defaults" in text
+    assert "recording:all_source_outputs" in text
     assert "pruned_from_model_step" in text
 
 

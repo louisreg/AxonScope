@@ -49,6 +49,7 @@ def validate_model_ir(
     issues: list[ValidationIssue] = []
     _validate_component_metadata(model, issues)
     _validate_source_metadata(model, issues)
+    _validate_recording_output_names(model, issues)
     env = _environment(model, issues)
 
     for state in model.states:
@@ -279,6 +280,34 @@ def _validate_source_metadata(model: ModelIR, issues: list[ValidationIssue]) -> 
                         f"references unknown source mechanism {name!r}",
                     )
                 )
+
+
+def _validate_recording_output_names(
+    model: ModelIR,
+    issues: list[ValidationIssue],
+) -> None:
+    duplicate_observable = _first_duplicate_name(
+        tuple(observable.name for observable in model.observables)
+    )
+    if duplicate_observable is not None:
+        issues.append(
+            ValidationIssue(
+                "observables",
+                f"duplicate observable name {duplicate_observable!r}",
+            )
+        )
+    if model.step_program is None:
+        return
+    duplicate_diagnostic = _first_duplicate_name(
+        tuple(diagnostic.name for diagnostic in model.step_program.diagnostics)
+    )
+    if duplicate_diagnostic is not None:
+        issues.append(
+            ValidationIssue(
+                "step.diagnostics",
+                f"duplicate diagnostic name {duplicate_diagnostic!r}",
+            )
+        )
 
 
 def _validate_source_outputs(value: Any, issues: list[ValidationIssue]) -> None:

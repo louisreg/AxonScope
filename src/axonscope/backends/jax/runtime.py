@@ -318,10 +318,15 @@ def _record_membrane_source_compile_metadata(
         for source in source_results
     )
     single = len(source_results) == 1
+    generated_module_policy = _generated_module_policy(
+        source_results,
+        target="jax",
+    )
     record_benchmark_metadata(
         membrane_source_cache=statuses[0] if single else statuses,
         membrane_source_cache_all_hit=all(status == "hit" for status in statuses),
         membrane_source_cache_reasons=reasons[0] if single else reasons,
+        membrane_source_generated_module_policy=generated_module_policy,
         membrane_source_loaded_targets=loaded_targets[0] if single else loaded_targets,
         membrane_source_cache_keys=keys[0] if single else keys,
         membrane_source_hashes=hashes[0] if single else hashes,
@@ -339,6 +344,18 @@ def _single_generated_module(
     if len(source_results) != 1:
         return None
     return source_results[0].cache.loaded_modules.get(target)
+
+
+def _generated_module_policy(
+    source_results: tuple[SourceModelCompileResult, ...],
+    *,
+    target: str,
+) -> str:
+    if len(source_results) == 1:
+        if target in source_results[0].cache.loaded_modules:
+            return "single_source_loaded"
+        return "single_source_missing"
+    return "multi_source_fallback"
 
 
 def compile_axon_membrane(
