@@ -69,6 +69,9 @@ The format is inspired by Keep a Changelog.
   public gate/state/generic-observable names are qualified as
   `component_label.name`, and current/conductance groups remain the only
   automatic duplicate-name aggregates.
+- Extended `axs.membranes.explain()` with a model-level component and recording
+  output summary, including composite labels and current/conductance aggregate
+  names.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

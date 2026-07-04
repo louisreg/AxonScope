@@ -154,7 +154,9 @@ jax_source = report.sources[0].file("jax_model.py").read_text()
 For a higher-level source explanation, use `explain()`. It reports source
 sections, named mechanisms, equation dependencies, unit roles, public outputs,
 generated backend targets, cache identity, and intermediates pruned from the
-generated `model_step`.
+generated `model_step`. The top of the report also summarizes component labels
+and the public recording names users will see for gates, states, observables,
+currents, and conductances.
 
 ```python
 explanation = model.explain()

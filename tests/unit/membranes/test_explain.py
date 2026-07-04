@@ -11,6 +11,19 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
 
     assert isinstance(report, axs.membranes.MembraneModelExplanation)
     assert report.model_kind == "passive"
+    assert report.components == (
+        axs.membranes.MembraneComponentExplanation(
+            label="passive",
+            model_kind="passive",
+        ),
+    )
+    assert isinstance(
+        report.recording_outputs,
+        axs.membranes.MembraneRecordingOutputExplanation,
+    )
+    assert report.recording_outputs.currents == ("I_l",)
+    assert report.recording_outputs.conductances == ("g_l",)
+    assert report.recording_outputs.observables == ("passive.g_l",)
     assert len(report.sources) == 1
     source = report.sources[0]
     assert source.model_name == "passive"
@@ -37,8 +50,54 @@ def test_membrane_model_explain_reports_source_units_cache_and_targets(tmp_path,
     text = report.format()
     assert "AxonScope membrane model explanation" in text
     assert "model=passive" in text
+    assert "components=(passive:passive)" in text
+    assert "recording_outputs=" in text
     assert "generated model_step targets" in text
     assert "Rm(resistance_area" in text
+
+
+def test_membrane_explain_reports_composite_labels_and_recording_outputs(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    model = axs.membranes.Composite(
+        {
+            "rattay": axs.membranes.RattayAberham(),
+            "extra_leak": axs.membranes.Passive(Rm=12_000.0, EL=-68.0),
+        }
+    )
+
+    report = model.explain()
+
+    assert report.model_kind == "composite"
+    assert report.components == (
+        axs.membranes.MembraneComponentExplanation(
+            label="rattay",
+            model_kind="rattay_aberham",
+        ),
+        axs.membranes.MembraneComponentExplanation(
+            label="extra_leak",
+            model_kind="passive",
+        ),
+    )
+    assert report.recording_outputs.gates == (
+        "rattay.m",
+        "rattay.h",
+        "rattay.n",
+    )
+    assert report.recording_outputs.currents == ("I_na", "I_k", "I_l")
+    assert report.recording_outputs.conductances == ("g_na", "g_k", "g_l")
+    assert report.recording_outputs.current_aggregates == ("I_l",)
+    assert report.recording_outputs.conductance_aggregates == ("g_l",)
+    assert "extra_leak.g_l" in report.recording_outputs.observables
+
+    text = report.format()
+    assert "model=composite" in text
+    assert "components=(rattay:rattay_aberham, extra_leak:passive)" in text
+    assert "gates: (rattay.m, rattay.h, rattay.n)" in text
+    assert "currents: (I_na, I_k, I_l) aggregates=(I_l)" in text
+    assert "conductances: (g_na, g_k, g_l) aggregates=(g_l)" in text
 
 
 def test_membrane_explain_reuses_generated_cache_and_reports_model_step_pruning(

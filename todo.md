@@ -381,6 +381,11 @@ between P7 model authoring and P11 JAX solver optimization.
   names, equations, gates, currents, observables, generated targets, cache
   identity, and optimization summaries without exposing Model IR as required
   user knowledge.
+  - [x] Add a model-level `explain()` summary for component labels and public
+    recording output names. Composite reports now show `label -> model_kind`,
+    qualified gate/state/observable names, and current/conductance aggregates.
+  - [ ] Add explicit optimization summaries and target-specialized identity
+    details without making Model IR required user knowledge.
 - [ ] Broaden generated-artifact identity to the full target-specialized key:
   internal graph hash, optimized graph hash, backend lowering key, static
   shapes, recording policy, parameter specialization, dtype/precision,

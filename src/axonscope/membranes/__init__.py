@@ -18,9 +18,11 @@ from axonscope.membranes.generated_code import (
 )
 from axonscope.membranes.explain import (
     GeneratedTargetExplanation,
+    MembraneComponentExplanation,
     MembraneEquationDependency,
     MembraneMechanismExplanation,
     MembraneModelExplanation,
+    MembraneRecordingOutputExplanation,
     MembraneSourceExplanation,
     MembraneSourceSection,
     MembraneSourceSymbol,
@@ -50,9 +52,11 @@ __all__ = [
     "GeneratedMembraneCodeReport",
     "GeneratedTargetExplanation",
     "HodgkinHuxley",
+    "MembraneComponentExplanation",
     "MembraneEquationDependency",
     "MembraneMechanismExplanation",
     "MembraneModelExplanation",
+    "MembraneRecordingOutputExplanation",
     "MembraneSourceExplanation",
     "MembraneSourceSection",
     "MembraneSourceSymbol",

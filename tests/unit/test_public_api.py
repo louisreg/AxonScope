@@ -149,8 +149,10 @@ def test_public_package_imports_are_available():
     assert membranes.GeneratedMembraneCodeInspection is not None
     assert membranes.GeneratedMembraneCodeReport is not None
     assert membranes.GeneratedTargetExplanation is not None
+    assert membranes.MembraneComponentExplanation is not None
     assert membranes.MembraneEquationDependency is not None
     assert membranes.MembraneModelExplanation is not None
+    assert membranes.MembraneRecordingOutputExplanation is not None
     assert membranes.MembraneSourceExplanation is not None
     assert membranes.MembraneSourceSection is not None
     assert membranes.MembraneSourceSymbol is not None

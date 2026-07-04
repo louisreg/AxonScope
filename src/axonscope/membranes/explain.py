@@ -97,6 +97,27 @@ class GeneratedTargetExplanation:
 
 
 @dataclass(frozen=True, slots=True)
+class MembraneComponentExplanation:
+    """One public component label in a membrane model explanation."""
+
+    label: str
+    model_kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class MembraneRecordingOutputExplanation:
+    """Public recording names produced by a membrane model."""
+
+    gates: tuple[str, ...]
+    currents: tuple[str, ...]
+    conductances: tuple[str, ...]
+    states: tuple[str, ...]
+    observables: tuple[str, ...]
+    current_aggregates: tuple[str, ...]
+    conductance_aggregates: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MembraneSourceExplanation:
     """Explanation for one standalone membrane source file."""
 
@@ -130,6 +151,8 @@ class MembraneModelExplanation:
     """Explanation report for a public membrane model descriptor."""
 
     model_kind: str
+    components: tuple[MembraneComponentExplanation, ...]
+    recording_outputs: MembraneRecordingOutputExplanation
     sources: tuple[MembraneSourceExplanation, ...]
 
     def format(self) -> str:
@@ -157,7 +180,53 @@ def explain(model: MembraneModel) -> MembraneModelExplanation:
         _explain_source(source)
         for source in generated_report.sources
     )
-    return MembraneModelExplanation(model_kind=membrane.kind, sources=sources)
+    from axonscope.membranes.compiler import lower_membrane_model_to_ir
+    from axonscope.model_ir.program import membrane_program_from_model_ir
+
+    lowered_model = lower_membrane_model_to_ir(membrane)
+    program = membrane_program_from_model_ir(lowered_model)
+    return MembraneModelExplanation(
+        model_kind=membrane.kind,
+        components=_component_explanations(membrane),
+        recording_outputs=MembraneRecordingOutputExplanation(
+            gates=program.gate_names,
+            currents=program.current_names,
+            conductances=program.conductance_names,
+            states=program.membrane_state_display_names,
+            observables=program.observable_display_names,
+            current_aggregates=_aggregate_names(program.current_names, program.current_groups),
+            conductance_aggregates=_aggregate_names(
+                program.conductance_names,
+                program.conductance_groups,
+            ),
+        ),
+        sources=sources,
+    )
+
+
+def _component_explanations(
+    membrane: MembraneModel,
+) -> tuple[MembraneComponentExplanation, ...]:
+    if membrane.kind != "composite":
+        return (MembraneComponentExplanation(label=membrane.kind, model_kind=membrane.kind),)
+    labels = membrane.component_labels
+    if not labels:
+        labels = tuple(component.kind for component in membrane.components)
+    return tuple(
+        MembraneComponentExplanation(label=label, model_kind=component.kind)
+        for label, component in zip(labels, membrane.components, strict=True)
+    )
+
+
+def _aggregate_names(
+    names: tuple[str, ...],
+    groups: tuple[tuple[int, ...], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name, group in zip(names, groups, strict=True)
+        if len(group) > 1
+    )
 
 
 def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
@@ -166,6 +235,8 @@ def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
     lines = [
         "AxonScope membrane model explanation",
         f"model={report.model_kind}",
+        f"components={_format_components(report.components)}",
+        f"recording_outputs={_format_recording_outputs(report.recording_outputs)}",
         "sources:",
     ]
     for source in report.sources:
@@ -688,6 +759,35 @@ def _format_symbols(symbols: tuple[MembraneSourceSymbol, ...]) -> str:
     return _format_names(tuple(parts), max_items=8)
 
 
+def _format_components(components: tuple[MembraneComponentExplanation, ...]) -> str:
+    if not components:
+        return "()"
+    return _format_names(
+        tuple(
+            f"{component.label}:{component.model_kind}"
+            for component in components
+        ),
+        max_items=8,
+    )
+
+
+def _format_recording_outputs(recording: MembraneRecordingOutputExplanation) -> str:
+    groups = (
+        ("gates", recording.gates, ()),
+        ("currents", recording.currents, recording.current_aggregates),
+        ("conductances", recording.conductances, recording.conductance_aggregates),
+        ("states", recording.states, ()),
+        ("observables", recording.observables, ()),
+    )
+    parts = []
+    for group_name, names, aggregates in groups:
+        detail = f"{group_name}: {_format_names(names, max_items=8)}"
+        if aggregates:
+            detail += f" aggregates={_format_names(aggregates, max_items=8)}"
+        parts.append(detail)
+    return "{" + "; ".join(parts) + "}"
+
+
 def _format_output_groups(groups: Mapping[str, tuple[str, ...]]) -> str:
     if not groups:
         return "{}"
@@ -797,9 +897,11 @@ def _format_expression(expression: Expression) -> str:
 
 __all__ = [
     "GeneratedTargetExplanation",
+    "MembraneComponentExplanation",
     "MembraneEquationDependency",
     "MembraneMechanismExplanation",
     "MembraneModelExplanation",
+    "MembraneRecordingOutputExplanation",
     "MembraneSourceExplanation",
     "MembraneSourceSection",
     "MembraneSourceSymbol",

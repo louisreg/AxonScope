@@ -124,6 +124,11 @@ kind, and duplicate model kinds in a sequence fail early. Public gate, state,
 and generic-observable names are qualified as `component_label.name`; current
 and conductance groups remain the only automatic duplicate-name aggregates.
 
+`explain()` now starts with a model-level summary before the per-source blocks:
+component labels, their model kinds, public recording names, and the
+current/conductance names that aggregate duplicate physical terms. The source
+blocks still show model-file-local names and generated target details.
+
 ## Next P10 Slices
 
 1. Extend `explain()` and generated-artifact identity around optimization,
