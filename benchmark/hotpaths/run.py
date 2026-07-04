@@ -48,6 +48,7 @@ from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 
 
 DEFAULT_OUT_DIR = Path("benchmark/results/hotpaths")
+DEFAULT_TIME_CHUNK_STEPS = "default"
 DIRECT_WORKLOADS = frozenset(
     {
         "solver_only_precomputed",
@@ -92,9 +93,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument(
         "--time-chunk-steps",
-        type=int,
-        default=None,
-        help="Optional batch-kernel time chunk size for long-run probes.",
+        default=DEFAULT_TIME_CHUNK_STEPS,
+        metavar="STEPS",
+        help=(
+            "Batch-kernel time chunk policy for long-run probes. Pass an integer "
+            "to force a chunk size, 'none' or 'unchunked' to force one full "
+            "scan, or 'default' to keep each workload's runtime default."
+        ),
     )
     parser.add_argument(
         "--double-cable-block-solver",
@@ -209,8 +214,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--dt must be > 0.")
     if args.warmups < 0:
         raise ValueError("--warmups must be >= 0.")
-    if args.time_chunk_steps is not None and args.time_chunk_steps < 1:
-        raise ValueError("--time-chunk-steps must be >= 1.")
+    time_chunk_steps, time_chunk_steps_override = _parse_time_chunk_steps(
+        args.time_chunk_steps
+    )
     if args.sweep_repeats < 1:
         raise ValueError("--sweep-repeats must be >= 1.")
     if args.memory_top_n < 0:
@@ -251,7 +257,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             "warmups": int(args.warmups),
             "timing_mode": timing_mode,
             "timing_signature": timing_signature,
-            "time_chunk_steps": args.time_chunk_steps,
+            "time_chunk_steps": _time_chunk_steps_label(
+                time_chunk_steps,
+                override=time_chunk_steps_override,
+            ),
+            "time_chunk_steps_override": bool(time_chunk_steps_override),
             "double_cable_block_solver": args.double_cable_block_solver,
             "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
             "jax_default_backend": jax_backend,
@@ -286,7 +296,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 print_summary=bool(args.print_summary),
                 output_dir=run_root / f"{run.workload}_n{run.size}",
                 jax_log_compiles=bool(args.jax_log_compiles),
-                time_chunk_steps=args.time_chunk_steps,
+                time_chunk_steps=time_chunk_steps,
                 jax_trace=_jax_trace_record(
                     jax_trace_root,
                     workload=run.workload,
@@ -317,7 +327,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         simulations = _with_batch_options(
             simulations,
-            time_chunk_steps=args.time_chunk_steps,
+            time_chunk_steps=time_chunk_steps,
+            time_chunk_steps_override=time_chunk_steps_override,
             double_cable_block_solver=args.double_cable_block_solver,
         )
         estimates = [simulation.estimate().to_dict() for simulation in simulations]
@@ -342,7 +353,11 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "warmup_count": int(args.warmups),
                 "timing_mode": timing_mode,
                 "timing_signature": timing_signature,
-                "time_chunk_steps": args.time_chunk_steps,
+                "time_chunk_steps": _time_chunk_steps_label(
+                    time_chunk_steps,
+                    override=time_chunk_steps_override,
+                ),
+                "time_chunk_steps_override": bool(time_chunk_steps_override),
                 "double_cable_block_solver": args.double_cable_block_solver,
                 "double_cable_block_solver_resolved": resolved_double_cable_block_solver,
                 "jax_default_backend": jax_backend,
@@ -825,6 +840,7 @@ def _with_batch_options(
     simulations: Sequence[axs.AxonSimulation],
     *,
     time_chunk_steps: int | None,
+    time_chunk_steps_override: bool,
     double_cable_block_solver: str,
 ) -> tuple[axs.AxonSimulation, ...]:
     """Return simulations with benchmark batch-kernel options applied."""
@@ -836,10 +852,12 @@ def _with_batch_options(
             batch_options,
             double_cable_block_solver=double_cable_block_solver,
         )
-        if time_chunk_steps is not None:
+        if time_chunk_steps_override:
             updated_options = replace(
                 updated_options,
-                time_chunk_steps=int(time_chunk_steps),
+                time_chunk_steps=(
+                    None if time_chunk_steps is None else int(time_chunk_steps)
+                ),
             )
         updated.append(
             axs.AxonSimulation(
@@ -1076,6 +1094,41 @@ def resolve_sizes(preset: str, sizes: Sequence[int] | None) -> tuple[int, ...]:
     if any(size < 1 for size in resolved):
         raise ValueError("all sizes must be >= 1.")
     return resolved
+
+
+def _parse_time_chunk_steps(value: object) -> tuple[int | None, bool]:
+    """Return `(steps, override)` for the hotpath CLI chunk policy."""
+
+    if value is None:
+        return None, False
+    text = str(value).strip().lower()
+    if text in {"", DEFAULT_TIME_CHUNK_STEPS}:
+        return None, False
+    if text in {"none", "unchunked", "off"}:
+        return None, True
+    try:
+        steps = int(text)
+    except ValueError as exc:
+        raise ValueError(
+            "--time-chunk-steps must be an integer, 'default', or 'none'."
+        ) from exc
+    if steps < 1:
+        raise ValueError("--time-chunk-steps must be >= 1.")
+    return steps, True
+
+
+def _time_chunk_steps_label(
+    time_chunk_steps: int | None,
+    *,
+    override: bool,
+) -> int | str:
+    """Return the manifest label for the requested chunk policy."""
+
+    if not override:
+        return DEFAULT_TIME_CHUNK_STEPS
+    if time_chunk_steps is None:
+        return "none"
+    return int(time_chunk_steps)
 
 
 def planned_runs(workload: str, sizes: Sequence[int]) -> tuple[PlannedRun, ...]:

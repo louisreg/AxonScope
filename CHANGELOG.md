@@ -24,6 +24,10 @@ The format is inspired by Keep a Changelog.
 - Normalized scalar retained-Vm benchmark spans with batch/observer routes so
   cold-run reports include comparable runtime preparation, input lowering,
   kernel enqueue/wait, and result assembly stages.
+- Closed the P9 runtime-performance planning slice with explicit hotpath
+  `time_chunk_steps` CLI policies (`default`, integer, `none`/`unchunked`), a
+  local observer-only chunking smoke, and documented decisions to keep larger
+  GPU/amplitude/solver optimization campaigns as future work.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

@@ -142,6 +142,12 @@ python benchmark/hotpaths/run.py \
   --time-chunk-steps 100
 ```
 
+`--time-chunk-steps default` keeps each workload's runtime default. For
+observer-only public simulations that means `axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS`.
+Pass `--time-chunk-steps none` or `--time-chunk-steps unchunked` to force one
+full-duration scan for comparison runs. The manifest records both the selected
+policy and whether it overrode the workload default.
+
 Run the double-cable long probe with automatic block-solver selection:
 
 ```bash

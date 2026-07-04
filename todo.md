@@ -33,9 +33,10 @@ Current state:
   recruitment summaries are post-processing.
 - `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
   solver-side design is accepted.
-- P3 is paused after current-docs cleanup. P9 has started with a short
-  cold-run micro baseline and scalar/batch span coverage normalization before
-  any larger P8 runtime project.
+- P3 is paused after current-docs cleanup. P9 is closed with a short cold-run
+  baseline, scalar/batch span coverage normalization, explicit hotpath
+  `time_chunk_steps` controls, and documented closeout decisions before any
+  larger P8 runtime project.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -287,39 +288,31 @@ path.
 - [x] Normalize hotpath span coverage across scalar retained-Vm and
   batch/observer routes so preparation, input lowering, kernel enqueue/wait,
   and result assembly are comparable in cold-run reports.
-- [ ] Add a rotated or one-case-per-process cold comparison only if independent
-  per-path cold-start timing becomes important.
-- [ ] Keep shape bucketing internal and opt-in until benchmarks show an
-  end-to-end cold-run win.
-- [ ] Investigate persistent JAX compilation/cache policy or a dedicated
-  compiler-level strategy if cold `kernel.dispatch_jax` remains a product
-  requirement. Keep this separate from solver-route cleanup.
-- [ ] Explore recruitment amplitude micro-batching as a benchmark axis, but
-  keep the runtime/protocol default at one amplitude per solver call until
-  evidence says otherwise. Benchmark candidate `amplitude_batch_size` values
-  such as 1, 2, 4, and 8 against peak memory, footprint duplication,
-  cold/warm time, and observer-only result assembly.
-- [ ] Benchmark and formalize `time_chunk_steps` policy for observer/result
-  assembly. Compare unchunked, 250, 500, 1000, and adaptive values across full
-  Vm, probe Vm, and observer-only outputs; track peak memory, chunk overhead,
-  cold/warm time, GPU utilization, result equivalence, and whether defaults
-  should depend on `nt`, `Naxons`, recording mode, or backend.
-- [ ] Park performance optimization unless explicitly in scope. When
-  optimization resumes, start with a cold-path audit for large synthetic/GPU
-  populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
-  `runtime.prepare`, and `kernel.dispatch_jax`; investigate row-by-row
-  planning/preparation overhead before changing kernel routes or adding
-  scheduling complexity.
-- [ ] GPU dispatch scheduling: memory-aware bucket/coalesce first, optional
-  async enqueue second, only after memory budgets and group-route inspection
-  exist. See `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
-- [ ] Double-cable rank-K compact `Vext`: future optimization/validation slice.
-  Current double-cable keeps dense materialization for unsupported compact
-  cases. Only broaden compact forcing after equivalence tests against dense
-  results and benchmark evidence for memory/time benefits.
-- [ ] Improve GPU solver: see
-  `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md` and update
-  `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`.
+- [x] Add explicit hotpath CLI chunk controls: `--time-chunk-steps default`
+  keeps workload defaults, an integer forces chunk size, and `none`/`unchunked`
+  forces one full scan for comparison runs.
+- [x] Run a local observer-only `time_chunk_steps` smoke (`n=5`, `nt=500`,
+  warm CPU) and record it in
+  `docs/benchmarks/p9_runtime_closeout_2026_07_04.md`.
+- [x] Decide not to add a rotated or one-case-per-process cold comparison in
+  P9. Keep that for future publication-grade per-path cold-start evidence if
+  it becomes important.
+- [x] Keep shape bucketing internal and opt-in until benchmarks show an
+  end-to-end cold-run win. Current guardrail: backend-only
+  `AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING`.
+- [x] Decide not to add an AxonScope-owned persistent JAX compilation/cache
+  policy in P9. Use compile logging/tracing for diagnosis; revisit only if
+  cold compilation becomes a product requirement.
+- [x] Keep recruitment amplitude sweeps sequential by default. Micro-batching is
+  a future benchmark axis, not a P9 runtime default.
+- [x] Keep `BatchOptions.none()` defaulting to
+  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS`; explicit `time_chunk_steps=None` remains
+  the unchunked comparison path.
+- [x] Park runtime optimization outside P9. The next optimization round starts
+  from large synthetic/GPU profiling and separate validation evidence.
+- [x] Keep GPU dispatch scheduling, double-cable rank-K compact `Vext`, and
+  exact GPU solver improvements as future benchmark/optimization work rather
+  than current P9 tasks.
 
 ### P10 - Future Membrane-Model Extensions
 
@@ -373,6 +366,32 @@ previous TODO.
   same-diameter versus different-diameter cohorts, CPU versus GPU versus NRV.
   Keep this reproducible with fixed presets, saved raw data, plots, and
   publication-ready summary tables.
+- [ ] Add a process-isolated or rotated cold-start comparison if per-path cold
+  timing becomes publication-relevant. Keep the short local baseline as
+  `cold_run_micro`.
+- [ ] Benchmark recruitment amplitude micro-batching as an explicit campaign
+  axis. Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
+  against peak memory, footprint duplication, cold/warm time, observer-only
+  result assembly, and scientific equivalence before changing defaults.
+- [ ] Run the full `time_chunk_steps` campaign across unchunked, 50, 250, 500,
+  1000, and adaptive policies for full Vm, probe Vm, and observer-only outputs.
+  Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
+  equivalence, and whether defaults should depend on `nt`, `Naxons`, recording
+  mode, or backend.
+- [ ] When performance optimization resumes, start with a cold-path audit for
+  large synthetic/GPU populations (`n=1000`): split `build pool`,
+  `dispatch.build_plan`, `runtime.prepare`, `kernel.dispatch_jax`, memory
+  pressure, and result assembly before changing kernel routes or scheduling.
+- [ ] GPU dispatch scheduling: memory-aware bucket/coalesce first, optional
+  async enqueue second, only after memory budgets and group-route inspection
+  exist. See `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
+- [ ] Double-cable rank-K compact `Vext`: future optimization/validation slice.
+  Current double-cable keeps dense materialization for unsupported compact
+  cases. Only broaden compact forcing after equivalence tests against dense
+  results and benchmark evidence for memory/time benefits.
+- [ ] Improve GPU solver: see
+  `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md` and update
+  `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`.
 - [ ] Continue hardening NRV integration only where the package contract is
   stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
   promote future pieces only when they do not duplicate the canonical

@@ -153,9 +153,10 @@ Selected aggregate spans from
 | `kernel.wait` | 3 | 0.179 ms | 0.113 ms |
 | `results.split_batch` | 3 | 0.111 ms | 0.053 ms |
 
-## Next P9 Work
+## P9 Closeout
 
-- Add a rotated or one-case-per-process cold comparison if independent path
-  cold-start timing becomes important.
-- Investigate first-call JAX runtime lowering and kernel dispatch before
-  changing solver routes.
+P9 is closed in `docs/benchmarks/p9_runtime_closeout_2026_07_04.md`. The
+process-isolated cold comparison, persistent JAX compilation/cache policy,
+amplitude micro-batching, large synthetic/GPU cold-path audit, GPU dispatch
+scheduling, double-cable rank-K compact `Vext`, and exact GPU solver work are
+future benchmark/optimization topics rather than current P9 tasks.

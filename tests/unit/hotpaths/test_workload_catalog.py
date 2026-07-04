@@ -5,8 +5,10 @@ from benchmark.hotpaths.catalog import HOTPATH_PRESETS, HOTPATH_WORKLOADS
 from benchmark.hotpaths.run import (
     _describe_simulations,
     _jax_trace_record,
+    _parse_time_chunk_steps,
     _resolve_jax_trace_root,
     _simulation_labels,
+    _time_chunk_steps_label,
     _timing_signature,
     build_simulation,
     build_simulations,
@@ -191,6 +193,42 @@ def test_hotpath_runner_accepts_time_chunk_steps_in_dry_run(capsys):
     )
 
     assert capsys.readouterr().out.splitlines() == ["observer_only size=1"]
+
+
+def test_hotpath_runner_accepts_unchunked_time_chunk_steps_in_dry_run(capsys):
+    main(
+        [
+            "--workload",
+            "observer_only",
+            "--sizes",
+            "1",
+            "--dry-run",
+            "--time-chunk-steps",
+            "none",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == ["observer_only size=1"]
+
+
+def test_hotpath_time_chunk_steps_parser_distinguishes_default_and_none():
+    assert _parse_time_chunk_steps("default") == (None, False)
+    assert _parse_time_chunk_steps("none") == (None, True)
+    assert _parse_time_chunk_steps("unchunked") == (None, True)
+    assert _parse_time_chunk_steps("250") == (250, True)
+    assert _time_chunk_steps_label(None, override=False) == "default"
+    assert _time_chunk_steps_label(None, override=True) == "none"
+    assert _time_chunk_steps_label(250, override=True) == 250
+
+
+def test_hotpath_time_chunk_steps_parser_rejects_invalid_values():
+    for value in ("0", "-1", "not-a-policy"):
+        try:
+            _parse_time_chunk_steps(value)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{value!r} should be rejected")
 
 
 def test_hotpath_runner_accepts_double_cable_pcr_solver_in_dry_run(capsys):
