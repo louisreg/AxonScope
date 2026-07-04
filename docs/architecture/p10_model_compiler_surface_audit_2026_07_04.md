@@ -88,10 +88,18 @@ linear form now have explicit source syntax on `@currents(...)`. Both
 `conductances` and `reversals` are required for each current, and the compiler
 rejects unknown current names before lowering.
 
+Concentration/current conversion formulas were audited across the active
+source-backed built-ins. Tigerholm has dynamic Na/K Nernst terms, Na/K pump
+terms, and current-to-concentration factors tied to its diameter and
+periaxonal-volume assumptions. Schild 94/97 share Nernst, Ca-pool,
+Na/Ca-exchanger, Na/K-pump, and Ca-pump formulas inside one model family. None
+of these formulas are shared across independent model families in a way that
+justifies a public membrane helper today, so the current policy is:
+Schild-family duplication belongs in `schild_common.py`, Tigerholm-specific
+logic stays inline in `tigerholm.py`, and public helpers should wait for at
+least two independent families needing the same operation.
+
 ## Next P10 Slices
 
-1. Audit concentration/current conversion formulas. Keep model-family-specific
-   electrochemical helpers local, following the Schild pattern in
-   `src/axonscope/membranes/models/schild_common.py`.
-2. Extend `explain()` and generated-artifact identity around optimization,
+1. Extend `explain()` and generated-artifact identity around optimization,
    recording policy, dtype/precision, and target-specialized lowering.

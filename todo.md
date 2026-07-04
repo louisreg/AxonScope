@@ -350,9 +350,10 @@ between P7 model authoring and P11 JAX solver optimization.
   - [x] Reject `nernst` as a public helper for now: current need is
     Schild-family-specific; shared Schild 94/97 Nernst logic now lives in
     `src/axonscope/membranes/models/schild_common.py`.
-  - [ ] Audit concentration/current conversion formulas before exposing any
-    helper; keep them model-local unless at least two independent model
-    families need the same public operation.
+  - [x] Audit concentration/current conversion formulas before exposing any
+    helper. Tigerholm Na/K concentration dynamics and Schild Ca/NaCa/pump
+    formulas are model- or family-specific today, so they stay local unless at
+    least two independent model families need the same public operation.
 - [x] Add explicit public source syntax for currents whose conductance/reversal
   cannot be inferred from `I_x = g_x * (Vm - E_x)`. Use
   `@currents(conductances={"I_x": "g_x"}, reversals={"I_x": "E_x"})`; both
