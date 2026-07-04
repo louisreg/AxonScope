@@ -573,6 +573,6 @@ P7 is not complete until:
 - JAX lowering runs equivalent model-step tests;
 - solver integration has a clear path to use Model IR without changing public
   axon APIs;
-- `Runtime.NUMPY` remains reserved until the future NumPy/SciPy reference solver
-  runtime phase implements executable behavior through the same public
+- `Runtime.NUMPY` remains reserved until a future bonus NumPy/SciPy reference
+  runtime implements executable behavior through the same public
   `AxonSimulation` lifecycle.

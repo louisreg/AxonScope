@@ -1,6 +1,6 @@
 # AxonScope Architecture Guidelines
 
-Snapshot: 2026-07-03.
+Snapshot: 2026-07-04.
 
 This is the consolidated architecture reference for AxonScope. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
@@ -26,10 +26,12 @@ clean final design over retrocompatibility, downstream migration paths,
 deprecated wrappers, argument aliases, or prototype APIs. Delete superseded
 paths rather than preserving shims.
 
-Current focus after the P0-P5 cleanup:
+Current focus after the P9 closeout:
 
 - keep only retained solver routes in active runtime code;
 - preserve the public/runtime/backend boundary;
+- prioritize a clean membrane/model/compiler surface and current JAX solver
+  optimization before starting a new NumPy/SciPy solver runtime;
 - converge simulation, estimation, inspection, results, analyses, and plots on
   one public workflow;
 - flatten public examples and docs against the public API, then make every
@@ -54,6 +56,9 @@ Current focus after the P0-P5 cleanup:
   only to the membrane descriptor/source compiler. Axon templates must not own
   model defaults, aliases, equations, derived parameter formulas, or unit
   conversion contracts.
+- treat `Runtime.NUMPY` as a future bonus reference/debug backend, not the next
+  product priority. It stays reserved and non-executable until the current JAX
+  path has a clean model/compiler contract and realistic benchmark evidence.
 
 ## 1.1 Phase Snapshot
 
@@ -77,10 +82,12 @@ Current focus after the P0-P5 cleanup:
 | 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
 | 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
 | 7.8 - Runtime policy and inspection | Done for current JAX path | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; `AxonSimulation.inspect()` explains planning, dispatch, preparation, lowering, kernel, and result assembly through the backend boundary. |
-| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `Runtime.NUMPY` stays reserved for the future reference solver runtime. |
-| 7.10 - NumPy/SciPy reference solver runtime | Planned | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route. |
-| 8 - Studies | Not started | Callable studies, reuse policies, retention policies, study results. |
-| 9 - Serialization | Not started | Final schemas and persistence strategy. |
+| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `Runtime.NUMPY` stays reserved for a future bonus reference solver runtime. |
+| 8 - NumPy/SciPy reference solver runtime | Deferred bonus | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route, and not the next implementation priority. |
+| 9 - Cold-run/runtime benchmark closeout | Done | `cold_run_micro`, normalized scalar/batch spans, explicit hotpath chunk controls, and decisions to park larger optimization campaigns until realistic evidence exists. |
+| 10 - Model/compiler surface cleanup | Active next | Flatten membrane helper/diagnostic/explain surfaces, harden compiler/cache identity, and prepare recording-aware pruning/fusion contracts before deeper solver work. |
+| 11 - Realistic JAX solver benchmarking and optimization | Active next | Build realistic workflow evidence first, then optimize the current JAX preparation/lowering/kernel/result paths with validation gates. |
+| 12 - Studies, serialization, integration | Not started | Callable studies, reuse policies, retention policies, schemas, HPC, FEM/NRV integration. |
 
 ## 1.2 Active Gaps
 
@@ -106,7 +113,9 @@ Current focus after the P0-P5 cleanup:
 - `Runtime.NUMPY` is not an executable runtime yet. Passive, HH, and
   Rattay-Aberham membrane semantics now run through Model IR with a NumPy
   model-step oracle and JAX lowering, but a full NumPy/SciPy cable-solver
-  runtime is a separate later phase documented in `todo.md`.
+  runtime is a separate bonus phase documented in `todo.md`. Do not implement
+  it before the membrane/compiler surface and current JAX optimization evidence
+  are clean.
 - `estimate()` and `inspect()` must follow the same public workflow as
   execution. Prefer `AxonSimulation(...).estimate()` and
   `AxonSimulation(...).inspect()` over a separate root helper.
@@ -117,9 +126,10 @@ Current focus after the P0-P5 cleanup:
 - Benchmark modes, presets, flags, and names are documented in
   `benchmark/README.md`. Treat fresh benchmark outputs as evidence only when
   the command, machine metadata, git state, and validation context are recorded.
-- Remaining post-P7 cleanup is mainly documentation/examples: keep proposal
-  pages clearly labelled, remove stale future snippets from user docs, and
-  make the examples learning path match the current public API.
+- Remaining post-P7 cleanup is now model/compiler and evidence oriented:
+  flatten the public membrane authoring surface, harden compiler/cache identity
+  and output pruning, then use realistic benchmarks to guide current JAX solver
+  optimization before introducing a new runtime.
 
 ---
 
@@ -445,7 +455,7 @@ Use:
 ```python
 axs.Runtime.AUTO
 axs.Runtime.JAX
-axs.Runtime.NUMPY  # reserved until the future NumPy/SciPy reference solver runtime
+axs.Runtime.NUMPY  # reserved for a future bonus NumPy/SciPy reference runtime
 
 axs.Device.auto()
 axs.Device.cpu()
@@ -481,7 +491,7 @@ single = result.single
 Current behavior:
 
 - `Runtime.AUTO` and `Runtime.JAX` are valid for execution;
-- `Runtime.NUMPY` is reserved until the future NumPy/SciPy reference solver
+- `Runtime.NUMPY` is reserved until a future bonus NumPy/SciPy reference
   runtime has executable behavior, docs, examples, estimates, inspection, and
   tests; it must not be advertised as executable for current solves;
 - `Device.cpu()` and `Device.gpu(index=...)` resolve through the JAX backend or

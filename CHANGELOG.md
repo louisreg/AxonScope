@@ -28,6 +28,9 @@ The format is inspired by Keep a Changelog.
   `time_chunk_steps` CLI policies (`default`, integer, `none`/`unchunked`), a
   local observer-only chunking smoke, and documented decisions to keep larger
   GPU/amplitude/solver optimization campaigns as future work.
+- Reprioritized the roadmap so the NumPy/SciPy reference runtime is a future
+  bonus while the active path is model/compiler surface cleanup followed by
+  realistic benchmark evidence and optimization of the current JAX solver.
 - Extended model-codegen benchmarks with generated NumPy/JAX model-step timing,
   correctness rows, and tiny public `AxonSimulation` first/warm runs for the
   new class-based membrane template families.

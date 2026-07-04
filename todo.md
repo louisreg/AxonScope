@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-03 after the P3 current-docs cleanup.
+Updated on 2026-07-04 after the P9 closeout and roadmap reprioritization.
 
 Current state:
 
@@ -27,7 +27,8 @@ Current state:
 - Model IR remains internal compiler/runtime vocabulary. Users write membrane
   models, equations, parameters, gates, currents, and observables.
 - `Runtime.NUMPY` remains reserved for a future real NumPy/SciPy reference
-  runtime. It must not become a JAX-backed compatibility path.
+  runtime, but it is now a bonus/future phase. It must not become a JAX-backed
+  compatibility path.
 - Solver-side observer-only execution is the strict VmRaster path under
   `observations["vm_raster"]`; activation, latency, velocity, threshold, and
   recruitment summaries are post-processing.
@@ -36,7 +37,10 @@ Current state:
 - P3 is paused after current-docs cleanup. P9 is closed with a short cold-run
   baseline, scalar/batch span coverage normalization, explicit hotpath
   `time_chunk_steps` controls, and documented closeout decisions before any
-  larger P8 runtime project.
+  larger runtime project.
+- The next priority is not the NumPy solver. First flatten the public
+  model/compiler surface, then build realistic benchmark evidence and optimize
+  the current JAX solver path.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -247,15 +251,20 @@ performance claims.
 
 ## Next Major Phases
 
-### P8 - Future NumPy/SciPy Reference Solver Runtime
+### P8 - Future Bonus NumPy/SciPy Reference Solver Runtime
 
-This phase starts only after post-P7 cleanup and model benchmarks are stable.
-The goal is a real reference solver runtime, not a JAX-backed compatibility
-path.
+This is intentionally no longer the next implementation phase. The NumPy/SciPy
+runtime remains valuable as a future reference/debug backend, but only after
+the model/compiler surface is flat and the current JAX solver has realistic
+benchmark evidence. The goal is a real reference solver runtime, not a
+JAX-backed compatibility path.
 
 - [ ] Keep `Runtime.NUMPY` reserved/non-executable until this phase reaches
   executable behavior through the same `AxonSimulation(...).run()`,
   `.estimate()`, and `.inspect()` lifecycle as JAX.
+- [ ] Do not start implementation before P10 model/compiler cleanup and P11
+  realistic JAX solver benchmarking/optimization are stable enough that the
+  reference runtime has a clean contract to implement.
 - [ ] Define the first supported scope explicitly: scalar/tiny simulations
   first, not population batching, GPU parity, or a second public workflow.
 - [ ] Implement the reference solver behind the backend execution facade, using
@@ -314,11 +323,17 @@ path.
   exact GPU solver improvements as future benchmark/optimization work rather
   than current P9 tasks.
 
-### P10 - Future Membrane-Model Extensions
+### P10 - Model/Compiler Surface Cleanup And JAX Optimization Prep
 
-These are not blockers for P7, but they are unfinished work preserved from the
-previous TODO.
+Goal: flatten the public membrane/model authoring surface and the internal
+compiler/runtime contracts before deeper solver work. This is the active bridge
+between P7 model authoring and P11 JAX solver optimization.
 
+- [ ] Audit `src/axonscope/membranes/`, `src/axonscope/model_ir/`,
+  `src/axonscope/backends/jax/model_ir_lowering.py`,
+  `src/axonscope/backends/jax/membrane_program.py`, generated-code cache code,
+  custom membrane examples, and model-codegen benchmarks against the desired
+  public vocabulary and optimization contract.
 - [ ] Tighten rejected Python construct diagnostics for mutation,
   data-dependent Python loops, I/O, dynamic imports, object construction inside
   equations, arbitrary NumPy/JAX calls, hidden global state, and side effects.
@@ -326,17 +341,25 @@ previous TODO.
   `exp`, `expm1`, `log`, `log1p`, `sqrt`, `abs`, `minimum`, `maximum`, `clip`,
   `where`, `tanh`, `sigmoid`, `vtrap`, `q10`, `boltzmann`,
   `rates_from_tau_inf`, `nernst`, and concentration/current conversion helpers.
+- [ ] Decide whether public authoring needs explicit syntax for currents whose
+  conductance/reversal cannot be inferred from `I_x = g_x * (Vm - E_x)`.
 - [ ] Extend mechanism semantics beyond ordered sections: expose
   mechanism-level dependencies in reports, preserve boundaries for
   optimization/fusion, and apply the same readable shape to complex built-ins
   where useful.
-- [ ] Decide whether public authoring needs explicit syntax for currents whose
-  conductance/reversal cannot be inferred from `I_x = g_x * (Vm - E_x)`.
 - [ ] Extend semantic validation to purity/source provenance, unsupported
   helper calls, duplicate exports, duplicate observable names, and
   recording/output compatibility.
-- [ ] Define target-specific lowering hooks for JAX and NumPy intrinsics while
-  keeping scientific semantics target-neutral.
+- [ ] Make `explain()` and compiler reports useful to humans: show public model
+  names, equations, gates, currents, observables, generated targets, cache
+  identity, and optimization summaries without exposing Model IR as required
+  user knowledge.
+- [ ] Broaden generated-artifact identity to the full target-specialized key:
+  internal graph hash, optimized graph hash, backend lowering key, static
+  shapes, recording policy, parameter specialization, dtype/precision,
+  optimization level, compiler/helper versions, and dependency hashes.
+- [ ] Define target-specific lowering hooks for JAX and future NumPy intrinsics
+  while keeping scientific semantics target-neutral.
 - [ ] Make recording-aware output pruning part of the compiler plan:
   requested Vm/probes/observables should determine retained outputs before
   backend lowering.
@@ -347,17 +370,23 @@ previous TODO.
   state prepare/finalize updates, diagnostics, requested-observable pruning,
   composite generated programs or an explicit fail-fast boundary, and avoiding
   transport of unrequested intermediate arrays.
-- [ ] Broaden generated-artifact identity to the full target-specialized key:
-  internal graph hash, optimized graph hash, backend lowering key, static
-  shapes, recording policy, parameter specialization, dtype/precision,
-  optimization level, and compiler/helper versions.
 - [ ] Extend generated execution into the full fusion path beyond the
   P7-supported class subset: composite generated programs, more aggressive
   recording-aware pruning, and direct solver-kernel fusion.
 - [ ] Define duplicate-name aggregation semantics for generic observables before
   exposing custom observables as public recording outputs.
+- [ ] Update affected docs and examples in the same work: membrane docs,
+  runtime-agnostic DSL plan, custom membrane authoring example, model-codegen
+  benchmark docs, and changelog.
+- [ ] Keep model-codegen/model-step benchmarks as the performance gate for
+  model/compiler changes; only make speed claims after fresh runs with recorded
+  cache state, target, dtype/precision, backend, device, and git state.
 
-### P11 - Studies, Serialization, Integration
+### P11 - Realistic Benchmarks And Current JAX Solver Optimization
+
+Goal: optimize the JAX solver that exists today using realistic benchmark
+evidence before investing in a new runtime. Hotpath microbenchmarks remain
+diagnostic; product-facing optimization decisions need realistic workflows.
 
 - [ ] Prepare a publication-grade benchmark campaign for AxonScope versus
   baselines. Cover velocity, activation-threshold curves, block thresholds,
@@ -366,6 +395,15 @@ previous TODO.
   same-diameter versus different-diameter cohorts, CPU versus GPU versus NRV.
   Keep this reproducible with fixed presets, saved raw data, plots, and
   publication-ready summary tables.
+- [ ] Keep the benchmark ladder explicit:
+  `benchmark/runtime --suite model_codegen` for model/compiler changes,
+  `benchmark/hotpaths` for span-level diagnosis,
+  `benchmark/realistic_examples` for public workflows, and
+  `benchmark/nrv_performance` for NRV-derived or validation-adjacent workloads.
+- [ ] Refresh realistic workflow benchmark coverage for the current public API:
+  recruitment, threshold curves, velocity, mixed populations, MRG/double-cable,
+  observer-only VmRaster, probe Vm, full Vm, cold/warm CPU, and GPU where
+  available.
 - [ ] Add a process-isolated or rotated cold-start comparison if per-path cold
   timing becomes publication-relevant. Keep the short local baseline as
   `cold_run_micro`.
@@ -378,10 +416,15 @@ previous TODO.
   Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
   equivalence, and whether defaults should depend on `nt`, `Naxons`, recording
   mode, or backend.
-- [ ] When performance optimization resumes, start with a cold-path audit for
-  large synthetic/GPU populations (`n=1000`): split `build pool`,
-  `dispatch.build_plan`, `runtime.prepare`, `kernel.dispatch_jax`, memory
-  pressure, and result assembly before changing kernel routes or scheduling.
+- [ ] Start optimization from a cold-path audit for large synthetic/GPU
+  populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
+  `runtime.prepare`, `inputs.*`, `kernel.dispatch_jax`, memory pressure, and
+  result assembly before changing kernel routes or scheduling.
+- [ ] Optimize current JAX preparation and lowering before new solver routes:
+  runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
+  zero/sparse `Iinj`, recording-aware pruning, and result assembly.
+- [ ] Remove or reject dense internal fallback paths only after factorized or
+  compact equivalents have equivalence tests and realistic benchmark evidence.
 - [ ] GPU dispatch scheduling: memory-aware bucket/coalesce first, optional
   async enqueue second, only after memory budgets and group-route inspection
   exist. See `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
@@ -392,6 +435,11 @@ previous TODO.
 - [ ] Improve GPU solver: see
   `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md` and update
   `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`.
+- [ ] Re-run NRV validation only for numerical behavior changes, but always
+  pair optimization claims with fresh hotpath or realistic benchmark evidence.
+
+### P12 - Studies, Serialization, Integration
+
 - [ ] Continue hardening NRV integration only where the package contract is
   stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
   promote future pieces only when they do not duplicate the canonical
@@ -427,6 +475,10 @@ ledger in this TODO.
 - P4/P5 are complete: public estimate/inspection modules use the backend
   execution boundary for backend-owned benchmark support, and validation policy
   now separates fast acceptance, NRV, and performance benchmark evidence.
+- P9 is complete: cold-run micro baseline, scalar/batch span normalization,
+  explicit hotpath chunk controls, and closeout decisions are recorded. P8
+  NumPy/SciPy is parked as a future bonus until P10/P11 make the model/compiler
+  surface and current JAX solver evidence cleaner.
 
 ## Key References
 
