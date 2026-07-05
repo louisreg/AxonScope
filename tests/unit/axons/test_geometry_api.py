@@ -63,6 +63,29 @@ def test_public_axon_diameter_is_easy_for_uniform_and_template_models():
     assert mrg.diameter == pytest.approx(10.0)
 
 
+def test_template_axon_diameters_are_quantized_for_cache_reuse():
+    small = axs.axons.RattayAberham(
+        length=100.0 * axs.um,
+        diameter=0.666 * axs.um,
+        compartments=5,
+    )
+    large = axs.axons.RattayAberham(
+        length=100.0 * axs.um,
+        diameter=1.24 * axs.um,
+        compartments=5,
+    )
+    mrg = axs.axons.MRG(diameter=2.52 * axs.um, nodes=3)
+
+    assert small.diameter == pytest.approx(0.67)
+    np.testing.assert_allclose(small.diameter_values(unit=axs.um), np.full(5, 0.67))
+    assert large.diameter == pytest.approx(1.2)
+    np.testing.assert_allclose(large.diameter_values(unit=axs.um), np.full(5, 1.2))
+    assert mrg.diameter == pytest.approx(2.5)
+    assert axs.axons.mrg_like_node_spacing(2.52 * axs.um) == pytest.approx(
+        axs.axons.mrg_like_node_spacing(2.5 * axs.um)
+    )
+
+
 def test_public_axon_diameter_points_to_values_for_non_uniform_layouts():
     narrow = axs.axons.Section(
         "narrow",

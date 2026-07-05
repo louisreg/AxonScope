@@ -705,6 +705,10 @@ decisions need realistic workflow evidence.
   scouts under
   `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_vm_raster_plan_cache_69f06da`
   now show one observer-plan miss followed by hits across amplitude updates.
+  Fifth cleanup: AxonScope template axon/fiber diameters are now quantized at
+  construction time to 0.01 um for diameters up to 1 um and 0.1 um above 1 um,
+  so solver signatures and benchmark cohorts naturally reuse nearby diameter
+  variants before CPU/GPU Kaggle comparisons.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.

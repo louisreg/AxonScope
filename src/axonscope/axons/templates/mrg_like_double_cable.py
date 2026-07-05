@@ -28,6 +28,7 @@ from axonscope.utils.validation import (
     require_non_negative,
     require_positive,
 )
+from axonscope.axons.diameters import round_axon_diameter_um
 from axonscope.axons.layout import Layout, LayoutElement
 from axonscope.axons.section import PeriaxonalLayer, Section
 from axonscope.axons.templates._mrg_morphology import (
@@ -131,7 +132,9 @@ def _compartments_for_section(value: dict[str, int] | int, section_name: str) ->
 def mrg_like_node_spacing(diameter: length_t, *, fit_all: bool = False) -> float:
     """Return the MRG-like center-to-center node spacing in micrometers."""
 
-    diameter_um = units.require_length_um(diameter, name="diameter")
+    diameter_um = round_axon_diameter_um(
+        units.require_length_um(diameter, name="diameter")
+    )
     return float(get_mrg_morphology(diameter_um, fit_all=fit_all).deltax)
 
 
@@ -157,7 +160,9 @@ def mrg_like_length_from_nodes(
     """
 
     nodes = _normalize_nodes(nodes)
-    diameter_um = units.require_length_um(diameter, name="diameter")
+    diameter_um = round_axon_diameter_um(
+        units.require_length_um(diameter, name="diameter")
+    )
     deltax = get_mrg_length_node_spacing(diameter_um, fit_all=fit_all)
     shift_um = 0.0 if x_shift is None else units.require_length_um(x_shift, name="x_shift")
     phase_um = float(shift_um) % float(deltax)
@@ -241,7 +246,9 @@ def build_mrg_like_geometry(
     """
 
     nodes = _normalize_nodes(nodes)
-    diameter_um = units.require_length_um(diameter, name="diameter")
+    diameter_um = round_axon_diameter_um(
+        units.require_length_um(diameter, name="diameter")
+    )
     length_um = None if length is None else units.require_length_um(length, name="length")
     mysa_length_um = require_positive(
         units.require_length_um(mysa_length, name="mysa_length"),

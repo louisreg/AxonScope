@@ -327,5 +327,39 @@ def test_curve_workload_keeps_distinct_templates_for_distinct_diameters():
     assert len({id(simulation.axon) for simulation in pool}) == 4
     np.testing.assert_allclose(
         [meta["diameter_um"] for meta in row_meta],
-        [0.4, 2.0 / 3.0, 14.0 / 15.0, 1.2],
+        [0.4, 0.67, 0.93, 1.2],
+    )
+
+
+def test_curve_workload_reuses_templates_after_axonscope_diameter_quantization():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "100",
+            "--nx",
+            "5",
+            "--cable",
+            "single_cable",
+            "--diameters",
+            "different_diameters",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.full(100, 0.1, dtype=float),
+        curve_context="threshold",
+    )
+
+    diameters = [meta["diameter_um"] for meta in row_meta]
+    assert len(set(diameters)) < len(diameters)
+    assert len({id(simulation.axon) for simulation in pool}) == len(set(diameters))
+    assert all(
+        np.isclose(diameter * 100.0, round(diameter * 100.0))
+        if diameter <= 1.0
+        else np.isclose(diameter * 10.0, round(diameter * 10.0))
+        for diameter in diameters
     )

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from axonscope.utils import units
+from axonscope.axons.diameters import round_axon_diameter_um
 from axonscope.axons.formulation import (
     CableFormulation,
     Formulation,
@@ -69,7 +70,9 @@ class Axon:
         self._diameter_um = (
             None
             if diameter is None
-            else units.require_length_um(diameter, name="diameter")
+            else round_axon_diameter_um(
+                units.require_length_um(diameter, name="diameter")
+            )
         )
         self.v_init = units.require_voltage_mV(v_init, name="v_init")
         self.temperature = units.require_temperature_degC(temperature, name="temperature")

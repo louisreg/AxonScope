@@ -584,6 +584,7 @@ def _build_pool(
             if row_cable == "double_cable"
             else float(single_diameters[row])
         )
+        diameter_um = axs.axons.round_axon_diameter_um(diameter_um)
         template_key = (row_cable, diameter_um)
         template = templates.get(template_key)
         if template is None:
@@ -646,41 +647,32 @@ def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any
     compartments = max(int(options["nx"]), 3)
     if options["precision"] == "fp64":
         membrane = axs.membranes.RattayAberham(dtype=np.float64)
-        return (
-            axs.axons.Unmyelinated(
-                membrane=membrane,
-                length=length,
-                diameter=float(diameter_um) * axs.um,
-                compartments=compartments,
-                v_init=-70.0 * axs.mV,
-                temperature=37.0 * axs.degC,
-            ),
-            "rattay_aberham",
-            float(diameter_um),
-        )
-    return (
-        axs.axons.RattayAberham(
+        axon = axs.axons.Unmyelinated(
+            membrane=membrane,
             length=length,
             diameter=float(diameter_um) * axs.um,
             compartments=compartments,
-            celsius=37.0 * axs.degC,
-        ),
-        "rattay_aberham",
-        float(diameter_um),
+            v_init=-70.0 * axs.mV,
+            temperature=37.0 * axs.degC,
+        )
+        return (axon, "rattay_aberham", float(axon.diameter))
+    axon = axs.axons.RattayAberham(
+        length=length,
+        diameter=float(diameter_um) * axs.um,
+        compartments=compartments,
+        celsius=37.0 * axs.degC,
     )
+    return (axon, "rattay_aberham", float(axon.diameter))
 
 
 def _double_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:
     nodes = max(3, min(9, int(options["nx"]) // 5))
-    return (
-        axs.axons.MRG(
-            diameter=float(diameter_um) * axs.um,
-            nodes=nodes,
-            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
-        ),
-        "mrg",
-        float(diameter_um),
+    axon = axs.axons.MRG(
+        diameter=float(diameter_um) * axs.um,
+        nodes=nodes,
+        compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
     )
+    return (axon, "mrg", float(axon.diameter))
 
 
 def _stimulus_for_amplitude(options: dict[str, Any], amplitude_uA: float) -> Any:

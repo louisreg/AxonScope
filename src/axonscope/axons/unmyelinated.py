@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from axonscope.axons.axon import Axon
+from axonscope.axons.diameters import round_axon_diameter_um
 from axonscope.axons.formulation import CableFormulation
 from axonscope.axons.layout import Layout
 from axonscope.axons.section import Section
@@ -69,7 +70,9 @@ def _validate_geometry(
             raise ValueError(f"compartments must be >= 2, got {compartment_count}.")
 
     length_value = None if length is None else units.require_length_um(length, name="length")
-    diameter_value = units.require_length_um(diameter, name="diameter")
+    diameter_value = round_axon_diameter_um(
+        units.require_length_um(diameter, name="diameter")
+    )
     x_value = None if x is None else units.require_length_array_um(x, name="x", dtype=np.float32)
     return _GeometrySpec(
         length=None if length_value is None else _quantity_um(length_value),

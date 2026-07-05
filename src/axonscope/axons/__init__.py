@@ -1,6 +1,10 @@
 """Descriptive axon, section layout, and template API."""
 
 from axonscope.axons.axon import Axon
+from axonscope.axons.diameters import (
+    round_axon_diameter_um,
+    round_axon_diameter_values_um,
+)
 from axonscope.axons.flattened import FlattenedLayout, flatten_layout
 from axonscope.axons.formulation import (
     CableFormulation,
@@ -37,6 +41,8 @@ from axonscope.axons.unmyelinated import (
 
 __all__ = [
     "Axon",
+    "round_axon_diameter_um",
+    "round_axon_diameter_values_um",
     "Section",
     "PeriaxonalLayer",
     "Layout",
