@@ -26,9 +26,19 @@ python benchmark/kaggle/run_kernel.py \
   --preset gpu_smoke \
   --platform gpu \
   --machine-shape NvidiaTeslaP100 \
-  --case-filter observer_only \
-  --memory-trace all \
-  --profile
+  --case-filter observer_only
+```
+
+Capture a JAX trace on a deliberately tiny GPU case:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --script threshold_curves \
+  --preset gpu_trace_smoke \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --case-filter observer_only
 ```
 
 Run recruitment on a T4:
@@ -61,6 +71,10 @@ python benchmark/run.py --script ... --preset ... --platform ... --output ...
 
 and writes `kaggle_hardware.json`, `kaggle_command.json`, benchmark outputs,
 and `axonscope_benchmark_results_<run_id>.zip`.
+
+Keep whole-session JAX tracing on small trace presets only. Trace outputs can
+grow quickly; use `gpu_smoke` for functional GPU acceptance and
+`gpu_trace_smoke` for Perfetto/XPlane/device-memory artifacts.
 
 Use `--no-publish-branch --branch <branch>` only when the target branch already
 contains the exact code to benchmark. Use `--require-clean-git` when you want

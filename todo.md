@@ -545,9 +545,12 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   `benchmark/kaggle/`, `benchmark/results/`, and `benchmark/legacy/`.
 - [x] Implement explicit scale presets shared by both curve scripts:
   `quick`, `local_smoke`, `local_realistic`, `cpu_publication`, `gpu_smoke`,
-  `gpu_realistic`, `nrv_smoke`, and `nrv_full`. Presets must define repeats,
-  warmups, `tsim`, `dt`, `Nx`, `Naxons`, precision, recording mode, platform,
-  memory tracing, profiling, and output directory defaults.
+  `gpu_trace_smoke`, `gpu_realistic`, `nrv_smoke`, and `nrv_full`. Presets
+  must define repeats, warmups, `tsim`, `dt`, `Nx`, `Naxons`, precision,
+  recording mode, platform, memory tracing, profiling, and output directory
+  defaults. Keep GPU tracing on deliberately tiny cases only: one small pool
+  and two or three amplitude evaluations, otherwise Perfetto/XPlane artifacts
+  and device-memory profiles explode.
 - [x] Build the local/GPU launcher on the shared script/preset interface:
   `python benchmark/run.py --script threshold_curves --preset quick --platform cpu`,
   `python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platform gpu`,
@@ -605,14 +608,17 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
 - [ ] Complete P11A acceptance criteria. Local CPU `quick` threshold and
   recruitment runs now finish without NRV/GPU and write time, memory, metadata,
   case, raw-result, curve-summary, and manifest artifacts. A reduced Kaggle P100
-  smoke passed on 2026-07-05 for commit `b6c3c92` with `threshold_curves`,
-  `gpu_smoke`, `observer_only`, `n_axons=4`, `nx=21`, `tsim=1 ms`,
+  trace smoke passed on 2026-07-05 for commit `b6c3c92` with
+  `threshold_curves`, `observer_only`, `n_axons=4`, `nx=21`, `tsim=1 ms`,
   `dt=0.05 ms`, `max_iterations=1`, `memory_trace=all`, JAX profiling, and JAX
   device-memory profiles; it produced time, memory, metadata, hardware, and
-  trace artifacts under `benchmark/results/kaggle/`. Remaining: validate an
-  agreed non-reduced GPU preset/case through Kaggle or a local GPU, then keep
-  the rule that no speed/memory claim is allowed without a fresh artifact
-  directory and git metadata.
+  trace artifacts under `benchmark/results/kaggle/`. A later non-reduced
+  `gpu_smoke` attempt was interrupted because the preset still mixed smoke
+  validation with full tracing. Remaining: rerun the corrected lightweight
+  `gpu_smoke` through Kaggle for threshold and recruitment, use
+  `gpu_trace_smoke` only for trace artifacts, then keep the rule that no
+  speed/memory claim is allowed without a fresh artifact directory and git
+  metadata.
 
 ### P11B - Benchmark-Gated JAX Solver Optimization
 

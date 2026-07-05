@@ -26,6 +26,12 @@ def test_curve_presets_have_explicit_scale_and_execution_defaults():
     assert PRESETS["cpu_publication"].profile_backend == "jax"
     assert PRESETS["cpu_publication"].jax_device_memory_profile is True
     assert PRESETS["gpu_smoke"].platform == "gpu"
+    assert PRESETS["gpu_smoke"].profile is False
+    assert PRESETS["gpu_smoke"].jax_device_memory_profile is False
+    assert PRESETS["gpu_trace_smoke"].platform == "gpu"
+    assert PRESETS["gpu_trace_smoke"].n_axons <= 4
+    assert PRESETS["gpu_trace_smoke"].profile is True
+    assert PRESETS["gpu_trace_smoke"].jax_device_memory_profile is True
     assert PRESETS["nrv_full"].platform == "nrv"
 
 
@@ -95,6 +101,31 @@ def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path
     assert rows[0]["profile_backend"] == "jax"
     assert rows[0]["profile_create_perfetto"] == "True"
     assert rows[0]["jax_device_memory_profile"] == "True"
+
+
+def test_launcher_can_disable_trace_flags_from_trace_preset(tmp_path: Path):
+    assert (
+        run_benchmark(
+            [
+                "--script",
+                "threshold_curves",
+                "--preset",
+                "gpu_trace_smoke",
+                "--dry-run",
+                "--output",
+                str(tmp_path),
+                "--no-profile",
+                "--no-profile-create-perfetto",
+                "--no-jax-device-memory-profile",
+            ]
+        )
+        == 0
+    )
+
+    rows = list(csv.DictReader((tmp_path / "cases.csv").open()))
+    assert rows[0]["profile"] == "False"
+    assert rows[0]["profile_create_perfetto"] == "False"
+    assert rows[0]["jax_device_memory_profile"] == "False"
 
 
 def test_resolved_options_apply_preset_and_overrides():

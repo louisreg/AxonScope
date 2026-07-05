@@ -29,11 +29,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output")
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
-    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--profile", action="store_true", dest="profile", default=None)
+    parser.add_argument("--no-profile", action="store_false", dest="profile")
     parser.add_argument("--profile-backend", choices=("auto", "jax", "none"))
     parser.add_argument("--profile-output")
-    parser.add_argument("--profile-create-perfetto", action="store_true")
-    parser.add_argument("--jax-device-memory-profile", action="store_true")
+    parser.add_argument(
+        "--profile-create-perfetto",
+        action="store_true",
+        dest="profile_create_perfetto",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-profile-create-perfetto",
+        action="store_false",
+        dest="profile_create_perfetto",
+    )
+    parser.add_argument(
+        "--jax-device-memory-profile",
+        action="store_true",
+        dest="jax_device_memory_profile",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-jax-device-memory-profile",
+        action="store_false",
+        dest="jax_device_memory_profile",
+    )
     parser.add_argument("--case-filter")
     args, extra = parser.parse_known_args(argv)
 
@@ -66,12 +87,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         script_args.append("--dry-run")
     if args.resume:
         script_args.append("--resume")
-    if args.profile:
+    if args.profile is True:
         script_args.append("--profile")
-    if args.profile_create_perfetto:
+    elif args.profile is False:
+        script_args.append("--no-profile")
+    if args.profile_create_perfetto is True:
         script_args.append("--profile-create-perfetto")
-    if args.jax_device_memory_profile:
+    elif args.profile_create_perfetto is False:
+        script_args.append("--no-profile-create-perfetto")
+    if args.jax_device_memory_profile is True:
         script_args.append("--jax-device-memory-profile")
+    elif args.jax_device_memory_profile is False:
+        script_args.append("--no-jax-device-memory-profile")
     script_args.extend(extra)
     return SCRIPTS[args.script].main(script_args)
 

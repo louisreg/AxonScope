@@ -20,6 +20,7 @@ python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platfor
 python benchmark/run.py --script threshold_curves --preset quick --platform cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100
+python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_trace_smoke --platform gpu --machine-shape NvidiaTeslaP100
 ```
 
 Both curve scripts use the same option vocabulary:
@@ -57,6 +58,7 @@ Presets live in `benchmark/workloads/curve_options.py`:
 - `local_realistic`
 - `cpu_publication`
 - `gpu_smoke`
+- `gpu_trace_smoke`
 - `gpu_realistic`
 - `nrv_smoke`
 - `nrv_full`
@@ -64,6 +66,12 @@ Presets live in `benchmark/workloads/curve_options.py`:
 They define scale and defaults for repeats, warmups, duration, `dt`, `Nx`,
 `Naxons`, precision, recording mode, platform, memory tracing, profiling,
 threshold iterations, and recruitment amplitude count.
+
+`gpu_smoke` is a short GPU functional and memory smoke. It should not enable
+whole-session JAX tracing or device-memory pprof capture by default. Use
+`gpu_trace_smoke` when you explicitly want tracing: it is intentionally limited
+to one small pool and two or three amplitude evaluations so Perfetto/XPlane
+artifacts stay inspectable.
 
 FP64 runs require a JAX process with x64 enabled before importing JAX. For a
 fresh shell, use the project environment and set `JAX_ENABLE_X64=1` before

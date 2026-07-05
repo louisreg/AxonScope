@@ -108,23 +108,42 @@ PRESETS: dict[str, CurvePreset] = {
         amplitude_count=24,
     ),
     "gpu_smoke": CurvePreset(
-        tsim=5.0,
-        dt=0.01,
-        nx=51,
-        n_axons=64,
+        tsim=2.0,
+        dt=0.02,
+        nx=31,
+        n_axons=16,
         precision="fp32",
         recording="observer_only",
         platform="gpu",
-        repeats=2,
-        warmups=1,
+        repeats=1,
+        warmups=0,
+        memory_trace="device",
+        memory_top_n=0,
+        profile=False,
+        profile_backend="auto",
+        profile_create_perfetto=False,
+        jax_device_memory_profile=False,
+        max_iterations=2,
+        amplitude_count=3,
+    ),
+    "gpu_trace_smoke": CurvePreset(
+        tsim=1.0,
+        dt=0.05,
+        nx=21,
+        n_axons=4,
+        precision="fp32",
+        recording="observer_only",
+        platform="gpu",
+        repeats=1,
+        warmups=0,
         memory_trace="all",
-        memory_top_n=10,
+        memory_top_n=5,
         profile=True,
         profile_backend="jax",
         profile_create_perfetto=True,
         jax_device_memory_profile=True,
-        max_iterations=6,
-        amplitude_count=6,
+        max_iterations=1,
+        amplitude_count=3,
     ),
     "gpu_realistic": CurvePreset(
         tsim=50.0,
@@ -210,11 +229,32 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--warmups", type=int)
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
-    parser.add_argument("--profile", action="store_true", default=None)
+    parser.add_argument("--profile", action="store_true", dest="profile", default=None)
+    parser.add_argument("--no-profile", action="store_false", dest="profile")
     parser.add_argument("--profile-backend", choices=("auto", "jax", "none"))
     parser.add_argument("--profile-output")
-    parser.add_argument("--profile-create-perfetto", action="store_true", default=None)
-    parser.add_argument("--jax-device-memory-profile", action="store_true", default=None)
+    parser.add_argument(
+        "--profile-create-perfetto",
+        action="store_true",
+        dest="profile_create_perfetto",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-profile-create-perfetto",
+        action="store_false",
+        dest="profile_create_perfetto",
+    )
+    parser.add_argument(
+        "--jax-device-memory-profile",
+        action="store_true",
+        dest="jax_device_memory_profile",
+        default=None,
+    )
+    parser.add_argument(
+        "--no-jax-device-memory-profile",
+        action="store_false",
+        dest="jax_device_memory_profile",
+    )
     parser.add_argument("--output", default=f"benchmark/results/{script_name}")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
