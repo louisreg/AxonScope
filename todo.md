@@ -694,6 +694,11 @@ decisions need realistic workflow evidence.
   under
   `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_template_reuse_8330374`;
   this is still a benchmark-harness cleanup, not a solver speed claim.
+  Third cleanup: amplitude updates now reuse one benchmark stimulus build per
+  repeated amplitude value while keeping each row's stimulation object separate.
+  This reduces recruitment-curve update overhead for common-amplitude sweeps
+  and was validated with benchmark-suite unit tests plus clean CPU scouts under
+  `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_stimulus_cache_038b7a6`.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
