@@ -770,6 +770,14 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_time_chunk_sweep_quick` validated the summary
   columns for `curve.simulate`, `kernel.enqueue`, `kernel.dispatch_jax`,
   `kernel.wait`, `kernel.finalize_observer`, and observed chunk metadata.
+  CPU bounded sweep evidence was captured under
+  `benchmark/results/p11b_time_chunk_sweep_cpu` for `Naxons=1000`, `Nx=101`,
+  `tsim=10 ms`, `dt=0.01 ms`, five amplitudes, observer-only output, and
+  different-diameter cohorts. Warm `curve.simulate` means were about
+  2.95 s/amplitude for explicit 50, 3.00 s for default/250, 3.19 s for 500,
+  and 3.27 s for unchunked/1000. Explicit 1000 and unchunked still spend about
+  2.84 s/amplitude in `kernel.finalize_observer`, consistent with deferred
+  JAX materialization rather than a cheap observer finalization path.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
