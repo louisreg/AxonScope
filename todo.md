@@ -699,6 +699,12 @@ decisions need realistic workflow evidence.
   This reduces recruitment-curve update overhead for common-amplitude sweeps
   and was validated with benchmark-suite unit tests plus clean CPU scouts under
   `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_stimulus_cache_038b7a6`.
+  Fourth cleanup: VmRaster observer plan cache keys no longer depend on
+  replaced stimulation object identities, because the lowered plan depends on
+  observer definitions, positions, original indices, and dtype. Clean CPU
+  scouts under
+  `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_vm_raster_plan_cache_69f06da`
+  now show one observer-plan miss followed by hits across amplitude updates.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
