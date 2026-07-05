@@ -229,6 +229,16 @@ def test_vm_raster_combines_local_chunk_states_across_word_boundaries():
     np.testing.assert_array_equal(raster, expected)
 
 
+def test_vm_raster_keeps_single_full_chunk_state():
+    chunk = np.zeros((1, 1, 1, 2), dtype=np.uint32)
+    chunk[0, 0, 0, 0] |= np.uint32(1 << 3)
+    chunk[0, 0, 0, 1] |= np.uint32(1 << 1)
+
+    combined = combine_vm_raster_chunk_states([chunk], starts=[0], lengths=[64], nt=64)
+
+    np.testing.assert_array_equal(np.asarray(combined), chunk)
+
+
 def test_vm_raster_plan_rejects_non_threshold_observers():
     with pytest.raises(NotImplementedError, match="threshold-style Vm"):
         build_vm_raster_plan(

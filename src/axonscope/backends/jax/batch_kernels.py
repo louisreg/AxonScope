@@ -4791,9 +4791,7 @@ def _normalize_time_chunk_steps(time_chunk_steps: int | None, *, nt: int) -> int
     steps = int(time_chunk_steps)
     if steps < 1:
         raise ValueError("time_chunk_steps must be >= 1.")
-    if steps >= nt:
-        return None
-    return steps
+    return min(steps, int(nt))
 
 
 def _time_chunks(nt: int, time_chunk_steps: int | None):

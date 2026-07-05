@@ -742,6 +742,11 @@ decisions need realistic workflow evidence.
   37.7 s with a large `kernel.finalize_observer` span. Next step before a
   default change: inspect VmRaster finalization/full-scope observer handling
   and repeat a narrower CPU sanity run if needed.
+  Follow-up cleanup: explicit `time_chunk_steps >= Nt` is now clamped to one
+  local chunk instead of being normalized to the unchunked/full-scope observer
+  path. A single full VmRaster chunk also bypasses Python repacking during
+  combination. This fixes trace interpretability for `chunk_steps == Nt` before
+  any default change; it is not yet a new benchmark claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.

@@ -231,20 +231,34 @@ def combine_vm_raster_chunk_states(
     if lengths is not None and len(states) != len(lengths):
         raise ValueError("VmRaster chunk states and lengths must have the same length.")
 
-    first = np.asarray(states[0], dtype=np.uint32)
-    if first.ndim < 1:
-        raise ValueError("VmRaster chunk state must have at least one word axis.")
-
-    word_count = (int(nt) + 31) // 32
-    combined = np.zeros(first.shape[:-1] + (word_count,), dtype=np.uint32)
-    static_shape = first.shape[:-1]
-
     if lengths is None:
         chunk_lengths = [None] * len(states)
     else:
         chunk_lengths = [int(length) for length in lengths]
         if any(length < 0 for length in chunk_lengths):
             raise ValueError("VmRaster chunk lengths must be non-negative.")
+
+    word_count = (int(nt) + 31) // 32
+
+    if len(states) == 1 and int(starts[0]) == 0:
+        only = jnp.asarray(states[0])
+        if only.ndim < 1:
+            raise ValueError("VmRaster chunk state must have at least one word axis.")
+        local_capacity = int(only.shape[-1]) * 32
+        local_count = min(
+            local_capacity if chunk_lengths[0] is None else int(chunk_lengths[0]),
+            local_capacity,
+            int(nt),
+        )
+        if local_count >= int(nt) and int(only.shape[-1]) == word_count:
+            return only
+
+    first = np.asarray(states[0], dtype=np.uint32)
+    if first.ndim < 1:
+        raise ValueError("VmRaster chunk state must have at least one word axis.")
+
+    combined = np.zeros(first.shape[:-1] + (word_count,), dtype=np.uint32)
+    static_shape = first.shape[:-1]
 
     for state, start, length in zip(states, starts, chunk_lengths, strict=True):
         chunk = np.asarray(state, dtype=np.uint32)

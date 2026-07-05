@@ -137,6 +137,13 @@ def test_batch_options_none_defaults_to_observer_chunking():
     assert unchunked.time_chunk_steps is None
 
 
+def test_explicit_time_chunk_steps_are_clamped_not_disabled():
+    assert batch_kernels._normalize_time_chunk_steps(None, nt=1000) is None
+    assert batch_kernels._normalize_time_chunk_steps(50, nt=1000) == 50
+    assert batch_kernels._normalize_time_chunk_steps(1000, nt=1000) == 1000
+    assert batch_kernels._normalize_time_chunk_steps(5000, nt=1000) == 1000
+
+
 def test_recording_none_lowers_to_default_observer_chunking():
     options = batch_options_from_recording(axs.Recording.none())
 
