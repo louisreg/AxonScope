@@ -64,6 +64,33 @@ python benchmark/kaggle/run_kernel.py \
   --case-filter observer_only
 ```
 
+Submit the P11B time-chunk sweep campaign on the CPU path of a Kaggle GPU
+machine:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11b-time-chunk-sweep-cpu \
+  --campaign time_chunk_sweep \
+  --script recruitment_curves \
+  --preset quick \
+  --platform cpu \
+  --machine-shape NvidiaTeslaP100 \
+  --policies default,unchunked,50,250,500,1000 \
+  --recording observer_only \
+  --n-axons 1000 \
+  --nx 101 \
+  --tsim 10 \
+  --dt 0.01 \
+  --amplitude-count 5 \
+  --diameters different_diameters \
+  --memory-trace rss \
+  --memory-top-n 0
+```
+
+Switch only `--platform gpu`, the slug, and the memory trace to `device` for
+the matching GPU sweep.
+
 Run recruitment on a T4:
 
 ```bash

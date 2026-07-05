@@ -28,6 +28,7 @@ DEFAULT_REPO_URL = "https://github.com/louisreg/AxonScope.git"
 DEFAULT_SLUG = "axonscope-p11a-benchmarks"
 DEFAULT_TITLE = "AxonScope P11A Benchmarks"
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
+CAMPAIGNS = ("time_chunk_sweep",)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,6 +79,7 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--username", required=True, help="Kaggle username slug.")
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="Kaggle kernel slug.")
     parser.add_argument("--title", default=DEFAULT_TITLE, help="Kaggle kernel title.")
+    parser.add_argument("--campaign", choices=CAMPAIGNS)
     parser.add_argument("--script", required=True, choices=tuple(SCRIPTS))
     parser.add_argument("--preset", choices=tuple(PRESETS))
     parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"))
@@ -186,6 +188,7 @@ def prepare_kernel_package(
     run_id = make_run_id(args)
     require_gpu = bool(not args.no_require_gpu and args.platform == "gpu")
     config = {
+        "campaign": args.campaign,
         "repo_url": args.repo_url,
         "branch": args.branch,
         "script": args.script,
@@ -245,13 +248,15 @@ def render_kernel_entry(config: dict[str, Any]) -> str:
 def make_run_dir(args: argparse.Namespace) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     machine = safe_token(args.machine_shape)
-    return args.output_root / f"{timestamp}_{args.script}_{args.preset}_{machine}"
+    target = args.campaign or args.script
+    return args.output_root / f"{timestamp}_{target}_{args.preset}_{machine}"
 
 
 def make_run_id(args: argparse.Namespace) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    target = args.campaign or args.script
     return (
-        f"{safe_token(args.script)}_{safe_token(args.preset)}_"
+        f"{safe_token(target)}_{safe_token(args.preset)}_"
         f"{safe_token(args.platform)}_{timestamp}"
     )
 

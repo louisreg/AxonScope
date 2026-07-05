@@ -2,7 +2,7 @@
 
 This script is uploaded by `benchmark/kaggle/run_kernel.py`. It clones the
 configured AxonScope branch, installs the benchmark dependencies, runs
-`benchmark/run.py`, records Kaggle hardware metadata, and archives
+`benchmark/run.py` or a benchmark campaign runner, records Kaggle hardware metadata, and archives
 `benchmark/results` as a downloadable output.
 """
 
@@ -106,6 +106,24 @@ def _install_repo(config: dict[str, Any]) -> None:
 
 
 def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list[str]:
+    campaign = str(config.get("campaign") or "").strip()
+    if campaign == "time_chunk_sweep":
+        command = [
+            sys.executable,
+            "benchmark/campaigns/time_chunk_sweep.py",
+            "--script",
+            str(config["script"]),
+            "--preset",
+            str(config["preset"]),
+            "--platform",
+            str(config["platform"]),
+            "--output",
+            str(output_dir),
+        ]
+        command.extend(str(value) for value in config.get("benchmark_args", ()))
+        return command
+    if campaign:
+        raise RuntimeError(f"Unsupported benchmark campaign: {campaign!r}")
     command = [
         sys.executable,
         "benchmark/run.py",

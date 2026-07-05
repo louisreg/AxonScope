@@ -60,6 +60,58 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     ]
 
 
+def test_kaggle_runner_dry_run_supports_time_chunk_campaign(tmp_path: Path):
+    assert (
+        run_kaggle(
+            [
+                "--username",
+                "demo-user",
+                "--slug",
+                "axonscope-p11b-time-chunk-sweep-cpu",
+                "--campaign",
+                "time_chunk_sweep",
+                "--script",
+                "recruitment_curves",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--machine-shape",
+                "NvidiaTeslaP100",
+                "--dry-run",
+                "--no-publish-branch",
+                "--output-root",
+                str(tmp_path),
+                "--policies",
+                "default,unchunked,100",
+                "--recording",
+                "observer_only",
+            ]
+        )
+        == 0
+    )
+
+    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
+    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
+    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
+
+    assert metadata["id"] == "demo-user/axonscope-p11b-time-chunk-sweep-cpu"
+    assert metadata["enable_gpu"] == "true"
+    assert metadata["machine_shape"] == "NvidiaTeslaP100"
+    assert config["campaign"] == "time_chunk_sweep"
+    assert config["script"] == "recruitment_curves"
+    assert config["platform"] == "cpu"
+    assert config["require_gpu"] is False
+    assert config["benchmark_args"] == [
+        "--policies",
+        "default,unchunked,100",
+        "--recording",
+        "observer_only",
+    ]
+    assert "benchmark/campaigns/time_chunk_sweep.py" in kernel_source
+
+
 def test_kaggle_runner_cpu_shape_forces_cpu_platform(tmp_path: Path):
     assert (
         run_kaggle(
