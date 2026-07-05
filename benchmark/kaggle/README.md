@@ -74,7 +74,10 @@ and `axonscope_benchmark_results_<run_id>.zip`.
 
 Keep whole-session JAX tracing on small trace presets only. Trace outputs can
 grow quickly; use `gpu_smoke` for functional GPU acceptance and
-`gpu_trace_smoke` for Perfetto/XPlane/device-memory artifacts.
+`gpu_trace_smoke` for Perfetto/XPlane/device-memory artifacts. Device-memory
+pprof capture defaults to `kernel.wait`; add
+`--jax-device-memory-profile-stage <stage>` only on deliberately tiny trace
+cases.
 
 Use `--no-publish-branch --branch <branch>` only when the target branch already
 contains the exact code to benchmark. Use `--require-clean-git` when you want

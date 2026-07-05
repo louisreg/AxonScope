@@ -55,6 +55,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_false",
         dest="jax_device_memory_profile",
     )
+    parser.add_argument("--jax-device-memory-profile-stage", action="append")
     parser.add_argument("--case-filter")
     args, extra = parser.parse_known_args(argv)
 
@@ -99,6 +100,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         script_args.append("--jax-device-memory-profile")
     elif args.jax_device_memory_profile is False:
         script_args.append("--no-jax-device-memory-profile")
+    for stage in args.jax_device_memory_profile_stage or ():
+        script_args.extend(("--jax-device-memory-profile-stage", str(stage)))
     script_args.extend(extra)
     return SCRIPTS[args.script].main(script_args)
 

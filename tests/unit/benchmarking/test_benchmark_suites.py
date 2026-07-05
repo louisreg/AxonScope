@@ -117,6 +117,8 @@ def test_launcher_can_disable_trace_flags_from_trace_preset(tmp_path: Path):
                 "--no-profile",
                 "--no-profile-create-perfetto",
                 "--no-jax-device-memory-profile",
+                "--jax-device-memory-profile-stage",
+                "runtime.prepare",
             ]
         )
         == 0
@@ -126,6 +128,7 @@ def test_launcher_can_disable_trace_flags_from_trace_preset(tmp_path: Path):
     assert rows[0]["profile"] == "False"
     assert rows[0]["profile_create_perfetto"] == "False"
     assert rows[0]["jax_device_memory_profile"] == "False"
+    assert rows[0]["jax_device_memory_profile_stages"] == "('runtime.prepare',)"
 
 
 def test_resolved_options_apply_preset_and_overrides():

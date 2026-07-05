@@ -178,7 +178,7 @@ class _BenchmarkSessionContext:
             profile_output=self.options["profile_output"],
             profile_create_perfetto=bool(self.options["profile_create_perfetto"]),
             jax_device_memory_profile=bool(self.options["jax_device_memory_profile"]),
-            jax_device_memory_profile_stages=("kernel.wait",),
+            jax_device_memory_profile_stages=self.options["jax_device_memory_profile_stages"],
         )
         self.session = self._manager.__enter__()
         self.session.metadata["benchmark_script"] = self.script_name

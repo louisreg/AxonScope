@@ -73,6 +73,11 @@ whole-session JAX tracing or device-memory pprof capture by default. Use
 to one small pool and two or three amplitude evaluations so Perfetto/XPlane
 artifacts stay inspectable.
 
+Device-memory pprof capture is stage-filtered. Curve scripts default to
+`kernel.wait`; pass `--jax-device-memory-profile-stage runtime.prepare` or
+repeat the flag to capture more stages. Use
+`--jax-device-memory-profile-stage all` only on tiny trace cases.
+
 FP64 runs require a JAX process with x64 enabled before importing JAX. For a
 fresh shell, use the project environment and set `JAX_ENABLE_X64=1` before
 running an FP64 preset.

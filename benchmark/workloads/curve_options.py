@@ -255,6 +255,15 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
         action="store_false",
         dest="jax_device_memory_profile",
     )
+    parser.add_argument(
+        "--jax-device-memory-profile-stage",
+        action="append",
+        dest="jax_device_memory_profile_stages",
+        help=(
+            "Stage name for JAX device-memory profile capture. Repeat to select "
+            "multiple stages. Defaults to kernel.wait; use 'all' to capture every span."
+        ),
+    )
     parser.add_argument("--output", default=f"benchmark/results/{script_name}")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume", action="store_true")
@@ -328,6 +337,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
             if args.jax_device_memory_profile is None
             else bool(args.jax_device_memory_profile)
         ),
+        "jax_device_memory_profile_stages": _profile_stages(args.jax_device_memory_profile_stages),
         "output": args.output,
         "resume": bool(args.resume),
         "case_filter": args.case_filter,
@@ -357,6 +367,15 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
             else preset.amplitude_count
         )
     return options
+
+
+def _profile_stages(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ("kernel.wait",)
+    stages = tuple(str(value) for value in values)
+    if any(stage.lower() == "all" for stage in stages):
+        return ()
+    return stages
 
 
 def dry_run(script_name: str, args: argparse.Namespace) -> int:

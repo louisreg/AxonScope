@@ -468,9 +468,11 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   with JAX `start_trace`/TensorBoard/Perfetto traces delegated through
   `axonscope.backends.execution`, so benchmark scripts do not import JAX
   internals directly.
-- [ ] Add optional profiler stage filters after the two curve case lists are
+- [x] Add optional profiler stage filters after the two curve case lists are
   validated. Keep whole-session profiling as the default until the runtime
-  stage map is stable.
+  stage map is stable. Curve scripts expose
+  `--jax-device-memory-profile-stage`, default to `kernel.wait`, and reserve
+  broad stage capture for tiny trace cases.
 - [x] Move or replace legacy solver benchmark helpers currently living in
   `src/axonscope/benchmarking/benchmark.py`. Public/runtime workloads should
   live in `benchmark/workloads/`; `src` should expose only reusable
@@ -595,17 +597,18 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   seed, cache mode (`cold`, `warm`, `clear_codegen_cache`), chunking
   (`time_chunk_steps`, `amplitude_batch_size`), and result retention level
   (`summary_only`, `raw_traces`, `debug_artifacts`).
-- [ ] Prepare the publication-grade campaign from those two scripts only. Keep
+- [x] Prepare the publication-grade campaign from those two scripts only. Keep
   fixed presets, saved raw data, plots, and publication-ready summary tables.
   NRV comparison is included only after the baseline adapter contract is
-  defined.
+  defined. The campaign matrix and publication outputs are documented in
+  `benchmark/campaigns/README.md`.
 - [x] Clarify baseline scope before writing adapters. Baselines are external
   comparison entry points in `benchmark/baselines/`, never AxonScope runtime
   paths. First define the NRV comparison contract; keep dense/reference JAX only
   as an equivalence/performance sanity route; add a NumPy solver baseline only
   after that solver exists.
   The baseline contract is documented in `benchmark/baselines/README.md`.
-- [ ] Complete P11A acceptance criteria. Local CPU `quick` threshold and
+- [x] Complete P11A acceptance criteria. Local CPU `quick` threshold and
   recruitment runs now finish without NRV/GPU and write time, memory, metadata,
   case, raw-result, curve-summary, and manifest artifacts. A reduced Kaggle P100
   trace smoke passed on 2026-07-05 for commit `b6c3c92` with
@@ -614,11 +617,12 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   device-memory profiles; it produced time, memory, metadata, hardware, and
   trace artifacts under `benchmark/results/kaggle/`. A later non-reduced
   `gpu_smoke` attempt was interrupted because the preset still mixed smoke
-  validation with full tracing. Remaining: rerun the corrected lightweight
-  `gpu_smoke` through Kaggle for threshold and recruitment, use
-  `gpu_trace_smoke` only for trace artifacts, then keep the rule that no
-  speed/memory claim is allowed without a fresh artifact directory and git
-  metadata.
+  validation with full tracing. The corrected lightweight `gpu_smoke` passed on
+  Kaggle P100 for commit `33da04a` on both `threshold_curves` and
+  `recruitment_curves`, with observer-only GPU outputs, time/memory metadata,
+  hardware metadata, and redacted Kaggle environment values. Use
+  `gpu_trace_smoke` only for trace artifacts. No speed/memory claim is allowed
+  without a fresh artifact directory and git metadata.
 
 ### P11B - Benchmark-Gated JAX Solver Optimization
 
