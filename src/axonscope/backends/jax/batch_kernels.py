@@ -3678,11 +3678,14 @@ def _run_single_cable_vstim_batch_observer_chunks(
             progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return combine_vm_raster_chunk_states(
+        return _combine_vm_raster_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
             nt=grid.Nt,
+            mode="single",
+            variant="dense_vstim",
+            time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
     return observer_state
@@ -3804,11 +3807,14 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
             progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return combine_vm_raster_chunk_states(
+        return _combine_vm_raster_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
             nt=grid.Nt,
+            mode="single",
+            variant="sparse_vstim",
+            time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
     return observer_state
@@ -3942,11 +3948,14 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return combine_vm_raster_chunk_states(
+        return _combine_vm_raster_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
             nt=grid.Nt,
+            mode="single",
+            variant="factorized_sparse_vstim",
+            time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
     return observer_state
@@ -4131,11 +4140,14 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
             progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return combine_vm_raster_chunk_states(
+        return _combine_vm_raster_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
             nt=grid.Nt,
+            mode="single",
+            variant="zero_sparse_vstim",
+            time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
     return observer_state
@@ -4710,11 +4722,14 @@ def _run_double_cable_batch_observer_chunks(
             progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return combine_vm_raster_chunk_states(
+        return _combine_vm_raster_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
             nt=grid.Nt,
+            mode="double",
+            variant=kernel_block_solver,
+            time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
     return observer_state
@@ -4783,6 +4798,36 @@ def _resolve_recording(recording: BatchRecording, *, nx: int) -> tuple[Array, bo
     if indices is None:
         return jnp.arange(nx, dtype=jnp.int32), True
     return jnp.asarray(indices, dtype=jnp.int32), False
+
+
+def _combine_vm_raster_chunk_states(
+    states: list[VmRasterState],
+    *,
+    starts: list[int],
+    lengths: list[int],
+    nt: int,
+    mode: str,
+    variant: str,
+    time_chunk_steps: int | None,
+) -> VmRasterState:
+    with benchmark_span(
+        "kernel.combine_observer_chunks",
+        mode=mode,
+        variant=variant,
+        observer="vm_raster",
+        observer_state_scope="chunk",
+        chunk_count=len(states),
+        chunk_steps_min=min(lengths) if lengths else None,
+        chunk_steps_max=max(lengths) if lengths else None,
+        time_chunk_steps=time_chunk_steps,
+        nt=nt,
+    ):
+        return combine_vm_raster_chunk_states(
+            states,
+            starts=starts,
+            lengths=lengths,
+            nt=nt,
+        )
 
 
 def _normalize_time_chunk_steps(time_chunk_steps: int | None, *, nt: int) -> int | None:

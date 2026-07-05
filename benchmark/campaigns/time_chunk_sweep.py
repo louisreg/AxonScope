@@ -47,6 +47,8 @@ SUMMARY_FIELDS = (
     "repeat_curve_simulate_ms",
     "kernel_enqueue_ms",
     "repeat_kernel_enqueue_ms",
+    "kernel_combine_observer_chunks_ms",
+    "repeat_kernel_combine_observer_chunks_ms",
     "kernel_dispatch_jax_ms",
     "repeat_kernel_dispatch_jax_ms",
     "kernel_dispatch_jax_count",
@@ -251,6 +253,16 @@ def summarize_run(
         "repeat_curve_simulate_ms": sum_duration(events, "curve.simulate", phase="repeat", by_id=by_id),
         "kernel_enqueue_ms": sum_duration(events, "kernel.enqueue"),
         "repeat_kernel_enqueue_ms": sum_duration(events, "kernel.enqueue", phase="repeat", by_id=by_id),
+        "kernel_combine_observer_chunks_ms": sum_duration(
+            events,
+            "kernel.combine_observer_chunks",
+        ),
+        "repeat_kernel_combine_observer_chunks_ms": sum_duration(
+            events,
+            "kernel.combine_observer_chunks",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "kernel_dispatch_jax_ms": sum_duration(events, "kernel.dispatch_jax"),
         "repeat_kernel_dispatch_jax_ms": sum_duration(
             events,
@@ -379,16 +391,18 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     lines = [
         "# Time Chunk Sweep",
         "",
-        "| policy | status | curve.simulate ms | dispatch_jax ms | dispatch count | scope | chunk steps |",
-        "| --- | --- | ---: | ---: | ---: | --- | --- |",
+        "| policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | dispatch count | scope | chunk steps |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {count} | {scope} | {chunks} |".format(
+            "| {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {count} | {scope} | {chunks} |".format(
                 policy=row.get("policy", ""),
                 status=row.get("status", ""),
                 curve=float(row.get("repeat_curve_simulate_ms") or 0.0),
                 dispatch=float(row.get("repeat_kernel_dispatch_jax_ms") or 0.0),
+                combine=float(row.get("repeat_kernel_combine_observer_chunks_ms") or 0.0),
+                finalize=float(row.get("repeat_kernel_finalize_observer_ms") or 0.0),
                 count=row.get("kernel_dispatch_jax_count", ""),
                 scope=row.get("observer_state_scopes", ""),
                 chunks=row.get("dispatch_chunk_steps", ""),

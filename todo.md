@@ -791,6 +791,14 @@ decisions need realistic workflow evidence.
   500 about 14.4 s, and 50/default about 17.5-18.1 s. This points toward a
   backend-dependent observer chunk policy, but full/probe Vm still need their
   own evidence before changing defaults broadly.
+  Third tooling step: observer-only chunk combination is now traced explicitly
+  as `kernel.combine_observer_chunks` inside `kernel.enqueue`, and
+  `time_chunk_sweep_summary.csv`/`time_chunk_sweep_report.md` include combine
+  and finalize timings side by side. Local smoke artifacts under
+  `benchmark/results/p11b_time_chunk_sweep_combine_multichunk_smoke` confirm
+  that multi-chunk local VmRaster paths expose combine time, while unchunked
+  full-scope observer paths keep that column at zero. This is trace plumbing,
+  not yet an optimization claim.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
