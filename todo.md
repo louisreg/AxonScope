@@ -708,7 +708,16 @@ decisions need realistic workflow evidence.
   Fifth cleanup: AxonScope template axon/fiber diameters are now quantized at
   construction time to 0.01 um for diameters up to 1 um and 0.1 um above 1 um,
   so solver signatures and benchmark cohorts naturally reuse nearby diameter
-  variants before CPU/GPU Kaggle comparisons.
+  variants before CPU/GPU Kaggle comparisons. The matching Kaggle P100
+  recruitment scouts were captured on 2026-07-05 at commit `9b0dda8` for
+  `Naxons=1000`, `Nx=31`, `tsim=2 ms`, `dt=0.02 ms`, observer-only output,
+  three amplitudes, and different-diameter cohorts. Both CPU and GPU outputs
+  report 63 unique quantized diameters for 1000 axons, with clean git metadata,
+  and are summarized under
+  `benchmark/results/p11b_baseline/bottleneck_kaggle_rounded_diam_cpu_gpu_9b0dda8`.
+  The scout shows a modest GPU kernel enqueue improvement but extra GPU
+  dispatch/runtime overhead on this small workload, so larger GPU-realistic
+  cases are still required before any speed claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
