@@ -778,6 +778,19 @@ decisions need realistic workflow evidence.
   and 3.27 s for unchunked/1000. Explicit 1000 and unchunked still spend about
   2.84 s/amplitude in `kernel.finalize_observer`, consistent with deferred
   JAX materialization rather than a cheap observer finalization path.
+  Matching Kaggle P100 CPU/GPU observer-only sweeps were captured at commit
+  `a237734`: CPU-path artifacts live under
+  `benchmark/results/kaggle/20260705_205140_time_chunk_sweep_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  and GPU-path artifacts under
+  `benchmark/results/kaggle/20260705_205140_time_chunk_sweep_quick_NvidiaTeslaP100/outputs/extracted_gpu`.
+  On Kaggle CPU, explicit 50 is fastest at about 34.2 s total, then 250
+  around 35.0 s and default around 36.0 s; 500, 1000, and unchunked are slower
+  around 36.8-37.2 s, with unchunked/1000 dominated by about 30.5-30.9 s in
+  `kernel.finalize_observer`. On Kaggle GPU, large chunks win clearly:
+  explicit 1000 and unchunked are about 12.35 s total, 250 is about 13.9 s,
+  500 about 14.4 s, and 50/default about 17.5-18.1 s. This points toward a
+  backend-dependent observer chunk policy, but full/probe Vm still need their
+  own evidence before changing defaults broadly.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
