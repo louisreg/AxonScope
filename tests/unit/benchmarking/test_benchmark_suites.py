@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 import axonscope as axs
+from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
 from benchmark.workloads.curve_runtime import _build_pool, _update_pool_amplitudes
@@ -195,6 +196,47 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
         )
         currents.append(float(np.asarray(current)[0]))
     np.testing.assert_allclose(currents, [-0.3, -0.4])
+
+
+def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "3",
+            "--nx",
+            "5",
+            "--stimulation",
+            "monophasic",
+        ]
+    )
+    options = resolved_options(args)
+    pool, _row_meta = _build_pool(
+        options,
+        np.asarray([0.1, 0.2, 0.3], dtype=float),
+        curve_context="recruitment",
+    )
+
+    calls = []
+    original_stimulus_for_amplitude = curve_runtime._stimulus_for_amplitude
+
+    def stimulus_for_amplitude(options, amplitude_uA):
+        calls.append(float(amplitude_uA))
+        return original_stimulus_for_amplitude(options, amplitude_uA)
+
+    monkeypatch.setattr(
+        curve_runtime,
+        "_stimulus_for_amplitude",
+        stimulus_for_amplitude,
+    )
+    _update_pool_amplitudes(pool, np.asarray([0.5, 0.5, 0.5], dtype=float), options)
+
+    stimulations = [simulation.extracellular_stimulation for simulation in pool]
+    assert all(stimulation is not None for stimulation in stimulations)
+    assert len({id(stimulation) for stimulation in stimulations}) == 3
+    assert calls == [0.5]
 
 
 def test_curve_workload_reuses_same_diameter_axon_templates():

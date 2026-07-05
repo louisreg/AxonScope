@@ -526,14 +526,20 @@ def _update_pool_amplitudes(
     amplitudes = np.asarray(amplitudes_uA, dtype=float).reshape(-1)
     if amplitudes.shape != (len(pool),):
         raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
+    stimulus_cache: dict[float, Any] = {}
     for instance, amplitude in zip(pool, amplitudes, strict=True):
         stimulation = instance.extracellular_stimulation
         if stimulation is None:
             raise RuntimeError("benchmark pool row has no extracellular stimulation.")
         drive = stimulation.drives[0]
+        amplitude_key = float(amplitude)
+        stimulus = stimulus_cache.get(amplitude_key)
+        if stimulus is None:
+            stimulus = _stimulus_for_amplitude(options, amplitude_key)
+            stimulus_cache[amplitude_key] = stimulus
         updated = stimulation.replace_drive(
             drive.id,
-            stimulus=_stimulus_for_amplitude(options, float(amplitude)),
+            stimulus=stimulus,
         )
         instance.add_extracellular_stimulation(stimulation=updated, replace=True)
 
