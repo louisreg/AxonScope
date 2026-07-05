@@ -655,9 +655,12 @@ decisions need realistic workflow evidence.
   `cold_path_group_summary.csv`, and plots for pool build, dispatch, runtime
   preparation, input lowering, kernel, and result assembly. First bounded CPU
   audit was generated on 2026-07-05 for `threshold_large_cpu_7ebe7c3` and
-  `recruitment_large_cpu_7ebe7c3`; remaining cold-path evidence before solver
-  changes is the agreed GPU/large-population run, ideally `n=1000` with RSS or
-  device tracing only.
+  `recruitment_large_cpu_7ebe7c3`. A clean `n=1000` CPU scout was generated on
+  2026-07-05 at commit `f895a03` for short observer-only threshold and
+  recruitment runs (`Nx=31`, `tsim=2 ms`, `dt=0.02 ms`, RSS tracing) under
+  `benchmark/results/p11b_baseline/cold_path_n1000_cpu_scout_f895a03`.
+  Remaining cold-path evidence before solver changes is the agreed GPU or
+  larger realistic-population run with RSS or device tracing only.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
