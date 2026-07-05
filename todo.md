@@ -633,6 +633,11 @@ decisions need realistic workflow evidence.
 - [ ] Capture a clean P11A baseline before changing solver behavior:
   `quick`, `local_realistic`, key NRV smoke cases, and GPU smoke/realistic
   where available.
+  CPU `quick` threshold and recruitment baselines were captured on 2026-07-05
+  at commit `ecddf36` under `benchmark/results/p11b_baseline/`, with clean git
+  metadata and full P11A output artifacts. Remaining before optimization
+  claims: CPU `local_realistic`, selected NRV smoke, and GPU smoke/realistic
+  artifacts on the agreed hardware.
 - [ ] Start optimization from a cold-path audit for large synthetic/GPU
   populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
   `runtime.prepare`, `inputs.*`, `kernel.dispatch_jax`, memory pressure, and
