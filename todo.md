@@ -686,6 +686,12 @@ decisions need realistic workflow evidence.
   footprints. Validated with targeted unit tests and a small CPU `quick`
   threshold run under
   `benchmark/results/p11b_cache_smoke/threshold_quick_static_footprint_cache`.
+  Second cleanup: the curve benchmark pool builder now reuses one descriptive
+  axon template per `(cable, diameter)` and keeps row-specific
+  `AxonInstance` stimulations separate. This removes same-diameter workload
+  model reconstruction as a benchmark confounder before interpreting solver
+  bottlenecks. Validated with benchmark-suite unit tests and small dirty CPU
+  scouts; rerun clean artifacts before making any speed claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.

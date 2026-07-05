@@ -61,6 +61,15 @@ class _PhasePool:
     row_meta: tuple[dict[str, Any], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _AxonTemplate:
+    axon: Any
+    family: str
+    diameter_um: float
+    electrode_x: Any
+    positions: Any
+
+
 def run_threshold_curves(args: Any) -> int:
     """Run the currently supported activation-threshold benchmark."""
 
@@ -559,47 +568,71 @@ def _build_pool(
         y_um = np.zeros(n_axons, dtype=float)
         z_um = np.full(n_axons, 100.0, dtype=float)
 
+    templates: dict[tuple[str, float], _AxonTemplate] = {}
     pool: list[axs.AxonInstance] = []
     row_meta: list[dict[str, Any]] = []
     for row in range(n_axons):
         row_cable = _row_cable(options, row)
-        if row_cable == "double_cable":
-            axon, family, diameter_um = _double_cable_axon(options, double_diameters[row])
-            electrode_x = axon.node_position("center", unit=axs.um)
-        else:
-            axon, family, diameter_um = _single_cable_axon(options, single_diameters[row])
-            electrode_x = _fiber_length_um(options) / 2.0 * axs.um
+        diameter_um = (
+            float(double_diameters[row])
+            if row_cable == "double_cable"
+            else float(single_diameters[row])
+        )
+        template_key = (row_cable, diameter_um)
+        template = templates.get(template_key)
+        if template is None:
+            template = _build_axon_template(options, row_cable, diameter_um)
+            templates[template_key] = template
 
         electrode = axs.analytical.PointSourceElectrode(
-            x=electrode_x,
+            x=template.electrode_x,
             y=0.0 * axs.um,
             z=0.0 * axs.um if curve_context == "recruitment" else 100.0 * axs.um,
             min_distance=5.0 * axs.um if curve_context == "recruitment" else None,
         )
-        positions = axon.layout.position_values(unit=axs.um) * axs.um
         stimulation = axs.analytical.point_source_stimulation(
             electrode,
-            positions,
+            template.positions,
             sigma=0.3 * axs.S_per_m,
             stimulus=_stimulus_for_amplitude(options, amplitudes[row]),
             axon_y=float(y_um[row]) * axs.um,
             axon_z=float(z_um[row]) * axs.um,
             axon_id=axs.AxonId(f"row_{row:05d}"),
         )
-        instance = axs.AxonInstance(axon)
+        instance = axs.AxonInstance(template.axon)
         instance.add_extracellular_stimulation(stimulation=stimulation)
         pool.append(instance)
         row_meta.append(
             {
                 "row": row,
-                "family": family,
-                "diameter_um": float(diameter_um),
+                "family": template.family,
+                "diameter_um": float(template.diameter_um),
                 "cable": row_cable,
                 "axon_y_um": float(y_um[row]),
                 "axon_z_um": float(z_um[row]),
             }
         )
     return tuple(pool), tuple(row_meta)
+
+
+def _build_axon_template(
+    options: dict[str, Any],
+    row_cable: str,
+    diameter_um: float,
+) -> _AxonTemplate:
+    if row_cable == "double_cable":
+        axon, family, resolved_diameter_um = _double_cable_axon(options, diameter_um)
+        electrode_x = axon.node_position("center", unit=axs.um)
+    else:
+        axon, family, resolved_diameter_um = _single_cable_axon(options, diameter_um)
+        electrode_x = _fiber_length_um(options) / 2.0 * axs.um
+    return _AxonTemplate(
+        axon=axon,
+        family=family,
+        diameter_um=float(resolved_diameter_um),
+        electrode_x=electrode_x,
+        positions=axon.layout.position_values(unit=axs.um) * axs.um,
+    )
 
 
 def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:

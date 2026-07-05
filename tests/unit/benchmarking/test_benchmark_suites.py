@@ -195,3 +195,95 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
         )
         currents.append(float(np.asarray(current)[0]))
     np.testing.assert_allclose(currents, [-0.3, -0.4])
+
+
+def test_curve_workload_reuses_same_diameter_axon_templates():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "4",
+            "--nx",
+            "5",
+            "--cable",
+            "single_cable",
+            "--diameters",
+            "same_diameter",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
+        curve_context="threshold",
+    )
+
+    assert len({id(simulation.axon) for simulation in pool}) == 1
+    assert len({id(simulation.extracellular_stimulation) for simulation in pool}) == 4
+    assert [meta["diameter_um"] for meta in row_meta] == [0.8, 0.8, 0.8, 0.8]
+
+
+def test_curve_workload_splits_templates_by_cable_model():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "4",
+            "--nx",
+            "15",
+            "--population",
+            "mixed_models",
+            "--diameters",
+            "same_diameter",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
+        curve_context="threshold",
+    )
+
+    assert len({id(simulation.axon) for simulation in pool}) == 2
+    assert id(pool[0].axon) == id(pool[2].axon)
+    assert id(pool[1].axon) == id(pool[3].axon)
+    assert [meta["cable"] for meta in row_meta] == [
+        "single_cable",
+        "double_cable",
+        "single_cable",
+        "double_cable",
+    ]
+
+
+def test_curve_workload_keeps_distinct_templates_for_distinct_diameters():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "4",
+            "--nx",
+            "5",
+            "--cable",
+            "single_cable",
+            "--diameters",
+            "different_diameters",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
+        curve_context="threshold",
+    )
+
+    assert len({id(simulation.axon) for simulation in pool}) == 4
+    np.testing.assert_allclose(
+        [meta["diameter_um"] for meta in row_meta],
+        [0.4, 2.0 / 3.0, 14.0 / 15.0, 1.2],
+    )
