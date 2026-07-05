@@ -560,7 +560,8 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   the local run directory, publishes/clones a stable branch, forwards
   `benchmark/run.py --script ... --preset ... --platform ...` plus extra
   options, streams available logs while polling, downloads the zipped result
-  archive, and the Kaggle entry writes `kaggle_hardware.json`.
+  archive, and the Kaggle entry writes `kaggle_hardware.json` with sensitive
+  Kaggle environment values redacted.
 - [x] Build `benchmark/curves/threshold_curves.py` as the activation/block
   threshold script. Validate its concrete case list together before expanding
   implementation. Required axes: point-source AxonScope first, future NRV nerve
@@ -603,10 +604,15 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   The baseline contract is documented in `benchmark/baselines/README.md`.
 - [ ] Complete P11A acceptance criteria. Local CPU `quick` threshold and
   recruitment runs now finish without NRV/GPU and write time, memory, metadata,
-  case, raw-result, curve-summary, and manifest artifacts. Remaining:
-  validate GPU presets locally where a GPU exists and through the new Kaggle
-  runner otherwise; keep the rule that no speed/memory claim is allowed without
-  a fresh artifact directory and git metadata.
+  case, raw-result, curve-summary, and manifest artifacts. A reduced Kaggle P100
+  smoke passed on 2026-07-05 for commit `b6c3c92` with `threshold_curves`,
+  `gpu_smoke`, `observer_only`, `n_axons=4`, `nx=21`, `tsim=1 ms`,
+  `dt=0.05 ms`, `max_iterations=1`, `memory_trace=all`, JAX profiling, and JAX
+  device-memory profiles; it produced time, memory, metadata, hardware, and
+  trace artifacts under `benchmark/results/kaggle/`. Remaining: validate an
+  agreed non-reduced GPU preset/case through Kaggle or a local GPU, then keep
+  the rule that no speed/memory claim is allowed without a fresh artifact
+  directory and git metadata.
 
 ### P11B - Benchmark-Gated JAX Solver Optimization
 
