@@ -31,6 +31,54 @@ baseline adapter contract is implemented.
 Every campaign must write a manifest with fixed presets, raw data paths, plot
 paths, summary-table paths, git metadata, and hardware metadata.
 
+## P11B Time-Chunk Sweep
+
+Use the time-chunk campaign to compare AxonScope's observer/kernel chunking
+policies without hand-written shell loops. It runs each policy in a separate
+Python process and writes one result directory per policy plus a campaign
+summary table.
+
+Quick local smoke:
+
+```bash
+python benchmark/campaigns/time_chunk_sweep.py \
+  --script recruitment_curves \
+  --preset quick \
+  --platform cpu \
+  --policies default,unchunked,100 \
+  --recording observer_only \
+  --amplitude-count 1 \
+  --memory-trace rss \
+  --memory-top-n 0 \
+  --output benchmark/results/p11b_time_chunk_sweep_quick
+```
+
+Bounded P11B sweep shape:
+
+```bash
+python benchmark/campaigns/time_chunk_sweep.py \
+  --script recruitment_curves \
+  --preset quick \
+  --platform cpu \
+  --policies default,unchunked,50,250,500,1000 \
+  --recording observer_only \
+  --n-axons 1000 \
+  --nx 101 \
+  --tsim 10 \
+  --dt 0.01 \
+  --amplitude-count 5 \
+  --diameters different_diameters \
+  --memory-trace rss \
+  --memory-top-n 0 \
+  --output benchmark/results/p11b_time_chunk_sweep_cpu
+```
+
+The campaign writes `time_chunk_sweep_manifest.json`,
+`time_chunk_sweep_summary.csv`, and `time_chunk_sweep_report.md`. Summary rows
+include the requested policy, the effective benchmark options, observed
+`kernel.dispatch_jax` chunk metadata, `curve.simulate`, `kernel.enqueue`,
+`kernel.dispatch_jax`, `kernel.wait`, and `kernel.finalize_observer` timings.
+
 ## Publication Outputs
 
 Publication runs should retain:

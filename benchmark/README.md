@@ -211,6 +211,22 @@ The bottleneck report writes event-level rows, stage/group rankings, cache
 signals, memory context, and a Markdown summary. Use it before making solver
 optimization claims; it is a triage artifact, not a benchmark claim by itself.
 
+For time-chunk policy triage, use the campaign runner instead of hand-written
+loops:
+
+```bash
+python benchmark/campaigns/time_chunk_sweep.py \
+  --script recruitment_curves \
+  --preset quick \
+  --platform cpu \
+  --policies default,unchunked,50,250,500,1000 \
+  --recording observer_only \
+  --memory-trace rss
+```
+
+It writes separate raw result directories per policy and a merged summary of
+observed chunk metadata plus kernel/observer timings.
+
 ## Publishability
 
 A benchmark result is publishable only if the run directory contains the full

@@ -763,6 +763,13 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_chunk_policy_smoke` confirms default observer-only
   uses two 50-step local chunks, `unchunked` uses the full-scope observer path,
   and explicit `100` on `Nt=100` uses one local chunk.
+  Second tooling step: `benchmark/campaigns/time_chunk_sweep.py` now runs each
+  policy in a separate Python process and writes one result directory per
+  policy plus `time_chunk_sweep_summary.csv` and
+  `time_chunk_sweep_report.md`. A local quick CPU campaign smoke under
+  `benchmark/results/p11b_time_chunk_sweep_quick` validated the summary
+  columns for `curve.simulate`, `kernel.enqueue`, `kernel.dispatch_jax`,
+  `kernel.wait`, `kernel.finalize_observer`, and observed chunk metadata.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
