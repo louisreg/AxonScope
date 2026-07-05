@@ -29,6 +29,29 @@ python benchmark/kaggle/run_kernel.py \
   --case-filter observer_only
 ```
 
+Submit and wait for a CPU-only Kaggle run:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --script threshold_curves \
+  --cpu \
+  --case-filter observer_only
+```
+
+To compare the AxonScope CPU path and GPU path on a closer Kaggle runtime,
+keep the GPU machine shape but switch only the benchmark platform:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --script threshold_curves \
+  --preset quick \
+  --platform cpu \
+  --machine-shape NvidiaTeslaP100 \
+  --case-filter observer_only
+```
+
 Capture a JAX trace on a deliberately tiny GPU case:
 
 ```bash

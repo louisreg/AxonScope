@@ -19,6 +19,7 @@ python benchmark/run.py --script threshold_curves --preset quick --platform cpu 
 python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platform gpu --dry-run
 python benchmark/run.py --script threshold_curves --preset quick --platform cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu
+python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --cpu
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_trace_smoke --platform gpu --machine-shape NvidiaTeslaP100
 ```
@@ -45,9 +46,12 @@ Real execution writes timing, memory, environment, raw activation rows, and
 curve summaries. Block thresholds and NRV execution are intentionally left as
 future benchmark/baseline work until their adapter contracts are defined.
 
-Kaggle GPU runs use `benchmark/kaggle/run_kernel.py`, which packages a script
+Kaggle runs use `benchmark/kaggle/run_kernel.py`, which packages a script
 kernel around the same `benchmark/run.py` command, forwards extra options, and
-downloads a zipped result directory after success.
+downloads a zipped result directory after success. Use `--cpu` or `--platform
+cpu` without `--machine-shape` for a CPU-only Kaggle run. Use `--platform cpu
+--machine-shape NvidiaTeslaP100` when you deliberately want the CPU benchmark
+path on a Kaggle GPU machine for closer CPU/GPU environment comparisons.
 
 ## Presets
 
@@ -185,6 +189,19 @@ The audit writes:
 Use `memory_trace=rss` or `device` for large local/GPU sweeps. Keep
 `memory_trace=all`, JAX profiling, and device-memory pprof capture for tiny
 trace cases only.
+
+For optimization triage, rank nested event spans by exclusive self time:
+
+```bash
+python benchmark/analysis/bottleneck_report.py \
+  benchmark/results/p11b_baseline/threshold_n1000_cpu_scout_f895a03 \
+  benchmark/results/p11b_baseline/recruitment_n1000_cpu_scout_f895a03 \
+  --output benchmark/results/p11b_baseline/bottleneck_n1000_current
+```
+
+The bottleneck report writes event-level rows, stage/group rankings, cache
+signals, memory context, and a Markdown summary. Use it before making solver
+optimization claims; it is a triage artifact, not a benchmark claim by itself.
 
 ## Publishability
 

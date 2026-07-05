@@ -566,7 +566,10 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
   `benchmark/run.py --script ... --preset ... --platform ...` plus extra
   options, streams available logs while polling, downloads the zipped result
   archive, and the Kaggle entry writes `kaggle_hardware.json` with sensitive
-  Kaggle environment values redacted.
+  Kaggle environment values redacted. The runner also supports CPU Kaggle
+  comparisons: `--cpu` or `--platform cpu` selects a CPU-only Kaggle run, while
+  `--platform cpu --machine-shape NvidiaTeslaP100` runs AxonScope's CPU path on
+  a Kaggle GPU machine for closer CPU/GPU environment comparisons.
 - [x] Build `benchmark/curves/threshold_curves.py` as the activation/block
   threshold script. Validate its concrete case list together before expanding
   implementation. Required axes: point-source AxonScope first, future NRV nerve
@@ -664,6 +667,9 @@ decisions need realistic workflow evidence.
   (`Naxons=1000`, `Nx=31`, `tsim=2 ms`, `dt=0.02 ms`, device tracing) and
   summarized under
   `benchmark/results/p11b_baseline/cold_path_n1000_gpu_p100_scout_f225afd`.
+  `benchmark/analysis/bottleneck_report.py` adds the next triage layer from
+  `events.jsonl`: exclusive self-time ranking, group shares, cache signals,
+  memory context, and a Markdown bottleneck summary across CPU/GPU runs.
   The first optimization target is now pool/plan/runtime reuse between
   amplitude evaluations before changing solver kernels.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:

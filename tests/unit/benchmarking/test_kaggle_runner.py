@@ -93,6 +93,97 @@ def test_kaggle_runner_cpu_shape_forces_cpu_platform(tmp_path: Path):
     assert config["require_gpu"] is False
 
 
+def test_kaggle_runner_platform_cpu_defaults_to_cpu_kernel(tmp_path: Path):
+    assert (
+        run_kaggle(
+            [
+                "--username",
+                "demo-user",
+                "--script",
+                "threshold_curves",
+                "--platform",
+                "cpu",
+                "--dry-run",
+                "--no-publish-branch",
+                "--output-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+
+    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
+    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
+
+    assert metadata["enable_gpu"] == "false"
+    assert "machine_shape" not in metadata
+    assert config["preset"] == "quick"
+    assert config["platform"] == "cpu"
+    assert config["require_gpu"] is False
+
+
+def test_kaggle_runner_can_run_cpu_path_on_gpu_machine(tmp_path: Path):
+    assert (
+        run_kaggle(
+            [
+                "--username",
+                "demo-user",
+                "--script",
+                "threshold_curves",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--machine-shape",
+                "NvidiaTeslaP100",
+                "--dry-run",
+                "--no-publish-branch",
+                "--output-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+
+    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
+    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
+
+    assert metadata["enable_gpu"] == "true"
+    assert metadata["machine_shape"] == "NvidiaTeslaP100"
+    assert config["platform"] == "cpu"
+    assert config["require_gpu"] is False
+
+
+def test_kaggle_runner_cpu_shortcut_uses_quick_cpu_preset(tmp_path: Path):
+    assert (
+        run_kaggle(
+            [
+                "--username",
+                "demo-user",
+                "--script",
+                "recruitment_curves",
+                "--cpu",
+                "--dry-run",
+                "--no-publish-branch",
+                "--output-root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+
+    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
+    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
+
+    assert metadata["enable_gpu"] == "false"
+    assert config["preset"] == "quick"
+    assert config["platform"] == "cpu"
+    assert config["require_gpu"] is False
+
+
 def test_kaggle_hardware_metadata_redacts_sensitive_environment_values():
     assert _redact_env_value("KAGGLE_DATA_PROXY_TOKEN", "secret-token") == "<redacted:12 chars>"
     assert _redact_env_value("KAGGLE_API_V1_TOKEN", "/etc/secrets/kaggle/api-v1-token") == "<redacted:32 chars>"

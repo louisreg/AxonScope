@@ -79,12 +79,21 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="Kaggle kernel slug.")
     parser.add_argument("--title", default=DEFAULT_TITLE, help="Kaggle kernel title.")
     parser.add_argument("--script", required=True, choices=tuple(SCRIPTS))
-    parser.add_argument("--preset", default="gpu_smoke", choices=tuple(PRESETS))
-    parser.add_argument("--platform", default="gpu", choices=("cpu", "gpu", "nrv"))
+    parser.add_argument("--preset", choices=tuple(PRESETS))
+    parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"))
+    parser.add_argument(
+        "--cpu",
+        action="store_true",
+        help="Shortcut for a Kaggle CPU run without an accelerator.",
+    )
     parser.add_argument(
         "--machine-shape",
-        default="NvidiaTeslaP100",
-        help="Kaggle accelerator shape, or cpu/no-accelerator.",
+        help=(
+            "Kaggle accelerator shape. Omit it for the default P100 GPU run, "
+            "use cpu/no-accelerator for a CPU-only Kaggle run, or combine "
+            "--platform cpu with a GPU shape to run AxonScope's CPU path on a "
+            "Kaggle GPU machine."
+        ),
     )
     parser.add_argument("--repo-url", default=DEFAULT_REPO_URL)
     parser.add_argument("--branch", default="main")
@@ -118,12 +127,53 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         default=".*axonscope_benchmark_results.*",
         help="Regex passed to `kaggle kernels output --file-pattern`.",
     )
+    raw_args = list(argv) if argv is not None else sys.argv[1:]
+    preset_explicit = _flag_present(raw_args, "--preset")
+    machine_shape_explicit = _flag_present(raw_args, "--machine-shape")
     args, benchmark_args = parser.parse_known_args(argv)
+    normalize_compute_args(
+        args,
+        preset_explicit=preset_explicit,
+        machine_shape_explicit=machine_shape_explicit,
+    )
+    return args, benchmark_args
+
+
+def normalize_compute_args(
+    args: argparse.Namespace,
+    *,
+    preset_explicit: bool,
+    machine_shape_explicit: bool,
+) -> None:
+    if args.cpu:
+        args.platform = "cpu"
+        args.machine_shape = "cpu"
+        args.no_require_gpu = True
+        if not preset_explicit:
+            args.preset = "quick"
+        return
+
+    if args.platform is None:
+        args.platform = "gpu"
+    if args.machine_shape is None:
+        args.machine_shape = "cpu" if args.platform == "cpu" else "NvidiaTeslaP100"
+    if args.preset is None:
+        args.preset = "quick" if args.platform == "cpu" else "gpu_smoke"
+
     if is_cpu_machine_shape(args.machine_shape):
         args.machine_shape = "cpu"
         args.platform = "cpu"
         args.no_require_gpu = True
-    return args, benchmark_args
+        if not preset_explicit:
+            args.preset = "quick"
+    elif args.platform == "cpu":
+        args.no_require_gpu = True
+        if not machine_shape_explicit:
+            args.machine_shape = "cpu"
+
+
+def _flag_present(argv: list[str], flag: str) -> bool:
+    return flag in argv or any(value.startswith(flag + "=") for value in argv)
 
 
 def prepare_kernel_package(
