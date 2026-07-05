@@ -3,8 +3,12 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import numpy as np
+
+import axonscope as axs
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
+from benchmark.workloads.curve_runtime import _build_pool, _update_pool_amplitudes
 
 
 def test_benchmark_launcher_lists_two_curve_scripts_and_presets(capsys):
@@ -155,3 +159,39 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["n_axons"] == 12
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
+
+
+def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "2",
+            "--nx",
+            "5",
+            "--stimulation",
+            "monophasic",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.asarray([0.1, 0.2], dtype=float),
+        curve_context="threshold",
+    )
+
+    _update_pool_amplitudes(pool, np.asarray([0.3, 0.4], dtype=float), options)
+
+    assert [meta["row"] for meta in row_meta] == [0, 1]
+    currents = []
+    for simulation in pool:
+        stimulation = simulation.extracellular_stimulation
+        assert stimulation is not None
+        current = stimulation.drives[0].stimulus.evaluate(
+            [0.21],
+            unit=axs.uA,
+        )
+        currents.append(float(np.asarray(current)[0]))
+    np.testing.assert_allclose(currents, [-0.3, -0.4])

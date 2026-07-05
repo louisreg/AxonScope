@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,12 @@ CURVE_SUMMARY_FIELDS = (
     "activation_count",
     "activation_fraction",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _PhasePool:
+    pool: tuple[axs.AxonInstance, ...]
+    row_meta: tuple[dict[str, Any], ...]
 
 
 def run_threshold_curves(args: Any) -> int:
@@ -212,8 +219,19 @@ def _run_threshold_phase(
     n_axons = int(options["n_axons"])
     low = np.full(n_axons, float(options["amplitude_min"]), dtype=float)
     high = np.full(n_axons, float(options["amplitude_max"]), dtype=float)
+    phase_pool = _build_phase_pool(
+        options,
+        low,
+        selected_case=selected_case,
+        phase=phase,
+        repeat=repeat,
+        curve="activation_threshold",
+        iteration=-2,
+        curve_context="threshold",
+    )
     active_low, row_meta = _evaluate_amplitudes(
         options,
+        phase_pool,
         low,
         target=axs.positions.DISTAL,
         selected_case=selected_case,
@@ -221,9 +239,11 @@ def _run_threshold_phase(
         repeat=repeat,
         curve="activation_threshold",
         iteration=-2,
+        update_amplitudes=False,
     )
     active_high, row_meta = _evaluate_amplitudes(
         options,
+        phase_pool,
         high,
         target=axs.positions.DISTAL,
         selected_case=selected_case,
@@ -269,6 +289,7 @@ def _run_threshold_phase(
         mid = (low + high) / 2.0
         activated, row_meta = _evaluate_amplitudes(
             options,
+            phase_pool,
             mid,
             target=axs.positions.DISTAL,
             selected_case=selected_case,
@@ -339,8 +360,20 @@ def _run_recruitment_phase(
         )
     for iteration, amplitude in enumerate(amplitudes):
         values = np.full(int(options["n_axons"]), float(amplitude), dtype=float)
+        if iteration == 0:
+            phase_pool = _build_phase_pool(
+                options,
+                values,
+                selected_case=selected_case,
+                phase=phase,
+                repeat=repeat,
+                curve="recruitment",
+                iteration=iteration,
+                curve_context="recruitment",
+            )
         activated, row_meta = _evaluate_amplitudes(
             options,
+            phase_pool,
             values,
             target=axs.positions.ALL,
             selected_case=selected_case,
@@ -348,6 +381,7 @@ def _run_recruitment_phase(
             repeat=repeat,
             curve="recruitment",
             iteration=iteration,
+            update_amplitudes=iteration > 0,
         )
         _append_activation_rows(
             result_rows,
@@ -380,8 +414,37 @@ def _run_recruitment_phase(
         )
 
 
+def _build_phase_pool(
+    options: dict[str, Any],
+    amplitudes_uA: np.ndarray,
+    *,
+    selected_case: str,
+    phase: str,
+    repeat: int,
+    curve: str,
+    iteration: int,
+    curve_context: str,
+) -> _PhasePool:
+    with benchmark_span(
+        "curve.build_pool",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        n_axons=int(options["n_axons"]),
+        case_name=selected_case,
+    ):
+        pool, row_meta = _build_pool(
+            options,
+            amplitudes_uA,
+            curve_context=curve_context,
+        )
+    return _PhasePool(pool=pool, row_meta=row_meta)
+
+
 def _evaluate_amplitudes(
     options: dict[str, Any],
+    phase_pool: _PhasePool,
     amplitudes_uA: np.ndarray,
     *,
     target: Any,
@@ -390,20 +453,22 @@ def _evaluate_amplitudes(
     repeat: int,
     curve: str,
     iteration: int,
+    update_amplitudes: bool = True,
 ) -> tuple[np.ndarray, tuple[dict[str, Any], ...]]:
-    with benchmark_span(
-        "curve.build_pool",
-        phase=phase,
-        repeat=repeat,
-        curve=curve,
-        iteration=iteration,
-        n_axons=int(options["n_axons"]),
-    ):
-        pool, row_meta = _build_pool(
-            options,
-            amplitudes_uA,
-            curve_context="recruitment" if curve == "recruitment" else "threshold",
-        )
+    if update_amplitudes:
+        with benchmark_span(
+            "curve.update_amplitudes",
+            phase=phase,
+            repeat=repeat,
+            curve=curve,
+            iteration=iteration,
+            n_axons=int(options["n_axons"]),
+        ):
+            _update_pool_amplitudes(
+                phase_pool.pool,
+                amplitudes_uA,
+                options,
+            )
     activation = axs.analysis.Activation(
         threshold=0.0 * axs.mV,
         blanking=_stim_start_ms(options) * axs.ms,
@@ -412,7 +477,7 @@ def _evaluate_amplitudes(
     recording = _recording_policy(options)
     observers = (activation,) if options["recording"] == "observer_only" else None
     simulation = axs.AxonSimulation(
-        axs.AxonPopulation(pool, name=selected_case),
+        axs.AxonPopulation(phase_pool.pool, name=selected_case),
         duration=float(options["tsim"]) * axs.ms,
         dt=float(options["dt"]) * axs.ms,
         recording=recording,
@@ -441,7 +506,27 @@ def _evaluate_amplitudes(
         recording=options["recording"],
     ):
         activated = _activation_values(result, activation, recording_mode=options["recording"])
-    return activated, row_meta
+    return activated, phase_pool.row_meta
+
+
+def _update_pool_amplitudes(
+    pool: tuple[axs.AxonInstance, ...],
+    amplitudes_uA: np.ndarray,
+    options: dict[str, Any],
+) -> None:
+    amplitudes = np.asarray(amplitudes_uA, dtype=float).reshape(-1)
+    if amplitudes.shape != (len(pool),):
+        raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
+    for instance, amplitude in zip(pool, amplitudes, strict=True):
+        stimulation = instance.extracellular_stimulation
+        if stimulation is None:
+            raise RuntimeError("benchmark pool row has no extracellular stimulation.")
+        drive = stimulation.drives[0]
+        updated = stimulation.replace_drive(
+            drive.id,
+            stimulus=_stimulus_for_amplitude(options, float(amplitude)),
+        )
+        instance.add_extracellular_stimulation(stimulation=updated, replace=True)
 
 
 def _build_pool(
