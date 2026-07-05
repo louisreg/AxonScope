@@ -440,40 +440,183 @@ between P7 model authoring and P11 JAX solver optimization.
   cache state, target, dtype/precision, backend, device, and git state. Fresh
   timing claims are deferred to P11.
 
-### P11 - Realistic Benchmarks And Current JAX Solver Optimization
+### P11A - Benchmark Reset And Evidence Surface
 
-Goal: optimize the JAX solver that exists today using realistic benchmark
-evidence before investing in a new runtime. Hotpath microbenchmarks remain
-diagnostic; product-facing optimization decisions need realistic workflows.
+Goal: restart benchmarking from a clean, reproducible surface before optimizing
+the JAX solver. `src/axonscope/benchmarking` should be the small public
+interface for enabling traces and collecting reports; real benchmark workloads,
+campaigns, presets, launchers, analysis, and generated outputs belong under
+`benchmark/`.
 
-- [ ] Prepare a publication-grade benchmark campaign for AxonScope versus
-  baselines. Cover velocity, activation-threshold curves, block thresholds,
-  recruitment curves, `dt`, `Nx`, `Naxons`, FP32 versus FP64, full Vm, probe
-  Vm, observer-only outputs, single-cable, double-cable, mixed populations,
-  same-diameter versus different-diameter cohorts, CPU versus GPU versus NRV.
-  Keep this reproducible with fixed presets, saved raw data, plots, and
-  publication-ready summary tables.
-- [ ] Keep the benchmark ladder explicit:
-  `benchmark/runtime --suite model_codegen` for model/compiler changes,
-  `benchmark/hotpaths` for span-level diagnosis,
-  `benchmark/realistic_examples` for public workflows, and
-  `benchmark/nrv_performance` for NRV-derived or validation-adjacent workloads.
-- [ ] Refresh realistic workflow benchmark coverage for the current public API:
-  recruitment, threshold curves, velocity, mixed populations, MRG/double-cable,
-  observer-only VmRaster, probe Vm, full Vm, cold/warm CPU, and GPU where
-  available.
-- [ ] Add a process-isolated or rotated cold-start comparison if per-path cold
-  timing becomes publication-relevant. Keep the short local baseline as
-  `cold_run_micro`.
-- [ ] Benchmark recruitment amplitude micro-batching as an explicit campaign
-  axis. Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
-  against peak memory, footprint duplication, cold/warm time, observer-only
-  result assembly, and scientific equivalence before changing defaults.
-- [ ] Run the full `time_chunk_steps` campaign across unchunked, 50, 250, 500,
-  1000, and adaptive policies for full Vm, probe Vm, and observer-only outputs.
-  Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
-  equivalence, and whether defaults should depend on `nt`, `Naxons`, recording
-  mode, or backend.
+- [x] Archive the current benchmark tree before rewriting it. Move old scripts,
+  notebooks, reports, and results that are not part of the new surface to
+  `benchmark/legacy/pre_p11/` with a short inventory README. Keep unfinished
+  ideas visible there; do not treat old raw results as current evidence.
+- [x] Clean generated junk from the benchmark surface (`__pycache__`,
+  `.DS_Store`, stale ad-hoc outputs) and make `benchmark/results/` and new
+  generated reports ignored/generated-only.
+- [x] Redesign `src/axonscope/benchmarking` as an interface, not a workload
+  home:
+  `BenchmarkOptions`, `BenchmarkSession`, `enable_benchmark`,
+  `benchmark(...)`, `benchmark_span`, `record_benchmark_metadata`,
+  environment capture, report writing, and a generic profiling option. The
+  public modules are now thin facades; concrete session/memory/report runtime
+  support lives in private runtime code, and workflow-specific benchmark cases
+  stay out of `src`.
+- [x] Add a backend-neutral profiling option to the benchmark interface:
+  `profile=True`, `profile_backend="auto|jax|none"`, `profile_output=...`,
+  with JAX `start_trace`/TensorBoard/Perfetto traces delegated through
+  `axonscope.backends.execution`, so benchmark scripts do not import JAX
+  internals directly.
+- [ ] Add optional profiler stage filters after the two curve case lists are
+  validated. Keep whole-session profiling as the default until the runtime
+  stage map is stable.
+- [x] Move or replace legacy solver benchmark helpers currently living in
+  `src/axonscope/benchmarking/benchmark.py`. Public/runtime workloads should
+  live in `benchmark/workloads/`; `src` should expose only reusable
+  instrumentation and serialization primitives.
+- [x] Instrument the actual runtime path where work happens rather than putting
+  benchmark logic in the interface layer. Required stages: model/source
+  compile, dispatch planning, runtime preparation, input lowering,
+  stimulation/materialization, kernel dispatch, result assembly,
+  analysis/post-processing, and NRV handoff where relevant.
+  Runtime instrumentation now emits spans such as `dispatch.build_plan`,
+  `runtime.prepare.*`, `inputs.*`, `kernel.enqueue`, `kernel.wait`,
+  `results.split_batch`, `results.to_public`, plus curve-level
+  `curve.build_pool`, `curve.simulate`, and `curve.analyze_activation`.
+  NRV handoff remains tied to the future baseline adapter.
+- [x] Standardize timing and memory tracing for every benchmark span:
+  wall-clock time, warm/cold timing, synchronization boundaries,
+  process RSS, `tracemalloc` current/peak and top allocation deltas, JAX device
+  memory stats, `nvidia-smi`/`jax-smi`-style GPU memory when available, and
+  optional JAX device-memory profile artifacts.
+  `BenchmarkSession` writes span wall time and optional `rss`, `tracemalloc`,
+  device, and `nvidia-smi` memory deltas; curve scripts label warmup/repeat
+  phases and can save JAX device-memory profiles on `kernel.wait`.
+- [x] Record machine and runtime metadata with every run: OS, Python, package
+  versions, git commit/dirty state, CPU model, host RAM, GPU model/VRAM,
+  backend, device, precision policy, execution policy, JAX platform, cache
+  state, recording policy, observer policy, and NRV availability/version.
+  `metadata.json` and `environment.json` now include host environment,
+  packages, git state, CPU/GPU/RAM where available, JAX details, benchmark
+  options, recording/platform/precision, and active profile settings.
+- [x] Define canonical output files for all benchmark runs:
+  `environment.json`, `events.jsonl`, `summary.csv`, `memory_summary.csv`,
+  `cases.csv`, `artifacts/`, and optional `plots/`. Make runs resumable and
+  comparable without scraping console output.
+  Curve runs also write `results.csv`, `curve_summary.csv`, and
+  `manifest.json`; `--resume` skips an existing `results.csv` directory.
+- [x] Add a trace-analysis tool under `benchmark/analysis/` that can summarize
+  generated JAX traces alongside `events.jsonl`: stage timeline, compile vs
+  execute time, long-running ops, device idle gaps where detectable, memory
+  profile artifacts, and links/instructions for opening the trace in
+  TensorBoard/Perfetto. Initial `trace_summary.py` summarizes event durations
+  and lists trace/profile artifacts; deeper JAX trace parsing remains future
+  analysis work.
+- [x] Create a new `benchmark/README.md` around the new surface only:
+  benchmark philosophy, command map, output schema, local/GPU/NRV prerequisites,
+  and how to decide whether a result is publishable.
+- [x] Document the user-facing benchmark instrumentation API with two equivalent
+  styles: context-manager for scripts and `enable_benchmark(...)` /
+  `disable_benchmark(...)` for notebooks/debugging. The example must show time,
+  memory, and JAX trace options:
+
+  ```python
+  import axonscope as axs
+
+  with axs.benchmarking.benchmark(
+      "benchmark/results/example",
+      sync_device=True,
+      record_shapes=True,
+      memory_trace="all",
+      memory_top_n=10,
+      profile=True,
+      profile_backend="jax",
+      jax_device_memory_profile=True,
+  ):
+      result = axs.AxonSimulation(...).run()
+  ```
+
+- [x] Rebuild the `benchmark/` layout from scratch around two canonical curve
+  scripts:
+  `benchmark/run.py`, `benchmark/curves/threshold_curves.py`,
+  `benchmark/curves/recruitment_curves.py`, `benchmark/workloads/`,
+  `benchmark/presets/`, `benchmark/baselines/`, `benchmark/analysis/`,
+  `benchmark/kaggle/`, `benchmark/results/`, and `benchmark/legacy/`.
+- [x] Implement explicit scale presets shared by both curve scripts:
+  `quick`, `local_smoke`, `local_realistic`, `cpu_publication`, `gpu_smoke`,
+  `gpu_realistic`, `nrv_smoke`, and `nrv_full`. Presets must define repeats,
+  warmups, `tsim`, `dt`, `Nx`, `Naxons`, precision, recording mode, platform,
+  memory tracing, profiling, and output directory defaults.
+- [x] Build the local/GPU launcher on the shared script/preset interface:
+  `python benchmark/run.py --script threshold_curves --preset quick --platform cpu`,
+  `python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platform gpu`,
+  `python benchmark/run.py --list`, `--dry-run`, `--resume`, `--output`,
+  `--memory-trace`, `--profile`, and `--case-filter`.
+- [x] Rebuild the Kaggle runner around the same script/preset interface:
+  package the repo, choose GPU shape, pass script/preset/options, stream logs,
+  download `benchmark/results`, and record Kaggle hardware metadata.
+  `benchmark/kaggle/run_kernel.py` now packages a generated Kaggle kernel under
+  the local run directory, publishes/clones a stable branch, forwards
+  `benchmark/run.py --script ... --preset ... --platform ...` plus extra
+  options, streams available logs while polling, downloads the zipped result
+  archive, and the Kaggle entry writes `kaggle_hardware.json`.
+- [x] Build `benchmark/curves/threshold_curves.py` as the activation/block
+  threshold script. Validate its concrete case list together before expanding
+  implementation. Required axes: point-source AxonScope first, future NRV nerve
+  baseline, `tsim`, `dt`, `Nx`, `Naxons`, FP32/FP64, full Vm, probe Vm,
+  observer-only output, single-cable, double-cable, mixed populations,
+  same-diameter and different-diameter cohorts, CPU, GPU, and future NRV.
+  Current real execution supports point-source AxonScope activation-threshold
+  runs through `AxonSimulation(..., execution_policy=...)`, with observer-only
+  VmRaster and recorded-Vm post-processing paths. Block thresholds and NRV
+  remain listed but intentionally rejected for real execution until their
+  semantics/adapters are defined.
+- [x] Build `benchmark/curves/recruitment_curves.py` as the recruitment script.
+  Validate its concrete case list together before expanding implementation.
+  It must share the same axes as `threshold_curves.py` so threshold and
+  recruitment results can be compared table-for-table. Current real execution
+  supports point-source AxonScope recruitment sweeps with the same output
+  schema as threshold runs; NRV remains future baseline work.
+- [x] Give both curve scripts the same core CLI vocabulary:
+  `--source point_source_axonscope|nrv_nerve`, `--tsim`, `--dt`, `--nx`,
+  `--n-axons`, `--precision fp32|fp64`, `--recording full_vm|probe_vm|observer_only`,
+  `--cable single_cable|double_cable`, `--population single_model|mixed_models`,
+  `--diameters same_diameter|different_diameters`, `--platform cpu|gpu|nrv`, `--execution-policy`,
+  `--repeats`, `--warmups`, `--memory-trace`, `--profile`, `--output`,
+  `--dry-run`, and `--case-filter`.
+- [x] Give both curve scripts the same advanced CLI vocabulary where relevant:
+  spatial recording policy (`center`, `probes`, explicit indices), observer
+  criterion, amplitude bounds/tolerance/max-iterations, stimulation preset,
+  seed, cache mode (`cold`, `warm`, `clear_codegen_cache`), chunking
+  (`time_chunk_steps`, `amplitude_batch_size`), and result retention level
+  (`summary_only`, `raw_traces`, `debug_artifacts`).
+- [ ] Prepare the publication-grade campaign from those two scripts only. Keep
+  fixed presets, saved raw data, plots, and publication-ready summary tables.
+  NRV comparison is included only after the baseline adapter contract is
+  defined.
+- [x] Clarify baseline scope before writing adapters. Baselines are external
+  comparison entry points in `benchmark/baselines/`, never AxonScope runtime
+  paths. First define the NRV comparison contract; keep dense/reference JAX only
+  as an equivalence/performance sanity route; add a NumPy solver baseline only
+  after that solver exists.
+  The baseline contract is documented in `benchmark/baselines/README.md`.
+- [ ] Complete P11A acceptance criteria. Local CPU `quick` threshold and
+  recruitment runs now finish without NRV/GPU and write time, memory, metadata,
+  case, raw-result, curve-summary, and manifest artifacts. Remaining:
+  validate GPU presets locally where a GPU exists and through the new Kaggle
+  runner otherwise; keep the rule that no speed/memory claim is allowed without
+  a fresh artifact directory and git metadata.
+
+### P11B - Benchmark-Gated JAX Solver Optimization
+
+Goal: optimize the current JAX solver only after P11A produces realistic,
+stage-level evidence. Hotpath microbenchmarks remain diagnostic; product
+decisions need realistic workflow evidence.
+
+- [ ] Capture a clean P11A baseline before changing solver behavior:
+  `quick`, `local_realistic`, key NRV smoke cases, and GPU smoke/realistic
+  where available.
 - [ ] Start optimization from a cold-path audit for large synthetic/GPU
   populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
   `runtime.prepare`, `inputs.*`, `kernel.dispatch_jax`, memory pressure, and
@@ -481,6 +624,15 @@ diagnostic; product-facing optimization decisions need realistic workflows.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
+- [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
+  Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
+  against peak memory, footprint duplication, cold/warm time, observer-only
+  result assembly, and scientific equivalence before changing defaults.
+- [ ] Run the full `time_chunk_steps` campaign across unchunked, 50, 250, 500,
+  1000, and adaptive policies for full Vm, probe Vm, and observer-only outputs.
+  Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
+  equivalence, and whether defaults should depend on `nt`, `Naxons`,
+  recording mode, or backend.
 - [ ] Carry over P10 backend-neutral optimizer closeout under benchmark
   control: common subexpression elimination, unused diagnostic pruning, stable
   optimized-graph hashing, explainable before/after summaries, and deciding

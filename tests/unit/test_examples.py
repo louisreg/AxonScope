@@ -89,13 +89,15 @@ def test_benchmark_scripts_are_outside_examples_and_importable():
     benchmark_examples = sorted((EXAMPLES_ROOT / "benchmarks").glob("*.py"))
     assert benchmark_examples == []
 
-    hotpath = _load_script(REPO_ROOT / "benchmark" / "runtime" / "hotpath_observer_only_example.py")
-    simple_batching = _load_script(
-        REPO_ROOT / "benchmark" / "runtime" / "benchmark_001_simple_batching.py"
+    threshold_curves = _load_script(
+        REPO_ROOT / "benchmark" / "curves" / "threshold_curves.py"
+    )
+    recruitment_curves = _load_script(
+        REPO_ROOT / "benchmark" / "curves" / "recruitment_curves.py"
     )
 
-    assert callable(hotpath.main)
-    assert callable(simple_batching.main)
+    assert callable(threshold_curves.main)
+    assert callable(recruitment_curves.main)
 
 
 def test_examples_readme_references_existing_learning_and_benchmark_paths():

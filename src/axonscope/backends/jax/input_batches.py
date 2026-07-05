@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.benchmarking.hotpaths import record_benchmark_metadata
+from axonscope.benchmarking import record_benchmark_metadata
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.stimulation import (

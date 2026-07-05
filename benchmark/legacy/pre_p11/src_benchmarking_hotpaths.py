@@ -28,6 +28,27 @@ _ACTIVE_BENCHMARK_SESSION: ContextVar["BenchmarkSession | None"] = ContextVar(
 
 
 @dataclass(frozen=True)
+class BenchmarkOptions:
+    """User-facing options for benchmark instrumentation sessions."""
+
+    print_summary: bool = True
+    save: bool = True
+    sync_device: bool = True
+    record_shapes: bool = True
+    record_memory: bool = True
+    level: str = "hotpaths"
+    memory_trace: str = "off"
+    memory_top_n: int = 0
+    profile: bool = False
+    profile_backend: str = "auto"
+    profile_output: Path | None = None
+    profile_create_perfetto: bool = False
+    profile_create_perfetto_link: bool = False
+    jax_device_memory_profile: bool = False
+    jax_device_memory_profile_stages: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class BenchmarkConfig:
     """Configuration for one hotpath benchmark session."""
 
@@ -40,6 +61,11 @@ class BenchmarkConfig:
     level: str = "hotpaths"
     memory_trace: str = "off"
     memory_top_n: int = 0
+    profile: bool = False
+    profile_backend: str = "auto"
+    profile_output: Path | None = None
+    profile_create_perfetto: bool = False
+    profile_create_perfetto_link: bool = False
     jax_device_memory_profile: bool = False
     jax_device_memory_profile_stages: tuple[str, ...] = ()
 
@@ -190,6 +216,7 @@ class BenchmarkSession:
     _next_event_id: int = 0
     _token: Token[BenchmarkSession | None] | None = None
     _jax_trace_active: bool = False
+    _profile_handle: Any | None = None
     _tracemalloc_started_by_session: bool = False
 
     @contextmanager
@@ -278,13 +305,17 @@ class BenchmarkSession:
         trace_dir.mkdir(parents=True, exist_ok=True)
         self._jax_trace_active = True
         try:
-            import jax
+            from axonscope.backends.execution import (
+                benchmark_profile_trace,
+                benchmark_trace_annotation,
+            )
 
-            with jax.profiler.trace(
-                str(trace_dir),
+            with benchmark_profile_trace(
+                "jax",
+                trace_dir,
                 create_perfetto_trace=bool(trace.get("create_perfetto_trace", False)),
             ):
-                with jax.profiler.StepTraceAnnotation("kernel.enqueue"):
+                with benchmark_trace_annotation("kernel.enqueue"):
                     yield
         finally:
             self._jax_trace_active = False
@@ -301,9 +332,11 @@ class BenchmarkSession:
         profile_dir.mkdir(parents=True, exist_ok=True)
         profile_path = profile_dir / f"{event_id:04d}_{_safe_stage_name(name)}.prof"
         try:
-            import jax
+            from axonscope.backends.execution import (
+                benchmark_save_device_memory_profile,
+            )
 
-            jax.profiler.save_device_memory_profile(str(profile_path))
+            benchmark_save_device_memory_profile(profile_path, backend="jax")
         except Exception as exc:  # pragma: no cover - backend-dependent.
             return {
                 "enabled": True,
@@ -351,6 +384,7 @@ class BenchmarkSession:
         """Finalize the session and optionally print/save the report."""
 
         self.active = False
+        self._stop_profile()
         report = self.report()
         should_save = self.config.save if save is None else bool(save)
         should_print = self.config.print_summary if print_summary is None else bool(print_summary)
@@ -363,10 +397,58 @@ class BenchmarkSession:
             self._tracemalloc_started_by_session = False
         return report
 
+    def start_profile(self) -> None:
+        """Start the backend profiler for whole-session traces, if requested."""
+
+        if not self.config.profile or self.config.profile_backend == "none":
+            return
+        profile_output = self.config.profile_output or self.config.output_dir / "profiles" / "run"
+        self.metadata["profile"] = {
+            "enabled": True,
+            "backend": self.config.profile_backend,
+            "output": str(profile_output),
+            "create_perfetto_trace": bool(self.config.profile_create_perfetto),
+            "create_perfetto_link": bool(self.config.profile_create_perfetto_link),
+        }
+        try:
+            from axonscope.backends.execution import benchmark_profile_start
+
+            self._profile_handle = benchmark_profile_start(
+                self.config.profile_backend,
+                profile_output,
+                create_perfetto_trace=self.config.profile_create_perfetto,
+                create_perfetto_link=self.config.profile_create_perfetto_link,
+            )
+        except Exception as exc:  # pragma: no cover - backend-dependent.
+            self.metadata["profile"].update(
+                {
+                    "active": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+        else:
+            self.metadata["profile"]["active"] = self._profile_handle is not None
+
+    def _stop_profile(self) -> None:
+        if self._profile_handle is None:
+            return
+        try:
+            from axonscope.backends.execution import benchmark_profile_stop
+
+            metadata = benchmark_profile_stop(self._profile_handle)
+        except Exception as exc:  # pragma: no cover - backend-dependent.
+            metadata = {"stop_error": f"{type(exc).__name__}: {exc}"}
+        profile = self.metadata.setdefault("profile", {})
+        if isinstance(profile, dict):
+            profile.update(_json_safe_dict(metadata))
+            profile["active"] = False
+        self._profile_handle = None
+
 
 def enable_benchmark(
     output_dir: str | Path,
     *,
+    options: BenchmarkOptions | None = None,
     print_summary: bool = True,
     save: bool = True,
     reset: bool = True,
@@ -374,6 +456,11 @@ def enable_benchmark(
     record_shapes: bool = True,
     record_memory: bool = True,
     level: str = "hotpaths",
+    profile: bool | None = None,
+    profile_backend: str | None = None,
+    profile_output: str | Path | None = None,
+    profile_create_perfetto: bool | None = None,
+    profile_create_perfetto_link: bool | None = None,
     jax_trace: bool = False,
     jax_trace_dir: str | Path | None = None,
     jax_trace_create_perfetto: bool = False,
@@ -385,11 +472,45 @@ def enable_benchmark(
 ) -> BenchmarkSession:
     """Enable hotpath instrumentation for subsequent AxonScope calls."""
 
+    if options is not None:
+        print_summary = options.print_summary
+        save = options.save
+        sync_device = options.sync_device
+        record_shapes = options.record_shapes
+        record_memory = options.record_memory
+        level = options.level
+        memory_trace = options.memory_trace
+        memory_top_n = options.memory_top_n
+        if profile is None:
+            profile = options.profile
+        if profile_backend is None:
+            profile_backend = options.profile_backend
+        if profile_output is None:
+            profile_output = options.profile_output
+        if profile_create_perfetto is None:
+            profile_create_perfetto = options.profile_create_perfetto
+        if profile_create_perfetto_link is None:
+            profile_create_perfetto_link = options.profile_create_perfetto_link
+        jax_device_memory_profile = options.jax_device_memory_profile
+        if not jax_device_memory_profile_stages:
+            jax_device_memory_profile_stages = options.jax_device_memory_profile_stages
+
+    profile = bool(profile) if profile is not None else False
+    profile_backend = str(profile_backend or "auto").lower()
+    profile_create_perfetto = bool(profile_create_perfetto) if profile_create_perfetto is not None else False
+    profile_create_perfetto_link = (
+        bool(profile_create_perfetto_link)
+        if profile_create_perfetto_link is not None
+        else False
+    )
+
     active = _ACTIVE_BENCHMARK_SESSION.get()
     if active is not None and active.active:
         raise RuntimeError("An AxonScope benchmark session is already active.")
     if level != "hotpaths":
         raise ValueError("Only level='hotpaths' is supported for now.")
+    if profile_backend not in {"auto", "jax", "none"}:
+        raise ValueError("profile_backend must be one of: auto, jax, none.")
     if jax_trace_scope not in {"kernel"}:
         raise ValueError("Only jax_trace_scope='kernel' is supported by enable_benchmark.")
     if memory_trace not in {"off", "rss", "tracemalloc", "device", "all"}:
@@ -418,6 +539,11 @@ def enable_benchmark(
             level=level,
             memory_trace=memory_trace,
             memory_top_n=int(memory_top_n),
+            profile=profile,
+            profile_backend=profile_backend,
+            profile_output=Path(profile_output) if profile_output is not None else None,
+            profile_create_perfetto=profile_create_perfetto,
+            profile_create_perfetto_link=profile_create_perfetto_link,
             jax_device_memory_profile=bool(jax_device_memory_profile),
             jax_device_memory_profile_stages=profile_stages,
         ),
@@ -437,6 +563,15 @@ def enable_benchmark(
             else None,
         }
     )
+    if profile:
+        session.metadata["profile"] = {
+            "enabled": True,
+            "backend": profile_backend,
+            "output": str(session.config.profile_output or path / "profiles" / "run"),
+            "create_perfetto_trace": profile_create_perfetto,
+            "create_perfetto_link": profile_create_perfetto_link,
+            "active": False,
+        }
     if jax_trace:
         trace_dir = Path(jax_trace_dir) if jax_trace_dir is not None else path / "jax_traces" / "benchmark"
         session.metadata["jax_trace"] = {
@@ -449,6 +584,7 @@ def enable_benchmark(
     if reset:
         session.reset()
     session._token = _ACTIVE_BENCHMARK_SESSION.set(session)
+    session.start_profile()
     return session
 
 

@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
-from axonscope.benchmarking.hotpaths import record_benchmark_metadata
+from axonscope.benchmarking import record_benchmark_metadata
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
 

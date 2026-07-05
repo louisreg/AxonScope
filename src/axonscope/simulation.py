@@ -11,7 +11,7 @@ from axonscope.backends.execution import (
     batch_options_from_recording,
     execution_context,
 )
-from axonscope.benchmarking.hotpaths import benchmark_span
+from axonscope.benchmarking import benchmark_span
 from axonscope.performance import ExecutionPolicy
 from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.utils import units

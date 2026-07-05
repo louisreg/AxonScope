@@ -14,7 +14,7 @@ from axonscope.backends.jax.input_lowering import (
     factorized_drive_count_from_rows,
 )
 from axonscope.backends.jax.runtime import SolverRuntime
-from axonscope.benchmarking.hotpaths import (
+from axonscope.benchmarking import (
     benchmark_array_metadata,
     record_benchmark_metadata,
 )

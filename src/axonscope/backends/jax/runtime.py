@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
 from axonscope.backends.jax.rate_tables import enable_rate_tables
 from axonscope.backends.jax.membrane_backend import (

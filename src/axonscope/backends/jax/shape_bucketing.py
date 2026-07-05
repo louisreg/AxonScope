@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from axonscope.benchmarking.hotpaths import record_benchmark_metadata
+from axonscope.benchmarking import record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup
 
 

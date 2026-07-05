@@ -11,7 +11,7 @@ import pytest
 
 import axonscope as axs
 from axonscope import membranes
-from axonscope.benchmarking.hotpaths import benchmark_span
+from axonscope.benchmarking import benchmark_span
 from axonscope.backends.jax.membrane_backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from axonscope.benchmarking.hotpaths import (
+from axonscope.benchmarking import (
     benchmark_array_metadata,
     benchmark_span,
     benchmark_wait,

@@ -471,11 +471,10 @@ def test_public_examples_and_docs_do_not_place_axon_instances_in_world_space():
 
     for root in (
         REPO_ROOT / "examples",
-        REPO_ROOT / "benchmark" / "hotpaths",
-        REPO_ROOT / "benchmark" / "nrv_performance",
-        REPO_ROOT / "benchmark" / "pseudo_double",
-        REPO_ROOT / "benchmark" / "runtime",
-        REPO_ROOT / "benchmark" / "solvers",
+        REPO_ROOT / "benchmark" / "curves",
+        REPO_ROOT / "benchmark" / "workloads",
+        REPO_ROOT / "benchmark" / "analysis",
+        REPO_ROOT / "benchmark" / "baselines",
     ):
         for path in _python_sources(root):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1611,12 +1610,38 @@ def test_crank_nicholson_facade_delegates_to_backend_boundary():
     assert offenders == []
 
 
+def test_benchmarking_public_modules_are_interfaces_not_runtime_engines():
+    benchmark_text = (SRC_ROOT / "benchmarking" / "benchmark.py").read_text(
+        encoding="utf-8"
+    )
+    profiling_text = (SRC_ROOT / "benchmarking" / "profiling.py").read_text(
+        encoding="utf-8"
+    )
+
+    forbidden_benchmark_terms = {
+        "tracemalloc",
+        "nvidia-smi",
+        "subprocess",
+        "ContextVar",
+        "import jax",
+        "numpy as np",
+    }
+    forbidden_profiling_terms = {
+        "import jax",
+        "jax.profiler",
+        "start_trace",
+        "stop_trace",
+        "save_device_memory_profile",
+    }
+
+    assert "axonscope._runtime.benchmarking" in benchmark_text
+    assert all(term not in benchmark_text for term in forbidden_benchmark_terms)
+    assert "axonscope.backends.execution" in profiling_text
+    assert all(term not in profiling_text for term in forbidden_profiling_terms)
+
+
 def test_active_double_cable_solver_surface_excludes_archived_candidates():
     from axonscope.solvers.options import DoubleCableBlockSolver
-    from benchmark.solvers.bench_double_cable_linear_solvers import (
-        BENCHMARK_ONLY_SOLVER_RESOLUTIONS,
-        SOLVER_CHOICES,
-    )
 
     retained_public = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
     archived = {
@@ -1638,8 +1663,7 @@ def test_active_double_cable_solver_surface_excludes_archived_candidates():
     }
 
     assert set(get_args(DoubleCableBlockSolver)) == retained_public
-    assert archived.isdisjoint(set(SOLVER_CHOICES))
-    assert archived.isdisjoint(set(BENCHMARK_ONLY_SOLVER_RESOLUTIONS))
+    assert archived.isdisjoint(retained_public)
 
     common_text = (SRC_ROOT / "backends" / "jax" / "common.py").read_text(
         encoding="utf-8"

@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance
-from axonscope.benchmarking.hotpaths import (
+from axonscope.benchmarking import (
     benchmark_array_metadata,
     benchmark_span,
     benchmark_wait,

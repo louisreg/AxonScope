@@ -7,7 +7,7 @@ from typing import Any, Callable, cast
 import jax
 import jax.numpy as jnp
 
-from axonscope.benchmarking.hotpaths import benchmark_span
+from axonscope.benchmarking import benchmark_span
 
 from .batch_inputs import (
     FactorizedExtracellularPotentialBatch,

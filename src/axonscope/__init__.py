@@ -34,6 +34,7 @@ from axonscope.analysis import (
 )
 from axonscope.axon_instance import AxonInstance
 from axonscope.benchmarking import (
+    BenchmarkOptions,
     BenchmarkReport,
     BenchmarkSession,
     benchmark,
@@ -200,6 +201,7 @@ __all__ = [
     "SimulationEstimateGroup",
     "AxonInstance",
     "BenchmarkReport",
+    "BenchmarkOptions",
     "BenchmarkSession",
     "AxonPopulation",
     "AxonSimulation",

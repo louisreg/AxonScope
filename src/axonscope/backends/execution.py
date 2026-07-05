@@ -9,6 +9,8 @@ route.
 from __future__ import annotations
 
 from dataclasses import replace
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
 from axonscope.recording import Recording, RecordingPlan
@@ -142,6 +144,106 @@ def benchmark_membrane_output_names(
     return jax_benchmark_membrane_output_names(model, method_name)
 
 
+def benchmark_profile_start(
+    backend: str,
+    output_dir: str | Path,
+    *,
+    create_perfetto_link: bool = False,
+    create_perfetto_trace: bool = False,
+) -> Any:
+    """Start a backend-owned profiler trace for benchmark instrumentation."""
+
+    resolved = _resolve_benchmark_profile_backend(backend)
+    if resolved is None:
+        return None
+    if resolved == "jax":
+        from axonscope.backends.jax.benchmark import benchmark_profile_start as start
+
+        return start(
+            output_dir,
+            create_perfetto_link=create_perfetto_link,
+            create_perfetto_trace=create_perfetto_trace,
+        )
+    raise ValueError(f"Unsupported benchmark profile backend: {backend!r}.")
+
+
+def benchmark_profile_stop(handle: Any) -> dict[str, Any]:
+    """Stop a backend-owned profiler trace and return JSON-safe metadata."""
+
+    if handle is None:
+        return {"enabled": False}
+    stop = getattr(handle, "stop", None)
+    if callable(stop):
+        metadata = stop()
+        return dict(metadata or {})
+    return {"enabled": True, "stopped": False, "error": "profile handle has no stop method"}
+
+
+@contextmanager
+def benchmark_profile_trace(
+    backend: str,
+    output_dir: str | Path,
+    *,
+    create_perfetto_link: bool = False,
+    create_perfetto_trace: bool = False,
+):
+    """Context manager for a backend-owned profiler trace."""
+
+    handle = benchmark_profile_start(
+        backend,
+        output_dir,
+        create_perfetto_link=create_perfetto_link,
+        create_perfetto_trace=create_perfetto_trace,
+    )
+    try:
+        yield Path(output_dir)
+    finally:
+        benchmark_profile_stop(handle)
+
+
+def benchmark_trace_annotation(name: str):
+    """Return a backend-owned trace annotation context when available."""
+
+    try:
+        from axonscope.backends.jax.benchmark import (
+            benchmark_trace_annotation as jax_trace_annotation,
+        )
+
+        return jax_trace_annotation(name)
+    except Exception:
+        return nullcontext()
+
+
+def benchmark_save_device_memory_profile(
+    output_path: str | Path,
+    *,
+    backend: str = "auto",
+) -> dict[str, Any]:
+    """Save a backend device-memory profile and return metadata."""
+
+    resolved = _resolve_benchmark_profile_backend(backend)
+    if resolved is None:
+        return {"enabled": False}
+    if resolved == "jax":
+        from axonscope.backends.jax.benchmark import (
+            benchmark_save_device_memory_profile as save,
+        )
+
+        return save(output_path)
+    raise ValueError(f"Unsupported benchmark profile backend: {backend!r}.")
+
+
+def _resolve_benchmark_profile_backend(backend: str) -> str | None:
+    normalized = str(backend).lower()
+    if normalized == "none":
+        return None
+    if normalized == "auto":
+        return "jax"
+    if normalized == "jax":
+        return "jax"
+    raise ValueError("benchmark profile backend must be one of: auto, jax, none.")
+
+
 def batch_options_for_execution_context(
     batch_options: BatchOptions | None,
     context: Any,
@@ -198,6 +300,11 @@ __all__ = [
     "benchmark_observer_output_label",
     "benchmark_observers_are_vm_raster_compatible",
     "benchmark_plan_input_lowering",
+    "benchmark_profile_start",
+    "benchmark_profile_stop",
+    "benchmark_profile_trace",
+    "benchmark_save_device_memory_profile",
+    "benchmark_trace_annotation",
     "benchmark_vm_raster_definitions",
     "execution_context",
     "run_batch_group",

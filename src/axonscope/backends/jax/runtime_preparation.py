@@ -8,7 +8,7 @@ from typing import Any, cast
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.backends.jax.runtime import (
     CableRuntime,
     ExtracellularRuntime,

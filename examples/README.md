@@ -109,8 +109,9 @@ explicit NRV code in the example or benchmark, not package integration code.
   from the bundled histology contour image with `cv2`, sample NRV's LIFE/FEM
   footprint into AxonScope stimulation objects, run an AxonScope recruitment
   sweep, and plot recruitment plus activated fibers on the nerve cross-section.
-  NRV validation and large timing/memory comparisons live under
-  `benchmark/nrv_performance/`.
+  NRV validation lives under `tests/nrv`; future NRV timing comparisons belong
+  in `benchmark/baselines/` and the P11 curve scripts once the adapter contract
+  is defined.
 
 ## Tutorials
 
@@ -125,10 +126,9 @@ Timing, memory, profiling, and reproducibility scripts live under `benchmark/`,
 not `examples/`:
 
 - `benchmark/README.md`: supported benchmark surface and retained commands.
-- `benchmark/runtime/run.py`: named public-runtime and model-codegen suites.
-- `benchmark/hotpaths/run.py`: cold/warm, lowering, memory, and dispatch
-  diagnostics.
-- `benchmark/nrv_performance/run.py`: AxonScope-vs-NRV and realistic fascicle
-  performance suites.
-- `benchmark/notebooks/`: archived notebook snapshots only; use current CLI
-  runners for new evidence.
+- `benchmark/run.py`: shared launcher for benchmark scripts and presets.
+- `benchmark/curves/threshold_curves.py`: activation/block threshold case
+  matrix.
+- `benchmark/curves/recruitment_curves.py`: recruitment case matrix.
+- `benchmark/analysis/trace_summary.py`: event/profile artifact summaries.
+- `benchmark/legacy/pre_p11/`: archived historical runners and notebooks.

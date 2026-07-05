@@ -5,7 +5,7 @@ from typing import Any, Sequence
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.backends.execution import run_batch_group
-from axonscope.benchmarking.hotpaths import benchmark_span, record_benchmark_metadata
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import (
     DispatchProgress,

@@ -6,7 +6,7 @@ import json
 import numpy as np
 import pytest
 
-import axonscope.benchmarking.hotpaths as hotpaths
+import axonscope._runtime.benchmarking as instrumentation
 from axonscope.benchmarking import (
     benchmark,
     benchmark_array_metadata,
@@ -20,7 +20,7 @@ from axonscope.benchmarking import (
 )
 
 
-def test_hotpath_session_records_nested_events_and_writes_files(tmp_path):
+def test_session_records_nested_events_and_writes_files(tmp_path):
     enable_benchmark(tmp_path, print_summary=False)
     try:
         with benchmark_span("simulation.pool.total", pool_size=2):
@@ -44,7 +44,9 @@ def test_hotpath_session_records_nested_events_and_writes_files(tmp_path):
     assert (tmp_path / "events.jsonl").is_file()
     assert (tmp_path / "summary.csv").is_file()
     assert (tmp_path / "metadata.json").is_file()
-    assert not (tmp_path / "memory_summary.csv").exists()
+    assert (tmp_path / "environment.json").is_file()
+    assert (tmp_path / "memory_summary.csv").is_file()
+    assert list(csv.DictReader((tmp_path / "memory_summary.csv").open())) == []
 
     first_event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
     assert first_event["name"] == "inputs.intracellular"
@@ -112,7 +114,7 @@ def test_device_memory_trace_uses_best_effort_snapshots(tmp_path, monkeypatch):
             },
         ]
     )
-    monkeypatch.setattr(hotpaths, "_device_memory_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr(instrumentation, "_device_memory_snapshot", lambda: next(snapshots))
 
     enable_benchmark(tmp_path, print_summary=False, memory_trace="device")
     try:
@@ -130,7 +132,7 @@ def test_device_memory_trace_uses_best_effort_snapshots(tmp_path, monkeypatch):
 
 
 def test_rss_memory_trace_tolerates_missing_process_memory(tmp_path, monkeypatch):
-    monkeypatch.setattr(hotpaths, "_current_rss_mib", lambda: None)
+    monkeypatch.setattr(instrumentation, "_current_rss_mib", lambda: None)
 
     enable_benchmark(tmp_path, print_summary=False, memory_trace="rss")
     try:
@@ -147,7 +149,7 @@ def test_rss_memory_trace_tolerates_missing_process_memory(tmp_path, monkeypatch
 
 
 def test_jax_device_memory_profile_metadata_is_recorded(tmp_path, monkeypatch):
-    def fake_save(self, *, name, event_id):
+    def fake_profile(self, name, event_id):
         return {
             "enabled": True,
             "stage": name,
@@ -155,7 +157,11 @@ def test_jax_device_memory_profile_metadata_is_recorded(tmp_path, monkeypatch):
             "format": "pprof",
         }
 
-    monkeypatch.setattr(hotpaths.BenchmarkSession, "_save_jax_device_memory_profile", fake_save)
+    monkeypatch.setattr(
+        instrumentation.BenchmarkSession,
+        "_device_memory_profile",
+        fake_profile,
+    )
 
     enable_benchmark(
         tmp_path,
@@ -209,36 +215,38 @@ def test_nested_benchmark_sessions_are_rejected(tmp_path):
         disable_benchmark(print_summary=False, save=False)
 
 
-def test_enable_benchmark_accepts_jax_trace_metadata(tmp_path):
+def test_enable_benchmark_accepts_profile_metadata(tmp_path):
     session = enable_benchmark(
         tmp_path,
         print_summary=False,
         save=False,
-        jax_trace=True,
-        jax_trace_create_perfetto=True,
+        profile=True,
+        profile_backend="none",
+        profile_create_perfetto=True,
     )
     try:
-        trace = session.metadata["jax_trace"]
+        profile = session.metadata["profile"]
     finally:
         disable_benchmark(print_summary=False, save=False)
 
-    assert trace == {
+    assert profile == {
         "enabled": True,
-        "label": "benchmark",
-        "trace_dir": str(tmp_path / "jax_traces" / "benchmark"),
+        "backend": "none",
+        "output": str(tmp_path / "profiles" / "run"),
         "create_perfetto_trace": True,
-        "scope": "kernel",
+        "create_perfetto_link": False,
+        "active": False,
     }
 
 
-def test_enable_benchmark_rejects_unsupported_jax_trace_scope(tmp_path):
-    with pytest.raises(ValueError, match="jax_trace_scope"):
+def test_enable_benchmark_rejects_unsupported_profile_backend(tmp_path):
+    with pytest.raises(ValueError, match="profile_backend"):
         enable_benchmark(
             tmp_path,
             print_summary=False,
             save=False,
-            jax_trace=True,
-            jax_trace_scope="run",
+            profile=True,
+            profile_backend="other",
         )
 
 
