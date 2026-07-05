@@ -679,8 +679,15 @@ decisions need realistic workflow evidence.
   once and update only extracellular drive stimuli between amplitude
   evaluations, matching the public protocol examples. This removes repeated
   benchmark-side pool construction as a confounder; it is not yet a solver
-  speed claim. Remaining optimization targets are dispatch-plan/runtime reuse,
-  prepared cohort caching, and lowering/transport pruning.
+  speed claim. Next cleanup: prepared-cohort caching now reuses static row
+  positions while refreshing replaced stimulation rows, and factorized
+  footprint cache keys now follow static footprints rather than transient drive
+  objects, so amplitude sweeps can update waveform current without recomputing
+  footprints. Validated with targeted unit tests and a small CPU `quick`
+  threshold run under
+  `benchmark/results/p11b_cache_smoke/threshold_quick_static_footprint_cache`.
+  Remaining optimization targets are broader dispatch/runtime reuse,
+  lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
   Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
   against peak memory, footprint duplication, cold/warm time, observer-only
@@ -709,8 +716,15 @@ decisions need realistic workflow evidence.
   cases. Only broaden compact forcing after equivalence tests against dense
   results and benchmark evidence for memory/time benefits.
 - [ ] Improve GPU solver: see
-  `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md` and update
-  `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`.
+  `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md`,
+  `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`, and
+  `ideas/axonscope_single_double_cable_gpu_solver_options_with_precompute.md`.
+  Before implementation, do a critical reading pass over these documents:
+  identify what already exists in the current code, what is relevant versus
+  not relevant for AxonScope's present solver boundary, and which ideas deserve
+  staged implementation. Implement candidates incrementally, each gated by
+  correctness checks plus small benchmarks first, then larger realistic
+  benchmarks before keeping or promoting the change.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

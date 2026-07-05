@@ -5,11 +5,17 @@ import numpy as np
 
 import axonscope as axs
 import axonscope.backends.jax.group_runner as group_runner
+import axonscope.backends.jax.input_batches as input_batches
 from axonscope.backends.jax import runtime_caches, runtime_preparation, shape_bucketing
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
+from axonscope.benchmarking import benchmark_span
+from axonscope.backends.jax.batch_inputs import (
+    materialize_factorized_extracellular_potential_batch,
+)
 from axonscope.analytical import PointSourceElectrode
 from axonscope.backends.jax.input_batches import (
+    build_factorized_vstim_midpoint_batch,
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
     build_vstim_midpoint_batch,
@@ -916,6 +922,92 @@ def test_batch_static_runtime_cache_reuses_equivalent_pool_with_new_time_grid():
     ]
     assert runtime_cache_events == ["miss", "miss"]
     assert static_cache_events == ["miss", "hit"]
+
+
+def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    group = build_dispatch_plan([axon]).groups[0]
+
+    runtime_caches.clear_prepared_cohort_cache()
+    first = runtime_preparation.prepared_cohort_for_group(group)
+    stimulation = first.stimulations[0][0]
+    drive = stimulation.drives[0]
+    updated = stimulation.replace_drive(
+        drive.id,
+        stimulus=Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=20e-6,
+        ),
+    )
+    axon.add_extracellular_stimulation(stimulation=updated, replace=True)
+
+    second = runtime_preparation.prepared_cohort_for_group(group)
+
+    assert second is not first
+    assert second.x_positions_m is first.x_positions_m
+    assert second.stimulations == ((updated,),)
+    second_peak = np.asarray(second.stimulations[0][0].drives[0].stimulus.y).max()
+    first_peak = np.asarray(first.stimulations[0][0].drives[0].stimulus.y).max()
+    assert second_peak > first_peak
+
+
+def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    updated = stimulation.replace_drive(
+        drive.id,
+        stimulus=Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=20e-6,
+        ),
+    )
+
+    input_batches._FOOTPRINT_CACHE.clear()
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.extracellular"):
+            first = build_factorized_vstim_midpoint_batch(
+                axon,
+                [(stimulation,), (stimulation,)],
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+            )
+        with benchmark_span("inputs.extracellular"):
+            second = build_factorized_vstim_midpoint_batch(
+                axon,
+                [(updated,), (updated,)],
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+            )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert first is not None
+    assert second is not None
+    statuses = [
+        event.metadata.get("vstim_footprint_cache")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    assert statuses == ["miss", "hit"]
+    np.testing.assert_allclose(
+        np.asarray(second.footprint_mV_per_A),
+        np.asarray(first.footprint_mV_per_A),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(materialize_factorized_extracellular_potential_batch(second)),
+        2.0 * np.asarray(materialize_factorized_extracellular_potential_batch(first)),
+        rtol=1e-6,
+        atol=1e-6,
+    )
 
 
 def test_batch_runtime_cache_separates_backend_context_scope():

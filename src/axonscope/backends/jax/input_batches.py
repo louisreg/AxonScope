@@ -1018,7 +1018,7 @@ def _factorized_footprint_rows_cache_key(
         str(np_dtype),
         int(max_drive_count),
         tuple(
-            tuple((id(stimulation), id(drive)) for stimulation, drive, _stimulus in row)
+            tuple(_drive_static_footprint_key(drive) for _stimulation, drive, _stimulus in row)
             for row in drive_rows
         ),
         _array_content_key(x_rows),
@@ -1090,12 +1090,30 @@ def _footprint_rows_cache_key(
         "footprint_rows",
         str(np_dtype),
         tuple(
-            (id(stimulation), id(drive))
-            for stimulation, drive in zip(stimulations, drives, strict=True)
+            _drive_static_footprint_key(drive)
+            for _stimulation, drive in zip(stimulations, drives, strict=True)
         ),
         _array_content_key(x_rows),
         _array_content_key(axon_y_um),
         _array_content_key(axon_z_um),
+    )
+
+
+def _drive_static_footprint_key(drive: Any) -> tuple[Any, ...]:
+    footprint = getattr(drive, "footprint", None)
+    if footprint is None:
+        return ("drive_identity", id(drive))
+    drive_id = getattr(drive, "id", None)
+    interpolation = getattr(footprint, "interpolation", None)
+    source_id = getattr(footprint, "source_id", None)
+    reference = getattr(footprint, "reference", None)
+    return (
+        "static_footprint_v1",
+        drive_id,
+        id(footprint),
+        interpolation,
+        source_id,
+        reference,
     )
 
 

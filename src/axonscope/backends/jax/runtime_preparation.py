@@ -37,6 +37,7 @@ from axonscope.backends.jax.membrane_backend import (
 )
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.preparation.cohort import PreparedCohort
+from axonscope.preparation.runtime_batches import extracellular_stimulation_rows
 from axonscope.solvers.options import SolverOptions
 
 
@@ -171,12 +172,48 @@ def prepared_cohort_for_group(group: DispatchGroup) -> PreparedCohort:
     cached = get_prepared_cohort(cache_key)
     if cached is not None:
         record_benchmark_metadata(prepared_cohort_cache="hit")
-        return cached
+        return _with_current_stimulation_rows(cached, group)
 
     cohort = PreparedCohort.from_dispatch_group(group)
     store_prepared_cohort(cache_key, cohort)
     record_benchmark_metadata(prepared_cohort_cache="miss")
     return cohort
+
+
+def _with_current_stimulation_rows(
+    cohort: PreparedCohort,
+    group: DispatchGroup,
+) -> PreparedCohort:
+    axons = tuple(item.simulation for item in group.items)
+    stimulations = extracellular_stimulation_rows(axons)
+    representative = representative_item(group).simulation
+    if (
+        _same_objects(cohort.axons, axons)
+        and _same_stimulation_rows(cohort.stimulations, stimulations)
+        and cohort.representative is representative
+    ):
+        return cohort
+    return replace(
+        cohort,
+        representative=representative,
+        axons=axons,
+        stimulations=stimulations,
+    )
+
+
+def _same_objects(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
+    return len(left) == len(right) and all(
+        a is b for a, b in zip(left, right, strict=True)
+    )
+
+
+def _same_stimulation_rows(
+    left: tuple[tuple[Any, ...], ...],
+    right: tuple[tuple[Any, ...], ...],
+) -> bool:
+    if len(left) != len(right):
+        return False
+    return all(_same_objects(a, b) for a, b in zip(left, right, strict=True))
 
 
 def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
@@ -449,19 +486,7 @@ def _group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
 
 
 def _group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
-    return (
-        _group_static_signature(group),
-        tuple(
-            (
-                bool(getattr(item.simulation, "use_extracellular", False)),
-                tuple(
-                    id(stimulation)
-                    for stimulation in getattr(item.simulation, "extracellular_stimulations", ())
-                ),
-            )
-            for item in group.items
-        ),
-    )
+    return _group_static_signature(group)
 
 
 def _prepare_parameter_batch_base_runtime(
