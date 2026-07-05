@@ -718,6 +718,18 @@ decisions need realistic workflow evidence.
   The scout shows a modest GPU kernel enqueue improvement but extra GPU
   dispatch/runtime overhead on this small workload, so larger GPU-realistic
   cases are still required before any speed claim.
+  Follow-up bounded-realistic Kaggle recruitment scouts were captured on
+  2026-07-05 at commit `a48fc36` for `Naxons=1000`, `Nx=101`, `tsim=10 ms`,
+  `dt=0.01 ms`, observer-only output, five amplitudes, and different-diameter
+  cohorts. They are summarized under
+  `benchmark/results/p11b_baseline/bottleneck_kaggle_realistic_rounded_diam_cpu_gpu_a48fc36`
+  and plotted under
+  `benchmark/results/p11b_baseline/cold_path_kaggle_realistic_rounded_diam_cpu_gpu_a48fc36`.
+  This larger run shows the GPU path clearly reducing solver dispatch time
+  (`curve.simulate` about 17.8 s GPU versus 34.4 s CPU), while the CPU path
+  spends about 24.6 s in 100 `kernel.dispatch_jax` spans. Because the effective
+  chunking is 20 chunks per amplitude (`time_chunk_steps=50`), the immediate
+  next campaign should vary `time_chunk_steps` before changing kernel code.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
