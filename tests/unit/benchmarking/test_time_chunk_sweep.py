@@ -123,6 +123,34 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "duration_ms": 2.0,
             "metadata": {},
         },
+        {
+            "event_id": 8,
+            "parent_event_id": 2,
+            "name": "results.split_batch",
+            "duration_ms": 9.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 9,
+            "parent_event_id": 8,
+            "name": "results.materialize_vm",
+            "duration_ms": 3.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 10,
+            "parent_event_id": 8,
+            "name": "results.assemble_rows",
+            "duration_ms": 4.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 11,
+            "parent_event_id": 8,
+            "name": "results.assemble_cohort_record",
+            "duration_ms": 1.0,
+            "metadata": {},
+        },
     ]
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (tmp_path / "events.jsonl").write_text(
@@ -145,4 +173,8 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["repeat_kernel_dispatch_jax_ms"] == 20.0
     assert row["repeat_kernel_wait_ms"] == 5.0
     assert row["repeat_kernel_finalize_observer_ms"] == 2.0
+    assert row["repeat_results_split_batch_ms"] == 9.0
+    assert row["repeat_results_materialize_vm_ms"] == 3.0
+    assert row["repeat_results_assemble_rows_ms"] == 4.0
+    assert row["repeat_results_assemble_cohort_record_ms"] == 1.0
     assert row["rss_end_mib_max"] == "321"

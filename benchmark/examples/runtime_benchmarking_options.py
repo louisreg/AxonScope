@@ -1,7 +1,7 @@
 """Benchmark one AxonScope simulation and plot what happened.
 
 Run:
-    MPLBACKEND=Agg python examples/advanced/runtime/04_benchmarking_options.py
+    MPLBACKEND=Agg python benchmark/examples/runtime_benchmarking_options.py
 
 This is a teaching example, not a benchmark campaign. It shows the smallest
 useful workflow:

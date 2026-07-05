@@ -799,6 +799,15 @@ decisions need realistic workflow evidence.
   that multi-chunk local VmRaster paths expose combine time, while unchunked
   full-scope observer paths keep that column at zero. This is trace plumbing,
   not yet an optimization claim.
+  Fourth tooling step: batch result assembly now has generic result-side spans:
+  `results.materialize_vm`, `results.assemble_rows`, and
+  `results.assemble_cohort_record`. The time-chunk sweep CSV includes these
+  alongside `results.split_batch`, so full Vm, probe Vm, and observer-only
+  paths can be compared on the same output-boundary vocabulary before making
+  any recording-mode-specific optimization. Tiny local smoke artifacts live
+  under `benchmark/results/p11b_result_trace_full_smoke`,
+  `benchmark/results/p11b_result_trace_probe_smoke`, and
+  `benchmark/results/p11b_result_trace_observer_smoke`.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

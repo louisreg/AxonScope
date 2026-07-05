@@ -19,6 +19,7 @@ def test_classify_stage_groups() -> None:
     assert classify_stage("inputs.extracellular") == "input_lowering"
     assert classify_stage("observer.plan") == "input_lowering"
     assert classify_stage("kernel.dispatch_jax") == "kernel"
+    assert classify_stage("results.materialize_vm") == "result_assembly"
     assert classify_stage("results.to_public") == "result_assembly"
     assert classify_stage("something.custom") == "other"
 

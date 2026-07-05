@@ -6,6 +6,11 @@ from typing import Any
 
 import numpy as np
 
+from axonscope.benchmarking import (
+    benchmark_array_metadata,
+    benchmark_span,
+    record_benchmark_metadata,
+)
 from axonscope.backends.jax.batch_kernels import BatchKernelResult
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher._records import (
@@ -43,79 +48,122 @@ def dispatch_results_from_batch(
 ) -> tuple[DispatchRecord, ...]:
     """Convert a batched solver output to compact dispatch records."""
 
-    vm_values = None if Vm is None else np.asarray(Vm)
     kernel_indices = kernel_batch_options.recording.indices_for(group.nx)
     kernel_record_indices = (
         None if kernel_indices is None else tuple(int(value) for value in kernel_indices)
     )
+    with benchmark_span(
+        "results.materialize_vm",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=batch_options.recording.mode,
+        kernel_recording_mode=kernel_batch_options.recording.mode,
+        output="none" if Vm is None else "Vm",
+        method=method,
+    ):
+        vm_values = None if Vm is None else np.asarray(Vm)
+        if vm_values is not None:
+            record_benchmark_metadata(
+                **benchmark_array_metadata("Vm_host", vm_values, role="result_output"),
+                retained_width=int(vm_values.shape[-1]) if vm_values.ndim >= 2 else "",
+            )
 
     if vm_values is None and observations is not None:
-        return (
-            DispatchCohortRecord(
-                indices=tuple(item.index for item in group.items),
-                axons=tuple(item.simulation.axon for item in group.items),
-                simulations=tuple(item.simulation for item in group.items),
-                Vm=None,
-                t=t,
-                group_id=group.group_id,
-                method=method,
-                record_indices=tuple(None for _ in group.items),
-                observations=observations,
-                group_size=group.size,
-                batch_kind=group.batch_kind,
-                geometry_shared=group.geometry_shared,
-                has_padding=group.has_padding,
-            ),
-        )
+        with benchmark_span(
+            "results.assemble_cohort_record",
+            group_id=group.group_id,
+            group_size=group.size,
+            recording_mode=batch_options.recording.mode,
+            output="observations",
+            method=method,
+        ):
+            return (
+                DispatchCohortRecord(
+                    indices=tuple(item.index for item in group.items),
+                    axons=tuple(item.simulation.axon for item in group.items),
+                    simulations=tuple(item.simulation for item in group.items),
+                    Vm=None,
+                    t=t,
+                    group_id=group.group_id,
+                    method=method,
+                    record_indices=tuple(None for _ in group.items),
+                    observations=observations,
+                    group_size=group.size,
+                    batch_kind=group.batch_kind,
+                    geometry_shared=group.geometry_shared,
+                    has_padding=group.has_padding,
+                ),
+            )
 
-    results = []
-    for row_index, item in enumerate(group.items):
-        original_nx = int(item.solver_axon.n_compartments)
-        row_vm = None if vm_values is None else vm_values[row_index]
-        record_indices = kernel_record_indices
+    observer_definition_count = 0 if observer_definitions is None else len(observer_definitions)
+    with benchmark_span(
+        "results.assemble_rows",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=batch_options.recording.mode,
+        kernel_recording_mode=kernel_batch_options.recording.mode,
+        output="Vm" if vm_values is not None else "none",
+        has_observations=observations is not None,
+        observer_definition_count=observer_definition_count,
+        method=method,
+    ):
+        results = []
+        posthoc_row_count = 0
+        row_trim_count = 0
+        for row_index, item in enumerate(group.items):
+            original_nx = int(item.solver_axon.n_compartments)
+            row_vm = None if vm_values is None else vm_values[row_index]
+            record_indices = kernel_record_indices
 
-        if row_vm is not None and kernel_indices is None:
-            row_vm = row_vm[:, :original_nx]
-            requested_indices = batch_options.recording.indices_for(original_nx)
-            if requested_indices is not None:
-                row_vm = np.take(row_vm, np.asarray(requested_indices), axis=1)
-                record_indices = tuple(int(value) for value in requested_indices)
-            else:
+            if row_vm is not None and kernel_indices is None:
+                row_vm = row_vm[:, :original_nx]
+                requested_indices = batch_options.recording.indices_for(original_nx)
+                if requested_indices is not None:
+                    row_vm = np.take(row_vm, np.asarray(requested_indices), axis=1)
+                    record_indices = tuple(int(value) for value in requested_indices)
+                    row_trim_count += 1
+                else:
+                    record_indices = None
+            if row_vm is None:
                 record_indices = None
-        if row_vm is None:
-            record_indices = None
 
-        row_observations = observations
-        observations_are_batched = row_observations is not None
-        if row_observations is None and observer_definitions and row_vm is not None:
-            row_observations = _posthoc_observations_for_row(
-                item,
-                row_vm=row_vm,
-                t=t,
-                record_indices=record_indices,
-                observer_definitions=observer_definitions,
-            )
-            observations_are_batched = False
+            row_observations = observations
+            observations_are_batched = row_observations is not None
+            if row_observations is None and observer_definitions and row_vm is not None:
+                row_observations = _posthoc_observations_for_row(
+                    item,
+                    row_vm=row_vm,
+                    t=t,
+                    record_indices=record_indices,
+                    observer_definitions=observer_definitions,
+                )
+                observations_are_batched = False
+                posthoc_row_count += 1
 
-        results.append(
-            DispatchRowRecord(
-                index=item.index,
-                axon=item.simulation.axon,
-                simulation=item.simulation,
-                Vm=row_vm,
-                t=t,
-                group_id=group.group_id,
-                method=method,
-                record_indices=record_indices,
-                observations=row_observations,
-                observations_are_batched=observations_are_batched,
-                group_size=group.size,
-                batch_kind=group.batch_kind,
-                geometry_shared=group.geometry_shared,
-                has_padding=group.has_padding,
+            results.append(
+                DispatchRowRecord(
+                    index=item.index,
+                    axon=item.simulation.axon,
+                    simulation=item.simulation,
+                    Vm=row_vm,
+                    t=t,
+                    group_id=group.group_id,
+                    method=method,
+                    record_indices=record_indices,
+                    observations=row_observations,
+                    observations_are_batched=observations_are_batched,
+                    group_size=group.size,
+                    batch_kind=group.batch_kind,
+                    geometry_shared=group.geometry_shared,
+                    has_padding=group.has_padding,
+                )
             )
+        record_benchmark_metadata(
+            row_count=len(results),
+            row_trim_count=row_trim_count,
+            posthoc_row_count=posthoc_row_count,
         )
-    return tuple(results)
+        return tuple(results)
 
 
 def trim_observations_batch(

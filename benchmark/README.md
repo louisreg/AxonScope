@@ -162,6 +162,13 @@ with benchmark_span("stage.name"):
     record_benchmark_metadata(case="example")
 ```
 
+A standalone teaching script shows the same instrumentation around one normal
+AxonScope simulation and writes timing/memory plots:
+
+```bash
+MPLBACKEND=Agg python benchmark/examples/runtime_benchmarking_options.py
+```
+
 ## Trace Analysis
 
 Summarize saved events and trace/profile artifacts with:

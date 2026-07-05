@@ -56,6 +56,14 @@ SUMMARY_FIELDS = (
     "repeat_kernel_wait_ms",
     "kernel_finalize_observer_ms",
     "repeat_kernel_finalize_observer_ms",
+    "results_split_batch_ms",
+    "repeat_results_split_batch_ms",
+    "results_materialize_vm_ms",
+    "repeat_results_materialize_vm_ms",
+    "results_assemble_rows_ms",
+    "repeat_results_assemble_rows_ms",
+    "results_assemble_cohort_record_ms",
+    "repeat_results_assemble_cohort_record_ms",
     "rss_end_mib_max",
 )
 
@@ -280,6 +288,37 @@ def summarize_run(
             phase="repeat",
             by_id=by_id,
         ),
+        "results_split_batch_ms": sum_duration(events, "results.split_batch"),
+        "repeat_results_split_batch_ms": sum_duration(
+            events,
+            "results.split_batch",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "results_materialize_vm_ms": sum_duration(events, "results.materialize_vm"),
+        "repeat_results_materialize_vm_ms": sum_duration(
+            events,
+            "results.materialize_vm",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "results_assemble_rows_ms": sum_duration(events, "results.assemble_rows"),
+        "repeat_results_assemble_rows_ms": sum_duration(
+            events,
+            "results.assemble_rows",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "results_assemble_cohort_record_ms": sum_duration(
+            events,
+            "results.assemble_cohort_record",
+        ),
+        "repeat_results_assemble_cohort_record_ms": sum_duration(
+            events,
+            "results.assemble_cohort_record",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "rss_end_mib_max": max_event_memory(events, "rss_end_mib"),
     }
     return {field: row.get(field, "") for field in SUMMARY_FIELDS}
@@ -391,18 +430,19 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     lines = [
         "# Time Chunk Sweep",
         "",
-        "| policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | dispatch count | scope | chunk steps |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | result ms | dispatch count | scope | chunk steps |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {count} | {scope} | {chunks} |".format(
+            "| {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {result:.3f} | {count} | {scope} | {chunks} |".format(
                 policy=row.get("policy", ""),
                 status=row.get("status", ""),
                 curve=float(row.get("repeat_curve_simulate_ms") or 0.0),
                 dispatch=float(row.get("repeat_kernel_dispatch_jax_ms") or 0.0),
                 combine=float(row.get("repeat_kernel_combine_observer_chunks_ms") or 0.0),
                 finalize=float(row.get("repeat_kernel_finalize_observer_ms") or 0.0),
+                result=float(row.get("repeat_results_split_batch_ms") or 0.0),
                 count=row.get("kernel_dispatch_jax_count", ""),
                 scope=row.get("observer_state_scopes", ""),
                 chunks=row.get("dispatch_chunk_steps", ""),
