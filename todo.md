@@ -646,7 +646,7 @@ decisions need realistic workflow evidence.
   use `rss`/`device` for larger local, GPU, and publication-scale sweeps.
   Remaining before optimization claims: selected NRV smoke and GPU
   smoke/realistic artifacts on the agreed hardware.
-- [ ] Start optimization from a cold-path audit for large synthetic/GPU
+- [x] Start optimization from a cold-path audit for large synthetic/GPU
   populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
   `runtime.prepare`, `inputs.*`, `kernel.dispatch_jax`, memory pressure, and
   result assembly before changing kernel routes or scheduling.
@@ -659,8 +659,13 @@ decisions need realistic workflow evidence.
   2026-07-05 at commit `f895a03` for short observer-only threshold and
   recruitment runs (`Nx=31`, `tsim=2 ms`, `dt=0.02 ms`, RSS tracing) under
   `benchmark/results/p11b_baseline/cold_path_n1000_cpu_scout_f895a03`.
-  Remaining cold-path evidence before solver changes is the agreed GPU or
-  larger realistic-population run with RSS or device tracing only.
+  The matching Kaggle P100 scout was generated on 2026-07-05 at commit
+  `f225afd` for short observer-only threshold and recruitment runs
+  (`Naxons=1000`, `Nx=31`, `tsim=2 ms`, `dt=0.02 ms`, device tracing) and
+  summarized under
+  `benchmark/results/p11b_baseline/cold_path_n1000_gpu_p100_scout_f225afd`.
+  The first optimization target is now pool/plan/runtime reuse between
+  amplitude evaluations before changing solver kernels.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
