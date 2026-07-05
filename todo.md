@@ -749,15 +749,32 @@ decisions need realistic workflow evidence.
   any default change; it is not yet a new benchmark claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
-- [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
-  Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
-  against peak memory, footprint duplication, cold/warm time, observer-only
-  result assembly, and scientific equivalence before changing defaults.
-- [ ] Run the full `time_chunk_steps` campaign across unchunked, 50, 250, 500,
-  1000, and adaptive policies for full Vm, probe Vm, and observer-only outputs.
+- [ ] Explore low-level observer/kernel bottlenecks before high-level workflow
+  scheduling changes. Start from the corrected `time_chunk_steps == Nt`
+  behavior and compare explicit one-chunk versus unchunked/full-scope observer
+  paths, `kernel.dispatch_jax`, `kernel.enqueue`, `kernel.wait`,
+  `kernel.finalize_observer`, host/device materialization boundaries, and
+  VmRaster combine/finalize costs. Use tiny traced cases for JAX profiling and
+  device-memory artifacts, then confirm with bounded realistic CPU/GPU runs.
+  First tooling step: curve benchmarks now distinguish `time_chunk_policy`
+  values `default`, `unchunked`, and `explicit`; CLI forms
+  `--time-chunk-steps unchunked`, `none`, and `N` map to the intended
+  `BatchOptions` paths. A local quick CPU smoke under
+  `benchmark/results/p11b_chunk_policy_smoke` confirms default observer-only
+  uses two 50-step local chunks, `unchunked` uses the full-scope observer path,
+  and explicit `100` on `Nt=100` uses one local chunk.
+- [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
+  250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
+  observer-only outputs.
   Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
   equivalence, and whether defaults should depend on `nt`, `Naxons`,
   recording mode, or backend.
+- [ ] Keep recruitment amplitude micro-batching as a later high-level
+  optimization axis, not the immediate P11B target. When low-level
+  observer/kernel bottlenecks are understood, compare candidate
+  `amplitude_batch_size` values such as 1, 2, 4, and 8 against peak memory,
+  footprint duplication, cold/warm time, observer-only result assembly, and
+  scientific equivalence before changing defaults.
 - [ ] Carry over P10 backend-neutral optimizer closeout under benchmark
   control: common subexpression elimination, unused diagnostic pruning, stable
   optimized-graph hashing, explainable before/after summaries, and deciding

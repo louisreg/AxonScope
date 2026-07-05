@@ -504,6 +504,8 @@ def _evaluate_amplitudes(
         recording=options["recording"],
         platform=options["platform"],
         precision=options["precision"],
+        time_chunk_policy=options.get("time_chunk_policy", "default"),
+        time_chunk_steps=options.get("time_chunk_steps"),
     ):
         result = simulation.run()
     with benchmark_span(
@@ -720,9 +722,16 @@ def _recording_policy(options: dict[str, Any]) -> Any:
 
 
 def _batch_options(options: dict[str, Any]) -> Any:
+    policy = str(options.get("time_chunk_policy", "default"))
     time_chunk_steps = options["time_chunk_steps"]
-    if time_chunk_steps is None:
+    if policy == "default":
         return None
+    if policy == "unchunked":
+        return axs.BatchOptions(time_chunk_steps=None)
+    if policy != "explicit":
+        raise ValueError(f"unsupported time_chunk_policy: {policy!r}")
+    if time_chunk_steps is None:
+        raise ValueError("explicit time_chunk_policy requires time_chunk_steps.")
     return axs.BatchOptions(time_chunk_steps=int(time_chunk_steps))
 
 

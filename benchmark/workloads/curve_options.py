@@ -277,7 +277,16 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--stimulation", choices=("monophasic", "biphasic", "custom"), default="biphasic")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cache-mode", choices=("cold", "warm", "clear_codegen_cache"), default="warm")
-    parser.add_argument("--time-chunk-steps", type=int)
+    parser.add_argument(
+        "--time-chunk-steps",
+        type=_parse_time_chunk_steps_arg,
+        metavar="{default,unchunked,N}",
+        help=(
+            "Observer/kernel time chunk policy. Omit or use 'default' to let "
+            "AxonScope choose its recording-specific default, use 'unchunked' "
+            "or 'none' to force one full scan, or pass an integer chunk size."
+        ),
+    )
     parser.add_argument("--amplitude-batch-size", type=int)
     parser.add_argument("--retention", choices=("summary_only", "raw_traces", "debug_artifacts"), default="summary_only")
     parser.set_defaults(
@@ -354,7 +363,8 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "stimulation": args.stimulation,
         "seed": args.seed,
         "cache_mode": args.cache_mode,
-        "time_chunk_steps": args.time_chunk_steps,
+        "time_chunk_policy": _time_chunk_policy(args.time_chunk_steps),
+        "time_chunk_steps": _time_chunk_steps(args.time_chunk_steps),
         "amplitude_batch_size": args.amplitude_batch_size,
         "retention": args.retention,
     }
@@ -376,6 +386,43 @@ def _profile_stages(values: list[str] | None) -> tuple[str, ...]:
     if any(stage.lower() == "all" for stage in stages):
         return ()
     return stages
+
+
+def _parse_time_chunk_steps_arg(value: str) -> str:
+    text = str(value).strip().lower()
+    if text in {"", "default", "none", "off", "unchunked", "full"}:
+        return text
+    return str(_positive_int(text, option="--time-chunk-steps"))
+
+
+def _time_chunk_policy(value: str | None) -> str:
+    if value is None:
+        return "default"
+    text = str(value).strip().lower()
+    if text in {"", "default"}:
+        return "default"
+    if text in {"none", "off", "unchunked", "full"}:
+        return "unchunked"
+    _positive_int(text, option="--time-chunk-steps")
+    return "explicit"
+
+
+def _time_chunk_steps(value: str | None) -> int | None:
+    if _time_chunk_policy(value) != "explicit":
+        return None
+    return _positive_int(str(value).strip(), option="--time-chunk-steps")
+
+
+def _positive_int(value: str, *, option: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"{option} must be 'default', 'unchunked', or a positive integer."
+        ) from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"{option} must be >= 1.")
+    return parsed
 
 
 def dry_run(script_name: str, args: argparse.Namespace) -> int:

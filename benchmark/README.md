@@ -46,6 +46,14 @@ Real execution writes timing, memory, environment, raw activation rows, and
 curve summaries. Block thresholds and NRV execution are intentionally left as
 future benchmark/baseline work until their adapter contracts are defined.
 
+Use `--time-chunk-steps default` or omit the option to keep AxonScope's
+recording-specific default; for observer-only runs this currently means the
+stable VmRaster default. Use `--time-chunk-steps unchunked` or `none` to force
+one full scan, and use an integer such as `--time-chunk-steps 500` for an
+explicit local chunk size. Benchmark artifacts record both `time_chunk_policy`
+and `time_chunk_steps` so default, unchunked, and explicit one-chunk runs can be
+compared without ambiguity.
+
 Kaggle runs use `benchmark/kaggle/run_kernel.py`, which packages a script
 kernel around the same `benchmark/run.py` command, forwards extra options, and
 downloads a zipped result directory after success. Use `--cpu` or `--platform

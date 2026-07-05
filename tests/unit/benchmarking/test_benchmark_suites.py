@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import axonscope as axs
 from benchmark.workloads import curve_runtime
@@ -71,6 +72,8 @@ def test_threshold_dry_run_writes_common_case_options(tmp_path: Path, capsys):
     assert rows[0]["recording"] == "probe_vm"
     assert rows[0]["cable"] == "double_cable"
     assert rows[0]["diameters"] == "different_diameters"
+    assert rows[0]["time_chunk_policy"] == "default"
+    assert rows[0]["time_chunk_steps"] == ""
 
 
 def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path, capsys):
@@ -106,6 +109,46 @@ def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path
     assert rows[0]["profile_backend"] == "jax"
     assert rows[0]["profile_create_perfetto"] == "True"
     assert rows[0]["jax_device_memory_profile"] == "True"
+
+
+def test_curve_time_chunk_cli_distinguishes_default_unchunked_and_explicit():
+    parser = build_parser("recruitment_curves", description="test parser")
+
+    default_options = resolved_options(parser.parse_args(["--preset", "quick"]))
+    unchunked_options = resolved_options(
+        parser.parse_args(["--preset", "quick", "--time-chunk-steps", "unchunked"])
+    )
+    none_options = resolved_options(
+        parser.parse_args(["--preset", "quick", "--time-chunk-steps", "none"])
+    )
+    explicit_options = resolved_options(
+        parser.parse_args(["--preset", "quick", "--time-chunk-steps", "1000"])
+    )
+
+    assert default_options["time_chunk_policy"] == "default"
+    assert default_options["time_chunk_steps"] is None
+    assert curve_runtime._batch_options(default_options) is None
+
+    assert unchunked_options["time_chunk_policy"] == "unchunked"
+    assert unchunked_options["time_chunk_steps"] is None
+    assert curve_runtime._batch_options(unchunked_options).time_chunk_steps is None
+
+    assert none_options["time_chunk_policy"] == "unchunked"
+    assert none_options["time_chunk_steps"] is None
+    assert curve_runtime._batch_options(none_options).time_chunk_steps is None
+
+    assert explicit_options["time_chunk_policy"] == "explicit"
+    assert explicit_options["time_chunk_steps"] == 1000
+    assert curve_runtime._batch_options(explicit_options).time_chunk_steps == 1000
+
+
+def test_curve_time_chunk_cli_rejects_invalid_values():
+    parser = build_parser("recruitment_curves", description="test parser")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--preset", "quick", "--time-chunk-steps", "0"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--preset", "quick", "--time-chunk-steps", "nope"])
 
 
 def test_launcher_can_disable_trace_flags_from_trace_preset(tmp_path: Path):
