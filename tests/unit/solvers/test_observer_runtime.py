@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 import axonscope as axs
+from axonscope.backends.jax import recording_lowering
 from axonscope.positions import ALL, CENTER, DISTAL, Indices
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
 from axonscope.backends.jax.observer_runtime import (
@@ -39,6 +42,63 @@ def test_vm_raster_plan_lowers_shared_probe_tables():
     np.testing.assert_array_equal(np.asarray(plan.probe_indices), [[1, 0], [1, 3]])
     np.testing.assert_array_equal(np.asarray(plan.probe_mask), [[True, False], [True, True]])
     np.testing.assert_array_equal(np.asarray(plan.original_indices), [[1, -1], [1, 3]])
+
+
+def test_vm_raster_plan_cache_survives_stimulation_replacement():
+    recording_lowering._VM_RASTER_PLAN_CACHE.clear()
+    axons = (object(), object())
+    solver_axons = (
+        SimpleNamespace(n_compartments=3),
+        SimpleNamespace(n_compartments=3),
+    )
+    cohort = SimpleNamespace(
+        group_id=0,
+        mode="single",
+        size=2,
+        nx=3,
+        geometry_shared=True,
+        has_padding=False,
+        axons=axons,
+        solver_axons=solver_axons,
+        stimulations=((object(),), (object(),)),
+        x_positions_m=np.asarray(
+            [
+                [0.0, 5.0e-5, 1.0e-4],
+                [0.0, 5.0e-5, 1.0e-4],
+            ],
+            dtype=float,
+        ),
+        axon_y_um=np.asarray([0.0, 10.0], dtype=float),
+        axon_z_um=np.asarray([50.0, 60.0], dtype=float),
+    )
+    observers = (
+        axs.analysis.Activation(
+            threshold=0.0 * axs.mV,
+            target=DISTAL,
+            name="activation",
+        ),
+    )
+
+    first = recording_lowering.lower_observers_for_cohort(
+        observers,
+        cohort=cohort,
+        dtype=np.float32,
+        prefer_vm_raster=True,
+    )
+    refreshed = SimpleNamespace(
+        **{
+            **cohort.__dict__,
+            "stimulations": ((object(),), (object(),)),
+        }
+    )
+    second = recording_lowering.lower_observers_for_cohort(
+        observers,
+        cohort=refreshed,
+        dtype=np.float32,
+        prefer_vm_raster=True,
+    )
+
+    assert first is second
 
 
 def test_vm_raster_update_packs_row_aware_threshold_bits():

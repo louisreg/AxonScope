@@ -179,7 +179,6 @@ def _prepared_cohort_signature(cohort: Any) -> tuple[Any, ...]:
         bool(cohort.has_padding),
         tuple(id(axon) for axon in cohort.axons),
         tuple(id(solver_axon) for solver_axon in cohort.solver_axons),
-        tuple(tuple(id(stimulation) for stimulation in row) for row in cohort.stimulations),
         _array_shape_dtype_digest(cohort.x_positions_m),
         _array_shape_dtype_digest(cohort.axon_y_um),
         _array_shape_dtype_digest(cohort.axon_z_um),
