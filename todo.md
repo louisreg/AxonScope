@@ -690,8 +690,10 @@ decisions need realistic workflow evidence.
   axon template per `(cable, diameter)` and keeps row-specific
   `AxonInstance` stimulations separate. This removes same-diameter workload
   model reconstruction as a benchmark confounder before interpreting solver
-  bottlenecks. Validated with benchmark-suite unit tests and small dirty CPU
-  scouts; rerun clean artifacts before making any speed claim.
+  bottlenecks. Validated with benchmark-suite unit tests and clean CPU scouts
+  under
+  `benchmark/results/p11b_baseline/bottleneck_n1000_cpu_template_reuse_8330374`;
+  this is still a benchmark-harness cleanup, not a solver speed claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
