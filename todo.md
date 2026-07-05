@@ -635,13 +635,29 @@ decisions need realistic workflow evidence.
   where available.
   CPU `quick` threshold and recruitment baselines were captured on 2026-07-05
   at commit `ecddf36` under `benchmark/results/p11b_baseline/`, with clean git
-  metadata and full P11A output artifacts. Remaining before optimization
-  claims: CPU `local_realistic`, selected NRV smoke, and GPU smoke/realistic
-  artifacts on the agreed hardware.
+  metadata and full P11A output artifacts. Additional CPU baselines were
+  captured on 2026-07-05 at commit `7ebe7c3`: small `quick` observer-only runs
+  with `memory_trace=all` for a full tracing sanity check, matching `quick`
+  calibration runs with `memory_trace=rss`, and bounded `local_realistic`
+  threshold/recruitment runs (`Naxons=64`, `Nx=101`, `tsim=20 ms`,
+  `dt=0.005 ms`, observer-only, one repeat, no warmup) with RSS tracing.
+  Operational rule: keep `memory_trace=all`, JAX profiling, and device-memory
+  profiles for tiny trace cases only, such as one pool and a few amplitudes;
+  use `rss`/`device` for larger local, GPU, and publication-scale sweeps.
+  Remaining before optimization claims: selected NRV smoke and GPU
+  smoke/realistic artifacts on the agreed hardware.
 - [ ] Start optimization from a cold-path audit for large synthetic/GPU
   populations (`n=1000`): split `build pool`, `dispatch.build_plan`,
   `runtime.prepare`, `inputs.*`, `kernel.dispatch_jax`, memory pressure, and
   result assembly before changing kernel routes or scheduling.
+  `benchmark/analysis/cold_path_audit.py` now converts fresh curve benchmark
+  result directories into `cold_path_stage_rows.csv`,
+  `cold_path_group_summary.csv`, and plots for pool build, dispatch, runtime
+  preparation, input lowering, kernel, and result assembly. First bounded CPU
+  audit was generated on 2026-07-05 for `threshold_large_cpu_7ebe7c3` and
+  `recruitment_large_cpu_7ebe7c3`; remaining cold-path evidence before solver
+  changes is the agreed GPU/large-population run, ideally `n=1000` with RSS or
+  device tracing only.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.

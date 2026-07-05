@@ -94,6 +94,9 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
   preparation, lowering, kernel route, and result assembly without launching
   kernels.
+- `runtime/04_benchmarking_options.py`: wrap one normal simulation with
+  `axs.benchmark(...)`, plot stage timing/memory/timeline reports, and
+  optionally compare `memory_trace` modes.
 
 ## With NRV
 
@@ -122,8 +125,9 @@ simulation to population protocols and NRV integration.
 
 ## Benchmarks And Profiling
 
-Timing, memory, profiling, and reproducibility scripts live under `benchmark/`,
-not `examples/`:
+Small API-level instrumentation examples can live under `examples/advanced/`.
+Reusable timing, memory, profiling, and reproducibility campaigns live under
+`benchmark/`:
 
 - `benchmark/README.md`: supported benchmark surface and retained commands.
 - `benchmark/run.py`: shared launcher for benchmark scripts and presets.

@@ -161,6 +161,31 @@ python benchmark/analysis/trace_summary.py benchmark/results/example
 JAX profiler traces are TensorBoard/Perfetto artifacts. JAX device-memory
 profiles are pprof artifacts; open them with `pprof --web <profile.prof>`.
 
+## P11B Cold-Path Audit
+
+Before changing solver routes or scheduling, turn fresh curve outputs into a
+stage-level timing and memory map:
+
+```bash
+python benchmark/analysis/cold_path_audit.py \
+  benchmark/results/p11b_baseline/threshold_large_cpu_7ebe7c3 \
+  benchmark/results/p11b_baseline/recruitment_large_cpu_7ebe7c3 \
+  --output benchmark/results/p11b_baseline/cold_path_cpu_audit_7ebe7c3
+```
+
+The audit writes:
+
+- `cold_path_stage_rows.csv`: one row per benchmark span with timing, RSS,
+  `tracemalloc`, device-memory, environment, git, and case metadata.
+- `cold_path_group_summary.csv`: grouped P11B view for pool build, dispatch,
+  runtime preparation, input lowering, kernel, and result assembly.
+- `plots/cold_path_group_time.png`, `plots/cold_path_top_stages.png`, and
+  `plots/cold_path_memory.png`.
+
+Use `memory_trace=rss` or `device` for large local/GPU sweeps. Keep
+`memory_trace=all`, JAX profiling, and device-memory pprof capture for tiny
+trace cases only.
+
 ## Publishability
 
 A benchmark result is publishable only if the run directory contains the full
