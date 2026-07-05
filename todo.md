@@ -730,6 +730,18 @@ decisions need realistic workflow evidence.
   spends about 24.6 s in 100 `kernel.dispatch_jax` spans. Because the effective
   chunking is 20 chunks per amplitude (`time_chunk_steps=50`), the immediate
   next campaign should vary `time_chunk_steps` before changing kernel code.
+  The bounded recruitment `time_chunk_steps` campaign was then captured on
+  Kaggle P100 at commit `f72ed02` for effective/default 50, 100, 250, 500, and
+  1000 steps per chunk, with CPU and GPU runs for the same observer-only
+  workload. The summary lives under
+  `benchmark/results/p11b_baseline/time_chunk_campaign_kaggle_a48fc36_summary_with_default50`.
+  On this case, GPU improves as chunks get larger, with `curve.simulate` about
+  17.8 s at 50, 15.1 s at 100, 14.1 s at 250, 15.0 s at 500, and 12.4 s at
+  1000. CPU does not show a clean monotonic win: 50 and 100 stay around
+  34 s, 250 is about 35.4 s, 500 rises to about 41.8 s, and 1000 is about
+  37.7 s with a large `kernel.finalize_observer` span. Next step before a
+  default change: inspect VmRaster finalization/full-scope observer handling
+  and repeat a narrower CPU sanity run if needed.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
