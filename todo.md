@@ -669,6 +669,12 @@ decisions need realistic workflow evidence.
 - [ ] Optimize current JAX preparation and lowering before new solver routes:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
+  First cleanup landed in `33535ee`: curve benchmarks now build each phase pool
+  once and update only extracellular drive stimuli between amplitude
+  evaluations, matching the public protocol examples. This removes repeated
+  benchmark-side pool construction as a confounder; it is not yet a solver
+  speed claim. Remaining optimization targets are dispatch-plan/runtime reuse,
+  prepared cohort caching, and lowering/transport pruning.
 - [ ] Run recruitment amplitude micro-batching as an explicit campaign axis.
   Compare candidate `amplitude_batch_size` values such as 1, 2, 4, and 8
   against peak memory, footprint duplication, cold/warm time, observer-only
