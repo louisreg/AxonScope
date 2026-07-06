@@ -1014,6 +1014,17 @@ decisions need realistic workflow evidence.
   claim, so confirm with a reduced Kaggle CPU/GPU matrix before claiming
   workflow improvement. Next low-level target: build the same cartography for
   double-cable preparation/forcing paths before changing double-cable kernels.
+  Matching quick Kaggle P100-image validation was captured on 2026-07-07 for
+  commit `8ab92c3` with observer-only recruitment sweeps over policies
+  `default`, `unchunked`, 50, 250, 500, and 1000. CPU-path artifacts live under
+  `benchmark/results/kaggle/20260707_004323_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  and GPU-path artifacts under
+  `benchmark/results/kaggle/20260707_004350_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`.
+  All 12 cases passed. The cache signal is stable: CPU misses are about
+  253-277 ms and GPU misses about 291-319 ms, while all CPU/GPU hits are about
+  0.04-0.08 ms. This confirms the forcing cache behavior on Kaggle; it remains
+  observer-only quick evidence, so broader full/probe workflow speed claims
+  still need a reduced matrix if they matter.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
