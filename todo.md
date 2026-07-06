@@ -820,6 +820,19 @@ decisions need realistic workflow evidence.
   Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
   equivalence, and whether defaults should depend on `nt`, `Naxons`,
   recording mode, or backend.
+  CPU recruitment matrix evidence was captured under
+  `benchmark/results/p11b_time_chunk_recording_matrix_cpu` for `Naxons=1000`,
+  `Nx=101`, `tsim=10 ms`, `dt=0.01 ms`, five amplitudes, different-diameter
+  cohorts, and policies `default`, `unchunked`, 50, 250, 500, and 1000. On CPU,
+  full Vm and probe Vm favor large/unchunked time chunks: full Vm is fastest at
+  explicit 1000 (~19.6 s) then unchunked (~20.0 s), while probe Vm is fastest
+  unchunked (~18.0 s) then explicit 1000 (~18.1 s). Small chunks increase
+  dispatch overhead for full/probe modes. Observer-only behaves differently:
+  default/50/250 are close (~19.2-19.3 s), while 500, 1000, and unchunked are
+  slower (~20.6-21.0 s) due to shifted VmRaster combine/finalize
+  materialization. This supports backend/recording-specific evidence gathering
+  before any default change; matching Kaggle CPU/GPU and threshold-curve
+  evidence are still pending.
 - [ ] Keep recruitment amplitude micro-batching as a later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
