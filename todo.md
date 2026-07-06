@@ -849,6 +849,22 @@ decisions need realistic workflow evidence.
   while GPU best rows keep substantial unattributed curve/setup time that
   should be split further before optimizing. Treat this as bottleneck
   cartography, not a policy decision.
+  Matching Kaggle low-level threshold cartography was captured on 2026-07-06
+  at commit `af439cc` on the same P100 image, with the same reduced policies,
+  recordings, size, precision, and tracing options. CPU artifacts live under
+  `benchmark/results/kaggle/20260706_210319_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_210319_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  threshold plots/report under
+  `benchmark/results/p11b_low_level_threshold_cpu_gpu_af439cc`, and the
+  combined threshold/recruitment CPU/GPU report under
+  `benchmark/results/p11b_low_level_threshold_recruitment_cpu_gpu_af439cc`.
+  All 18 threshold cases passed. The threshold map reinforces the low-level
+  split: CPU full/probe best rows are dominated by `kernel.wait`, CPU
+  observer-only with explicit `1000` exposes a large
+  `kernel.finalize_observer.to_host` cost, and GPU rows still retain large
+  curve/setup time outside the current sub-spans. Use the combined report as
+  the next optimization baseline.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
