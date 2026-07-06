@@ -230,6 +230,7 @@ def build_runs(
     extra: Sequence[str],
 ) -> list[dict[str, Any]]:
     runs = []
+    script_extra = normalize_script_extra(args.script, extra)
     recording_modes: Sequence[str | None] = tuple(recordings) or (None,)
     include_recording_dir = len(recording_modes) > 1
     for recording in recording_modes:
@@ -256,7 +257,7 @@ def build_runs(
                 command.extend(["--recording", recording])
             if args.resume:
                 command.append("--resume")
-            command.extend(str(item) for item in extra)
+            command.extend(script_extra)
             runs.append(
                 {
                     "policy": policy,
@@ -266,6 +267,38 @@ def build_runs(
                 }
             )
     return runs
+
+
+def normalize_script_extra(script: str, extra: Sequence[str]) -> list[str]:
+    """Adapt campaign-scale aliases before forwarding to a concrete curve script."""
+    if script != "threshold_curves":
+        return [str(item) for item in extra]
+
+    normalized: list[str] = []
+    amplitude_count: str | None = None
+    has_max_iterations = False
+    items = [str(item) for item in extra]
+    index = 0
+    while index < len(items):
+        item = items[index]
+        if item == "--amplitude-count":
+            if index + 1 >= len(items):
+                raise argparse.ArgumentTypeError("--amplitude-count requires a value.")
+            amplitude_count = items[index + 1]
+            index += 2
+            continue
+        if item.startswith("--amplitude-count="):
+            amplitude_count = item.split("=", 1)[1]
+            index += 1
+            continue
+        if item == "--max-iterations" or item.startswith("--max-iterations="):
+            has_max_iterations = True
+        normalized.append(item)
+        index += 1
+
+    if amplitude_count is not None and not has_max_iterations:
+        normalized.extend(["--max-iterations", amplitude_count])
+    return normalized
 
 
 def run_label(run: Mapping[str, Any]) -> str:

@@ -100,6 +100,42 @@ def test_time_chunk_sweep_dry_run_builds_recording_matrix(tmp_path: Path, capsys
     assert sum("--recording probe_vm" in command for command in commands) == 2
 
 
+def test_time_chunk_sweep_maps_amplitude_count_for_threshold_curves(
+    tmp_path: Path,
+    capsys,
+):
+    assert (
+        run_time_chunk_sweep(
+            [
+                "--script",
+                "threshold_curves",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--policies",
+                "default",
+                "--recording",
+                "full_vm",
+                "--output",
+                str(tmp_path),
+                "--dry-run",
+                "--amplitude-count",
+                "5",
+            ]
+        )
+        == 0
+    )
+
+    capsys.readouterr()
+    manifest = json.loads(
+        (tmp_path / "time_chunk_sweep_manifest.json").read_text(encoding="utf-8")
+    )
+    command = " ".join(manifest["runs"][0]["command"])
+    assert "--amplitude-count" not in command
+    assert "--max-iterations 5" in command
+
+
 def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     manifest = {
         "script": "recruitment_curves",
