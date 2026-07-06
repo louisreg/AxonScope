@@ -959,6 +959,21 @@ decisions need realistic workflow evidence.
   0.61 s, 0.63 s, and 0.80 s; and `curve.analyze_activation` is about
   1.18 s, 1.51 s, and 0.03 s. Treat these as local validation only: rerun the
   reduced CPU/GPU Kaggle matrix before making a fresh speed or policy claim.
+  Matching Kaggle P100 CPU/GPU validation passed on 2026-07-06 at commit
+  `6caf6dc`, using the same reduced recruitment matrix, RSS tracing only, and
+  no JAX/device profiling. CPU artifacts live under
+  `benchmark/results/kaggle/20260706_224708_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_224708_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and combined plots/report under
+  `benchmark/results/p11b_outside_solver_optim_cpu_gpu_6caf6dc`. All 18 cases
+  passed. Versus the `c4e3e53` workflow-span baseline, best-policy visible time
+  improved by about 12.6%/8.6%/14.3% on CPU full/probe/observer and
+  28.1%/20.4%/32.1% on GPU full/probe/observer. `curve.build_pool` is now
+  about 0.48-0.54 s on Kaggle, dense full/probe activation analysis is about
+  0.9-1.2 s, and observer-only activation analysis is about 0.03 s. This
+  confirms those outside-solver costs are no longer the dominant blocker for
+  the next low-level solver/kernel optimization pass.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
