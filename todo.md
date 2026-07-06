@@ -883,6 +883,10 @@ decisions need realistic workflow evidence.
   CPU/GPU speedups, CPU RSS memory plots, GPU JAX device-memory plots, and
   GPU `nvidia-smi` context plots. Use this visual report to pick the next
   low-level optimization target before writing adaptive policy code.
+  A no-policy-decision interpretation note lives at
+  `benchmark/results/p11b_time_chunk_matrix_report_20260706_stage_groups/p11b_low_level_bottleneck_notes.md`;
+  it frames the next step as deeper low-level tracing and optimization, not
+  adaptive policy selection.
 - [ ] Keep recruitment amplitude micro-batching as a later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
