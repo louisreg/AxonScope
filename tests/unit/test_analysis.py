@@ -102,6 +102,37 @@ def test_result_analyze_returns_report_with_population_denominators():
     np.testing.assert_allclose(report["peak_voltage"].values, [10.0, -70.0], atol=1e-6)
 
 
+def test_population_activation_dense_fast_path_matches_events(monkeypatch):
+    from axonscope.analysis import definitions as analysis_definitions
+
+    result = _fake_pool_result()
+    definition = axs.analysis.Activation(
+        threshold=0.0 * axs.mV,
+        blanking=20.0 * axs.ms,
+        target=axs.positions.ALL,
+    )
+
+    def fail_row_fallback(*args, **kwargs):
+        raise AssertionError("population Activation should use the dense fast path")
+
+    monkeypatch.setattr(analysis_definitions, "_evaluate_rows", fail_row_fallback)
+
+    analyzed = result.analyze(definition)
+
+    np.testing.assert_array_equal(analyzed.values, [True, False])
+    assert analyzed.statuses == (
+        axs.analysis.AnalysisStatus.VALID,
+        axs.analysis.AnalysisStatus.VALID,
+    )
+    assert analyzed.events[0].activated is True
+    assert analyzed.events[0].first_index == 1
+    assert analyzed.events[0].first_time_ms == pytest.approx(29.75)
+    assert analyzed.events[0].peak_time_ms == pytest.approx(30.0)
+    assert analyzed.events[1].activated is False
+    assert analyzed.events[1].first_time_ms is None
+    assert analyzed.events[1].peak_time_ms == pytest.approx(20.0)
+
+
 def test_analysis_report_views_format_dataframe_and_plot(capsys):
     result = _fake_pool_result()
     report = result.report(

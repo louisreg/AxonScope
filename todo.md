@@ -922,6 +922,43 @@ decisions need realistic workflow evidence.
   report also accepts direct single-recording campaign layouts as well as
   `recording/policy` matrix layouts. A tiny CPU smoke lives under
   `benchmark/results/p11b_workflow_span_smoke`.
+  Matching Kaggle P100 CPU/GPU workflow-span evidence was captured on
+  2026-07-06 at commit `c4e3e53` with the same reduced recruitment matrix as
+  the clean RSS baseline: three recordings, policies `default`, explicit
+  `1000`, and `unchunked`, `Naxons=1000`, `Nx=101`, `tsim=10 ms`,
+  `dt=0.01 ms`, three amplitudes, different-diameter cohorts, one repeat, no
+  warmup, RSS tracing only, and no JAX/device profiling. CPU artifacts live
+  under
+  `benchmark/results/kaggle/20260706_220316_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_220331_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and combined plots/reports under
+  `benchmark/results/p11b_workflow_spans_cpu_gpu_c4e3e53`. All 18 cases
+  passed. The new spans show that on this workflow `curve.build_pool` is about
+  1.25-1.4 s and activation analysis is a real post-run cost: about 4.0-4.3 s
+  for full Vm, 2.3-2.5 s for probe Vm, and 3.2-3.6 s for observer-only. GPU
+  `curve.simulate` remains much faster than CPU, but the visible end-to-end
+  workflow is now substantially shaped by pool construction and activation
+  analysis. Treat this as bottleneck cartography before low-level solver work:
+  next split or cache the activation analysis/result-view path so solver
+  timings are not hidden by result-side workflow overhead.
+  First outside-solver cleanup after this map: public VmRaster activation
+  decoding now tests packed words directly instead of unpacking the full
+  `(batch, raster, probe, time)` bool array; dense population
+  `Activation.evaluate(...)` has a vectorized cohort path for public result
+  analysis; curve benchmarks build point-source footprints directly while
+  staying numerically equivalent to the public analytical helper; and curve
+  activation reads only dense boolean values for full/probe Vm campaign cases
+  instead of materializing one full `ActivationEvent` per row. Local CPU smoke
+  artifacts live under
+  `benchmark/results/p11b_outside_solver_optim_max_smoke` for
+  `Naxons=1000`, `Nx=101`, `tsim=10 ms`, `dt=0.01 ms`, three amplitudes,
+  different-diameter cohorts, one repeat, no warmup, and no memory/profiling
+  overhead. On this local smoke, visible full/probe/observer workflow time is
+  about 16.2 s, 21.7 s, and 19.3 s respectively; `curve.build_pool` is about
+  0.61 s, 0.63 s, and 0.80 s; and `curve.analyze_activation` is about
+  1.18 s, 1.51 s, and 0.03 s. Treat these as local validation only: rerun the
+  reduced CPU/GPU Kaggle matrix before making a fresh speed or policy claim.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

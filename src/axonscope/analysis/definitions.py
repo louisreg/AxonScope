@@ -20,6 +20,7 @@ from axonscope.analysis.posthoc import conduction_velocity, rasterize
 from axonscope.positions import ALL, DISTAL, PositionSelector
 from axonscope.results.pool import AxonSimulationResult
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
+from axonscope.utils import units
 
 
 _ANY_MYELINATION = ("unmyelinated", "myelinated")
@@ -251,6 +252,214 @@ def _activation_event(
         ) from exc
 
 
+def _activation_fast_population(
+    definition: Any,
+    result: Any,
+) -> AnalysisResult | None:
+    """Vectorized Activation fast path for dense population result cohorts."""
+
+    if not isinstance(result, AxonSimulationResult):
+        return None
+    signal = getattr(definition, "signal", MEMBRANE_VOLTAGE)
+    if not isinstance(signal, Signal) or signal.id != MEMBRANE_VOLTAGE.id:
+        return None
+    target = getattr(definition, "target", None)
+    if not isinstance(target, PositionSelector):
+        return None
+
+    try:
+        threshold_mV = units.to_mV(getattr(definition, "threshold"))
+        blanking_ms = units.to_ms(getattr(definition, "blanking"))
+    except (TypeError, ValueError):
+        return None
+    if blanking_ms < 0.0:
+        return None
+
+    values = np.zeros(result.size, dtype=bool)
+    statuses = [AnalysisStatus.VALID] * result.size
+    messages = [""] * result.size
+    events: list[ActivationEvent | None] = [None] * result.size
+    requirements: list[Any | None] = [None] * result.size
+
+    cohorts = tuple(getattr(result, "_cohorts", ()))
+    if not cohorts:
+        return None
+    try:
+        for cohort in cohorts:
+            if getattr(cohort, "Vm", None) is None:
+                return None
+            _evaluate_activation_cohort_fast(
+                cohort,
+                threshold_mV=threshold_mV,
+                blanking_ms=blanking_ms,
+                target=target,
+                values=values,
+                events=events,
+            )
+    except (AttributeError, TypeError, ValueError, FloatingPointError):
+        return None
+
+    return AnalysisResult(
+        name=definition.name,
+        values=values,
+        statuses=tuple(statuses),
+        messages=tuple(messages),
+        unit=None,
+        row_labels=_result_row_labels(result),
+        definition=definition,
+        events=tuple(events),
+        input_requirements=tuple(requirements),
+    )
+
+
+def _evaluate_activation_cohort_fast(
+    cohort: Any,
+    *,
+    threshold_mV: float,
+    blanking_ms: float,
+    target: PositionSelector,
+    values: np.ndarray,
+    events: list[ActivationEvent | None],
+) -> None:
+    vm = np.asarray(cohort.Vm)
+    if vm.ndim != 3:
+        raise ValueError(f"population Vm must be 3D, got {vm.shape}.")
+    time_ms = np.asarray(cohort.t, dtype=float)
+    if time_ms.ndim != 1 or time_ms.shape[0] != vm.shape[1]:
+        raise ValueError("cohort time vector must match Vm time axis.")
+    if time_ms.size == 0 or vm.shape[2] == 0:
+        raise ValueError("cohort Vm must include time and position samples.")
+
+    groups = _activation_cohort_groups(cohort, width=vm.shape[2], target=target)
+    eligible_start = int(np.searchsorted(time_ms, float(blanking_ms), side="left"))
+    has_eligible_times = eligible_start < time_ms.shape[0]
+    time_slice = slice(eligible_start, None) if has_eligible_times else slice(None)
+    window_time_ms = time_ms[time_slice]
+
+    for group in groups:
+        rows = np.asarray(group["rows"], dtype=int)
+        input_indices = np.asarray(group["input_indices"], dtype=int)
+        selected = np.asarray(group["selected"], dtype=int)
+        original_indices = np.asarray(group["original_indices"], dtype=int)
+        positions_um = np.asarray(group["positions_um"], dtype=float)
+        window = _activation_window_view(
+            vm,
+            rows=rows,
+            time_slice=time_slice,
+            selected=selected,
+        )
+        flat = window.reshape(window.shape[0], -1)
+        peak_flat = np.argmax(flat, axis=1)
+        peak_time = peak_flat // selected.size
+        peak_col = peak_flat % selected.size
+
+        if has_eligible_times:
+            crossing = window >= float(threshold_mV)
+            active = np.any(crossing, axis=(1, 2))
+            crossing_flat = crossing.reshape(crossing.shape[0], -1)
+            first_flat = np.argmax(crossing_flat, axis=1)
+        else:
+            active = np.zeros(rows.shape[0], dtype=bool)
+            first_flat = np.zeros(rows.shape[0], dtype=int)
+
+        for local_row, input_index in enumerate(input_indices):
+            activated = bool(active[local_row])
+            if activated:
+                first_time = int(first_flat[local_row]) // selected.size
+                first_col = int(first_flat[local_row]) % selected.size
+                first_time_ms = float(window_time_ms[first_time])
+                first_position_um = float(positions_um[first_col])
+                first_index = int(original_indices[first_col])
+            else:
+                first_time_ms = None
+                first_position_um = None
+                first_index = None
+            values[int(input_index)] = activated
+            events[int(input_index)] = ActivationEvent(
+                activated=activated,
+                first_time_ms=first_time_ms,
+                first_position_um=first_position_um,
+                first_index=first_index,
+                peak_mV=float(flat[local_row, peak_flat[local_row]]),
+                peak_time_ms=float(window_time_ms[peak_time[local_row]]),
+                peak_index=int(original_indices[peak_col[local_row]]),
+            )
+
+
+def _activation_cohort_groups(
+    cohort: Any,
+    *,
+    width: int,
+    target: PositionSelector,
+) -> tuple[dict[str, Any], ...]:
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row, (axon, record_indices) in enumerate(
+        zip(cohort.axons, cohort.record_indices, strict=True)
+    ):
+        full_positions_um = np.asarray(
+            axon.layout.position_values(unit="micrometer"),
+            dtype=float,
+        )
+        if record_indices is None:
+            if full_positions_um.shape != (int(width),):
+                raise ValueError("recorded positions must match Vm columns.")
+            original_indices = np.arange(int(width), dtype=int)
+            positions_um = full_positions_um
+        else:
+            original_indices = np.asarray(record_indices, dtype=int)
+            if original_indices.shape != (int(width),):
+                raise ValueError("record_indices must match Vm columns.")
+            if np.any(original_indices < 0) or np.any(original_indices >= full_positions_um.size):
+                raise ValueError("record_indices contains values outside axon positions.")
+            positions_um = full_positions_um[original_indices]
+        selected = target.columns(
+            positions_um=positions_um,
+            original_indices=original_indices,
+        )
+        if selected.size == 0:
+            raise ValueError("activation target selects no positions.")
+        selected = np.asarray(selected, dtype=int)
+        key = (
+            tuple(int(value) for value in selected),
+            tuple(int(value) for value in original_indices[selected]),
+            tuple(float(value) for value in positions_um[selected]),
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "rows": [],
+                "input_indices": [],
+                "selected": selected,
+                "original_indices": original_indices[selected],
+                "positions_um": positions_um[selected],
+            },
+        )
+        group["rows"].append(row)
+        group["input_indices"].append(int(cohort.input_indices[row]))
+    return tuple(grouped.values())
+
+
+def _activation_window_view(
+    vm: np.ndarray,
+    *,
+    rows: np.ndarray,
+    time_slice: slice,
+    selected: np.ndarray,
+) -> np.ndarray:
+    all_rows = rows.shape == (vm.shape[0],) and np.array_equal(
+        rows,
+        np.arange(vm.shape[0]),
+    )
+    all_columns = selected.shape == (vm.shape[2],) and np.array_equal(
+        selected,
+        np.arange(vm.shape[2]),
+    )
+    column_index: Any = slice(None) if all_columns else selected
+    if all_rows:
+        return np.asarray(vm[:, time_slice, column_index])
+    return np.asarray(vm[rows][:, time_slice, :][:, :, column_index])
+
+
 @dataclass(frozen=True)
 class Activation:
     """Detect whether a membrane-voltage trace crosses a threshold."""
@@ -277,6 +486,9 @@ class Activation:
         )
 
     def evaluate(self, result: Any) -> AnalysisResult:
+        fast = _activation_fast_population(self, result)
+        if fast is not None:
+            return fast
         return _evaluate_rows(self, result, self._evaluate_one, unit=None)
 
     def online_observer(

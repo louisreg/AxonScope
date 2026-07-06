@@ -407,22 +407,28 @@ def vm_raster_any_active(
     """Return whether each batch row has any active sample for one definition."""
 
     raster_index = vm_raster_definition_index(raster, name_or_definition)
-    bits = np.asarray(raster.unpack(), dtype=bool)
-    if bits.ndim != 4:
-        raise ValueError(f"VmRaster output must unpack to (B, R, P, Nt), got {bits.shape}.")
-    row_bits = bits[:, raster_index]
+    words = np.asarray(getattr(raster, "words"), dtype=np.uint32)
+    if words.ndim != 4:
+        raise ValueError(f"VmRaster words must have shape (B, R, P, W), got {words.shape}.")
+    if int(raster_index) < 0 or int(raster_index) >= words.shape[1]:
+        raise ValueError(f"VmRaster definition index {raster_index} is out of range.")
+    row_words = words[:, int(raster_index)]
 
     probe_mask = _probe_mask_for_definition(
         raster,
         raster_index=raster_index,
-        batch_size=row_bits.shape[0],
-        probe_count=row_bits.shape[1],
+        batch_size=row_words.shape[0],
+        probe_count=row_words.shape[1],
     )
     blanking_ms = None if blanking is None else _blanking_ms(blanking)
-    if blanking_ms is not None and blanking_ms > 0.0:
-        times_ms = (np.arange(int(raster.nt), dtype=float) + 1.0) * float(raster.dt_ms)
-        row_bits = row_bits[:, :, times_ms >= blanking_ms]
-    return np.any(row_bits & probe_mask[:, :, None], axis=(1, 2))
+    word_mask = _vm_raster_time_word_mask(
+        nt=int(raster.nt),
+        word_count=row_words.shape[2],
+        dt_ms=float(raster.dt_ms),
+        blanking_ms=blanking_ms,
+    )
+    active_words = (row_words & word_mask[None, None, :]) != 0
+    return np.any(active_words & probe_mask[:, :, None], axis=(1, 2))
 
 
 def activation_values_from_vm_raster(raster: Any, activation: Any) -> np.ndarray:
@@ -461,6 +467,51 @@ def _blanking_ms(value: Any) -> float:
     from axonscope.utils import units
 
     return units.to_ms(value)
+
+
+def _vm_raster_time_word_mask(
+    *,
+    nt: int,
+    word_count: int,
+    dt_ms: float,
+    blanking_ms: float | None,
+) -> np.ndarray:
+    """Return packed-word masks matching the public VmRaster time window."""
+
+    nt = int(nt)
+    word_count = int(word_count)
+    if nt < 0:
+        raise ValueError("VmRaster nt must be non-negative.")
+    if word_count < 1:
+        raise ValueError("VmRaster word_count must be positive.")
+    start = 0
+    if blanking_ms is not None and float(blanking_ms) > 0.0:
+        if float(dt_ms) <= 0.0:
+            start = nt
+        else:
+            # VmRaster samples are indexed as (t + 1) * dt_ms, matching the
+            # previous unpack-and-slice implementation.
+            start = max(int(np.ceil(float(blanking_ms) / float(dt_ms))) - 1, 0)
+    if start >= nt:
+        return np.zeros(word_count, dtype=np.uint32)
+
+    masks = np.full(word_count, np.uint32(0xFFFFFFFF), dtype=np.uint32)
+    valid_word_count = min(word_count, max((nt + 31) // 32, 0))
+    if valid_word_count < word_count:
+        masks[valid_word_count:] = np.uint32(0)
+
+    first_word = start // 32
+    first_bit = start % 32
+    if first_word > 0:
+        masks[:first_word] = np.uint32(0)
+    if first_bit:
+        masks[first_word] &= np.uint32((0xFFFFFFFF << first_bit) & 0xFFFFFFFF)
+
+    valid_tail_bits = nt % 32
+    if valid_tail_bits and valid_word_count:
+        tail_mask = (1 << valid_tail_bits) - 1
+        masks[valid_word_count - 1] &= np.uint32(tail_mask)
+    return masks
 
 
 def _normalize_vm_raster_definitions(definitions: Sequence[Any]) -> tuple[Any, ...]:

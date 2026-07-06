@@ -10,7 +10,10 @@ import numpy as np
 
 import axonscope as axs
 from axonscope.benchmarking import benchmark_span
+from axonscope.positions import PositionSelector
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, activation_values_from_vm_raster
+from axonscope.signals import MEMBRANE_VOLTAGE, Signal
+from axonscope.utils import units
 
 from benchmark.workloads.curve_options import (
     case_name,
@@ -66,8 +69,9 @@ class _AxonTemplate:
     axon: Any
     family: str
     diameter_um: float
-    electrode_x: Any
+    electrode_x_um: float
     positions: Any
+    positions_um: np.ndarray
 
 
 def run_threshold_curves(args: Any) -> int:
@@ -624,6 +628,7 @@ def _build_pool(
             z_um = np.full(n_axons, 100.0, dtype=float)
 
     templates: dict[tuple[str, float], _AxonTemplate] = {}
+    stimulus_cache: dict[float, Any] = {}
     pool: list[axs.AxonInstance] = []
     row_meta: list[dict[str, Any]] = []
     with benchmark_span("curve.build_pool.rows", n_axons=n_axons):
@@ -646,20 +651,19 @@ def _build_pool(
                     template = _build_axon_template(options, row_cable, diameter_um)
                 templates[template_key] = template
 
-            electrode = axs.analytical.PointSourceElectrode(
-                x=template.electrode_x,
-                y=0.0 * axs.um,
-                z=0.0 * axs.um if curve_context == "recruitment" else 100.0 * axs.um,
-                min_distance=5.0 * axs.um if curve_context == "recruitment" else None,
-            )
-            stimulation = axs.analytical.point_source_stimulation(
-                electrode,
-                template.positions,
-                sigma=0.3 * axs.S_per_m,
-                stimulus=_stimulus_for_amplitude(options, amplitudes[row]),
-                axon_y=float(y_um[row]) * axs.um,
-                axon_z=float(z_um[row]) * axs.um,
-                axon_id=axs.AxonId(f"row_{row:05d}"),
+            amplitude_key = float(amplitudes[row])
+            stimulus = stimulus_cache.get(amplitude_key)
+            if stimulus is None:
+                stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                stimulus_cache[amplitude_key] = stimulus
+            axon_id = axs.AxonId(f"row_{row:05d}")
+            stimulation = _point_source_stimulation_for_template(
+                template,
+                stimulus=stimulus,
+                curve_context=curve_context,
+                axon_y_um=float(y_um[row]),
+                axon_z_um=float(z_um[row]),
+                axon_id=axon_id,
             )
             instance = axs.AxonInstance(template.axon)
             instance.add_extracellular_stimulation(stimulation=stimulation)
@@ -684,17 +688,61 @@ def _build_axon_template(
 ) -> _AxonTemplate:
     if row_cable == "double_cable":
         axon, family, resolved_diameter_um = _double_cable_axon(options, diameter_um)
-        electrode_x = axon.node_position("center", unit=axs.um)
+        electrode_x_um = float(axon.node_position("center", unit="micrometer").magnitude)
     else:
         axon, family, resolved_diameter_um = _single_cable_axon(options, diameter_um)
-        electrode_x = _fiber_length_um(options) / 2.0 * axs.um
+        electrode_x_um = _fiber_length_um(options) / 2.0
+    positions_um = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float)
     return _AxonTemplate(
         axon=axon,
         family=family,
         diameter_um=float(resolved_diameter_um),
-        electrode_x=electrode_x,
-        positions=axon.layout.position_values(unit=axs.um) * axs.um,
+        electrode_x_um=float(electrode_x_um),
+        positions=positions_um * axs.um,
+        positions_um=positions_um,
     )
+
+
+def _point_source_stimulation_for_template(
+    template: _AxonTemplate,
+    *,
+    stimulus: Any,
+    curve_context: str,
+    axon_y_um: float,
+    axon_z_um: float,
+    axon_id: Any,
+) -> Any:
+    electrode_z_um = 0.0 if curve_context == "recruitment" else 100.0
+    min_distance_um = 5.0 if curve_context == "recruitment" else 1e-3
+    dx_m = (template.positions_um - float(template.electrode_x_um)) * 1e-6
+    dy_m = (0.0 - float(axon_y_um)) * 1e-6
+    dz_m = (electrode_z_um - float(axon_z_um)) * 1e-6
+    radius_m = np.sqrt(dx_m * dx_m + dy_m * dy_m + dz_m * dz_m)
+    radius_m = np.maximum(radius_m, min_distance_um * 1e-6)
+    values = 1.0 / (4.0 * np.pi * 0.3 * radius_m)
+    footprint = axs.ExtracellularFootprint(
+        values=values,
+        positions=template.positions,
+        axon_ids=(axon_id,),
+        metadata={
+            "builder": "benchmark.workloads.curve_runtime.point_source",
+            "source": "point_source_helper",
+            "electrode_x_um": template.electrode_x_um,
+            "electrode_y_um": 0.0,
+            "electrode_z_um": electrode_z_um,
+            "axon_x_offset_um": 0.0,
+            "axon_y_um": float(axon_y_um),
+            "axon_z_um": float(axon_z_um),
+            "sigma_S_m": 0.3,
+        },
+    )
+    drive = axs.ExtracellularDrive(
+        id=axs.DriveId("point_source"),
+        footprint=footprint,
+        stimulus=stimulus,
+        metadata={"source": "point_source_helper"},
+    )
+    return axs.ExtracellularStimulation((drive,))
 
 
 def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:
@@ -760,14 +808,133 @@ def _activation_values(result: Any, activation: Any, *, recording_mode: str) -> 
         with benchmark_span("curve.analyze_activation.vm_raster_values"):
             values = activation_values_from_vm_raster(raster, activation)
     else:
-        with benchmark_span("curve.analyze_activation.result_analyze"):
-            analysis = result.analyze(activation)
-            values = analysis.values
+        with benchmark_span("curve.analyze_activation.dense_values"):
+            values = _dense_activation_values(result, activation)
+        if values is None:
+            with benchmark_span("curve.analyze_activation.result_analyze"):
+                analysis = result.analyze(activation)
+                values = analysis.values
     with benchmark_span(
         "curve.analyze_activation.materialize_values",
         recording=recording_mode,
     ):
         return np.asarray(values, dtype=bool).reshape(-1)
+
+
+def _dense_activation_values(result: Any, activation: Any) -> np.ndarray | None:
+    signal = getattr(activation, "signal", MEMBRANE_VOLTAGE)
+    if not isinstance(signal, Signal) or signal.id != MEMBRANE_VOLTAGE.id:
+        return None
+    target = getattr(activation, "target", None)
+    if not isinstance(target, PositionSelector):
+        return None
+    cohorts = tuple(getattr(result, "_cohorts", ()))
+    size = getattr(result, "size", None)
+    if not cohorts or size is None:
+        return None
+    try:
+        threshold_mV = units.to_mV(getattr(activation, "threshold"))
+        blanking_ms = units.to_ms(getattr(activation, "blanking"))
+    except (TypeError, ValueError):
+        return None
+    if blanking_ms < 0.0:
+        return None
+
+    values = np.zeros(int(size), dtype=bool)
+    try:
+        for cohort in cohorts:
+            vm = np.asarray(cohort.Vm)
+            if vm.ndim != 3:
+                return None
+            time_ms = np.asarray(cohort.t, dtype=float)
+            if time_ms.ndim != 1 or time_ms.shape[0] != vm.shape[1]:
+                return None
+            if vm.shape[2] == 0:
+                return None
+            start = int(np.searchsorted(time_ms, float(blanking_ms), side="left"))
+            if start >= time_ms.shape[0]:
+                continue
+            groups = _dense_activation_groups(cohort, width=vm.shape[2], target=target)
+            for group in groups:
+                rows = np.asarray(group["rows"], dtype=int)
+                selected = np.asarray(group["selected"], dtype=int)
+                input_indices = np.asarray(group["input_indices"], dtype=int)
+                window = _dense_activation_window(
+                    vm,
+                    rows=rows,
+                    time_slice=slice(start, None),
+                    selected=selected,
+                )
+                values[input_indices] = np.max(window, axis=(1, 2)) >= float(threshold_mV)
+    except (AttributeError, TypeError, ValueError, FloatingPointError):
+        return None
+    return values
+
+
+def _dense_activation_groups(
+    cohort: Any,
+    *,
+    width: int,
+    target: PositionSelector,
+) -> tuple[dict[str, Any], ...]:
+    grouped: dict[tuple[int, ...], dict[str, Any]] = {}
+    for row, (axon, record_indices) in enumerate(
+        zip(cohort.axons, cohort.record_indices, strict=True)
+    ):
+        full_positions_um = np.asarray(
+            axon.layout.position_values(unit="micrometer"),
+            dtype=float,
+        )
+        if record_indices is None:
+            if full_positions_um.shape != (int(width),):
+                raise ValueError("recorded positions must match Vm columns.")
+            original_indices = np.arange(int(width), dtype=int)
+            positions_um = full_positions_um
+        else:
+            original_indices = np.asarray(record_indices, dtype=int)
+            if original_indices.shape != (int(width),):
+                raise ValueError("record_indices must match Vm columns.")
+            positions_um = full_positions_um[original_indices]
+        selected = np.asarray(
+            target.columns(
+                positions_um=positions_um,
+                original_indices=original_indices,
+            ),
+            dtype=int,
+        )
+        key = tuple(int(value) for value in selected)
+        group = grouped.setdefault(
+            key,
+            {
+                "rows": [],
+                "input_indices": [],
+                "selected": selected,
+            },
+        )
+        group["rows"].append(row)
+        group["input_indices"].append(int(cohort.input_indices[row]))
+    return tuple(grouped.values())
+
+
+def _dense_activation_window(
+    vm: np.ndarray,
+    *,
+    rows: np.ndarray,
+    time_slice: slice,
+    selected: np.ndarray,
+) -> np.ndarray:
+    all_rows = rows.shape == (vm.shape[0],) and np.array_equal(
+        rows,
+        np.arange(vm.shape[0]),
+    )
+    all_columns = selected.shape == (vm.shape[2],) and np.array_equal(
+        selected,
+        np.arange(vm.shape[2]),
+    )
+    column_index: Any = slice(None) if all_columns else selected
+    if all_rows:
+        return np.asarray(vm[:, time_slice, column_index])
+    return np.asarray(vm[rows][:, time_slice, :][:, :, column_index])
 
 
 def _recording_policy(options: dict[str, Any]) -> Any:

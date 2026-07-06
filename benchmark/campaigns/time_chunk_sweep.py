@@ -74,6 +74,8 @@ SUMMARY_FIELDS = (
     "repeat_curve_analyze_activation_ms",
     "curve_analyze_activation_self_ms",
     "repeat_curve_analyze_activation_self_ms",
+    "curve_analyze_activation_dense_values_ms",
+    "repeat_curve_analyze_activation_dense_values_ms",
     "curve_analyze_activation_result_analyze_ms",
     "repeat_curve_analyze_activation_result_analyze_ms",
     "curve_analyze_activation_vm_raster_extract_ms",
@@ -538,6 +540,16 @@ def summarize_run(
         "repeat_curve_analyze_activation_self_ms": sum_self_duration(
             events,
             "curve.analyze_activation",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "curve_analyze_activation_dense_values_ms": sum_duration(
+            events,
+            "curve.analyze_activation.dense_values",
+        ),
+        "repeat_curve_analyze_activation_dense_values_ms": sum_duration(
+            events,
+            "curve.analyze_activation.dense_values",
             phase="repeat",
             by_id=by_id,
         ),

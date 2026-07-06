@@ -242,6 +242,59 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
     np.testing.assert_allclose(currents, [-0.3, -0.4])
 
 
+@pytest.mark.parametrize("curve_context", ["threshold", "recruitment"])
+def test_curve_workload_fast_point_source_matches_public_helper(curve_context):
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "1",
+            "--nx",
+            "5",
+            "--stimulation",
+            "monophasic",
+        ]
+    )
+    options = resolved_options(args)
+    pool, row_meta = _build_pool(
+        options,
+        np.asarray([0.1], dtype=float),
+        curve_context=curve_context,
+    )
+    simulation = pool[0]
+    stimulation = simulation.extracellular_stimulation
+    assert stimulation is not None
+    drive = stimulation.drives[0]
+    metadata = drive.footprint.metadata
+    electrode = axs.analytical.PointSourceElectrode(
+        x=float(metadata["electrode_x_um"]) * axs.um,
+        y=float(metadata["electrode_y_um"]) * axs.um,
+        z=float(metadata["electrode_z_um"]) * axs.um,
+        min_distance=(5.0 * axs.um if curve_context == "recruitment" else None),
+    )
+    expected = axs.analytical.point_source_stimulation(
+        electrode,
+        axs.units.Q_(
+            simulation.axon.layout.position_values(unit="micrometer"),
+            "micrometer",
+        ),
+        sigma=0.3 * axs.S_per_m,
+        stimulus=drive.stimulus,
+        axon_y=float(row_meta[0]["axon_y_um"]) * axs.um,
+        axon_z=float(row_meta[0]["axon_z_um"]) * axs.um,
+        axon_id=axs.AxonId("row_00000"),
+    )
+
+    np.testing.assert_allclose(
+        drive.footprint.values_for_axon(axs.AxonId("row_00000")),
+        expected.drives[0].footprint.values_for_axon(axs.AxonId("row_00000")),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
 def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
     parser = build_parser("recruitment_curves", description="test parser")
     args = parser.parse_args(

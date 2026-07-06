@@ -178,6 +178,48 @@ def test_vm_raster_shared_activation_decoder_reports_missing_definition():
         axs.results.activation_values_from_vm_raster(raster, activation)
 
 
+def test_vm_raster_activation_decoder_ignores_bits_outside_nt():
+    raster = VmRasterResult(
+        words=np.asarray([[[[0b100000]]]], dtype=np.uint32),
+        nt=3,
+        dt_ms=1.0,
+        definitions=(),
+        names=("activation",),
+        probe_indices=np.asarray([[0]], dtype=np.int32),
+        probe_mask=np.asarray([[True]], dtype=bool),
+        original_indices=np.asarray([[0]], dtype=np.int32),
+        positions_um=np.asarray([[0.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    activation = axs.Activation(name="activation")
+
+    np.testing.assert_array_equal(
+        axs.results.activation_values_from_vm_raster(raster, activation),
+        [False],
+    )
+
+
+def test_vm_raster_activation_decoder_ignores_extra_words_outside_nt():
+    raster = VmRasterResult(
+        words=np.asarray([[[[0, 0xFFFFFFFF]]]], dtype=np.uint32),
+        nt=3,
+        dt_ms=1.0,
+        definitions=(),
+        names=("activation",),
+        probe_indices=np.asarray([[0]], dtype=np.int32),
+        probe_mask=np.asarray([[True]], dtype=bool),
+        original_indices=np.asarray([[0]], dtype=np.int32),
+        positions_um=np.asarray([[0.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    activation = axs.Activation(name="activation")
+
+    np.testing.assert_array_equal(
+        axs.results.activation_values_from_vm_raster(raster, activation),
+        [False],
+    )
+
+
 def test_find_activation_threshold_accepts_simulation_factory(monkeypatch):
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,

@@ -377,6 +377,13 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "metadata": {},
         },
         {
+            "event_id": 39,
+            "parent_event_id": 36,
+            "name": "curve.analyze_activation.dense_values",
+            "duration_ms": 0.5,
+            "metadata": {},
+        },
+        {
             "event_id": 38,
             "parent_event_id": 36,
             "name": "curve.analyze_activation.materialize_values",
@@ -408,7 +415,8 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["repeat_curve_construct_simulation_ms"] == 1.5
     assert row["repeat_curve_simulate_ms"] == 100.0
     assert row["repeat_curve_analyze_activation_ms"] == 8.0
-    assert row["repeat_curve_analyze_activation_self_ms"] == 1.0
+    assert row["repeat_curve_analyze_activation_self_ms"] == 0.5
+    assert row["repeat_curve_analyze_activation_dense_values_ms"] == 0.5
     assert row["repeat_curve_analyze_activation_result_analyze_ms"] == 6.0
     assert row["repeat_curve_analyze_activation_materialize_values_ms"] == 1.0
     assert row["repeat_kernel_enqueue_ms"] == 60.0
