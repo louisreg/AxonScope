@@ -832,6 +832,23 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_low_level_span_smoke`,
   `benchmark/results/p11b_low_level_span_sweep_smoke_ok`, and
   `benchmark/results/p11b_low_level_span_matrix_smoke`.
+  First Kaggle low-level recruitment cartography with the new spans was
+  captured on 2026-07-06 at commit `a73b1f0` on the same P100 image for CPU
+  and GPU AxonScope paths, with policies `default`, explicit `1000`, and
+  `unchunked`, recordings `full_vm`, `probe_vm`, and `observer_only`,
+  `Naxons=1000`, `Nx=101`, `tsim=10 ms`, `dt=0.01 ms`, three amplitudes,
+  different-diameter cohorts, one repeat, and no warmup. CPU artifacts live
+  under
+  `benchmark/results/kaggle/20260706_205203_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_205122_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and plots/report under
+  `benchmark/results/p11b_low_level_recruitment_cpu_gpu_a73b1f0`.
+  All 18 cases passed. Best rows are still kernel-dominated; the new spans
+  make `kernel.chunk_setup` visible as a large CPU observer-only/default cost,
+  while GPU best rows keep substantial unattributed curve/setup time that
+  should be split further before optimizing. Treat this as bottleneck
+  cartography, not a policy decision.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
