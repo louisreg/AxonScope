@@ -1000,6 +1000,20 @@ decisions need realistic workflow evidence.
   about 3.6-3.9% in this run, while GPU changes stay within small run-to-run
   variation. This confirms the fix mainly improves trace attribution and
   removes per-chunk state setup overhead, not the core solver bottleneck.
+  Second low-level single-cable follow-up: factorized extracellular forcing now
+  keeps a runtime cache keyed by the static footprint, cable coefficients, and
+  dtype, so amplitude sweeps can reuse the lowered single-cable forcing
+  footprint after the first miss. The lowering formula was also rewritten from
+  scatter-style `.at[].set` updates to direct slicing/concatenation. Local CPU
+  validation on 2026-07-06 passed `compileall`, `tests/unit/solvers/test_batch.py`,
+  and a six-case quick recruitment smoke under
+  `benchmark/results/p11b_prepare_forcing_local_final_bis`. The useful trace
+  signal is cache behavior, not end-to-end speed: first `kernel.prepare_factorized_forcing`
+  misses are still about 0.5-0.9 s on the local Mac, while second amplitude
+  hits are about 0.1 ms. The total local smoke remained too noisy for a speed
+  claim, so confirm with a reduced Kaggle CPU/GPU matrix before claiming
+  workflow improvement. Next low-level target: build the same cartography for
+  double-cable preparation/forcing paths before changing double-cable kernels.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

@@ -34,6 +34,10 @@ from .observer_runtime import (
     update_vm_raster_state_batch_from_tables,
     update_vm_raster_state_scalar_from_tables,
 )
+from .runtime_caches import (
+    get_single_cable_factorized_forcing,
+    store_single_cable_factorized_forcing,
+)
 from axonscope.solvers.options import (
     BatchOptions,
     BatchRecording,
@@ -3678,10 +3682,12 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint(
-            extracellular_potential_mid_mV.footprint_mV_per_A,
+        forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint_for_batch(
+            extracellular_potential_mid_mV,
             lower=lower,
             upper=upper,
+            lower_cache_source=cable.lower,
+            upper_cache_source=cable.upper,
             dtype_local=dtype_local,
         )
     Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
@@ -4179,10 +4185,12 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         current_rows_mid_A,
         dtype=dtype_local,
     )
-    forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint(
-        extracellular_potential_mid_mV.footprint_mV_per_A,
+    forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint_for_batch(
+        extracellular_potential_mid_mV,
         lower=lower,
         upper=upper,
+        lower_cache_source=cable.lower,
+        upper_cache_source=cable.upper,
         dtype_local=dtype_local,
     )
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
@@ -4297,7 +4305,86 @@ def _factorized_current_mid_rows(
     )
 
 
-def _single_cable_factorized_forcing_footprint(
+def _single_cable_factorized_forcing_footprint_for_batch(
+    batch: FactorizedExtracellularPotentialBatch,
+    *,
+    lower: Array,
+    upper: Array,
+    lower_cache_source: Array,
+    upper_cache_source: Array,
+    dtype_local: Any,
+) -> Array:
+    """Return a cached factorized single-cable forcing footprint when possible."""
+
+    cache_key = _single_cable_factorized_forcing_cache_key(
+        batch,
+        lower_cache_source=lower_cache_source,
+        upper_cache_source=upper_cache_source,
+        dtype_local=dtype_local,
+    )
+    cached = (
+        None
+        if cache_key is None
+        else get_single_cable_factorized_forcing(cache_key)
+    )
+    batch_cached = batch.single_cable_forcing_footprint_mV_per_A
+    cache_state = (
+        "batch"
+        if batch_cached is not None
+        else "hit" if cached is not None else "miss" if cache_key is not None else "disabled"
+    )
+    with benchmark_span(
+        "kernel.prepare_factorized_forcing",
+        mode="single",
+        cache=cache_state,
+        group_size=batch.batch_size,
+        drive_count=batch.drive_count,
+        footprint_rank=jnp.asarray(batch.footprint_mV_per_A).ndim,
+    ):
+        if batch_cached is not None:
+            return jnp.asarray(batch_cached, dtype=dtype_local)
+        if cached is not None:
+            return jnp.asarray(cached, dtype=dtype_local)
+        forcing = _compute_single_cable_factorized_forcing_footprint(
+            batch.footprint_mV_per_A,
+            lower=lower,
+            upper=upper,
+            dtype_local=dtype_local,
+        )
+        if cache_key is not None:
+            store_single_cable_factorized_forcing(cache_key, forcing)
+        return forcing
+
+
+def _single_cable_factorized_forcing_cache_key(
+    batch: FactorizedExtracellularPotentialBatch,
+    *,
+    lower_cache_source: Array,
+    upper_cache_source: Array,
+    dtype_local: Any,
+) -> tuple[Any, ...] | None:
+    footprint_key = batch.static_footprint_key
+    if footprint_key is None:
+        return None
+    return (
+        "single_cable_factorized_forcing_v1",
+        footprint_key,
+        _array_identity_cache_key(lower_cache_source),
+        _array_identity_cache_key(upper_cache_source),
+        str(dtype_local),
+    )
+
+
+def _array_identity_cache_key(values: Array) -> tuple[Any, ...]:
+    arr = jnp.asarray(values)
+    return (
+        id(values),
+        tuple(int(dim) for dim in arr.shape),
+        str(arr.dtype),
+    )
+
+
+def _compute_single_cable_factorized_forcing_footprint(
     footprint_mV_per_A: Array,
     *,
     lower: Array,
@@ -4306,44 +4393,44 @@ def _single_cable_factorized_forcing_footprint(
 ) -> Array:
     """Lower factorized Vstim footprints to diffusion forcing footprints once."""
 
-    with benchmark_span("kernel.prepare_factorized_forcing", mode="single"):
-        footprint = jnp.asarray(footprint_mV_per_A, dtype=dtype_local)
-        lower_rows = jnp.asarray(lower, dtype=dtype_local)
-        upper_rows = jnp.asarray(upper, dtype=dtype_local)
-        if footprint.ndim == 3:
-            batch_size, drive_count, nx = footprint.shape
-            flattened = footprint.reshape((batch_size * drive_count, nx))
-            lower_rows = jnp.broadcast_to(
-                lower_rows[:, None, :],
-                (batch_size, drive_count, nx),
-            ).reshape((batch_size * drive_count, nx))
-            upper_rows = jnp.broadcast_to(
-                upper_rows[:, None, :],
-                (batch_size, drive_count, nx),
-            ).reshape((batch_size * drive_count, nx))
-            forcing = _single_cable_factorized_forcing_footprint(
-                flattened,
-                lower=lower_rows,
-                upper=upper_rows,
-                dtype_local=dtype_local,
-            )
-            return forcing.reshape((batch_size, drive_count, nx))
-        if footprint.ndim != 2:
-            raise ValueError(
-                "factorized single-cable footprints must have shape (B, Nx) or (B, K, Nx), "
-                f"got {footprint.shape}."
-            )
-        out = jnp.zeros_like(footprint)
-        nx = int(footprint.shape[1])
-        if nx >= 2:
-            out = out.at[:, 0].set(upper_rows[:, 0] * (footprint[:, 1] - footprint[:, 0]))
-            out = out.at[:, -1].set(lower_rows[:, -1] * (footprint[:, -2] - footprint[:, -1]))
-        if nx > 2:
-            out = out.at[:, 1:-1].set(
-                lower_rows[:, 1:-1] * (footprint[:, :-2] - footprint[:, 1:-1])
-                + upper_rows[:, 1:-1] * (footprint[:, 2:] - footprint[:, 1:-1])
-            )
-        return out
+    footprint = jnp.asarray(footprint_mV_per_A, dtype=dtype_local)
+    lower_rows = jnp.asarray(lower, dtype=dtype_local)
+    upper_rows = jnp.asarray(upper, dtype=dtype_local)
+    if footprint.ndim == 3:
+        batch_size, drive_count, nx = footprint.shape
+        flattened = footprint.reshape((batch_size * drive_count, nx))
+        lower_rows = jnp.broadcast_to(
+            lower_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        upper_rows = jnp.broadcast_to(
+            upper_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        forcing = _compute_single_cable_factorized_forcing_footprint(
+            flattened,
+            lower=lower_rows,
+            upper=upper_rows,
+            dtype_local=dtype_local,
+        )
+        return forcing.reshape((batch_size, drive_count, nx))
+    if footprint.ndim != 2:
+        raise ValueError(
+            "factorized single-cable footprints must have shape (B, Nx) or (B, K, Nx), "
+            f"got {footprint.shape}."
+        )
+    nx = int(footprint.shape[1])
+    if nx < 2:
+        return jnp.zeros_like(footprint)
+    first = upper_rows[:, :1] * (footprint[:, 1:2] - footprint[:, :1])
+    last = lower_rows[:, -1:] * (footprint[:, -2:-1] - footprint[:, -1:])
+    if nx == 2:
+        return jnp.concatenate((first, last), axis=1)
+    middle = (
+        lower_rows[:, 1:-1] * (footprint[:, :-2] - footprint[:, 1:-1])
+        + upper_rows[:, 1:-1] * (footprint[:, 2:] - footprint[:, 1:-1])
+    )
+    return jnp.concatenate((first, middle, last), axis=1)
 
 
 def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
@@ -5381,6 +5468,14 @@ def _as_factorized_extracellular_potential_batch(
         else jnp.asarray(values.current_initial_previous_A, dtype=dtype_local)
     )
     footprint_mV_per_A = jnp.asarray(values.footprint_mV_per_A, dtype=dtype_local)
+    forcing_footprint_mV_per_A = (
+        None
+        if values.single_cable_forcing_footprint_mV_per_A is None
+        else jnp.asarray(
+            values.single_cable_forcing_footprint_mV_per_A,
+            dtype=dtype_local,
+        )
+    )
     if int(values.target_nx) != int(nx):
         raise ValueError(f"{name}.target_nx must be {nx}, got {values.target_nx}.")
     if footprint_mV_per_A.ndim not in {2, 3} or footprint_mV_per_A.shape[-1] != nx:
@@ -5434,6 +5529,8 @@ def _as_factorized_extracellular_potential_batch(
         footprint_mV_per_A=footprint_mV_per_A,
         target_nx=nx,
         current_initial_previous_A=current_initial_previous_A,
+        static_footprint_key=values.static_footprint_key,
+        single_cable_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
     )
 
 

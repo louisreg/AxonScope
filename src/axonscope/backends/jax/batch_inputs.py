@@ -108,6 +108,8 @@ class FactorizedExtracellularPotentialBatch:
     footprint_mV_per_A: Array
     target_nx: int
     current_initial_previous_A: Array | None = None
+    static_footprint_key: tuple[Any, ...] | None = None
+    single_cable_forcing_footprint_mV_per_A: Array | None = None
 
     def __post_init__(self) -> None:
         current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
@@ -116,6 +118,10 @@ class FactorizedExtracellularPotentialBatch:
         )
         footprint_shape = tuple(
             int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
+        )
+        forcing_shape = tuple(
+            int(dim)
+            for dim in getattr(self.single_cable_forcing_footprint_mV_per_A, "shape", ())
         )
         if len(footprint_shape) not in {2, 3}:
             raise ValueError("footprint_mV_per_A must have shape (B, Nx) or (B, K, Nx).")
@@ -156,6 +162,12 @@ class FactorizedExtracellularPotentialBatch:
             )
         if int(self.target_nx) < 1:
             raise ValueError("target_nx must be >= 1.")
+        if self.single_cable_forcing_footprint_mV_per_A is not None:
+            if forcing_shape != footprint_shape:
+                raise ValueError(
+                    "single_cable_forcing_footprint_mV_per_A must match "
+                    f"footprint_mV_per_A shape {footprint_shape}, got {forcing_shape}."
+                )
         object.__setattr__(self, "target_nx", int(self.target_nx))
 
     @property

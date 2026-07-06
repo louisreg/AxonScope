@@ -956,6 +956,7 @@ def _try_build_factorized_footprint_vstim_batch(
             if current_initial_previous_A is None
             else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
         ),
+        static_footprint_key=cache_key,
     )
 
 

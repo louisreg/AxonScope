@@ -472,7 +472,7 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     footprint = jnp.asarray(factorized.footprint_mV_per_A, dtype=runtime.membrane.dtype)
     lower_rows = jnp.broadcast_to(runtime.cable.lower[None, :], footprint.shape)
     upper_rows = jnp.broadcast_to(runtime.cable.upper[None, :], footprint.shape)
-    forcing = batch_kernels._single_cable_factorized_forcing_footprint(
+    forcing = batch_kernels._compute_single_cable_factorized_forcing_footprint(
         footprint,
         lower=lower_rows,
         upper=upper_rows,
