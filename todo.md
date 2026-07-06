@@ -974,6 +974,18 @@ decisions need realistic workflow evidence.
   0.9-1.2 s, and observer-only activation analysis is about 0.03 s. This
   confirms those outside-solver costs are no longer the dominant blocker for
   the next low-level solver/kernel optimization pass.
+  First low-level observer follow-up: single-cable observer-only local chunk
+  execution now reuses one VmRaster zero-state template per run instead of
+  recreating it for every local chunk. Local CPU before/after probes live under
+  `benchmark/results/p11b_lowlevel_observer_chunk_setup_probe` and
+  `benchmark/results/p11b_lowlevel_observer_chunk_template_probe` for the same
+  `Naxons=1000`, `Nx=101`, `tsim=10 ms`, `dt=0.01 ms`, three-amplitude
+  observer-only smoke. On this local default policy probe, `kernel.chunk_setup`
+  drops from about 6.5 s to about 0.09 s, while CPU work is reattributed mostly
+  to `kernel.dispatch_jax`; total `curve.simulate` falls from about 14.48 s to
+  about 13.44 s. Treat this as trace cleanup plus a small runtime win, not a
+  policy decision. The analogous double-cable observer path intentionally stays
+  untouched until the dedicated double-cable optimization pass.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

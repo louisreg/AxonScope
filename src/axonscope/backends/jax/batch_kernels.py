@@ -3812,6 +3812,15 @@ def _run_single_cable_vstim_batch_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
+    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+        observers,
+        batch_size=batch_size,
+        chunk_ranges=chunk_ranges,
+        mode="single",
+        variant="dense_vstim",
+        time_chunk_steps=time_chunk_steps,
+        enabled=local_observer_chunks,
+    )
     observer_state = (
         None
         if local_observer_chunks
@@ -3835,7 +3844,7 @@ def _run_single_cable_vstim_batch_observer_chunks(
             observer_state_scope="chunk" if local_observer_chunks else "full",
         ):
             observer_state0 = (
-                init_vm_raster_state(observers, batch_size=batch_size, nt=stop - start)
+                observer_chunk_state_template
                 if local_observer_chunks
                 else observer_state
             )
@@ -3973,6 +3982,15 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
+    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+        observers,
+        batch_size=batch_size,
+        chunk_ranges=chunk_ranges,
+        mode="single",
+        variant="sparse_vstim",
+        time_chunk_steps=time_chunk_steps,
+        enabled=local_observer_chunks,
+    )
     observer_state = (
         None
         if local_observer_chunks
@@ -3996,7 +4014,7 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
             observer_state_scope="chunk" if local_observer_chunks else "full",
         ):
             observer_state0 = (
-                init_vm_raster_state(observers, batch_size=batch_size, nt=stop - start)
+                observer_chunk_state_template
                 if local_observer_chunks
                 else observer_state
             )
@@ -4140,6 +4158,15 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
     )
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
+    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+        observers,
+        batch_size=batch_size,
+        chunk_ranges=chunk_ranges,
+        mode="single",
+        variant="factorized_sparse_vstim",
+        time_chunk_steps=time_chunk_steps,
+        enabled=local_observer_chunks,
+    )
     observer_state = (
         None
         if local_observer_chunks
@@ -4173,7 +4200,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             observer_state_scope="chunk" if local_observer_chunks else "full",
         ):
             observer_state0 = (
-                init_vm_raster_state(observers, batch_size=batch_size, nt=stop - start)
+                observer_chunk_state_template
                 if local_observer_chunks
                 else observer_state
             )
@@ -4377,6 +4404,15 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
+    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+        observers,
+        batch_size=batch_size,
+        chunk_ranges=chunk_ranges,
+        mode="single",
+        variant="zero_sparse_vstim",
+        time_chunk_steps=time_chunk_steps,
+        enabled=local_observer_chunks,
+    )
     observer_state = (
         None
         if local_observer_chunks
@@ -4400,7 +4436,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
             observer_state_scope="chunk" if local_observer_chunks else "full",
         ):
             observer_state0 = (
-                init_vm_raster_state(observers, batch_size=batch_size, nt=stop - start)
+                observer_chunk_state_template
                 if local_observer_chunks
                 else observer_state
             )
@@ -5204,6 +5240,36 @@ def _resolve_recording(recording: BatchRecording, *, nx: int) -> tuple[Array, bo
     if indices is None:
         return jnp.arange(nx, dtype=jnp.int32), True
     return jnp.asarray(indices, dtype=jnp.int32), False
+
+
+def _init_local_vm_raster_chunk_template(
+    plan: VmRasterPlan,
+    *,
+    batch_size: int,
+    chunk_ranges: tuple[tuple[int, int], ...],
+    mode: str,
+    variant: str,
+    time_chunk_steps: int | None,
+    enabled: bool,
+) -> VmRasterState | None:
+    if not enabled:
+        return None
+    max_chunk_steps = max((stop - start for start, stop in chunk_ranges), default=0)
+    if max_chunk_steps <= 0:
+        return None
+    with benchmark_span(
+        "kernel.prepare_state",
+        mode=mode,
+        variant=variant,
+        output="observer_only",
+        observer="vm_raster",
+        state="chunk_template",
+        group_size=batch_size,
+        chunk_steps=max_chunk_steps,
+        chunk_count=len(chunk_ranges),
+        time_chunk_steps=time_chunk_steps,
+    ):
+        return init_vm_raster_state(plan, batch_size=batch_size, nt=max_chunk_steps)
 
 
 def _combine_vm_raster_chunk_states(
