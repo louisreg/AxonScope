@@ -234,7 +234,9 @@ def row_result_dir(campaign_root: Path, raw: Mapping[str, Any]) -> Path:
     recording = str(raw.get("recording") or "")
     policy = str(raw.get("policy") or "")
     if recording:
-        return campaign_root / recording / policy_token(policy)
+        nested = campaign_root / recording / policy_token(policy)
+        if nested.exists():
+            return nested
     return campaign_root / policy_token(policy)
 
 

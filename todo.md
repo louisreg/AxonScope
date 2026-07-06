@@ -887,6 +887,41 @@ decisions need realistic workflow evidence.
   `rss`, keep device/all tracing to one pool and a few amplitudes, and compare
   the new `kernel.prepare_inputs` span against `kernel.dispatch_jax` and
   `kernel.wait`.
+  Clean RSS timing was captured next on Kaggle P100 at commit `f5862eb` for a
+  reduced recruitment matrix: CPU and GPU AxonScope paths, recordings
+  `full_vm`, `probe_vm`, and `observer_only`, policies `default`, explicit
+  `1000`, and `unchunked`, `Naxons=1000`, `Nx=101`, `tsim=10 ms`,
+  `dt=0.01 ms`, three amplitudes, different-diameter cohorts, one repeat, no
+  warmup, RSS tracing only, and no JAX/device profiling. CPU artifacts live
+  under
+  `benchmark/results/kaggle/20260706_213755_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_213808_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and the combined plots/reports under
+  `benchmark/results/p11b_clean_timing_cpu_gpu_f5862eb`. All 18 cases passed.
+  Best-policy times are now coherent: CPU full/probe/observer are about
+  22.6 s, 21.7 s, and 21.9 s, while GPU full/probe/observer are about 10.0 s,
+  8.9 s, and 8.7 s, giving roughly 2.3-2.5x GPU speedup on this workload.
+  CPU full/probe best rows are still dominated by `kernel.wait`; CPU
+  observer-only depends strongly on the observer finalization/chunk path. GPU
+  best rows show a mixed bottleneck rather than pure solver time:
+  `kernel.enqueue` and `kernel.dispatch_jax` are visible, but
+  `curve.analyze_activation`, `curve.build_pool`, `runtime.prepare`, and input
+  lowering remain large enough to split or cache before deeper solver-kernel
+  optimization. This replaces the previous device-traced GPU timing as the
+  timing baseline; keep heavy device traces for tiny allocation/profiler cases.
+  Follow-up instrumentation now splits benchmark workflow overhead without
+  changing solver behavior: `curve.build_pool` exposes diameter grid, spatial
+  layout, row/stimulation construction, and template builds;
+  `curve.update_amplitudes` exposes row updates and stimulus builds; and
+  `curve.analyze_activation` exposes VmRaster extraction/value computation,
+  result-side analysis, and value materialization. `time_chunk_sweep_summary.csv`
+  and `time_chunk_sweep_report.md` now include build-pool, simulation
+  construction, and activation-analysis timings, and the stage classifier
+  correctly groups `curve.analyze_activation*` with result assembly. The matrix
+  report also accepts direct single-recording campaign layouts as well as
+  `recording/policy` matrix layouts. A tiny CPU smoke lives under
+  `benchmark/results/p11b_workflow_span_smoke`.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

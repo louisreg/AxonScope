@@ -14,6 +14,9 @@ from benchmark.analysis.cold_path_audit import (
 
 def test_classify_stage_groups() -> None:
     assert classify_stage("curve.build_pool") == "pool_build"
+    assert classify_stage("curve.build_pool.template_build") == "pool_build"
+    assert classify_stage("curve.analyze_activation") == "result_assembly"
+    assert classify_stage("curve.analyze_activation.result_analyze") == "result_assembly"
     assert classify_stage("dispatch.build_plan") == "dispatch"
     assert classify_stage("runtime.prepare") == "runtime_prepare"
     assert classify_stage("inputs.extracellular") == "input_lowering"

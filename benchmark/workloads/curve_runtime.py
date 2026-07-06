@@ -560,21 +560,27 @@ def _update_pool_amplitudes(
     if amplitudes.shape != (len(pool),):
         raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
     stimulus_cache: dict[float, Any] = {}
-    for instance, amplitude in zip(pool, amplitudes, strict=True):
-        stimulation = instance.extracellular_stimulation
-        if stimulation is None:
-            raise RuntimeError("benchmark pool row has no extracellular stimulation.")
-        drive = stimulation.drives[0]
-        amplitude_key = float(amplitude)
-        stimulus = stimulus_cache.get(amplitude_key)
-        if stimulus is None:
-            stimulus = _stimulus_for_amplitude(options, amplitude_key)
-            stimulus_cache[amplitude_key] = stimulus
-        updated = stimulation.replace_drive(
-            drive.id,
-            stimulus=stimulus,
-        )
-        instance.add_extracellular_stimulation(stimulation=updated, replace=True)
+    with benchmark_span(
+        "curve.update_amplitudes.rows",
+        n_axons=len(pool),
+        unique_amplitudes=int(np.unique(amplitudes).size),
+    ):
+        for instance, amplitude in zip(pool, amplitudes, strict=True):
+            stimulation = instance.extracellular_stimulation
+            if stimulation is None:
+                raise RuntimeError("benchmark pool row has no extracellular stimulation.")
+            drive = stimulation.drives[0]
+            amplitude_key = float(amplitude)
+            stimulus = stimulus_cache.get(amplitude_key)
+            if stimulus is None:
+                with benchmark_span("curve.update_amplitudes.stimulus_build"):
+                    stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                stimulus_cache[amplitude_key] = stimulus
+            updated = stimulation.replace_drive(
+                drive.id,
+                stimulus=stimulus,
+            )
+            instance.add_extracellular_stimulation(stimulation=updated, replace=True)
 
 
 def _build_pool(
@@ -589,69 +595,85 @@ def _build_pool(
     if amplitudes.shape != (n_axons,):
         raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
 
-    if options["diameters"] == "different_diameters":
-        single_diameters = np.linspace(0.4, 1.2, n_axons, dtype=float)
-        double_values = np.asarray([5.7, 7.3, 10.0, 12.8, 16.0], dtype=float)
-        double_diameters = np.resize(double_values, n_axons)
-    else:
-        single_diameters = np.full(n_axons, 0.8, dtype=float)
-        double_diameters = np.full(n_axons, 7.3, dtype=float)
+    with benchmark_span(
+        "curve.build_pool.diameter_grid",
+        diameters=options["diameters"],
+        n_axons=n_axons,
+    ):
+        if options["diameters"] == "different_diameters":
+            single_diameters = np.linspace(0.4, 1.2, n_axons, dtype=float)
+            double_values = np.asarray([5.7, 7.3, 10.0, 12.8, 16.0], dtype=float)
+            double_diameters = np.resize(double_values, n_axons)
+        else:
+            single_diameters = np.full(n_axons, 0.8, dtype=float)
+            double_diameters = np.full(n_axons, 7.3, dtype=float)
 
-    if curve_context == "recruitment":
-        radius_um = 125.0
-        angles = rng.uniform(0.0, 2.0 * np.pi, n_axons)
-        radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, n_axons))
-        y_um = radii * np.cos(angles)
-        z_um = radii * np.sin(angles)
-    else:
-        y_um = np.zeros(n_axons, dtype=float)
-        z_um = np.full(n_axons, 100.0, dtype=float)
+    with benchmark_span(
+        "curve.build_pool.spatial_layout",
+        curve_context=curve_context,
+        n_axons=n_axons,
+    ):
+        if curve_context == "recruitment":
+            radius_um = 125.0
+            angles = rng.uniform(0.0, 2.0 * np.pi, n_axons)
+            radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, n_axons))
+            y_um = radii * np.cos(angles)
+            z_um = radii * np.sin(angles)
+        else:
+            y_um = np.zeros(n_axons, dtype=float)
+            z_um = np.full(n_axons, 100.0, dtype=float)
 
     templates: dict[tuple[str, float], _AxonTemplate] = {}
     pool: list[axs.AxonInstance] = []
     row_meta: list[dict[str, Any]] = []
-    for row in range(n_axons):
-        row_cable = _row_cable(options, row)
-        diameter_um = (
-            float(double_diameters[row])
-            if row_cable == "double_cable"
-            else float(single_diameters[row])
-        )
-        diameter_um = axs.axons.round_axon_diameter_um(diameter_um)
-        template_key = (row_cable, diameter_um)
-        template = templates.get(template_key)
-        if template is None:
-            template = _build_axon_template(options, row_cable, diameter_um)
-            templates[template_key] = template
+    with benchmark_span("curve.build_pool.rows", n_axons=n_axons):
+        for row in range(n_axons):
+            row_cable = _row_cable(options, row)
+            diameter_um = (
+                float(double_diameters[row])
+                if row_cable == "double_cable"
+                else float(single_diameters[row])
+            )
+            diameter_um = axs.axons.round_axon_diameter_um(diameter_um)
+            template_key = (row_cable, diameter_um)
+            template = templates.get(template_key)
+            if template is None:
+                with benchmark_span(
+                    "curve.build_pool.template_build",
+                    cable=row_cable,
+                    diameter_um=diameter_um,
+                ):
+                    template = _build_axon_template(options, row_cable, diameter_um)
+                templates[template_key] = template
 
-        electrode = axs.analytical.PointSourceElectrode(
-            x=template.electrode_x,
-            y=0.0 * axs.um,
-            z=0.0 * axs.um if curve_context == "recruitment" else 100.0 * axs.um,
-            min_distance=5.0 * axs.um if curve_context == "recruitment" else None,
-        )
-        stimulation = axs.analytical.point_source_stimulation(
-            electrode,
-            template.positions,
-            sigma=0.3 * axs.S_per_m,
-            stimulus=_stimulus_for_amplitude(options, amplitudes[row]),
-            axon_y=float(y_um[row]) * axs.um,
-            axon_z=float(z_um[row]) * axs.um,
-            axon_id=axs.AxonId(f"row_{row:05d}"),
-        )
-        instance = axs.AxonInstance(template.axon)
-        instance.add_extracellular_stimulation(stimulation=stimulation)
-        pool.append(instance)
-        row_meta.append(
-            {
-                "row": row,
-                "family": template.family,
-                "diameter_um": float(template.diameter_um),
-                "cable": row_cable,
-                "axon_y_um": float(y_um[row]),
-                "axon_z_um": float(z_um[row]),
-            }
-        )
+            electrode = axs.analytical.PointSourceElectrode(
+                x=template.electrode_x,
+                y=0.0 * axs.um,
+                z=0.0 * axs.um if curve_context == "recruitment" else 100.0 * axs.um,
+                min_distance=5.0 * axs.um if curve_context == "recruitment" else None,
+            )
+            stimulation = axs.analytical.point_source_stimulation(
+                electrode,
+                template.positions,
+                sigma=0.3 * axs.S_per_m,
+                stimulus=_stimulus_for_amplitude(options, amplitudes[row]),
+                axon_y=float(y_um[row]) * axs.um,
+                axon_z=float(z_um[row]) * axs.um,
+                axon_id=axs.AxonId(f"row_{row:05d}"),
+            )
+            instance = axs.AxonInstance(template.axon)
+            instance.add_extracellular_stimulation(stimulation=stimulation)
+            pool.append(instance)
+            row_meta.append(
+                {
+                    "row": row,
+                    "family": template.family,
+                    "diameter_um": float(template.diameter_um),
+                    "cable": row_cable,
+                    "axon_y_um": float(y_um[row]),
+                    "axon_z_um": float(z_um[row]),
+                }
+            )
     return tuple(pool), tuple(row_meta)
 
 
@@ -730,13 +752,22 @@ def _stimulus_for_amplitude(options: dict[str, Any], amplitude_uA: float) -> Any
 
 def _activation_values(result: Any, activation: Any, *, recording_mode: str) -> np.ndarray:
     if recording_mode == "observer_only":
-        observations = getattr(result, "observations", None)
-        if observations is None:
-            raise RuntimeError("observer-only benchmark produced no observations.")
-        raster = observations[VM_RASTER_OBSERVATION_KEY]
-        return np.asarray(activation_values_from_vm_raster(raster, activation), dtype=bool)
-    analysis = result.analyze(activation)
-    return np.asarray(analysis.values, dtype=bool).reshape(-1)
+        with benchmark_span("curve.analyze_activation.vm_raster_extract"):
+            observations = getattr(result, "observations", None)
+            if observations is None:
+                raise RuntimeError("observer-only benchmark produced no observations.")
+            raster = observations[VM_RASTER_OBSERVATION_KEY]
+        with benchmark_span("curve.analyze_activation.vm_raster_values"):
+            values = activation_values_from_vm_raster(raster, activation)
+    else:
+        with benchmark_span("curve.analyze_activation.result_analyze"):
+            analysis = result.analyze(activation)
+            values = analysis.values
+    with benchmark_span(
+        "curve.analyze_activation.materialize_values",
+        recording=recording_mode,
+    ):
+        return np.asarray(values, dtype=bool).reshape(-1)
 
 
 def _recording_policy(options: dict[str, Any]) -> Any:

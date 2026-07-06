@@ -83,6 +83,34 @@ def test_time_chunk_matrix_report_writes_best_rows(tmp_path: Path):
     assert "sample" in (output / "time_chunk_matrix_report.md").read_text(encoding="utf-8")
 
 
+def test_time_chunk_matrix_report_reads_direct_single_recording_layout(tmp_path: Path):
+    root = tmp_path / "campaign"
+    output = tmp_path / "report"
+    root.mkdir(parents=True)
+    with (root / "time_chunk_sweep_summary.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        writer.writeheader()
+        writer.writerow(_summary_row("default", 2000.0))
+
+    _write_memory(root / "default" / "memory_summary.csv", rss=333.0)
+
+    assert (
+        run_matrix_report(
+            [
+                "--run",
+                f"single={root}",
+                "--output",
+                str(output),
+                "--no-plots",
+            ]
+        )
+        == 0
+    )
+
+    best = list(csv.DictReader((output / "time_chunk_best_rows.csv").open()))
+    assert best[0]["peak_rss_end_mib"] == "333.0"
+
+
 def _write_campaign(root: Path) -> None:
     root.mkdir(parents=True)
     with (root / "time_chunk_sweep_summary.csv").open("w", newline="", encoding="utf-8") as handle:

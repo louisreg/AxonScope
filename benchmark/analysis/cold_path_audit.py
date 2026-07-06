@@ -246,6 +246,8 @@ def read_context(run_dir: Path) -> RunContext:
 def classify_stage(stage: str) -> str:
     if stage.startswith("curve.build_pool"):
         return "pool_build"
+    if stage.startswith("curve.analyze"):
+        return "result_assembly"
     if stage.startswith("curve."):
         return "curve"
     if stage.startswith("dispatch."):
@@ -256,7 +258,7 @@ def classify_stage(stage: str) -> str:
         return "input_lowering"
     if stage.startswith("kernel."):
         return "kernel"
-    if stage.startswith("results.") or stage.startswith("curve.analyze"):
+    if stage.startswith("results."):
         return "result_assembly"
     if stage.startswith("simulation."):
         return "curve"

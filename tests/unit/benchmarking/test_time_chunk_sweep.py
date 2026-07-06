@@ -320,6 +320,69 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "duration_ms": 1.0,
             "metadata": {},
         },
+        {
+            "event_id": 30,
+            "parent_event_id": None,
+            "name": "curve.build_pool",
+            "duration_ms": 40.0,
+            "metadata": {"phase": "repeat"},
+        },
+        {
+            "event_id": 31,
+            "parent_event_id": 30,
+            "name": "curve.build_pool.diameter_grid",
+            "duration_ms": 1.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 32,
+            "parent_event_id": 30,
+            "name": "curve.build_pool.spatial_layout",
+            "duration_ms": 2.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 33,
+            "parent_event_id": 30,
+            "name": "curve.build_pool.rows",
+            "duration_ms": 30.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 34,
+            "parent_event_id": 33,
+            "name": "curve.build_pool.template_build",
+            "duration_ms": 5.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 35,
+            "parent_event_id": None,
+            "name": "curve.construct_simulation",
+            "duration_ms": 1.5,
+            "metadata": {"phase": "repeat"},
+        },
+        {
+            "event_id": 36,
+            "parent_event_id": None,
+            "name": "curve.analyze_activation",
+            "duration_ms": 8.0,
+            "metadata": {"phase": "repeat"},
+        },
+        {
+            "event_id": 37,
+            "parent_event_id": 36,
+            "name": "curve.analyze_activation.result_analyze",
+            "duration_ms": 6.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 38,
+            "parent_event_id": 36,
+            "name": "curve.analyze_activation.materialize_values",
+            "duration_ms": 1.0,
+            "metadata": {},
+        },
     ]
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (tmp_path / "events.jsonl").write_text(
@@ -336,7 +399,18 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["observer_state_scopes"] == "chunk"
     assert row["dispatch_chunk_steps"] == "100"
     assert row["dispatch_chunk_count_max"] == "1"
+    assert row["repeat_curve_build_pool_ms"] == 40.0
+    assert row["repeat_curve_build_pool_self_ms"] == 7.0
+    assert row["repeat_curve_build_pool_diameter_grid_ms"] == 1.0
+    assert row["repeat_curve_build_pool_spatial_layout_ms"] == 2.0
+    assert row["repeat_curve_build_pool_rows_ms"] == 30.0
+    assert row["repeat_curve_build_pool_template_build_ms"] == 5.0
+    assert row["repeat_curve_construct_simulation_ms"] == 1.5
     assert row["repeat_curve_simulate_ms"] == 100.0
+    assert row["repeat_curve_analyze_activation_ms"] == 8.0
+    assert row["repeat_curve_analyze_activation_self_ms"] == 1.0
+    assert row["repeat_curve_analyze_activation_result_analyze_ms"] == 6.0
+    assert row["repeat_curve_analyze_activation_materialize_values_ms"] == 1.0
     assert row["repeat_kernel_enqueue_ms"] == 60.0
     assert row["repeat_kernel_prepare_inputs_ms"] == 6.0
     assert row["repeat_kernel_prepare_inputs_self_ms"] == 3.5
