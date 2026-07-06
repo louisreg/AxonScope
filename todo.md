@@ -831,8 +831,28 @@ decisions need realistic workflow evidence.
   default/50/250 are close (~19.2-19.3 s), while 500, 1000, and unchunked are
   slower (~20.6-21.0 s) due to shifted VmRaster combine/finalize
   materialization. This supports backend/recording-specific evidence gathering
-  before any default change; matching Kaggle CPU/GPU and threshold-curve
-  evidence are still pending.
+  before any default change.
+  Matching Kaggle P100-image CPU/GPU recruitment matrix evidence was captured
+  on 2026-07-06 at commit `091992b` with the same bounded workload and all
+  18 cases passing. CPU-path artifacts live under
+  `benchmark/results/kaggle/20260706_182247_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  and GPU-path artifacts under
+  `benchmark/results/kaggle/20260706_182247_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`.
+  The Kaggle CPU path keeps the same qualitative shape as the local CPU run but
+  is slower overall: full Vm is best with explicit 1000 (~35.4 s), probe Vm is
+  best with default (~34.0 s, close to unchunked/1000), and observer-only is
+  best with default (~33.2 s). Full/probe CPU cases are dominated by
+  `kernel.wait` (~26-27 s), while observer-only time moves between dispatch,
+  combine, and finalize depending on chunk policy. The Kaggle GPU path shifts
+  the best policy toward large/unchunked chunks: full Vm is best with explicit
+  1000 (~14.3 s), probe Vm is essentially tied across default/1000/unchunked
+  (~12.7-12.8 s), and observer-only is best unchunked (~12.4 s) with explicit
+  1000 close behind (~12.7 s). Default/50-step observer-only on GPU remains
+  much slower (~17.5 s), so current small-chunk behavior is a GPU bottleneck.
+  Result-boundary traces now show full/probe GPU materialization/assembly costs
+  around 1.2-2.3 s. Keep this as bottleneck cartography for now: no default
+  change until threshold-curve evidence, adaptive policy candidates, and
+  repeated/realistic confirmation exist.
 - [ ] Keep recruitment amplitude micro-batching as a later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
