@@ -986,6 +986,20 @@ decisions need realistic workflow evidence.
   about 13.44 s. Treat this as trace cleanup plus a small runtime win, not a
   policy decision. The analogous double-cable observer path intentionally stays
   untouched until the dedicated double-cable optimization pass.
+  Matching Kaggle P100 CPU/GPU validation passed on 2026-07-06 at commit
+  `27c86c6`. CPU artifacts live under
+  `benchmark/results/kaggle/20260706_231351_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260706_231407_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and combined plots/report under
+  `benchmark/results/p11b_vmraster_template_cpu_gpu_27c86c6`. All 18 cases
+  passed. Versus the `6caf6dc` reduced-matrix run, CPU observer-only/default
+  `kernel.chunk_setup` drops from about 15.0 s to about 0.10 s, with the work
+  reattributed mostly to `kernel.dispatch_jax`; total CPU observer-only best
+  visible time improves by about 3.1%. Full/probe CPU rows also improve by
+  about 3.6-3.9% in this run, while GPU changes stay within small run-to-run
+  variation. This confirms the fix mainly improves trace attribution and
+  removes per-chunk state setup overhead, not the core solver bottleneck.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
