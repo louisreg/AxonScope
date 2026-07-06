@@ -850,9 +850,31 @@ decisions need realistic workflow evidence.
   1000 close behind (~12.7 s). Default/50-step observer-only on GPU remains
   much slower (~17.5 s), so current small-chunk behavior is a GPU bottleneck.
   Result-boundary traces now show full/probe GPU materialization/assembly costs
-  around 1.2-2.3 s. Keep this as bottleneck cartography for now: no default
-  change until threshold-curve evidence, adaptive policy candidates, and
-  repeated/realistic confirmation exist.
+  around 1.2-2.3 s. Keep this as bottleneck cartography for now: at this
+  point, threshold-curve evidence, adaptive policy candidates, and
+  repeated/realistic confirmation were still required before any default
+  change.
+  Threshold-curve matrix evidence was then captured on 2026-07-06 at commit
+  `6c92042` after fixing `benchmark/campaigns/time_chunk_sweep.py` to map the
+  campaign-scale `--amplitude-count` knob to `--max-iterations` for
+  `threshold_curves`. All 18 Kaggle CPU-path cases and all 18 Kaggle GPU-path
+  cases passed. CPU-path artifacts live under
+  `benchmark/results/kaggle/20260706_185153_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  and GPU-path artifacts under
+  `benchmark/results/kaggle/20260706_185207_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`.
+  On Kaggle CPU threshold curves, full Vm and probe Vm again favor large
+  chunks: full Vm is best with explicit 1000 (~16.3 s) and probe Vm is best
+  with explicit 1000 (~15.7 s). Observer-only is nearly flat across default,
+  unchunked, and explicit 1000 (~14.4-14.5 s), but its time moves between
+  dispatch, combine, and finalize depending on policy. On Kaggle GPU threshold
+  curves, unchunked is best across all recording modes: full Vm ~10.0 s,
+  probe Vm ~9.0 s, and observer-only ~8.9 s, with explicit 1000 close behind
+  for probe/observer and 50-step chunks clearly slower. This confirms the
+  broad GPU bottleneck map from recruitment: small chunks cost too much on GPU,
+  large/unchunked policies are consistently competitive, and full/probe GPU
+  result materialization/assembly remains visible (~0.5-1.1 s depending on
+  recording). Remaining before changing defaults: adaptive policy candidates,
+  repeated runs, and a bounded-realistic confirmation pass.
 - [ ] Keep recruitment amplitude micro-batching as a later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
