@@ -808,6 +808,12 @@ decisions need realistic workflow evidence.
   under `benchmark/results/p11b_result_trace_full_smoke`,
   `benchmark/results/p11b_result_trace_probe_smoke`, and
   `benchmark/results/p11b_result_trace_observer_smoke`.
+  Fifth tooling step: `benchmark/campaigns/time_chunk_sweep.py` now accepts
+  `--recordings full_vm,probe_vm,observer_only` and writes matrix outputs under
+  `<recording>/<policy>` while keeping single `--recording` commands
+  compatible with the old layout. A local matrix smoke under
+  `benchmark/results/p11b_recording_matrix_smoke` validated `default` and
+  explicit `100` across full Vm, probe Vm, and observer-only outputs.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

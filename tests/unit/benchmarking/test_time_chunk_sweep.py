@@ -38,6 +38,7 @@ def test_time_chunk_sweep_dry_run_writes_manifest(tmp_path: Path, capsys):
 
     assert "benchmark/run.py" in out
     assert manifest["policies"] == ["default", "unchunked", "100"]
+    assert manifest["recordings"] == ["observer_only"]
     assert [Path(run["run_dir"]).name for run in manifest["runs"]] == [
         "default",
         "unchunked",
@@ -49,6 +50,54 @@ def test_time_chunk_sweep_dry_run_writes_manifest(tmp_path: Path, capsys):
     assert "--time-chunk-steps 100" in commands[2]
     assert all("--recording observer_only" in command for command in commands)
     assert all("--amplitude-count 1" in command for command in commands)
+
+
+def test_time_chunk_sweep_dry_run_builds_recording_matrix(tmp_path: Path, capsys):
+    assert (
+        run_time_chunk_sweep(
+            [
+                "--script",
+                "recruitment_curves",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--policies",
+                "default,100",
+                "--recordings",
+                "full_vm,probe_vm",
+                "--output",
+                str(tmp_path),
+                "--dry-run",
+                "--amplitude-count",
+                "1",
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    manifest = json.loads(
+        (tmp_path / "time_chunk_sweep_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert manifest["policies"] == ["default", "100"]
+    assert manifest["recordings"] == ["full_vm", "probe_vm"]
+    rel_dirs = [
+        str(Path(run["run_dir"]).relative_to(tmp_path))
+        for run in manifest["runs"]
+    ]
+    assert rel_dirs == [
+        "full_vm/default",
+        "full_vm/chunk_100",
+        "probe_vm/default",
+        "probe_vm/chunk_100",
+    ]
+    commands = [" ".join(run["command"]) for run in manifest["runs"]]
+    assert all("--amplitude-count 1" in command for command in commands)
+    assert out.count("benchmark/run.py") == 4
+    assert sum("--recording full_vm" in command for command in commands) == 2
+    assert sum("--recording probe_vm" in command for command in commands) == 2
 
 
 def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):

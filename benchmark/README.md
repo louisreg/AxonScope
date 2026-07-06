@@ -227,12 +227,13 @@ python benchmark/campaigns/time_chunk_sweep.py \
   --preset quick \
   --platform cpu \
   --policies default,unchunked,50,250,500,1000 \
-  --recording observer_only \
+  --recordings full_vm,probe_vm,observer_only \
   --memory-trace rss
 ```
 
 It writes separate raw result directories per policy and a merged summary of
-observed chunk metadata plus kernel/observer timings.
+observed chunk metadata plus kernel, observer, Vm-materialization, and
+result-assembly timings.
 
 ## Publishability
 

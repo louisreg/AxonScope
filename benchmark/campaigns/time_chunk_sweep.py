@@ -22,6 +22,7 @@ from benchmark.workloads.curve_options import PRESETS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICIES = ("default", "unchunked", "50", "250", "500", "1000")
+RECORDING_MODES = ("full_vm", "probe_vm", "observer_only")
 
 SUMMARY_FIELDS = (
     "policy",
@@ -82,6 +83,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--recording",
+        choices=RECORDING_MODES,
+        help=(
+            "Single recording mode to forward to the curve script. Kept for "
+            "compatibility with older one-mode campaign commands."
+        ),
+    )
+    parser.add_argument(
+        "--recordings",
+        action="append",
+        help=(
+            "Comma-separated recording modes to sweep: full_vm, probe_vm, "
+            "observer_only. When omitted, the preset/script default is used "
+            "unless --recording is set."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("benchmark/results/p11b_time_chunk_sweep"),
@@ -95,11 +113,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         policies = parse_policies(args.policies)
+        recordings = parse_recordings(args.recordings, args.recording)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
     args.output.mkdir(parents=True, exist_ok=True)
-    runs = build_runs(args, policies, extra)
-    write_manifest(args.output / "time_chunk_sweep_manifest.json", args, runs, extra)
+    runs = build_runs(args, policies, recordings, extra)
+    write_manifest(
+        args.output / "time_chunk_sweep_manifest.json",
+        args,
+        policies,
+        recordings,
+        runs,
+        extra,
+    )
 
     if args.dry_run:
         for run in runs:
@@ -122,13 +148,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         status = "passed" if result.returncode == 0 else "failed"
         if result.returncode != 0:
             failed = True
-            print(f"failed: {run['policy']} (returncode={result.returncode})")
+            print(f"failed: {run_label(run)} (returncode={result.returncode})")
         else:
-            print(f"passed: {run['policy']}")
+            print(f"passed: {run_label(run)}")
         rows.append(
             summarize_run(
                 run_dir,
                 policy=str(run["policy"]),
+                recording=str(run.get("recording") or ""),
                 status=status,
                 returncode=result.returncode,
             )
@@ -157,6 +184,28 @@ def parse_policies(values: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(policies)
 
 
+def parse_recordings(
+    values: Sequence[str] | None,
+    recording: str | None,
+) -> tuple[str, ...]:
+    recordings: list[str] = []
+    if recording:
+        recordings.append(recording)
+    for value in values or ():
+        for item in str(value).split(","):
+            mode = item.strip().lower()
+            if not mode:
+                continue
+            if mode not in RECORDING_MODES:
+                allowed = ", ".join(RECORDING_MODES)
+                raise argparse.ArgumentTypeError(
+                    f"recording modes must be one of: {allowed}."
+                )
+            if mode not in recordings:
+                recordings.append(mode)
+    return tuple(recordings)
+
+
 def normalize_policy(value: object) -> str:
     text = str(value).strip().lower()
     if text in {"", "default"}:
@@ -177,36 +226,52 @@ def normalize_policy(value: object) -> str:
 def build_runs(
     args: argparse.Namespace,
     policies: Sequence[str],
+    recordings: Sequence[str],
     extra: Sequence[str],
 ) -> list[dict[str, Any]]:
     runs = []
-    for policy in policies:
-        run_dir = args.output / policy_token(policy)
-        command = [
-            args.python,
-            "benchmark/run.py",
-            "--script",
-            args.script,
-            "--preset",
-            args.preset,
-            "--platform",
-            args.platform,
-            "--output",
-            str(run_dir),
-            "--time-chunk-steps",
-            policy,
-        ]
-        if args.resume:
-            command.append("--resume")
-        command.extend(str(item) for item in extra)
-        runs.append(
-            {
-                "policy": policy,
-                "run_dir": str(run_dir),
-                "command": command,
-            }
-        )
+    recording_modes: Sequence[str | None] = tuple(recordings) or (None,)
+    include_recording_dir = len(recording_modes) > 1
+    for recording in recording_modes:
+        for policy in policies:
+            run_dir = args.output / policy_token(policy)
+            if include_recording_dir:
+                assert recording is not None
+                run_dir = args.output / recording / policy_token(policy)
+            command = [
+                args.python,
+                "benchmark/run.py",
+                "--script",
+                args.script,
+                "--preset",
+                args.preset,
+                "--platform",
+                args.platform,
+                "--output",
+                str(run_dir),
+                "--time-chunk-steps",
+                policy,
+            ]
+            if recording is not None:
+                command.extend(["--recording", recording])
+            if args.resume:
+                command.append("--resume")
+            command.extend(str(item) for item in extra)
+            runs.append(
+                {
+                    "policy": policy,
+                    "recording": "" if recording is None else recording,
+                    "run_dir": str(run_dir),
+                    "command": command,
+                }
+            )
     return runs
+
+
+def run_label(run: Mapping[str, Any]) -> str:
+    recording = str(run.get("recording") or "")
+    policy = str(run.get("policy") or "")
+    return f"{recording}/{policy}" if recording else policy
 
 
 def policy_token(policy: str) -> str:
@@ -229,6 +294,7 @@ def summarize_run(
     run_dir: Path,
     *,
     policy: str,
+    recording: str = "",
     status: str = "passed",
     returncode: int = 0,
 ) -> dict[str, Any]:
@@ -245,7 +311,7 @@ def summarize_run(
         "case_name": manifest.get("case_name", ""),
         "script": manifest.get("script", ""),
         "platform": options.get("platform", ""),
-        "recording": options.get("recording", ""),
+        "recording": options.get("recording", recording),
         "n_axons": options.get("n_axons", ""),
         "nx": options.get("nx", ""),
         "tsim": options.get("tsim", ""),
@@ -430,12 +496,13 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     lines = [
         "# Time Chunk Sweep",
         "",
-        "| policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | result ms | dispatch count | scope | chunk steps |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| recording | policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | result ms | dispatch count | scope | chunk steps |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {result:.3f} | {count} | {scope} | {chunks} |".format(
+            "| {recording} | {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {result:.3f} | {count} | {scope} | {chunks} |".format(
+                recording=row.get("recording", ""),
                 policy=row.get("policy", ""),
                 status=row.get("status", ""),
                 curve=float(row.get("repeat_curve_simulate_ms") or 0.0),
@@ -454,6 +521,8 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
 def write_manifest(
     path: Path,
     args: argparse.Namespace,
+    policies: Sequence[str],
+    recordings: Sequence[str],
     runs: Sequence[Mapping[str, Any]],
     extra: Sequence[str],
 ) -> None:
@@ -463,7 +532,8 @@ def write_manifest(
         "preset": args.preset,
         "platform": args.platform,
         "output": str(args.output),
-        "policies": [run["policy"] for run in runs],
+        "policies": list(policies),
+        "recordings": list(recordings),
         "extra_args": list(extra),
         "runs": list(runs),
     }

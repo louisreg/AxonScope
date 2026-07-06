@@ -77,7 +77,7 @@ python benchmark/kaggle/run_kernel.py \
   --platform cpu \
   --machine-shape NvidiaTeslaP100 \
   --policies default,unchunked,50,250,500,1000 \
-  --recording observer_only \
+  --recordings full_vm,probe_vm,observer_only \
   --n-axons 1000 \
   --nx 101 \
   --tsim 10 \

@@ -53,6 +53,21 @@ python benchmark/campaigns/time_chunk_sweep.py \
   --output benchmark/results/p11b_time_chunk_sweep_quick
 ```
 
+Recording-mode smoke:
+
+```bash
+python benchmark/campaigns/time_chunk_sweep.py \
+  --script recruitment_curves \
+  --preset quick \
+  --platform cpu \
+  --policies default,unchunked,100 \
+  --recordings full_vm,probe_vm,observer_only \
+  --amplitude-count 1 \
+  --memory-trace rss \
+  --memory-top-n 0 \
+  --output benchmark/results/p11b_time_chunk_recording_smoke
+```
+
 Bounded P11B sweep shape:
 
 ```bash
@@ -77,7 +92,10 @@ The campaign writes `time_chunk_sweep_manifest.json`,
 `time_chunk_sweep_summary.csv`, and `time_chunk_sweep_report.md`. Summary rows
 include the requested policy, the effective benchmark options, observed
 `kernel.dispatch_jax` chunk metadata, `curve.simulate`, `kernel.enqueue`,
-`kernel.dispatch_jax`, `kernel.wait`, and `kernel.finalize_observer` timings.
+`kernel.dispatch_jax`, `kernel.wait`, `kernel.finalize_observer`, Vm
+materialization, row/cohort assembly, and split-result timings. Use
+`--recording` for one mode and `--recordings` for a matrix across full Vm,
+probe Vm, and observer-only outputs.
 
 ## Publication Outputs
 
