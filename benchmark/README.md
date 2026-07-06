@@ -235,6 +235,21 @@ It writes separate raw result directories per policy and a merged summary of
 observed chunk metadata plus kernel, observer, Vm-materialization, and
 result-assembly timings.
 
+To turn multiple CPU/GPU time-chunk campaigns into bottleneck plots, use:
+
+```bash
+python benchmark/analysis/time_chunk_matrix_report.py \
+  --run threshold_cpu=benchmark/results/kaggle/<threshold-cpu>/outputs/extracted_cpu \
+  --run threshold_gpu=benchmark/results/kaggle/<threshold-gpu>/outputs/extracted_gpu \
+  --run recruitment_cpu=benchmark/results/kaggle/<recruitment-cpu>/outputs/extracted_cpu \
+  --run recruitment_gpu=benchmark/results/kaggle/<recruitment-gpu>/outputs/extracted_gpu \
+  --output benchmark/results/p11b_time_chunk_matrix_report
+```
+
+The matrix report writes normalized rows, best-policy rows, heatmaps, CPU/GPU
+speedup plots, exclusive pipeline-group stage plots, kernel/result sub-stage
+plots, and separate CPU RSS, GPU JAX-device, and GPU `nvidia-smi` memory plots.
+
 ## Publishability
 
 A benchmark result is publishable only if the run directory contains the full

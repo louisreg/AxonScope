@@ -875,6 +875,14 @@ decisions need realistic workflow evidence.
   result materialization/assembly remains visible (~0.5-1.1 s depending on
   recording). Remaining before changing defaults: adaptive policy candidates,
   repeated runs, and a bounded-realistic confirmation pass.
+  Cross-run bottleneck plots were generated with
+  `benchmark/analysis/time_chunk_matrix_report.py` under
+  `benchmark/results/p11b_time_chunk_matrix_report_20260706_stage_groups`.
+  The report combines threshold/recruitment CPU/GPU matrices into heatmaps,
+  best-policy stage-group breakdowns, kernel/result sub-stage breakdowns,
+  CPU/GPU speedups, CPU RSS memory plots, GPU JAX device-memory plots, and
+  GPU `nvidia-smi` context plots. Use this visual report to pick the next
+  low-level optimization target before writing adaptive policy code.
 - [ ] Keep recruitment amplitude micro-batching as a later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
