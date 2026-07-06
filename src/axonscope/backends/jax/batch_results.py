@@ -30,8 +30,14 @@ def trim_batch_kernel_result(
     """Drop backend-only padded batch rows before public result assembly."""
 
     size = int(batch_size)
-    Vm = None if out.Vm is None else out.Vm[:size]
-    observations = trim_observations_batch(out.observations, batch_size=size)
+    with benchmark_span(
+        "results.trim_padded_batch",
+        batch_size=size,
+        has_vm=out.Vm is not None,
+        has_observations=out.observations is not None,
+    ):
+        Vm = None if out.Vm is None else out.Vm[:size]
+        observations = trim_observations_batch(out.observations, batch_size=size)
     return BatchKernelResult(Vm=Vm, t=out.t, observations=observations)
 
 
@@ -61,7 +67,15 @@ def dispatch_results_from_batch(
         output="none" if Vm is None else "Vm",
         method=method,
     ):
-        vm_values = None if Vm is None else np.asarray(Vm)
+        with benchmark_span(
+            "results.materialize_vm.to_host",
+            group_id=group.group_id,
+            group_size=group.size,
+            recording_mode=batch_options.recording.mode,
+            output="none" if Vm is None else "Vm",
+            method=method,
+        ):
+            vm_values = None if Vm is None else np.asarray(Vm)
         if vm_values is not None:
             record_benchmark_metadata(
                 **benchmark_array_metadata("Vm_host", vm_values, role="result_output"),

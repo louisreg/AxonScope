@@ -814,6 +814,24 @@ decisions need realistic workflow evidence.
   compatible with the old layout. A local matrix smoke under
   `benchmark/results/p11b_recording_matrix_smoke` validated `default` and
   explicit `100` across full Vm, probe Vm, and observer-only outputs.
+  Sixth tooling step: low-level JAX/runtime spans now split kernel preparation,
+  chunk setup, JAX dispatch, chunk bookkeeping, trace concatenation, VmRaster
+  to-host finalization, result trimming, and Vm to-host materialization:
+  `kernel.prepare_arrays`, `kernel.prepare_state`,
+  `kernel.prepare_observer_tables`, `kernel.materialize_inputs`,
+  `kernel.prepare_factorized_forcing`, `kernel.chunk_setup`,
+  `kernel.dispatch_jax`, `kernel.chunk_bookkeeping`,
+  `kernel.concat_trace_chunks`, `kernel.finalize_observer.to_host`,
+  `results.trim_padded_batch`, and `results.materialize_vm.to_host`. Curve
+  scripts also expose `curve.activation_definition`,
+  `curve.runtime_options`, and `curve.construct_simulation` before
+  `curve.simulate`. These timings are included in
+  `time_chunk_sweep_summary.csv`, `time_chunk_sweep_report.md`, and
+  `benchmark/analysis/time_chunk_matrix_report.py` without changing solver
+  behavior or default time-chunk policy. Tiny CPU smoke artifacts live under
+  `benchmark/results/p11b_low_level_span_smoke`,
+  `benchmark/results/p11b_low_level_span_sweep_smoke_ok`, and
+  `benchmark/results/p11b_low_level_span_matrix_smoke`.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

@@ -478,23 +478,54 @@ def _evaluate_amplitudes(
                 amplitudes_uA,
                 options,
             )
-    activation = axs.analysis.Activation(
-        threshold=0.0 * axs.mV,
-        blanking=_stim_start_ms(options) * axs.ms,
-        target=target,
-    )
-    recording = _recording_policy(options)
-    observers = (activation,) if options["recording"] == "observer_only" else None
-    simulation = axs.AxonSimulation(
-        axs.AxonPopulation(phase_pool.pool, name=selected_case),
-        duration=float(options["tsim"]) * axs.ms,
-        dt=float(options["dt"]) * axs.ms,
-        recording=recording,
-        batch_options=_batch_options(options),
-        observers=observers,
-        execution_policy=_execution_policy(options),
-        progress=False,
-    )
+    with benchmark_span(
+        "curve.activation_definition",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        recording=options["recording"],
+    ):
+        activation = axs.analysis.Activation(
+            threshold=0.0 * axs.mV,
+            blanking=_stim_start_ms(options) * axs.ms,
+            target=target,
+        )
+        observers = (activation,) if options["recording"] == "observer_only" else None
+    with benchmark_span(
+        "curve.runtime_options",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        recording=options["recording"],
+        platform=options["platform"],
+        precision=options["precision"],
+        time_chunk_policy=options.get("time_chunk_policy", "default"),
+        time_chunk_steps=options.get("time_chunk_steps"),
+    ):
+        recording = _recording_policy(options)
+        batch_options = _batch_options(options)
+        execution_policy = _execution_policy(options)
+    with benchmark_span(
+        "curve.construct_simulation",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        recording=options["recording"],
+        n_axons=int(options["n_axons"]),
+    ):
+        simulation = axs.AxonSimulation(
+            axs.AxonPopulation(phase_pool.pool, name=selected_case),
+            duration=float(options["tsim"]) * axs.ms,
+            dt=float(options["dt"]) * axs.ms,
+            recording=recording,
+            batch_options=batch_options,
+            observers=observers,
+            execution_policy=execution_policy,
+            progress=False,
+        )
     with benchmark_span(
         "curve.simulate",
         phase=phase,

@@ -23,11 +23,20 @@ SCRIPT_ORDER = ("threshold_curves", "recruitment_curves")
 PLATFORM_ORDER = ("cpu", "gpu")
 
 STAGE_SPECS = (
+    ("prepare arrays", "prepare_arrays_s", "#4C78A8"),
+    ("prepare state", "prepare_state_s", "#72B7B2"),
+    ("observer tables", "observer_tables_s", "#54A24B"),
+    ("materialize inputs", "materialize_inputs_s", "#B279A2"),
+    ("chunk setup", "chunk_setup_s", "#F58518"),
     ("dispatch_jax", "dispatch_s", "#4C78A8"),
     ("wait/sync", "wait_s", "#E15759"),
+    ("chunk bookkeeping", "chunk_bookkeeping_s", "#FF9DA6"),
+    ("concat trace", "concat_trace_s", "#9D755D"),
     ("combine", "combine_s", "#59A14F"),
-    ("finalize", "finalize_s", "#F28E2B"),
-    ("materialize", "materialize_s", "#B07AA1"),
+    ("finalize to-host", "finalize_to_host_s", "#F28E2B"),
+    ("finalize other", "finalize_other_s", "#FFBE7D"),
+    ("Vm to-host", "materialize_to_host_s", "#B07AA1"),
+    ("Vm materialize other", "materialize_other_s", "#D4A6C8"),
     ("assemble rows", "assemble_rows_s", "#EDC948"),
     ("assemble cohort", "assemble_cohort_s", "#76B7B2"),
     ("result other", "result_other_s", "#9C755F"),
@@ -65,12 +74,24 @@ ROW_FIELDS = (
     "observer_scope",
     "dispatch_chunk_steps",
     "curve_s",
+    "prepare_arrays_s",
+    "prepare_state_s",
+    "observer_tables_s",
+    "materialize_inputs_s",
+    "prepare_factorized_forcing_s",
+    "chunk_setup_s",
     "dispatch_s",
     "wait_s",
+    "chunk_bookkeeping_s",
+    "concat_trace_s",
     "combine_s",
     "finalize_s",
+    "finalize_to_host_s",
+    "finalize_other_s",
     "result_s",
     "materialize_s",
+    "materialize_to_host_s",
+    "materialize_other_s",
     "assemble_rows_s",
     "assemble_cohort_s",
     "result_other_s",
@@ -264,14 +285,36 @@ def normalize_row(
 ) -> dict[str, Any]:
     result_s = ms_to_s(raw.get("repeat_results_split_batch_ms"))
     materialize_s = ms_to_s(raw.get("repeat_results_materialize_vm_ms"))
+    materialize_to_host_s = ms_to_s(raw.get("repeat_results_materialize_vm_to_host_ms"))
+    materialize_other_s = max(materialize_s - materialize_to_host_s, 0.0)
     assemble_rows_s = ms_to_s(raw.get("repeat_results_assemble_rows_ms"))
     assemble_cohort_s = ms_to_s(raw.get("repeat_results_assemble_cohort_record_ms"))
     result_other_s = max(result_s - materialize_s - assemble_rows_s - assemble_cohort_s, 0.0)
+    prepare_arrays_s = ms_to_s(raw.get("repeat_kernel_prepare_arrays_ms"))
+    prepare_state_s = ms_to_s(raw.get("repeat_kernel_prepare_state_ms"))
+    observer_tables_s = ms_to_s(raw.get("repeat_kernel_prepare_observer_tables_ms"))
+    materialize_inputs_s = ms_to_s(raw.get("repeat_kernel_materialize_inputs_ms"))
+    prepare_factorized_forcing_s = ms_to_s(
+        raw.get("repeat_kernel_prepare_factorized_forcing_ms")
+    )
+    chunk_setup_s = ms_to_s(raw.get("repeat_kernel_chunk_setup_ms"))
+    chunk_bookkeeping_s = ms_to_s(raw.get("repeat_kernel_chunk_bookkeeping_ms"))
+    concat_trace_s = ms_to_s(raw.get("repeat_kernel_concat_trace_chunks_ms"))
+    finalize_s = ms_to_s(raw.get("repeat_kernel_finalize_observer_ms"))
+    finalize_to_host_s = ms_to_s(raw.get("repeat_kernel_finalize_observer_to_host_ms"))
+    finalize_other_s = max(finalize_s - finalize_to_host_s, 0.0)
     measured_s = (
-        ms_to_s(raw.get("repeat_kernel_dispatch_jax_ms"))
+        prepare_arrays_s
+        + prepare_state_s
+        + observer_tables_s
+        + materialize_inputs_s
+        + chunk_setup_s
+        + ms_to_s(raw.get("repeat_kernel_dispatch_jax_ms"))
         + ms_to_s(raw.get("repeat_kernel_wait_ms"))
+        + chunk_bookkeeping_s
+        + concat_trace_s
         + ms_to_s(raw.get("repeat_kernel_combine_observer_chunks_ms"))
-        + ms_to_s(raw.get("repeat_kernel_finalize_observer_ms"))
+        + finalize_s
         + materialize_s
         + assemble_rows_s
         + assemble_cohort_s
@@ -298,12 +341,24 @@ def normalize_row(
         "observer_scope": raw.get("observer_state_scopes", ""),
         "dispatch_chunk_steps": raw.get("dispatch_chunk_steps", ""),
         "curve_s": curve_s,
+        "prepare_arrays_s": prepare_arrays_s,
+        "prepare_state_s": prepare_state_s,
+        "observer_tables_s": observer_tables_s,
+        "materialize_inputs_s": materialize_inputs_s,
+        "prepare_factorized_forcing_s": prepare_factorized_forcing_s,
+        "chunk_setup_s": chunk_setup_s,
         "dispatch_s": ms_to_s(raw.get("repeat_kernel_dispatch_jax_ms")),
         "wait_s": ms_to_s(raw.get("repeat_kernel_wait_ms")),
+        "chunk_bookkeeping_s": chunk_bookkeeping_s,
+        "concat_trace_s": concat_trace_s,
         "combine_s": ms_to_s(raw.get("repeat_kernel_combine_observer_chunks_ms")),
-        "finalize_s": ms_to_s(raw.get("repeat_kernel_finalize_observer_ms")),
+        "finalize_s": finalize_s,
+        "finalize_to_host_s": finalize_to_host_s,
+        "finalize_other_s": finalize_other_s,
         "result_s": result_s,
         "materialize_s": materialize_s,
+        "materialize_to_host_s": materialize_to_host_s,
+        "materialize_other_s": materialize_other_s,
         "assemble_rows_s": assemble_rows_s,
         "assemble_cohort_s": assemble_cohort_s,
         "result_other_s": result_other_s,

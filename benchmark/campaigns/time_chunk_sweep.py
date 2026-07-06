@@ -48,19 +48,41 @@ SUMMARY_FIELDS = (
     "repeat_curve_simulate_ms",
     "kernel_enqueue_ms",
     "repeat_kernel_enqueue_ms",
+    "kernel_prepare_arrays_ms",
+    "repeat_kernel_prepare_arrays_ms",
+    "kernel_prepare_state_ms",
+    "repeat_kernel_prepare_state_ms",
+    "kernel_prepare_observer_tables_ms",
+    "repeat_kernel_prepare_observer_tables_ms",
+    "kernel_materialize_inputs_ms",
+    "repeat_kernel_materialize_inputs_ms",
+    "kernel_prepare_factorized_forcing_ms",
+    "repeat_kernel_prepare_factorized_forcing_ms",
+    "kernel_chunk_setup_ms",
+    "repeat_kernel_chunk_setup_ms",
     "kernel_combine_observer_chunks_ms",
     "repeat_kernel_combine_observer_chunks_ms",
     "kernel_dispatch_jax_ms",
     "repeat_kernel_dispatch_jax_ms",
     "kernel_dispatch_jax_count",
+    "kernel_chunk_bookkeeping_ms",
+    "repeat_kernel_chunk_bookkeeping_ms",
+    "kernel_concat_trace_chunks_ms",
+    "repeat_kernel_concat_trace_chunks_ms",
     "kernel_wait_ms",
     "repeat_kernel_wait_ms",
     "kernel_finalize_observer_ms",
     "repeat_kernel_finalize_observer_ms",
+    "kernel_finalize_observer_to_host_ms",
+    "repeat_kernel_finalize_observer_to_host_ms",
     "results_split_batch_ms",
     "repeat_results_split_batch_ms",
+    "results_trim_padded_batch_ms",
+    "repeat_results_trim_padded_batch_ms",
     "results_materialize_vm_ms",
     "repeat_results_materialize_vm_ms",
+    "results_materialize_vm_to_host_ms",
+    "repeat_results_materialize_vm_to_host_ms",
     "results_assemble_rows_ms",
     "repeat_results_assemble_rows_ms",
     "results_assemble_cohort_record_ms",
@@ -360,6 +382,54 @@ def summarize_run(
         "repeat_curve_simulate_ms": sum_duration(events, "curve.simulate", phase="repeat", by_id=by_id),
         "kernel_enqueue_ms": sum_duration(events, "kernel.enqueue"),
         "repeat_kernel_enqueue_ms": sum_duration(events, "kernel.enqueue", phase="repeat", by_id=by_id),
+        "kernel_prepare_arrays_ms": sum_duration(events, "kernel.prepare_arrays"),
+        "repeat_kernel_prepare_arrays_ms": sum_duration(
+            events,
+            "kernel.prepare_arrays",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_state_ms": sum_duration(events, "kernel.prepare_state"),
+        "repeat_kernel_prepare_state_ms": sum_duration(
+            events,
+            "kernel.prepare_state",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_observer_tables_ms": sum_duration(
+            events,
+            "kernel.prepare_observer_tables",
+        ),
+        "repeat_kernel_prepare_observer_tables_ms": sum_duration(
+            events,
+            "kernel.prepare_observer_tables",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_materialize_inputs_ms": sum_duration(events, "kernel.materialize_inputs"),
+        "repeat_kernel_materialize_inputs_ms": sum_duration(
+            events,
+            "kernel.materialize_inputs",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_factorized_forcing_ms": sum_duration(
+            events,
+            "kernel.prepare_factorized_forcing",
+        ),
+        "repeat_kernel_prepare_factorized_forcing_ms": sum_duration(
+            events,
+            "kernel.prepare_factorized_forcing",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_chunk_setup_ms": sum_duration(events, "kernel.chunk_setup"),
+        "repeat_kernel_chunk_setup_ms": sum_duration(
+            events,
+            "kernel.chunk_setup",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "kernel_combine_observer_chunks_ms": sum_duration(
             events,
             "kernel.combine_observer_chunks",
@@ -378,12 +448,36 @@ def summarize_run(
             by_id=by_id,
         ),
         "kernel_dispatch_jax_count": len(dispatch_events),
+        "kernel_chunk_bookkeeping_ms": sum_duration(events, "kernel.chunk_bookkeeping"),
+        "repeat_kernel_chunk_bookkeeping_ms": sum_duration(
+            events,
+            "kernel.chunk_bookkeeping",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_concat_trace_chunks_ms": sum_duration(events, "kernel.concat_trace_chunks"),
+        "repeat_kernel_concat_trace_chunks_ms": sum_duration(
+            events,
+            "kernel.concat_trace_chunks",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "kernel_wait_ms": sum_duration(events, "kernel.wait"),
         "repeat_kernel_wait_ms": sum_duration(events, "kernel.wait", phase="repeat", by_id=by_id),
         "kernel_finalize_observer_ms": sum_duration(events, "kernel.finalize_observer"),
         "repeat_kernel_finalize_observer_ms": sum_duration(
             events,
             "kernel.finalize_observer",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_finalize_observer_to_host_ms": sum_duration(
+            events,
+            "kernel.finalize_observer.to_host",
+        ),
+        "repeat_kernel_finalize_observer_to_host_ms": sum_duration(
+            events,
+            "kernel.finalize_observer.to_host",
             phase="repeat",
             by_id=by_id,
         ),
@@ -394,10 +488,27 @@ def summarize_run(
             phase="repeat",
             by_id=by_id,
         ),
+        "results_trim_padded_batch_ms": sum_duration(events, "results.trim_padded_batch"),
+        "repeat_results_trim_padded_batch_ms": sum_duration(
+            events,
+            "results.trim_padded_batch",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "results_materialize_vm_ms": sum_duration(events, "results.materialize_vm"),
         "repeat_results_materialize_vm_ms": sum_duration(
             events,
             "results.materialize_vm",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "results_materialize_vm_to_host_ms": sum_duration(
+            events,
+            "results.materialize_vm.to_host",
+        ),
+        "repeat_results_materialize_vm_to_host_ms": sum_duration(
+            events,
+            "results.materialize_vm.to_host",
             phase="repeat",
             by_id=by_id,
         ),
@@ -529,20 +640,40 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     lines = [
         "# Time Chunk Sweep",
         "",
-        "| recording | policy | status | curve.simulate ms | dispatch_jax ms | combine ms | finalize ms | result ms | dispatch count | scope | chunk steps |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| recording | policy | status | curve.simulate ms | prep/chunk ms | dispatch_jax ms | wait ms | combine ms | finalize/to-host ms | result/to-host ms | dispatch count | scope | chunk steps |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for row in rows:
+        prep_ms = (
+            float(row.get("repeat_kernel_prepare_arrays_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_state_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_observer_tables_ms") or 0.0)
+            + float(row.get("repeat_kernel_materialize_inputs_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_factorized_forcing_ms") or 0.0)
+            + float(row.get("repeat_kernel_chunk_setup_ms") or 0.0)
+            + float(row.get("repeat_kernel_chunk_bookkeeping_ms") or 0.0)
+            + float(row.get("repeat_kernel_concat_trace_chunks_ms") or 0.0)
+        )
+        finalize_ms = float(row.get("repeat_kernel_finalize_observer_ms") or 0.0)
+        finalize_to_host_ms = float(
+            row.get("repeat_kernel_finalize_observer_to_host_ms") or 0.0
+        )
+        result_ms = float(row.get("repeat_results_split_batch_ms") or 0.0)
+        result_to_host_ms = float(row.get("repeat_results_materialize_vm_to_host_ms") or 0.0)
         lines.append(
-            "| {recording} | {policy} | {status} | {curve:.3f} | {dispatch:.3f} | {combine:.3f} | {finalize:.3f} | {result:.3f} | {count} | {scope} | {chunks} |".format(
+            "| {recording} | {policy} | {status} | {curve:.3f} | {prep:.3f} | {dispatch:.3f} | {wait:.3f} | {combine:.3f} | {finalize:.3f}/{finalize_to_host:.3f} | {result:.3f}/{result_to_host:.3f} | {count} | {scope} | {chunks} |".format(
                 recording=row.get("recording", ""),
                 policy=row.get("policy", ""),
                 status=row.get("status", ""),
                 curve=float(row.get("repeat_curve_simulate_ms") or 0.0),
+                prep=prep_ms,
                 dispatch=float(row.get("repeat_kernel_dispatch_jax_ms") or 0.0),
+                wait=float(row.get("repeat_kernel_wait_ms") or 0.0),
                 combine=float(row.get("repeat_kernel_combine_observer_chunks_ms") or 0.0),
-                finalize=float(row.get("repeat_kernel_finalize_observer_ms") or 0.0),
-                result=float(row.get("repeat_results_split_batch_ms") or 0.0),
+                finalize=finalize_ms,
+                finalize_to_host=finalize_to_host_ms,
+                result=result_ms,
+                result_to_host=result_to_host_ms,
                 count=row.get("kernel_dispatch_jax_count", ""),
                 scope=row.get("observer_state_scopes", ""),
                 chunks=row.get("dispatch_chunk_steps", ""),

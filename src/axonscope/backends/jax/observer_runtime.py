@@ -15,6 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope.benchmarking import benchmark_span
 from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
@@ -400,18 +401,33 @@ def finalize_vm_raster_state(
 ) -> dict[str, VmRasterResult]:
     """Package packed raster words as the single solver-side observation."""
 
+    with benchmark_span(
+        "kernel.finalize_observer.to_host",
+        observer="vm_raster",
+        raster_count=plan.raster_count,
+        probe_count=plan.probe_count,
+        nt=int(nt),
+        row_aware=plan.row_aware,
+    ):
+        words = np.asarray(state, dtype=np.uint32)
+        probe_indices = np.asarray(plan.probe_indices)
+        probe_mask = np.asarray(plan.probe_mask, dtype=bool)
+        original_indices = np.asarray(plan.original_indices, dtype=np.int32)
+        positions_um = np.asarray(plan.positions_um, dtype=float)
+        thresholds_mV = np.asarray(plan.thresholds_mV, dtype=float)
+
     return {
         VM_RASTER_OBSERVATION_KEY: VmRasterResult(
-            words=np.asarray(state, dtype=np.uint32),
+            words=words,
             nt=int(nt),
             dt_ms=float(dt_ms),
             definitions=plan.definitions,
             names=plan.names,
-            probe_indices=np.asarray(plan.probe_indices),
-            probe_mask=np.asarray(plan.probe_mask, dtype=bool),
-            original_indices=np.asarray(plan.original_indices, dtype=np.int32),
-            positions_um=np.asarray(plan.positions_um, dtype=float),
-            thresholds_mV=np.asarray(plan.thresholds_mV, dtype=float),
+            probe_indices=probe_indices,
+            probe_mask=probe_mask,
+            original_indices=original_indices,
+            positions_um=positions_um,
+            thresholds_mV=thresholds_mV,
             row_aware=plan.row_aware,
         )
     }

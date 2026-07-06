@@ -188,10 +188,66 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             },
         },
         {
+            "event_id": 12,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_arrays",
+            "duration_ms": 11.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 13,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_state",
+            "duration_ms": 1.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 14,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_observer_tables",
+            "duration_ms": 1.5,
+            "metadata": {},
+        },
+        {
+            "event_id": 15,
+            "parent_event_id": 3,
+            "name": "kernel.materialize_inputs",
+            "duration_ms": 2.5,
+            "metadata": {},
+        },
+        {
+            "event_id": 16,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_factorized_forcing",
+            "duration_ms": 0.5,
+            "metadata": {},
+        },
+        {
+            "event_id": 17,
+            "parent_event_id": 3,
+            "name": "kernel.chunk_setup",
+            "duration_ms": 3.0,
+            "metadata": {},
+        },
+        {
             "event_id": 5,
             "parent_event_id": 3,
             "name": "kernel.combine_observer_chunks",
             "duration_ms": 7.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 18,
+            "parent_event_id": 3,
+            "name": "kernel.chunk_bookkeeping",
+            "duration_ms": 4.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 19,
+            "parent_event_id": 3,
+            "name": "kernel.concat_trace_chunks",
+            "duration_ms": 5.0,
             "metadata": {},
         },
         {
@@ -209,6 +265,13 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "metadata": {},
         },
         {
+            "event_id": 20,
+            "parent_event_id": 7,
+            "name": "kernel.finalize_observer.to_host",
+            "duration_ms": 1.2,
+            "metadata": {},
+        },
+        {
             "event_id": 8,
             "parent_event_id": 2,
             "name": "results.split_batch",
@@ -216,10 +279,24 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "metadata": {},
         },
         {
+            "event_id": 21,
+            "parent_event_id": 8,
+            "name": "results.trim_padded_batch",
+            "duration_ms": 0.7,
+            "metadata": {},
+        },
+        {
             "event_id": 9,
             "parent_event_id": 8,
             "name": "results.materialize_vm",
             "duration_ms": 3.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 22,
+            "parent_event_id": 9,
+            "name": "results.materialize_vm.to_host",
+            "duration_ms": 2.0,
             "metadata": {},
         },
         {
@@ -254,12 +331,23 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["dispatch_chunk_count_max"] == "1"
     assert row["repeat_curve_simulate_ms"] == 100.0
     assert row["repeat_kernel_enqueue_ms"] == 60.0
+    assert row["repeat_kernel_prepare_arrays_ms"] == 11.0
+    assert row["repeat_kernel_prepare_state_ms"] == 1.0
+    assert row["repeat_kernel_prepare_observer_tables_ms"] == 1.5
+    assert row["repeat_kernel_materialize_inputs_ms"] == 2.5
+    assert row["repeat_kernel_prepare_factorized_forcing_ms"] == 0.5
+    assert row["repeat_kernel_chunk_setup_ms"] == 3.0
     assert row["repeat_kernel_combine_observer_chunks_ms"] == 7.0
     assert row["repeat_kernel_dispatch_jax_ms"] == 20.0
+    assert row["repeat_kernel_chunk_bookkeeping_ms"] == 4.0
+    assert row["repeat_kernel_concat_trace_chunks_ms"] == 5.0
     assert row["repeat_kernel_wait_ms"] == 5.0
     assert row["repeat_kernel_finalize_observer_ms"] == 2.0
+    assert row["repeat_kernel_finalize_observer_to_host_ms"] == 1.2
     assert row["repeat_results_split_batch_ms"] == 9.0
+    assert row["repeat_results_trim_padded_batch_ms"] == 0.7
     assert row["repeat_results_materialize_vm_ms"] == 3.0
+    assert row["repeat_results_materialize_vm_to_host_ms"] == 2.0
     assert row["repeat_results_assemble_rows_ms"] == 4.0
     assert row["repeat_results_assemble_cohort_record_ms"] == 1.0
     assert row["rss_end_mib_max"] == "321"
