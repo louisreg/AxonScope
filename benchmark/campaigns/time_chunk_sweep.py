@@ -48,6 +48,10 @@ SUMMARY_FIELDS = (
     "repeat_curve_simulate_ms",
     "kernel_enqueue_ms",
     "repeat_kernel_enqueue_ms",
+    "kernel_prepare_inputs_ms",
+    "repeat_kernel_prepare_inputs_ms",
+    "kernel_prepare_inputs_self_ms",
+    "repeat_kernel_prepare_inputs_self_ms",
     "kernel_prepare_arrays_ms",
     "repeat_kernel_prepare_arrays_ms",
     "kernel_prepare_state_ms",
@@ -382,6 +386,24 @@ def summarize_run(
         "repeat_curve_simulate_ms": sum_duration(events, "curve.simulate", phase="repeat", by_id=by_id),
         "kernel_enqueue_ms": sum_duration(events, "kernel.enqueue"),
         "repeat_kernel_enqueue_ms": sum_duration(events, "kernel.enqueue", phase="repeat", by_id=by_id),
+        "kernel_prepare_inputs_ms": sum_duration(events, "kernel.prepare_inputs"),
+        "repeat_kernel_prepare_inputs_ms": sum_duration(
+            events,
+            "kernel.prepare_inputs",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_inputs_self_ms": sum_self_duration(
+            events,
+            "kernel.prepare_inputs",
+            by_id=by_id,
+        ),
+        "repeat_kernel_prepare_inputs_self_ms": sum_self_duration(
+            events,
+            "kernel.prepare_inputs",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "kernel_prepare_arrays_ms": sum_duration(events, "kernel.prepare_arrays"),
         "repeat_kernel_prepare_arrays_ms": sum_duration(
             events,
@@ -551,6 +573,41 @@ def sum_duration(
     return total
 
 
+def sum_self_duration(
+    events: Sequence[Mapping[str, Any]],
+    name: str,
+    *,
+    phase: str | None = None,
+    by_id: Mapping[int, Mapping[str, Any]] | None = None,
+) -> float:
+    by_id = by_id or {}
+    child_ms: dict[int, float] = {}
+    for event in events:
+        if phase is not None and event_phase(event, by_id) != phase:
+            continue
+        parent = event.get("parent_event_id")
+        if parent is None:
+            continue
+        try:
+            parent_id = int(parent)
+        except (TypeError, ValueError):
+            continue
+        child_ms[parent_id] = child_ms.get(parent_id, 0.0) + float(
+            event.get("duration_ms") or 0.0
+        )
+
+    total = 0.0
+    for event in events:
+        if event.get("name") != name:
+            continue
+        if phase is not None and event_phase(event, by_id) != phase:
+            continue
+        event_id = int(event.get("event_id", -1))
+        duration = float(event.get("duration_ms") or 0.0)
+        total += max(duration - child_ms.get(event_id, 0.0), 0.0)
+    return total
+
+
 def event_phase(
     event: Mapping[str, Any],
     by_id: Mapping[int, Mapping[str, Any]],
@@ -646,6 +703,7 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     for row in rows:
         prep_ms = (
             float(row.get("repeat_kernel_prepare_arrays_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_inputs_self_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_state_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_observer_tables_ms") or 0.0)
             + float(row.get("repeat_kernel_materialize_inputs_ms") or 0.0)

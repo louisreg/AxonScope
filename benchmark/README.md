@@ -79,11 +79,11 @@ They define scale and defaults for repeats, warmups, duration, `dt`, `Nx`,
 `Naxons`, precision, recording mode, platform, memory tracing, profiling,
 threshold iterations, and recruitment amplitude count.
 
-`gpu_smoke` is a short GPU functional and memory smoke. It should not enable
-whole-session JAX tracing or device-memory pprof capture by default. Use
-`gpu_trace_smoke` when you explicitly want tracing: it is intentionally limited
-to one small pool and two or three amplitude evaluations so Perfetto/XPlane
-artifacts stay inspectable.
+`gpu_smoke` is a short GPU functional smoke with lightweight RSS tracing. It
+should not enable whole-session JAX tracing, device memory tracing, or
+device-memory pprof capture by default. Use `gpu_trace_smoke` when you
+explicitly want tracing: it is intentionally limited to one small pool and two
+or three amplitude evaluations so Perfetto/XPlane artifacts stay inspectable.
 
 Device-memory pprof capture is stage-filtered. Curve scripts default to
 `kernel.wait`; pass `--jax-device-memory-profile-stage runtime.prepare` or
@@ -133,6 +133,9 @@ with axs.benchmark(
 ):
     result = axs.AxonSimulation(...).run()
 ```
+
+Keep that heavy `memory_trace="all"` style for tiny diagnostic runs. Use
+`memory_trace="off"` or `"rss"` when the timing itself is the signal.
 
 For notebooks and debugging, use the explicit enable/disable style:
 
@@ -201,9 +204,10 @@ The audit writes:
 - `plots/cold_path_group_time.png`, `plots/cold_path_top_stages.png`, and
   `plots/cold_path_memory.png`.
 
-Use `memory_trace=rss` or `device` for large local/GPU sweeps. Keep
-`memory_trace=all`, JAX profiling, and device-memory pprof capture for tiny
-trace cases only.
+Use `memory_trace=off` or `rss` for timing-focused large local/GPU sweeps.
+Keep `device`, `all`, JAX profiling, and device-memory pprof capture for tiny
+trace cases only. Device memory tracing samples JAX memory stats and
+`nvidia-smi` around spans, so it can visibly perturb fine GPU timing.
 
 For optimization triage, rank nested event spans by exclusive self time:
 
@@ -211,12 +215,14 @@ For optimization triage, rank nested event spans by exclusive self time:
 python benchmark/analysis/bottleneck_report.py \
   benchmark/results/p11b_baseline/threshold_n1000_cpu_scout_f895a03 \
   benchmark/results/p11b_baseline/recruitment_n1000_cpu_scout_f895a03 \
+  --phase repeat \
   --output benchmark/results/p11b_baseline/bottleneck_n1000_current
 ```
 
 The bottleneck report writes event-level rows, stage/group rankings, cache
-signals, memory context, and a Markdown summary. Use it before making solver
-optimization claims; it is a triage artifact, not a benchmark claim by itself.
+signals, memory context, and a Markdown summary. Use `--phase repeat` for
+hot-path solver triage. The report is a triage artifact, not a benchmark claim
+by itself.
 
 For time-chunk policy triage, use the campaign runner instead of hand-written
 loops:

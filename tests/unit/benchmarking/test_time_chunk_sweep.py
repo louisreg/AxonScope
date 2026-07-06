@@ -209,8 +209,15 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "metadata": {},
         },
         {
-            "event_id": 15,
+            "event_id": 23,
             "parent_event_id": 3,
+            "name": "kernel.prepare_inputs",
+            "duration_ms": 6.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 15,
+            "parent_event_id": 23,
             "name": "kernel.materialize_inputs",
             "duration_ms": 2.5,
             "metadata": {},
@@ -331,6 +338,8 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["dispatch_chunk_count_max"] == "1"
     assert row["repeat_curve_simulate_ms"] == 100.0
     assert row["repeat_kernel_enqueue_ms"] == 60.0
+    assert row["repeat_kernel_prepare_inputs_ms"] == 6.0
+    assert row["repeat_kernel_prepare_inputs_self_ms"] == 3.5
     assert row["repeat_kernel_prepare_arrays_ms"] == 11.0
     assert row["repeat_kernel_prepare_state_ms"] == 1.0
     assert row["repeat_kernel_prepare_observer_tables_ms"] == 1.5

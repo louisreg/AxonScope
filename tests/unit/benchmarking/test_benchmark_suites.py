@@ -28,10 +28,11 @@ def test_benchmark_launcher_lists_two_curve_scripts_and_presets(capsys):
 def test_curve_presets_have_explicit_scale_and_execution_defaults():
     assert PRESETS["quick"].n_axons == 1
     assert PRESETS["quick"].memory_trace == "rss"
-    assert PRESETS["cpu_publication"].profile is True
-    assert PRESETS["cpu_publication"].profile_backend == "jax"
-    assert PRESETS["cpu_publication"].jax_device_memory_profile is True
+    assert PRESETS["cpu_publication"].memory_trace == "rss"
+    assert PRESETS["cpu_publication"].profile is False
+    assert PRESETS["cpu_publication"].jax_device_memory_profile is False
     assert PRESETS["gpu_smoke"].platform == "gpu"
+    assert PRESETS["gpu_smoke"].memory_trace == "rss"
     assert PRESETS["gpu_smoke"].profile is False
     assert PRESETS["gpu_smoke"].jax_device_memory_profile is False
     assert PRESETS["gpu_trace_smoke"].platform == "gpu"

@@ -23,6 +23,7 @@ SCRIPT_ORDER = ("threshold_curves", "recruitment_curves")
 PLATFORM_ORDER = ("cpu", "gpu")
 
 STAGE_SPECS = (
+    ("prepare inputs", "prepare_inputs_s", "#8CD17D"),
     ("prepare arrays", "prepare_arrays_s", "#4C78A8"),
     ("prepare state", "prepare_state_s", "#72B7B2"),
     ("observer tables", "observer_tables_s", "#54A24B"),
@@ -74,6 +75,7 @@ ROW_FIELDS = (
     "observer_scope",
     "dispatch_chunk_steps",
     "curve_s",
+    "prepare_inputs_s",
     "prepare_arrays_s",
     "prepare_state_s",
     "observer_tables_s",
@@ -290,6 +292,10 @@ def normalize_row(
     assemble_rows_s = ms_to_s(raw.get("repeat_results_assemble_rows_ms"))
     assemble_cohort_s = ms_to_s(raw.get("repeat_results_assemble_cohort_record_ms"))
     result_other_s = max(result_s - materialize_s - assemble_rows_s - assemble_cohort_s, 0.0)
+    prepare_inputs_s = ms_to_s(
+        raw.get("repeat_kernel_prepare_inputs_self_ms")
+        or raw.get("repeat_kernel_prepare_inputs_ms")
+    )
     prepare_arrays_s = ms_to_s(raw.get("repeat_kernel_prepare_arrays_ms"))
     prepare_state_s = ms_to_s(raw.get("repeat_kernel_prepare_state_ms"))
     observer_tables_s = ms_to_s(raw.get("repeat_kernel_prepare_observer_tables_ms"))
@@ -304,7 +310,8 @@ def normalize_row(
     finalize_to_host_s = ms_to_s(raw.get("repeat_kernel_finalize_observer_to_host_ms"))
     finalize_other_s = max(finalize_s - finalize_to_host_s, 0.0)
     measured_s = (
-        prepare_arrays_s
+        prepare_inputs_s
+        + prepare_arrays_s
         + prepare_state_s
         + observer_tables_s
         + materialize_inputs_s
@@ -341,6 +348,7 @@ def normalize_row(
         "observer_scope": raw.get("observer_state_scopes", ""),
         "dispatch_chunk_steps": raw.get("dispatch_chunk_steps", ""),
         "curve_s": curve_s,
+        "prepare_inputs_s": prepare_inputs_s,
         "prepare_arrays_s": prepare_arrays_s,
         "prepare_state_s": prepare_state_s,
         "observer_tables_s": observer_tables_s,

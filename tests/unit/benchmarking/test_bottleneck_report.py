@@ -30,7 +30,7 @@ def test_summaries_rank_stage_and_group_bottlenecks(tmp_path: Path) -> None:
     run_dir = tmp_path / "run_a"
     _write_fake_event_run(run_dir)
 
-    events = read_event_rows(run_dir)
+    events = read_event_rows(run_dir, phase_filter="repeat")
     stages = summarize_stages(events)
     groups = summarize_groups(stages)
 
@@ -41,6 +41,18 @@ def test_summaries_rank_stage_and_group_bottlenecks(tmp_path: Path) -> None:
     runtime_group = next(row for row in groups if row["group"] == "runtime_prepare")
     assert runtime_group["event_count"] == 1
     assert runtime_group["cache_misses"] == 1
+
+
+def test_event_rows_can_filter_inherited_repeat_phase(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run_a"
+    _write_fake_event_run(run_dir)
+
+    rows = read_event_rows(run_dir, phase_filter="repeat")
+    by_stage = {row.stage: row for row in rows}
+
+    assert "curve.warmup_only" not in by_stage
+    assert by_stage["runtime.prepare"].phase == "repeat"
+    assert by_stage["kernel.enqueue"].phase == "repeat"
 
 
 def test_main_writes_report_outputs(tmp_path: Path) -> None:
@@ -65,6 +77,14 @@ def test_main_writes_report_outputs(tmp_path: Path) -> None:
 def _write_fake_event_run(run_dir: Path) -> None:
     run_dir.mkdir(parents=True)
     events = [
+        {
+            "event_id": 99,
+            "parent_event_id": None,
+            "depth": 0,
+            "name": "curve.warmup_only",
+            "duration_ms": 123.0,
+            "metadata": {"phase": "warmup", "repeat": -1},
+        },
         {
             "event_id": 0,
             "parent_event_id": None,

@@ -646,7 +646,13 @@ decisions need realistic workflow evidence.
   `dt=0.005 ms`, observer-only, one repeat, no warmup) with RSS tracing.
   Operational rule: keep `memory_trace=all`, JAX profiling, and device-memory
   profiles for tiny trace cases only, such as one pool and a few amplitudes;
-  use `rss`/`device` for larger local, GPU, and publication-scale sweeps.
+  use `memory_trace=off` or `rss` for timing-focused larger local/GPU sweeps,
+  and run separate tiny `device`/`all` memory traces when the question is
+  allocation or profiler cartography. Device traces sample JAX memory stats and
+  `nvidia-smi` around spans, so they can visibly perturb fine GPU timing.
+  Benchmark presets now follow that split: `gpu_trace_smoke` keeps heavy GPU
+  tracing, while local realistic, CPU publication, GPU smoke, and GPU
+  realistic presets default to lightweight RSS timing.
   Remaining before optimization claims: selected NRV smoke and GPU
   smoke/realistic artifacts on the agreed hardware.
 - [x] Start optimization from a cold-path audit for large synthetic/GPU
@@ -817,7 +823,7 @@ decisions need realistic workflow evidence.
   Sixth tooling step: low-level JAX/runtime spans now split kernel preparation,
   chunk setup, JAX dispatch, chunk bookkeeping, trace concatenation, VmRaster
   to-host finalization, result trimming, and Vm to-host materialization:
-  `kernel.prepare_arrays`, `kernel.prepare_state`,
+  `kernel.prepare_inputs`, `kernel.prepare_arrays`, `kernel.prepare_state`,
   `kernel.prepare_observer_tables`, `kernel.materialize_inputs`,
   `kernel.prepare_factorized_forcing`, `kernel.chunk_setup`,
   `kernel.dispatch_jax`, `kernel.chunk_bookkeeping`,
@@ -865,6 +871,22 @@ decisions need realistic workflow evidence.
   `kernel.finalize_observer.to_host` cost, and GPU rows still retain large
   curve/setup time outside the current sub-spans. Use the combined report as
   the next optimization baseline.
+  Follow-up trace hygiene: `benchmark/analysis/bottleneck_report.py` now
+  supports `--phase repeat`, inherited phase labels for nested spans, and
+  unique run labels across CPU/GPU/recording/policy directories. A
+  representative repeat-phase report over current threshold/recruitment Kaggle
+  runs lives under
+  `benchmark/results/p11b_repeat_bottleneck_cpu_gpu_current`. It shows CPU
+  full-Vm paths dominated by `kernel.wait`, CPU observer-only explicit `1000`
+  dominated by `kernel.finalize_observer.to_host`, and GPU device-traced paths
+  dominated by `kernel.enqueue` self-time. Direct event inspection shows
+  repeated ~50 ms gaps between spans on GPU device traces, consistent with
+  memory tracing overhead; treat those GPU `device` timings as memory
+  cartography, not pure solver timing. Next measurement before low-level solver
+  changes: rerun representative CPU/GPU timing with `memory_trace=off` or
+  `rss`, keep device/all tracing to one pool and a few amplitudes, and compare
+  the new `kernel.prepare_inputs` span against `kernel.dispatch_jax` and
+  `kernel.wait`.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

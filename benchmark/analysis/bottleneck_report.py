@@ -6,7 +6,7 @@ import json
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -215,12 +215,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         default=Path("benchmark/results/p11b_bottleneck_report"),
     )
+    parser.add_argument(
+        "--phase",
+        default="all",
+        choices=("all", "repeat", "warmup"),
+        help="Filter events by inherited benchmark phase before ranking bottlenecks.",
+    )
     parser.add_argument("--top-n", type=int, default=12)
     args = parser.parse_args(argv)
 
     events: list[BottleneckEvent] = []
     for run_dir in args.run_dirs:
-        events.extend(read_event_rows(run_dir))
+        events.extend(read_event_rows(run_dir, phase_filter=args.phase))
     if not events:
         print("No benchmark events found.")
         return 1
@@ -237,7 +243,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     _write_csv(event_csv, EVENT_FIELDS, [row.to_dict() for row in events])
     _write_csv(stage_csv, STAGE_FIELDS, stage_rows)
     _write_csv(group_csv, GROUP_FIELDS, group_rows)
-    write_report(report_md, events, stage_rows, group_rows, top_n=max(args.top_n, 1))
+    write_report(
+        report_md,
+        events,
+        stage_rows,
+        group_rows,
+        top_n=max(args.top_n, 1),
+        phase_filter=args.phase,
+    )
 
     print(f"wrote: {event_csv}")
     print(f"wrote: {stage_csv}")
@@ -247,25 +260,44 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def read_event_rows(run_dir: Path) -> list[BottleneckEvent]:
+def read_event_rows(run_dir: Path, *, phase_filter: str = "all") -> list[BottleneckEvent]:
     events_path = run_dir / "events.jsonl"
     if not events_path.is_file():
         raise FileNotFoundError(f"missing events.jsonl in {run_dir}")
 
-    context = read_context(run_dir)
+    base_context = read_context(run_dir)
+    context = replace(base_context, run_label=_run_label(run_dir, base_context))
     raw_events = [_mapping(json.loads(line)) for line in events_path.read_text(encoding="utf-8").splitlines() if line]
+    by_id = {
+        int(_float(event.get("event_id")) or 0): event
+        for event in raw_events
+    }
+    phases = {
+        event_id: _event_phase(event, by_id)
+        for event_id, event in by_id.items()
+    }
+    selected_events = [
+        event
+        for event in raw_events
+        if phase_filter == "all"
+        or phases.get(int(_float(event.get("event_id")) or 0), "") == phase_filter
+    ]
+    selected_ids = {
+        int(_float(event.get("event_id")) or 0)
+        for event in selected_events
+    }
     child_ms: defaultdict[int, float] = defaultdict(float)
     workflow_ms = 0.0
-    for event in raw_events:
+    for event in selected_events:
         duration_ms = _float(event.get("duration_ms")) or 0.0
         parent_id = _int_or_none(event.get("parent_event_id"))
-        if parent_id is None:
+        if parent_id is None or parent_id not in selected_ids:
             workflow_ms += duration_ms
         else:
             child_ms[parent_id] += duration_ms
 
     rows = []
-    for event in raw_events:
+    for event in selected_events:
         metadata = _mapping(event.get("metadata"))
         memory = _mapping(metadata.get("memory"))
         event_id = int(_float(event.get("event_id")) or 0)
@@ -284,7 +316,7 @@ def read_event_rows(run_dir: Path) -> list[BottleneckEvent]:
                 duration_ms=duration_ms,
                 self_ms=self_ms,
                 workflow_ms=workflow_ms,
-                phase=str(metadata.get("phase") or ""),
+                phase=phases.get(event_id, ""),
                 repeat=str(metadata.get("repeat") if metadata.get("repeat") is not None else ""),
                 iteration=str(
                     metadata.get("iteration") if metadata.get("iteration") is not None else ""
@@ -423,6 +455,7 @@ def write_report(
     group_rows: Sequence[Mapping[str, Any]],
     *,
     top_n: int,
+    phase_filter: str,
 ) -> None:
     by_run_stage = _group_by_run(stage_rows)
     by_run_group = _group_by_run(group_rows)
@@ -432,6 +465,8 @@ def write_report(
         "",
         "This report ranks benchmark spans by exclusive self time. Use it to select",
         "the next optimization target; it is not a speed claim by itself.",
+        "",
+        f"Phase filter: `{phase_filter}`.",
         "",
         "## Runs",
         "",
@@ -554,6 +589,20 @@ def write_report(
                 "`nvidia_smi_end_mib_max` as allocator/process context.",
             ]
         )
+    if any(context.memory_trace in {"device", "all"} for context in contexts.values()):
+        lines.extend(
+            [
+                "",
+                "## Timing Hygiene",
+                "",
+                "`memory_trace=device` and `memory_trace=all` sample JAX device",
+                "stats and `nvidia-smi` around benchmark spans. They are useful for",
+                "memory cartography, but they can add visible per-span overhead on GPU",
+                "and should not be used alone for fine solver timing. For solver",
+                "optimization runs, pair a timing-focused run (`memory_trace=off` or",
+                "`rss`) with a tiny memory/profiling run.",
+            ]
+        )
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -630,6 +679,26 @@ def _contexts_by_run(events: Sequence[BottleneckEvent]) -> dict[str, RunContext]
     for event in events:
         contexts.setdefault(event.context.run_label, event.context)
     return contexts
+
+
+def _run_label(run_dir: Path, context: RunContext) -> str:
+    parts = [
+        _script_short(context.script),
+        context.platform,
+        context.recording,
+        run_dir.name,
+        context.git_commit,
+    ]
+    label = "_".join(part for part in parts if part)
+    return label or run_dir.name
+
+
+def _script_short(script: str) -> str:
+    if script == "threshold_curves":
+        return "thr"
+    if script == "recruitment_curves":
+        return "rec"
+    return script
 
 
 def _group_by_run(rows: Sequence[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
@@ -712,6 +781,28 @@ def _float(value: Any) -> float | None:
 def _int_or_none(value: Any) -> int | None:
     parsed = _float(value)
     return None if parsed is None else int(parsed)
+
+
+def _event_phase(
+    event: Mapping[str, Any],
+    by_id: Mapping[int, Mapping[str, Any]],
+) -> str:
+    current: Mapping[str, Any] | None = event
+    seen: set[int] = set()
+    while current is not None:
+        metadata = _mapping(current.get("metadata"))
+        phase = metadata.get("phase")
+        if phase:
+            return str(phase)
+        parent = current.get("parent_event_id")
+        if parent is None:
+            return ""
+        parent_id = _int_or_none(parent)
+        if parent_id is None or parent_id in seen:
+            return ""
+        seen.add(parent_id)
+        current = by_id.get(parent_id)
+    return ""
 
 
 def _bytes_to_mib(value: float | None) -> float | None:

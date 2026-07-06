@@ -2907,94 +2907,100 @@ class SingleCableVStimBatchKernel:
         grid = runtime.grid
         cable = runtime.cable
         dtype_local = membrane_runtime.dtype
-        has_driven_extracellular = (
-            runtime.stimulation.has_driven_extracellular
-            if self.has_driven_extracellular is None
-            else bool(self.has_driven_extracellular)
-        )
-
-        vext_mid = (
-            runtime.stimulation.extracellular_potential_mid_mV
-            if extracellular_potential_mid_mV is None
-            else extracellular_potential_mid_mV
-        )
-        iinj_mid = (
-            runtime.stimulation.intracellular_current_density_mid
-            if intracellular_current_density_mid is None
-            else intracellular_current_density_mid
-        )
-
-        factorized_vext = None
-        if isinstance(vext_mid, FactorizedExtracellularPotentialBatch):
-            factorized_vext = _as_factorized_extracellular_potential_batch(
-                "extracellular_potential_mid_mV",
-                vext_mid,
-                nt=grid.Nt,
-                nx=membrane_runtime.Nx,
-                dtype_local=dtype_local,
+        with benchmark_span(
+            "kernel.prepare_inputs",
+            mode="single",
+            nx=membrane_runtime.Nx,
+            nt=grid.Nt,
+        ):
+            has_driven_extracellular = (
+                runtime.stimulation.has_driven_extracellular
+                if self.has_driven_extracellular is None
+                else bool(self.has_driven_extracellular)
             )
-            vext_batch = None
-            batch_size = factorized_vext.batch_size
-        elif vext_mid is None:
-            if has_driven_extracellular:
-                raise ValueError("extracellular_potential_mid_mV is required for Vstim batching.")
-            if not isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
-                raise ValueError(
-                    "extracellular_potential_mid_mV is required unless sparse "
-                    "observer-only current input defines the batch size."
+
+            vext_mid = (
+                runtime.stimulation.extracellular_potential_mid_mV
+                if extracellular_potential_mid_mV is None
+                else extracellular_potential_mid_mV
+            )
+            iinj_mid = (
+                runtime.stimulation.intracellular_current_density_mid
+                if intracellular_current_density_mid is None
+                else intracellular_current_density_mid
+            )
+
+            factorized_vext = None
+            if isinstance(vext_mid, FactorizedExtracellularPotentialBatch):
+                factorized_vext = _as_factorized_extracellular_potential_batch(
+                    "extracellular_potential_mid_mV",
+                    vext_mid,
+                    nt=grid.Nt,
+                    nx=membrane_runtime.Nx,
+                    dtype_local=dtype_local,
                 )
-            batch_size = iinj_mid.batch_size
-            vext_batch = None
-        else:
-            vext_batch = _as_batched_time_space_array(
-                "extracellular_potential_mid_mV",
-                vext_mid,
-                nt=grid.Nt,
-                nx=membrane_runtime.Nx,
-                dtype_local=dtype_local,
-            )
-            batch_size = int(vext_batch.shape[0])
+                vext_batch = None
+                batch_size = factorized_vext.batch_size
+            elif vext_mid is None:
+                if has_driven_extracellular:
+                    raise ValueError("extracellular_potential_mid_mV is required for Vstim batching.")
+                if not isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
+                    raise ValueError(
+                        "extracellular_potential_mid_mV is required unless sparse "
+                        "observer-only current input defines the batch size."
+                    )
+                batch_size = iinj_mid.batch_size
+                vext_batch = None
+            else:
+                vext_batch = _as_batched_time_space_array(
+                    "extracellular_potential_mid_mV",
+                    vext_mid,
+                    nt=grid.Nt,
+                    nx=membrane_runtime.Nx,
+                    dtype_local=dtype_local,
+                )
+                batch_size = int(vext_batch.shape[0])
 
-        sparse_iinj = None
-        if isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
-            sparse_iinj = _as_sparse_intracellular_current_density_batch(
-                "intracellular_current_density_mid",
-                iinj_mid,
-                nt=grid.Nt,
-                nx=membrane_runtime.Nx,
-                dtype_local=dtype_local,
-                batch_size=batch_size,
-            )
-        iinj_batch = None
-        if sparse_iinj is None and iinj_mid is None:
-            iinj_batch = jnp.zeros(
-                (batch_size, grid.Nt, membrane_runtime.Nx),
-                dtype=dtype_local,
-            )
-        elif sparse_iinj is None:
-            iinj_batch = _as_batched_time_space_array(
-                "intracellular_current_density_mid",
-                cast(Any, iinj_mid),
-                nt=grid.Nt,
-                nx=membrane_runtime.Nx,
-                dtype_local=dtype_local,
-                batch_size=batch_size,
-            )
+            sparse_iinj = None
+            if isinstance(iinj_mid, SparseIntracellularCurrentDensityBatch):
+                sparse_iinj = _as_sparse_intracellular_current_density_batch(
+                    "intracellular_current_density_mid",
+                    iinj_mid,
+                    nt=grid.Nt,
+                    nx=membrane_runtime.Nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+            iinj_batch = None
+            if sparse_iinj is None and iinj_mid is None:
+                iinj_batch = jnp.zeros(
+                    (batch_size, grid.Nt, membrane_runtime.Nx),
+                    dtype=dtype_local,
+                )
+            elif sparse_iinj is None:
+                iinj_batch = _as_batched_time_space_array(
+                    "intracellular_current_density_mid",
+                    cast(Any, iinj_mid),
+                    nt=grid.Nt,
+                    nx=membrane_runtime.Nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
 
-        dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
-        lower, diag, upper = cable.lower, cable.diag, cable.upper
-        options = _normalize_batch_options(options)
-        record_idx, record_full = _resolve_recording(options.recording, nx=membrane_runtime.Nx)
-        record_voltage = options.recording.mode != "none"
-        chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
-        stateless_vm_only = bool(
-            membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
-        )
-        shared_cable = (
-            jnp.asarray(cable.lower).ndim == 1
-            and jnp.asarray(cable.diag).ndim == 1
-            and jnp.asarray(cable.upper).ndim == 1
-        )
+            dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
+            lower, diag, upper = cable.lower, cable.diag, cable.upper
+            options = _normalize_batch_options(options)
+            record_idx, record_full = _resolve_recording(options.recording, nx=membrane_runtime.Nx)
+            record_voltage = options.recording.mode != "none"
+            chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
+            stateless_vm_only = bool(
+                membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
+            )
+            shared_cable = (
+                jnp.asarray(cable.lower).ndim == 1
+                and jnp.asarray(cable.diag).ndim == 1
+                and jnp.asarray(cable.upper).ndim == 1
+            )
         if observers is not None and not record_voltage:
             if sparse_iinj is not None:
                 if vext_batch is None:
@@ -3221,126 +3227,127 @@ class DoubleCableBatchKernel:
         dtype_local = membrane_runtime.dtype
         nx = membrane_runtime.Nx
 
-        vext_mid = (
-            runtime.stimulation.extracellular_potential_mid_mV
-            if extracellular_potential_mid_mV is None
-            else extracellular_potential_mid_mV
-        )
-        if vext_mid is None:
-            raise ValueError(
-                "extracellular_potential_mid_mV is required for double-cable batching."
+        with benchmark_span("kernel.prepare_inputs", mode="double", nx=nx, nt=grid.Nt):
+            vext_mid = (
+                runtime.stimulation.extracellular_potential_mid_mV
+                if extracellular_potential_mid_mV is None
+                else extracellular_potential_mid_mV
             )
-        factorized_vext = None
-        factorized_source = None
-        if isinstance(vext_mid, FactorizedExtracellularPotentialBatch):
-            factorized_source = _as_factorized_extracellular_potential_batch(
-                "extracellular_potential_mid_mV",
-                vext_mid,
-                nt=grid.Nt,
-                nx=nx,
-                dtype_local=dtype_local,
-            )
-            factorized_previous_is_scalar = (
-                factorized_source.current_initial_previous_A is not None
-                and jnp.asarray(factorized_source.current_initial_previous_A).ndim == 0
-            )
-            if factorized_source.shared_current and factorized_previous_is_scalar:
-                factorized_vext = factorized_source
-                vext_batch = None
-                batch_size = factorized_vext.batch_size
-            else:
-                with benchmark_span(
-                    "kernel.materialize_inputs",
-                    mode="double",
-                    input="factorized_vext",
-                ):
-                    vext_batch = materialize_factorized_extracellular_potential_batch(
-                        factorized_source
-                    )
-                batch_size = factorized_source.batch_size
-        else:
-            vext_batch = _as_batched_time_space_array(
-                "extracellular_potential_mid_mV",
-                vext_mid,
-                nt=grid.Nt,
-                nx=nx,
-                dtype_local=dtype_local,
-            )
-            batch_size = int(vext_batch.shape[0])
-
-        if factorized_vext is None:
-            vext_previous = (
-                runtime.stimulation.extracellular_potential_initial_previous_mV
-                if extracellular_potential_initial_previous_mV is None
-                else extracellular_potential_initial_previous_mV
-            )
-            if vext_previous is None and factorized_source is not None:
-                with benchmark_span(
-                    "kernel.materialize_inputs",
-                    mode="double",
-                    input="factorized_vext_previous",
-                    group_size=batch_size,
-                ):
-                    vext_previous = (
-                        materialize_factorized_extracellular_potential_initial_previous(
+            if vext_mid is None:
+                raise ValueError(
+                    "extracellular_potential_mid_mV is required for double-cable batching."
+                )
+            factorized_vext = None
+            factorized_source = None
+            if isinstance(vext_mid, FactorizedExtracellularPotentialBatch):
+                factorized_source = _as_factorized_extracellular_potential_batch(
+                    "extracellular_potential_mid_mV",
+                    vext_mid,
+                    nt=grid.Nt,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                )
+                factorized_previous_is_scalar = (
+                    factorized_source.current_initial_previous_A is not None
+                    and jnp.asarray(factorized_source.current_initial_previous_A).ndim == 0
+                )
+                if factorized_source.shared_current and factorized_previous_is_scalar:
+                    factorized_vext = factorized_source
+                    vext_batch = None
+                    batch_size = factorized_vext.batch_size
+                else:
+                    with benchmark_span(
+                        "kernel.materialize_inputs",
+                        mode="double",
+                        input="factorized_vext",
+                    ):
+                        vext_batch = materialize_factorized_extracellular_potential_batch(
                             factorized_source
                         )
-                    )
-            if vext_previous is None:
-                raise ValueError(
-                    "extracellular_potential_initial_previous_mV is required "
-                    "for double-cable batching."
+                    batch_size = factorized_source.batch_size
+            else:
+                vext_batch = _as_batched_time_space_array(
+                    "extracellular_potential_mid_mV",
+                    vext_mid,
+                    nt=grid.Nt,
+                    nx=nx,
+                    dtype_local=dtype_local,
                 )
-            vext_previous_batch = _as_batched_space_array(
-                "extracellular_potential_initial_previous_mV",
-                vext_previous,
-                nx=nx,
-                dtype_local=dtype_local,
-                batch_size=batch_size,
-            )
-        else:
-            vext_previous_batch = None
+                batch_size = int(vext_batch.shape[0])
 
-        iinj_mid = (
-            runtime.stimulation.intracellular_current_density_mid
-            if intracellular_current_density_mid is None
-            else intracellular_current_density_mid
-        )
-        if iinj_mid is None:
-            iinj_batch = None
-        else:
-            iinj_batch = _as_batched_time_space_array(
-                "intracellular_current_density_mid",
-                iinj_mid,
-                nt=grid.Nt,
-                nx=nx,
-                dtype_local=dtype_local,
-                batch_size=batch_size,
-            )
+            if factorized_vext is None:
+                vext_previous = (
+                    runtime.stimulation.extracellular_potential_initial_previous_mV
+                    if extracellular_potential_initial_previous_mV is None
+                    else extracellular_potential_initial_previous_mV
+                )
+                if vext_previous is None and factorized_source is not None:
+                    with benchmark_span(
+                        "kernel.materialize_inputs",
+                        mode="double",
+                        input="factorized_vext_previous",
+                        group_size=batch_size,
+                    ):
+                        vext_previous = (
+                            materialize_factorized_extracellular_potential_initial_previous(
+                                factorized_source
+                            )
+                        )
+                if vext_previous is None:
+                    raise ValueError(
+                        "extracellular_potential_initial_previous_mV is required "
+                        "for double-cable batching."
+                    )
+                vext_previous_batch = _as_batched_space_array(
+                    "extracellular_potential_initial_previous_mV",
+                    vext_previous,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+            else:
+                vext_previous_batch = None
 
-        options = _normalize_batch_options(options)
-        record_idx, record_full = _resolve_recording(options.recording, nx=nx)
-        chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
-        has_driven_extracellular = (
-            runtime.stimulation.has_driven_extracellular
-            if self.has_driven_extracellular is None
-            else bool(self.has_driven_extracellular)
-        )
-        stateless_vm_only = bool(
-            membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
-        )
-        shared_cable = (
-            jnp.asarray(cable.area_cm2).ndim == 1
-            and jnp.asarray(extracellular.Cm_abs).ndim == 1
-            and jnp.asarray(extracellular.Gax_i).ndim == 1
-            and jnp.asarray(extracellular.Gax_e).ndim == 1
-        )
-        block_solver = _resolve_double_cable_run_block_solver(
-            options.double_cable_block_solver
-            if benchmark_double_cable_block_solver is None
-            else benchmark_double_cable_block_solver,
-            platform=jax.default_backend(),
-        )
+            iinj_mid = (
+                runtime.stimulation.intracellular_current_density_mid
+                if intracellular_current_density_mid is None
+                else intracellular_current_density_mid
+            )
+            if iinj_mid is None:
+                iinj_batch = None
+            else:
+                iinj_batch = _as_batched_time_space_array(
+                    "intracellular_current_density_mid",
+                    iinj_mid,
+                    nt=grid.Nt,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+
+            options = _normalize_batch_options(options)
+            record_idx, record_full = _resolve_recording(options.recording, nx=nx)
+            chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
+            has_driven_extracellular = (
+                runtime.stimulation.has_driven_extracellular
+                if self.has_driven_extracellular is None
+                else bool(self.has_driven_extracellular)
+            )
+            stateless_vm_only = bool(
+                membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
+            )
+            shared_cable = (
+                jnp.asarray(cable.area_cm2).ndim == 1
+                and jnp.asarray(extracellular.Cm_abs).ndim == 1
+                and jnp.asarray(extracellular.Gax_i).ndim == 1
+                and jnp.asarray(extracellular.Gax_e).ndim == 1
+            )
+            block_solver = _resolve_double_cable_run_block_solver(
+                options.double_cable_block_solver
+                if benchmark_double_cable_block_solver is None
+                else benchmark_double_cable_block_solver,
+                platform=jax.default_backend(),
+            )
         if observers is not None and options.recording.mode == "none":
             if factorized_vext is not None:
                 observer_state = _run_double_cable_batch_observer_chunks(
