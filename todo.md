@@ -1127,6 +1127,23 @@ decisions need realistic workflow evidence.
   `kernel.chunk_setup`/inter-chunk sync attribution, and GPU is now dominated
   by solver/wait plus full/probe result assembly and the remaining
   double-cable runtime preparation.
+  First true low-level solver-stage cartography tool added:
+  `benchmark/analysis/double_cable_solver_stage_profile.py` profiles synthetic
+  double-cable numerical stages outside the public runtime path:
+  `assemble_system`, `block_solve` variants (`thomas_vmap`,
+  `thomas_batched_scan`, `pcr_matrix_vmap`, `pcr_soa_vmap`,
+  `pcr_soa_batched`), `vm_gate_update`, current VmRaster
+  `observer_write`, and a compact `full_numeric_step` proxy. It writes
+  repeat CSVs, summary CSVs, metadata, a markdown report, and plots. Local CPU
+  smoke passed under
+  `benchmark/results/p11b_double_cable_solver_stage_local_smoke_v2` with
+  `Nx=21`, `batch_size=4`, fp32, batched coefficients, and two measured
+  solver variants. Treat this as bounded low-level cartography only; it does
+  not replace realistic curve benchmarks or choose runtime policy. Next:
+  run the same tool on Kaggle CPU/GPU with representative `Nx`/batch grids,
+  then use the report to decide whether the immediate low-level target is
+  Thomas scan structure, batch-native PCR, coefficient/RHS assembly, or
+  observer write overhead.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
