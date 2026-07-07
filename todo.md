@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-04 after the P9 closeout and roadmap reprioritization.
+Updated on 2026-07-07 during the P11B double-cable low-level optimization pass.
 
 Current state:
 
@@ -1038,6 +1038,34 @@ decisions need realistic workflow evidence.
   VmRaster observer-state preparation is about 45-50 ms. Treat this as
   instrumentation/cartography only. Next, run the same reduced CPU/GPU Kaggle
   double-cable matrix before changing double-cable solver kernels.
+  Matching Kaggle P100-image CPU/GPU double-cable recruitment matrices were
+  then captured at commit `890c252` with policies `default`, explicit `1000`,
+  and `unchunked`, recordings `full_vm`, `probe_vm`, and `observer_only`,
+  `Naxons=1000`, `Nx=101`, `tsim=10 ms`, `dt=0.01 ms`, three amplitudes,
+  different-diameter cohorts, one repeat, no warmup, RSS tracing only, and no
+  JAX/device profiling. Both runs passed but were very long: extracted CPU
+  artifacts live under
+  `benchmark/results/kaggle/20260707_085822_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260707_085839_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  combined plots/report under
+  `benchmark/results/p11b_double_cable_cartography_cpu_gpu_890c252`, and the
+  bottleneck report under
+  `benchmark/results/p11b_double_cable_bottleneck_report_890c252`. The clear
+  bottleneck was not the solver: `runtime.prepare.stack_membrane` consumed
+  about 138-140 s on CPU and about 306-315 s on GPU because repeated reads of
+  derived membrane-program values (`g_bar`, `E_rev`, static signatures/state
+  specs) were recalculated while encoding many parametrized double-cable
+  membrane compartments.
+  Compiler/backend cleanup: `JaxMembraneProgram` now memoizes those derived
+  static values and invalidates only the rate-table-dependent signature when
+  rate tables are enabled/disabled. This keeps the runtime structural and free
+  of model-family-specific shortcuts. Local validation on 2026-07-07 shows
+  50k passive-program `g_bar` reads drop from about 41 s to about 0.006 s, and
+  a short `Naxons=1000`, double-cable observer-only CPU run now completes in
+  14 s with `runtime.prepare.stack_membrane` about 2.14 s for 89,000
+  compartments. Next, rerun the reduced CPU/GPU Kaggle double-cable matrix at
+  the post-fix commit before making a fresh CPU/GPU timing claim.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

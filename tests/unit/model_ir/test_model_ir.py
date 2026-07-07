@@ -1939,6 +1939,26 @@ def test_compile_membrane_model_returns_direct_jax_program_contract():
     assert membrane.rate_table_config == RateTableConfig(step_mV=1.0)
 
 
+def test_jax_membrane_program_caches_derived_static_values():
+    membrane = compile_membrane_model(membranes.Passive(Rm=12_000.0, EL=-68.0))
+
+    g_bar = membrane.g_bar
+    e_rev = membrane.E_rev
+    states = membrane.membrane_state_specs()
+    signature = membrane.static_signature()
+
+    assert membrane.g_bar is g_bar
+    assert membrane.E_rev is e_rev
+    assert membrane.membrane_state_specs() is states
+    assert membrane.static_signature() is signature
+
+    membrane.enable_rate_table(config=RateTableConfig(step_mV=1.0))
+
+    assert membrane.static_signature() is not signature
+    assert membrane.g_bar is g_bar
+    assert membrane.E_rev is e_rev
+
+
 def test_membrane_backends_consume_jax_program_directly():
     hh = JaxMembraneProgram.from_model_ir(
         lower_membrane_model_to_ir(membranes.HodgkinHuxley())

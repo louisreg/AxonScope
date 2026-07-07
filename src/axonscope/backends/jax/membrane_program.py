@@ -41,6 +41,10 @@ class JaxMembraneProgram:
         )
         self.q10 = dtype(self._representative_q10())
         self._rate_table: RateTable | None = None
+        self._static_signature_cache: tuple[Any, ...] | None = None
+        self._g_bar_cache: jnp.ndarray | None = None
+        self._e_rev_cache: jnp.ndarray | None = None
+        self._membrane_state_specs_cache: tuple[MembraneStateSpec, ...] | None = None
 
     @classmethod
     def from_model_ir(
@@ -61,8 +65,11 @@ class JaxMembraneProgram:
         return self.lowering.generated_model_step_available
 
     def static_signature(self) -> tuple[Any, ...]:
+        cached = self._static_signature_cache
+        if cached is not None:
+            return cached
         rate_table = self.rate_table_config
-        return (
+        signature = (
             self.__class__.__module__,
             self.__class__.__qualname__,
             str(self.dtype),
@@ -71,6 +78,8 @@ class JaxMembraneProgram:
             self.program.final_gate_update_mode,
             None if rate_table is None else repr(rate_table),
         )
+        self._static_signature_cache = signature
+        return signature
 
     @property
     def source_provenance(self) -> dict[str, Any]:
@@ -82,6 +91,9 @@ class JaxMembraneProgram:
 
     @property
     def g_bar(self) -> jnp.ndarray:
+        cached = self._g_bar_cache
+        if cached is not None:
+            return cached
         fallback = None
         values = []
         for index, name in enumerate(self.program.conductance_parameter_names):
@@ -97,12 +109,20 @@ class JaxMembraneProgram:
                 )[0]
             values.append(jnp.asarray(fallback[index], dtype=self.dtype))
         if not values:
-            return jnp.zeros((0,), dtype=self.dtype)
-        return jnp.stack(values).astype(self.dtype)
+            out = jnp.zeros((0,), dtype=self.dtype)
+        else:
+            out = jnp.stack(values).astype(self.dtype)
+        self._g_bar_cache = out
+        return out
 
     @property
     def E_rev(self) -> jnp.ndarray:
-        return self.lowering.reversal_values()
+        cached = self._e_rev_cache
+        if cached is not None:
+            return cached
+        out = self.lowering.reversal_values()
+        self._e_rev_cache = out
+        return out
 
     def exact_rate_constants(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         return self.lowering.rate_constants(V_mV)
@@ -140,10 +160,12 @@ class JaxMembraneProgram:
             dtype_local=self.dtype,
             exact_rate_constants=self.exact_rate_constants,
         )
+        self._static_signature_cache = None
         return self
 
     def disable_rate_table(self) -> "JaxMembraneProgram":
         self._rate_table = None
+        self._static_signature_cache = None
         return self
 
     @property
@@ -249,10 +271,15 @@ class JaxMembraneProgram:
         return self.program.current_names
 
     def membrane_state_specs(self) -> tuple[MembraneStateSpec, ...]:
-        return tuple(
+        cached = self._membrane_state_specs_cache
+        if cached is not None:
+            return cached
+        specs = tuple(
             MembraneStateSpec(name)
             for name in self.program.membrane_state_display_names
         )
+        self._membrane_state_specs_cache = specs
+        return specs
 
     def membrane_state_names(self) -> tuple[str, ...]:
         return tuple(spec.name for spec in self.membrane_state_specs())
