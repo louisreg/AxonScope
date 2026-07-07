@@ -195,10 +195,24 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "metadata": {},
         },
         {
+            "event_id": 40,
+            "parent_event_id": 12,
+            "name": "kernel.prepare_double_coefficients",
+            "duration_ms": 10.5,
+            "metadata": {},
+        },
+        {
             "event_id": 13,
             "parent_event_id": 3,
             "name": "kernel.prepare_state",
             "duration_ms": 1.0,
+            "metadata": {},
+        },
+        {
+            "event_id": 41,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_observer_state",
+            "duration_ms": 1.7,
             "metadata": {},
         },
         {
@@ -227,6 +241,13 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
             "parent_event_id": 3,
             "name": "kernel.prepare_factorized_forcing",
             "duration_ms": 0.5,
+            "metadata": {},
+        },
+        {
+            "event_id": 42,
+            "parent_event_id": 3,
+            "name": "kernel.prepare_factorized_vext",
+            "duration_ms": 0.8,
             "metadata": {},
         },
         {
@@ -423,10 +444,13 @@ def test_time_chunk_sweep_summarizes_kernel_events(tmp_path: Path):
     assert row["repeat_kernel_prepare_inputs_ms"] == 6.0
     assert row["repeat_kernel_prepare_inputs_self_ms"] == 3.5
     assert row["repeat_kernel_prepare_arrays_ms"] == 11.0
+    assert row["repeat_kernel_prepare_double_coefficients_ms"] == 10.5
     assert row["repeat_kernel_prepare_state_ms"] == 1.0
+    assert row["repeat_kernel_prepare_observer_state_ms"] == 1.7
     assert row["repeat_kernel_prepare_observer_tables_ms"] == 1.5
     assert row["repeat_kernel_materialize_inputs_ms"] == 2.5
     assert row["repeat_kernel_prepare_factorized_forcing_ms"] == 0.5
+    assert row["repeat_kernel_prepare_factorized_vext_ms"] == 0.8
     assert row["repeat_kernel_chunk_setup_ms"] == 3.0
     assert row["repeat_kernel_combine_observer_chunks_ms"] == 7.0
     assert row["repeat_kernel_dispatch_jax_ms"] == 20.0

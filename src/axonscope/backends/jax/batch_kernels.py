@@ -4627,108 +4627,27 @@ def _run_double_cable_batch_array_chunks(
         double_cable_block_solver,
         batch_size=batch_size,
     )
-    shared_coefficients = (
-        jnp.asarray(runtime.cable.area_cm2).ndim == 1
-        and jnp.asarray(extracellular.Cm_abs).ndim == 1
-        and jnp.asarray(extracellular.Cx_abs).ndim == 1
-        and jnp.asarray(extracellular.Gx_abs).ndim == 1
-        and jnp.asarray(extracellular.Gax_e).ndim == 1
-        and jnp.asarray(extracellular.Gax_i).ndim == 1
-        and jnp.asarray(extracellular.left_i).ndim == 1
-        and jnp.asarray(extracellular.right_i).ndim == 1
-        and jnp.asarray(extracellular.left_e).ndim == 1
-        and jnp.asarray(extracellular.right_e).ndim == 1
-        and jnp.asarray(membrane_runtime.background_current).ndim <= 1
+    (
+        area_cm2,
+        Cm_abs,
+        Cx_abs,
+        Gx_abs,
+        Gax_e,
+        Gax_i,
+        left_i,
+        right_i,
+        left_e,
+        right_e,
+        background,
+        shared_coefficients,
+    ) = _prepare_double_cable_batch_arrays(
+        runtime=runtime,
+        batch_size=batch_size,
+        output="full_vm" if record_full else "probe_vm",
+        variant=kernel_block_solver,
+        time_chunk_steps=time_chunk_steps,
+        factorized_vext=False,
     )
-    if shared_coefficients:
-        area_cm2 = _as_space_array(
-            "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local
-        )
-        Cm_abs = _as_space_array("Cm_abs", extracellular.Cm_abs, nx=nx, dtype_local=dtype_local)
-        Cx_abs = _as_space_array("Cx_abs", extracellular.Cx_abs, nx=nx, dtype_local=dtype_local)
-        Gx_abs = _as_space_array("Gx_abs", extracellular.Gx_abs, nx=nx, dtype_local=dtype_local)
-        Gax_e = _as_edge_array("Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local)
-        Gax_i = _as_edge_array("Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local)
-        left_i = _as_space_array("left_i", extracellular.left_i, nx=nx, dtype_local=dtype_local)
-        right_i = _as_space_array(
-            "right_i", extracellular.right_i, nx=nx, dtype_local=dtype_local
-        )
-        left_e = _as_space_array("left_e", extracellular.left_e, nx=nx, dtype_local=dtype_local)
-        right_e = _as_space_array(
-            "right_e", extracellular.right_e, nx=nx, dtype_local=dtype_local
-        )
-        background = _as_scalar_or_space_array(
-            "I_background",
-            membrane_runtime.background_current,
-            nx=nx,
-            dtype_local=dtype_local,
-        )
-    else:
-        area_cm2 = _as_batched_space_array(
-            "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local, batch_size=batch_size
-        )
-        Cm_abs = _as_batched_space_array(
-            "Cm_abs",
-            extracellular.Cm_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Cx_abs = _as_batched_space_array(
-            "Cx_abs",
-            extracellular.Cx_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Gx_abs = _as_batched_space_array(
-            "Gx_abs",
-            extracellular.Gx_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Gax_e = _as_batched_edge_array(
-            "Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local, batch_size=batch_size
-        )
-        Gax_i = _as_batched_edge_array(
-            "Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local, batch_size=batch_size
-        )
-        left_i = _as_batched_space_array(
-            "left_i",
-            extracellular.left_i,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        right_i = _as_batched_space_array(
-            "right_i",
-            extracellular.right_i,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        left_e = _as_batched_space_array(
-            "left_e",
-            extracellular.left_e,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        right_e = _as_batched_space_array(
-            "right_e",
-            extracellular.right_e,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        background = _as_batched_space_array(
-            "I_background",
-            membrane_runtime.background_current,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
     previous = extracellular_potential_initial_previous_mV
     chunks = []
@@ -4846,6 +4765,202 @@ def _run_double_cable_batch_array_chunks(
     return _concat_trace_chunks(chunks)
 
 
+def _prepare_double_cable_batch_arrays(
+    *,
+    runtime: SolverRuntime,
+    batch_size: int,
+    output: str,
+    variant: str,
+    time_chunk_steps: int | None,
+    factorized_vext: bool,
+    observer: str | None = None,
+) -> tuple[
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    Array,
+    bool,
+]:
+    membrane_runtime = runtime.membrane
+    extracellular = runtime.extracellular
+    if extracellular is None:
+        raise ValueError("double-cable batch chunks require extracellular runtime arrays.")
+    dtype_local = membrane_runtime.dtype
+    nx = membrane_runtime.Nx
+    shared_coefficients = (
+        jnp.asarray(runtime.cable.area_cm2).ndim == 1
+        and jnp.asarray(extracellular.Cm_abs).ndim == 1
+        and jnp.asarray(extracellular.Cx_abs).ndim == 1
+        and jnp.asarray(extracellular.Gx_abs).ndim == 1
+        and jnp.asarray(extracellular.Gax_e).ndim == 1
+        and jnp.asarray(extracellular.Gax_i).ndim == 1
+        and jnp.asarray(extracellular.left_i).ndim == 1
+        and jnp.asarray(extracellular.right_i).ndim == 1
+        and jnp.asarray(extracellular.left_e).ndim == 1
+        and jnp.asarray(extracellular.right_e).ndim == 1
+        and jnp.asarray(membrane_runtime.background_current).ndim <= 1
+    )
+    metadata: dict[str, Any] = {
+        "mode": "double",
+        "variant": variant,
+        "output": output,
+        "group_size": batch_size,
+        "nx": nx,
+        "time_chunk_steps": time_chunk_steps,
+        "shared_coefficients": shared_coefficients,
+        "factorized_vext": factorized_vext,
+    }
+    if observer is not None:
+        metadata["observer"] = observer
+    with benchmark_span("kernel.prepare_arrays", **metadata):
+        with benchmark_span("kernel.prepare_double_coefficients", **metadata):
+            if shared_coefficients:
+                area_cm2 = _as_space_array(
+                    "area_cm2",
+                    runtime.cable.area_cm2,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                )
+                Cm_abs = _as_space_array(
+                    "Cm_abs", extracellular.Cm_abs, nx=nx, dtype_local=dtype_local
+                )
+                Cx_abs = _as_space_array(
+                    "Cx_abs", extracellular.Cx_abs, nx=nx, dtype_local=dtype_local
+                )
+                Gx_abs = _as_space_array(
+                    "Gx_abs", extracellular.Gx_abs, nx=nx, dtype_local=dtype_local
+                )
+                Gax_e = _as_edge_array(
+                    "Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local
+                )
+                Gax_i = _as_edge_array(
+                    "Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local
+                )
+                left_i = _as_space_array(
+                    "left_i", extracellular.left_i, nx=nx, dtype_local=dtype_local
+                )
+                right_i = _as_space_array(
+                    "right_i",
+                    extracellular.right_i,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                )
+                left_e = _as_space_array(
+                    "left_e", extracellular.left_e, nx=nx, dtype_local=dtype_local
+                )
+                right_e = _as_space_array(
+                    "right_e",
+                    extracellular.right_e,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                )
+                background = _as_scalar_or_space_array(
+                    "I_background",
+                    membrane_runtime.background_current,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                )
+            else:
+                area_cm2 = _as_batched_space_array(
+                    "area_cm2",
+                    runtime.cable.area_cm2,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                Cm_abs = _as_batched_space_array(
+                    "Cm_abs",
+                    extracellular.Cm_abs,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                Cx_abs = _as_batched_space_array(
+                    "Cx_abs",
+                    extracellular.Cx_abs,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                Gx_abs = _as_batched_space_array(
+                    "Gx_abs",
+                    extracellular.Gx_abs,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                Gax_e = _as_batched_edge_array(
+                    "Gax_e",
+                    extracellular.Gax_e,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                Gax_i = _as_batched_edge_array(
+                    "Gax_i",
+                    extracellular.Gax_i,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                left_i = _as_batched_space_array(
+                    "left_i",
+                    extracellular.left_i,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                right_i = _as_batched_space_array(
+                    "right_i",
+                    extracellular.right_i,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                left_e = _as_batched_space_array(
+                    "left_e",
+                    extracellular.left_e,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                right_e = _as_batched_space_array(
+                    "right_e",
+                    extracellular.right_e,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+                background = _as_batched_space_array(
+                    "I_background",
+                    membrane_runtime.background_current,
+                    nx=nx,
+                    dtype_local=dtype_local,
+                    batch_size=batch_size,
+                )
+    return (
+        area_cm2,
+        Cm_abs,
+        Cx_abs,
+        Gx_abs,
+        Gax_e,
+        Gax_i,
+        left_i,
+        right_i,
+        left_e,
+        right_e,
+        background,
+        shared_coefficients,
+    )
+
+
 def _run_double_cable_batch_observer_chunks(
     *,
     runtime: SolverRuntime,
@@ -4927,153 +5042,110 @@ def _run_double_cable_batch_observer_chunks(
         double_cable_block_solver,
         batch_size=batch_size,
     )
-    shared_coefficients = (
-        jnp.asarray(runtime.cable.area_cm2).ndim == 1
-        and jnp.asarray(extracellular.Cm_abs).ndim == 1
-        and jnp.asarray(extracellular.Cx_abs).ndim == 1
-        and jnp.asarray(extracellular.Gx_abs).ndim == 1
-        and jnp.asarray(extracellular.Gax_e).ndim == 1
-        and jnp.asarray(extracellular.Gax_i).ndim == 1
-        and jnp.asarray(extracellular.left_i).ndim == 1
-        and jnp.asarray(extracellular.right_i).ndim == 1
-        and jnp.asarray(extracellular.left_e).ndim == 1
-        and jnp.asarray(extracellular.right_e).ndim == 1
-        and jnp.asarray(membrane_runtime.background_current).ndim <= 1
+    (
+        area_cm2,
+        Cm_abs,
+        Cx_abs,
+        Gx_abs,
+        Gax_e,
+        Gax_i,
+        left_i,
+        right_i,
+        left_e,
+        right_e,
+        background,
+        shared_coefficients,
+    ) = _prepare_double_cable_batch_arrays(
+        runtime=runtime,
+        batch_size=batch_size,
+        output="observer_only",
+        variant=kernel_block_solver,
+        time_chunk_steps=time_chunk_steps,
+        factorized_vext=factorized_vext is not None,
+        observer="vm_raster",
     )
-    if shared_coefficients:
-        area_cm2 = _as_space_array(
-            "area_cm2", runtime.cable.area_cm2, nx=nx, dtype_local=dtype_local
-        )
-        Cm_abs = _as_space_array("Cm_abs", extracellular.Cm_abs, nx=nx, dtype_local=dtype_local)
-        Cx_abs = _as_space_array("Cx_abs", extracellular.Cx_abs, nx=nx, dtype_local=dtype_local)
-        Gx_abs = _as_space_array("Gx_abs", extracellular.Gx_abs, nx=nx, dtype_local=dtype_local)
-        Gax_e = _as_edge_array("Gax_e", extracellular.Gax_e, nx=nx, dtype_local=dtype_local)
-        Gax_i = _as_edge_array("Gax_i", extracellular.Gax_i, nx=nx, dtype_local=dtype_local)
-        left_i = _as_space_array("left_i", extracellular.left_i, nx=nx, dtype_local=dtype_local)
-        right_i = _as_space_array(
-            "right_i", extracellular.right_i, nx=nx, dtype_local=dtype_local
-        )
-        left_e = _as_space_array("left_e", extracellular.left_e, nx=nx, dtype_local=dtype_local)
-        right_e = _as_space_array(
-            "right_e", extracellular.right_e, nx=nx, dtype_local=dtype_local
-        )
-        background = _as_scalar_or_space_array(
-            "I_background",
-            membrane_runtime.background_current,
-            nx=nx,
-            dtype_local=dtype_local,
-        )
-    else:
-        area_cm2 = _as_batched_space_array(
-            "area_cm2",
-            runtime.cable.area_cm2,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Cm_abs = _as_batched_space_array(
-            "Cm_abs",
-            extracellular.Cm_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Cx_abs = _as_batched_space_array(
-            "Cx_abs",
-            extracellular.Cx_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Gx_abs = _as_batched_space_array(
-            "Gx_abs",
-            extracellular.Gx_abs,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Gax_e = _as_batched_edge_array(
-            "Gax_e",
-            extracellular.Gax_e,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        Gax_i = _as_batched_edge_array(
-            "Gax_i",
-            extracellular.Gax_i,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        left_i = _as_batched_space_array(
-            "left_i",
-            extracellular.left_i,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        right_i = _as_batched_space_array(
-            "right_i",
-            extracellular.right_i,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        left_e = _as_batched_space_array(
-            "left_e",
-            extracellular.left_e,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        right_e = _as_batched_space_array(
-            "right_e",
-            extracellular.right_e,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
-        background = _as_batched_space_array(
-            "I_background",
-            membrane_runtime.background_current,
-            nx=nx,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
     raster_probe_indices, raster_probe_mask = _vm_raster_probe_tables_for_kernel(
         observers,
         batch_size=batch_size,
     )
     previous = extracellular_potential_initial_previous_mV
-    previous_current_A = (
-        None
-        if factorized_vext is None
-        else jnp.asarray(factorized_vext.current_initial_previous_A, dtype=dtype_local)
-    )
-    factorized_current_mid_A = (
-        None
-        if factorized_vext is None
-        else jnp.asarray(factorized_vext.current_mid_A, dtype=dtype_local)
-    )
-    factorized_footprint_mV_per_A = (
-        None
-        if factorized_vext is None
-        else jnp.asarray(factorized_vext.footprint_mV_per_A, dtype=dtype_local)
-    )
+    previous_current_A = None
+    factorized_current_mid_A = None
+    factorized_footprint_mV_per_A = None
+    if factorized_vext is not None:
+        with benchmark_span(
+            "kernel.prepare_factorized_vext",
+            mode="double",
+            output="observer_only",
+            observer="vm_raster",
+            variant=kernel_block_solver,
+            group_size=batch_size,
+            nx=nx,
+            nt=grid.Nt,
+            time_chunk_steps=time_chunk_steps,
+            drive_count=factorized_vext.drive_count,
+            shared_current=factorized_vext.shared_current,
+            footprint_rank=jnp.asarray(factorized_vext.footprint_mV_per_A).ndim,
+        ):
+            previous_current_A = jnp.asarray(
+                factorized_vext.current_initial_previous_A,
+                dtype=dtype_local,
+            )
+            factorized_current_mid_A = jnp.asarray(
+                factorized_vext.current_mid_A,
+                dtype=dtype_local,
+            )
+            factorized_footprint_mV_per_A = jnp.asarray(
+                factorized_vext.footprint_mV_per_A,
+                dtype=dtype_local,
+            )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
-    observer_state = (
-        None
-        if local_observer_chunks
-        else init_vm_raster_state(observers, batch_size=batch_size, nt=grid.Nt)
-    )
+    observer_state = None
+    if not local_observer_chunks:
+        with benchmark_span(
+            "kernel.prepare_observer_state",
+            mode="double",
+            output="observer_only",
+            observer="vm_raster",
+            variant=kernel_block_solver,
+            state_scope="full",
+            group_size=batch_size,
+            nt=grid.Nt,
+            time_chunk_steps=time_chunk_steps,
+        ):
+            observer_state = init_vm_raster_state(
+                observers,
+                batch_size=batch_size,
+                nt=grid.Nt,
+            )
     observer_chunk_states: list[VmRasterState] = []
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
+        if local_observer_chunks:
+            with benchmark_span(
+                "kernel.prepare_observer_state",
+                mode="double",
+                output="observer_only",
+                observer="vm_raster",
+                variant=kernel_block_solver,
+                state_scope="chunk",
+                group_size=batch_size,
+                time_chunk_steps=time_chunk_steps,
+                chunk_steps=stop - start,
+                chunk_index=chunk_index,
+                chunk_count=len(chunk_ranges),
+            ):
+                observer_state0 = init_vm_raster_state(
+                    observers,
+                    batch_size=batch_size,
+                    nt=stop - start,
+                )
+        else:
+            observer_state0 = observer_state
         with benchmark_span(
             "kernel.chunk_setup",
             mode="double",
@@ -5103,11 +5175,6 @@ def _run_double_cable_batch_observer_chunks(
                 None
                 if intracellular_current_density_mid is None
                 else intracellular_current_density_mid[:, start:stop]
-            )
-            observer_state0 = (
-                init_vm_raster_state(observers, batch_size=batch_size, nt=stop - start)
-                if local_observer_chunks
-                else observer_state
             )
             assert observer_state0 is not None
             time_start_index = jnp.asarray(

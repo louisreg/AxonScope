@@ -1025,6 +1025,19 @@ decisions need realistic workflow evidence.
   0.04-0.08 ms. This confirms the forcing cache behavior on Kaggle; it remains
   observer-only quick evidence, so broader full/probe workflow speed claims
   still need a reduced matrix if they matter.
+  Double-cable cartography follow-up: double-cable kernel preparation now
+  exposes separate spans for `kernel.prepare_double_coefficients`,
+  `kernel.prepare_factorized_vext`, and `kernel.prepare_observer_state`.
+  These spans are surfaced in `benchmark/campaigns/time_chunk_sweep.py`
+  summaries without double-counting nested coefficient work. Local CPU
+  validation on 2026-07-07 passed compileall on active paths, the focused
+  batch/dispatcher/time-chunk tests, and a four-case double-cable recruitment
+  smoke under `benchmark/results/p11b_double_cable_cartography_local`.
+  On this small CPU smoke, double-cable coefficient preparation is under 1 ms,
+  factorized-Vext prep is about 0.25 ms for observer-only, while chunk-local
+  VmRaster observer-state preparation is about 45-50 ms. Treat this as
+  instrumentation/cartography only. Next, run the same reduced CPU/GPU Kaggle
+  double-cable matrix before changing double-cable solver kernels.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

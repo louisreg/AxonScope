@@ -92,14 +92,20 @@ SUMMARY_FIELDS = (
     "repeat_kernel_prepare_inputs_self_ms",
     "kernel_prepare_arrays_ms",
     "repeat_kernel_prepare_arrays_ms",
+    "kernel_prepare_double_coefficients_ms",
+    "repeat_kernel_prepare_double_coefficients_ms",
     "kernel_prepare_state_ms",
     "repeat_kernel_prepare_state_ms",
+    "kernel_prepare_observer_state_ms",
+    "repeat_kernel_prepare_observer_state_ms",
     "kernel_prepare_observer_tables_ms",
     "repeat_kernel_prepare_observer_tables_ms",
     "kernel_materialize_inputs_ms",
     "repeat_kernel_materialize_inputs_ms",
     "kernel_prepare_factorized_forcing_ms",
     "repeat_kernel_prepare_factorized_forcing_ms",
+    "kernel_prepare_factorized_vext_ms",
+    "repeat_kernel_prepare_factorized_vext_ms",
     "kernel_chunk_setup_ms",
     "repeat_kernel_chunk_setup_ms",
     "kernel_combine_observer_chunks_ms",
@@ -620,10 +626,30 @@ def summarize_run(
             phase="repeat",
             by_id=by_id,
         ),
+        "kernel_prepare_double_coefficients_ms": sum_duration(
+            events,
+            "kernel.prepare_double_coefficients",
+        ),
+        "repeat_kernel_prepare_double_coefficients_ms": sum_duration(
+            events,
+            "kernel.prepare_double_coefficients",
+            phase="repeat",
+            by_id=by_id,
+        ),
         "kernel_prepare_state_ms": sum_duration(events, "kernel.prepare_state"),
         "repeat_kernel_prepare_state_ms": sum_duration(
             events,
             "kernel.prepare_state",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_observer_state_ms": sum_duration(
+            events,
+            "kernel.prepare_observer_state",
+        ),
+        "repeat_kernel_prepare_observer_state_ms": sum_duration(
+            events,
+            "kernel.prepare_observer_state",
             phase="repeat",
             by_id=by_id,
         ),
@@ -651,6 +677,16 @@ def summarize_run(
         "repeat_kernel_prepare_factorized_forcing_ms": sum_duration(
             events,
             "kernel.prepare_factorized_forcing",
+            phase="repeat",
+            by_id=by_id,
+        ),
+        "kernel_prepare_factorized_vext_ms": sum_duration(
+            events,
+            "kernel.prepare_factorized_vext",
+        ),
+        "repeat_kernel_prepare_factorized_vext_ms": sum_duration(
+            events,
+            "kernel.prepare_factorized_vext",
             phase="repeat",
             by_id=by_id,
         ),
@@ -914,9 +950,11 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             float(row.get("repeat_kernel_prepare_arrays_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_inputs_self_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_state_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_observer_state_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_observer_tables_ms") or 0.0)
             + float(row.get("repeat_kernel_materialize_inputs_ms") or 0.0)
             + float(row.get("repeat_kernel_prepare_factorized_forcing_ms") or 0.0)
+            + float(row.get("repeat_kernel_prepare_factorized_vext_ms") or 0.0)
             + float(row.get("repeat_kernel_chunk_setup_ms") or 0.0)
             + float(row.get("repeat_kernel_chunk_bookkeeping_ms") or 0.0)
             + float(row.get("repeat_kernel_concat_trace_chunks_ms") or 0.0)
