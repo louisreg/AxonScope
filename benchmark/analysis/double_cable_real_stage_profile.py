@@ -68,6 +68,7 @@ from benchmark.workloads.curve_runtime import _build_pool
 REPEAT_FIELDS = (
     "stage",
     "variant",
+    "stage_group",
     "phase",
     "repeat",
     "platform",
@@ -80,6 +81,13 @@ REPEAT_FIELDS = (
     "diameters",
     "recording",
     "extracellular_format",
+    "membrane_backend",
+    "membrane_model",
+    "membrane_gates_max",
+    "membrane_channels_max",
+    "membrane_backend_branches",
+    "membrane_gated_compartments",
+    "membrane_leak_compartments",
     "elapsed_ms",
     "rss_delta_mib",
     "output_bytes",
@@ -88,6 +96,7 @@ REPEAT_FIELDS = (
 SUMMARY_FIELDS = (
     "stage",
     "variant",
+    "stage_group",
     "platform",
     "device",
     "precision",
@@ -98,6 +107,13 @@ SUMMARY_FIELDS = (
     "diameters",
     "recording",
     "extracellular_format",
+    "membrane_backend",
+    "membrane_model",
+    "membrane_gates_max",
+    "membrane_channels_max",
+    "membrane_backend_branches",
+    "membrane_gated_compartments",
+    "membrane_leak_compartments",
     "repeats",
     "mean_ms",
     "min_ms",
@@ -399,6 +415,34 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             row_indices,
         )
     )
+    gated_leak_cases: tuple[StageCase, ...] = ()
+    if _is_gated_leak_stack_backend(runtime.membrane.backend):
+        gated_gm, gated_ge = _block_until_ready(
+            _real_gated_only_conductance_terms(
+                runtime.membrane.backend,
+                gates_pred,
+            )
+        )
+        gated_leak_cases = (
+            StageCase(
+                "membrane_gate_update_gated_only",
+                _backend_variant(runtime.membrane.backend),
+                _real_gated_only_gate_update,
+                (runtime.membrane.backend, gates, Vm, dt_ms),
+            ),
+            StageCase(
+                "membrane_conductance_terms_gated_only",
+                _backend_variant(runtime.membrane.backend),
+                _real_gated_only_conductance_terms,
+                (runtime.membrane.backend, gates_pred),
+            ),
+            StageCase(
+                "membrane_conductance_terms_mask_mix",
+                _backend_variant(runtime.membrane.backend),
+                _real_gated_leak_conductance_mix,
+                (runtime.membrane.backend, gates_pred, gated_gm, gated_ge),
+            ),
+        )
     drive_case = _drive_stage_case(
         extracellular.midpoint,
         extracellular.initial_previous,
@@ -569,6 +613,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             _real_membrane_conductance_terms,
             (runtime.membrane.backend, gates_pred, row_indices),
         ),
+        *gated_leak_cases,
         drive_case,
         StageCase(
             "system_assembly",
@@ -638,6 +683,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             )
         )
 
+    membrane_metadata = _membrane_backend_metadata(runtime.membrane.backend, gates)
     group_metadata = {
         "target_nx": int(options["nx"]),
         "actual_nx": int(runtime.membrane.Nx),
@@ -655,6 +701,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "resolved_solver": resolved,
         "membrane_backend": _backend_variant(runtime.membrane.backend),
         "membrane_model": type(runtime.membrane.membrane).__name__,
+        **membrane_metadata,
         "uses_generated_model_step": bool(
             getattr(runtime.membrane.membrane, "uses_generated_model_step", False)
         ),
@@ -750,6 +797,65 @@ def _real_membrane_conductance_terms(
             lambda row_index, gates_row: row_terms(row_index, gates_row)
         )(row_indices, gates)
     return jax.vmap(backend.membrane_conductance_terms)(gates)
+
+
+def _is_gated_leak_stack_backend(backend: Any) -> bool:
+    return all(
+        hasattr(backend, attr)
+        for attr in (
+            "gated_model",
+            "gated_gate_count",
+            "_gated_mask_col",
+            "_leak_g_col",
+            "_leak_ge_col",
+        )
+    )
+
+
+@partial(jax.jit, static_argnames=("backend",))
+def _real_gated_only_gate_update(
+    backend: Any,
+    gates: Any,
+    Vm: Any,
+    dt_ms: Any,
+) -> Any:
+    gated_gate_count = int(backend.gated_gate_count)
+    return jax.vmap(
+        lambda gates_row, vm_row: backend.gated_model.cn_gate_update(
+            g_prev=gates_row[:, :gated_gate_count],
+            V_mV=vm_row,
+            dt=dt_ms,
+        )
+    )(gates, Vm)
+
+
+@partial(jax.jit, static_argnames=("backend",))
+def _real_gated_only_conductance_terms(
+    backend: Any,
+    gates: Any,
+) -> tuple[Any, Any]:
+    gated_gate_count = int(backend.gated_gate_count)
+    return jax.vmap(
+        lambda gates_row: backend.gated_model.membrane_conductance_terms(
+            gates_row[:, :gated_gate_count]
+        )
+    )(gates)
+
+
+@partial(jax.jit, static_argnames=("backend",))
+def _real_gated_leak_conductance_mix(
+    backend: Any,
+    gates: Any,
+    gated_gm: Any,
+    gated_ge: Any,
+) -> tuple[Any, Any]:
+    gated_mask = gates[:, :, backend._gated_mask_col]
+    leak_gm = gates[:, :, backend._leak_g_col]
+    leak_ge = gates[:, :, backend._leak_ge_col]
+    return (
+        gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
+        gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
+    )
 
 
 def _drive_stage_case(
@@ -1452,6 +1558,7 @@ def _measure_case(
         **_row_context(args=args, device_name=device_name, group_metadata=group_metadata),
         "stage": case.stage,
         "variant": case.variant,
+        "stage_group": _stage_group(case.stage),
         "repeats": repeats,
         "mean_ms": sum(measured) / len(measured),
         "min_ms": min(measured),
@@ -1479,6 +1586,7 @@ def _repeat_row(
         **_row_context(args=args, device_name=device_name, group_metadata=group_metadata),
         "stage": case.stage,
         "variant": case.variant,
+        "stage_group": _stage_group(case.stage),
         "phase": phase,
         "repeat": repeat,
         "elapsed_ms": elapsed_ms,
@@ -1504,6 +1612,13 @@ def _row_context(
         "diameters": args.diameters,
         "recording": args.recording,
         "extracellular_format": group_metadata["extracellular_format"],
+        "membrane_backend": group_metadata.get("membrane_backend"),
+        "membrane_model": group_metadata.get("membrane_model"),
+        "membrane_gates_max": group_metadata.get("membrane_gates_max"),
+        "membrane_channels_max": group_metadata.get("membrane_channels_max"),
+        "membrane_backend_branches": group_metadata.get("membrane_backend_branches"),
+        "membrane_gated_compartments": group_metadata.get("membrane_gated_compartments"),
+        "membrane_leak_compartments": group_metadata.get("membrane_leak_compartments"),
     }
 
 
@@ -1619,10 +1734,62 @@ def _backend_variant(backend: Any) -> str:
     return type(backend).__name__
 
 
+def _membrane_backend_metadata(backend: Any, gates: Any) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "membrane_gates_max": int(getattr(backend, "n_gates_max", 0)),
+        "membrane_channels_max": int(getattr(backend, "n_channels_max", 0)),
+        "membrane_backend_branches": None,
+        "membrane_gated_compartments": None,
+        "membrane_leak_compartments": None,
+        "membrane_gated_gate_count": getattr(backend, "gated_gate_count", None),
+        "membrane_gated_channel_count": getattr(backend, "gated_channel_count", None),
+    }
+    rows = getattr(backend, "rows", None)
+    if rows is not None:
+        metadata["membrane_backend_branches"] = len(rows)
+    elif _is_gated_leak_stack_backend(backend):
+        metadata["membrane_backend_branches"] = 1
+    groups = getattr(backend, "groups", None)
+    if groups is not None:
+        metadata["membrane_backend_branches"] = len(groups)
+    if _is_gated_leak_stack_backend(backend):
+        mask_col = int(backend._gated_mask_col)
+        mask = np.asarray(gates[0, :, mask_col])
+        gated_count = int(np.count_nonzero(mask > 0.5))
+        metadata["membrane_gated_compartments"] = gated_count
+        metadata["membrane_leak_compartments"] = int(mask.shape[0]) - gated_count
+        metadata["membrane_gated_gate_count"] = int(backend.gated_gate_count)
+        metadata["membrane_gated_channel_count"] = int(backend.gated_channel_count)
+    return metadata
+
+
+def _stage_group(stage: str) -> str:
+    if stage.startswith("membrane_"):
+        return "membrane"
+    if stage.startswith("extracellular_"):
+        return "forcing"
+    if stage == "system_assembly":
+        return "assembly"
+    if stage == "block_solve":
+        return "solver"
+    if stage == "observer_write":
+        return "observer"
+    if stage == "one_step_proxy":
+        return "one_step"
+    return "other"
+
+
 def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
     stage_rows = sorted(rows, key=lambda item: (item["stage"], item["variant"]))
     block_rows = [row for row in rows if row["stage"] == "block_solve"]
     fastest_block = min(block_rows, key=lambda row: float(row["mean_ms"])) if block_rows else None
+    primary_solver = _primary_block_solve(rows, metadata)
+    if primary_solver is None:
+        primary_solver = fastest_block
+    one_step = _primary_one_step(rows, metadata)
+    hot_rows = sorted(rows, key=lambda item: float(item["mean_ms"]), reverse=True)
+    group_sums = _stage_group_sums(rows, metadata)
+    membrane_ratios = _membrane_ratio_notes(rows)
     lines = [
         "# Real Double-Cable Stage Profile",
         "",
@@ -1642,8 +1809,48 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
         f"- Extracellular input: `{metadata['group']['extracellular_format']}`",
         f"- Active solver: `{metadata['group']['active_solver']}`",
         f"- Membrane backend: `{metadata['group']['membrane_backend']}`",
+        f"- Membrane model: `{metadata['group']['membrane_model']}`",
+        f"- Membrane gates/channels max: `{metadata['group'].get('membrane_gates_max')}` / `{metadata['group'].get('membrane_channels_max')}`",
+        f"- Membrane branches: `{metadata['group'].get('membrane_backend_branches')}`",
+        f"- MRG gated/leak compartments: `{metadata['group'].get('membrane_gated_compartments')}` / `{metadata['group'].get('membrane_leak_compartments')}`",
         "",
     ]
+    if one_step is not None:
+        one_step_ms = float(one_step["mean_ms"])
+        lines.extend(
+            [
+                "## Hot-Step Decomposition",
+                "",
+                (
+                    "Primary one-step proxy: "
+                    f"`{one_step['variant']}` at {one_step_ms:.3f} ms mean."
+                ),
+                "",
+                "| group | representative mean ms | share of primary one-step |",
+                "| --- | ---: | ---: |",
+            ]
+        )
+        for group, value in group_sums:
+            if group == "one_step":
+                continue
+            share = 100.0 * value / one_step_ms if one_step_ms else 0.0
+            lines.append(f"| {group} | {value:.3f} | {share:.1f}% |")
+        lines.extend(
+            [
+                "",
+                "### Hottest Individual Stages",
+                "",
+                "| rank | stage | variant | mean ms | share of primary one-step |",
+                "| ---: | --- | --- | ---: | ---: |",
+            ]
+        )
+        for rank, row in enumerate(hot_rows[:8], start=1):
+            share = 100.0 * float(row["mean_ms"]) / one_step_ms if one_step_ms else 0.0
+            lines.append(
+                f"| {rank} | {row['stage']} | {row['variant']} | "
+                f"{float(row['mean_ms']):.3f} | {share:.1f}% |"
+            )
+        lines.append("")
     if fastest_block is not None:
         lines.extend(
             [
@@ -1657,6 +1864,24 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
                 "",
             ]
         )
+    if primary_solver is not None and one_step is not None:
+        solver_share = 100.0 * float(primary_solver["mean_ms"]) / float(one_step["mean_ms"])
+        lines.extend(
+            [
+                "## Solver Share",
+                "",
+                (
+                    f"Primary block solve `{primary_solver['variant']}` is "
+                    f"{float(primary_solver['mean_ms']):.3f} ms mean, "
+                    f"or {solver_share:.1f}% of `{one_step['variant']}`."
+                ),
+                "",
+            ]
+        )
+    if membrane_ratios:
+        lines.extend(["## MRG Membrane Compiler Signals", ""])
+        lines.extend(f"- {note}" for note in membrane_ratios)
+        lines.append("")
     lines.extend(
         [
             "## Stage Means",
@@ -1678,6 +1903,7 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "## Notes",
             "",
             "- `membrane_gate_update` and `membrane_conductance_terms` use the real prepared membrane backend.",
+            "- `*_gated_only` and `*_mask_mix` rows appear for MRG gated/leak-stack backends; they separate generated gated-model work from leak/mask blending.",
             "- `system_assembly` uses real prepared double-cable coefficients and real extracellular forcing for one step.",
             "- `system_assembly/precomputed_static` precomposes static diagonal terms and absolute currents as a benchmark-only diagnostic.",
             "- `block_solve` runs selected solver functions on the real assembled system.",
@@ -1687,6 +1913,120 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _row_for(rows: Sequence[dict[str, Any]], stage: str, variant: str) -> dict[str, Any] | None:
+    for row in rows:
+        if row["stage"] == stage and row["variant"] == variant:
+            return row
+    return None
+
+
+def _primary_one_step(rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> dict[str, Any] | None:
+    active_solver = metadata["group"]["active_solver"]
+    preferred = f"{active_solver}_real"
+    row = _row_for(rows, "one_step_proxy", preferred)
+    if row is not None:
+        return row
+    all_one_step = [item for item in rows if item["stage"] == "one_step_proxy"]
+    return min(all_one_step, key=lambda item: float(item["mean_ms"])) if all_one_step else None
+
+
+def _stage_group_sums(
+    rows: Sequence[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> list[tuple[str, float]]:
+    primary_solver = _primary_block_solve(rows, metadata)
+    selected = {
+        "membrane": (
+            _sum_stage(rows, "membrane_gate_update")
+            + _sum_stage(rows, "membrane_conductance_terms")
+        ),
+        "forcing": _sum_stage(rows, "extracellular_rhs_drive"),
+        "assembly": _sum_stage(rows, "system_assembly", variant="real_double_cable"),
+        "solver": 0.0 if primary_solver is None else float(primary_solver["mean_ms"]),
+        "observer": _sum_stage(rows, "observer_write"),
+    }
+    return sorted(
+        ((group, value) for group, value in selected.items() if value > 0.0),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+
+def _sum_stage(rows: Sequence[dict[str, Any]], stage: str, *, variant: str | None = None) -> float:
+    values = [
+        float(row["mean_ms"])
+        for row in rows
+        if row["stage"] == stage and (variant is None or row["variant"] == variant)
+    ]
+    return sum(values)
+
+
+def _primary_block_solve(
+    rows: Sequence[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    active_solver = str(metadata["group"]["active_solver"])
+    candidate_names = [active_solver]
+    if active_solver in {"pcr_soa", "pcr_adaptive"}:
+        candidate_names.append("pcr_soa_batched")
+    if active_solver == "pcr":
+        candidate_names.append("pcr_matrix_vmap")
+    if active_solver == "thomas":
+        candidate_names.append("thomas_vmap")
+    for name in candidate_names:
+        row = _row_for(rows, "block_solve", name)
+        if row is not None:
+            return row
+    block_rows = [row for row in rows if row["stage"] == "block_solve"]
+    return min(block_rows, key=lambda row: float(row["mean_ms"])) if block_rows else None
+
+
+def _membrane_ratio_notes(rows: Sequence[dict[str, Any]]) -> list[str]:
+    notes: list[str] = []
+    gate = _first_stage(rows, "membrane_gate_update")
+    gated_gate = _first_stage(rows, "membrane_gate_update_gated_only")
+    if gate is not None and gated_gate is not None:
+        ratio = _safe_ratio(float(gate["mean_ms"]), float(gated_gate["mean_ms"]))
+        notes.append(
+            "Gate update full MRG stack is "
+            f"{float(gate['mean_ms']):.3f} ms versus "
+            f"{float(gated_gate['mean_ms']):.3f} ms for generated gated-model work "
+            f"({ratio:.2f}x)."
+        )
+    conductance = _first_stage(rows, "membrane_conductance_terms")
+    gated_conductance = _first_stage(rows, "membrane_conductance_terms_gated_only")
+    mix = _first_stage(rows, "membrane_conductance_terms_mask_mix")
+    if conductance is not None and gated_conductance is not None:
+        ratio = _safe_ratio(float(conductance["mean_ms"]), float(gated_conductance["mean_ms"]))
+        notes.append(
+            "Conductance full MRG stack is "
+            f"{float(conductance['mean_ms']):.3f} ms versus "
+            f"{float(gated_conductance['mean_ms']):.3f} ms for generated gated-model work "
+            f"({ratio:.2f}x)."
+        )
+    if conductance is not None and mix is not None:
+        conductance_ms = float(conductance["mean_ms"])
+        share = 100.0 * float(mix["mean_ms"]) / conductance_ms if conductance_ms else 0.0
+        notes.append(
+            "The isolated leak/mask conductance blend is "
+            f"{float(mix['mean_ms']):.3f} ms, about {share:.1f}% of full conductance terms."
+        )
+        notes.append(
+            "The gated-only and mask-mix rows are separate JIT kernels for diagnosis; "
+            "they are not additive timings for the fused full conductance stage."
+        )
+    return notes
+
+
+def _first_stage(rows: Sequence[dict[str, Any]], stage: str) -> dict[str, Any] | None:
+    candidates = [row for row in rows if row["stage"] == stage]
+    return candidates[0] if candidates else None
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator else float("inf")
 
 
 def _write_plots(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:

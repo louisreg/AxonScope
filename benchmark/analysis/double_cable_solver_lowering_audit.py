@@ -253,7 +253,7 @@ def _selected_cases(
         out.extend(
             case
             for case in cases
-            if case.stage in {"membrane_gate_update", "membrane_conductance_terms"}
+            if case.stage.startswith("membrane_")
         )
     if include_system_stages:
         out.extend(

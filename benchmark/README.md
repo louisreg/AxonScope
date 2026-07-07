@@ -269,13 +269,16 @@ python benchmark/analysis/double_cable_real_stage_profile.py \
   --warmups 1
 ```
 
-It builds public AxonScope double-cable workloads, then measures prepared JAX
-stages for generated membrane work, extracellular RHS drive, system assembly,
-selected block solvers, a one-step proxy, and VmRaster observer writes where
-applicable. It writes `real_stage_repeats.csv`, `real_stage_summary.csv`,
-`metadata.json`, `real_stage_report.md`, and plots. This is an introspection
-tool under `benchmark/analysis`; it does not add or select a production runtime
-policy.
+It builds public AxonScope MRG/double-cable workloads, then measures prepared
+JAX stages for generated membrane work, extracellular RHS drive, system
+assembly, selected block solvers, a one-step proxy, and VmRaster observer
+writes where applicable. For the MRG gated/leak-stack backend it also emits
+benchmark-only `*_gated_only` and `*_mask_mix` rows to separate generated
+gated-model work from leak/mask blending. It writes `real_stage_repeats.csv`,
+`real_stage_summary.csv`, `metadata.json`, `real_stage_report.md`, and plots.
+The report includes a hot-step decomposition, solver share, and MRG membrane
+compiler signals. This is an introspection tool under `benchmark/analysis`; it
+does not add or select a production runtime policy.
 
 The profiler also emits a benchmark-only `system_assembly/precomputed_static`
 candidate and matching `_precomputed_static` one-step proxy variants. These
@@ -344,8 +347,8 @@ for this audit to inspect whether candidate changes reduce optimized-HLO tuple,
 gather, fusion, or hot-path timing pressure before any runtime integration
 work.
 
-To include the generated membrane and system-preparation stages in the same
-lowering artifact, use:
+To include the generated membrane, MRG gated/leak-stack diagnostic stages, and
+system-preparation stages in the same lowering artifact, use:
 
 ```bash
 python benchmark/analysis/double_cable_solver_lowering_audit.py \

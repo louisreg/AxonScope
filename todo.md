@@ -1501,6 +1501,19 @@ decisions need realistic workflow evidence.
   cartography to real generated double-cable membrane stages, then consider a
   benchmark-only batched Thomas-family GPU prototype against current GPU
   PCR-SoA if the profile still supports that direction.
+  First gate implemented in `benchmark/analysis/double_cable_real_stage_profile.py`:
+  the real MRG/double-cable profiler now reports hot-step group shares,
+  solver share, membrane backend metadata, and gated/leak-stack diagnostic
+  rows (`*_gated_only`, `*_mask_mix`). The lowering audit now includes those
+  membrane sub-stages when `--include-membrane-stages` is enabled, and
+  `hlo_fusion_summary.py` recognizes the new stage names. Local CPU smokes:
+  `benchmark/results/p11b_mrg_hot_step_profile_smoke_diff` and
+  `benchmark/results/p11b_mrg_hot_step_lowering_smoke`. On the small
+  different-diameter MRG smoke (`Naxons=8`, actual `Nx=56`), the isolated
+  PCR/SoA block solve is about `53%` of the one-step proxy, while full
+  membrane gate+conductance work is about `15%`. Next evidence should be the
+  same hot-step/lowering profile on the Kaggle GPU shape before choosing a
+  solver or compiler optimization candidate.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

@@ -180,6 +180,42 @@ low-level system, not as a black box. Current likely useful gates are:
    This should flow from the compiler output-pruning plan and recording policy,
    not from ad hoc runtime conditions.
 
+## First MRG Hot-Step Decomposition
+
+The first compiler/solver split gate is now implemented in
+`benchmark/analysis/double_cable_real_stage_profile.py`. The profiler still uses
+real public MRG/double-cable workloads and prepared backend inputs, but its
+report now exposes:
+
+- hot-step group shares for membrane, forcing, assembly, solver, and observer
+  stages;
+- primary block-solver share relative to the one-step proxy;
+- membrane backend metadata: backend kind, model kind, max gates/channels,
+  backend branches, and gated/leak compartment counts where available;
+- MRG gated/leak-stack diagnostic rows:
+  `membrane_gate_update_gated_only`,
+  `membrane_conductance_terms_gated_only`, and
+  `membrane_conductance_terms_mask_mix`.
+
+The lowering audit now includes all `membrane_*` sub-stages when
+`--include-membrane-stages` is enabled, and `hlo_fusion_summary.py` recognizes
+the new stage names.
+
+Local CPU smoke artifacts:
+
+- `benchmark/results/p11b_mrg_hot_step_profile_smoke_diff`
+- `benchmark/results/p11b_mrg_hot_step_lowering_smoke`
+
+Small-smoke result, for `Naxons=8`, different diameters, requested `Nx=31`,
+actual kernel `Nx=56`, fp32, observer-only, and `pcr_soa`: the prepared MRG
+path uses `GatedLeakStackMembraneBackend` with one backend branch, `6` gated
+compartments and `50` leak compartments. The isolated PCR/SoA block solve is
+about `53%` of the one-step proxy; full membrane gate+conductance work is about
+`15%`; assembly, observer write, and forcing are each below that on this CPU
+smoke. This is not a speed claim, but it confirms that the current next GPU
+benchmark should inspect both PCR/SoA and generated MRG membrane lowering before
+opening a new solver route.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as

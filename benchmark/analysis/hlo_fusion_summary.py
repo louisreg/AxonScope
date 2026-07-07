@@ -16,7 +16,10 @@ if __package__ in {None, ""}:
 
 
 KNOWN_STAGES = (
+    "membrane_conductance_terms_gated_only",
+    "membrane_conductance_terms_mask_mix",
     "membrane_conductance_terms",
+    "membrane_gate_update_gated_only",
     "membrane_gate_update",
     "extracellular_rhs_drive",
     "system_assembly",
