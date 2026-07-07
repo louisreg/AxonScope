@@ -91,6 +91,41 @@ python benchmark/kaggle/run_kernel.py \
 Switch only `--platform gpu`, the slug, and the memory trace to `device` for
 the matching GPU sweep.
 
+Submit the low-level double-cable solver-stage profiler on the CPU path of a
+Kaggle GPU machine:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11b-solver-stage-cpu \
+  --campaign double_cable_solver_stage_profile \
+  --platform cpu \
+  --machine-shape NvidiaTeslaP100 \
+  --nx 21 51 101 \
+  --batch-size 4 32 128 \
+  --dtype fp32 \
+  --coefficient-mode both \
+  --repeats 5 \
+  --warmups 1
+```
+
+Run the matching GPU path by switching only `--platform gpu` and the slug:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11b-solver-stage-gpu \
+  --campaign double_cable_solver_stage_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --nx 21 51 101 \
+  --batch-size 4 32 128 \
+  --dtype fp32 \
+  --coefficient-mode both \
+  --repeats 5 \
+  --warmups 1
+```
+
 Run recruitment on a T4:
 
 ```bash

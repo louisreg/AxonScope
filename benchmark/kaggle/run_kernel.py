@@ -1,4 +1,4 @@
-"""Submit AxonScope P11A benchmark scripts to Kaggle."""
+"""Submit AxonScope benchmark scripts and campaigns to Kaggle."""
 
 from __future__ import annotations
 
@@ -26,9 +26,11 @@ REPO_ROOT = KAGGLE_DIR.parents[1]
 KERNEL_ENTRY = KAGGLE_DIR / "kernel_entry.py"
 DEFAULT_REPO_URL = "https://github.com/louisreg/AxonScope.git"
 DEFAULT_SLUG = "axonscope-p11a-benchmarks"
-DEFAULT_TITLE = "AxonScope P11A Benchmarks"
+DEFAULT_TITLE = "AxonScope Benchmarks"
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
-CAMPAIGNS = ("time_chunk_sweep",)
+TIME_CHUNK_SWEEP_CAMPAIGN = "time_chunk_sweep"
+SOLVER_STAGE_PROFILE_CAMPAIGN = "double_cable_solver_stage_profile"
+CAMPAIGNS = (TIME_CHUNK_SWEEP_CAMPAIGN, SOLVER_STAGE_PROFILE_CAMPAIGN)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,7 +82,7 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="Kaggle kernel slug.")
     parser.add_argument("--title", default=DEFAULT_TITLE, help="Kaggle kernel title.")
     parser.add_argument("--campaign", choices=CAMPAIGNS)
-    parser.add_argument("--script", required=True, choices=tuple(SCRIPTS))
+    parser.add_argument("--script", choices=tuple(SCRIPTS))
     parser.add_argument("--preset", choices=tuple(PRESETS))
     parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"))
     parser.add_argument(
@@ -133,12 +135,29 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     preset_explicit = _flag_present(raw_args, "--preset")
     machine_shape_explicit = _flag_present(raw_args, "--machine-shape")
     args, benchmark_args = parser.parse_known_args(argv)
+    validate_benchmark_target(parser, args)
     normalize_compute_args(
         args,
         preset_explicit=preset_explicit,
         machine_shape_explicit=machine_shape_explicit,
     )
     return args, benchmark_args
+
+
+def validate_benchmark_target(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    if args.campaign == SOLVER_STAGE_PROFILE_CAMPAIGN:
+        if args.script is not None:
+            parser.error(
+                f"--script is not used with --campaign {SOLVER_STAGE_PROFILE_CAMPAIGN}."
+            )
+        return
+    if args.script is None:
+        parser.error(
+            f"--script is required unless --campaign {SOLVER_STAGE_PROFILE_CAMPAIGN} is used."
+        )
 
 
 def normalize_compute_args(
@@ -160,7 +179,10 @@ def normalize_compute_args(
     if args.machine_shape is None:
         args.machine_shape = "cpu" if args.platform == "cpu" else "NvidiaTeslaP100"
     if args.preset is None:
-        args.preset = "quick" if args.platform == "cpu" else "gpu_smoke"
+        if args.campaign == SOLVER_STAGE_PROFILE_CAMPAIGN:
+            args.preset = "quick"
+        else:
+            args.preset = "quick" if args.platform == "cpu" else "gpu_smoke"
 
     if is_cpu_machine_shape(args.machine_shape):
         args.machine_shape = "cpu"

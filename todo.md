@@ -1139,11 +1139,14 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_double_cable_solver_stage_local_smoke_v2` with
   `Nx=21`, `batch_size=4`, fp32, batched coefficients, and two measured
   solver variants. Treat this as bounded low-level cartography only; it does
-  not replace realistic curve benchmarks or choose runtime policy. Next:
-  run the same tool on Kaggle CPU/GPU with representative `Nx`/batch grids,
-  then use the report to decide whether the immediate low-level target is
-  Thomas scan structure, batch-native PCR, coefficient/RHS assembly, or
-  observer write overhead.
+  not replace realistic curve benchmarks or choose runtime policy. The Kaggle
+  runner now exposes it as
+  `--campaign double_cable_solver_stage_profile`, and the profiler can run
+  `--coefficient-mode both` to compare shared versus per-row coefficient
+  layouts in one artifact. Next: run the same tool on Kaggle CPU/GPU with
+  representative `Nx`/batch grids, then use the report to decide whether the
+  immediate low-level target is Thomas scan structure, batch-native PCR,
+  coefficient/RHS assembly, or observer write overhead.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

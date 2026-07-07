@@ -2,8 +2,8 @@
 
 This script is uploaded by `benchmark/kaggle/run_kernel.py`. It clones the
 configured AxonScope branch, installs the benchmark dependencies, runs
-`benchmark/run.py` or a benchmark campaign runner, records Kaggle hardware metadata, and archives
-`benchmark/results` as a downloadable output.
+`benchmark/run.py` or a benchmark campaign runner, records Kaggle hardware
+metadata, and archives `benchmark/results` as a downloadable output.
 """
 
 from __future__ import annotations
@@ -115,6 +115,17 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
             str(config["script"]),
             "--preset",
             str(config["preset"]),
+            "--platform",
+            str(config["platform"]),
+            "--output",
+            str(output_dir),
+        ]
+        command.extend(str(value) for value in config.get("benchmark_args", ()))
+        return command
+    if campaign == "double_cable_solver_stage_profile":
+        command = [
+            sys.executable,
+            "benchmark/analysis/double_cable_solver_stage_profile.py",
             "--platform",
             str(config["platform"]),
             "--output",

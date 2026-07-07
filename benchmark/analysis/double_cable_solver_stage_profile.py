@@ -88,9 +88,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--dtype", choices=("fp32", "fp64"), default="fp32")
     parser.add_argument(
         "--coefficient-mode",
-        choices=("shared", "batched"),
+        choices=("shared", "batched", "both"),
         default="batched",
-        help="Use shared cable coefficients or one coefficient row per axon.",
+        help="Use shared coefficients, per-axon coefficient rows, or both.",
     )
     parser.add_argument(
         "--solver",
@@ -131,6 +131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ))
 
     args.output.mkdir(parents=True, exist_ok=True)
+    coefficient_modes = (
+        ("shared", "batched")
+        if args.coefficient_mode == "both"
+        else (str(args.coefficient_mode),)
+    )
     metadata = _metadata(args=args, device=device, solvers=requested_solvers)
     _write_json(args.output / "metadata.json", metadata)
 
@@ -139,37 +144,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     with jax.default_device(device):
         for nx in args.nx:
             for batch_size in args.batch_size:
-                inputs = _make_inputs(
-                    batch_size=batch_size,
-                    nx=nx,
-                    dtype=dtype,
-                    coefficient_mode=args.coefficient_mode,
-                )
-                assembled = _block_until_ready(_assemble_system(*inputs["assemble"]))
-                solver_inputs = _solver_inputs(
-                    assembled,
-                    coefficient_mode=args.coefficient_mode,
-                )
-                stage_cases = _stage_cases(
-                    inputs=inputs,
-                    assembled=assembled,
-                    solver_inputs=solver_inputs,
-                    solvers=requested_solvers,
-                )
-                for case in stage_cases:
-                    rows, summary = _measure_case(
-                        case,
-                        repeats=args.repeats,
-                        warmups=args.warmups,
-                        platform_name=args.platform,
-                        device_name=str(device),
-                        dtype_name=args.dtype,
-                        nx=nx,
+                for coefficient_mode in coefficient_modes:
+                    inputs = _make_inputs(
                         batch_size=batch_size,
-                        coefficient_mode=args.coefficient_mode,
+                        nx=nx,
+                        dtype=dtype,
+                        coefficient_mode=coefficient_mode,
                     )
-                    repeat_rows.extend(rows)
-                    summary_rows.append(summary)
+                    assembled = _block_until_ready(_assemble_system(*inputs["assemble"]))
+                    solver_inputs = _solver_inputs(
+                        assembled,
+                        coefficient_mode=coefficient_mode,
+                    )
+                    stage_cases = _stage_cases(
+                        inputs=inputs,
+                        assembled=assembled,
+                        solver_inputs=solver_inputs,
+                        solvers=requested_solvers,
+                    )
+                    for case in stage_cases:
+                        rows, summary = _measure_case(
+                            case,
+                            repeats=args.repeats,
+                            warmups=args.warmups,
+                            platform_name=args.platform,
+                            device_name=str(device),
+                            dtype_name=args.dtype,
+                            nx=nx,
+                            batch_size=batch_size,
+                            coefficient_mode=coefficient_mode,
+                        )
+                        repeat_rows.extend(rows)
+                        summary_rows.append(summary)
 
     repeat_csv = args.output / "solver_stage_repeats.csv"
     summary_csv = args.output / "solver_stage_summary.csv"
@@ -779,11 +785,16 @@ def _git_metadata() -> dict[str, Any]:
 
 
 def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
-    fastest_by_case: dict[tuple[str, int, int], dict[str, Any]] = {}
+    fastest_by_case: dict[tuple[str, int, int, str], dict[str, Any]] = {}
     for row in rows:
         if row["stage"] != "block_solve":
             continue
-        key = (str(row["dtype"]), int(row["nx"]), int(row["batch_size"]))
+        key = (
+            str(row["dtype"]),
+            int(row["nx"]),
+            int(row["batch_size"]),
+            str(row["coefficient_mode"]),
+        )
         current = fastest_by_case.get(key)
         if current is None or float(row["mean_ms"]) < float(current["mean_ms"]):
             fastest_by_case[key] = row
@@ -804,13 +815,13 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
         "",
         "## Fastest Block Solver By Shape",
         "",
-        "| dtype | Nx | batch | variant | mean ms | max ms |",
-        "| --- | ---: | ---: | --- | ---: | ---: |",
+        "| dtype | Nx | batch | coeffs | variant | mean ms | max ms |",
+        "| --- | ---: | ---: | --- | --- | ---: | ---: |",
     ]
     for key in sorted(fastest_by_case):
         row = fastest_by_case[key]
         lines.append(
-            "| {dtype} | {nx} | {batch_size} | {variant} | {mean_ms:.3f} | {max_ms:.3f} |".format(
+            "| {dtype} | {nx} | {batch_size} | {coefficient_mode} | {variant} | {mean_ms:.3f} | {max_ms:.3f} |".format(
                 **row
             )
         )
@@ -820,13 +831,22 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "",
             "## Stage Means",
             "",
-            "| stage | variant | Nx | batch | mean ms | first run ms | output KiB |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+            "| stage | variant | coeffs | Nx | batch | mean ms | first run ms | output KiB |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
-    for row in sorted(rows, key=lambda item: (item["stage"], int(item["nx"]), int(item["batch_size"]), item["variant"])):
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            item["stage"],
+            int(item["nx"]),
+            int(item["batch_size"]),
+            item["coefficient_mode"],
+            item["variant"],
+        ),
+    ):
         lines.append(
-            "| {stage} | {variant} | {nx} | {batch_size} | {mean_ms:.3f} | {first_run_ms:.3f} | {output_kib:.1f} |".format(
+            "| {stage} | {variant} | {coefficient_mode} | {nx} | {batch_size} | {mean_ms:.3f} | {first_run_ms:.3f} | {output_kib:.1f} |".format(
                 output_kib=float(row["output_bytes"]) / 1024.0,
                 **row,
             )
@@ -869,7 +889,10 @@ def _write_plots(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
             if not subset:
                 continue
             subset.sort(key=lambda row: float(row["mean_ms"]))
-            labels = [str(row["variant"]) for row in subset]
+            labels = [
+                f"{row['variant']}\n{row['coefficient_mode']}"
+                for row in subset
+            ]
             values = [float(row["mean_ms"]) for row in subset]
             fig, ax = plt.subplots(figsize=(9, 4.8))
             ax.bar(labels, values, color="#4b6f8f")
@@ -886,7 +909,10 @@ def _write_plots(output_dir: Path, rows: Sequence[dict[str, Any]]) -> None:
         for row in stage_rows
         if int(row["batch_size"]) == max(int(item["batch_size"]) for item in rows)
     ]
-    labels = [f"{row['stage']}:{row['variant']}" for row in stage_rows]
+    labels = [
+        f"{row['stage']}:{row['variant']}\n{row['coefficient_mode']}"
+        for row in stage_rows
+    ]
     values = [float(row["mean_ms"]) for row in stage_rows]
     if labels:
         fig, ax = plt.subplots(figsize=(11, 5.5))
