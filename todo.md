@@ -1308,6 +1308,18 @@ decisions need realistic workflow evidence.
   local correctness gate, HLO/fusion summary, real-stage hot timing, and P100
   artifact capture. Promote nothing to runtime policy without a hot-path win and
   a real curve-level validation.
+  P100 sweep completed under
+  `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_lowering_gpu_512/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_real_gpu_512/outputs/extracted`.
+  `pcr_soa_shift_batched` is the cleanest compiler diagnostic: optimized HLO
+  `2267` -> `1821` lines, gathers `184` -> `0`, selects `117` -> `0`, first-run
+  `2426 ms` -> `1636 ms`, but hot block solve is `0.417 ms` -> `0.425 ms`
+  (`+1.9%`). `pcr_soa_padded_batched` is runtime-equivalent within noise
+  (`0.416 ms`) and shrinks the largest fusion output to `14` arrays / `3.50
+  MiB`, but does not provide a robust win. `nomask`, `transposed`, and `hybrid`
+  are slower. Decision: promote none as-is; keep `shift`/`padded` as diagnostic
+  references and require one-step or curve-level wins before any runtime route.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

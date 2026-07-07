@@ -143,6 +143,40 @@ Do not promote `pcr_soa_symmetric_batched` as-is. Keep it as a benchmark-only
 probe: it is useful evidence that PCR live-state size affects the generated
 program, but it does not yet produce a large enough hot-path win.
 
+## Existing PCR/SoA Probe Sweep
+
+A second P100 gate compared existing low-level PCR/SoA probes already present
+in `src/axonscope/backends/jax/common.py`:
+
+- `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_lowering_gpu_512/outputs/extracted`
+- `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_real_gpu_512/outputs/extracted`
+
+The run used commit `e5e0c85`, `Naxons=512`, requested `Nx=101`, actual kernel
+`Nx=89`, fp32, different-diameter observer-only double-cable inputs on
+`Tesla P100-PCIE-16GB`.
+
+| variant | optimized HLO lines | gathers | selects | fusions | max fusion output | hot block solve |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `pcr_soa_batched` | 2267 | 184 | 117 | 7 | 22 arrays / 3.82 MiB | 0.417 ms |
+| `pcr_soa_nomask_batched` | 2054 | 184 | 13 | 7 | 22 arrays / 3.82 MiB | 0.607 ms |
+| `pcr_soa_shift_batched` | 1821 | 0 | 0 | 7 | 22 arrays / 3.82 MiB | 0.425 ms |
+| `pcr_soa_transposed_batched` | 2410 | 184 | 117 | 7 | 22 arrays / 3.82 MiB | 0.513 ms |
+| `pcr_soa_padded_batched` | 2140 | 184 | 112 | 7 | 14 arrays / 3.50 MiB | 0.416 ms |
+| `pcr_soa_hybrid_batched` | 7105 | 304 | 125 | 206 | 73 arrays / 3.82 MiB | 2.904 ms |
+
+`pcr_soa_shift_batched` is the most useful diagnostic: it eliminates gathers
+and selects from the optimized HLO and lowers first-run time (`2426 ms` to
+`1636 ms`), but does not improve hot GPU runtime (`+1.9%` versus baseline).
+`pcr_soa_padded_batched` slightly reduces the largest fusion tuple and lands at
+baseline-equivalent hot runtime (`-0.4%`), but the difference is within
+measurement noise and it carries extra padding semantics. `nomask`,
+`transposed`, and `hybrid` are worse on hot runtime for this workload.
+
+Decision: do not promote any of these probes as-is. Keep `shift` and `padded`
+as diagnostic references for future lowering experiments, because they isolate
+useful compiler effects, but require a stronger hot-path or one-step win before
+runtime integration.
+
 The next low-level work should inspect the code generated inside the current
 PCR/SoA implementation and the one-step composition around it, not add a new
 public or policy route:
