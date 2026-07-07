@@ -1530,6 +1530,24 @@ decisions need realistic workflow evidence.
   a specialization target. Forced-PCR CPU is a bad target (`~208.7 ms`,
   `99.7%` solver, `32122` optimized-HLO lines, `2576` transposes); CPU work
   should remain Thomas-first unless a dedicated CPU benchmark says otherwise.
+  A benchmark-only `one_step_without_solve` probe was then added in commit
+  `3c3bdb0`: it fuses gate update, conductance, extracellular RHS, and system
+  assembly, then materializes assembled coefficients/RHS plus updated gates to
+  avoid dead-code elimination. Local smoke artifacts:
+  `benchmark/results/p11b_mrg_no_solve_profile_smoke` and
+  `benchmark/results/p11b_mrg_no_solve_lowering_smoke`. Kaggle P100 artifacts
+  for the same `Naxons=512`, actual `Nx=89` MRG case:
+  `benchmark/results/kaggle/20260707_172311_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-no-solve-hot-step-gpu-512/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260707_172327_double_cable_real_stage_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11b-no-solve-hot-step-cpu-512/outputs/extracted`.
+  CPU forced-PCR is clearly solver-dominated (`one_step_without_solve`
+  `~3.20 ms`, fused one-step `~175.35 ms`, isolated PCR/SoA `~170.07 ms`).
+  GPU no-solve materialized is `~0.418 ms` versus fused one-step `~0.488 ms`
+  and isolated PCR/SoA `~0.466 ms`, but it writes about `2.7 MiB` of assembled
+  outputs; treat it as a materialization/traffic probe, not a subtractive
+  decomposition. Next GPU evidence should inspect PCR/SoA fusion bodies and
+  memory traffic, and optionally add a non-materializing/reduced-output
+  no-solve diagnostic before changing solver code.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

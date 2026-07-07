@@ -259,6 +259,36 @@ solver explodes after compilation (`32122` optimized-HLO lines, `268` fusions,
 This makes CPU PCR/SoA a compiler/layout antipattern rather than an optimization
 candidate.
 
+A benchmark-only `one_step_without_solve` probe was then added in commit
+`3c3bdb0`. It fuses gate update, conductance terms, extracellular RHS, and
+system assembly, then materializes the assembled coefficients/RHS plus updated
+gates so XLA cannot delete the non-solve work. This is intentionally a
+materialized upper-bound proxy, not a value to subtract directly from the fused
+`one_step_proxy`.
+
+Fresh Kaggle P100 artifacts for the same MRG different-diameter case,
+`Naxons=512`, requested `Nx=101`, actual kernel `Nx=89`, observer-only, fp32,
+and forced `pcr_soa`:
+
+- GPU no-solve hot-step:
+  `benchmark/results/kaggle/20260707_172311_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-no-solve-hot-step-gpu-512/outputs/extracted`
+- CPU no-solve hot-step:
+  `benchmark/results/kaggle/20260707_172327_double_cable_real_stage_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11b-no-solve-hot-step-cpu-512/outputs/extracted`
+
+On CPU forced-PCR, the result is clear: `one_step_without_solve` is about
+`3.20 ms`, while the forced-PCR one-step is about `175.35 ms` and isolated
+`pcr_soa_batched` is about `170.07 ms`. This confirms that forced-PCR CPU is
+solver-dominated and remains a bad CPU production direction.
+
+On GPU, the materialized no-solve proxy is about `0.418 ms`, the fused one-step
+is about `0.488 ms`, and isolated `pcr_soa_batched` is about `0.466 ms`. Since
+the no-solve proxy writes about `2.7 MiB` of assembled outputs, it should be read
+as a materialization/traffic probe rather than evidence that membrane/assembly
+dominates the fused production kernel. The useful next GPU question is therefore
+more precise: inspect PCR/SoA fusion bodies and memory traffic, and if possible
+add a benchmark-only non-materializing or reduced-output no-solve probe to
+separate assembly arithmetic from output bandwidth.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as
