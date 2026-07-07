@@ -5103,6 +5103,15 @@ def _run_double_cable_batch_observer_chunks(
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     local_observer_chunks = time_chunk_steps is not None
+    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+        observers,
+        batch_size=batch_size,
+        chunk_ranges=chunk_ranges,
+        mode="double",
+        variant=kernel_block_solver,
+        time_chunk_steps=time_chunk_steps,
+        enabled=local_observer_chunks,
+    )
     observer_state = None
     if not local_observer_chunks:
         with benchmark_span(
@@ -5125,27 +5134,6 @@ def _run_double_cable_batch_observer_chunks(
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
-        if local_observer_chunks:
-            with benchmark_span(
-                "kernel.prepare_observer_state",
-                mode="double",
-                output="observer_only",
-                observer="vm_raster",
-                variant=kernel_block_solver,
-                state_scope="chunk",
-                group_size=batch_size,
-                time_chunk_steps=time_chunk_steps,
-                chunk_steps=stop - start,
-                chunk_index=chunk_index,
-                chunk_count=len(chunk_ranges),
-            ):
-                observer_state0 = init_vm_raster_state(
-                    observers,
-                    batch_size=batch_size,
-                    nt=stop - start,
-                )
-        else:
-            observer_state0 = observer_state
         with benchmark_span(
             "kernel.chunk_setup",
             mode="double",
@@ -5160,6 +5148,11 @@ def _run_double_cable_batch_observer_chunks(
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
         ):
+            observer_state0 = (
+                observer_chunk_state_template
+                if local_observer_chunks
+                else observer_state
+            )
             if factorized_vext is None:
                 vext_chunk = cast(Any, extracellular_potential_mid_mV)[:, start:stop]
                 current_chunk = None

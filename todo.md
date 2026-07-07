@@ -1086,6 +1086,25 @@ decisions need realistic workflow evidence.
   target before solver algorithm work: reduce/factor/cache double-cable
   extracellular runtime stacking and then revisit CPU observer-only
   chunk/finalize behavior.
+  Local cleanup now stages double-cable extracellular rows entirely on the
+  host: `_extracellular_runtime_numpy` returns NumPy arrays, stacked runtime
+  preparation caches rows by cable signature, transfers two batched blocks
+  (`space` and `edge`) instead of thousands of per-row JAX arrays, and records
+  `extracellular_stack_unique_rows`/cache hits in benchmark metadata. VmRaster
+  local chunk combination now repacks packed words instead of iterating over
+  every time step, keeps the combined chunk state host-side for immediate
+  finalization, and adds benchmark-only `kernel.wait` spans before chunk
+  combination/finalization so deferred JAX compute is not misattributed to
+  `combine` or `to_host`. Local validation passed focused double-cable and
+  VmRaster tests, plus CPU smokes under
+  `benchmark/results/p11b_stack_extracellular_local_smoke` and
+  `benchmark/results/p11b_extracellular_vmraster_wait_local_smoke`: for
+  `Naxons=128`, `runtime.prepare.stack_extracellular` is about 0.10 s with
+  5 unique rows and 123 cache hits, `kernel.finalize_observer.to_host` is
+  about 0.05 ms/repeat, and remaining observer chunk time is explicitly
+  attributed to `kernel.wait`. Next validation: rerun the reduced double-cable
+  CPU/GPU Kaggle matrix before claiming the GPU `stack_extracellular` bottleneck
+  is fixed, then proceed to true low-level double-cable solver cartography.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

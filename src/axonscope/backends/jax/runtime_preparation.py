@@ -60,6 +60,31 @@ class _GatedLeakMember:
     leak_ge: float = 0.0
 
 
+@dataclass(frozen=True)
+class _ExtracellularRuntimeNumpy:
+    Cm_abs: np.ndarray
+    Cx_abs: np.ndarray
+    Gx_abs: np.ndarray
+    Gax_e: np.ndarray
+    Gax_i: np.ndarray
+    left_i: np.ndarray
+    right_i: np.ndarray
+    left_e: np.ndarray
+    right_e: np.ndarray
+
+
+_EXTRACELLULAR_SPACE_FIELDS = (
+    "Cm_abs",
+    "Cx_abs",
+    "Gx_abs",
+    "left_i",
+    "right_i",
+    "left_e",
+    "right_e",
+)
+_EXTRACELLULAR_EDGE_FIELDS = ("Gax_e", "Gax_i")
+
+
 def representative_item(group: DispatchGroup) -> DispatchItem:
     """Return the row used to compile the shared runtime."""
 
@@ -262,24 +287,56 @@ def stack_extracellular_runtime(
     """Stack double-cable extracellular arrays using host-side row preparation."""
 
     np_dtype = np.dtype(dtype_local)
-    rows = tuple(
-        _extracellular_runtime_numpy(
-            item.solver_axon,
-            dtype=np_dtype,
-            target_nx=group.nx,
+    batch_size = len(group.items)
+    target_nx = int(group.nx)
+    target_edges = max(target_nx - 1, 0)
+    space_rows = np.empty(
+        (len(_EXTRACELLULAR_SPACE_FIELDS), batch_size, target_nx),
+        dtype=np_dtype,
+    )
+    edge_rows = np.empty(
+        (len(_EXTRACELLULAR_EDGE_FIELDS), batch_size, target_edges),
+        dtype=np_dtype,
+    )
+    row_cache: dict[tuple[Any, ...], _ExtracellularRuntimeNumpy] = {}
+
+    for row_index, item in enumerate(group.items):
+        cache_key = (
+            item.cable_signature,
+            int(item.solver_axon.n_compartments),
+            target_nx,
+            np_dtype.str,
         )
-        for item in group.items
+        row = row_cache.get(cache_key)
+        if row is None:
+            row = _extracellular_runtime_numpy(
+                item.solver_axon,
+                dtype=np_dtype,
+                target_nx=target_nx,
+            )
+            row_cache[cache_key] = row
+        for field_index, field_name in enumerate(_EXTRACELLULAR_SPACE_FIELDS):
+            space_rows[field_index, row_index] = getattr(row, field_name)
+        for field_index, field_name in enumerate(_EXTRACELLULAR_EDGE_FIELDS):
+            edge_rows[field_index, row_index] = getattr(row, field_name)
+
+    space = jnp.asarray(space_rows, dtype=dtype_local)
+    edge = jnp.asarray(edge_rows, dtype=dtype_local)
+    record_benchmark_metadata(
+        extracellular_stack_rows=batch_size,
+        extracellular_stack_unique_rows=len(row_cache),
+        extracellular_stack_cache_hits=batch_size - len(row_cache),
     )
     return ExtracellularRuntime(
-        Cm_abs=jnp.asarray(np.stack([row.Cm_abs for row in rows], axis=0), dtype=dtype_local),
-        Cx_abs=jnp.asarray(np.stack([row.Cx_abs for row in rows], axis=0), dtype=dtype_local),
-        Gx_abs=jnp.asarray(np.stack([row.Gx_abs for row in rows], axis=0), dtype=dtype_local),
-        Gax_e=jnp.asarray(np.stack([row.Gax_e for row in rows], axis=0), dtype=dtype_local),
-        Gax_i=jnp.asarray(np.stack([row.Gax_i for row in rows], axis=0), dtype=dtype_local),
-        left_i=jnp.asarray(np.stack([row.left_i for row in rows], axis=0), dtype=dtype_local),
-        right_i=jnp.asarray(np.stack([row.right_i for row in rows], axis=0), dtype=dtype_local),
-        left_e=jnp.asarray(np.stack([row.left_e for row in rows], axis=0), dtype=dtype_local),
-        right_e=jnp.asarray(np.stack([row.right_e for row in rows], axis=0), dtype=dtype_local),
+        Cm_abs=space[0],
+        Cx_abs=space[1],
+        Gx_abs=space[2],
+        Gax_e=edge[0],
+        Gax_i=edge[1],
+        left_i=space[3],
+        right_i=space[4],
+        left_e=space[5],
+        right_e=space[6],
     )
 
 
@@ -1010,7 +1067,7 @@ def _extracellular_runtime_numpy(
     *,
     dtype: np.dtype,
     target_nx: int,
-) -> ExtracellularRuntime:
+) -> _ExtracellularRuntimeNumpy:
     """Build one padded double-cable extracellular row with NumPy arrays."""
 
     area = _compartment_area_cm2_numpy(axon, dtype=dtype)
@@ -1041,16 +1098,16 @@ def _extracellular_runtime_numpy(
     left_e = np.concatenate([np.zeros((1,), dtype=dtype), Gax_e])
     right_e = np.concatenate([Gax_e, np.zeros((1,), dtype=dtype)])
 
-    return ExtracellularRuntime(
-        Cm_abs=jnp.asarray(_pad_space_array_numpy(Cm_abs, target_nx=target_nx, mode="edge")),
-        Cx_abs=jnp.asarray(_pad_space_array_numpy(Cx_abs, target_nx=target_nx, mode="edge")),
-        Gx_abs=jnp.asarray(_pad_space_array_numpy(Gx_abs, target_nx=target_nx, mode="edge")),
-        Gax_e=jnp.asarray(_pad_edge_array_numpy(Gax_e, target_nx=target_nx)),
-        Gax_i=jnp.asarray(_pad_edge_array_numpy(Gax_i, target_nx=target_nx)),
-        left_i=jnp.asarray(_pad_space_array_numpy(left_i, target_nx=target_nx, mode="zero")),
-        right_i=jnp.asarray(_pad_space_array_numpy(right_i, target_nx=target_nx, mode="zero")),
-        left_e=jnp.asarray(_pad_space_array_numpy(left_e, target_nx=target_nx, mode="zero")),
-        right_e=jnp.asarray(_pad_space_array_numpy(right_e, target_nx=target_nx, mode="zero")),
+    return _ExtracellularRuntimeNumpy(
+        Cm_abs=_pad_space_array_numpy(Cm_abs, target_nx=target_nx, mode="edge"),
+        Cx_abs=_pad_space_array_numpy(Cx_abs, target_nx=target_nx, mode="edge"),
+        Gx_abs=_pad_space_array_numpy(Gx_abs, target_nx=target_nx, mode="edge"),
+        Gax_e=_pad_edge_array_numpy(Gax_e, target_nx=target_nx),
+        Gax_i=_pad_edge_array_numpy(Gax_i, target_nx=target_nx),
+        left_i=_pad_space_array_numpy(left_i, target_nx=target_nx, mode="zero"),
+        right_i=_pad_space_array_numpy(right_i, target_nx=target_nx, mode="zero"),
+        left_e=_pad_space_array_numpy(left_e, target_nx=target_nx, mode="zero"),
+        right_e=_pad_space_array_numpy(right_e, target_nx=target_nx, mode="zero"),
     )
 
 

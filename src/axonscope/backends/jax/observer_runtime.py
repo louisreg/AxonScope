@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.benchmarking import benchmark_span
+from axonscope.benchmarking import benchmark_span, benchmark_wait
 from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
@@ -254,6 +254,15 @@ def combine_vm_raster_chunk_states(
         if local_count >= int(nt) and int(only.shape[-1]) == word_count:
             return only
 
+    with benchmark_span(
+        "kernel.wait",
+        observer="vm_raster",
+        wait_scope="chunk_states",
+        chunk_count=len(states),
+        nt=int(nt),
+    ):
+        benchmark_wait(tuple(states))
+
     first = np.asarray(states[0], dtype=np.uint32)
     if first.ndim < 1:
         raise ValueError("VmRaster chunk state must have at least one word axis.")
@@ -276,18 +285,28 @@ def combine_vm_raster_chunk_states(
         )
         if local_count <= 0:
             continue
-        for local_step in range(local_count):
-            local_word = local_step // 32
-            local_bit = np.uint32(1 << (local_step & 31))
-            hits = (chunk[..., local_word] & local_bit) != 0
-            if not np.any(hits):
+        for local_word in range(int(chunk.shape[-1])):
+            local_step = local_word * 32
+            remaining = local_count - local_step
+            if remaining <= 0:
+                break
+            values = chunk[..., local_word]
+            valid_bits = min(32, remaining)
+            if valid_bits < 32:
+                values = values & np.uint32((1 << valid_bits) - 1)
+            if not np.any(values):
                 continue
+
             global_step = start_index + local_step
             global_word = global_step // 32
-            global_bit = np.uint32(1 << (global_step & 31))
-            combined[..., global_word] |= hits.astype(np.uint32) * global_bit
+            if global_word >= word_count:
+                break
+            offset = global_step & 31
+            combined[..., global_word] |= values << np.uint32(offset)
+            if offset and global_word + 1 < word_count:
+                combined[..., global_word + 1] |= values >> np.uint32(32 - offset)
 
-    return jnp.asarray(combined)
+    return combined
 
 
 def _raster_probe_tables_for_batch(
@@ -400,6 +419,17 @@ def finalize_vm_raster_state(
     dt_ms: float,
 ) -> dict[str, VmRasterResult]:
     """Package packed raster words as the single solver-side observation."""
+
+    with benchmark_span(
+        "kernel.wait",
+        observer="vm_raster",
+        wait_scope="observer_state",
+        raster_count=plan.raster_count,
+        probe_count=plan.probe_count,
+        nt=int(nt),
+        row_aware=plan.row_aware,
+    ):
+        benchmark_wait(state)
 
     with benchmark_span(
         "kernel.finalize_observer.to_host",
