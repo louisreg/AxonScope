@@ -216,6 +216,46 @@ smoke. This is not a speed claim, but it confirms that the current next GPU
 benchmark should inspect both PCR/SoA and generated MRG membrane lowering before
 opening a new solver route.
 
+Kaggle CPU/GPU hot-step and lowering runs then passed on 2026-07-07 at commit
+`ffd54fe` for the MRG different-diameter double-cable case, `Naxons=512`,
+requested `Nx=101`, actual kernel `Nx=89`, observer-only, fp32, and forced
+`pcr_soa`.
+
+Artifacts:
+
+- GPU hot-step:
+  `benchmark/results/kaggle/20260707_164147_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-mrg-hot-step-gpu-512/outputs/extracted`
+- CPU hot-step:
+  `benchmark/results/kaggle/20260707_164203_double_cable_real_stage_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11b-mrg-hot-step-cpu-512/outputs/extracted`
+- GPU lowering:
+  `benchmark/results/kaggle/20260707_164448_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-mrg-lowering-gpu-512-r2/outputs/extracted`
+- CPU lowering:
+  `benchmark/results/kaggle/20260707_164501_double_cable_solver_lowering_audit_quick_cpu_NvidiaTeslaP100_axonscope-p11b-mrg-lowering-cpu-512-r2/outputs/extracted`
+
+The prepared MRG path used `GatedLeakStackMembraneBackend` with `9` gated
+compartments and `80` leak compartments. On the P100 GPU, the fused one-step
+proxy is about `0.499 ms`, and the isolated `pcr_soa_batched` block solve is
+also about `0.499 ms`. Isolated generated membrane work remains visible
+(`0.230 ms` gate update and `0.237 ms` conductance), but these isolated stages
+are separate kernels and are not additive with the fused one-step result. The
+current GPU evidence therefore points first at the PCR/SoA solver/fusion body
+and its memory traffic, not at a model-family runtime branch for MRG membrane
+work.
+
+The forced-PCR CPU run is intentionally not the production CPU policy. It shows
+why: `pcr_soa_batched` is about `208.7 ms` and `99.7%` of the forced-PCR
+one-step proxy. CPU optimization should stay on the current Thomas-first route
+unless a dedicated CPU solver benchmark says otherwise.
+
+Lowering reinforces the same split. On GPU, optimized HLO for
+`pcr_soa_batched` is compact relative to CPU (`2267` lines, `7` fusions,
+`184` gathers, `117` selects, and `0` transposes), while the full one-step proxy
+is `2862` optimized-HLO lines and `10` fusions. On CPU, the same forced-PCR
+solver explodes after compilation (`32122` optimized-HLO lines, `268` fusions,
+`2576` transposes), and the one-step proxy reaches `33605` optimized-HLO lines.
+This makes CPU PCR/SoA a compiler/layout antipattern rather than an optimization
+candidate.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as

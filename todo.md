@@ -1511,9 +1511,23 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_mrg_hot_step_lowering_smoke`. On the small
   different-diameter MRG smoke (`Naxons=8`, actual `Nx=56`), the isolated
   PCR/SoA block solve is about `53%` of the one-step proxy, while full
-  membrane gate+conductance work is about `15%`. Next evidence should be the
-  same hot-step/lowering profile on the Kaggle GPU shape before choosing a
-  solver or compiler optimization candidate.
+  membrane gate+conductance work is about `15%`.
+  Kaggle CPU/GPU hot-step and lowering runs then passed on 2026-07-07 at
+  commit `ffd54fe` for MRG different-diameter double-cable, `Naxons=512`,
+  requested `Nx=101`, actual kernel `Nx=89`, observer-only, fp32, and forced
+  `pcr_soa`. Artifact roots:
+  `benchmark/results/kaggle/20260707_164147_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-mrg-hot-step-gpu-512/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_164203_double_cable_real_stage_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11b-mrg-hot-step-cpu-512/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_164448_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-mrg-lowering-gpu-512-r2/outputs/extracted`,
+  and
+  `benchmark/results/kaggle/20260707_164501_double_cable_solver_lowering_audit_quick_cpu_NvidiaTeslaP100_axonscope-p11b-mrg-lowering-cpu-512-r2/outputs/extracted`.
+  GPU one-step and isolated `pcr_soa_batched` are both about `0.499 ms`; the
+  isolated generated membrane stages are visible but not additive with the
+  fused one-step. GPU lowering points next at PCR/SoA fusion/memory traffic
+  (`2267` optimized-HLO lines, `7` fusions, no transpose) rather than an MRG
+  runtime branch. Forced-PCR CPU is a bad target (`~208.7 ms`, `99.7%` solver,
+  `32122` optimized-HLO lines, `2576` transposes); CPU work should remain
+  Thomas-first unless a dedicated CPU benchmark says otherwise.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
