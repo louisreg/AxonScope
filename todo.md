@@ -1234,8 +1234,25 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_solver_lowering_smoke_v2` for `Naxons=2`,
   requested `Nx=21`, different diameters, and forced `pcr_soa`. The Kaggle
   runner exposes it as `--campaign double_cable_solver_lowering_audit`.
-  Next run it on Kaggle GPU at the validated `Naxons=512`, `Nx=101` shapes and
-  inspect optimized HLO before implementing solver changes.
+  Matching Kaggle P100 GPU lowering audits passed on 2026-07-07 at commit
+  `e1101ab` for `Naxons=512`, requested `Nx=101`, actual kernel `Nx=89`,
+  observer-only, fp32, and both different-diameter and same-diameter cohorts.
+  Artifacts live under
+  `benchmark/results/kaggle/20260707_141000_solver_lowering_diff_gpu_512/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260707_141000_solver_lowering_same_gpu_512/outputs/extracted`;
+  summary note:
+  `docs/architecture/p11b_double_cable_solver_lowering_audit_2026_07_07.md`.
+  Optimized HLO shows `pcr_soa_batched` and `pcr_soa_vmap` are almost
+  identical after XLA GPU compilation: gather/select/fusion counts match, no
+  transpose remains in the isolated solver HLO, and the batch-native path is
+  only slightly smaller by line/broadcast count. Same-diameter coefficient
+  sharing does not simplify the isolated solver HLO. The one-step proxy changes
+  more, but that comparison also changes membrane backend/generated-model
+  status, so treat it as a compiler/backend signal rather than a pure solver
+  result. Decision: do not add a new vmap-vs-batched runtime route; next drill
+  into current PCR/SoA fusion bodies/memory layout and CPU generated-membrane
+  lowering before any solver candidate or policy change.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

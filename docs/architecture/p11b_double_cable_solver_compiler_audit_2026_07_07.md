@@ -19,6 +19,11 @@ Fresh evidence anchor:
 
 - Real workflow solver-choice report:
   `benchmark/results/p11b_real_solver_choice_cpu_gpu_ff78c4f/solver_choice/solver_choice_report.md`
+- Real double-cable stage profile reports:
+  `docs/architecture/p11b_real_double_cable_stage_profile_2026_07_07.md` and
+  `docs/architecture/p11b_real_double_cable_stage_profile_512_2026_07_07.md`
+- GPU solver lowering report:
+  `docs/architecture/p11b_double_cable_solver_lowering_audit_2026_07_07.md`
 
 That report confirms the current next target:
 
@@ -190,34 +195,42 @@ This is housekeeping. It should not block the next measurement/prototype gate.
 
 ## Proposed Next Sequence
 
-1. Add a real double-cable compiler-stage profile.
+1. Continue current PCR/SoA inspection before adding a solver route.
 
-   Use the existing benchmark/runtime spans and solver-stage profiler shape,
-   but measure the current generated membrane execution stages on real
-   MRG/AxNode-style double-cable rows: gate update, conductance terms,
-   system assembly, solve, observer write, finalize/result boundary. Run a
-   tiny traced case and one bounded realistic CPU/GPU case.
+   The real stage profiler now shows GPU PCR/SoA as the immediate low-level
+   target, but the lowering audit shows `pcr_soa_batched` and
+   `pcr_soa_vmap` become nearly identical after XLA GPU optimization. The next
+   useful step is therefore not a vmap-vs-batched runtime route; it is a
+   deeper inspection of current PCR/SoA fusion bodies, memory layout, and
+   one-step composition.
 
-2. Add a focused exact solver candidate only after that profile.
+2. Add a CPU/generated-membrane lowering view for the different-diameter case.
+
+   CPU remains Thomas-first, but different-diameter CPU stage profiles still
+   show visible generated membrane, conductance, and assembly costs. Keep this
+   in the compiler/backend layer rather than adding model-family branches to
+   runtime policy.
+
+3. Add a focused exact solver candidate only after that inspection.
 
    The most plausible first candidate is a benchmark-only batched
    Thomas-family GPU route inspired by the literature/PTA note and prior
    Triton/JAX-Triton results. It must start outside public `auto` routing and
    compare against current GPU PCR-SoA on solver-only and real curve workloads.
 
-3. Add correctness gates before keeping any solver candidate.
+4. Add correctness gates before keeping any solver candidate.
 
    Compare against Thomas float64 on generated real double-cable systems,
    subthreshold traces, suprathreshold traces with margin, activation counts,
    and threshold/recruitment outcomes. Do not use spike-timing-sensitive traces
    alone as the first rejection/acceptance oracle.
 
-4. Revisit GPU fusion/launch overhead only after solver candidate evidence.
+5. Revisit GPU fusion/launch overhead only after solver candidate evidence.
 
    The latest maps show GPU still has non-solver boundaries. If solve time
    shrinks, kernel fusion/launch/finalization can become the next bottleneck.
 
-5. Defer policy.
+6. Defer policy.
 
    Do not choose adaptive time-chunk or high-level amplitude batching defaults
    in this step. Keep them tracked as later workflow optimizations after the
