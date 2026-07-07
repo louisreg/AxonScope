@@ -1548,6 +1548,14 @@ decisions need realistic workflow evidence.
   decomposition. Next GPU evidence should inspect PCR/SoA fusion bodies and
   memory traffic, and optionally add a non-materializing/reduced-output
   no-solve diagnostic before changing solver code.
+  The HLO fusion analyzer now reports benchmark-only per-fusion input/output
+  byte estimates. Offline analysis of the existing P100 MRG lowering artifact
+  under `benchmark/results/p11b_gpu_hlo_fusion_io_audit` confirms the GPU focus:
+  repeated PCR/SoA `loop_select_subtract*` fusions each carry about `3.82 MiB`
+  of HLO-shaped inputs and `3.82 MiB` of tuple outputs (`~7.65 MiB` estimated
+  I/O). Next action should stay GPU solver-local: reduce PCR stage live
+  state/tuple outputs or change staging, with no membrane-model-specific
+  runtime path.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

@@ -345,7 +345,9 @@ enabled, `lowering_summary.csv`, `lowering_metrics.json`, and
 `hlo_fusion_summary.csv`, `hlo_layout_summary.csv`,
 `hlo_fusion_metrics.json`, and `hlo_fusion_report.md` so existing artifacts can
 be inspected for fusion bodies, tuple outputs, gather/shape layouts, and rough
-per-fusion output bytes. It compares real prepared `pcr_soa_vmap`,
+per-fusion input/output byte estimates. These bytes are HLO-shape estimates, not
+hardware counters, and are most useful for comparing solver variants on the
+same shape. It compares real prepared `pcr_soa_vmap`,
 `pcr_soa_batched`, and the active one-step proxy without adding a runtime
 solver route.
 The optional `pcr_soa_symmetric_batched`, `pcr_soa_nomask_batched`,

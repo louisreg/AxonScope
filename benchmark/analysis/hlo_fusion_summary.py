@@ -54,6 +54,9 @@ FUSION_FIELDS = (
     "operand_count",
     "output_arrays",
     "output_bytes_estimate",
+    "computation_input_bytes_estimate",
+    "computation_output_bytes_estimate",
+    "computation_io_bytes_estimate",
     "output_layouts",
     "computation_lines",
     "computation_input_arrays",
@@ -228,8 +231,9 @@ def _fusion_rows_for_file(
         output_text = match.group("output")
         calls = match.group("calls")
         computation = computations.get(calls, "")
-        computation_shapes = _array_shapes(computation)
         output_shapes = _array_shapes(output_text)
+        computation_input_bytes = _computation_input_bytes_estimate(computation)
+        computation_output_bytes = _computation_output_bytes_estimate(computation)
         counts = _op_counts(computation)
         rows.append(
             {
@@ -244,6 +248,9 @@ def _fusion_rows_for_file(
                 "operand_count": len(re.findall(r"%[\w.\-]+", match.group("operands"))),
                 "output_arrays": len(output_shapes),
                 "output_bytes_estimate": sum(_shape_nbytes(shape) for shape in output_shapes),
+                "computation_input_bytes_estimate": computation_input_bytes,
+                "computation_output_bytes_estimate": computation_output_bytes,
+                "computation_io_bytes_estimate": computation_input_bytes + computation_output_bytes,
                 "output_layouts": ";".join(sorted({shape.get("layout") or "" for shape in output_shapes})),
                 "computation_lines": len(computation.splitlines()),
                 "computation_input_arrays": _computation_input_array_count(computation),
@@ -380,6 +387,18 @@ def _computation_output_array_count(text: str) -> int:
     return len(_array_shapes(after_arrow))
 
 
+def _computation_input_bytes_estimate(text: str) -> int:
+    first_line = text.splitlines()[0] if text else ""
+    before_arrow = first_line.split("->", 1)[0]
+    return sum(_shape_nbytes(shape) for shape in _array_shapes(before_arrow))
+
+
+def _computation_output_bytes_estimate(text: str) -> int:
+    first_line = text.splitlines()[0] if text else ""
+    after_arrow = first_line.split("->", 1)[1] if "->" in first_line else ""
+    return sum(_shape_nbytes(shape) for shape in _array_shapes(after_arrow))
+
+
 def _module_name(text: str) -> str:
     first = text.splitlines()[0] if text else ""
     match = re.match(r"HloModule\s+([^,\s]+)", first)
@@ -435,6 +454,8 @@ def _write_report(
         )
     lines.extend(["", "## Largest Fusion Outputs", ""])
     lines.extend(_fusion_table(sorted(analysis.fusion_rows, key=_fusion_sort_key, reverse=True)[:12]))
+    lines.extend(["", "## Largest Fusion I/O Estimates", ""])
+    lines.extend(_fusion_table(sorted(analysis.fusion_rows, key=_fusion_io_sort_key, reverse=True)[:12]))
     lines.extend(["", "## Top Shape Layouts", ""])
     lines.extend(_layout_table(_top_layout_rows(analysis.layout_rows)))
     if metadata:
@@ -458,16 +479,19 @@ def _write_report(
 
 def _fusion_table(rows: Sequence[dict[str, Any]]) -> list[str]:
     lines = [
-        "| stage | variant | fusion | kind | operands | outputs | output MiB | lines | gather | select | copy |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| stage | variant | fusion | kind | operands | outputs | input MiB | output MiB | I/O MiB | lines | gather | select | copy |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
             "| {stage} | {variant} | {fusion_name} | {fusion_kind} | {operand_count} | "
-            "{output_arrays} | {output_mib:.2f} | {computation_lines} | {count_gather} | "
+            "{output_arrays} | {input_mib:.2f} | {output_mib:.2f} | {io_mib:.2f} | "
+            "{computation_lines} | {count_gather} | "
             "{count_select} | {count_copy} |".format(
                 **row,
+                input_mib=float(row["computation_input_bytes_estimate"]) / (1024.0 * 1024.0),
                 output_mib=float(row["output_bytes_estimate"]) / (1024.0 * 1024.0),
+                io_mib=float(row["computation_io_bytes_estimate"]) / (1024.0 * 1024.0),
             )
         )
     return lines
@@ -490,6 +514,14 @@ def _fusion_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
     return (
         int(row["output_bytes_estimate"]),
         int(row["operand_count"]),
+        int(row["computation_lines"]),
+    )
+
+
+def _fusion_io_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
+    return (
+        int(row["computation_io_bytes_estimate"]),
+        int(row["output_bytes_estimate"]),
         int(row["computation_lines"]),
     )
 

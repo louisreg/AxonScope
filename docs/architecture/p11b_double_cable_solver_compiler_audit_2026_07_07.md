@@ -289,6 +289,17 @@ more precise: inspect PCR/SoA fusion bodies and memory traffic, and if possible
 add a benchmark-only non-materializing or reduced-output no-solve probe to
 separate assembly arithmetic from output bandwidth.
 
+The GPU HLO fusion analysis was then extended with benchmark-only per-fusion
+input/output byte estimates. Re-running it offline on the existing P100 MRG
+lowering artifact under `benchmark/results/p11b_gpu_hlo_fusion_io_audit`
+confirms that the dominant PCR/SoA fusions are the repeated
+`loop_select_subtract*` bodies: each carries about `3.82 MiB` of HLO-shaped
+inputs and `3.82 MiB` of HLO-shaped tuple outputs, or roughly `7.65 MiB` of
+estimated fusion I/O before considering hardware-level reuse. This keeps the
+next optimization question GPU-local and solver-local: reduce the PCR stage
+tuple/live state or change staging without introducing model-specific runtime
+paths.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as
