@@ -1325,6 +1325,13 @@ decisions need realistic workflow evidence.
   `pcr_soa_padded_batched` on P100. If no clear one-step gain appears, stop
   spending time on these PCR/SoA micro-variants and move to the next low-level
   optimization family.
+  Final P100 one-step check completed under
+  `benchmark/results/kaggle/20260707_145211_one_step_probe_real_gpu_512/outputs/extracted`
+  on commit `c89ff93`: baseline `pcr_soa_batched_real` is `0.472 ms`, `shift`
+  is `0.529 ms` (`+12.1%`), and `padded` is `0.485 ms` (`+2.8%`). `shift`
+  lowers first-run time (`2342 ms` -> `1954 ms`) but not hot one-step runtime.
+  Decision: close this PCR/SoA micro-variant branch for now; move to another
+  low-level optimization family.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

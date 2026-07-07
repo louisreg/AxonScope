@@ -177,6 +177,23 @@ as diagnostic references for future lowering experiments, because they isolate
 useful compiler effects, but require a stronger hot-path or one-step win before
 runtime integration.
 
+The final one-step check was run under
+`benchmark/results/kaggle/20260707_145211_one_step_probe_real_gpu_512/outputs/extracted`
+on commit `c89ff93`, with the same P100 workload and explicit one-step variants
+`pcr_soa_batched`, `pcr_soa_shift_batched`, and `pcr_soa_padded_batched`.
+Results:
+
+| one-step variant | mean | min | max | first run | delta vs baseline |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `pcr_soa_batched_real` | 0.472 ms | 0.399 ms | 0.511 ms | 2342 ms | baseline |
+| `pcr_soa_shift_batched_real` | 0.529 ms | 0.402 ms | 0.678 ms | 1954 ms | +12.1% |
+| `pcr_soa_padded_batched_real` | 0.485 ms | 0.412 ms | 0.537 ms | 2275 ms | +2.8% |
+
+Conclusion: `shift` still improves first-run/compile behavior, but not hot
+one-step runtime; `padded` is close but not a clear win. This closes the current
+PCR/SoA micro-variant branch. Future work should use `shift` and `padded` only
+as diagnostic references unless a new structural hypothesis changes the target.
+
 The next low-level work should inspect the code generated inside the current
 PCR/SoA implementation and the one-step composition around it, not add a new
 public or policy route:
