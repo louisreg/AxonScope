@@ -1757,6 +1757,10 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     right_e_batch = batch_space(right_e)
     background_batch = batch_space(I_background)
 
+    a00_static = cm_over_dt + left_i_batch + right_i_batch
+    a11_static = cm_over_dt + cx_over_dt + Gx_abs_batch + left_e_batch + right_e_batch
+    background_abs = background_batch * area_batch
+    zero_abs = jnp.zeros_like(area_batch)
     off_i = -jnp.asarray(Gax_i)
     off_e = -jnp.asarray(Gax_e)
     vext_previous_mV = jnp.concatenate(
@@ -1888,33 +1892,26 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         Ve: Array,
         gates_new: Array,
         Iinj_abs: Array,
-        I_outward_den: Array,
-        I_corr_den: Array,
+        I_outward_abs: Array,
+        I_corr_abs: Array,
         extracellular_drive_abs: Array,
     ) -> tuple[Array, Array]:
         Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
 
-        I_outward_abs = I_outward_den * area_batch
-        I_corr_abs = I_corr_den * area_batch
         Vm = Vi - Ve
+        cm_plus_gm = cm_over_dt + Gm_abs
+        membrane_charge = cm_over_dt * Vm
 
-        a00 = cm_over_dt + Gm_abs + left_i_batch + right_i_batch
-        a01 = -(cm_over_dt + Gm_abs)
-        rhs0 = cm_over_dt * Vm + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
+        a00 = a00_static + Gm_abs
+        a01 = -cm_plus_gm
+        rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
 
         a10 = a01
-        a11 = (
-            cm_over_dt
-            + Gm_abs
-            + cx_over_dt
-            + Gx_abs_batch
-            + left_e_batch
-            + right_e_batch
-        )
+        a11 = a11_static + Gm_abs
         rhs1 = (
-            -cm_over_dt * Vm
+            -membrane_charge
             - GE_abs
             + cx_over_dt * Ve
             + extracellular_drive_abs
@@ -1950,8 +1947,8 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         gates_pred = batch_gate_update(gates, Vm)
         if stateless_vm_only:
             linearization_gates = gates if has_driven_extracellular else gates_pred
-            explicit_outward_current = background_batch
-            correction_current = jnp.zeros_like(Vm)
+            explicit_outward_current_abs = background_abs
+            correction_current_abs = zero_abs
         else:
             Iion_pred = batch_currents(Vm, gates_pred)
             step_plan_pred = batch_prepare_membrane_step(
@@ -1965,16 +1962,16 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
             linearization_gates = step_plan_pred.linearization_gates
             if has_driven_extracellular:
                 linearization_gates = gates
-            explicit_outward_current = step_plan_pred.explicit_outward_current
-            correction_current = step_plan_pred.correction_current
+            explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
+            correction_current_abs = step_plan_pred.correction_current * area_batch
 
         Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
             Iinj_abs=Iinj_abs,
-            I_outward_den=explicit_outward_current,
-            I_corr_den=correction_current,
+            I_outward_abs=explicit_outward_current_abs,
+            I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
         )
         Vm_new = Vi_new - Ve_new
@@ -2519,6 +2516,10 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
     right_e_batch = batch_space(right_e)
     background_batch = batch_space(I_background)
 
+    a00_static = cm_over_dt + left_i_batch + right_i_batch
+    a11_static = cm_over_dt + cx_over_dt + Gx_abs_batch + left_e_batch + right_e_batch
+    background_abs = background_batch * area_batch
+    zero_abs = jnp.zeros_like(area_batch)
     off_i = -jnp.asarray(Gax_i)
     off_e = -jnp.asarray(Gax_e)
     use_factorized_vext = extracellular_footprint_mV_per_A is not None
@@ -2685,33 +2686,26 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         Ve: Array,
         gates_new: Array,
         Iinj_abs: Array,
-        I_outward_den: Array,
-        I_corr_den: Array,
+        I_outward_abs: Array,
+        I_corr_abs: Array,
         extracellular_drive_abs: Array,
     ) -> tuple[Array, Array]:
         Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
 
-        I_outward_abs = I_outward_den * area_batch
-        I_corr_abs = I_corr_den * area_batch
         Vm = Vi - Ve
+        cm_plus_gm = cm_over_dt + Gm_abs
+        membrane_charge = cm_over_dt * Vm
 
-        a00 = cm_over_dt + Gm_abs + left_i_batch + right_i_batch
-        a01 = -(cm_over_dt + Gm_abs)
-        rhs0 = cm_over_dt * Vm + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
+        a00 = a00_static + Gm_abs
+        a01 = -cm_plus_gm
+        rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
 
         a10 = a01
-        a11 = (
-            cm_over_dt
-            + Gm_abs
-            + cx_over_dt
-            + Gx_abs_batch
-            + left_e_batch
-            + right_e_batch
-        )
+        a11 = a11_static + Gm_abs
         rhs1 = (
-            -cm_over_dt * Vm
+            -membrane_charge
             - GE_abs
             + cx_over_dt * Ve
             + extracellular_drive_abs
@@ -2765,8 +2759,8 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         gates_pred = batch_gate_update(gates, Vm)
         if stateless_vm_only:
             linearization_gates = gates if has_driven_extracellular else gates_pred
-            explicit_outward_current = background_batch
-            correction_current = jnp.zeros_like(Vm)
+            explicit_outward_current_abs = background_abs
+            correction_current_abs = zero_abs
         else:
             Iion_pred = batch_currents(Vm, gates_pred)
             step_plan_pred = batch_prepare_membrane_step(
@@ -2780,16 +2774,16 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
             linearization_gates = step_plan_pred.linearization_gates
             if has_driven_extracellular:
                 linearization_gates = gates
-            explicit_outward_current = step_plan_pred.explicit_outward_current
-            correction_current = step_plan_pred.correction_current
+            explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
+            correction_current_abs = step_plan_pred.correction_current * area_batch
 
         Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
             Iinj_abs=Iinj_abs,
-            I_outward_den=explicit_outward_current,
-            I_corr_den=correction_current,
+            I_outward_abs=explicit_outward_current_abs,
+            I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
         )
         Vm_new = Vi_new - Ve_new
