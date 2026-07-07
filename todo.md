@@ -1598,18 +1598,25 @@ decisions need realistic workflow evidence.
   instruction shape. Focus on a measured structural runtime cost: launch/stage
   count, memory traffic across stages, or an actually different GPU solve
   structure from the solver-roadmap documents.
-  Current structural candidate: gate `thomas_batched_scan`, the existing
-  batch-native block-Thomas scan (`solve_block_tridiagonal_2x2_scalar_batched`),
-  against `thomas_vmap` and `pcr_soa_batched` on real double-cable inputs. This
-  follows the GPU solver-options recommendation to compare PCR against a strong
-  many-small-systems Thomas-family baseline before inventing more PCR probes.
-  It is exposed only in benchmark lowering/real-stage tools, not public runtime
-  solver policy. Local CPU smoke artifacts:
-  `benchmark/results/p11b_thomas_batched_scan_real_smoke` and
-  `benchmark/results/p11b_thomas_batched_scan_lowering_smoke`. Next gate:
-  fresh P100 lowering and real-stage timing for `thomas_vmap`,
-  `thomas_batched_scan`, and `pcr_soa_batched` on `Naxons=512`, requested
-  `Nx=101`, actual `Nx=89`, observer-only MRG shape.
+  Rejected structural GPU candidate: benchmark-only `thomas_batched_scan`, the
+  existing batch-native block-Thomas scan
+  (`solve_block_tridiagonal_2x2_scalar_batched`), was gated against
+  `thomas_vmap` and `pcr_soa_batched` on real double-cable inputs. It remains
+  useful for CPU/compiler diagnostics, but not as a GPU runtime policy. See
+  `docs/architecture/p11b_thomas_batched_scan_gate_2026_07_07.md`. On Kaggle
+  P100, `Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only MRG
+  shape, `thomas_batched_scan` had compact optimized HLO (`795` lines versus
+  `2267` for PCR-SoA) but regressed hot time badly: isolated solve was
+  `3.698 ms` versus `0.453 ms` for `pcr_soa_batched`, and the fused one-step
+  proxy was `2.172-2.176 ms` versus `0.535-0.564 ms` for PCR-SoA. Artifact
+  roots:
+  `benchmark/results/kaggle/20260707_190539_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-thomas-scan-lower-gpu/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260707_190552_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-thomas-scan-real-gpu/outputs/extracted`.
+  Next action: keep GPU `auto` on PCR-SoA and move to measured hot-path cost,
+  not HLO size alone: PCR-SoA live state/memory traffic, launch/stage boundaries
+  around the one-step proxy, or a genuinely GPU-native tiled/custom/Pallas-style
+  solver candidate only after a narrow benchmark-backed hypothesis.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

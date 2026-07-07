@@ -26,6 +26,8 @@ Fresh evidence anchor:
   `docs/architecture/p11b_double_cable_solver_lowering_audit_2026_07_07.md`
 - GPU-only critical reading of the older idea documents:
   `docs/architecture/p11b_gpu_solver_ideas_critical_review_2026_07_07.md`
+- Plain XLA batch-Thomas gate:
+  `docs/architecture/p11b_thomas_batched_scan_gate_2026_07_07.md`
 
 That report confirms the current next target:
 
@@ -97,14 +99,17 @@ assumes:
    They belong behind runtime/compiler abstractions, not as model-family
    branches in public workflows.
 
-4. A strong batched Thomas-family GPU prototype is worth considering, but only
-   with a new integration gate.
+4. A strong batched Thomas-family GPU prototype is worth considering only if it
+   changes the implementation class.
 
    The literature note argues for a memory-coalesced, many-small-systems
    Thomas/PTA-style GPU baseline. The old Triton/JAX-Triton evidence also found
    a real solver-only and partial E2E win, but validation/routing was not ready.
-   Reopening this line should start as benchmark-only and must pass agreement
-   gates before any `auto` policy change.
+   The existing plain JAX/XLA batch-native Thomas scan has now been benchmarked
+   as `thomas_batched_scan` and rejected for GPU policy: it has compact HLO but
+   is much slower than PCR-SoA on P100. Reopening this line should mean a
+   genuinely different GPU integration, such as tiled/custom/Pallas-style work,
+   and must stay benchmark-only until it passes agreement and timing gates.
 
 ### Keep As Standby
 
