@@ -279,7 +279,10 @@ def make_run_dir(args: argparse.Namespace) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     machine = safe_token(args.machine_shape)
     target = args.campaign or args.script
-    return args.output_root / f"{timestamp}_{target}_{args.preset}_{args.platform}_{machine}"
+    slug = safe_token(args.slug)
+    return args.output_root / (
+        f"{timestamp}_{target}_{args.preset}_{args.platform}_{machine}_{slug}"
+    )
 
 
 def make_run_id(args: argparse.Namespace) -> str:

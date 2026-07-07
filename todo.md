@@ -1207,6 +1207,24 @@ decisions need realistic workflow evidence.
   factorized RHS drive, and observer writes remain visible when measured as
   separate kernels, so the next low-level pass should inspect solver internals
   and membrane/compiler output before adding a new runtime route.
+  Follow-up Kaggle v2 runs at commit `6cdb966` extended this to `Naxons=512`,
+  requested `Nx=101`, actual kernel `Nx=89`, for both different-diameter and
+  same-diameter cohorts on CPU/GPU. Valid artifact roots are
+  `benchmark/results/kaggle/20260707_133000_real_stage_diff_cpu_512_v2/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_133000_real_stage_diff_gpu_512_v2/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_134000_real_stage_same_cpu_512_v2/outputs/extracted`,
+  and
+  `benchmark/results/kaggle/20260707_134000_real_stage_same_gpu_512_v2/outputs/extracted`;
+  summary note:
+  `docs/architecture/p11b_real_double_cable_stage_profile_512_2026_07_07.md`.
+  The larger run confirms GPU PCR/SoA as the immediate low-level target:
+  fused GPU one-step is about 0.49-0.56 ms and PCR/SoA solve is about
+  0.44-0.46 ms, while GPU Thomas is about 2.1-2.2 ms. CPU remains
+  Thomas-first, but different-diameter CPU still has visible generated
+  membrane and assembly costs; same-diameter coefficient sharing reduces CPU
+  one-step from about 4.32 ms to 2.50 ms. Keep high-level grouping/policy work
+  for later; next inspect GPU PCR/SoA lowering/layout and CPU membrane compiler
+  output before adding a new runtime route.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
