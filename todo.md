@@ -1064,8 +1064,28 @@ decisions need realistic workflow evidence.
   50k passive-program `g_bar` reads drop from about 41 s to about 0.006 s, and
   a short `Naxons=1000`, double-cable observer-only CPU run now completes in
   14 s with `runtime.prepare.stack_membrane` about 2.14 s for 89,000
-  compartments. Next, rerun the reduced CPU/GPU Kaggle double-cable matrix at
-  the post-fix commit before making a fresh CPU/GPU timing claim.
+  compartments.
+  Matching post-fix Kaggle P100-image CPU/GPU validation passed on 2026-07-07
+  at commit `64fca75` with the same reduced double-cable recruitment matrix.
+  CPU artifacts live under
+  `benchmark/results/kaggle/20260707_102157_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU artifacts under
+  `benchmark/results/kaggle/20260707_102122_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  combined plots/report under
+  `benchmark/results/p11b_double_cable_program_cache_cpu_gpu_64fca75`, and
+  repeat-phase bottlenecks under
+  `benchmark/results/p11b_double_cable_program_cache_bottlenecks_64fca75`.
+  Versus `890c252`, best visible times dropped from about 163-165 s CPU and
+  318-322 s GPU to about 23-26 s CPU and 13-16 s GPU. The previous
+  `runtime.prepare.stack_membrane` bottleneck dropped to about 1.5 s on CPU
+  and about 1.9-2.1 s on GPU. The remaining double-cable map is now split:
+  CPU full/probe rows are solver-wait dominated, CPU observer-only still
+  exposes VmRaster chunk/finalize costs depending on policy, and GPU rows are
+  dominated by host-side double-cable runtime preparation, especially
+  `runtime.prepare.stack_extracellular` around 5.3-6.1 s. Next low-level
+  target before solver algorithm work: reduce/factor/cache double-cable
+  extracellular runtime stacking and then revisit CPU observer-only
+  chunk/finalize behavior.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
