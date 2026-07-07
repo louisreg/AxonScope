@@ -1288,6 +1288,19 @@ decisions need realistic workflow evidence.
   P100 for `Naxons=512`,
   requested `Nx=101`, comparing optimized HLO/fusion tuple shape and hot
   block-solve timing against current `pcr_soa_batched`.
+  Kaggle P100 gate completed under
+  `benchmark/results/kaggle/20260707_140519_symmetric_pcr_lowering_gpu_512/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260707_140519_symmetric_pcr_real_gpu_512/outputs/extracted`.
+  Result: candidate optimized HLO is smaller (`2267` -> `1855` lines, gathers
+  `184` -> `134`, selects `117` -> `87`, largest PCR fusion output `22` arrays
+  / `3.82 MiB` -> `14` arrays / `2.43 MiB`, total estimated fusion outputs
+  `21.90 MiB` -> `14.25 MiB`), but hot isolated block-solve timing only moves
+  `0.415 ms` -> `0.404 ms` (`-2.6%`). Decision: keep the candidate as
+  benchmark-only evidence, do not promote it to runtime policy as-is. Next
+  low-level direction: keep attacking PCR/fusion/gather/layout costs inside
+  solver lowering, and validate any stronger candidate on full real double-cable
+  curves before runtime integration.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

@@ -114,11 +114,34 @@ roughly `80 mV` solution range, with max relative residual `9.0e-6` versus
 GPU benchmark exploration, but not enough to choose a runtime route; the next
 gate is GPU HLO/timing on the P100 workload.
 
+That P100 gate was run under:
+
+- `benchmark/results/kaggle/20260707_140519_symmetric_pcr_lowering_gpu_512/outputs/extracted`
+- `benchmark/results/kaggle/20260707_140519_symmetric_pcr_real_gpu_512/outputs/extracted`
+
+For `Naxons=512`, requested `Nx=101`, actual kernel `Nx=89`, fp32,
+different-diameter observer-only double-cable inputs on `Tesla P100-PCIE-16GB`,
+the candidate does reduce compiler pressure: optimized HLO shrinks from `2267`
+to `1855` lines, gathers from `184` to `134`, selects from `117` to `87`, and
+the largest PCR fusion output drops from `22` arrays / `3.82 MiB` to `14`
+arrays / `2.43 MiB`. Total estimated PCR fusion outputs drop from `21.90 MiB`
+to `14.25 MiB`.
+
+The hot runtime gain is small: isolated block solve mean goes from `0.415 ms`
+to `0.404 ms` (`-2.6%`), with first-run compile/execute time from `2253.6 ms`
+to `1839.4 ms` (`-18.4%`). This confirms that live tuple pressure is real, but
+also that reducing this particular carried state is not enough to justify a
+runtime route by itself.
+
 ## Decision
 
 Do not add a new `pcr_soa_vmap` versus `pcr_soa_batched` runtime route. The
 current batch-native PCR/SoA path is a reasonable active GPU route and has no
 obvious high-level lowering defect relative to the vmap shape.
+
+Do not promote `pcr_soa_symmetric_batched` as-is. Keep it as a benchmark-only
+probe: it is useful evidence that PCR live-state size affects the generated
+program, but it does not yet produce a large enough hot-path win.
 
 The next low-level work should inspect the code generated inside the current
 PCR/SoA implementation and the one-step composition around it, not add a new
