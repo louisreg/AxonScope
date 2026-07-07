@@ -1591,6 +1591,10 @@ decisions need realistic workflow evidence.
   compiled `block_solve:pcr_soa_batched` uses `count_divide=13` on the smoke
   shape. Next gate: fresh P100 lowering and real-stage timing on the existing
   `Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only MRG shape.
+  Submitted P100 gates for commit `21ffaef`:
+  `benchmark/results/kaggle/20260707_183755_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-recip-inv-lowering-gpu-512`
+  and
+  `benchmark/results/kaggle/20260707_183812_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-recip-inv-real-gpu-512`.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
