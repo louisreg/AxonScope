@@ -289,6 +289,33 @@ python benchmark/kaggle/run_kernel.py \
   -- --n-axons 32 --nx 51 --repeats 5 --warmups 1
 ```
 
+For PCR/SoA lowering and codegen inspection, use:
+
+```bash
+python benchmark/analysis/double_cable_solver_lowering_audit.py \
+  --platform cpu \
+  --preset quick \
+  --n-axons 4 \
+  --nx 21 \
+  --diameters different_diameters
+```
+
+This writes lowered StableHLO/HLO, compiled optimized HLO when `--compile` is
+enabled, `lowering_summary.csv`, `lowering_metrics.json`, and
+`lowering_report.md`. It compares real prepared `pcr_soa_vmap`,
+`pcr_soa_batched`, and the active one-step proxy without adding a runtime
+solver route. Run it on Kaggle GPU when inspecting GPU-specific optimized HLO:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --campaign double_cable_solver_lowering_audit \
+  --preset quick \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  -- --n-axons 512 --nx 101 --diameters different_diameters
+```
+
 ## Publishability
 
 A benchmark result is publishable only if the run directory contains the full

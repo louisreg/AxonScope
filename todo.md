@@ -1225,6 +1225,17 @@ decisions need realistic workflow evidence.
   one-step from about 4.32 ms to 2.50 ms. Keep high-level grouping/policy work
   for later; next inspect GPU PCR/SoA lowering/layout and CPU membrane compiler
   output before adding a new runtime route.
+  First lowering/codegen audit tool added:
+  `benchmark/analysis/double_cable_solver_lowering_audit.py` lowers real
+  prepared `pcr_soa_vmap`, `pcr_soa_batched`, and the active one-step proxy to
+  StableHLO/HLO, optionally compiles optimized HLO, and writes
+  `lowering_summary.csv`, `lowering_metrics.json`, raw IR files, and
+  `lowering_report.md`. A local CPU smoke passed under
+  `benchmark/results/p11b_solver_lowering_smoke_v2` for `Naxons=2`,
+  requested `Nx=21`, different diameters, and forced `pcr_soa`. The Kaggle
+  runner exposes it as `--campaign double_cable_solver_lowering_audit`.
+  Next run it on Kaggle GPU at the validated `Naxons=512`, `Nx=101` shapes and
+  inspect optimized HLO before implementing solver changes.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
