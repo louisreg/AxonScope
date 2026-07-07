@@ -1192,7 +1192,21 @@ decisions need realistic workflow evidence.
   one-step proxy, and VmRaster observer writes. The Kaggle runner exposes it as
   `--campaign double_cable_real_stage_profile`. Next use this to separate
   solver execution from generated membrane, assembly, launch/finalize, and
-  result boundaries before adding any new solver route.
+  result boundaries before adding any new solver route. First CPU/GPU Kaggle
+  run passed on 2026-07-07 at commit `4053985` for double-cable
+  observer-only, `Naxons=128`, requested `Nx=101`, actual kernel `Nx=89`,
+  fp32, different diameters, factorized extracellular input, five repeats, and
+  one warmup. Artifacts live under
+  `benchmark/results/kaggle/20260707_130525_double_cable_real_stage_profile_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`
+  and
+  `benchmark/results/kaggle/20260707_130525_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`;
+  summary note:
+  `docs/architecture/p11b_real_double_cable_stage_profile_2026_07_07.md`.
+  CPU remains Thomas-first; GPU is clearly PCR/SoA-first. The active one-step
+  proxy is solver-sensitive, but generated membrane work, system assembly,
+  factorized RHS drive, and observer writes remain visible when measured as
+  separate kernels, so the next low-level pass should inspect solver internals
+  and membrane/compiler output before adding a new runtime route.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
