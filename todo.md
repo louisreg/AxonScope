@@ -1367,6 +1367,25 @@ decisions need realistic workflow evidence.
   `22` outputs / `3.82 MiB`. Next prototype, if we pursue it, should be a clean
   runtime scan-body precompute of the remaining diagonal/RHS bases, followed by
   real curve-level validation, not another PCR micro-variant.
+- [x] Time-box the runtime scan-body precompute prototype on real curve
+  benchmarks. The runtime double-cable PCR/SoA scan now precomputes the static
+  diagonal bases and absolute background/correction helpers outside the scan
+  step. Local validation passed `git diff --check`, `compileall`, focused and
+  full `tests/unit/solvers/test_batch.py`, plus a local double-cable
+  recruitment smoke. P100 A/B artifacts:
+  `benchmark/results/kaggle/20260707_153410_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-baseline-gpu/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_153636_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-prototype-gpu/outputs/extracted`,
+  `benchmark/results/kaggle/20260707_154008_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-baseline-gpu-r3/outputs/extracted`,
+  and
+  `benchmark/results/kaggle/20260707_154232_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-prototype-gpu-r3/outputs/extracted`.
+  Results were numerically identical for the recruitment curve. The short
+  single-repeat run improved total simulation time by about `5.6%`. The R3 run
+  split the picture: cold/warmup simulation worsened by about `9.5%`, but repeat
+  simulation improved by about `8.1%` (`runtime.prepare` repeats `-13.2%`,
+  `kernel.wait` repeats `-2.9%`, `kernel.dispatch_jax` unchanged). Decision:
+  keep this as a bounded runtime cleanup for repeated curve workloads, but stop
+  exploring this precompute family for now because it does not move the core
+  solver lowering or PCR fusion bottleneck.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

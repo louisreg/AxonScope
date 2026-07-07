@@ -245,6 +245,41 @@ double-cable scan body and verify real curve-level timing. It should not be
 treated as a new solver algorithm, and it does not change the earlier
 conclusion that the PCR loop fusions remain the dominant low-level structure.
 
+## Runtime Scan Precompute Check
+
+A narrow runtime prototype was then validated on the real public recruitment
+curve path. It precomputes the static double-cable diagonal bases and absolute
+background/correction helpers outside the PCR/SoA scan step, without adding a
+new public option or solver route.
+
+Artifacts:
+
+- `benchmark/results/kaggle/20260707_153410_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-baseline-gpu/outputs/extracted`
+- `benchmark/results/kaggle/20260707_153636_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-prototype-gpu/outputs/extracted`
+- `benchmark/results/kaggle/20260707_154008_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-baseline-gpu-r3/outputs/extracted`
+- `benchmark/results/kaggle/20260707_154232_recruitment_curves_quick_gpu_NvidiaTeslaP100_axonscope-p11b-runtime-precompute-prototype-gpu-r3/outputs/extracted`
+
+All runs used P100 GPU, fp32, `Naxons=512`, requested `Nx=101`, actual kernel
+`Nx=89`, different-diameter observer-only double-cable recruitment,
+`pcr_soa`, three amplitudes, and `time_chunk_steps=50`. The R3 run used one
+warmup and three repeats.
+
+| metric | baseline R3 | runtime precompute R3 | delta |
+| --- | ---: | ---: | ---: |
+| all `curve.simulate` | 7651.5 ms | 8139.1 ms | +6.4% |
+| warmup `curve.simulate` | 6306.5 ms | 6903.7 ms | +9.5% |
+| repeat `curve.simulate` | 1345.0 ms | 1235.4 ms | -8.1% |
+| repeat `runtime.prepare` | 204.3 ms | 177.3 ms | -13.2% |
+| repeat `kernel.dispatch_jax` | 25.7 ms | 25.7 ms | ~0.0% |
+| repeat `kernel.wait` | 99.8 ms | 96.9 ms | -2.9% |
+
+The recruitment curve summaries were identical. The prototype is therefore
+acceptable as a small repeated-workload runtime cleanup, but it is not a solver
+optimization direction: hot `kernel.dispatch_jax` and the PCR lowering shape do
+not materially change, while cold compile/warmup gets worse. Stop this
+precompute family here unless a future compiler-level change gives a new
+structural reason to revisit it.
+
 The next low-level work should inspect the code generated inside the current
 PCR/SoA implementation and the one-step composition around it, not add a new
 public or policy route:
