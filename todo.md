@@ -1320,6 +1320,11 @@ decisions need realistic workflow evidence.
   MiB`, but does not provide a robust win. `nomask`, `transposed`, and `hybrid`
   are slower. Decision: promote none as-is; keep `shift`/`padded` as diagnostic
   references and require one-step or curve-level wins before any runtime route.
+  Final check before leaving this branch: compare fused `one_step_proxy`
+  variants `pcr_soa_batched`, `pcr_soa_shift_batched`, and
+  `pcr_soa_padded_batched` on P100. If no clear one-step gain appears, stop
+  spending time on these PCR/SoA micro-variants and move to the next low-level
+  optimization family.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

@@ -179,6 +179,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         help="Block-solve variant to include. Repeat to select several. Defaults to active_auto.",
     )
+    parser.add_argument(
+        "--one-step-solver",
+        action="append",
+        choices=(
+            "active_auto",
+            "pcr_soa",
+            "pcr_soa_batched",
+            "pcr_soa_shift_batched",
+            "pcr_soa_padded_batched",
+        ),
+        help=(
+            "One-step proxy solver variant to include. Repeat to select several. "
+            "Defaults to active_auto. Benchmark-only; this does not add a runtime policy."
+        ),
+    )
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--no-plots", action="store_true")
@@ -276,6 +291,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "cache_mode": "warm",
         "time_chunk_policy": "explicit",
         "time_chunk_steps": int(args.time_chunk_steps),
+        "one_step_solver": tuple(getattr(args, "one_step_solver", None) or ("active_auto",)),
         "amplitude_batch_size": None,
         "retention": "summary_only",
         "amplitude_count": 1,
@@ -431,6 +447,41 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         requested=requested_solvers,
         active_solver=active_solver,
     )
+    one_step_solvers = _one_step_solver_names(
+        getattr(args, "one_step_solver", None) or ("active_auto",),
+        active_solver=active_solver,
+    )
+    one_step_cases = tuple(
+        StageCase(
+            "one_step_proxy",
+            f"{name}_real",
+            _real_one_step_proxy,
+            (
+                runtime.membrane.backend,
+                Vi,
+                Ve,
+                gates,
+                row_indices,
+                area_cm2,
+                Cm_abs,
+                Cx_abs,
+                Gx_abs,
+                left_i,
+                right_i,
+                left_e,
+                right_e,
+                Gax_i,
+                Gax_e,
+                Iinj_abs,
+                I_outward,
+                I_corr,
+                drive,
+                dt_ms,
+                name,
+            ),
+        )
+        for name in one_step_solvers
+    )
     stage_cases = [
         StageCase(
             "membrane_gate_update",
@@ -472,34 +523,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             ),
         ),
         *solver_cases,
-        StageCase(
-            "one_step_proxy",
-            f"{active_solver}_real",
-            _real_one_step_proxy,
-            (
-                runtime.membrane.backend,
-                Vi,
-                Ve,
-                gates,
-                row_indices,
-                area_cm2,
-                Cm_abs,
-                Cx_abs,
-                Gx_abs,
-                left_i,
-                right_i,
-                left_e,
-                right_e,
-                Gax_i,
-                Gax_e,
-                Iinj_abs,
-                I_outward,
-                I_corr,
-                drive,
-                dt_ms,
-                active_solver,
-            ),
-        ),
+        *one_step_cases,
     ]
     if observer_plan is not None and observer_state is not None:
         stage_cases.append(
@@ -529,6 +553,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "extracellular_factorized_rank": extracellular.factorized_rank,
         "shared_coefficients": bool(shared_coefficients),
         "active_solver": active_solver,
+        "one_step_solvers": one_step_solvers,
         "resolved_solver": resolved,
         "membrane_backend": _backend_variant(runtime.membrane.backend),
         "membrane_model": type(runtime.membrane.membrane).__name__,
@@ -1061,6 +1086,21 @@ def _solver_cases(
     return tuple(out)
 
 
+def _one_step_solver_names(
+    requested: Sequence[str],
+    *,
+    active_solver: str,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for name in requested:
+        resolved = active_solver if name == "active_auto" else name
+        if resolved == "pcr_adaptive":
+            resolved = "pcr_soa"
+        if resolved not in names:
+            names.append(resolved)
+    return tuple(names)
+
+
 def _solve_by_name(
     solver: str,
     assembled: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
@@ -1069,8 +1109,12 @@ def _solve_by_name(
         return _solve_thomas_vmap(*assembled)
     if solver == "pcr":
         return _solve_pcr_matrix_vmap(*assembled)
-    if solver in {"pcr_soa", "pcr_adaptive"}:
+    if solver in {"pcr_soa", "pcr_adaptive", "pcr_soa_batched"}:
         return _solve_pcr_soa_batched(*assembled)
+    if solver == "pcr_soa_shift_batched":
+        return _solve_pcr_soa_shift_batched(*assembled)
+    if solver == "pcr_soa_padded_batched":
+        return _solve_pcr_soa_padded_batched(*assembled)
     raise ValueError(f"unsupported one-step solver: {solver!r}")
 
 
@@ -1401,7 +1445,7 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "- `membrane_gate_update` and `membrane_conductance_terms` use the real prepared membrane backend.",
             "- `system_assembly` uses real prepared double-cable coefficients and real extracellular forcing for one step.",
             "- `block_solve` runs selected solver functions on the real assembled system.",
-            "- `one_step_proxy` fuses gate update, conductance terms, assembly, and active block solve for one step.",
+            "- `one_step_proxy` fuses gate update, conductance terms, assembly, and the selected benchmark one-step block solver for one step.",
             "- `observer_write` is present only for observer-only VmRaster runs.",
         ]
     )

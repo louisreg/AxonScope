@@ -284,6 +284,19 @@ existing low-level PCR/SoA probes `pcr_soa_nomask_batched`,
 `pcr_soa_shift_batched`, `pcr_soa_transposed_batched`,
 `pcr_soa_padded_batched`, and `pcr_soa_hybrid_batched`. Use these as
 measurement candidates only; they are not public solver policies.
+The fused one-step proxy can also be profiled with selected benchmark-only
+solver probes, for example:
+
+```bash
+python benchmark/analysis/double_cable_real_stage_profile.py \
+  --platform gpu \
+  --n-axons 512 \
+  --nx 101 \
+  --solver pcr_soa_batched \
+  --one-step-solver pcr_soa_batched \
+  --one-step-solver pcr_soa_shift_batched \
+  --one-step-solver pcr_soa_padded_batched
+```
 
 The same profiler can run on Kaggle:
 
