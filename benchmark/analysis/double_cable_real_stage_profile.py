@@ -572,6 +572,59 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         )
         for name in one_step_solvers
     )
+    one_step_without_solve_cases = (
+        StageCase(
+            "one_step_without_solve",
+            "real_materialized",
+            _real_one_step_without_solve,
+            (
+                runtime.membrane.backend,
+                Vi,
+                Ve,
+                gates,
+                row_indices,
+                area_cm2,
+                Cm_abs,
+                Cx_abs,
+                Gx_abs,
+                left_i,
+                right_i,
+                left_e,
+                right_e,
+                Gax_i,
+                Gax_e,
+                Iinj_abs,
+                I_outward,
+                I_corr,
+                drive,
+                dt_ms,
+            ),
+        ),
+        StageCase(
+            "one_step_without_solve",
+            "precomputed_static_materialized",
+            _real_one_step_without_solve_precomputed,
+            (
+                runtime.membrane.backend,
+                Vi,
+                Ve,
+                gates,
+                row_indices,
+                area_precomputed,
+                cm_over_dt_precomputed,
+                cx_over_dt_precomputed,
+                a00_static,
+                a11_static,
+                off_i_precomputed,
+                off_e_precomputed,
+                Iinj_abs,
+                I_outward_abs_precomputed,
+                I_corr_abs_precomputed,
+                drive,
+                dt_ms,
+            ),
+        ),
+    )
     one_step_precomputed_cases = tuple(
         StageCase(
             "one_step_proxy",
@@ -664,6 +717,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             ),
         ),
         *solver_cases,
+        *one_step_without_solve_cases,
         *one_step_cases,
         *one_step_precomputed_cases,
     ]
@@ -1136,6 +1190,56 @@ def _real_one_step_proxy(
     return Vi_new, Ve_new, gates_new
 
 
+@partial(jax.jit, static_argnames=("backend",))
+def _real_one_step_without_solve(
+    backend: Any,
+    Vi: Any,
+    Ve: Any,
+    gates: Any,
+    row_indices: Any,
+    area_cm2: Any,
+    Cm_abs: Any,
+    Cx_abs: Any,
+    Gx_abs: Any,
+    left_i: Any,
+    right_i: Any,
+    left_e: Any,
+    right_e: Any,
+    Gax_i: Any,
+    Gax_e: Any,
+    Iinj_abs: Any,
+    I_outward_den: Any,
+    I_corr_den: Any,
+    extracellular_drive_abs: Any,
+    dt_ms: Any,
+) -> tuple[Any, tuple[Any, Any, Any, Any, Any, Any, Any, Any]]:
+    Vm = Vi - Ve
+    gates_new = _real_gate_update(backend, gates, Vm, row_indices, dt_ms)
+    Gm_den, GE_den = _real_membrane_conductance_terms(backend, gates_new, row_indices)
+    assembled = _real_assemble_system(
+        Vi,
+        Ve,
+        Gm_den,
+        GE_den,
+        area_cm2,
+        Cm_abs,
+        Cx_abs,
+        Gx_abs,
+        left_i,
+        right_i,
+        left_e,
+        right_e,
+        Gax_i,
+        Gax_e,
+        Iinj_abs,
+        I_outward_den,
+        I_corr_den,
+        extracellular_drive_abs,
+        dt_ms,
+    )
+    return gates_new, assembled
+
+
 @partial(jax.jit, static_argnames=("backend", "solver"))
 def _real_one_step_proxy_precomputed(
     backend: Any,
@@ -1179,6 +1283,49 @@ def _real_one_step_proxy_precomputed(
     )
     Vi_new, Ve_new = _solve_by_name(solver, assembled)
     return Vi_new, Ve_new, gates_new
+
+
+@partial(jax.jit, static_argnames=("backend",))
+def _real_one_step_without_solve_precomputed(
+    backend: Any,
+    Vi: Any,
+    Ve: Any,
+    gates: Any,
+    row_indices: Any,
+    area: Any,
+    cm_over_dt: Any,
+    cx_over_dt: Any,
+    a00_static: Any,
+    a11_static: Any,
+    off_i: Any,
+    off_e: Any,
+    Iinj_abs: Any,
+    I_outward_abs: Any,
+    I_corr_abs: Any,
+    extracellular_drive_abs: Any,
+    dt_ms: Any,
+) -> tuple[Any, tuple[Any, Any, Any, Any, Any, Any, Any, Any]]:
+    Vm = Vi - Ve
+    gates_new = _real_gate_update(backend, gates, Vm, row_indices, dt_ms)
+    Gm_den, GE_den = _real_membrane_conductance_terms(backend, gates_new, row_indices)
+    assembled = _real_assemble_system_precomputed(
+        Vi,
+        Ve,
+        Gm_den,
+        GE_den,
+        area,
+        cm_over_dt,
+        cx_over_dt,
+        a00_static,
+        a11_static,
+        off_i,
+        off_e,
+        Iinj_abs,
+        I_outward_abs,
+        I_corr_abs,
+        extracellular_drive_abs,
+    )
+    return gates_new, assembled
 
 
 @jax.jit
@@ -1774,6 +1921,8 @@ def _stage_group(stage: str) -> str:
         return "solver"
     if stage == "observer_write":
         return "observer"
+    if stage == "one_step_without_solve":
+        return "one_step_without_solve"
     if stage == "one_step_proxy":
         return "one_step"
     return "other"
@@ -1787,6 +1936,7 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
     if primary_solver is None:
         primary_solver = fastest_block
     one_step = _primary_one_step(rows, metadata)
+    no_solve = _primary_one_step_without_solve(rows)
     hot_rows = sorted(rows, key=lambda item: float(item["mean_ms"]), reverse=True)
     group_sums = _stage_group_sums(rows, metadata)
     membrane_ratios = _membrane_ratio_notes(rows)
@@ -1878,6 +2028,25 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
                 "",
             ]
         )
+    if no_solve is not None and one_step is not None:
+        no_solve_share = 100.0 * float(no_solve["mean_ms"]) / float(one_step["mean_ms"])
+        lines.extend(
+            [
+                "## One-Step Without Solve Proxy",
+                "",
+                (
+                    f"`{no_solve['variant']}` is {float(no_solve['mean_ms']):.3f} ms mean, "
+                    f"or {no_solve_share:.1f}% of `{one_step['variant']}`."
+                ),
+                "",
+                (
+                    "This benchmark-only proxy fuses gate update, conductance terms, "
+                    "extracellular RHS, and system assembly, then materializes the "
+                    "assembled system plus updated gates to prevent dead-code elimination."
+                ),
+                "",
+            ]
+        )
     if membrane_ratios:
         lines.extend(["## MRG Membrane Compiler Signals", ""])
         lines.extend(f"- {note}" for note in membrane_ratios)
@@ -1907,6 +2076,7 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "- `system_assembly` uses real prepared double-cable coefficients and real extracellular forcing for one step.",
             "- `system_assembly/precomputed_static` precomposes static diagonal terms and absolute currents as a benchmark-only diagnostic.",
             "- `block_solve` runs selected solver functions on the real assembled system.",
+            "- `one_step_without_solve` fuses membrane and assembly work without the block solve; it materializes assembled coefficients/RHS, so use it as a non-solve upper-bound proxy rather than subtracting it from `one_step_proxy`.",
             "- `one_step_proxy` fuses gate update, conductance terms, assembly, and the selected benchmark one-step block solver for one step; `_precomputed_static` variants use the same precomposed assembly inputs.",
             "- `observer_write` is present only for observer-only VmRaster runs.",
         ]
@@ -1930,6 +2100,14 @@ def _primary_one_step(rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) 
         return row
     all_one_step = [item for item in rows if item["stage"] == "one_step_proxy"]
     return min(all_one_step, key=lambda item: float(item["mean_ms"])) if all_one_step else None
+
+
+def _primary_one_step_without_solve(rows: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    row = _row_for(rows, "one_step_without_solve", "real_materialized")
+    if row is not None:
+        return row
+    all_no_solve = [item for item in rows if item["stage"] == "one_step_without_solve"]
+    return min(all_no_solve, key=lambda item: float(item["mean_ms"])) if all_no_solve else None
 
 
 def _stage_group_sums(

@@ -23,6 +23,7 @@ KNOWN_STAGES = (
     "membrane_gate_update",
     "extracellular_rhs_drive",
     "system_assembly",
+    "one_step_without_solve",
     "one_step_proxy",
     "observer_write",
     "block_solve",

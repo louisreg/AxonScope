@@ -271,14 +271,16 @@ python benchmark/analysis/double_cable_real_stage_profile.py \
 
 It builds public AxonScope MRG/double-cable workloads, then measures prepared
 JAX stages for generated membrane work, extracellular RHS drive, system
-assembly, selected block solvers, a one-step proxy, and VmRaster observer
+assembly, selected block solvers, a materialized `one_step_without_solve`
+proxy, a one-step proxy with the active block solve, and VmRaster observer
 writes where applicable. For the MRG gated/leak-stack backend it also emits
 benchmark-only `*_gated_only` and `*_mask_mix` rows to separate generated
 gated-model work from leak/mask blending. It writes `real_stage_repeats.csv`,
 `real_stage_summary.csv`, `metadata.json`, `real_stage_report.md`, and plots.
-The report includes a hot-step decomposition, solver share, and MRG membrane
-compiler signals. This is an introspection tool under `benchmark/analysis`; it
-does not add or select a production runtime policy.
+The report includes a hot-step decomposition, solver share, a without-solve
+proxy note, and MRG membrane compiler signals. This is an introspection tool
+under `benchmark/analysis`; it does not add or select a production runtime
+policy.
 
 The profiler also emits a benchmark-only `system_assembly/precomputed_static`
 candidate and matching `_precomputed_static` one-step proxy variants. These
@@ -286,6 +288,12 @@ precompose static double-cable diagonal terms and absolute current terms before
 the measured JAX assembly call, then compare numerically against the baseline
 assembled system. Use them to decide whether a runtime-side precompute is worth
 implementing; do not treat them as a runtime policy.
+
+The `one_step_without_solve` rows fuse gate update, conductance terms,
+extracellular RHS, and system assembly, then materialize the assembled
+coefficients/RHS plus updated gates to avoid dead-code elimination. Treat them
+as non-solve upper-bound probes, not as values to subtract directly from the
+fused `one_step_proxy`.
 
 The selected block solvers may include benchmark-only candidates such as
 `pcr_soa_symmetric_batched`, which exploits the symmetric exact double-cable

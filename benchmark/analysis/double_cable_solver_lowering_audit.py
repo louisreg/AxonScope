@@ -248,7 +248,11 @@ def _selected_cases(
         case for case in cases if case.stage == "block_solve" and case.variant in wanted
     ]
     if include_one_step:
-        out.extend(case for case in cases if case.stage == "one_step_proxy")
+        out.extend(
+            case
+            for case in cases
+            if case.stage in {"one_step_proxy", "one_step_without_solve"}
+        )
     if include_membrane_stages:
         out.extend(
             case
