@@ -1105,6 +1105,28 @@ decisions need realistic workflow evidence.
   attributed to `kernel.wait`. Next validation: rerun the reduced double-cable
   CPU/GPU Kaggle matrix before claiming the GPU `stack_extracellular` bottleneck
   is fixed, then proceed to true low-level double-cable solver cartography.
+  Matching Kaggle P100-image CPU/GPU validation passed on 2026-07-07 at commit
+  `9df793b` with the same reduced double-cable recruitment matrix. CPU-path
+  artifacts live under
+  `benchmark/results/kaggle/20260707_105820_time_chunk_sweep_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU-path artifacts under
+  `benchmark/results/kaggle/20260707_105839_time_chunk_sweep_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  combined plots/report under
+  `benchmark/results/p11b_double_cable_stage_cpu_gpu_9df793b`, and repeat-phase
+  bottlenecks under
+  `benchmark/results/p11b_double_cable_stage_bottlenecks_9df793b`. The
+  targeted GPU bottleneck is resolved: `runtime.prepare.stack_extracellular`
+  falls from about 5.3-6.1 s at `64fca75` to about 0.12-0.14 s, with 5 unique
+  extracellular rows and 995 cache hits for 1000 axons. Best GPU visible times
+  improve by about 32-37% across full Vm, probe Vm, and observer-only. CPU
+  `stack_extracellular` also falls from about 0.62-0.69 s to about 0.12-0.13 s,
+  but the total CPU run is slower than `64fca75` because kernel/result spans
+  dominate this Kaggle run; do not treat it as a CPU regression claim without a
+  repeat. The remaining map before solver-algorithm work: CPU full/probe are
+  `kernel.wait` dominated, CPU observer-only/default still exposes large
+  `kernel.chunk_setup`/inter-chunk sync attribution, and GPU is now dominated
+  by solver/wait plus full/probe result assembly and the remaining
+  double-cable runtime preparation.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
