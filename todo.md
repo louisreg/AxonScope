@@ -1565,6 +1565,18 @@ decisions need realistic workflow evidence.
   the dominant fusion tuple/I/O pressure, then gate it on local correctness,
   P100 lowering, P100 hot-step, and only then realistic curve behavior if it
   actually wins.
+  Internal solver structure now starts to follow that boundary:
+  `DoubleCableLinearSystemStaticTerms` and `DoubleCableLinearSystem` name the
+  backend-owned static terms and assembled SoA system before solve, and the two
+  batch-native PCR/SoA runtime paths use this `prepare -> assemble -> solve`
+  shape. The first stage-state audit tool,
+  `benchmark/analysis/pcr_soa_stage_state_audit.py`, produced
+  `benchmark/results/p11b_gpu_pcr_soa_stage_state_audit` from the existing P100
+  HLO artifact. For `B=512`, actual `Nx=89`, fp32, the algorithmic state is 14
+  arrays (`~2.43 MiB`), while HLO commonly exposes 22 fusion outputs and up to
+  `~7.65 MiB` estimated fusion I/O. Next action: prototype one benchmark-only
+  state/staging variant that reduces those tuple outputs or proves they are not
+  worth attacking.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

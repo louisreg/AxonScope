@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypeAlias
+from typing import NamedTuple, TypeAlias
 
 import jax
 import jax.numpy as jnp
@@ -12,6 +12,133 @@ from axonscope.solvers.axon_runtime import SolverAxon
 # -----------------------------------------------------------------------------
 Array: TypeAlias = jnp.ndarray
 Carry: TypeAlias = tuple[Array, Array]  # generic (V, gates) carry used by scan
+
+
+class DoubleCableLinearSystem(NamedTuple):
+    """Batch-first SoA coefficients/RHS for an exact double-cable solve."""
+
+    a00: Array
+    a01: Array
+    a10: Array
+    a11: Array
+    off0: Array
+    off1: Array
+    rhs0: Array
+    rhs1: Array
+
+
+class DoubleCableLinearSystemStaticTerms(NamedTuple):
+    """Static-ish batch terms used to assemble a double-cable linear system."""
+
+    area: Array
+    cm_over_dt: Array
+    cx_over_dt: Array
+    cx_plus_gx: Array
+    a00_static: Array
+    a11_static: Array
+    off_i: Array
+    off_e: Array
+    background_abs: Array
+    zero_abs: Array
+
+
+def batch_double_cable_space(values: Array, *, batch_size: int, nx: int) -> Array:
+    """Broadcast scalar or space-only values to batch-first double-cable space."""
+
+    arr = jnp.asarray(values)
+    if arr.ndim == 0:
+        return jnp.broadcast_to(arr, (batch_size, nx))
+    if arr.ndim == 1:
+        return jnp.broadcast_to(arr[None, :], (batch_size, nx))
+    return arr
+
+
+def prepare_double_cable_linear_system_static_terms(
+    *,
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
+    dt_ms: Array,
+    batch_size: int,
+    nx: int,
+) -> DoubleCableLinearSystemStaticTerms:
+    """Prepare reusable batch-first terms for double-cable system assembly."""
+
+    area = batch_double_cable_space(area_cm2, batch_size=batch_size, nx=nx)
+    cm_over_dt = batch_double_cable_space(Cm_abs, batch_size=batch_size, nx=nx) / dt_ms
+    cx_over_dt = batch_double_cable_space(Cx_abs, batch_size=batch_size, nx=nx) / dt_ms
+    Gx_abs_batch = batch_double_cable_space(Gx_abs, batch_size=batch_size, nx=nx)
+    left_i_batch = batch_double_cable_space(left_i, batch_size=batch_size, nx=nx)
+    right_i_batch = batch_double_cable_space(right_i, batch_size=batch_size, nx=nx)
+    left_e_batch = batch_double_cable_space(left_e, batch_size=batch_size, nx=nx)
+    right_e_batch = batch_double_cable_space(right_e, batch_size=batch_size, nx=nx)
+    background_batch = batch_double_cable_space(I_background, batch_size=batch_size, nx=nx)
+
+    return DoubleCableLinearSystemStaticTerms(
+        area=area,
+        cm_over_dt=cm_over_dt,
+        cx_over_dt=cx_over_dt,
+        cx_plus_gx=cx_over_dt + Gx_abs_batch,
+        a00_static=cm_over_dt + left_i_batch + right_i_batch,
+        a11_static=cm_over_dt + cx_over_dt + Gx_abs_batch + left_e_batch + right_e_batch,
+        off_i=-jnp.asarray(Gax_i),
+        off_e=-jnp.asarray(Gax_e),
+        background_abs=background_batch * area,
+        zero_abs=jnp.zeros_like(area),
+    )
+
+
+def assemble_double_cable_linear_system(
+    *,
+    Vi: Array,
+    Ve: Array,
+    Gm_abs: Array,
+    GE_abs: Array,
+    static: DoubleCableLinearSystemStaticTerms,
+    Iinj_abs: Array,
+    I_outward_abs: Array,
+    I_corr_abs: Array,
+    extracellular_drive_abs: Array,
+) -> DoubleCableLinearSystem:
+    """Assemble the exact double-cable SoA block-tridiagonal system."""
+
+    Vm = Vi - Ve
+    cm_plus_gm = static.cm_over_dt + Gm_abs
+    membrane_charge = static.cm_over_dt * Vm
+    a01 = -cm_plus_gm
+    return DoubleCableLinearSystem(
+        a00=static.a00_static + Gm_abs,
+        a01=a01,
+        a10=a01,
+        a11=static.a11_static + Gm_abs,
+        off0=static.off_i,
+        off1=static.off_e,
+        rhs0=membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs,
+        rhs1=(
+            -membrane_charge
+            - GE_abs
+            + static.cx_over_dt * Ve
+            + extracellular_drive_abs
+            + I_outward_abs
+            + I_corr_abs
+        ),
+    )
+
+
+def solve_double_cable_linear_system_pcr_soa_batched(
+    system: DoubleCableLinearSystem,
+) -> tuple[Array, Array]:
+    """Solve a batch-first double-cable linear system with the PCR/SoA route."""
+
+    return solve_block_tridiagonal_2x2_pcr_soa_batched(*system)
 
 
 def initial_voltage(axon: object, Nx: int, dtype_local: jnp.dtype) -> Array:

@@ -19,9 +19,11 @@ from .batch_inputs import (
 from .common import (
     Array,
     apply_diffusion_operator,
+    assemble_double_cable_linear_system,
+    prepare_double_cable_linear_system_static_terms,
+    solve_double_cable_linear_system_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
-    solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
@@ -1739,30 +1741,25 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
 
-    def batch_space(values: Array) -> Array:
-        arr = jnp.asarray(values)
-        if arr.ndim == 0:
-            return jnp.broadcast_to(arr, (batch_size, nx))
-        if arr.ndim == 1:
-            return jnp.broadcast_to(arr[None, :], (batch_size, nx))
-        return arr
-
-    area_batch = batch_space(area_cm2)
-    cm_over_dt = batch_space(Cm_abs) / dt_ms
-    cx_over_dt = batch_space(Cx_abs) / dt_ms
-    Gx_abs_batch = batch_space(Gx_abs)
-    left_i_batch = batch_space(left_i)
-    right_i_batch = batch_space(right_i)
-    left_e_batch = batch_space(left_e)
-    right_e_batch = batch_space(right_e)
-    background_batch = batch_space(I_background)
-
-    a00_static = cm_over_dt + left_i_batch + right_i_batch
-    a11_static = cm_over_dt + cx_over_dt + Gx_abs_batch + left_e_batch + right_e_batch
-    background_abs = background_batch * area_batch
-    zero_abs = jnp.zeros_like(area_batch)
-    off_i = -jnp.asarray(Gax_i)
-    off_e = -jnp.asarray(Gax_e)
+    linear_static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=I_background,
+        dt_ms=dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+    )
+    area_batch = linear_static.area
+    background_abs = linear_static.background_abs
+    zero_abs = linear_static.zero_abs
     vext_previous_mV = jnp.concatenate(
         [
             extracellular_potential_initial_previous_mV[:, None, :],
@@ -1771,8 +1768,8 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         axis=1,
     )
     extracellular_rhs_drive = (
-        (cx_over_dt + Gx_abs_batch)[:, None, :] * extracellular_potential_mid_mV
-        - cx_over_dt[:, None, :] * vext_previous_mV
+        linear_static.cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
+        - linear_static.cx_over_dt[:, None, :] * vext_previous_mV
     )
 
     if intracellular_current_density_mid is None:
@@ -1900,36 +1897,20 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
 
-        Vm = Vi - Ve
-        cm_plus_gm = cm_over_dt + Gm_abs
-        membrane_charge = cm_over_dt * Vm
-
-        a00 = a00_static + Gm_abs
-        a01 = -cm_plus_gm
-        rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
-
-        a10 = a01
-        a11 = a11_static + Gm_abs
-        rhs1 = (
-            -membrane_charge
-            - GE_abs
-            + cx_over_dt * Ve
-            + extracellular_drive_abs
-            + I_outward_abs
-            + I_corr_abs
+        system = assemble_double_cable_linear_system(
+            Vi=Vi,
+            Ve=Ve,
+            Gm_abs=Gm_abs,
+            GE_abs=GE_abs,
+            static=linear_static,
+            Iinj_abs=Iinj_abs,
+            I_outward_abs=I_outward_abs,
+            I_corr_abs=I_corr_abs,
+            extracellular_drive_abs=extracellular_drive_abs,
         )
 
         if double_cable_block_solver == "pcr_soa":
-            return solve_block_tridiagonal_2x2_pcr_soa_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off_i,
-                off_e,
-                rhs0,
-                rhs1,
-            )
+            return solve_double_cable_linear_system_pcr_soa_batched(system)
         raise ValueError(
             f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
         )
@@ -2498,6 +2479,26 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
 
+    linear_static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=I_background,
+        dt_ms=dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+    )
+    area_batch = linear_static.area
+    background_abs = linear_static.background_abs
+    zero_abs = linear_static.zero_abs
+
     def batch_space(values: Array) -> Array:
         arr = jnp.asarray(values)
         if arr.ndim == 0:
@@ -2505,23 +2506,6 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         if arr.ndim == 1:
             return jnp.broadcast_to(arr[None, :], (batch_size, nx))
         return arr
-
-    area_batch = batch_space(area_cm2)
-    cm_over_dt = batch_space(Cm_abs) / dt_ms
-    cx_over_dt = batch_space(Cx_abs) / dt_ms
-    Gx_abs_batch = batch_space(Gx_abs)
-    left_i_batch = batch_space(left_i)
-    right_i_batch = batch_space(right_i)
-    left_e_batch = batch_space(left_e)
-    right_e_batch = batch_space(right_e)
-    background_batch = batch_space(I_background)
-
-    a00_static = cm_over_dt + left_i_batch + right_i_batch
-    a11_static = cm_over_dt + cx_over_dt + Gx_abs_batch + left_e_batch + right_e_batch
-    background_abs = background_batch * area_batch
-    zero_abs = jnp.zeros_like(area_batch)
-    off_i = -jnp.asarray(Gax_i)
-    off_e = -jnp.asarray(Gax_e)
     use_factorized_vext = extracellular_footprint_mV_per_A is not None
     if use_factorized_vext:
         if extracellular_current_mid_A is None:
@@ -2564,8 +2548,8 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
             axis=1,
         )
         extracellular_rhs_drive = (
-            (cx_over_dt + Gx_abs_batch)[:, None, :] * extracellular_potential_mid_mV
-            - cx_over_dt[:, None, :] * vext_previous_mV
+            linear_static.cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
+            - linear_static.cx_over_dt[:, None, :] * vext_previous_mV
         )
         step_count = int(extracellular_rhs_drive.shape[1])
 
@@ -2694,36 +2678,20 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
 
-        Vm = Vi - Ve
-        cm_plus_gm = cm_over_dt + Gm_abs
-        membrane_charge = cm_over_dt * Vm
-
-        a00 = a00_static + Gm_abs
-        a01 = -cm_plus_gm
-        rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
-
-        a10 = a01
-        a11 = a11_static + Gm_abs
-        rhs1 = (
-            -membrane_charge
-            - GE_abs
-            + cx_over_dt * Ve
-            + extracellular_drive_abs
-            + I_outward_abs
-            + I_corr_abs
+        system = assemble_double_cable_linear_system(
+            Vi=Vi,
+            Ve=Ve,
+            Gm_abs=Gm_abs,
+            GE_abs=GE_abs,
+            static=linear_static,
+            Iinj_abs=Iinj_abs,
+            I_outward_abs=I_outward_abs,
+            I_corr_abs=I_corr_abs,
+            extracellular_drive_abs=extracellular_drive_abs,
         )
 
         if double_cable_block_solver == "pcr_soa":
-            return solve_block_tridiagonal_2x2_pcr_soa_batched(
-                a00,
-                a01,
-                a10,
-                a11,
-                off_i,
-                off_e,
-                rhs0,
-                rhs1,
-            )
+            return solve_double_cable_linear_system_pcr_soa_batched(system)
         raise ValueError(
             f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
         )
@@ -2741,8 +2709,8 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
                 Iinj_abs, current_A, previous_current_A, local_step = step_inputs
             extracellular_drive_abs = (
                 (
-                    (cx_over_dt + Gx_abs_batch) * current_to_space(current_A)
-                    - cx_over_dt * current_to_space(previous_current_A)
+                    linear_static.cx_plus_gx * current_to_space(current_A)
+                    - linear_static.cx_over_dt * current_to_space(previous_current_A)
                 )
                 * footprint_batch
             )

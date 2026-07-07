@@ -302,6 +302,16 @@ next optimization question GPU-local and solver-local: reduce the PCR stage
 tuple/live state or change staging without introducing model-specific runtime
 paths.
 
+The solver boundary now has an internal named shape for this work:
+`DoubleCableLinearSystemStaticTerms` prepares backend-owned static terms,
+`DoubleCableLinearSystem` names the assembled SoA system, and the batch-native
+PCR/SoA paths follow `prepare -> assemble -> solve`. A first
+`pcr_soa_stage_state_audit.py` report under
+`benchmark/results/p11b_gpu_pcr_soa_stage_state_audit` shows the algorithmic
+state at `B=512`, actual `Nx=89`, fp32 is 14 batch-space arrays (`~2.43 MiB`),
+while optimized HLO commonly exposes 22 fusion outputs and up to `~7.65 MiB`
+estimated fusion I/O.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as

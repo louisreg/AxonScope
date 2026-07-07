@@ -141,7 +141,12 @@ Immediate GPU-only benchmark slice:
 
 1. Add a PCR/SoA stage-state audit that reports, per stride, the carried arrays,
    output tuple shape, estimated I/O, and which values are structurally required
-   by the next stride.
+   by the next stride. Implemented in
+   `benchmark/analysis/pcr_soa_stage_state_audit.py`; the first P100-shape
+   offline report is under `benchmark/results/p11b_gpu_pcr_soa_stage_state_audit`.
+   For `B=512`, actual `Nx=89`, fp32, the algorithmic PCR/SoA state is 14
+   batch-space arrays (`~2.43 MiB`), while optimized HLO rows commonly expose
+   22 fusion outputs and up to `~7.65 MiB` estimated fusion I/O.
 2. Prototype one benchmark-only stage-state variant that aims to reduce live
    PCR output state without changing public routing. Candidate directions:
    carry fewer structurally redundant block components, split a stage to reduce

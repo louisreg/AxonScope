@@ -6,10 +6,13 @@ import jax.numpy as jnp
 
 from axonscope.backends.jax.common import (
     apply_diffusion_operator,
+    assemble_double_cable_linear_system,
+    prepare_double_cable_linear_system_static_terms,
     double_cable_block_residual_norm,
     diffusion_operator_coeffs,
     double_cable_power_bucket,
     pad_double_cable_system_to_power_bucket,
+    solve_double_cable_linear_system_pcr_soa_batched,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
@@ -106,6 +109,140 @@ def test_scalar_block_tridiagonal_solver_matches_generic_2x2_solver():
     scalar = jnp.stack([scalar0, scalar1], axis=1)
 
     np.testing.assert_allclose(np.asarray(scalar), np.asarray(generic), rtol=1e-6, atol=1e-6)
+
+
+def test_double_cable_linear_system_assembly_matches_explicit_formula():
+    batch_size = 3
+    n = 5
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+
+    Vi = -70.0 + 0.2 * batch + 0.1 * x
+    Ve = 0.5 * batch - 0.05 * x
+    Gm_abs = 0.02 + 0.001 * x + 0.0002 * batch
+    GE_abs = -1.0 + 0.02 * x
+    Iinj_abs = 0.01 * batch + 0.002 * x
+    I_outward_abs = 0.003 * x
+    I_corr_abs = 0.001 * batch
+    extracellular_drive_abs = 0.04 + 0.005 * x
+
+    Cm_abs = jnp.linspace(0.08, 0.12, n, dtype=jnp.float32)
+    Cx_abs = jnp.linspace(0.02, 0.03, n, dtype=jnp.float32)
+    Gx_abs = jnp.linspace(0.004, 0.006, n, dtype=jnp.float32)
+    Gax_i = jnp.linspace(0.2, 0.3, n - 1, dtype=jnp.float32)
+    Gax_e = jnp.linspace(0.05, 0.07, n - 1, dtype=jnp.float32)
+    left_i = jnp.linspace(0.1, 0.2, n, dtype=jnp.float32)
+    right_i = jnp.linspace(0.15, 0.25, n, dtype=jnp.float32)
+    left_e = jnp.linspace(0.01, 0.02, n, dtype=jnp.float32)
+    right_e = jnp.linspace(0.012, 0.022, n, dtype=jnp.float32)
+    area = jnp.linspace(1.0, 1.2, n, dtype=jnp.float32)
+    background = jnp.zeros((n,), dtype=jnp.float32)
+    dt_ms = jnp.asarray(0.01, dtype=jnp.float32)
+
+    static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=background,
+        dt_ms=dt_ms,
+        batch_size=batch_size,
+        nx=n,
+    )
+    system = assemble_double_cable_linear_system(
+        Vi=Vi,
+        Ve=Ve,
+        Gm_abs=Gm_abs,
+        GE_abs=GE_abs,
+        static=static,
+        Iinj_abs=Iinj_abs,
+        I_outward_abs=I_outward_abs,
+        I_corr_abs=I_corr_abs,
+        extracellular_drive_abs=extracellular_drive_abs,
+    )
+
+    cm_over_dt = Cm_abs[None, :] / dt_ms
+    cx_over_dt = Cx_abs[None, :] / dt_ms
+    vm = Vi - Ve
+    membrane_charge = cm_over_dt * vm
+    np.testing.assert_allclose(
+        np.asarray(system.a00),
+        np.asarray(cm_over_dt + left_i[None, :] + right_i[None, :] + Gm_abs),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(np.asarray(system.a01), np.asarray(-(cm_over_dt + Gm_abs)), rtol=1e-6)
+    np.testing.assert_allclose(np.asarray(system.a10), np.asarray(system.a01), rtol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(system.a11),
+        np.asarray(cm_over_dt + cx_over_dt + Gx_abs[None, :] + left_e[None, :] + right_e[None, :] + Gm_abs),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(np.asarray(system.off0), np.asarray(-Gax_i), rtol=1e-6)
+    np.testing.assert_allclose(np.asarray(system.off1), np.asarray(-Gax_e), rtol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(system.rhs0),
+        np.asarray(membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs),
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(system.rhs1),
+        np.asarray(
+            -membrane_charge
+            - GE_abs
+            + cx_over_dt * Ve
+            + extracellular_drive_abs
+            + I_outward_abs
+            + I_corr_abs
+        ),
+        rtol=1e-6,
+    )
+
+
+def test_double_cable_linear_system_solver_wrapper_matches_direct_pcr_soa():
+    batch_size = 4
+    n = 7
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+    edge = jnp.arange(n - 1, dtype=jnp.float32)[None, :]
+
+    system = assemble_double_cable_linear_system(
+        Vi=-70.0 + 0.1 * x + 0.01 * batch,
+        Ve=0.2 * batch - 0.03 * x,
+        Gm_abs=0.05 + 0.002 * x + 0.001 * batch,
+        GE_abs=-0.5 + 0.03 * x,
+        static=prepare_double_cable_linear_system_static_terms(
+            area_cm2=jnp.ones((n,), dtype=jnp.float32),
+            Cm_abs=jnp.linspace(0.08, 0.11, n, dtype=jnp.float32),
+            Cx_abs=jnp.linspace(0.02, 0.025, n, dtype=jnp.float32),
+            Gx_abs=jnp.linspace(0.004, 0.005, n, dtype=jnp.float32),
+            Gax_e=0.04 + 0.003 * edge[0],
+            Gax_i=0.20 + 0.005 * edge[0],
+            left_i=jnp.linspace(0.10, 0.20, n, dtype=jnp.float32),
+            right_i=jnp.linspace(0.11, 0.21, n, dtype=jnp.float32),
+            left_e=jnp.linspace(0.01, 0.02, n, dtype=jnp.float32),
+            right_e=jnp.linspace(0.011, 0.021, n, dtype=jnp.float32),
+            I_background=jnp.zeros((n,), dtype=jnp.float32),
+            dt_ms=jnp.asarray(0.01, dtype=jnp.float32),
+            batch_size=batch_size,
+            nx=n,
+        ),
+        Iinj_abs=0.001 * x,
+        I_outward_abs=0.002 * batch,
+        I_corr_abs=0.0005 * x,
+        extracellular_drive_abs=0.03 + 0.004 * x,
+    )
+
+    wrapped = solve_double_cable_linear_system_pcr_soa_batched(system)
+    direct = solve_block_tridiagonal_2x2_pcr_soa_batched(*system)
+
+    np.testing.assert_allclose(np.asarray(wrapped[0]), np.asarray(direct[0]), rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(np.asarray(wrapped[1]), np.asarray(direct[1]), rtol=0.0, atol=0.0)
 
 
 def test_pcr_block_tridiagonal_solver_matches_thomas_for_non_power_of_two_size():

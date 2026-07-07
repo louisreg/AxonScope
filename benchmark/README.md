@@ -380,6 +380,22 @@ python benchmark/analysis/hlo_fusion_summary.py \
   --output benchmark/results/<hlo-report>
 ```
 
+To map the current PCR/SoA stage state against those HLO fusion estimates, use:
+
+```bash
+python benchmark/analysis/pcr_soa_stage_state_audit.py \
+  --batch-size 512 \
+  --nx 89 \
+  --dtype float32 \
+  --hlo-fusion-summary benchmark/results/<hlo-report>/hlo_fusion_summary.csv \
+  --output benchmark/results/<stage-state-report>
+```
+
+This writes `pcr_soa_stage_state_summary.csv`,
+`pcr_soa_stage_state_metrics.json`, and `pcr_soa_stage_state_report.md`. It is
+a structural benchmark aid for choosing state/staging candidates; it is not a
+solver route and does not make runtime policy claims.
+
 Run the lowering audit on Kaggle GPU when inspecting GPU-specific optimized HLO:
 
 ```bash
