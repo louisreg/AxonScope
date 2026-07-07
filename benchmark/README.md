@@ -256,6 +256,39 @@ The matrix report writes normalized rows, best-policy rows, heatmaps, CPU/GPU
 speedup plots, exclusive pipeline-group stage plots, kernel/result sub-stage
 plots, and separate CPU RSS, GPU JAX-device, and GPU `nvidia-smi` memory plots.
 
+For real double-cable compiler/runtime stage cartography before changing solver
+routes, use the benchmark-only profiler:
+
+```bash
+python benchmark/analysis/double_cable_real_stage_profile.py \
+  --platform cpu \
+  --preset quick \
+  --n-axons 4 \
+  --nx 21 \
+  --repeats 2 \
+  --warmups 1
+```
+
+It builds public AxonScope double-cable workloads, then measures prepared JAX
+stages for generated membrane work, extracellular RHS drive, system assembly,
+selected block solvers, a one-step proxy, and VmRaster observer writes where
+applicable. It writes `real_stage_repeats.csv`, `real_stage_summary.csv`,
+`metadata.json`, `real_stage_report.md`, and plots. This is an introspection
+tool under `benchmark/analysis`; it does not add or select a production runtime
+policy.
+
+The same profiler can run on Kaggle:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --campaign double_cable_real_stage_profile \
+  --preset quick \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  -- --n-axons 32 --nx 51 --repeats 5 --warmups 1
+```
+
 ## Publishability
 
 A benchmark result is publishable only if the run directory contains the full

@@ -1183,9 +1183,16 @@ decisions need realistic workflow evidence.
   `docs/architecture/p11b_double_cable_solver_compiler_audit_2026_07_07.md`.
   Current decision: do not reopen old split/associative-transfer/PCR-layout
   variants without a new hypothesis; keep high-level amplitude batching for
-  later; next build a real double-cable compiler-stage profile that separates
-  generated membrane work, system assembly, block solve, observer write,
-  launch/finalize, and result boundaries before adding any new solver route.
+  later. First real compiler-stage profiler added under
+  `benchmark/analysis/double_cable_real_stage_profile.py`: it builds public
+  AxonScope double-cable workloads, reuses current backend/runtime preparation,
+  and writes `real_stage_repeats.csv`, `real_stage_summary.csv`, metadata,
+  plots, and `real_stage_report.md` for generated membrane gate/conductance
+  work, extracellular RHS drive, system assembly, selected block solvers, a
+  one-step proxy, and VmRaster observer writes. The Kaggle runner exposes it as
+  `--campaign double_cable_real_stage_profile`. Next use this to separate
+  solver execution from generated membrane, assembly, launch/finalize, and
+  result boundaries before adding any new solver route.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

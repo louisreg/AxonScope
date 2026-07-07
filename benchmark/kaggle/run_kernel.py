@@ -30,7 +30,9 @@ DEFAULT_TITLE = None
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
 TIME_CHUNK_SWEEP_CAMPAIGN = "time_chunk_sweep"
 SOLVER_STAGE_PROFILE_CAMPAIGN = "double_cable_solver_stage_profile"
-CAMPAIGNS = (TIME_CHUNK_SWEEP_CAMPAIGN, SOLVER_STAGE_PROFILE_CAMPAIGN)
+REAL_STAGE_PROFILE_CAMPAIGN = "double_cable_real_stage_profile"
+STANDALONE_CAMPAIGNS = (SOLVER_STAGE_PROFILE_CAMPAIGN, REAL_STAGE_PROFILE_CAMPAIGN)
+CAMPAIGNS = (TIME_CHUNK_SWEEP_CAMPAIGN, *STANDALONE_CAMPAIGNS)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,15 +154,15 @@ def validate_benchmark_target(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
 ) -> None:
-    if args.campaign == SOLVER_STAGE_PROFILE_CAMPAIGN:
+    if args.campaign in STANDALONE_CAMPAIGNS:
         if args.script is not None:
             parser.error(
-                f"--script is not used with --campaign {SOLVER_STAGE_PROFILE_CAMPAIGN}."
+                f"--script is not used with --campaign {args.campaign}."
             )
         return
     if args.script is None:
         parser.error(
-            f"--script is required unless --campaign {SOLVER_STAGE_PROFILE_CAMPAIGN} is used."
+            "--script is required unless a standalone --campaign is used."
         )
 
 
@@ -183,7 +185,7 @@ def normalize_compute_args(
     if args.machine_shape is None:
         args.machine_shape = "cpu" if args.platform == "cpu" else "NvidiaTeslaP100"
     if args.preset is None:
-        if args.campaign == SOLVER_STAGE_PROFILE_CAMPAIGN:
+        if args.campaign in STANDALONE_CAMPAIGNS:
             args.preset = "quick"
         else:
             args.preset = "quick" if args.platform == "cpu" else "gpu_smoke"

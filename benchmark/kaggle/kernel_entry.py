@@ -68,7 +68,7 @@ def _load_config() -> dict[str, Any]:
 
 
 def _default_run_id(config: dict[str, Any]) -> str:
-    script = _safe_token(config.get("script", "benchmark"))
+    script = _safe_token(config.get("campaign") or config.get("script") or "benchmark")
     preset = _safe_token(config.get("preset", "preset"))
     platform_name = _safe_token(config.get("platform", "platform"))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -128,6 +128,19 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
             "benchmark/analysis/double_cable_solver_stage_profile.py",
             "--platform",
             str(config["platform"]),
+            "--output",
+            str(output_dir),
+        ]
+        command.extend(str(value) for value in config.get("benchmark_args", ()))
+        return command
+    if campaign == "double_cable_real_stage_profile":
+        command = [
+            sys.executable,
+            "benchmark/analysis/double_cable_real_stage_profile.py",
+            "--platform",
+            str(config["platform"]),
+            "--preset",
+            str(config["preset"]),
             "--output",
             str(output_dir),
         ]
