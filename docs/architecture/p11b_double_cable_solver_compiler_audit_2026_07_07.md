@@ -333,6 +333,18 @@ regressed (`0.417 ms` to `0.474 ms` for isolated `pcr_soa_batched`). The code
 was reverted. Treat this as negative evidence: do not optimize isolated HLO
 instruction counts unless they reduce measured hot-path time.
 
+The next structural gate is not another PCR/SoA retuning pass. The solver
+options note recommends comparing PCR against a stronger many-small-systems
+Thomas-family baseline before inventing more PCR probes. The existing
+`solve_block_tridiagonal_2x2_scalar_batched` implementation is now exposed to
+the benchmark lowering and real-stage tools as `thomas_batched_scan`, alongside
+`thomas_vmap` and `pcr_soa_batched`. This remains benchmark-only and does not
+add public runtime solver policy. Local smoke artifacts are under
+`benchmark/results/p11b_thomas_batched_scan_real_smoke` and
+`benchmark/results/p11b_thomas_batched_scan_lowering_smoke`; the next decision
+gate is a fresh P100 lowering and hot-stage comparison on the real
+`Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only workload.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as

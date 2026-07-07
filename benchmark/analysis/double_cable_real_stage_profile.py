@@ -37,6 +37,7 @@ from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
     solve_block_tridiagonal_2x2_scalar,
+    solve_block_tridiagonal_2x2_scalar_batched,
 )
 from axonscope.backends.jax.input_lowering import (
     lower_double_cable_extracellular_input,
@@ -183,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=(
             "active_auto",
             "thomas_vmap",
+            "thomas_batched_scan",
             "pcr_matrix_vmap",
             "pcr_soa_vmap",
             "pcr_soa_batched",
@@ -200,6 +202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         choices=(
             "active_auto",
+            "thomas_batched_scan",
             "pcr_soa",
             "pcr_soa_batched",
             "pcr_soa_shift_batched",
@@ -1348,6 +1351,22 @@ def _solve_thomas_vmap(
 
 
 @jax.jit
+def _solve_thomas_batched_scan(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_scalar_batched(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
 def _solve_pcr_matrix_vmap(
     a00: Any,
     a01: Any,
@@ -1559,6 +1578,7 @@ def _solver_cases(
             names.append(resolved)
     mapping = {
         "thomas_vmap": _solve_thomas_vmap,
+        "thomas_batched_scan": _solve_thomas_batched_scan,
         "pcr_matrix_vmap": _solve_pcr_matrix_vmap,
         "pcr_soa_vmap": _solve_pcr_soa_vmap,
         "pcr_soa_batched": _solve_pcr_soa_batched,
@@ -1595,6 +1615,8 @@ def _solve_by_name(
 ) -> tuple[Any, Any]:
     if solver == "thomas":
         return _solve_thomas_vmap(*assembled)
+    if solver == "thomas_batched_scan":
+        return _solve_thomas_batched_scan(*assembled)
     if solver == "pcr":
         return _solve_pcr_matrix_vmap(*assembled)
     if solver in {"pcr_soa", "pcr_adaptive", "pcr_soa_batched"}:

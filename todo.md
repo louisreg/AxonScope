@@ -1598,6 +1598,18 @@ decisions need realistic workflow evidence.
   instruction shape. Focus on a measured structural runtime cost: launch/stage
   count, memory traffic across stages, or an actually different GPU solve
   structure from the solver-roadmap documents.
+  Current structural candidate: gate `thomas_batched_scan`, the existing
+  batch-native block-Thomas scan (`solve_block_tridiagonal_2x2_scalar_batched`),
+  against `thomas_vmap` and `pcr_soa_batched` on real double-cable inputs. This
+  follows the GPU solver-options recommendation to compare PCR against a strong
+  many-small-systems Thomas-family baseline before inventing more PCR probes.
+  It is exposed only in benchmark lowering/real-stage tools, not public runtime
+  solver policy. Local CPU smoke artifacts:
+  `benchmark/results/p11b_thomas_batched_scan_real_smoke` and
+  `benchmark/results/p11b_thomas_batched_scan_lowering_smoke`. Next gate:
+  fresh P100 lowering and real-stage timing for `thomas_vmap`,
+  `thomas_batched_scan`, and `pcr_soa_batched` on `Naxons=512`, requested
+  `Nx=101`, actual `Nx=89`, observer-only MRG shape.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

@@ -157,6 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     unknown = set(variants) - {
         "active_auto",
         "thomas_vmap",
+        "thomas_batched_scan",
         "pcr_matrix_vmap",
         "pcr_soa_vmap",
         "pcr_soa_batched",
