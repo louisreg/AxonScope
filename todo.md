@@ -1143,10 +1143,25 @@ decisions need realistic workflow evidence.
   runner now exposes it as
   `--campaign double_cable_solver_stage_profile`, and the profiler can run
   `--coefficient-mode both` to compare shared versus per-row coefficient
-  layouts in one artifact. Next: run the same tool on Kaggle CPU/GPU with
-  representative `Nx`/batch grids, then use the report to decide whether the
-  immediate low-level target is Thomas scan structure, batch-native PCR,
-  coefficient/RHS assembly, or observer write overhead.
+  layouts in one artifact. Matching Kaggle P100-image CPU/GPU solver-stage
+  cartography was captured at commit `08566b3` with `Nx=21,51,101`,
+  `batch_size=4,32,128`, fp32, shared+batched coefficients, five repeats, and
+  one warmup. CPU-path artifacts live under
+  `benchmark/results/kaggle/20260707_120045_double_cable_solver_stage_profile_quick_cpu_NvidiaTeslaP100/outputs/extracted_cpu`,
+  GPU-path artifacts under
+  `benchmark/results/kaggle/20260707_115954_double_cable_solver_stage_profile_quick_gpu_NvidiaTeslaP100/outputs/extracted_gpu`,
+  and the combined report under
+  `benchmark/results/p11b_double_cable_solver_stage_cpu_gpu_08566b3`. The
+  synthetic map is clear: CPU should stay on Thomas-style scan variants
+  (`thomas_vmap`/`thomas_batched_scan`), while GPU should focus on PCR/SoA
+  variants (`pcr_soa_vmap`/`pcr_soa_batched`, with `pcr_matrix_vmap` sometimes
+  competitive). GPU only wins once batch/shape is large enough; for small
+  batches CPU Thomas is faster. At the largest tested shape, best GPU PCR
+  solve time is about 0.35-0.47 ms while synthetic assembly/gate/observer
+  writes are about 0.25-0.35 ms each, so after solver-choice cleanup kernel
+  fusion/launch overhead may become the next low-level target. Do not turn
+  this into high-level runtime policy yet; validate any backend solver-layer
+  change in real double-cable curve benchmarks.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
