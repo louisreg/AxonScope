@@ -80,6 +80,26 @@ remaining transposes in the same-diameter run. Because that run also changes
 the membrane backend and generated-model status, this should be treated as a
 compiler/backend signal rather than a pure solver signal.
 
+## Follow-Up Fusion/Layout View
+
+The next tooling slice added `benchmark/analysis/hlo_fusion_summary.py` plus
+automatic fusion/layout summaries in the lowering audit. Re-reading the two
+GPU artifact roots above shows the dominant isolated PCR/SoA pattern more
+clearly:
+
+- both `pcr_soa_batched` and `pcr_soa_vmap` compile to seven solver fusions;
+- the five large reduction/update fusions are `loop_select_subtract*`;
+- the four central reduction fusions each return 22 arrays of shape
+  `[512,89]`, about 3.82 MiB of output per fusion in fp32;
+- the last `loop_add_fusion` returns the two solution arrays;
+- both variants use the same batch-first `[512,89]{1,0}` entry layout, while
+  gather bodies still expose many `[89,512,1]{2,0,1}` gather intermediates
+  that are bitcast back to `[512,89]`.
+
+This reinforces the same decision: the next PCR/SoA work should inspect
+fusion bodies, live tuples, and gather/layout behavior inside the current
+solver, not add a vmap-vs-batched public route.
+
 ## Decision
 
 Do not add a new `pcr_soa_vmap` versus `pcr_soa_batched` runtime route. The
@@ -96,4 +116,3 @@ public or policy route:
 3. Prototype solver changes only as benchmark-only candidates with correctness
    gates, then validate in real double-cable curve benchmarks before any
    runtime policy change.
-

@@ -1253,6 +1253,22 @@ decisions need realistic workflow evidence.
   result. Decision: do not add a new vmap-vs-batched runtime route; next drill
   into current PCR/SoA fusion bodies/memory layout and CPU generated-membrane
   lowering before any solver candidate or policy change.
+  Follow-up tooling now adds `benchmark/analysis/hlo_fusion_summary.py` and
+  automatic `hlo_fusion_summary.csv`, `hlo_layout_summary.csv`,
+  `hlo_fusion_metrics.json`, and `hlo_fusion_report.md` outputs to the
+  lowering audit when optimized HLO is available. The audit can also include
+  real generated membrane/system stages with `--include-membrane-stages` and
+  `--include-system-stages`. A local CPU smoke passed under
+  `benchmark/results/p11b_lowering_membrane_smoke` for `Naxons=2`,
+  requested `Nx=21`, different diameters, generated membrane stages, system
+  assembly, extracellular drive, and observer write. Offline analysis of the
+  existing Kaggle GPU HLO roots confirms the dominant solver-level shape:
+  each isolated PCR/SoA variant has seven fusions, with repeated
+  `loop_select_subtract*` fusions returning 22 `[512,89]` arrays each
+  (~3.82 MiB fp32 output per fusion) before the final two-array
+  `loop_add_fusion`. Next low-level action: inspect whether those large live
+  tuple/fusion outputs can be reduced, recomputed, or staged differently while
+  preserving exactness.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

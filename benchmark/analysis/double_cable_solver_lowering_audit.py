@@ -22,6 +22,7 @@ from benchmark.analysis.double_cable_real_stage_profile import (  # noqa: E402
     _prepare_real_stage_inputs,
     _select_device,
 )
+from benchmark.analysis.hlo_fusion_summary import write_hlo_fusion_artifacts  # noqa: E402
 from benchmark.workloads.curve_options import PRESETS  # noqa: E402
 
 
@@ -118,8 +119,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Comma-separated lowered compiler_ir dialects to write.",
     )
     parser.add_argument("--include-one-step", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--include-membrane-stages",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Also lower generated membrane gate/conductance stages.",
+    )
+    parser.add_argument(
+        "--include-system-stages",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Also lower extracellular drive, system assembly, and observer write stages.",
+    )
     parser.add_argument("--compile", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--write-ir", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--analyze-hlo-fusions",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Summarize compiled optimized-HLO fusion bodies and shape layouts.",
+    )
     args = parser.parse_args(argv)
 
     if args.nx is not None and args.nx < 3:
@@ -147,7 +166,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     with jax.default_device(device):
         inputs = _prepare_inputs(args, variants=variants)
 
-    cases = _selected_cases(inputs.stage_cases, variants=variants, include_one_step=args.include_one_step)
+    cases = _selected_cases(
+        inputs.stage_cases,
+        variants=variants,
+        include_one_step=args.include_one_step,
+        include_membrane_stages=args.include_membrane_stages,
+        include_system_stages=args.include_system_stages,
+    )
     metadata = _metadata(args=args, device=device, inputs=inputs, variants=variants, dialects=dialects)
     _write_json(args.output / "metadata.json", metadata)
 
@@ -166,6 +191,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     _write_csv(args.output / "lowering_summary.csv", SUMMARY_FIELDS, rows)
     _write_json(args.output / "lowering_metrics.json", lowered_metrics)
+    if args.analyze_hlo_fusions:
+        _write_hlo_fusion_summary(args.output, rows, metadata)
     _write_report(args.output / "lowering_report.md", rows, metadata)
     print(f"wrote: {args.output / 'lowering_summary.csv'}")
     print(f"wrote: {args.output / 'lowering_report.md'}")
@@ -201,6 +228,8 @@ def _selected_cases(
     *,
     variants: Sequence[str],
     include_one_step: bool,
+    include_membrane_stages: bool,
+    include_system_stages: bool,
 ) -> tuple[StageCase, ...]:
     wanted = set(variants)
     out: list[StageCase] = [
@@ -208,6 +237,18 @@ def _selected_cases(
     ]
     if include_one_step:
         out.extend(case for case in cases if case.stage == "one_step_proxy")
+    if include_membrane_stages:
+        out.extend(
+            case
+            for case in cases
+            if case.stage in {"membrane_gate_update", "membrane_conductance_terms"}
+        )
+    if include_system_stages:
+        out.extend(
+            case
+            for case in cases
+            if case.stage in {"extracellular_rhs_drive", "system_assembly", "observer_write"}
+        )
     if not out:
         raise RuntimeError("No solver lowering cases were selected.")
     return tuple(out)
@@ -428,6 +469,10 @@ def _metadata(
             "variants": tuple(variants),
             "dialects": tuple(dialects),
             "compile": bool(args.compile),
+            "include_one_step": bool(args.include_one_step),
+            "include_membrane_stages": bool(args.include_membrane_stages),
+            "include_system_stages": bool(args.include_system_stages),
+            "analyze_hlo_fusions": bool(args.analyze_hlo_fusions),
         },
         "group": group,
         "context": {
@@ -447,6 +492,24 @@ def _metadata(
             "Pattern counts are triage signals, not performance claims by themselves.",
         ],
     }
+
+
+def _write_hlo_fusion_summary(
+    output: Path,
+    rows: Sequence[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> None:
+    hlo_files = [
+        Path(str(row["file"]))
+        for row in rows
+        if row["ir_kind"] == "compiled"
+        and row["dialect"] == "optimized_hlo"
+        and row.get("file")
+        and not str(row["file"]).startswith("ERROR:")
+    ]
+    existing = tuple(path for path in hlo_files if path.exists())
+    if existing:
+        write_hlo_fusion_artifacts(output, files=existing, metadata=metadata)
 
 
 def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
@@ -485,6 +548,8 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "- `pcr_soa_vmap` lowers a one-fiber PCR solve under an outer vmap.",
             "- `pcr_soa_batched` lowers the batch-native `[B, Nx]` PCR/SoA path used by the active GPU runtime.",
             "- `one_step_proxy` lowers gate update, conductance terms, assembly, and active block solve together.",
+            "- Optional membrane/system stages can be included with `--include-membrane-stages` and `--include-system-stages`.",
+            "- `hlo_fusion_summary.csv` and `hlo_layout_summary.csv` summarize optimized-HLO fusion bodies when compiled HLO is available.",
             "- Use the emitted IR files for detailed inspection before adding solver routes.",
         ]
     )

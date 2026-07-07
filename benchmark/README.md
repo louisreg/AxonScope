@@ -302,9 +302,38 @@ python benchmark/analysis/double_cable_solver_lowering_audit.py \
 
 This writes lowered StableHLO/HLO, compiled optimized HLO when `--compile` is
 enabled, `lowering_summary.csv`, `lowering_metrics.json`, and
-`lowering_report.md`. It compares real prepared `pcr_soa_vmap`,
+`lowering_report.md`. When optimized HLO is available it also writes
+`hlo_fusion_summary.csv`, `hlo_layout_summary.csv`,
+`hlo_fusion_metrics.json`, and `hlo_fusion_report.md` so existing artifacts can
+be inspected for fusion bodies, tuple outputs, gather/shape layouts, and rough
+per-fusion output bytes. It compares real prepared `pcr_soa_vmap`,
 `pcr_soa_batched`, and the active one-step proxy without adding a runtime
-solver route. Run it on Kaggle GPU when inspecting GPU-specific optimized HLO:
+solver route.
+
+To include the generated membrane and system-preparation stages in the same
+lowering artifact, use:
+
+```bash
+python benchmark/analysis/double_cable_solver_lowering_audit.py \
+  --platform cpu \
+  --preset quick \
+  --n-axons 4 \
+  --nx 21 \
+  --diameters different_diameters \
+  --include-membrane-stages \
+  --include-system-stages
+```
+
+To analyze downloaded optimized-HLO artifacts without rerunning a benchmark,
+use:
+
+```bash
+python benchmark/analysis/hlo_fusion_summary.py \
+  benchmark/results/kaggle/<run>/outputs/extracted/ir \
+  --output benchmark/results/<hlo-report>
+```
+
+Run the lowering audit on Kaggle GPU when inspecting GPU-specific optimized HLO:
 
 ```bash
 python benchmark/kaggle/run_kernel.py \
