@@ -277,6 +277,13 @@ applicable. It writes `real_stage_repeats.csv`, `real_stage_summary.csv`,
 tool under `benchmark/analysis`; it does not add or select a production runtime
 policy.
 
+The profiler also emits a benchmark-only `system_assembly/precomputed_static`
+candidate and matching `_precomputed_static` one-step proxy variants. These
+precompose static double-cable diagonal terms and absolute current terms before
+the measured JAX assembly call, then compare numerically against the baseline
+assembled system. Use them to decide whether a runtime-side precompute is worth
+implementing; do not treat them as a runtime policy.
+
 The selected block solvers may include benchmark-only candidates such as
 `pcr_soa_symmetric_batched`, which exploits the symmetric exact double-cable
 matrix invariant to avoid carrying separate upper-coupling PCR state, and the

@@ -437,6 +437,52 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
             dt_ms,
         )
     )
+    (
+        area_precomputed,
+        cm_over_dt_precomputed,
+        cx_over_dt_precomputed,
+        a00_static,
+        a11_static,
+        off_i_precomputed,
+        off_e_precomputed,
+        I_outward_abs_precomputed,
+        I_corr_abs_precomputed,
+    ) = _precompute_assembly_inputs(
+        Vi=Vi,
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        Gax_i=Gax_i,
+        Gax_e=Gax_e,
+        I_outward_den=I_outward,
+        I_corr_den=I_corr,
+        dt_ms=dt_ms,
+    )
+    assembled_precomputed = _block_until_ready(
+        _real_assemble_system_precomputed(
+            Vi,
+            Ve,
+            Gm_den,
+            GE_den,
+            area_precomputed,
+            cm_over_dt_precomputed,
+            cx_over_dt_precomputed,
+            a00_static,
+            a11_static,
+            off_i_precomputed,
+            off_e_precomputed,
+            Iinj_abs,
+            I_outward_abs_precomputed,
+            I_corr_abs_precomputed,
+            drive,
+        )
+    )
+    _assert_assembled_close(assembled, assembled_precomputed)
     observer_state = None
     if observer_plan is not None:
         observer_state = init_vm_raster_state(observer_plan, batch_size=batch_size, nt=1)
@@ -475,6 +521,34 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 Iinj_abs,
                 I_outward,
                 I_corr,
+                drive,
+                dt_ms,
+                name,
+            ),
+        )
+        for name in one_step_solvers
+    )
+    one_step_precomputed_cases = tuple(
+        StageCase(
+            "one_step_proxy",
+            f"{name}_real_precomputed_static",
+            _real_one_step_proxy_precomputed,
+            (
+                runtime.membrane.backend,
+                Vi,
+                Ve,
+                gates,
+                row_indices,
+                area_precomputed,
+                cm_over_dt_precomputed,
+                cx_over_dt_precomputed,
+                a00_static,
+                a11_static,
+                off_i_precomputed,
+                off_e_precomputed,
+                Iinj_abs,
+                I_outward_abs_precomputed,
+                I_corr_abs_precomputed,
                 drive,
                 dt_ms,
                 name,
@@ -522,8 +596,31 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 dt_ms,
             ),
         ),
+        StageCase(
+            "system_assembly",
+            "precomputed_static",
+            _real_assemble_system_precomputed,
+            (
+                Vi,
+                Ve,
+                Gm_den,
+                GE_den,
+                area_precomputed,
+                cm_over_dt_precomputed,
+                cx_over_dt_precomputed,
+                a00_static,
+                a11_static,
+                off_i_precomputed,
+                off_e_precomputed,
+                Iinj_abs,
+                I_outward_abs_precomputed,
+                I_corr_abs_precomputed,
+                drive,
+            ),
+        ),
         *solver_cases,
         *one_step_cases,
+        *one_step_precomputed_cases,
     ]
     if observer_plan is not None and observer_state is not None:
         stage_cases.append(
@@ -554,6 +651,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "shared_coefficients": bool(shared_coefficients),
         "active_solver": active_solver,
         "one_step_solvers": one_step_solvers,
+        "assembly_variants": ("real_double_cable", "precomputed_static"),
         "resolved_solver": resolved,
         "membrane_backend": _backend_variant(runtime.membrane.backend),
         "membrane_model": type(runtime.membrane.membrane).__name__,
@@ -571,6 +669,17 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         group_metadata=group_metadata,
         stage_cases=tuple(stage_cases),
     )
+
+
+def _assert_assembled_close(reference: tuple[Any, ...], candidate: tuple[Any, ...]) -> None:
+    for index, (expected, actual) in enumerate(zip(reference, candidate, strict=True)):
+        np.testing.assert_allclose(
+            np.asarray(actual),
+            np.asarray(expected),
+            rtol=1e-5,
+            atol=1e-7,
+            err_msg=f"precomputed assembly output {index} differs from baseline",
+        )
 
 
 def _batch_options(args: argparse.Namespace) -> BatchOptions:
@@ -788,6 +897,87 @@ def _real_assemble_system(
     return a00, a01, a10, a11, -jnp.asarray(Gax_i), -jnp.asarray(Gax_e), rhs0, rhs1
 
 
+def _precompute_assembly_inputs(
+    *,
+    Vi: Any,
+    area_cm2: Any,
+    Cm_abs: Any,
+    Cx_abs: Any,
+    Gx_abs: Any,
+    left_i: Any,
+    right_i: Any,
+    left_e: Any,
+    right_e: Any,
+    Gax_i: Any,
+    Gax_e: Any,
+    I_outward_den: Any,
+    I_corr_den: Any,
+    dt_ms: Any,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+    batch_size = int(Vi.shape[0])
+    nx = int(Vi.shape[1])
+    area = _batch_space(area_cm2, batch_size=batch_size, nx=nx)
+    cm_over_dt = _batch_space(Cm_abs, batch_size=batch_size, nx=nx) / dt_ms
+    cx_over_dt = _batch_space(Cx_abs, batch_size=batch_size, nx=nx) / dt_ms
+    gx = _batch_space(Gx_abs, batch_size=batch_size, nx=nx)
+    left_i_batch = _batch_space(left_i, batch_size=batch_size, nx=nx)
+    right_i_batch = _batch_space(right_i, batch_size=batch_size, nx=nx)
+    left_e_batch = _batch_space(left_e, batch_size=batch_size, nx=nx)
+    right_e_batch = _batch_space(right_e, batch_size=batch_size, nx=nx)
+    return _block_until_ready(
+        (
+            area,
+            cm_over_dt,
+            cx_over_dt,
+            cm_over_dt + left_i_batch + right_i_batch,
+            cm_over_dt + cx_over_dt + gx + left_e_batch + right_e_batch,
+            -jnp.asarray(Gax_i),
+            -jnp.asarray(Gax_e),
+            _batch_space(I_outward_den, batch_size=batch_size, nx=nx) * area,
+            _batch_space(I_corr_den, batch_size=batch_size, nx=nx) * area,
+        )
+    )
+
+
+@jax.jit
+def _real_assemble_system_precomputed(
+    Vi: Any,
+    Ve: Any,
+    Gm_den: Any,
+    GE_den: Any,
+    area: Any,
+    cm_over_dt: Any,
+    cx_over_dt: Any,
+    a00_static: Any,
+    a11_static: Any,
+    off_i: Any,
+    off_e: Any,
+    Iinj_abs: Any,
+    I_outward_abs: Any,
+    I_corr_abs: Any,
+    extracellular_drive_abs: Any,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    Gm_abs = Gm_den * area
+    GE_abs = GE_den * area
+    Vm = Vi - Ve
+    cm_plus_gm = cm_over_dt + Gm_abs
+    membrane_charge = cm_over_dt * Vm
+    a00 = a00_static + Gm_abs
+    a01 = -cm_plus_gm
+    a10 = a01
+    a11 = a11_static + Gm_abs
+    rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
+    rhs1 = (
+        -membrane_charge
+        - GE_abs
+        + cx_over_dt * Ve
+        + extracellular_drive_abs
+        + I_outward_abs
+        + I_corr_abs
+    )
+    return a00, a01, a10, a11, off_i, off_e, rhs0, rhs1
+
+
 @partial(jax.jit, static_argnames=("backend", "solver"))
 def _real_one_step_proxy(
     backend: Any,
@@ -835,6 +1025,51 @@ def _real_one_step_proxy(
         I_corr_den,
         extracellular_drive_abs,
         dt_ms,
+    )
+    Vi_new, Ve_new = _solve_by_name(solver, assembled)
+    return Vi_new, Ve_new, gates_new
+
+
+@partial(jax.jit, static_argnames=("backend", "solver"))
+def _real_one_step_proxy_precomputed(
+    backend: Any,
+    Vi: Any,
+    Ve: Any,
+    gates: Any,
+    row_indices: Any,
+    area: Any,
+    cm_over_dt: Any,
+    cx_over_dt: Any,
+    a00_static: Any,
+    a11_static: Any,
+    off_i: Any,
+    off_e: Any,
+    Iinj_abs: Any,
+    I_outward_abs: Any,
+    I_corr_abs: Any,
+    extracellular_drive_abs: Any,
+    dt_ms: Any,
+    solver: str,
+) -> tuple[Any, Any, Any]:
+    Vm = Vi - Ve
+    gates_new = _real_gate_update(backend, gates, Vm, row_indices, dt_ms)
+    Gm_den, GE_den = _real_membrane_conductance_terms(backend, gates_new, row_indices)
+    assembled = _real_assemble_system_precomputed(
+        Vi,
+        Ve,
+        Gm_den,
+        GE_den,
+        area,
+        cm_over_dt,
+        cx_over_dt,
+        a00_static,
+        a11_static,
+        off_i,
+        off_e,
+        Iinj_abs,
+        I_outward_abs,
+        I_corr_abs,
+        extracellular_drive_abs,
     )
     Vi_new, Ve_new = _solve_by_name(solver, assembled)
     return Vi_new, Ve_new, gates_new
@@ -1444,8 +1679,9 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "",
             "- `membrane_gate_update` and `membrane_conductance_terms` use the real prepared membrane backend.",
             "- `system_assembly` uses real prepared double-cable coefficients and real extracellular forcing for one step.",
+            "- `system_assembly/precomputed_static` precomposes static diagonal terms and absolute currents as a benchmark-only diagnostic.",
             "- `block_solve` runs selected solver functions on the real assembled system.",
-            "- `one_step_proxy` fuses gate update, conductance terms, assembly, and the selected benchmark one-step block solver for one step.",
+            "- `one_step_proxy` fuses gate update, conductance terms, assembly, and the selected benchmark one-step block solver for one step; `_precomputed_static` variants use the same precomposed assembly inputs.",
             "- `observer_write` is present only for observer-only VmRaster runs.",
         ]
     )

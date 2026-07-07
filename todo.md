@@ -1332,6 +1332,18 @@ decisions need realistic workflow evidence.
   lowers first-run time (`2342 ms` -> `1954 ms`) but not hot one-step runtime.
   Decision: close this PCR/SoA micro-variant branch for now; move to another
   low-level optimization family.
+- [ ] Validate the benchmark-only `precomputed_static` double-cable assembly
+  candidate on P100 before any runtime change. The profiler now compares
+  baseline `system_assembly/real_double_cable` with
+  `system_assembly/precomputed_static`, and adds matching
+  `one_step_proxy/*_precomputed_static` rows. It precomposes static diagonal
+  bases, offsets, and absolute correction/background currents outside the
+  measured assembly call, with a numerical equality guard against the baseline
+  assembled system. Local smoke passed for a tiny thomas CPU case
+  (`benchmark/results/p11b_precomputed_assembly_smoke`) and a tiny PCR/SoA CPU
+  case (`benchmark/results/p11b_precomputed_assembly_pcr_smoke`); the PCR/SoA
+  smoke did not show a hot one-step win, so this remains a GPU diagnostic
+  rather than a runtime direction.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
