@@ -682,15 +682,35 @@ def _contexts_by_run(events: Sequence[BottleneckEvent]) -> dict[str, RunContext]
 
 
 def _run_label(run_dir: Path, context: RunContext) -> str:
+    solver = _solver_label(run_dir)
     parts = [
         _script_short(context.script),
         context.platform,
         context.recording,
-        run_dir.name,
+        solver,
+        _path_label(run_dir),
         context.git_commit,
     ]
     label = "_".join(part for part in parts if part)
     return label or run_dir.name
+
+
+def _path_label(run_dir: Path) -> str:
+    if run_dir.name not in {"extracted", "outputs"}:
+        return run_dir.name
+    current = run_dir
+    for parent in run_dir.parents:
+        if parent.name not in {"extracted", "outputs"}:
+            return parent.name
+        current = parent
+    return current.name
+
+
+def _solver_label(run_dir: Path) -> str:
+    manifest = _read_json(run_dir / "manifest.json")
+    options = _mapping(manifest.get("options"))
+    solver = str(options.get("double_cable_block_solver") or "")
+    return f"solver_{solver}" if solver else ""
 
 
 def _script_short(script: str) -> str:
@@ -767,6 +787,13 @@ _CONTEXT_FIELDS = (
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
 
 
 def _float(value: Any) -> float | None:
