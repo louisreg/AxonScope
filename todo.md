@@ -1301,6 +1301,13 @@ decisions need realistic workflow evidence.
   low-level direction: keep attacking PCR/fusion/gather/layout costs inside
   solver lowering, and validate any stronger candidate on full real double-cable
   curves before runtime integration.
+  Next low-level sweep: benchmark existing PCR/SoA probes
+  `pcr_soa_nomask_batched`, `pcr_soa_shift_batched`,
+  `pcr_soa_transposed_batched`, `pcr_soa_padded_batched`, and
+  `pcr_soa_hybrid_batched` against current `pcr_soa_batched` using the same
+  local correctness gate, HLO/fusion summary, real-stage hot timing, and P100
+  artifact capture. Promote nothing to runtime policy without a hot-path win and
+  a real curve-level validation.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

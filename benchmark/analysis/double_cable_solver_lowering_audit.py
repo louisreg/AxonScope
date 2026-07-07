@@ -161,6 +161,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "pcr_soa_vmap",
         "pcr_soa_batched",
         "pcr_soa_symmetric_batched",
+        "pcr_soa_nomask_batched",
+        "pcr_soa_shift_batched",
+        "pcr_soa_transposed_batched",
+        "pcr_soa_padded_batched",
+        "pcr_soa_hybrid_batched",
     }
     if unknown:
         parser.error(f"unsupported --variants: {sorted(unknown)}")

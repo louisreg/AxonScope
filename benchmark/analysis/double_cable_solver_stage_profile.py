@@ -23,6 +23,11 @@ from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
+    solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
     solve_block_tridiagonal_2x2_scalar,
     solve_block_tridiagonal_2x2_scalar_batched,
 )
@@ -109,6 +114,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "pcr_soa_vmap",
             "pcr_soa_batched",
             "pcr_soa_symmetric_batched",
+            "pcr_soa_nomask_batched",
+            "pcr_soa_shift_batched",
+            "pcr_soa_transposed_batched",
+            "pcr_soa_padded_batched",
+            "pcr_soa_hybrid_batched",
         ),
         help="Solver variant to include. Repeat to select several. Defaults to all.",
     )
@@ -136,6 +146,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "pcr_matrix_vmap",
         "pcr_soa_vmap",
         "pcr_soa_batched",
+        "pcr_soa_nomask_batched",
+        "pcr_soa_shift_batched",
+        "pcr_soa_transposed_batched",
+        "pcr_soa_padded_batched",
+        "pcr_soa_hybrid_batched",
     ))
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -413,6 +428,86 @@ def _solve_pcr_soa_symmetric_batched(
     )
 
 
+@jax.jit
+def _solve_pcr_soa_nomask_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_nomask(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
+def _solve_pcr_soa_shift_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_shift(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
+def _solve_pcr_soa_transposed_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_transposed(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
+def _solve_pcr_soa_padded_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_padded(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
+def _solve_pcr_soa_hybrid_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
 def _make_inputs(
     *,
     batch_size: int,
@@ -524,6 +619,11 @@ def _stage_cases(
             "pcr_soa_vmap": _solve_pcr_soa_vmap_shared,
             "pcr_soa_batched": _solve_pcr_soa_batched,
             "pcr_soa_symmetric_batched": _solve_pcr_soa_symmetric_batched,
+            "pcr_soa_nomask_batched": _solve_pcr_soa_nomask_batched,
+            "pcr_soa_shift_batched": _solve_pcr_soa_shift_batched,
+            "pcr_soa_transposed_batched": _solve_pcr_soa_transposed_batched,
+            "pcr_soa_padded_batched": _solve_pcr_soa_padded_batched,
+            "pcr_soa_hybrid_batched": _solve_pcr_soa_hybrid_batched,
         }
     else:
         solver_map = {
@@ -533,6 +633,11 @@ def _stage_cases(
             "pcr_soa_vmap": _solve_pcr_soa_vmap_batched,
             "pcr_soa_batched": _solve_pcr_soa_batched,
             "pcr_soa_symmetric_batched": _solve_pcr_soa_symmetric_batched,
+            "pcr_soa_nomask_batched": _solve_pcr_soa_nomask_batched,
+            "pcr_soa_shift_batched": _solve_pcr_soa_shift_batched,
+            "pcr_soa_transposed_batched": _solve_pcr_soa_transposed_batched,
+            "pcr_soa_padded_batched": _solve_pcr_soa_padded_batched,
+            "pcr_soa_hybrid_batched": _solve_pcr_soa_hybrid_batched,
         }
     for solver in solvers:
         cases.append(StageCase("block_solve", solver, solver_map[solver], solver_inputs))

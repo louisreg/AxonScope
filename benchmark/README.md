@@ -279,8 +279,11 @@ policy.
 
 The selected block solvers may include benchmark-only candidates such as
 `pcr_soa_symmetric_batched`, which exploits the symmetric exact double-cable
-matrix invariant to avoid carrying separate upper-coupling PCR state. Use it as
-a measurement candidate only; it is not a public solver policy.
+matrix invariant to avoid carrying separate upper-coupling PCR state, and the
+existing low-level PCR/SoA probes `pcr_soa_nomask_batched`,
+`pcr_soa_shift_batched`, `pcr_soa_transposed_batched`,
+`pcr_soa_padded_batched`, and `pcr_soa_hybrid_batched`. Use these as
+measurement candidates only; they are not public solver policies.
 
 The same profiler can run on Kaggle:
 
@@ -314,9 +317,12 @@ be inspected for fusion bodies, tuple outputs, gather/shape layouts, and rough
 per-fusion output bytes. It compares real prepared `pcr_soa_vmap`,
 `pcr_soa_batched`, and the active one-step proxy without adding a runtime
 solver route.
-The optional `pcr_soa_symmetric_batched` variant is available for this audit to
-inspect whether the symmetric-state candidate reduces optimized-HLO tuple
-pressure before any runtime integration work.
+The optional `pcr_soa_symmetric_batched`, `pcr_soa_nomask_batched`,
+`pcr_soa_shift_batched`, `pcr_soa_transposed_batched`,
+`pcr_soa_padded_batched`, and `pcr_soa_hybrid_batched` variants are available
+for this audit to inspect whether candidate changes reduce optimized-HLO tuple,
+gather, fusion, or hot-path timing pressure before any runtime integration
+work.
 
 To include the generated membrane and system-preparation stages in the same
 lowering artifact, use:
