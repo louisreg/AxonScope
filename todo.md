@@ -1583,6 +1583,14 @@ decisions need realistic workflow evidence.
   useful negative evidence, not a runtime route. Next action: inspect or
   prototype a low-level candidate that changes measured hot-path cost, not only
   HLO tuple size.
+  Current active low-level candidate: rewrite the generic 2x2 inverse helpers
+  to compute one reciprocal per determinant and multiply the four inverse
+  components, instead of emitting four divisions by the same determinant. This
+  is solver-generic and not model-specific. Local CPU lowering smoke under
+  `benchmark/results/p11b_reciprocal_inverse_lowering_smoke` confirms the
+  compiled `block_solve:pcr_soa_batched` uses `count_divide=13` on the smoke
+  shape. Next gate: fresh P100 lowering and real-stage timing on the existing
+  `Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only MRG shape.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
