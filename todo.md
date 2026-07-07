@@ -1574,9 +1574,15 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_gpu_pcr_soa_stage_state_audit` from the existing P100
   HLO artifact. For `B=512`, actual `Nx=89`, fp32, the algorithmic state is 14
   arrays (`~2.43 MiB`), while HLO commonly exposes 22 fusion outputs and up to
-  `~7.65 MiB` estimated fusion I/O. Next action: prototype one benchmark-only
-  state/staging variant that reduces those tuple outputs or proves they are not
-  worth attacking.
+  `~7.65 MiB` estimated fusion I/O. The tool now supports explicit variants,
+  and `benchmark/results/p11b_gpu_pcr_soa_stage_state_audit_symmetric` maps the
+  already-tested benchmark-only `pcr_soa_symmetric_batched` route: state drops
+  to 10 arrays (`~1.74 MiB`) and largest available HLO output estimate drops to
+  14 arrays (`~2.43 MiB`), but previous P100 hot solve timing only moved from
+  `0.415 ms` to `0.404 ms`. Conclusion: the symmetry/state-reduction probe is
+  useful negative evidence, not a runtime route. Next action: inspect or
+  prototype a low-level candidate that changes measured hot-path cost, not only
+  HLO tuple size.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

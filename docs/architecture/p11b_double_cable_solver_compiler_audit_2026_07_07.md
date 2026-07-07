@@ -312,6 +312,17 @@ state at `B=512`, actual `Nx=89`, fp32 is 14 batch-space arrays (`~2.43 MiB`),
 while optimized HLO commonly exposes 22 fusion outputs and up to `~7.65 MiB`
 estimated fusion I/O.
 
+The same audit now accepts an explicit solver-variant selector. Re-running it
+on the benchmark-only `pcr_soa_symmetric_batched` HLO artifact produces
+`benchmark/results/p11b_gpu_pcr_soa_stage_state_audit_symmetric`: algorithmic
+state drops to 10 arrays (`~1.74 MiB`), explicit neighbor reads drop from 28 to
+24, and the largest available HLO output estimate drops from 22 arrays /
+`~3.82 MiB` to 14 arrays / `~2.43 MiB`. That confirms the state-reduction
+mechanism works structurally, but the previous P100 hot solve only improved
+from `0.415 ms` to `0.404 ms`. Treat this as evidence to avoid promoting the
+symmetry route as-is; future low-level solver work needs to reduce actual
+hot-path cost, not only tuple size.
+
 ## Runtime Source Hygiene
 
 Several historical solver candidates still live in active JAX solver source as

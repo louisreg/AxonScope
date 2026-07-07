@@ -147,11 +147,13 @@ Immediate GPU-only benchmark slice:
    For `B=512`, actual `Nx=89`, fp32, the algorithmic PCR/SoA state is 14
    batch-space arrays (`~2.43 MiB`), while optimized HLO rows commonly expose
    22 fusion outputs and up to `~7.65 MiB` estimated fusion I/O.
-2. Prototype one benchmark-only stage-state variant that aims to reduce live
-   PCR output state without changing public routing. Candidate directions:
-   carry fewer structurally redundant block components, split a stage to reduce
-   tuple pressure only if the extra launch is measured, or recompute cheap
-   intermediates when it removes large carried arrays.
+2. Use the same audit for benchmark-only stage-state variants before changing
+   runtime code. The already-tested `pcr_soa_symmetric_batched` variant is the
+   first concrete example: it reduces state to 10 arrays (`~1.74 MiB`) and
+   largest available HLO output estimate to 14 arrays / `~2.43 MiB`, but the
+   P100 hot solve only moved from `0.415 ms` to `0.404 ms`. That is useful
+   negative evidence; the next candidate must target measured hot-path cost,
+   not only smaller HLO tuples.
 3. Validate on a tiny local correctness case against current PCR/SoA and Thomas,
    then run a P100 GPU lowering/hot-step gate on the existing MRG shape.
 4. Keep or reject based on full evidence: HLO tuple/I/O pressure, isolated

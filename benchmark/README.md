@@ -387,6 +387,7 @@ python benchmark/analysis/pcr_soa_stage_state_audit.py \
   --batch-size 512 \
   --nx 89 \
   --dtype float32 \
+  --variant pcr_soa_batched \
   --hlo-fusion-summary benchmark/results/<hlo-report>/hlo_fusion_summary.csv \
   --output benchmark/results/<stage-state-report>
 ```
@@ -394,7 +395,10 @@ python benchmark/analysis/pcr_soa_stage_state_audit.py \
 This writes `pcr_soa_stage_state_summary.csv`,
 `pcr_soa_stage_state_metrics.json`, and `pcr_soa_stage_state_report.md`. It is
 a structural benchmark aid for choosing state/staging candidates; it is not a
-solver route and does not make runtime policy claims.
+solver route and does not make runtime policy claims. The same tool can map
+benchmark-only probes such as `--variant pcr_soa_symmetric_batched` when their
+HLO summary is available; use that to quantify live-state or tuple-output
+changes before considering any runtime change.
 
 Run the lowering audit on Kaggle GPU when inspecting GPU-specific optimized HLO:
 

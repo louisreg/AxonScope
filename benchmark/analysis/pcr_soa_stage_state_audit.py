@@ -12,7 +12,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
-STATE_FIELDS = (
+PCR_SOA_BATCHED_STATE_FIELDS = (
     "diag00",
     "diag01",
     "diag10",
@@ -28,6 +28,36 @@ STATE_FIELDS = (
     "rhs0",
     "rhs1",
 )
+PCR_SOA_SYMMETRIC_BATCHED_STATE_FIELDS = (
+    "diag00",
+    "diag01",
+    "diag10",
+    "diag11",
+    "lower00",
+    "lower01",
+    "lower10",
+    "lower11",
+    "rhs0",
+    "rhs1",
+)
+VARIANT_SPECS = {
+    "pcr_soa_batched": {
+        "state_fields": PCR_SOA_BATCHED_STATE_FIELDS,
+        "explicit_neighbor_reads": 28,
+        "description": (
+            "current batch-native PCR/SoA solver carrying diagonal, lower, "
+            "upper, and RHS state"
+        ),
+    },
+    "pcr_soa_symmetric_batched": {
+        "state_fields": PCR_SOA_SYMMETRIC_BATCHED_STATE_FIELDS,
+        "explicit_neighbor_reads": 24,
+        "description": (
+            "benchmark-only symmetric candidate carrying diagonal, lower, "
+            "and RHS state while reconstructing upper couplings"
+        ),
+    },
+}
 HLO_FIELDS = (
     "hlo_fusion_name",
     "hlo_output_arrays",
@@ -39,6 +69,7 @@ HLO_FIELDS = (
 )
 SUMMARY_FIELDS = (
     "stage_index",
+    "variant",
     "stride",
     "valid_left_columns",
     "valid_right_columns",
@@ -67,6 +98,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="Optional hlo_fusion_summary.csv to attach compiler fusion output estimates.",
     )
+    parser.add_argument(
+        "--variant",
+        choices=tuple(VARIANT_SPECS),
+        default="pcr_soa_batched",
+        help="Solver variant to map against HLO fusion rows.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -75,6 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch_size=args.batch_size,
         nx=args.nx,
         dtype=args.dtype,
+        variant=args.variant,
         hlo_rows=hlo_rows,
     )
     write_outputs(
@@ -84,6 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "batch_size": args.batch_size,
             "nx": args.nx,
             "dtype": args.dtype,
+            "variant": args.variant,
             "hlo_fusion_summary": str(args.hlo_fusion_summary) if args.hlo_fusion_summary else None,
         },
     )
@@ -97,6 +136,7 @@ def pcr_soa_stage_state_rows(
     batch_size: int,
     nx: int,
     dtype: str = "float32",
+    variant: str = "pcr_soa_batched",
     hlo_rows: Sequence[dict[str, Any]] = (),
 ) -> tuple[dict[str, Any], ...]:
     if batch_size <= 0:
@@ -104,23 +144,27 @@ def pcr_soa_stage_state_rows(
     if nx <= 0:
         raise ValueError("nx must be positive.")
 
+    spec = _variant_spec(variant)
+    state_fields = spec["state_fields"]
+    explicit_neighbor_reads = spec["explicit_neighbor_reads"]
     bytes_per_array = int(batch_size) * int(nx) * _dtype_nbytes(dtype)
-    hlo_stage_rows = _pcr_stage_hlo_rows(hlo_rows)
+    hlo_stage_rows = _pcr_stage_hlo_rows(hlo_rows, variant=variant)
     rows: list[dict[str, Any]] = []
     for stage_index, stride in enumerate(_pcr_strides(nx)):
         hlo = hlo_stage_rows[stage_index] if stage_index < len(hlo_stage_rows) else {}
         rows.append(
             {
                 "stage_index": stage_index,
+                "variant": variant,
                 "stride": stride,
                 "valid_left_columns": max(nx - stride, 0),
                 "valid_right_columns": max(nx - stride, 0),
-                "state_arrays": len(STATE_FIELDS),
-                "state_mib": _bytes_to_mib(len(STATE_FIELDS) * bytes_per_array),
-                "state_fields": ";".join(STATE_FIELDS),
-                "explicit_neighbor_reads": 28,
-                "output_state_arrays": len(STATE_FIELDS),
-                "output_state_mib": _bytes_to_mib(len(STATE_FIELDS) * bytes_per_array),
+                "state_arrays": len(state_fields),
+                "state_mib": _bytes_to_mib(len(state_fields) * bytes_per_array),
+                "state_fields": ";".join(state_fields),
+                "explicit_neighbor_reads": explicit_neighbor_reads,
+                "output_state_arrays": len(state_fields),
+                "output_state_mib": _bytes_to_mib(len(state_fields) * bytes_per_array),
                 **_hlo_projection(hlo),
             }
         )
@@ -141,6 +185,12 @@ def write_outputs(
                 "metadata": metadata,
                 "stage_count": len(rows),
                 "max_state_mib": max((float(row["state_mib"]) for row in rows), default=0.0),
+                "max_hlo_output_mib": max(
+                    (float(row["hlo_output_mib"] or 0.0) for row in rows), default=0.0
+                ),
+                "max_hlo_input_mib": max(
+                    (float(row["hlo_input_mib"] or 0.0) for row in rows), default=0.0
+                ),
                 "max_hlo_io_mib": max((float(row["hlo_io_mib"] or 0.0) for row in rows), default=0.0),
             },
             indent=2,
@@ -161,12 +211,14 @@ def _pcr_strides(nx: int) -> tuple[int, ...]:
     return tuple(strides)
 
 
-def _pcr_stage_hlo_rows(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+def _pcr_stage_hlo_rows(
+    rows: Sequence[dict[str, Any]], *, variant: str
+) -> tuple[dict[str, Any], ...]:
     selected = [
         row
         for row in rows
         if row.get("stage") == "block_solve"
-        and row.get("variant") == "pcr_soa_batched"
+        and row.get("variant") == variant
         and "loop_select_subtract" in str(row.get("fusion_name", ""))
     ]
     return tuple(sorted(selected, key=lambda row: _float(row.get("line")) or 0.0))
@@ -176,15 +228,9 @@ def _hlo_projection(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "hlo_fusion_name": row.get("fusion_name", ""),
         "hlo_output_arrays": _int_or_empty(row.get("output_arrays")),
-        "hlo_output_mib": _bytes_to_mib(_float(row.get("output_bytes_estimate")) or 0.0)
-        if row
-        else "",
-        "hlo_input_mib": _bytes_to_mib(_float(row.get("computation_input_bytes_estimate")) or 0.0)
-        if row
-        else "",
-        "hlo_io_mib": _bytes_to_mib(_float(row.get("computation_io_bytes_estimate")) or 0.0)
-        if row
-        else "",
+        "hlo_output_mib": _mib_or_empty(row.get("output_bytes_estimate")) if row else "",
+        "hlo_input_mib": _mib_or_empty(row.get("computation_input_bytes_estimate")) if row else "",
+        "hlo_io_mib": _mib_or_empty(row.get("computation_io_bytes_estimate")) if row else "",
         "hlo_gather": _int_or_empty(row.get("count_gather")),
         "hlo_select": _int_or_empty(row.get("count_select")),
     }
@@ -204,6 +250,8 @@ def _write_csv(path: Path, fields: Sequence[str], rows: Sequence[dict[str, Any]]
 
 
 def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
+    variant = metadata.get("variant") or (rows[0].get("variant") if rows else "unknown")
+    spec = VARIANT_SPECS.get(str(variant), {})
     lines = [
         "# PCR/SoA Stage State Audit",
         "",
@@ -211,6 +259,8 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
         "",
         "## Context",
         "",
+        f"- Variant: `{variant}`",
+        f"- Variant shape: {spec.get('description', 'unknown')}",
         f"- Batch size: `{metadata['batch_size']}`",
         f"- Nx: `{metadata['nx']}`",
         f"- Dtype: `{metadata['dtype']}`",
@@ -231,16 +281,25 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
             "",
             "## Notes",
             "",
-            "- Algorithmic PCR/SoA state currently carries 14 batch-space arrays: "
-            "`diag*`, `lower*`, `upper*`, and `rhs*`.",
-            "- The explicit stage body performs 28 neighbor indexed reads before XLA "
-            "optimization. HLO rows, when attached, are compiler outputs and their "
-            "mapping to PCR strides is approximate.",
+            "- `state arrays` is the algorithmic PCR/SoA live state for this variant; "
+            "HLO output counts are compiler artifacts for the attached optimized HLO.",
+            "- The explicit neighbor-read count is estimated from the Python stage "
+            "body before XLA common-subexpression or fusion optimization. HLO rows, "
+            "when attached, are compiler outputs and their mapping to PCR strides is "
+            "approximate.",
             "- Use this report to choose benchmark-only state/staging variants; do not "
             "promote solver policy from this structural estimate alone.",
         ]
     )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _variant_spec(variant: str) -> dict[str, Any]:
+    try:
+        return VARIANT_SPECS[variant]
+    except KeyError as exc:
+        choices = ", ".join(sorted(VARIANT_SPECS))
+        raise ValueError(f"unknown variant {variant!r}; choices are: {choices}") from exc
 
 
 def _dtype_nbytes(dtype: str) -> int:
@@ -251,6 +310,11 @@ def _dtype_nbytes(dtype: str) -> int:
 
 def _bytes_to_mib(value: float | int) -> float:
     return float(value) / (1024.0 * 1024.0)
+
+
+def _mib_or_empty(value: Any) -> float | str:
+    parsed = _float(value)
+    return "" if parsed is None else _bytes_to_mib(parsed)
 
 
 def _float(value: Any) -> float | None:
