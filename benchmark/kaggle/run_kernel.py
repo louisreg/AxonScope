@@ -26,7 +26,7 @@ REPO_ROOT = KAGGLE_DIR.parents[1]
 KERNEL_ENTRY = KAGGLE_DIR / "kernel_entry.py"
 DEFAULT_REPO_URL = "https://github.com/louisreg/AxonScope.git"
 DEFAULT_SLUG = "axonscope-p11a-benchmarks"
-DEFAULT_TITLE = "AxonScope Benchmarks"
+DEFAULT_TITLE = None
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
 TIME_CHUNK_SWEEP_CAMPAIGN = "time_chunk_sweep"
 SOLVER_STAGE_PROFILE_CAMPAIGN = "double_cable_solver_stage_profile"
@@ -80,7 +80,11 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--username", required=True, help="Kaggle username slug.")
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="Kaggle kernel slug.")
-    parser.add_argument("--title", default=DEFAULT_TITLE, help="Kaggle kernel title.")
+    parser.add_argument(
+        "--title",
+        default=DEFAULT_TITLE,
+        help="Kaggle kernel title. Defaults to the slug to avoid Kaggle rewriting the id.",
+    )
     parser.add_argument("--campaign", choices=CAMPAIGNS)
     parser.add_argument("--script", choices=tuple(SCRIPTS))
     parser.add_argument("--preset", choices=tuple(PRESETS))
@@ -223,7 +227,7 @@ def prepare_kernel_package(
     }
     metadata: dict[str, Any] = {
         "id": f"{args.username}/{args.slug}",
-        "title": args.title,
+        "title": args.title or args.slug,
         "code_file": "axonscope_benchmark_kernel.py",
         "language": "python",
         "kernel_type": "script",
