@@ -1178,6 +1178,14 @@ decisions need realistic workflow evidence.
   47.5% of `curve.simulate` in kernel sync, so GPU work should keep separating
   solver execution from compile/launch/finalize/result boundaries instead of
   assuming every remaining millisecond is numerical solve time.
+  Critical reading of the solver idea docs plus a compiler/runtime audit is
+  recorded in
+  `docs/architecture/p11b_double_cable_solver_compiler_audit_2026_07_07.md`.
+  Current decision: do not reopen old split/associative-transfer/PCR-layout
+  variants without a new hypothesis; keep high-level amplitude batching for
+  later; next build a real double-cable compiler-stage profile that separates
+  generated membrane work, system assembly, block solve, observer write,
+  launch/finalize, and result boundaries before adding any new solver route.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
@@ -1287,6 +1295,12 @@ decisions need realistic workflow evidence.
   the runtime/solver layer for generated-code costs. Implement candidates
   incrementally, each gated by correctness checks plus small benchmarks first,
   then larger realistic benchmarks before keeping or promoting the change.
+  Initial critical-reading/audit pass is recorded in
+  `docs/architecture/p11b_double_cable_solver_compiler_audit_2026_07_07.md`.
+  The first candidate gate is not a policy change: extend benchmark
+  cartography to real generated double-cable membrane stages, then consider a
+  benchmark-only batched Thomas-family GPU prototype against current GPU
+  PCR-SoA if the profile still supports that direction.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
