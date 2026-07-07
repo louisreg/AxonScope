@@ -1332,7 +1332,7 @@ decisions need realistic workflow evidence.
   lowers first-run time (`2342 ms` -> `1954 ms`) but not hot one-step runtime.
   Decision: close this PCR/SoA micro-variant branch for now; move to another
   low-level optimization family.
-- [ ] Validate the benchmark-only `precomputed_static` double-cable assembly
+- [x] Validate the benchmark-only `precomputed_static` double-cable assembly
   candidate on P100 before any runtime change. The profiler now compares
   baseline `system_assembly/real_double_cable` with
   `system_assembly/precomputed_static`, and adds matching
@@ -1344,6 +1344,29 @@ decisions need realistic workflow evidence.
   case (`benchmark/results/p11b_precomputed_assembly_pcr_smoke`); the PCR/SoA
   smoke did not show a hot one-step win, so this remains a GPU diagnostic
   rather than a runtime direction.
+  P100 validation completed under
+  `benchmark/results/kaggle/20260707_151450_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-precomputed-assembly-gpu-512/outputs/extracted`
+  on commit `38dcfe5`: isolated assembly is slower (`0.299 ms` baseline vs
+  `0.339 ms` precomputed), but the fused one-step proxy improves in the same
+  run (`0.543 ms` baseline vs `0.500 ms` precomputed, median `0.558 ms` vs
+  `0.479 ms`). This is not enough for a runtime policy decision because the
+  isolated stage moved the wrong way and the production scan already precomputes
+  part of these terms; next step is a HLO/fusion audit of the baseline and
+  precomputed one-step bodies on P100.
+- [x] Audit HLO/fusion for the baseline and `precomputed_static` one-step
+  double-cable bodies. Compare fusion counts, largest fusion outputs, tuple
+  pressure, gather/select counts, and layout changes before deciding whether to
+  prototype a runtime scan version.
+  P100 HLO audit completed under
+  `benchmark/results/kaggle/20260707_151930_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-precomputed-lowering-gpu-512/outputs/extracted`
+  on commit `38dcfe5`. The compiled one-step HLO changes only modestly:
+  optimized-HLO lines `2862` -> `2831`, fusions stay `10`, gathers stay `182`,
+  selects stay `125`, and broadcasts `130` -> `129`. The useful signal is that
+  the non-PCR assembly-side loop fusion changes from `5` outputs / `0.87 MiB`
+  to `4` outputs / `0.70 MiB`; the large PCR loop fusions remain unchanged at
+  `22` outputs / `3.82 MiB`. Next prototype, if we pursue it, should be a clean
+  runtime scan-body precompute of the remaining diagonal/RHS bases, followed by
+  real curve-level validation, not another PCR micro-variant.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.

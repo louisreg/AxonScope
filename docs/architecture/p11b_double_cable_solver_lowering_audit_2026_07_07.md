@@ -194,6 +194,57 @@ one-step runtime; `padded` is close but not a clear win. This closes the current
 PCR/SoA micro-variant branch. Future work should use `shift` and `padded` only
 as diagnostic references unless a new structural hypothesis changes the target.
 
+## Precomputed Assembly Diagnostic
+
+A separate benchmark-only diagnostic on commit `38dcfe5` compared the regular
+one-step proxy with a `precomputed_static` assembly variant that precomposes
+static double-cable diagonal bases, offsets, and absolute correction/background
+terms outside the measured assembly call:
+
+- `benchmark/results/kaggle/20260707_151450_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-precomputed-assembly-gpu-512/outputs/extracted`
+
+The run used the same P100 shape as the previous one-step check: `Naxons=512`,
+requested `Nx=101`, actual kernel `Nx=89`, fp32, different-diameter
+observer-only double-cable inputs, and `pcr_soa_batched`.
+
+| stage | variant | mean | min | max | first run |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `system_assembly` | `real_double_cable` | 0.299 ms | 0.261 ms | 0.351 ms | 0.361 ms |
+| `system_assembly` | `precomputed_static` | 0.339 ms | 0.269 ms | 0.495 ms | 0.373 ms |
+| `one_step_proxy` | `pcr_soa_batched_real` | 0.543 ms | 0.396 ms | 0.612 ms | 2501 ms |
+| `one_step_proxy` | `pcr_soa_batched_real_precomputed_static` | 0.500 ms | 0.378 ms | 0.580 ms | 2541 ms |
+
+The isolated assembly result moves the wrong way, but the fused one-step proxy
+improves in the same run; measured one-step medians were roughly `0.558 ms`
+baseline versus `0.479 ms` for `precomputed_static`. Treat this as a compiler
+diagnostic, not a runtime decision. The production scan already precomputes
+some static terms (`cm_over_dt`, `cx_over_dt`, axial left/right coefficients,
+and off-diagonal edge arrays), so the relevant question is whether precomposing
+the remaining diagonal/RHS pieces changes fusion shape enough to matter in the
+real scan body.
+
+A matching P100 lowering audit was run here:
+
+- `benchmark/results/kaggle/20260707_151930_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-precomputed-lowering-gpu-512/outputs/extracted`
+
+The compiled one-step HLO changed only modestly:
+
+| metric | baseline | `precomputed_static` |
+| --- | ---: | ---: |
+| optimized-HLO lines | 2862 | 2831 |
+| fusions | 10 | 10 |
+| gathers | 182 | 182 |
+| selects | 125 | 125 |
+| broadcasts | 130 | 129 |
+| dominant PCR fusion output | 22 arrays / 3.82 MiB | 22 arrays / 3.82 MiB |
+| assembly-side loop fusion output | 5 arrays / 0.87 MiB | 4 arrays / 0.70 MiB |
+
+This supports a narrow hypothesis: if this path is pursued, the runtime
+prototype should precompute the remaining static diagonal/RHS bases in the
+double-cable scan body and verify real curve-level timing. It should not be
+treated as a new solver algorithm, and it does not change the earlier
+conclusion that the PCR loop fusions remain the dominant low-level structure.
+
 The next low-level work should inspect the code generated inside the current
 PCR/SoA implementation and the one-step composition around it, not add a new
 public or policy route:
