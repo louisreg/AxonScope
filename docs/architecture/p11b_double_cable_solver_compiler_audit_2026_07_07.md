@@ -51,9 +51,9 @@ The runtime/preparation side already contains important P11B fixes:
   single-cable forcing caches are present.
 - Double-cable extracellular stacking now builds NumPy rows on host, caches by
   cable signature, and transfers batched blocks instead of many per-row arrays.
-- Double-cable membrane stacking has a structural gated/leak fast path that
-  keeps model-specific simplification in the compiler/backend layer rather than
-  in user-workflow branches.
+- Double-cable membrane stacking has a structural gated/leak backend
+  representation. It is capability-based, not model-name based: no runtime
+  branch should know about `MRG` or any other specific membrane model family.
 - `JaxMembraneProgram` memoizes derived static values such as `g_bar`, `E_rev`,
   membrane state specs, and static signatures. This was the key fix for the
   previous `runtime.prepare.stack_membrane` bottleneck.
@@ -161,11 +161,13 @@ low-level system, not as a black box. Current likely useful gates are:
    P11B should benchmark whether direct generated `Gm`/`GE` terms reduce hot
    path work or HLO size for double-cable workloads.
 
-3. Keep model-specific simplifications structural.
+3. Keep model-specific simplifications structural and generic.
 
    The current gated/leak stack is the right pattern: classify capabilities
    from compiled membrane structure and encode row parameters. Do not add
-   runtime branches that know about a specific membrane model family.
+   runtime branches that know about a specific membrane model family. Realistic
+   MRG workloads are benchmark cases for validating generic optimizations, not
+   a reason to specialize the runtime.
 
 4. Improve composite/generated boundaries only with measurements.
 
@@ -239,8 +241,9 @@ also about `0.499 ms`. Isolated generated membrane work remains visible
 (`0.230 ms` gate update and `0.237 ms` conductance), but these isolated stages
 are separate kernels and are not additive with the fused one-step result. The
 current GPU evidence therefore points first at the PCR/SoA solver/fusion body
-and its memory traffic, not at a model-family runtime branch for MRG membrane
-work.
+and its memory traffic. Any optimization should remain generic to the
+solver/runtime or membrane compiler layer, then be validated against realistic
+MRG/double-cable benchmarks.
 
 The forced-PCR CPU run is intentionally not the production CPU policy. It shows
 why: `pcr_soa_batched` is about `208.7 ms` and `99.7%` of the forced-PCR

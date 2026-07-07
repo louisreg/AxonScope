@@ -1524,10 +1524,12 @@ decisions need realistic workflow evidence.
   GPU one-step and isolated `pcr_soa_batched` are both about `0.499 ms`; the
   isolated generated membrane stages are visible but not additive with the
   fused one-step. GPU lowering points next at PCR/SoA fusion/memory traffic
-  (`2267` optimized-HLO lines, `7` fusions, no transpose) rather than an MRG
-  runtime branch. Forced-PCR CPU is a bad target (`~208.7 ms`, `99.7%` solver,
-  `32122` optimized-HLO lines, `2576` transposes); CPU work should remain
-  Thomas-first unless a dedicated CPU benchmark says otherwise.
+  (`2267` optimized-HLO lines, `7` fusions, no transpose). Never add
+  runtime branches for a specific membrane model family; MRG is a realistic
+  validation benchmark for generic solver/runtime/compiler optimizations, not
+  a specialization target. Forced-PCR CPU is a bad target (`~208.7 ms`,
+  `99.7%` solver, `32122` optimized-HLO lines, `2576` transposes); CPU work
+  should remain Thomas-first unless a dedicated CPU benchmark says otherwise.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
