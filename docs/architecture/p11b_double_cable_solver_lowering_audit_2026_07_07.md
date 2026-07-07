@@ -100,6 +100,20 @@ This reinforces the same decision: the next PCR/SoA work should inspect
 fusion bodies, live tuples, and gather/layout behavior inside the current
 solver, not add a vmap-vs-batched public route.
 
+The first benchmark-only candidate following this reading is
+`pcr_soa_symmetric_batched`. It uses the exact double-cable symmetry invariant
+to carry one side of the PCR coupling state and reconstruct the opposite side
+by shifted transpose. It is intentionally wired only into benchmark analysis
+tools. Local CPU smoke checks show the candidate matches the current masked
+PCR/SoA solver on synthetic symmetric systems, lowers to a smaller optimized
+HLO (`23393` to `16751` lines and `228` to `186` fusions on the tiny CPU
+smoke), and runs through the real-stage profiler. On a tiny real prepared fp32
+system, the candidate differs from current PCR/SoA by `6.7e-4` absolute on a
+roughly `80 mV` solution range, with max relative residual `9.0e-6` versus
+`8.4e-6` for current PCR/SoA and `8.4e-7` for Thomas. This is good enough for
+GPU benchmark exploration, but not enough to choose a runtime route; the next
+gate is GPU HLO/timing on the P100 workload.
+
 ## Decision
 
 Do not add a new `pcr_soa_vmap` versus `pcr_soa_batched` runtime route. The

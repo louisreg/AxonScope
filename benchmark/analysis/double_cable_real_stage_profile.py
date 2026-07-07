@@ -53,6 +53,9 @@ from axonscope.backends.jax.shape_bucketing import double_cable_kernel_group
 from axonscope.dispatcher.plan import build_dispatch_plan
 from axonscope.solvers.options import BatchOptions, SolverOptions, resolve_double_cable_block_solver
 
+from benchmark.analysis.double_cable_solver_candidates import (
+    solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric,
+)
 from benchmark.workloads.curve_options import PRESETS
 from benchmark.workloads.curve_runtime import _build_pool
 
@@ -156,7 +159,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--solver",
         action="append",
-        choices=("active_auto", "thomas_vmap", "pcr_matrix_vmap", "pcr_soa_vmap", "pcr_soa_batched"),
+        choices=(
+            "active_auto",
+            "thomas_vmap",
+            "pcr_matrix_vmap",
+            "pcr_soa_vmap",
+            "pcr_soa_batched",
+            "pcr_soa_symmetric_batched",
+        ),
         help="Block-solve variant to include. Repeat to select several. Defaults to active_auto.",
     )
     parser.add_argument("--repeats", type=int, default=5)
@@ -869,6 +879,22 @@ def _solve_pcr_soa_batched(
 
 
 @jax.jit
+def _solve_pcr_soa_symmetric_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
+@jax.jit
 def _real_observer_write(
     state: Any,
     Vm: Any,
@@ -933,6 +959,7 @@ def _solver_cases(
         "pcr_matrix_vmap": _solve_pcr_matrix_vmap,
         "pcr_soa_vmap": _solve_pcr_soa_vmap,
         "pcr_soa_batched": _solve_pcr_soa_batched,
+        "pcr_soa_symmetric_batched": _solve_pcr_soa_symmetric_batched,
     }
     for name in names:
         out.append(StageCase("block_solve", name, mapping[name], assembled))

@@ -154,7 +154,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--variants must select at least one variant.")
     if not dialects:
         parser.error("--dialects must select at least one dialect.")
-    unknown = set(variants) - {"active_auto", "thomas_vmap", "pcr_matrix_vmap", "pcr_soa_vmap", "pcr_soa_batched"}
+    unknown = set(variants) - {
+        "active_auto",
+        "thomas_vmap",
+        "pcr_matrix_vmap",
+        "pcr_soa_vmap",
+        "pcr_soa_batched",
+        "pcr_soa_symmetric_batched",
+    }
     if unknown:
         parser.error(f"unsupported --variants: {sorted(unknown)}")
 

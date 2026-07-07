@@ -6,6 +6,7 @@ import json
 import os
 import platform as host_platform
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,9 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_pcr,
@@ -24,6 +28,9 @@ from axonscope.backends.jax.common import (
 )
 from axonscope.backends.jax.observer_runtime import (
     update_vm_raster_state_batch_from_tables,
+)
+from benchmark.analysis.double_cable_solver_candidates import (
+    solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric,
 )
 
 
@@ -101,6 +108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "pcr_matrix_vmap",
             "pcr_soa_vmap",
             "pcr_soa_batched",
+            "pcr_soa_symmetric_batched",
         ),
         help="Solver variant to include. Repeat to select several. Defaults to all.",
     )
@@ -389,6 +397,22 @@ def _solve_pcr_soa_batched(
     )
 
 
+@jax.jit
+def _solve_pcr_soa_symmetric_batched(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric(
+        a00, a01, a10, a11, off0, off1, rhs0, rhs1
+    )
+
+
 def _make_inputs(
     *,
     batch_size: int,
@@ -499,6 +523,7 @@ def _stage_cases(
             "pcr_matrix_vmap": _solve_pcr_matrix_vmap_shared,
             "pcr_soa_vmap": _solve_pcr_soa_vmap_shared,
             "pcr_soa_batched": _solve_pcr_soa_batched,
+            "pcr_soa_symmetric_batched": _solve_pcr_soa_symmetric_batched,
         }
     else:
         solver_map = {
@@ -507,6 +532,7 @@ def _stage_cases(
             "pcr_matrix_vmap": _solve_pcr_matrix_vmap_batched,
             "pcr_soa_vmap": _solve_pcr_soa_vmap_batched,
             "pcr_soa_batched": _solve_pcr_soa_batched,
+            "pcr_soa_symmetric_batched": _solve_pcr_soa_symmetric_batched,
         }
     for solver in solvers:
         cases.append(StageCase("block_solve", solver, solver_map[solver], solver_inputs))

@@ -1269,6 +1269,25 @@ decisions need realistic workflow evidence.
   `loop_add_fusion`. Next low-level action: inspect whether those large live
   tuple/fusion outputs can be reduced, recomputed, or staged differently while
   preserving exactness.
+  First benchmark-only candidate added:
+  `benchmark/analysis/double_cable_solver_candidates.py` provides
+  `pcr_soa_symmetric_batched`, which exploits the exact double-cable symmetric
+  matrix invariant to carry only one side of the PCR coupling state and rebuild
+  the opposite side by shifted transpose. It is wired only into benchmark
+  analysis tools, not runtime `auto` policy. Targeted unit tests pass against
+  current masked PCR/SoA for batched and shared synthetic symmetric
+  coefficients. Local CPU smoke evidence:
+  `benchmark/results/p11b_symmetric_pcr_lowering_smoke` lowers the tiny case
+  from `23393` to `16751` optimized-HLO lines and from `228` to `186` fusions;
+  `benchmark/results/p11b_symmetric_pcr_real_stage_smoke` runs the candidate on
+  real prepared double-cable inputs and is directionally faster on the tiny CPU
+  case. A tiny real prepared fp32 correctness check gives current-vs-candidate
+  max absolute difference `6.7e-4` on a roughly `80 mV` solution range, with
+  max relative residual `9.0e-6` for the candidate versus `8.4e-6` for current
+  PCR/SoA and `8.4e-7` for Thomas. Next gate: run the same candidate on Kaggle
+  P100 for `Naxons=512`,
+  requested `Nx=101`, comparing optimized HLO/fusion tuple shape and hot
+  block-solve timing against current `pcr_soa_batched`.
 - [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
