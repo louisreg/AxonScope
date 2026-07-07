@@ -1556,6 +1556,15 @@ decisions need realistic workflow evidence.
   I/O). Next action should stay GPU solver-local: reduce PCR stage live
   state/tuple outputs or change staging, with no membrane-model-specific
   runtime path.
+  GPU-only critical review of the three older idea documents is recorded in
+  `docs/architecture/p11b_gpu_solver_ideas_critical_review_2026_07_07.md`.
+  Decision from that pass: do not reopen a broad solver-zoo sweep, do not
+  promote Thomas/PTA/custom-kernel routes yet, and do not add public solver
+  policy. The next benchmark slice should audit PCR/SoA stage state per stride
+  and prototype one benchmark-only state/staging variant that tries to reduce
+  the dominant fusion tuple/I/O pressure, then gate it on local correctness,
+  P100 lowering, P100 hot-step, and only then realistic curve behavior if it
+  actually wins.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

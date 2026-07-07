@@ -24,6 +24,8 @@ Fresh evidence anchor:
   `docs/architecture/p11b_real_double_cable_stage_profile_512_2026_07_07.md`
 - GPU solver lowering report:
   `docs/architecture/p11b_double_cable_solver_lowering_audit_2026_07_07.md`
+- GPU-only critical reading of the older idea documents:
+  `docs/architecture/p11b_gpu_solver_ideas_critical_review_2026_07_07.md`
 
 That report confirms the current next target:
 
