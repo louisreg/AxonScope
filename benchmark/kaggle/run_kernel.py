@@ -141,6 +141,8 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
     preset_explicit = _flag_present(raw_args, "--preset")
     machine_shape_explicit = _flag_present(raw_args, "--machine-shape")
     args, benchmark_args = parser.parse_known_args(argv)
+    if benchmark_args[:1] == ["--"]:
+        benchmark_args = benchmark_args[1:]
     validate_benchmark_target(parser, args)
     normalize_compute_args(
         args,
