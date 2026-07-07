@@ -1583,18 +1583,21 @@ decisions need realistic workflow evidence.
   useful negative evidence, not a runtime route. Next action: inspect or
   prototype a low-level candidate that changes measured hot-path cost, not only
   HLO tuple size.
-  Current active low-level candidate: rewrite the generic 2x2 inverse helpers
-  to compute one reciprocal per determinant and multiply the four inverse
-  components, instead of emitting four divisions by the same determinant. This
-  is solver-generic and not model-specific. Local CPU lowering smoke under
-  `benchmark/results/p11b_reciprocal_inverse_lowering_smoke` confirms the
-  compiled `block_solve:pcr_soa_batched` uses `count_divide=13` on the smoke
-  shape. Next gate: fresh P100 lowering and real-stage timing on the existing
-  `Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only MRG shape.
-  Submitted P100 gates for commit `21ffaef`:
+  Rejected low-level arithmetic candidate: rewriting the generic 2x2 inverse
+  helpers to compute one reciprocal per determinant reduced HLO `count_divide`
+  on P100 (`60` to `15`) but regressed hot solve timing. See
+  `docs/architecture/p11b_reciprocal_inverse_gate_2026_07_07.md`. On the
+  existing `Naxons=512`, requested `Nx=101`, actual `Nx=89`, observer-only MRG
+  shape, isolated `pcr_soa_batched` moved from `0.417 ms` to `0.474 ms`; the
+  code was reverted. Do not pursue isolated instruction-count reductions
+  without a measured hot-path win. Gate artifacts for commit `21ffaef`:
   `benchmark/results/kaggle/20260707_183755_double_cable_solver_lowering_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11b-recip-inv-lowering-gpu-512`
   and
   `benchmark/results/kaggle/20260707_183812_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11b-recip-inv-real-gpu-512`.
+  Next action: change class of optimization rather than keep tuning PCR/SoA
+  instruction shape. Focus on a measured structural runtime cost: launch/stage
+  count, memory traffic across stages, or an actually different GPU solve
+  structure from the solver-roadmap documents.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 

@@ -98,8 +98,7 @@ def solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric(
         m11: Any,
     ) -> tuple[Any, Any, Any, Any]:
         det = m00 * m11 - m01 * m10
-        inv_det = jnp.reciprocal(det)
-        return m11 * inv_det, -m01 * inv_det, -m10 * inv_det, m00 * inv_det
+        return m11 / det, -m01 / det, -m10 / det, m00 / det
 
     def matmul2_components(
         l00: Any,

@@ -323,16 +323,15 @@ from `0.415 ms` to `0.404 ms`. Treat this as evidence to avoid promoting the
 symmetry route as-is; future low-level solver work needs to reduce actual
 hot-path cost, not only tuple size.
 
-The next active low-level candidate is arithmetic rather than routing or tuple
-shape: the generic 2x2 inverse helper now computes one reciprocal per
-determinant and multiplies the four inverse components, instead of emitting
-four divisions by the same determinant. This is not model-specific; it applies
-to the shared block inverse used by the JAX 2x2 solvers. Local CPU lowering
-smoke under `benchmark/results/p11b_reciprocal_inverse_lowering_smoke` confirms
-the compiled `block_solve:pcr_soa_batched` uses `count_divide=13` on that smoke
-shape. Do not treat this as a speed claim until the P100 lowering and real
-stage profile are refreshed on the `Naxons=512`, requested `Nx=101`, actual
-`Nx=89`, observer-only double-cable workload.
+The next arithmetic candidate was also rejected. The generic 2x2 inverse helper
+was temporarily rewritten to compute one reciprocal per determinant and
+multiply the four inverse components, instead of emitting four divisions by the
+same determinant. The P100 gate in
+`docs/architecture/p11b_reciprocal_inverse_gate_2026_07_07.md` showed the HLO
+counter changed as expected (`count_divide` 60 to 15), but hot GPU timing
+regressed (`0.417 ms` to `0.474 ms` for isolated `pcr_soa_batched`). The code
+was reverted. Treat this as negative evidence: do not optimize isolated HLO
+instruction counts unless they reduce measured hot-path time.
 
 ## Runtime Source Hygiene
 
