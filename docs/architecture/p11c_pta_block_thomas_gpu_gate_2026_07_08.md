@@ -529,6 +529,8 @@ snapshots disabled:
 | --- | ---: | ---: | ---: | ---: | --- |
 | `tiled_thomas` / `tl.static_range` | 32 | 118.1 s | 152 ms | 468 ms | `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted` |
 | `tiled_thomas_loop` / `tl.range` | 32 | 3.67 s | 125 ms | 158 ms | `benchmark/results/kaggle/20260708_221928_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx32-b128-fe899c4/outputs/extracted` |
+| `tiled_thomas` / `tl.static_range` | 89 | 2340.1 s | 154 ms | 1341 ms | `benchmark/results/kaggle/20260708_212036_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-start-gpu-7bb5250/outputs/extracted` |
+| `tiled_thomas_loop` / `tl.range` | 89 | 3.72 s | 138 ms | 154 ms | `benchmark/results/kaggle/20260708_222735_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx89-b128-8146a72/outputs/extracted` |
 
 Conclusion:
 
@@ -536,8 +538,36 @@ Conclusion:
 Lowering grows much faster than linearly with Nx for the static-range kernel.
 The first looped tl.range candidate removes the cold-start cliff at Nx=32, so
 the rejected piece is the static unrolling shape, not the whole Triton route.
-Keep the looped kernel benchmark-only until it is validated at the real Nx=89
-gate and compared on the real-stage large-population workload.
+The Nx=89 looped gate confirms the cold-start fix at the real compartment
+count. Keep the looped kernel benchmark-only until it is compared on the
+large-population workload.
+```
+
+Small looped real-stage validation gate at commit `44534e2`, P100, fp32,
+observer-only, target `Nx=101` / actual `Nx=89`, `Naxons=1024`:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_223254_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-44534e2/outputs/extracted`.
+- `real_stage_validation.csv` passed `9/9` rows.
+- `jax_triton_tiled_thomas_loop` versus `thomas_batched_scan`: max absolute
+  block-solve diff `0.00397 mV`, max absolute `Vm` diff `0.00383 mV`, max
+  residual norm `8.02e-7`.
+
+Hot timings from the same gate:
+
+| stage | PCR-SoA | JAX scan Thomas | looped jax-triton | looped first run |
+| --- | ---: | ---: | ---: | ---: |
+| block solve | 0.643 ms | 2.199 ms | 0.483 ms | 4109 ms |
+| one-step real | 0.763 ms | 2.371 ms | 0.584 ms | 588 ms |
+| one-step precomputed static | 0.758 ms | 2.445 ms | 0.541 ms | 501 ms |
+
+Interpretation:
+
+```text
+The looped Triton shape is now both numerically coherent and hot-time
+competitive on a small real-stage gate. Its standalone block-solve first run is
+still about 4.1 s at Naxons=1024, but this is acceptable enough to justify one
+large-population scale gate before any backend integration decision.
 ```
 
 ## CPU Synthetic Cross-Check

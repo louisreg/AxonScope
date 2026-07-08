@@ -1804,11 +1804,27 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260708_221928_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx32-b128-fe899c4/outputs/extracted`.
   Interpretation: the cold cliff is caused by the static unrolled kernel shape,
   not by all jax-triton usage.
-- [ ] Validate the looped jax-triton candidate before any integration:
+- [x] Validate the looped jax-triton candidate before any integration:
   run one small Kaggle P100 gate at the real `Nx=89` shape and then one small
   real-stage numerical/timing gate if `Nx=89` cold-start stays acceptable.
   Keep this benchmark-only and do not add public solver options or runtime
   policy changes.
+  Cold-start gate at commit `8146a72`, `Nx=89`, `B=128`, `block_b=64`:
+  `lower` `3.72 s`, `compile` `138 ms`, first compiled call `154 ms`,
+  same-process hot call `3.63 ms`. Artifact:
+  `benchmark/results/kaggle/20260708_222735_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx89-b128-8146a72/outputs/extracted`.
+  Small real-stage gate at commit `44534e2`, `Naxons=1024`, target `Nx=101` /
+  actual `Nx=89`, fp32, observer-only: validation passed `9/9`; looped Triton
+  block solve is `0.483 ms` hot versus `0.643 ms` PCR and `2.199 ms` JAX scan,
+  with first standalone block solve `4109 ms`. One-step precomputed-static is
+  `0.541 ms` hot versus `0.758 ms` PCR and `2.445 ms` JAX scan. Artifact:
+  `benchmark/results/kaggle/20260708_223254_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-44534e2/outputs/extracted`.
+- [ ] Run the looped jax-triton large-population scale gate:
+  test `Naxons=8192/16384`, actual `Nx=89`, fp32, observer-only, comparing
+  `pcr_soa_batched`, `thomas_batched_scan`, and
+  `jax_triton_tiled_thomas_loop`. Keep it benchmark-only; promote only if the
+  large-population real-stage win survives with acceptable first-run cost and
+  validation.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost
