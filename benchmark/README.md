@@ -94,6 +94,26 @@ python benchmark/kaggle/run_kernel.py \
   --warmups 1
 ```
 
+To include the JAX Thomas/PTA feasibility baseline, opt into the extra variant:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-pta-jax-gpu \
+  --campaign large_population_double_cable_solver_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --variant current_pcr_soa \
+  --variant thomas_batched_scan \
+  --variant large_population_exact_double_cable_jax \
+  --batch-size 1024 4096 8192 16384 \
+  --nx 47 89 129 \
+  --coefficient-mode both \
+  --layout TILED \
+  --repeats 5 \
+  --warmups 1
+```
+
 ## Presets
 
 Presets live in `benchmark/workloads/curve_options.py`:

@@ -23,6 +23,7 @@ if __package__ in {None, ""}:
 from axonscope.backends.jax.common import (
     double_cable_block_residual_norm,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+    solve_block_tridiagonal_2x2_scalar_batched,
 )
 from axonscope.backends.jax.large_population_solver import (
     LargePopulationLayoutName,
@@ -116,8 +117,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--variant",
         action="append",
-        choices=("current_pcr_soa", "large_population_exact_double_cable_jax"),
-        help="Variant to include. Repeat to select several. Defaults to both.",
+        choices=(
+            "current_pcr_soa",
+            "thomas_batched_scan",
+            "large_population_exact_double_cable_jax",
+        ),
+        help=(
+            "Variant to include. Repeat to select several. Defaults to current "
+            "PCR-SoA plus the tiled large-population candidate."
+        ),
     )
     parser.add_argument(
         "--layout",
@@ -231,6 +239,29 @@ def _solve_current(
     )
 
 
+@jax.jit
+def _solve_thomas_batched_scan(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_scalar_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+    )
+
+
 def _cases(
     *,
     variants: Sequence[str],
@@ -250,6 +281,22 @@ def _cases(
                     variant=variant,
                     layout="BX",
                     fn=_solve_current,
+                    args=inputs,
+                    batch_size=batch_size,
+                    nx_true=nx_true,
+                    nx_pad=nx_true,
+                    block_b=None,
+                    n_tiles=None,
+                    coefficient_mode=coefficient_mode,
+                )
+            )
+            continue
+        if variant == "thomas_batched_scan":
+            cases.append(
+                SolverCase(
+                    variant=variant,
+                    layout="XB_SCAN",
+                    fn=_solve_thomas_batched_scan,
                     args=inputs,
                     batch_size=batch_size,
                     nx_true=nx_true,

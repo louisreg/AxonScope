@@ -1630,6 +1630,8 @@ JAX GPU solver path.
 
 Design reference:
 `docs/architecture/p11c_large_population_gpu_solver_plan_2026_07_07.md`.
+PTA/block-Thomas GPU gate:
+`docs/architecture/p11c_pta_block_thomas_gpu_gate_2026_07_08.md`.
 
 - [x] P11C non-goals and boundaries:
   no public solver option, no `auto` policy change, no membrane-model-specific
@@ -1660,6 +1662,19 @@ Design reference:
   large-pop solver/layout benchmark with raw CSVs, metadata, git state, hardware
   metadata, memory, compile/first-run time, hot time, node-solves/s,
   axon-steps/s, output bytes, and a Markdown decision report.
+- [x] Add the P11C-PTA critical design gate:
+  document why the literature-backed `PTA_BLOCK_THOMAS_2X2_TILED` hypothesis is
+  not answered by the first tiled/padded PCR-SoA candidate; keep PfSolve/NVIDIA
+  lessons as a custom-kernel-ready design reference without adding Triton,
+  Pallas, FFI, public solver options, or runtime policy changes in this slice.
+- [x] Add `thomas_batched_scan` to the P11C synthetic profiler as the JAX
+  feasibility baseline for Thomas/PTA at large `Naxons`.
+- [ ] Run the P11C-PTA JAX feasibility matrix on GPU:
+  compare `current_pcr_soa`, `thomas_batched_scan`, and
+  `large_population_exact_double_cable_jax` at `Naxons=1024/4096/8192/16384`,
+  `Nx=47/89/129`, shared and batched coefficients, fp32 first. Treat this only
+  as a JAX/XLA feasibility gate; bad scan timing rejects the JAX expression,
+  not the future custom-kernel PTA idea.
 - [ ] Build the real-stage P11C benchmark harness before runtime integration:
   large-pop real-stage benchmark with layout/packing, membrane/RHS assembly,
   exact solve, compact recording, and result-boundary costs.
