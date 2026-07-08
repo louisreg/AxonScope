@@ -1788,6 +1788,16 @@ PTA/block-Thomas GPU gate:
   directory stays empty in this run. Next inspect whether the `tl.static_range`
   Thomas forward/backward loops cause unrolled lowering time, then test smaller
   `Nx` and a non-unrolled/looped kernel variant before doing any integration.
+  Micro scaling checks on the same P100 stack, with `B=128`, `block_b=64`, and
+  no cache snapshots to protect Kaggle quota:
+  `Nx=16` lower `15.8 s`, compile `119 ms`, first call `246 ms`; artifact
+  `benchmark/results/kaggle/20260708_220512_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx16-b128-f93fda4/outputs/extracted`.
+  `Nx=32` lower `118.1 s`, compile `152 ms`, first call `468 ms`; artifact
+  `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted`.
+  Stop the Kaggle matrix here for quota reasons: the lowering cost scales much
+  faster than linearly with `Nx`, consistent with static loop unrolling. Next
+  work locally in code first, then only run one tiny Kaggle gate for a
+  non-unrolled/less-unrolled candidate.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost

@@ -511,6 +511,23 @@ Next cold-start checks:
   the target stack.
 - Do not promote the jax-triton route while the lowering cost remains minutes.
 
+Quota-limited micro scaling checks, same P100 stack, `B=128`, `block_b=64`,
+cache snapshots disabled:
+
+| Nx | lower | compile | first compiled call | artifact |
+| ---: | ---: | ---: | ---: | --- |
+| 16 | 15.8 s | 119 ms | 246 ms | `benchmark/results/kaggle/20260708_220512_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx16-b128-f93fda4/outputs/extracted` |
+| 32 | 118.1 s | 152 ms | 468 ms | `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted` |
+| 89 | 2340.1 s | 154 ms | 1341 ms | `benchmark/results/kaggle/20260708_212036_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-start-gpu-7bb5250/outputs/extracted` |
+
+Conclusion:
+
+```text
+Lowering grows much faster than linearly with Nx. Stop spending Kaggle quota on
+the current static-range jax-triton shape; inspect and change the kernel shape
+locally first, then run only one tiny Kaggle gate for the next candidate.
+```
+
 ## CPU Synthetic Cross-Check
 
 The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
