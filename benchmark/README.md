@@ -114,6 +114,57 @@ python benchmark/kaggle/run_kernel.py \
   --warmups 1
 ```
 
+For the follow-up real-stage gate, compare PCR/SoA and the JAX Thomas scan on
+real prepared double-cable inputs:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-real-pta-gpu-n8192 \
+  --campaign double_cable_real_stage_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --n-axons 8192 \
+  --nx 101 \
+  --recording observer_only \
+  --diameters different_diameters \
+  --precision fp32 \
+  --solver pcr_soa_batched \
+  --solver thomas_batched_scan \
+  --one-step-solver pcr_soa_batched \
+  --one-step-solver thomas_batched_scan \
+  --repeats 3 \
+  --warmups 1 \
+  --no-plots
+```
+
+To test the paper-inspired jax-triton tile/lane Thomas candidate, install
+`jax-triton` inside the Kaggle kernel and include `jax_triton_tiled_thomas`:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-triton-thomas-gpu-16k \
+  --campaign double_cable_real_stage_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --pip-package jax-triton \
+  --n-axons 16384 \
+  --nx 101 \
+  --recording observer_only \
+  --diameters different_diameters \
+  --precision fp32 \
+  --solver pcr_soa_batched \
+  --solver thomas_batched_scan \
+  --solver jax_triton_tiled_thomas \
+  --one-step-solver pcr_soa_batched \
+  --one-step-solver thomas_batched_scan \
+  --one-step-solver jax_triton_tiled_thomas \
+  --repeats 3 \
+  --warmups 1 \
+  --no-plots
+```
+
 ## Presets
 
 Presets live in `benchmark/workloads/curve_options.py`:

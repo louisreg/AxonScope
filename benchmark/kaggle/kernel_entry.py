@@ -103,6 +103,13 @@ def _install_repo(config: dict[str, Any]) -> None:
     cuda_extra = str(config.get("jax_cuda_extra") or "").strip()
     if cuda_extra:
         _run([python, "-m", "pip", "install", "-U", f"jax[{cuda_extra}]"])
+    pip_packages = [
+        str(package)
+        for package in config.get("pip_packages", ())
+        if str(package).strip()
+    ]
+    if pip_packages:
+        _run([python, "-m", "pip", "install", *pip_packages])
 
 
 def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list[str]:

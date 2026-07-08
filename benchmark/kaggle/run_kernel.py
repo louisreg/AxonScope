@@ -140,6 +140,15 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         help="Optional JAX CUDA extra installed in Kaggle; use '' to skip.",
     )
     parser.add_argument(
+        "--pip-package",
+        action="append",
+        default=[],
+        help=(
+            "Extra pip package installed inside the Kaggle kernel after the "
+            "repo and optional JAX CUDA wheel. Repeat for several packages."
+        ),
+    )
+    parser.add_argument(
         "--output-file-pattern",
         default=".*axonscope_benchmark_results.*",
         help="Regex passed to `kaggle kernels output --file-pattern`.",
@@ -235,6 +244,7 @@ def prepare_kernel_package(
         "run_id": run_id,
         "require_gpu": require_gpu,
         "jax_cuda_extra": args.jax_cuda_extra,
+        "pip_packages": list(args.pip_package or ()),
     }
     metadata: dict[str, Any] = {
         "id": f"{args.username}/{args.slug}",

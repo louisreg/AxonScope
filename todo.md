@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-07 during the P11B double-cable low-level optimization pass.
+Updated on 2026-07-08 during the P11C large-population GPU solver gate.
 
 Current state:
 
@@ -1678,7 +1678,7 @@ PTA/block-Thomas GPU gate:
   `8192/16384`. Artifact:
   `benchmark/results/kaggle/20260708_181129_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-pta-jax-gpu-b4f4618/extracted`.
   Treat this only as a synthetic solver-only gate, not runtime policy.
-- [ ] Build the real-stage P11C benchmark harness before runtime integration:
+- [x] Build the real-stage P11C benchmark harness before runtime integration:
   large-pop real-stage benchmark with layout/packing, membrane/RHS assembly,
   exact solve, compact recording, and result-boundary costs.
 - [x] P11C-A gate: local smoke and correctness.
@@ -1695,12 +1695,47 @@ PTA/block-Thomas GPU gate:
   `Nx_true` values that cover all candidate buckets, shared and batched
   coefficients, fp32 first, and fp64 spot checks. Compare against the current
   exact JAX route only as baseline evidence, not as the objective.
+  CPU synthetic cross-check on Kaggle P100 machine at commit `ed0ccff` is now
+  available:
+  `benchmark/results/kaggle/20260708_174928_large_population_double_cable_solver_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11c-large-pop-cpu-ed0ccff/outputs/benchmark/results/large_population_double_cable_solver_profile_quick_cpu_20260708_174928`.
+  It shows the tiled/padded candidate only wins modestly for `Nx=47`
+  (`~3.5%-9.8%`) and loses or ties for `Nx=89/129`, especially because
+  `Nx=129 -> Nx_pad=160` is costly. Do not move CPU execution toward P11C;
+  keep P11C as a GPU large-population track.
 - [ ] P11C-D gate: real-stage large-population matrix.
   Use real double-cable MRG-like prepared inputs with observer-only and probe
   outputs first. Target `Naxons=4096/8192`, optional `16384` if memory allows.
   Measure membrane, assembly, solve, one-step proxy, compact recording,
   layout/packing, and result-boundary costs. Proceed to reduced
   recruitment/threshold curves only if this gate wins.
+  First GPU real-stage result on Kaggle P100 at commit `b233fc7`,
+  observer-only fp32, target `Nx=101` / actual `Nx=89`, different diameters,
+  `Naxons=8192`: `thomas_batched_scan` keeps the large-population signal with
+  `2.669 ms` block solve versus `3.796 ms` for `pcr_soa_batched`
+  (`1.42x` speedup), and `3.117 ms` one-step proxy versus `4.385 ms`
+  (`1.41x` speedup) on the precomputed-static real-stage proxy. Artifact:
+  `benchmark/results/kaggle/20260708_182559_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-real-pta-gpu-n8192-b233fc7/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_182559`.
+  Follow-up `Naxons=16384` on the same P100 gate confirms and strengthens the
+  signal: `thomas_batched_scan` is `3.287 ms` block solve versus `7.223 ms`
+  for `pcr_soa_batched` (`2.20x` speedup), and `4.104 ms` one-step proxy
+  versus `8.241 ms` (`2.01x` speedup) on the precomputed-static real-stage
+  proxy. Artifact:
+  `benchmark/results/kaggle/20260708_183319_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-real-pta-gpu-16k-b233fc7-r2/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_183319`.
+  Next decide whether to implement the backend-private large-population route
+  behind benchmark gates, without adding a public solver option or broad runtime
+  policy.
+- [x] Add the first paper-inspired jax-triton solver candidate:
+  `jax_triton_tiled_thomas` uses `jax_triton.triton_call`, an internal
+  `[Nx, B]` tile/lane layout, one Triton program per axon tile, and coalesced
+  same-compartment lane loads. This is closer to the GPU-tridiagonal papers
+  than the pure JAX scan, but still not a full PfSolve-equivalent
+  shared-memory/scratch implementation. Keep it benchmark-only.
+- [ ] Run the jax-triton P11C gate on Kaggle P100:
+  compare `pcr_soa_batched`, `thomas_batched_scan`, and
+  `jax_triton_tiled_thomas` at least on the real-stage `Naxons=8192/16384`,
+  fp32, observer-only, target `Nx=101` / actual `Nx=89`. Install the optional
+  dependency with `--pip-package jax-triton`; do not promote anything until the
+  artifact shows correctness and hot-step timing.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost

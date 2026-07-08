@@ -25,6 +25,9 @@ from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar_batched,
 )
+from axonscope.backends.jax.jax_triton_double_cable import (
+    solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
+)
 from axonscope.backends.jax.large_population_solver import (
     LargePopulationLayoutName,
     block_b_candidates_for_nx_bucket,
@@ -120,6 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=(
             "current_pcr_soa",
             "thomas_batched_scan",
+            "jax_triton_tiled_thomas",
             "large_population_exact_double_cable_jax",
         ),
         help=(
@@ -262,6 +266,30 @@ def _solve_thomas_batched_scan(
     )
 
 
+@jax.jit
+def _solve_jax_triton_tiled_thomas(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=128,
+    )
+
+
 def _cases(
     *,
     variants: Sequence[str],
@@ -303,6 +331,22 @@ def _cases(
                     nx_pad=nx_true,
                     block_b=None,
                     n_tiles=None,
+                    coefficient_mode=coefficient_mode,
+                )
+            )
+            continue
+        if variant == "jax_triton_tiled_thomas":
+            cases.append(
+                SolverCase(
+                    variant=variant,
+                    layout="XB_TRITON_TILED",
+                    fn=_solve_jax_triton_tiled_thomas,
+                    args=inputs,
+                    batch_size=batch_size,
+                    nx_true=nx_true,
+                    nx_pad=nx_true,
+                    block_b=128,
+                    n_tiles=(batch_size + 127) // 128,
                     coefficient_mode=coefficient_mode,
                 )
             )

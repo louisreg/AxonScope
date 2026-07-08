@@ -293,7 +293,7 @@ solver-only regimes.
 This is not yet a runtime decision because the result is synthetic solver-only.
 ```
 
-### Gate 2 - PTA Design Decision
+### Gate 2 - Real-Stage Large-Population Gate
 
 After Gate 1:
 
@@ -306,6 +306,56 @@ After Gate 1:
   different implementation class.
 - Do not add a public solver option or `auto` policy branch.
 
+Result at `Naxons=8192`:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_182559_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-real-pta-gpu-n8192-b233fc7/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_182559`.
+- Hardware: Kaggle `Tesla P100-PCIE-16GB`.
+- Commit: `b233fc7`.
+- Workload: real double-cable MRG-like prepared inputs, observer-only output,
+  different diameters, fp32, target `Nx=101`, actual kernel `Nx=89`.
+- `block_solve/thomas_batched_scan` is `2.669 ms` mean versus
+  `3.796 ms` for `pcr_soa_batched`, or `0.703x` of PCR time
+  (`1.42x` speedup).
+- `one_step_proxy/thomas_batched_scan_real` is `3.196 ms` mean versus
+  `4.350 ms` for `pcr_soa_batched_real`, or `0.735x` of PCR time
+  (`1.36x` speedup).
+- `one_step_proxy/thomas_batched_scan_real_precomputed_static` is
+  `3.117 ms` mean versus `4.385 ms` for the matching PCR route, or
+  `0.711x` of PCR time (`1.41x` speedup).
+- The Thomas block solve is `85.7%` of the primary one-step proxy, so this
+  large-population real-stage case is genuinely solver-bound.
+
+Result at `Naxons=16384`:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_183319_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-real-pta-gpu-16k-b233fc7-r2/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_183319`.
+- Hardware: Kaggle `Tesla P100-PCIE-16GB`.
+- Commit: `b233fc7`.
+- Workload: same as the `Naxons=8192` gate, with target `Nx=101`,
+  actual kernel `Nx=89`, observer-only output, different diameters, fp32.
+- `block_solve/thomas_batched_scan` is `3.287 ms` mean versus
+  `7.223 ms` for `pcr_soa_batched`, or `0.455x` of PCR time
+  (`2.20x` speedup).
+- `one_step_proxy/thomas_batched_scan_real` is `4.247 ms` mean versus
+  `8.285 ms` for `pcr_soa_batched_real`, or `0.513x` of PCR time
+  (`1.95x` speedup).
+- `one_step_proxy/thomas_batched_scan_real_precomputed_static` is
+  `4.104 ms` mean versus `8.241 ms` for the matching PCR route, or
+  `0.498x` of PCR time (`2.01x` speedup).
+- The Thomas block solve is `80.1%` of the primary one-step proxy, so the
+  larger real-stage case remains solver-bound.
+
+Interpretation:
+
+```text
+The synthetic large-Naxons Thomas signal survives realistic GPU hot-step gates
+at Naxons=8192 and Naxons=16384.
+The signal gets stronger at 16384 axons.
+This is enough to justify a backend-private large-population implementation
+experiment, but still not a public solver policy or automatic runtime branch.
+```
+
 ### Gate 3 - Future Custom-Kernel Entry Criteria
 
 Only open a custom-kernel PTA track if all are true:
@@ -317,10 +367,81 @@ Only open a custom-kernel PTA track if all are true:
 - the implementation can be generic to the exact double-cable system, not
   membrane-model-specific.
 
+## jax-triton Tile/Lane Candidate
+
+After the `Naxons=8192/16384` real-stage gates, P11C adds a benchmark-only
+`jax_triton_tiled_thomas` candidate. It is a first implementation step toward
+the GPU-tridiagonal papers, not a final PfSolve-equivalent solver:
+
+- it calls Triton kernels through `jax_triton.triton_call`;
+- it exposes an internal `[Nx, B]` layout so lanes in one program read adjacent
+  axons at the same compartment index;
+- one Triton program owns a tile of axons and runs the exact block-Thomas
+  recurrence over `x`;
+- it keeps global-memory forward scratch for now and does not yet implement the
+  shared-memory/scratch scheduling, occupancy tuning, or full PTA implementation
+  class described by PfSolve-style papers.
+
+Gate interpretation:
+
+```text
+If jax_triton_tiled_thomas wins, implement the backend-private large-population
+route around that layout.
+If it loses to the JAX scan, keep the pure JAX large-Naxons route as the current
+best low-level evidence and leave deeper Triton/CUDA work as a later track.
+```
+
+## CPU Synthetic Cross-Check
+
+The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_174928_large_population_double_cable_solver_profile_quick_cpu_NvidiaTeslaP100_axonscope-p11c-large-pop-cpu-ed0ccff/outputs/benchmark/results/large_population_double_cable_solver_profile_quick_cpu_20260708_174928`.
+- Hardware context: AxonScope CPU path on a Kaggle P100 machine.
+- Matrix: `B=1024/4096/8192`, `Nx=47/89/129`, shared and batched coefficients,
+  fp32.
+
+Result:
+
+- The tiled/padded large-population JAX candidate wins only for short
+  `Nx=47`, with modest gains around `3.5%-9.8%` depending on `B` and coefficient
+  mode.
+- For `Nx=89`, current PCR-SoA is generally best; the only near tie is
+  `B=4096`, shared coefficients, where the tiled route is effectively equal.
+- For `Nx=129`, current PCR-SoA is clearly best; the padded `Nx=160` candidate
+  loses by roughly `14%-27%`.
+
+Interpretation:
+
+```text
+Do not move CPU execution toward the P11C tiled/padded route.
+P11C remains a GPU large-population track.
+```
+
+CPU/GPU synthetic speedup, same commit `ed0ccff`, best available variant on
+each platform and averaged over shared/batched coefficients:
+
+| Naxons | Nx=47 | Nx=89 | Nx=129 |
+| ---: | ---: | ---: | ---: |
+| 1024 | 460x | 1072x | 1191x |
+| 4096 | 967x | 1647x | 2185x |
+| 8192 | 1364x | 2238x | 2719x |
+
+Directional CPU-vs-GPU comparison using the later GPU `b4f4618` run with
+`thomas_batched_scan` included shows why large-population GPU Thomas matters:
+
+| Naxons | Nx=47 | Nx=89 | Nx=129 | GPU best variant |
+| ---: | ---: | ---: | ---: | --- |
+| 1024 | 392x | 1047x | 1200x | tiled/PCR mix |
+| 4096 | 937x | 1561x | 2144x | tiled/PCR mix |
+| 8192 | 1357x | 2954x | 4357x | `thomas_batched_scan` |
+
+These tables are solver-only, and the Thomas table is cross-run/cross-commit,
+so use them as scaling signals rather than end-to-end workflow claims.
+
 ## Immediate Decision
 
-P11C should not conclude from the current tiled PCR-SoA candidate alone. The
-next cheap step is to run the large-population synthetic profiler with
-`thomas_batched_scan` included. If that repeats the P11B result at larger
-`Naxons`, the JAX PTA line can be closed while keeping PfSolve-style PTA as a
-future custom-kernel candidate.
+P11C should continue from the benchmark-only gate to a backend-private
+large-population implementation experiment. The `Naxons=8192` and `16384`
+real-stage GPU runs are strong enough to justify integration work, but not
+enough to change public runtime policy or add a public solver option.

@@ -138,6 +138,8 @@ def test_kaggle_runner_dry_run_supports_large_population_solver_campaign(tmp_pat
                 "TILED",
                 "--block-b",
                 "64",
+                "--pip-package",
+                "jax-triton",
             ]
         )
         == 0
@@ -156,6 +158,7 @@ def test_kaggle_runner_dry_run_supports_large_population_solver_campaign(tmp_pat
     assert config["preset"] == "quick"
     assert config["platform"] == "gpu"
     assert config["require_gpu"] is True
+    assert config["pip_packages"] == ["jax-triton"]
     assert config["benchmark_args"] == [
         "--batch-size",
         "1024",
