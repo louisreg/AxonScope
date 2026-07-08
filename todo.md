@@ -1819,12 +1819,25 @@ PTA/block-Thomas GPU gate:
   with first standalone block solve `4109 ms`. One-step precomputed-static is
   `0.541 ms` hot versus `0.758 ms` PCR and `2.445 ms` JAX scan. Artifact:
   `benchmark/results/kaggle/20260708_223254_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-44534e2/outputs/extracted`.
-- [ ] Run the looped jax-triton large-population scale gate:
+- [x] Run the looped jax-triton large-population scale gate:
   test `Naxons=8192/16384`, actual `Nx=89`, fp32, observer-only, comparing
   `pcr_soa_batched`, `thomas_batched_scan`, and
   `jax_triton_tiled_thomas_loop`. Keep it benchmark-only; promote only if the
   large-population real-stage win survives with acceptable first-run cost and
   validation.
+  Result at commit `c21a610`, Kaggle P100, target `Nx=101` / actual `Nx=89`,
+  different diameters, fp32, observer-only: validation passed `9/9` rows for
+  both `8192` and `16384`. At `Naxons=8192`, looped Triton block solve is
+  `0.619 ms` hot versus `3.791 ms` PCR and `2.715 ms` JAX scan; one-step
+  precomputed-static is `1.504 ms` versus `4.485 ms` PCR and `3.304 ms` JAX
+  scan. At `Naxons=16384`, looped Triton block solve is `0.992 ms` hot versus
+  `7.172 ms` PCR and `3.310 ms` JAX scan; one-step precomputed-static is
+  `2.360 ms` versus `8.333 ms` PCR and `4.218 ms` JAX scan. First standalone
+  looped block solve is now seconds, not minutes: `4319 ms` at `8192` and
+  `5881 ms` at `16384`. Artifacts:
+  `benchmark/results/kaggle/20260708_224000_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-8k-c21a610/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260708_224256_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-16k-c21a610/outputs/extracted`.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost

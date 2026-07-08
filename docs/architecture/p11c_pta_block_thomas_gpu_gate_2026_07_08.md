@@ -570,6 +570,44 @@ still about 4.1 s at Naxons=1024, but this is acceptable enough to justify one
 large-population scale gate before any backend integration decision.
 ```
 
+Large-population looped real-stage scale gate at commit `c21a610`, P100, fp32,
+observer-only, target `Nx=101` / actual `Nx=89`, different diameters:
+
+- Artifact root for `Naxons=8192`:
+  `benchmark/results/kaggle/20260708_224000_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-8k-c21a610/outputs/extracted`.
+- Artifact root for `Naxons=16384`:
+  `benchmark/results/kaggle/20260708_224256_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-16k-c21a610/outputs/extracted`.
+- Validation passed `9/9` rows for both runs. The looped Triton residual versus
+  `thomas_batched_scan` stayed `8.02e-7`; max absolute `Vm` diff stayed
+  `0.00383 mV`.
+
+Hot block-solve timings:
+
+| Naxons | PCR-SoA | JAX scan Thomas | looped jax-triton | looped vs PCR | looped first run |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8192 | 3.791 ms | 2.715 ms | 0.619 ms | 6.12x faster | 4319 ms |
+| 16384 | 7.172 ms | 3.310 ms | 0.992 ms | 7.23x faster | 5881 ms |
+
+Hot one-step proxy timings:
+
+| Naxons | mode | PCR-SoA | JAX scan Thomas | looped jax-triton | looped vs PCR | looped first run |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 8192 | real | 4.456 ms | 3.293 ms | 1.579 ms | 2.82x faster | 855 ms |
+| 8192 | precomputed static | 4.485 ms | 3.304 ms | 1.504 ms | 2.98x faster | 743 ms |
+| 16384 | real | 8.223 ms | 4.221 ms | 2.221 ms | 3.70x faster | 860 ms |
+| 16384 | precomputed static | 8.333 ms | 4.218 ms | 2.360 ms | 3.53x faster | 839 ms |
+
+Interpretation:
+
+```text
+The looped jax-triton candidate preserves the large-population warm speedup
+while removing the static-range cold-start cliff. The remaining first-run cost
+is seconds for standalone block-solve compilation, and under one second for
+one-step proxy first runs after the solver has compiled in the process.
+This is now strong enough to design a backend-private integration experiment,
+but still not a public solver option or runtime policy change.
+```
+
 ## CPU Synthetic Cross-Check
 
 The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
