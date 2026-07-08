@@ -46,6 +46,7 @@ from axonscope.backends.jax.input_lowering import (
 )
 from axonscope.backends.jax.jax_triton_double_cable import (
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
+    solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
 )
 from axonscope.backends.jax.observer_runtime import (
     init_vm_raster_state,
@@ -228,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "thomas_vmap",
             "thomas_batched_scan",
             "jax_triton_tiled_thomas",
+            "jax_triton_tiled_thomas_loop",
             "pcr_matrix_vmap",
             "pcr_soa_vmap",
             "pcr_soa_batched",
@@ -247,6 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "active_auto",
             "thomas_batched_scan",
             "jax_triton_tiled_thomas",
+            "jax_triton_tiled_thomas_loop",
             "pcr_soa",
             "pcr_soa_batched",
             "pcr_soa_shift_batched",
@@ -1496,6 +1499,30 @@ def _solve_jax_triton_tiled_thomas(
 
 
 @jax.jit
+def _solve_jax_triton_tiled_thomas_loop(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=64,
+    )
+
+
+@jax.jit
 def _solve_pcr_matrix_vmap(
     a00: Any,
     a01: Any,
@@ -1709,6 +1736,7 @@ def _solver_cases(
         "thomas_vmap": _solve_thomas_vmap,
         "thomas_batched_scan": _solve_thomas_batched_scan,
         "jax_triton_tiled_thomas": _solve_jax_triton_tiled_thomas,
+        "jax_triton_tiled_thomas_loop": _solve_jax_triton_tiled_thomas_loop,
         "pcr_matrix_vmap": _solve_pcr_matrix_vmap,
         "pcr_soa_vmap": _solve_pcr_soa_vmap,
         "pcr_soa_batched": _solve_pcr_soa_batched,
@@ -1749,6 +1777,8 @@ def _solve_by_name(
         return _solve_thomas_batched_scan(*assembled)
     if solver == "jax_triton_tiled_thomas":
         return _solve_jax_triton_tiled_thomas(*assembled)
+    if solver == "jax_triton_tiled_thomas_loop":
+        return _solve_jax_triton_tiled_thomas_loop(*assembled)
     if solver == "pcr":
         return _solve_pcr_matrix_vmap(*assembled)
     if solver in {"pcr_soa", "pcr_adaptive", "pcr_soa_batched"}:
