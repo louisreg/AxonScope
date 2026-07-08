@@ -46,6 +46,7 @@ from axonscope.backends.jax.input_lowering import (
 )
 from axonscope.backends.jax.jax_triton_double_cable import (
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
+    solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
 )
 from axonscope.backends.jax.observer_runtime import (
@@ -74,6 +75,8 @@ from benchmark.workloads.curve_runtime import _build_pool
 REPEAT_FIELDS = (
     "stage",
     "variant",
+    "layout",
+    "block_b",
     "stage_group",
     "phase",
     "repeat",
@@ -102,6 +105,8 @@ REPEAT_FIELDS = (
 SUMMARY_FIELDS = (
     "stage",
     "variant",
+    "layout",
+    "block_b",
     "stage_group",
     "platform",
     "device",
@@ -133,6 +138,8 @@ VALIDATION_FIELDS = (
     "stage",
     "variant",
     "reference_variant",
+    "layout",
+    "block_b",
     "stage_group",
     "platform",
     "device",
@@ -174,6 +181,9 @@ class StageCase:
     variant: str
     fn: Callable[..., Any]
     args: tuple[Any, ...]
+    layout: str | None = None
+    block_b: int | None = None
+    validation_args: tuple[Any, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +230,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--double-cable-block-solver",
         choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"),
         default="auto",
+    )
+    parser.add_argument(
+        "--jax-triton-block-b",
+        type=int,
+        nargs="+",
+        help=(
+            "Tile widths for benchmark-only jax-triton tiled Thomas variants. "
+            "Defaults preserve each variant's historical setting."
+        ),
     )
     parser.add_argument(
         "--solver",
@@ -303,6 +322,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--n-axons must be >= 1.")
     if args.time_chunk_steps < 1:
         parser.error("--time-chunk-steps must be >= 1.")
+    if args.jax_triton_block_b and any(value < 1 for value in args.jax_triton_block_b):
+        parser.error("--jax-triton-block-b values must be >= 1.")
     if args.validation_atol is not None and args.validation_atol < 0.0:
         parser.error("--validation-atol must be >= 0.")
     if args.validation_rtol is not None and args.validation_rtol < 0.0:
@@ -386,6 +407,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "recording": args.recording,
         "cable": "double_cable",
         "double_cable_block_solver": args.double_cable_block_solver,
+        "jax_triton_block_b": tuple(args.jax_triton_block_b or ()),
         "population": "single_model",
         "diameters": args.diameters,
         "platform": args.platform,
@@ -638,6 +660,52 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         )
     )
     _assert_assembled_close(assembled, assembled_precomputed)
+    (
+        area_precomputed_xb,
+        cm_over_dt_precomputed_xb,
+        cx_over_dt_precomputed_xb,
+        a00_static_xb,
+        a11_static_xb,
+        off_i_precomputed_xb,
+        off_e_precomputed_xb,
+        I_outward_abs_precomputed_xb,
+        I_corr_abs_precomputed_xb,
+    ) = _precompute_assembly_inputs_xb(
+        Vi=Vi,
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        Gax_i=Gax_i,
+        Gax_e=Gax_e,
+        I_outward_den=I_outward,
+        I_corr_den=I_corr,
+        dt_ms=dt_ms,
+    )
+    assembled_precomputed_xb = _block_until_ready(
+        _real_assemble_system_precomputed_xb(
+            _space_to_xb(Vi),
+            _space_to_xb(Ve),
+            _space_to_xb(Gm_den),
+            _space_to_xb(GE_den),
+            area_precomputed_xb,
+            cm_over_dt_precomputed_xb,
+            cx_over_dt_precomputed_xb,
+            a00_static_xb,
+            a11_static_xb,
+            off_i_precomputed_xb,
+            off_e_precomputed_xb,
+            _space_to_xb(Iinj_abs),
+            I_outward_abs_precomputed_xb,
+            I_corr_abs_precomputed_xb,
+            _space_to_xb(drive),
+        )
+    )
+    _assert_assembled_close(assembled_precomputed, _assembled_from_xb(assembled_precomputed_xb))
     observer_state = None
     if observer_plan is not None:
         observer_state = init_vm_raster_state(observer_plan, batch_size=batch_size, nt=1)
@@ -645,12 +713,17 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
     requested_solvers = tuple(args.solver or ("active_auto",))
     solver_cases = _solver_cases(
         assembled,
+        assembled_xb=assembled_precomputed_xb,
         requested=requested_solvers,
         active_solver=active_solver,
+        jax_triton_block_bs=_jax_triton_block_bs(args),
     )
-    one_step_solvers = _one_step_solver_names(
-        getattr(args, "one_step_solver", None) or ("active_auto",),
-        active_solver=active_solver,
+    one_step_solvers = _expand_jax_triton_one_step_solvers(
+        _one_step_solver_names(
+            getattr(args, "one_step_solver", None) or ("active_auto",),
+            active_solver=active_solver,
+        ),
+        jax_triton_block_bs=_jax_triton_block_bs(args),
     )
     one_step_cases = tuple(
         StageCase(
@@ -680,6 +753,8 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 dt_ms,
                 name,
             ),
+            layout=_solver_layout(name),
+            block_b=_solver_block_b(name),
         )
         for name in one_step_solvers
     )
@@ -761,6 +836,8 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 dt_ms,
                 name,
             ),
+            layout=_solver_layout(name),
+            block_b=_solver_block_b(name),
         )
         for name in one_step_solvers
     )
@@ -804,6 +881,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 drive,
                 dt_ms,
             ),
+            layout="BX",
         ),
         StageCase(
             "system_assembly",
@@ -826,6 +904,30 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
                 I_corr_abs_precomputed,
                 drive,
             ),
+            layout="BX",
+        ),
+        StageCase(
+            "system_assembly",
+            "precomputed_static_xb",
+            _real_assemble_system_precomputed_xb,
+            (
+                _space_to_xb(Vi),
+                _space_to_xb(Ve),
+                _space_to_xb(Gm_den),
+                _space_to_xb(GE_den),
+                area_precomputed_xb,
+                cm_over_dt_precomputed_xb,
+                cx_over_dt_precomputed_xb,
+                a00_static_xb,
+                a11_static_xb,
+                off_i_precomputed_xb,
+                off_e_precomputed_xb,
+                _space_to_xb(Iinj_abs),
+                I_outward_abs_precomputed_xb,
+                I_corr_abs_precomputed_xb,
+                _space_to_xb(drive),
+            ),
+            layout="XB",
         ),
         *solver_cases,
         *one_step_without_solve_cases,
@@ -862,7 +964,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "shared_coefficients": bool(shared_coefficients),
         "active_solver": active_solver,
         "one_step_solvers": one_step_solvers,
-        "assembly_variants": ("real_double_cable", "precomputed_static"),
+        "assembly_variants": ("real_double_cable", "precomputed_static", "precomputed_static_xb"),
         "resolved_solver": resolved,
         "membrane_backend": _backend_variant(runtime.membrane.backend),
         "membrane_model": type(runtime.membrane.membrane).__name__,
@@ -892,6 +994,42 @@ def _assert_assembled_close(reference: tuple[Any, ...], candidate: tuple[Any, ..
             atol=1e-7,
             err_msg=f"precomputed assembly output {index} differs from baseline",
         )
+
+
+def _space_to_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _edge_to_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _space_from_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _edge_from_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _assembled_from_xb(
+    assembled: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    a00, a01, a10, a11, off0, off1, rhs0, rhs1 = assembled
+    return (
+        _space_from_xb(a00),
+        _space_from_xb(a01),
+        _space_from_xb(a10),
+        _space_from_xb(a11),
+        _edge_from_xb(off0),
+        _edge_from_xb(off1),
+        _space_from_xb(rhs0),
+        _space_from_xb(rhs1),
+    )
 
 
 def _batch_options(args: argparse.Namespace) -> BatchOptions:
@@ -1210,8 +1348,105 @@ def _precompute_assembly_inputs(
     )
 
 
+def _precompute_assembly_inputs_xb(
+    *,
+    Vi: Any,
+    area_cm2: Any,
+    Cm_abs: Any,
+    Cx_abs: Any,
+    Gx_abs: Any,
+    left_i: Any,
+    right_i: Any,
+    left_e: Any,
+    right_e: Any,
+    Gax_i: Any,
+    Gax_e: Any,
+    I_outward_den: Any,
+    I_corr_den: Any,
+    dt_ms: Any,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+    (
+        area,
+        cm_over_dt,
+        cx_over_dt,
+        a00_static,
+        a11_static,
+        off_i,
+        off_e,
+        I_outward_abs,
+        I_corr_abs,
+    ) = _precompute_assembly_inputs(
+        Vi=Vi,
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        Gax_i=Gax_i,
+        Gax_e=Gax_e,
+        I_outward_den=I_outward_den,
+        I_corr_den=I_corr_den,
+        dt_ms=dt_ms,
+    )
+    return _block_until_ready(
+        (
+            _space_to_xb(area),
+            _space_to_xb(cm_over_dt),
+            _space_to_xb(cx_over_dt),
+            _space_to_xb(a00_static),
+            _space_to_xb(a11_static),
+            _edge_to_xb(off_i),
+            _edge_to_xb(off_e),
+            _space_to_xb(I_outward_abs),
+            _space_to_xb(I_corr_abs),
+        )
+    )
+
+
 @jax.jit
 def _real_assemble_system_precomputed(
+    Vi: Any,
+    Ve: Any,
+    Gm_den: Any,
+    GE_den: Any,
+    area: Any,
+    cm_over_dt: Any,
+    cx_over_dt: Any,
+    a00_static: Any,
+    a11_static: Any,
+    off_i: Any,
+    off_e: Any,
+    Iinj_abs: Any,
+    I_outward_abs: Any,
+    I_corr_abs: Any,
+    extracellular_drive_abs: Any,
+) -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    Gm_abs = Gm_den * area
+    GE_abs = GE_den * area
+    Vm = Vi - Ve
+    cm_plus_gm = cm_over_dt + Gm_abs
+    membrane_charge = cm_over_dt * Vm
+    a00 = a00_static + Gm_abs
+    a01 = -cm_plus_gm
+    a10 = a01
+    a11 = a11_static + Gm_abs
+    rhs0 = membrane_charge + GE_abs + Iinj_abs - I_outward_abs - I_corr_abs
+    rhs1 = (
+        -membrane_charge
+        - GE_abs
+        + cx_over_dt * Ve
+        + extracellular_drive_abs
+        + I_outward_abs
+        + I_corr_abs
+    )
+    return a00, a01, a10, a11, off_i, off_e, rhs0, rhs1
+
+
+@jax.jit
+def _real_assemble_system_precomputed_xb(
     Vi: Any,
     Ve: Any,
     Gm_den: Any,
@@ -1522,6 +1757,86 @@ def _solve_jax_triton_tiled_thomas_loop(
     )
 
 
+def _solve_jax_triton_tiled_thomas_with_block_b(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+
+
+def _solve_jax_triton_tiled_thomas_loop_with_block_b(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+
+
+def _solve_jax_triton_tiled_thomas_loop_xb_to_bx(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    out0_xb, out1_xb = solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+    return jnp.swapaxes(out0_xb, 0, 1), jnp.swapaxes(out1_xb, 0, 1)
+
+
+def _make_block_b_solver(fn: Callable[..., Any], *, block_b: int) -> Callable[..., Any]:
+    return jax.jit(partial(fn, block_b=int(block_b)))
+
+
 @jax.jit
 def _solve_pcr_matrix_vmap(
     a00: Any,
@@ -1715,8 +2030,10 @@ def _broadcast_solver_coefficients(
 def _solver_cases(
     assembled: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
     *,
+    assembled_xb: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
     requested: Sequence[str],
     active_solver: str,
+    jax_triton_block_bs: Sequence[int],
 ) -> tuple[StageCase, ...]:
     out: list[StageCase] = []
     names: list[str] = []
@@ -1735,8 +2052,6 @@ def _solver_cases(
     mapping = {
         "thomas_vmap": _solve_thomas_vmap,
         "thomas_batched_scan": _solve_thomas_batched_scan,
-        "jax_triton_tiled_thomas": _solve_jax_triton_tiled_thomas,
-        "jax_triton_tiled_thomas_loop": _solve_jax_triton_tiled_thomas_loop,
         "pcr_matrix_vmap": _solve_pcr_matrix_vmap,
         "pcr_soa_vmap": _solve_pcr_soa_vmap,
         "pcr_soa_batched": _solve_pcr_soa_batched,
@@ -1748,8 +2063,61 @@ def _solver_cases(
         "pcr_soa_hybrid_batched": _solve_pcr_soa_hybrid_batched,
     }
     for name in names:
+        if name == "jax_triton_tiled_thomas":
+            block_bs = tuple(jax_triton_block_bs or (128,))
+            for block_b in block_bs:
+                out.append(
+                    StageCase(
+                        "block_solve",
+                        f"{name}_b{int(block_b)}",
+                        _make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_with_block_b,
+                            block_b=int(block_b),
+                        ),
+                        assembled,
+                        layout="BX_WRAPPER",
+                        block_b=int(block_b),
+                    )
+                )
+            continue
+        if name == "jax_triton_tiled_thomas_loop":
+            block_bs = tuple(jax_triton_block_bs or (64,))
+            for block_b in block_bs:
+                out.append(
+                    StageCase(
+                        "block_solve",
+                        f"{name}_b{int(block_b)}",
+                        _make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_loop_with_block_b,
+                            block_b=int(block_b),
+                        ),
+                        assembled,
+                        layout="BX_WRAPPER",
+                        block_b=int(block_b),
+                    )
+                )
+                out.append(
+                    StageCase(
+                        "block_solve",
+                        f"{name}_xb_b{int(block_b)}",
+                        _make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_loop_xb_to_bx,
+                            block_b=int(block_b),
+                        ),
+                        assembled_xb,
+                        layout="XB_DIRECT",
+                        block_b=int(block_b),
+                        validation_args=assembled,
+                    )
+                )
+            continue
         out.append(StageCase("block_solve", name, mapping[name], assembled))
     return tuple(out)
+
+
+def _jax_triton_block_bs(args: argparse.Namespace) -> tuple[int, ...]:
+    values = tuple(int(value) for value in (args.jax_triton_block_b or ()))
+    return tuple(dict.fromkeys(values))
 
 
 def _one_step_solver_names(
@@ -1767,17 +2135,61 @@ def _one_step_solver_names(
     return tuple(names)
 
 
+def _expand_jax_triton_one_step_solvers(
+    names: Sequence[str],
+    *,
+    jax_triton_block_bs: Sequence[int],
+) -> tuple[str, ...]:
+    expanded: list[str] = []
+    for name in names:
+        if name == "jax_triton_tiled_thomas":
+            expanded.extend(f"{name}_b{int(block_b)}" for block_b in (jax_triton_block_bs or (128,)))
+            continue
+        if name == "jax_triton_tiled_thomas_loop":
+            expanded.extend(f"{name}_b{int(block_b)}" for block_b in (jax_triton_block_bs or (64,)))
+            continue
+        expanded.append(name)
+    return tuple(dict.fromkeys(expanded))
+
+
+def _split_jax_triton_solver_block_b(solver: str) -> tuple[str, int | None]:
+    prefix = "jax_triton_tiled_thomas_loop_b"
+    if solver.startswith(prefix):
+        return "jax_triton_tiled_thomas_loop", int(solver[len(prefix) :])
+    prefix = "jax_triton_tiled_thomas_b"
+    if solver.startswith(prefix):
+        return "jax_triton_tiled_thomas", int(solver[len(prefix) :])
+    return solver, None
+
+
+def _solver_layout(solver: str) -> str | None:
+    base, _ = _split_jax_triton_solver_block_b(solver)
+    if base in {"jax_triton_tiled_thomas", "jax_triton_tiled_thomas_loop"}:
+        return "BX_WRAPPER"
+    return None
+
+
+def _solver_block_b(solver: str) -> int | None:
+    _, block_b = _split_jax_triton_solver_block_b(solver)
+    return block_b
+
+
 def _solve_by_name(
     solver: str,
     assembled: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
 ) -> tuple[Any, Any]:
+    solver, block_b = _split_jax_triton_solver_block_b(solver)
     if solver == "thomas":
         return _solve_thomas_vmap(*assembled)
     if solver == "thomas_batched_scan":
         return _solve_thomas_batched_scan(*assembled)
     if solver == "jax_triton_tiled_thomas":
+        if block_b is not None:
+            return _solve_jax_triton_tiled_thomas_with_block_b(*assembled, block_b=block_b)
         return _solve_jax_triton_tiled_thomas(*assembled)
     if solver == "jax_triton_tiled_thomas_loop":
+        if block_b is not None:
+            return _solve_jax_triton_tiled_thomas_loop_with_block_b(*assembled, block_b=block_b)
         return _solve_jax_triton_tiled_thomas_loop(*assembled)
     if solver == "pcr":
         return _solve_pcr_matrix_vmap(*assembled)
@@ -1845,7 +2257,8 @@ def _validate_block_solve_cases(
     for case in cases:
         out = _block_until_ready(case.fn(*case.args))
         stats = _comparison_stats(out, reference_out)
-        max_residual, median_residual = _residual_stats(case.args, out)
+        residual_args = case.validation_args if case.validation_args is not None else case.args
+        max_residual, median_residual = _residual_stats(residual_args, out)
         rows.append(
             _validation_row(
                 case=case,
@@ -1971,6 +2384,8 @@ def _validation_row(
         "stage": case.stage,
         "variant": case.variant,
         "reference_variant": reference_variant,
+        "layout": case.layout,
+        "block_b": case.block_b,
         "stage_group": _stage_group(case.stage),
         "max_abs_diff": stats["max_abs_diff"],
         "max_rel_diff": stats["max_rel_diff"],
@@ -2191,6 +2606,8 @@ def _measure_case(
         **_row_context(args=args, device_name=device_name, group_metadata=group_metadata),
         "stage": case.stage,
         "variant": case.variant,
+        "layout": case.layout,
+        "block_b": case.block_b,
         "stage_group": _stage_group(case.stage),
         "repeats": repeats,
         "mean_ms": sum(measured) / len(measured),
@@ -2219,6 +2636,8 @@ def _repeat_row(
         **_row_context(args=args, device_name=device_name, group_metadata=group_metadata),
         "stage": case.stage,
         "variant": case.variant,
+        "layout": case.layout,
+        "block_b": case.block_b,
         "stage_group": _stage_group(case.stage),
         "phase": phase,
         "repeat": repeat,
@@ -2555,15 +2974,17 @@ def _write_report(
                     f"({len(validation_rows) - len(failed)}/{len(validation_rows)} rows passed)."
                 ),
                 "",
-                "| stage | variant | reference | max abs diff | max abs Vm diff | max residual | status |",
-                "| --- | --- | --- | ---: | ---: | ---: | --- |",
+                "| stage | variant | layout | block_b | reference | max abs diff | max abs Vm diff | max residual | status |",
+                "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | --- |",
             ]
         )
         for row in validation_rows:
             lines.append(
-                "| {stage} | {variant} | {reference_variant} | {max_abs:.3e} | {vm_abs} | {residual} | {status} |".format(
+                "| {stage} | {variant} | {layout} | {block_b} | {reference_variant} | {max_abs:.3e} | {vm_abs} | {residual} | {status} |".format(
                     stage=row["stage"],
                     variant=row["variant"],
+                    layout=row.get("layout") or "",
+                    block_b=row.get("block_b") or "",
                     reference_variant=row["reference_variant"],
                     max_abs=float(row["max_abs_diff"]),
                     vm_abs=_format_optional_scientific(row["max_abs_vm_diff"]),
@@ -2585,15 +3006,21 @@ def _write_report(
         [
             "## Stage Means",
             "",
-            "| stage | variant | mean ms | first run ms | max ms | output KiB |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
+            "| stage | variant | layout | block_b | mean ms | first run ms | max ms | output KiB |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ]
     )
     for row in stage_rows:
         lines.append(
-            "| {stage} | {variant} | {mean_ms:.3f} | {first_run_ms:.3f} | {max_ms:.3f} | {output_kib:.1f} |".format(
+            "| {stage} | {variant} | {layout} | {block_b} | {mean_ms:.3f} | {first_run_ms:.3f} | {max_ms:.3f} | {output_kib:.1f} |".format(
+                stage=row["stage"],
+                variant=row["variant"],
+                layout=row.get("layout") or "",
+                block_b=row.get("block_b") or "",
+                mean_ms=float(row["mean_ms"]),
+                first_run_ms=float(row["first_run_ms"]),
+                max_ms=float(row["max_ms"]),
                 output_kib=float(row["output_bytes"]) / 1024.0,
-                **row,
             )
         )
     lines.extend(

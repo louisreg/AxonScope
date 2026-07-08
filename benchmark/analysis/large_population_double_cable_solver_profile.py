@@ -27,6 +27,7 @@ from axonscope.backends.jax.common import (
 )
 from axonscope.backends.jax.jax_triton_double_cable import (
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
+    solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
 )
 from axonscope.backends.jax.large_population_solver import (
@@ -95,6 +96,7 @@ class SolverCase:
     block_b: int | None
     n_tiles: int | None
     coefficient_mode: str
+    validation_args: tuple[Any, ...] | None = None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -316,6 +318,110 @@ def _solve_jax_triton_tiled_thomas_loop(
     )
 
 
+def _solve_jax_triton_tiled_thomas_with_block_b(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+
+
+def _solve_jax_triton_tiled_thomas_loop_with_block_b(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+
+
+def _solve_jax_triton_tiled_thomas_loop_xb_to_bx(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    out0_xb, out1_xb = solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=int(block_b),
+    )
+    return jnp.swapaxes(out0_xb, 0, 1), jnp.swapaxes(out1_xb, 0, 1)
+
+
+def _make_block_b_solver(fn: Callable[..., Any], *, block_b: int) -> Callable[..., Any]:
+    return jax.jit(partial(fn, block_b=int(block_b)))
+
+
+def _space_to_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _edge_to_xb(values: Any) -> Any:
+    arr = jnp.asarray(values)
+    return jnp.swapaxes(arr, 0, 1) if arr.ndim == 2 else arr
+
+
+def _inputs_to_xb(inputs: tuple[Any, Any, Any, Any, Any, Any, Any, Any]) -> tuple[Any, ...]:
+    a00, a01, a10, a11, off0, off1, rhs0, rhs1 = inputs
+    return (
+        _space_to_xb(a00),
+        _space_to_xb(a01),
+        _space_to_xb(a10),
+        _space_to_xb(a11),
+        _edge_to_xb(off0),
+        _edge_to_xb(off1),
+        _space_to_xb(rhs0),
+        _space_to_xb(rhs1),
+    )
+
+
 def _cases(
     *,
     variants: Sequence[str],
@@ -362,36 +468,63 @@ def _cases(
             )
             continue
         if variant == "jax_triton_tiled_thomas":
-            cases.append(
-                SolverCase(
-                    variant=variant,
-                    layout="XB_TRITON_TILED",
-                    fn=_solve_jax_triton_tiled_thomas,
-                    args=inputs,
-                    batch_size=batch_size,
-                    nx_true=nx_true,
-                    nx_pad=nx_true,
-                    block_b=128,
-                    n_tiles=(batch_size + 127) // 128,
-                    coefficient_mode=coefficient_mode,
+            for block_b in tuple(block_bs or (128,)):
+                cases.append(
+                    SolverCase(
+                        variant=variant,
+                        layout="BX_WRAPPER_TRITON_TILED",
+                        fn=_make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_with_block_b,
+                            block_b=int(block_b),
+                        ),
+                        args=inputs,
+                        batch_size=batch_size,
+                        nx_true=nx_true,
+                        nx_pad=nx_true,
+                        block_b=int(block_b),
+                        n_tiles=(batch_size + int(block_b) - 1) // int(block_b),
+                        coefficient_mode=coefficient_mode,
+                    )
                 )
-            )
             continue
         if variant == "jax_triton_tiled_thomas_loop":
-            cases.append(
-                SolverCase(
-                    variant=variant,
-                    layout="XB_TRITON_TILED_LOOP",
-                    fn=_solve_jax_triton_tiled_thomas_loop,
-                    args=inputs,
-                    batch_size=batch_size,
-                    nx_true=nx_true,
-                    nx_pad=nx_true,
-                    block_b=64,
-                    n_tiles=(batch_size + 63) // 64,
-                    coefficient_mode=coefficient_mode,
+            inputs_xb = _inputs_to_xb(inputs)
+            for block_b in tuple(block_bs or (64,)):
+                cases.append(
+                    SolverCase(
+                        variant=variant,
+                        layout="BX_WRAPPER_TRITON_TILED_LOOP",
+                        fn=_make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_loop_with_block_b,
+                            block_b=int(block_b),
+                        ),
+                        args=inputs,
+                        batch_size=batch_size,
+                        nx_true=nx_true,
+                        nx_pad=nx_true,
+                        block_b=int(block_b),
+                        n_tiles=(batch_size + int(block_b) - 1) // int(block_b),
+                        coefficient_mode=coefficient_mode,
+                    )
                 )
-            )
+                cases.append(
+                    SolverCase(
+                        variant=f"{variant}_xb",
+                        layout="XB_DIRECT_TRITON_TILED_LOOP",
+                        fn=_make_block_b_solver(
+                            _solve_jax_triton_tiled_thomas_loop_xb_to_bx,
+                            block_b=int(block_b),
+                        ),
+                        args=inputs_xb,
+                        batch_size=batch_size,
+                        nx_true=nx_true,
+                        nx_pad=nx_true,
+                        block_b=int(block_b),
+                        n_tiles=(batch_size + int(block_b) - 1) // int(block_b),
+                        coefficient_mode=coefficient_mode,
+                        validation_args=inputs,
+                    )
+                )
             continue
         for block_b in block_bs:
             plan = make_large_population_layout_plan(
@@ -528,7 +661,8 @@ def _measure_case(
             )
         )
 
-    max_residual, median_residual = _residual_stats(case.args, out)
+    residual_args = case.validation_args if case.validation_args is not None else case.args
+    max_residual, median_residual = _residual_stats(residual_args, out)
     mean_ms = sum(measured) / len(measured)
     node_solves = float(case.batch_size * case.nx_true)
     return rows, {
