@@ -1755,13 +1755,22 @@ PTA/block-Thomas GPU gate:
   block-solve residual norms, and fails the script if validation fails. The
   validation deliberately runs after timing measurements so it does not hide the
   first-run/cold compilation cost.
-- [ ] Run a small P11C jax-triton numerical gate on Kaggle P100 before the
+- [x] Run a small P11C jax-triton numerical gate on Kaggle P100 before the
   cold-start audit: include `pcr_soa_batched`, `thomas_batched_scan`, and
   `jax_triton_tiled_thomas` for block solve and one-step proxy, with
   `--validate-solvers`, `--pip-package jax-triton`, fp32, observer-only, target
   `Nx=101` / actual `Nx=89`, and a modest `Naxons` so the first Triton compile
   is the main cost. Only after `real_stage_validation.csv` passes should P11C
   treat the warm jax-triton timings as numerically acceptable.
+  Result at commit `d9aa339`, Kaggle P100, `Naxons=1024`: validation passed
+  `9/9` rows. `jax_triton_tiled_thomas` versus `thomas_batched_scan` has max
+  absolute block-solve diff `0.00352 mV`, max absolute `Vm` diff `0.00335 mV`,
+  and max residual norm `8.28e-7`. Warm block solve is not yet a win at this
+  small population (`0.810 ms` Triton versus `0.710 ms` PCR), but one-step
+  proxy is slightly faster (`0.694 ms` Triton versus `0.746 ms` PCR). Artifact:
+  `benchmark/results/kaggle/20260708_195453_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-validation-gpu-d9aa339/outputs/extracted`.
+  Cold-start is confirmed even at `Naxons=1024`: first standalone Triton
+  block-solve call is `2,315,522 ms`, about `38.6 min`.
 - [ ] Audit the jax-triton cold-start path after the numerical gate passes:
   isolate install time, import time, JAX tracing/lowering time, Triton kernel
   compilation time, cache behavior inside one process, and whether a persistent

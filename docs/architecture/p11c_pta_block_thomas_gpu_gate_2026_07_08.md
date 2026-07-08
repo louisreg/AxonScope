@@ -446,6 +446,30 @@ Numerical validation caveat:
   the warm Triton timing as physically coherent, then investigate the
   `40-41 min` first standalone Triton compile/run cost.
 
+Small numerical Kaggle gate at commit `d9aa339`, P100, fp32, observer-only,
+target `Nx=101` / actual `Nx=89`, `Naxons=1024`:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_195453_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-validation-gpu-d9aa339/outputs/extracted`.
+- `real_stage_validation.csv` passed `9/9` rows.
+- `jax_triton_tiled_thomas` versus `thomas_batched_scan`:
+  max absolute block-solve diff `0.00352 mV`, max absolute `Vm` diff
+  `0.00335 mV`, max residual norm `8.28e-7`.
+- At this small population the warm standalone block solve does not beat PCR:
+  `0.810 ms` Triton versus `0.710 ms` PCR. The one-step proxy is slightly
+  faster: `0.694 ms` Triton versus `0.746 ms` PCR.
+- Cold-start remains the blocker: the first standalone Triton block solve is
+  `2,315,522 ms`, about `38.6 min`, even at `Naxons=1024`.
+
+Interpretation:
+
+```text
+The jax-triton candidate is numerically coherent on the small real-stage gate.
+The next P11C task is not another solver variant; it is a cold-start audit that
+separates JAX tracing/lowering, jax-triton lowering, Triton compilation,
+temporary compilation artifacts, and cache reuse.
+```
+
 ## CPU Synthetic Cross-Check
 
 The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
