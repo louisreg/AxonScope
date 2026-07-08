@@ -1669,12 +1669,15 @@ PTA/block-Thomas GPU gate:
   Pallas, FFI, public solver options, or runtime policy changes in this slice.
 - [x] Add `thomas_batched_scan` to the P11C synthetic profiler as the JAX
   feasibility baseline for Thomas/PTA at large `Naxons`.
-- [ ] Run the P11C-PTA JAX feasibility matrix on GPU:
+- [x] Run the P11C-PTA JAX feasibility matrix on GPU:
   compare `current_pcr_soa`, `thomas_batched_scan`, and
   `large_population_exact_double_cable_jax` at `Naxons=1024/4096/8192/16384`,
-  `Nx=47/89/129`, shared and batched coefficients, fp32 first. Treat this only
-  as a JAX/XLA feasibility gate; bad scan timing rejects the JAX expression,
-  not the future custom-kernel PTA idea.
+  `Nx=47/89/129`, shared and batched coefficients, fp32 first. Result on P100
+  at commit `b4f4618`: `thomas_batched_scan` is slower at `Naxons=1024`, close
+  but usually slower at `4096`, and fastest for all tested shapes at
+  `8192/16384`. Artifact:
+  `benchmark/results/kaggle/20260708_181129_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-pta-jax-gpu-b4f4618/extracted`.
+  Treat this only as a synthetic solver-only gate, not runtime policy.
 - [ ] Build the real-stage P11C benchmark harness before runtime integration:
   large-pop real-stage benchmark with layout/packing, membrane/RHS assembly,
   exact solve, compact recording, and result-boundary costs.

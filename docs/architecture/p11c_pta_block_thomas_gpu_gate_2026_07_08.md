@@ -29,6 +29,13 @@ The P11C GPU run at commit `ed0ccff` showed a small synthetic win for short
 systems (`Nx=47` and `Nx=89`) and a loss for `Nx=129`. That result is useful
 layout evidence, but it does not reject a PfSolve-style PTA solver.
 
+The follow-up JAX feasibility run at commit `b4f4618` added
+`thomas_batched_scan` to the same synthetic solver matrix. It changed the
+interpretation: the JAX scan is still poor at `Naxons=1024`, close but usually
+slower at `Naxons=4096`, then becomes the fastest synthetic solver at
+`Naxons=8192` and `16384` for all tested `Nx=47/89/129` and shared/batched
+coefficient modes.
+
 ## Reference Reading
 
 ### PfSolve / Parallel Factorization Solver
@@ -258,13 +265,45 @@ Expected interpretation:
 - If large `Naxons` unexpectedly closes the gap, run a real-stage gate before
   making any runtime decision.
 
+Result:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_181129_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-pta-jax-gpu-b4f4618/extracted`.
+- Hardware: Kaggle `Tesla P100-PCIE-16GB`.
+- Commit: `b4f4618`.
+- `thomas_batched_scan` is slower than current PCR-SoA at `Naxons=1024`
+  (`2.5x-3.5x` depending on `Nx` and coefficient mode).
+- At `Naxons=4096`, `thomas_batched_scan` is still slower, but the gap shrinks
+  to roughly `1.1x-1.3x`.
+- At `Naxons=8192`, `thomas_batched_scan` is the fastest solver in all tested
+  shapes. It is about `0.59x-0.92x` of current PCR-SoA time.
+- At `Naxons=16384`, `thomas_batched_scan` becomes clearly faster: about
+  `0.39x-0.57x` of current PCR-SoA time, with throughput around
+  `392M-470M node-solves/s`.
+- The tiled/padded P11C PCR-SoA candidate remains mildly useful for short
+  `Nx=47/89` at smaller `Naxons`, but it does not scale like the Thomas scan at
+  `Naxons=8192/16384` and remains hurt by `Nx=129 -> Nx_pad=160`.
+
+Interpretation:
+
+```text
+Large Naxons do close the JAX Thomas scan gap.
+The previous P11B rejection at Naxons=512 does not apply to large-population
+solver-only regimes.
+This is not yet a runtime decision because the result is synthetic solver-only.
+```
+
 ### Gate 2 - PTA Design Decision
 
 After Gate 1:
 
 - Keep current GPU runtime on PCR-SoA unless the real-stage evidence changes.
-- If JAX PTA is slow but short-`Nx` P11C results remain promising, keep
-  `PTA_BLOCK_THOMAS_2X2_TILED` as a future custom-kernel candidate.
+- Because JAX `thomas_batched_scan` wins synthetic large-population cases at
+  `Naxons >= 8192`, build a real-stage large-population gate before accepting
+  or rejecting the JAX expression.
+- Keep `PTA_BLOCK_THOMAS_2X2_TILED` as a future custom-kernel candidate
+  regardless of the JAX result, because PfSolve-style lane/scratch control is a
+  different implementation class.
 - Do not add a public solver option or `auto` policy branch.
 
 ### Gate 3 - Future Custom-Kernel Entry Criteria
