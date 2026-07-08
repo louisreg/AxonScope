@@ -1838,12 +1838,42 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260708_224000_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-8k-c21a610/outputs/extracted`
   and
   `benchmark/results/kaggle/20260708_224256_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-loop-real-16k-c21a610/outputs/extracted`.
-- [ ] P11C decision rule:
+- [x] Run the looped jax-triton `block_b` and direct-XB layout gate before
+  runtime integration:
+  commit `66d9b6a` adds benchmark-only `--jax-triton-block-b` support in
+  `benchmark/analysis/double_cable_real_stage_profile.py`, extends the
+  synthetic large-population profiler to sweep `block_b`, and compares the
+  current batch-first wrapper against a direct `[Nx, B]` input route. Kaggle
+  P100 synthetic solve-only gate, actual `Nx=89`, fp32, batched coefficients:
+  at `Naxons=8192`, PCR is `3.907 ms`, best wrapper Triton is `0.638 ms`
+  (`block_b=64`), and direct-XB Triton is `0.469 ms` (`block_b=32`);
+  at `Naxons=16384`, PCR is `7.277 ms`, best wrapper Triton is `0.871 ms`
+  (`block_b=128`), and direct-XB Triton is `0.634 ms` (`block_b=32`).
+  Artifact:
+  `benchmark/results/kaggle/20260708_230508_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-blockb-large-gpu-66d9b6a/outputs/extracted`.
+  Real-stage gates confirm the signal with validation passing: `19/19` rows at
+  `Naxons=8192` and `15/15` rows at `Naxons=16384`. At `8192`, PCR block solve
+  is `3.872 ms`, best wrapper Triton is `0.636 ms`, and direct-XB is `0.467 ms`
+  (`8.3x` versus PCR, `1.36x` versus wrapper). At `16384`, PCR block solve is
+  `7.129 ms`, best wrapper Triton is `0.868 ms`, and direct-XB is `0.628 ms`
+  (`11.3x` versus PCR, `1.38x` versus wrapper). Precomputed XB assembly is also
+  slightly faster than batch-first (`0.427 ms` versus `0.449 ms` at `8192`,
+  `0.541 ms` versus `0.573 ms` at `16384`). Artifacts:
+  `benchmark/results/kaggle/20260708_230811_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-blockb-real-gpu-66d9b6a/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260708_231205_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axs-p11c-blockb-real16k-gpu-66d9b6a/outputs/extracted`.
+- [x] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost
   to host packing, compile, or result assembly. Reject if the win exists only in
   solver-only synthetic tests or HLO counters. If rejected, stop P11C and keep
   the current GPU solver path rather than adding more JAX micro-variants.
+  Decision after the `block_b`/direct-XB gates: proceed to a backend-private
+  integration of the looped jax-triton exact double-cable solver for large
+  GPU batches, keeping the public API unchanged and falling back to the current
+  JAX/PCR routes when `jax-triton`, GPU, dtype, or shape constraints are not
+  satisfied. The integration should assemble directly into the solver's XB
+  layout; do not integrate the batch-first wrapper as the production hot path.
 
 ### P12 - Studies, Serialization, Integration
 
