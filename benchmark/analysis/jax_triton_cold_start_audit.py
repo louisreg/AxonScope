@@ -53,7 +53,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--platform", choices=("gpu",), default="gpu")
     parser.add_argument(
         "--variant",
-        choices=("tiled_thomas", "untiled_thomas"),
+        choices=("tiled_thomas", "tiled_thomas_loop", "untiled_thomas"),
         default="tiled_thomas",
     )
     parser.add_argument("--nx", type=int, default=89)
@@ -207,6 +207,8 @@ def _check_jax_triton_ready() -> None:
 def _solver_fn(variant: str, *, block_b: int) -> Any:
     if variant == "tiled_thomas":
         return jax.jit(partial(_solve_tiled_thomas, block_b=int(block_b)))
+    if variant == "tiled_thomas_loop":
+        return jax.jit(partial(_solve_tiled_thomas_loop, block_b=int(block_b)))
     if variant == "untiled_thomas":
         return jax.jit(_solve_untiled_thomas)
     raise ValueError(f"unsupported variant: {variant!r}")
@@ -229,6 +231,35 @@ def _solve_tiled_thomas(
     )
 
     return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched(
+        a00,
+        a01,
+        a10,
+        a11,
+        off0,
+        off1,
+        rhs0,
+        rhs1,
+        block_b=block_b,
+    )
+
+
+def _solve_tiled_thomas_loop(
+    a00: Any,
+    a01: Any,
+    a10: Any,
+    a11: Any,
+    off0: Any,
+    off1: Any,
+    rhs0: Any,
+    rhs1: Any,
+    *,
+    block_b: int,
+) -> tuple[Any, Any]:
+    from axonscope.backends.jax.jax_triton_double_cable import (
+        solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
+    )
+
+    return solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched(
         a00,
         a01,
         a10,
