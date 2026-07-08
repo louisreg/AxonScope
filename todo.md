@@ -1776,6 +1776,18 @@ PTA/block-Thomas GPU gate:
   compilation time, cache behavior inside one process, and whether a persistent
   cache can make the first usable simulation acceptable. Do not promote the
   route while the first standalone Triton block solve costs about `40-41 min`.
+  First audit implemented in `benchmark/analysis/jax_triton_cold_start_audit.py`
+  and run on Kaggle P100 at commit `7bb5250`, `Naxons=1024`, `Nx=89`,
+  `block_b=128`, explicit JAX/Triton cache directories, cleared at startup.
+  Artifact:
+  `benchmark/results/kaggle/20260708_212036_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-start-gpu-7bb5250/outputs/extracted`.
+  Result: the cold cost is in JAX/jax-triton lowering, not explicit compile or
+  execution. `lower` is `2,340,136 ms` (`39.0 min`), `compile` is `154 ms`,
+  `compiled_first_call` is `1,341 ms`, and `compiled_call_2` is `3.84 ms`.
+  JAX persistent cache gains files after compile, but the explicit Triton cache
+  directory stays empty in this run. Next inspect whether the `tl.static_range`
+  Thomas forward/backward loops cause unrolled lowering time, then test smaller
+  `Nx` and a non-unrolled/looped kernel variant before doing any integration.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost

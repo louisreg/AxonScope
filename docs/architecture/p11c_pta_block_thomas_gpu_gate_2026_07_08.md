@@ -470,6 +470,47 @@ separates JAX tracing/lowering, jax-triton lowering, Triton compilation,
 temporary compilation artifacts, and cache reuse.
 ```
 
+## jax-triton Cold-Start Audit
+
+First explicit cold-start audit at commit `7bb5250`, Kaggle P100, fp32,
+synthetic stable double-cable system, `Naxons=1024`, `Nx=89`, `block_b=128`,
+with explicit JAX and Triton cache directories cleared at startup:
+
+- Artifact root:
+  `benchmark/results/kaggle/20260708_212036_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-start-gpu-7bb5250/outputs/extracted`.
+- `select_device`: `371 ms`.
+- `dependency_probe`: `3,252 ms`.
+- `build_inputs`: `928 ms`.
+- `lower`: `2,340,136 ms`, about `39.0 min`.
+- `compile`: `154 ms`.
+- `compiled_first_call`: `1,341 ms`.
+- `compiled_call_2`: `3.84 ms`.
+
+Interpretation:
+
+```text
+The cold-start blocker is JAX/jax-triton lowering, not explicit
+lowered.compile() and not execution of the compiled object.
+This points at the kernel shape/lowering path itself, especially the
+tl.static_range Thomas forward/backward recurrences over Nx, before it points
+at AxonScope runtime preparation or result handling.
+```
+
+Cache observation:
+
+- The explicit JAX cache directory is populated by the run.
+- The explicit Triton cache directory remains empty.
+- This does not yet prove cross-process cache behavior; it only shows that the
+  current first-process blocker happens before or inside lowering.
+
+Next cold-start checks:
+
+- Run the same audit at smaller `Nx` to confirm whether lowering cost scales
+  with the static Thomas loop length.
+- Test a non-unrolled/looped Triton kernel shape if jax-triton supports it on
+  the target stack.
+- Do not promote the jax-triton route while the lowering cost remains minutes.
+
 ## CPU Synthetic Cross-Check
 
 The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
