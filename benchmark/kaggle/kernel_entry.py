@@ -159,6 +159,17 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
         ]
         command.extend(str(value) for value in config.get("benchmark_args", ()))
         return command
+    if campaign == "large_population_double_cable_solver_profile":
+        command = [
+            sys.executable,
+            "benchmark/analysis/large_population_double_cable_solver_profile.py",
+            "--platform",
+            str(config["platform"]),
+            "--output",
+            str(output_dir),
+        ]
+        command.extend(str(value) for value in config.get("benchmark_args", ()))
+        return command
     if campaign:
         raise RuntimeError(f"Unsupported benchmark campaign: {campaign!r}")
     command = [

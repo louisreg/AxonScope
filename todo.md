@@ -1620,6 +1620,76 @@ decisions need realistic workflow evidence.
 - [ ] Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
+### P11C - Large-Population Exact GPU Solver
+
+Goal: implement a benchmark-gated exact double-cable GPU execution family for
+large axon populations. This is not a selection between existing solver options.
+If the benchmarks show a meaningful large-population simulation win, promote the
+route into the backend. If not, close P11C with evidence and keep the current
+JAX GPU solver path.
+
+Design reference:
+`docs/architecture/p11c_large_population_gpu_solver_plan_2026_07_07.md`.
+
+- [x] P11C non-goals and boundaries:
+  no public solver option, no `auto` policy change, no membrane-model-specific
+  runtime path, no split/fixed-K approximate route, and no Triton/Pallas/CUDA
+  FFI/custom-kernel work in this slice. Keep custom kernels as the later path
+  only if P11C proves the layout direction is worth deeper GPU integration.
+- [x] Define the backend-private candidate:
+  `large_population_exact_double_cable_jax`. It must own a large-population GPU
+  execution shape rather than wrapping an existing solver name.
+- [ ] Extend the backend-private candidate into a measured real-stage route:
+  prepare layout, packed state, static terms, factorized forcing, dynamic
+  membrane/RHS assembly, exact solve, and compact recording as one measured
+  backend-owned path.
+- [x] Define and implement the internal layout vocabulary for benchmarks:
+  `BX`, `XB`, and `TILED`. The target production shape is
+  `[tile, Nx_pad, BLOCK_B]`; the JAX prototype may use `XB` or a tiled
+  representation only if it avoids extra packing/transposes in the hot path.
+- [x] Define broader `Nx_pad` candidates and neutral padding:
+  benchmark `32, 48, 64, 80, 96, 128, 160, 192, 256`; use electrically neutral
+  double-cable padding rows (`D=I_2`, `L/U=0`, `rhs=[0,0]`); keep the final
+  bucket set data-driven rather than copied from old idea docs.
+- [x] Define `BLOCK_B` candidates by bucket:
+  for `Nx_pad <= 64`, test `64/128/256`; for `Nx_pad <= 128`, test
+  `32/64/128`; for larger buckets, test `16/32/64`. Record occupancy-oriented
+  metrics indirectly through throughput, memory, compile time, and hot timing
+  until a custom-kernel path exists.
+- [x] Build the synthetic P11C benchmark harness before runtime integration:
+  large-pop solver/layout benchmark with raw CSVs, metadata, git state, hardware
+  metadata, memory, compile/first-run time, hot time, node-solves/s,
+  axon-steps/s, output bytes, and a Markdown decision report.
+- [ ] Build the real-stage P11C benchmark harness before runtime integration:
+  large-pop real-stage benchmark with layout/packing, membrane/RHS assembly,
+  exact solve, compact recording, and result-boundary costs.
+- [x] P11C-A gate: local smoke and correctness.
+  Run tiny synthetic cases against current exact solvers and Thomas reference;
+  validate shape/padding behavior, layout packing/unpacking, and no public API
+  surface changes.
+- [ ] P11C-B gate: JAX-only benchmark-private prototype.
+  Start with an exact PCR-SoA-like body in the large-pop layout because it
+  exposes parallelism over both `B` and `Nx`. It must differ from
+  `pcr_soa_batched` by owning explicit `Nx_pad`, `B` tiling/layout, persistent
+  static-term preparation, and direct assembly into the chosen layout.
+- [ ] P11C-C gate: synthetic GPU large-population matrix.
+  Test `B/Naxons=1024,4096,8192,16384` plus optional `32768` if memory allows,
+  `Nx_true` values that cover all candidate buckets, shared and batched
+  coefficients, fp32 first, and fp64 spot checks. Compare against the current
+  exact JAX route only as baseline evidence, not as the objective.
+- [ ] P11C-D gate: real-stage large-population matrix.
+  Use real double-cable MRG-like prepared inputs with observer-only and probe
+  outputs first. Target `Naxons=4096/8192`, optional `16384` if memory allows.
+  Measure membrane, assembly, solve, one-step proxy, compact recording,
+  layout/packing, and result-boundary costs. Proceed to reduced
+  recruitment/threshold curves only if this gate wins.
+- [ ] P11C decision rule:
+  promote only if the candidate improves large-population real-stage or curve
+  throughput with acceptable memory and correctness, and without shifting cost
+  to host packing, compile, or result assembly. Reject if the win exists only in
+  solver-only synthetic tests or HLO counters. If rejected, stop P11C and keep
+  the current GPU solver path rather than adding more JAX micro-variants.
+
 ### P12 - Studies, Serialization, Integration
 
 - [ ] Continue hardening NRV integration only where the package contract is

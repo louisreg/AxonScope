@@ -61,6 +61,39 @@ cpu` without `--machine-shape` for a CPU-only Kaggle run. Use `--platform cpu
 --machine-shape NvidiaTeslaP100` when you deliberately want the CPU benchmark
 path on a Kaggle GPU machine for closer CPU/GPU environment comparisons.
 
+Low-level solver gates use standalone campaigns. P11C's large-population
+double-cable solver gate is intentionally benchmark-private and does not change
+runtime policy:
+
+```bash
+python benchmark/analysis/large_population_double_cable_solver_profile.py \
+  --platform cpu \
+  --batch-size 1024 4096 \
+  --nx 47 89 129 \
+  --coefficient-mode both \
+  --layout TILED \
+  --repeats 5 \
+  --warmups 1 \
+  --output benchmark/results/p11c_large_population_solver_cpu
+```
+
+Run the matching Kaggle GPU smoke through the same campaign model:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-large-pop-gpu \
+  --campaign large_population_double_cable_solver_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --batch-size 1024 4096 8192 \
+  --nx 47 89 129 \
+  --coefficient-mode both \
+  --layout TILED \
+  --repeats 5 \
+  --warmups 1
+```
+
 ## Presets
 
 Presets live in `benchmark/workloads/curve_options.py`:

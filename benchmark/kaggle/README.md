@@ -126,6 +126,41 @@ python benchmark/kaggle/run_kernel.py \
   --warmups 1
 ```
 
+Submit the P11C large-population double-cable solver gate on the CPU path of a
+Kaggle GPU machine:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-large-pop-cpu \
+  --campaign large_population_double_cable_solver_profile \
+  --platform cpu \
+  --machine-shape NvidiaTeslaP100 \
+  --batch-size 1024 4096 8192 \
+  --nx 47 89 129 \
+  --coefficient-mode both \
+  --layout TILED \
+  --repeats 5 \
+  --warmups 1
+```
+
+Run the matching GPU path by switching only `--platform gpu` and the slug:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-large-pop-gpu \
+  --campaign large_population_double_cable_solver_profile \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --batch-size 1024 4096 8192 \
+  --nx 47 89 129 \
+  --coefficient-mode both \
+  --layout TILED \
+  --repeats 5 \
+  --warmups 1
+```
+
 Run recruitment on a T4:
 
 ```bash
