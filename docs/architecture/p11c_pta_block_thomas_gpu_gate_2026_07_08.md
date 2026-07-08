@@ -373,6 +373,8 @@ After the `Naxons=8192/16384` real-stage gates, P11C adds a benchmark-only
 `jax_triton_tiled_thomas` candidate. It is a first implementation step toward
 the GPU-tridiagonal papers, not a final PfSolve-equivalent solver:
 
+- kernel language/runtime reference: https://github.com/triton-lang/triton;
+- JAX integration reference: https://github.com/jax-ml/jax-triton;
 - it calls Triton kernels through `jax_triton.triton_call`;
 - it exposes an internal `[Nx, B]` layout so lanes in one program read adjacent
   axons at the same compartment index;
@@ -506,9 +508,9 @@ Cache observation:
 Next cold-start checks:
 
 - Run the same audit at smaller `Nx` to confirm whether lowering cost scales
-  with the static Thomas loop length.
+  with the static Thomas loop length. Done for `Nx=16/32`.
 - Test a non-unrolled/looped Triton kernel shape if jax-triton supports it on
-  the target stack.
+  the target stack. Done for `Nx=32`.
 - Do not promote the jax-triton route while the lowering cost remains minutes.
 
 Quota-limited micro scaling checks, same P100 stack, `B=128`, `block_b=64`,
@@ -520,12 +522,22 @@ cache snapshots disabled:
 | 32 | 118.1 s | 152 ms | 468 ms | `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted` |
 | 89 | 2340.1 s | 154 ms | 1341 ms | `benchmark/results/kaggle/20260708_212036_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-start-gpu-7bb5250/outputs/extracted` |
 
+Looped `tl.range` candidate, same P100 stack, `B=128`, `block_b=64`, cache
+snapshots disabled:
+
+| variant | Nx | lower | compile | first compiled call | artifact |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `tiled_thomas` / `tl.static_range` | 32 | 118.1 s | 152 ms | 468 ms | `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted` |
+| `tiled_thomas_loop` / `tl.range` | 32 | 3.67 s | 125 ms | 158 ms | `benchmark/results/kaggle/20260708_221928_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx32-b128-fe899c4/outputs/extracted` |
+
 Conclusion:
 
 ```text
-Lowering grows much faster than linearly with Nx. Stop spending Kaggle quota on
-the current static-range jax-triton shape; inspect and change the kernel shape
-locally first, then run only one tiny Kaggle gate for the next candidate.
+Lowering grows much faster than linearly with Nx for the static-range kernel.
+The first looped tl.range candidate removes the cold-start cliff at Nx=32, so
+the rejected piece is the static unrolling shape, not the whole Triton route.
+Keep the looped kernel benchmark-only until it is validated at the real Nx=89
+gate and compared on the real-stage large-population workload.
 ```
 
 ## CPU Synthetic Cross-Check

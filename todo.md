@@ -1771,7 +1771,7 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260708_195453_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-validation-gpu-d9aa339/outputs/extracted`.
   Cold-start is confirmed even at `Naxons=1024`: first standalone Triton
   block-solve call is `2,315,522 ms`, about `38.6 min`.
-- [ ] Audit the jax-triton cold-start path after the numerical gate passes:
+- [x] Audit the jax-triton cold-start path after the numerical gate passes:
   isolate install time, import time, JAX tracing/lowering time, Triton kernel
   compilation time, cache behavior inside one process, and whether a persistent
   cache can make the first usable simulation acceptable. Do not promote the
@@ -1794,10 +1794,21 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260708_220512_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx16-b128-f93fda4/outputs/extracted`.
   `Nx=32` lower `118.1 s`, compile `152 ms`, first call `468 ms`; artifact
   `benchmark/results/kaggle/20260708_220802_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-cold-nx32-b128-f93fda4/outputs/extracted`.
-  Stop the Kaggle matrix here for quota reasons: the lowering cost scales much
-  faster than linearly with `Nx`, consistent with static loop unrolling. Next
-  work locally in code first, then only run one tiny Kaggle gate for a
-  non-unrolled/less-unrolled candidate.
+  Stop the static-range Kaggle matrix here for quota reasons: the lowering cost
+  scales much faster than linearly with `Nx`, consistent with static loop
+  unrolling.
+  Follow-up at commit `fe899c4` added a benchmark-only `tl.range` looped
+  jax-triton candidate and ran one tiny Kaggle P100 gate at `Nx=32`, `B=128`,
+  `block_b=64`: `lower` fell from `118.1 s` to `3.67 s`, `compile` was
+  `125 ms`, and first compiled call was `158 ms`. Artifact:
+  `benchmark/results/kaggle/20260708_221928_jax_triton_cold_start_audit_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-loop-cold-nx32-b128-fe899c4/outputs/extracted`.
+  Interpretation: the cold cliff is caused by the static unrolled kernel shape,
+  not by all jax-triton usage.
+- [ ] Validate the looped jax-triton candidate before any integration:
+  run one small Kaggle P100 gate at the real `Nx=89` shape and then one small
+  real-stage numerical/timing gate if `Nx=89` cold-start stays acceptable.
+  Keep this benchmark-only and do not add public solver options or runtime
+  policy changes.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost
