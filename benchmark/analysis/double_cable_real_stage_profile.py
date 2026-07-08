@@ -28,6 +28,7 @@ from axonscope.backends.jax.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
 )
 from axonscope.backends.jax.common import (
+    double_cable_block_residual_norm,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -127,6 +128,44 @@ SUMMARY_FIELDS = (
     "output_bytes",
 )
 
+VALIDATION_FIELDS = (
+    "stage",
+    "variant",
+    "reference_variant",
+    "stage_group",
+    "platform",
+    "device",
+    "precision",
+    "target_nx",
+    "actual_nx",
+    "n_axons",
+    "kernel_group_size",
+    "diameters",
+    "recording",
+    "extracellular_format",
+    "membrane_backend",
+    "membrane_model",
+    "membrane_gates_max",
+    "membrane_channels_max",
+    "membrane_backend_branches",
+    "membrane_gated_compartments",
+    "membrane_leak_compartments",
+    "max_abs_diff",
+    "max_rel_diff",
+    "reference_max_abs",
+    "max_abs_vm_diff",
+    "max_rel_vm_diff",
+    "max_residual_norm",
+    "median_residual_norm",
+    "all_finite",
+    "passes_tolerance",
+    "status",
+    "atol",
+    "rtol",
+    "residual_tolerance",
+    "notes",
+)
+
 
 @dataclass(frozen=True)
 class StageCase:
@@ -221,6 +260,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument(
+        "--validate-solvers",
+        action="store_true",
+        help=(
+            "After timing measurements, compare selected solver outputs against "
+            "a trusted reference and write real_stage_validation.csv. This is "
+            "benchmark-only and deliberately runs after measurement so cold "
+            "timing is not hidden by validation."
+        ),
+    )
+    parser.add_argument(
+        "--validation-atol",
+        type=float,
+        help="Absolute tolerance for --validate-solvers. Defaults by precision.",
+    )
+    parser.add_argument(
+        "--validation-rtol",
+        type=float,
+        help="Relative tolerance for --validate-solvers. Defaults by precision.",
+    )
+    parser.add_argument(
+        "--validation-residual-tolerance",
+        type=float,
+        help=(
+            "Maximum relative residual allowed for block-solve validation. "
+            "Defaults by precision."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.repeats < 1:
@@ -233,6 +300,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--n-axons must be >= 1.")
     if args.time_chunk_steps < 1:
         parser.error("--time-chunk-steps must be >= 1.")
+    if args.validation_atol is not None and args.validation_atol < 0.0:
+        parser.error("--validation-atol must be >= 0.")
+    if args.validation_rtol is not None and args.validation_rtol < 0.0:
+        parser.error("--validation-rtol must be >= 0.")
+    if (
+        args.validation_residual_tolerance is not None
+        and args.validation_residual_tolerance < 0.0
+    ):
+        parser.error("--validation-residual-tolerance must be >= 0.")
 
     if args.precision == "fp64":
         jax.config.update("jax_enable_x64", True)
@@ -247,6 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     repeat_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
+    validation_rows: list[dict[str, Any]] = []
     with jax.default_device(device):
         for case in inputs.stage_cases:
             rows, summary = _measure_case(
@@ -259,17 +336,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             repeat_rows.extend(rows)
             summary_rows.append(summary)
+        if args.validate_solvers:
+            validation_rows = _validate_solver_cases(
+                inputs.stage_cases,
+                args=args,
+                device_name=str(device),
+                group_metadata=inputs.group_metadata,
+            )
 
     repeat_csv = args.output / "real_stage_repeats.csv"
     summary_csv = args.output / "real_stage_summary.csv"
     _write_csv(repeat_csv, REPEAT_FIELDS, repeat_rows)
     _write_csv(summary_csv, SUMMARY_FIELDS, summary_rows)
+    if args.validate_solvers:
+        _write_csv(args.output / "real_stage_validation.csv", VALIDATION_FIELDS, validation_rows)
     if not args.no_plots:
         _write_plots(args.output / "plots", summary_rows)
-    _write_report(args.output / "real_stage_report.md", summary_rows, metadata)
+    _write_report(
+        args.output / "real_stage_report.md",
+        summary_rows,
+        metadata,
+        validation_rows=validation_rows,
+    )
 
     print(f"wrote: {summary_csv}")
+    if args.validate_solvers:
+        print(f"wrote: {args.output / 'real_stage_validation.csv'}")
     print(f"wrote: {args.output / 'real_stage_report.md'}")
+    if any(row["status"] != "pass" for row in validation_rows):
+        print("solver validation failed; inspect real_stage_validation.csv", file=sys.stderr)
+        return 2
     return 0
 
 
@@ -316,6 +412,10 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "time_chunk_policy": "explicit",
         "time_chunk_steps": int(args.time_chunk_steps),
         "one_step_solver": tuple(getattr(args, "one_step_solver", None) or ("active_auto",)),
+        "validate_solvers": bool(args.validate_solvers),
+        "validation_atol": _validation_atol(args),
+        "validation_rtol": _validation_rtol(args),
+        "validation_residual_tolerance": _validation_residual_tolerance(args),
         "amplitude_batch_size": None,
         "retention": "summary_only",
         "amplitude_count": 1,
@@ -1660,6 +1760,308 @@ def _solve_by_name(
     raise ValueError(f"unsupported one-step solver: {solver!r}")
 
 
+def _validate_solver_cases(
+    stage_cases: Sequence[StageCase],
+    *,
+    args: argparse.Namespace,
+    device_name: str,
+    group_metadata: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    block_cases = [case for case in stage_cases if case.stage == "block_solve"]
+    one_step_cases = [case for case in stage_cases if case.stage == "one_step_proxy"]
+    if block_cases:
+        rows.extend(
+            _validate_block_solve_cases(
+                block_cases,
+                args=args,
+                device_name=device_name,
+                group_metadata=group_metadata,
+            )
+        )
+    if one_step_cases:
+        rows.extend(
+            _validate_one_step_cases(
+                one_step_cases,
+                args=args,
+                device_name=device_name,
+                group_metadata=group_metadata,
+            )
+        )
+    if not rows:
+        raise RuntimeError("--validate-solvers found no block_solve or one_step_proxy cases.")
+    return rows
+
+
+def _validate_block_solve_cases(
+    cases: Sequence[StageCase],
+    *,
+    args: argparse.Namespace,
+    device_name: str,
+    group_metadata: dict[str, Any],
+) -> list[dict[str, Any]]:
+    reference = _select_validation_reference_case(
+        cases,
+        preferred=(
+            "thomas_batched_scan",
+            "pcr_soa_batched",
+            "pcr_matrix_vmap",
+            "thomas_vmap",
+        ),
+        context="block_solve",
+    )
+    reference_out = _block_until_ready(reference.fn(*reference.args))
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        out = _block_until_ready(case.fn(*case.args))
+        stats = _comparison_stats(out, reference_out)
+        max_residual, median_residual = _residual_stats(case.args, out)
+        rows.append(
+            _validation_row(
+                case=case,
+                reference_variant=reference.variant,
+                args=args,
+                device_name=device_name,
+                group_metadata=group_metadata,
+                stats=stats,
+                max_residual_norm=max_residual,
+                median_residual_norm=median_residual,
+            )
+        )
+    return rows
+
+
+def _validate_one_step_cases(
+    cases: Sequence[StageCase],
+    *,
+    args: argparse.Namespace,
+    device_name: str,
+    group_metadata: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    groups: dict[str, list[StageCase]] = {}
+    for case in cases:
+        groups.setdefault(_one_step_validation_group(case.variant), []).append(case)
+    for group_name in sorted(groups):
+        group_cases = groups[group_name]
+        reference = _select_validation_reference_case(
+            group_cases,
+            preferred=(
+                f"thomas_batched_scan_{group_name}",
+                f"pcr_soa_batched_{group_name}",
+                f"pcr_soa_{group_name}",
+                f"pcr_matrix_vmap_{group_name}",
+                f"thomas_vmap_{group_name}",
+            ),
+            context=f"one_step_proxy/{group_name}",
+        )
+        reference_out = _block_until_ready(reference.fn(*reference.args))
+        for case in group_cases:
+            out = _block_until_ready(case.fn(*case.args))
+            stats = _comparison_stats(out, reference_out)
+            rows.append(
+                _validation_row(
+                    case=case,
+                    reference_variant=reference.variant,
+                    args=args,
+                    device_name=device_name,
+                    group_metadata=group_metadata,
+                    stats=stats,
+                    max_residual_norm=None,
+                    median_residual_norm=None,
+                )
+            )
+    return rows
+
+
+def _select_validation_reference_case(
+    cases: Sequence[StageCase],
+    *,
+    preferred: Sequence[str],
+    context: str,
+) -> StageCase:
+    by_variant = {case.variant: case for case in cases}
+    for name in preferred:
+        case = by_variant.get(name)
+        if case is not None:
+            return case
+    for case in cases:
+        if "jax_triton" not in case.variant:
+            return case
+    available = ", ".join(case.variant for case in cases)
+    raise RuntimeError(
+        f"--validate-solvers needs a non-Triton reference for {context}; "
+        f"available variants: {available}"
+    )
+
+
+def _one_step_validation_group(variant: str) -> str:
+    if variant.endswith("_real_precomputed_static"):
+        return "real_precomputed_static"
+    if variant.endswith("_real"):
+        return "real"
+    return "unknown"
+
+
+def _validation_row(
+    *,
+    case: StageCase,
+    reference_variant: str,
+    args: argparse.Namespace,
+    device_name: str,
+    group_metadata: dict[str, Any],
+    stats: dict[str, Any],
+    max_residual_norm: float | None,
+    median_residual_norm: float | None,
+) -> dict[str, Any]:
+    atol = _validation_atol(args)
+    rtol = _validation_rtol(args)
+    residual_tolerance = _validation_residual_tolerance(args)
+    passes_tolerance = _comparison_passes(stats, atol=atol, rtol=rtol)
+    residual_ok = (
+        max_residual_norm is None
+        or (
+            np.isfinite(max_residual_norm)
+            and max_residual_norm <= residual_tolerance
+        )
+    )
+    all_finite = bool(stats["all_finite"]) and (
+        max_residual_norm is None or np.isfinite(max_residual_norm)
+    )
+    status = "pass" if all_finite and passes_tolerance and residual_ok else "fail"
+    notes: list[str] = []
+    if not all_finite:
+        notes.append("non-finite output or residual")
+    if not passes_tolerance:
+        notes.append("output differs from reference beyond tolerance")
+    if not residual_ok:
+        notes.append("block residual exceeds tolerance")
+    return {
+        **_row_context(args=args, device_name=device_name, group_metadata=group_metadata),
+        "stage": case.stage,
+        "variant": case.variant,
+        "reference_variant": reference_variant,
+        "stage_group": _stage_group(case.stage),
+        "max_abs_diff": stats["max_abs_diff"],
+        "max_rel_diff": stats["max_rel_diff"],
+        "reference_max_abs": stats["reference_max_abs"],
+        "max_abs_vm_diff": stats["max_abs_vm_diff"],
+        "max_rel_vm_diff": stats["max_rel_vm_diff"],
+        "max_residual_norm": max_residual_norm,
+        "median_residual_norm": median_residual_norm,
+        "all_finite": all_finite,
+        "passes_tolerance": passes_tolerance,
+        "status": status,
+        "atol": atol,
+        "rtol": rtol,
+        "residual_tolerance": residual_tolerance,
+        "notes": "; ".join(notes),
+    }
+
+
+def _comparison_stats(actual: Any, reference: Any) -> dict[str, Any]:
+    actual_arrays = list(_numeric_leaves(actual))
+    reference_arrays = list(_numeric_leaves(reference))
+    if len(actual_arrays) != len(reference_arrays):
+        raise RuntimeError(
+            "validation output structure differs: "
+            f"{len(actual_arrays)} arrays versus {len(reference_arrays)}"
+        )
+    max_abs = 0.0
+    max_rel = 0.0
+    reference_max_abs = 0.0
+    all_finite = True
+    for actual_arr, reference_arr in zip(actual_arrays, reference_arrays, strict=True):
+        if actual_arr.shape != reference_arr.shape:
+            raise RuntimeError(
+                "validation output shape differs: "
+                f"{actual_arr.shape} versus {reference_arr.shape}"
+            )
+        diff = np.abs(actual_arr - reference_arr)
+        denom = np.maximum(np.abs(reference_arr), 1e-12)
+        max_abs = max(max_abs, _nanmax0(diff))
+        max_rel = max(max_rel, _nanmax0(diff / denom))
+        reference_max_abs = max(reference_max_abs, _nanmax0(np.abs(reference_arr)))
+        all_finite = all_finite and bool(np.all(np.isfinite(actual_arr)))
+        all_finite = all_finite and bool(np.all(np.isfinite(reference_arr)))
+    vm_abs, vm_rel = _vm_comparison_stats(actual_arrays, reference_arrays)
+    return {
+        "max_abs_diff": max_abs,
+        "max_rel_diff": max_rel,
+        "reference_max_abs": reference_max_abs,
+        "max_abs_vm_diff": vm_abs,
+        "max_rel_vm_diff": vm_rel,
+        "all_finite": all_finite,
+    }
+
+
+def _numeric_leaves(value: Any) -> list[np.ndarray]:
+    if isinstance(value, (tuple, list)):
+        leaves: list[np.ndarray] = []
+        for item in value:
+            leaves.extend(_numeric_leaves(item))
+        return leaves
+    return [np.asarray(value)]
+
+
+def _vm_comparison_stats(
+    actual_arrays: Sequence[np.ndarray],
+    reference_arrays: Sequence[np.ndarray],
+) -> tuple[float | None, float | None]:
+    if len(actual_arrays) < 2 or len(reference_arrays) < 2:
+        return None, None
+    if actual_arrays[0].shape != actual_arrays[1].shape:
+        return None, None
+    if reference_arrays[0].shape != reference_arrays[1].shape:
+        return None, None
+    actual_vm = actual_arrays[0] - actual_arrays[1]
+    reference_vm = reference_arrays[0] - reference_arrays[1]
+    diff = np.abs(actual_vm - reference_vm)
+    denom = np.maximum(np.abs(reference_vm), 1e-12)
+    return _nanmax0(diff), _nanmax0(diff / denom)
+
+
+def _comparison_passes(stats: dict[str, Any], *, atol: float, rtol: float) -> bool:
+    threshold = atol + rtol * float(stats["reference_max_abs"])
+    return bool(stats["max_abs_diff"] <= threshold)
+
+
+def _nanmax0(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    return float(np.nanmax(values))
+
+
+def _residual_stats(
+    inputs: tuple[Any, Any, Any, Any, Any, Any, Any, Any],
+    output: tuple[Any, Any],
+) -> tuple[float, float]:
+    residuals = _block_until_ready(double_cable_block_residual_norm(*inputs, *output))
+    return float(jnp.max(residuals)), float(jnp.median(residuals))
+
+
+def _validation_atol(args: argparse.Namespace) -> float:
+    if args.validation_atol is not None:
+        return float(args.validation_atol)
+    return 1e-8 if _validation_precision(args) == "fp64" else 1e-3
+
+
+def _validation_rtol(args: argparse.Namespace) -> float:
+    if args.validation_rtol is not None:
+        return float(args.validation_rtol)
+    return 1e-8 if _validation_precision(args) == "fp64" else 2e-4
+
+
+def _validation_residual_tolerance(args: argparse.Namespace) -> float:
+    if args.validation_residual_tolerance is not None:
+        return float(args.validation_residual_tolerance)
+    return 1e-8 if _validation_precision(args) == "fp64" else 1e-3
+
+
+def _validation_precision(args: argparse.Namespace) -> str:
+    return str(args.precision or PRESETS[args.preset].precision)
+
+
 def _batch_space(values: Any, *, batch_size: int, nx: int) -> Any:
     arr = jnp.asarray(values)
     if arr.ndim == 0:
@@ -1982,7 +2384,13 @@ def _stage_group(stage: str) -> str:
     return "other"
 
 
-def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
+def _write_report(
+    path: Path,
+    rows: Sequence[dict[str, Any]],
+    metadata: dict[str, Any],
+    *,
+    validation_rows: Sequence[dict[str, Any]] = (),
+) -> None:
     stage_rows = sorted(rows, key=lambda item: (item["stage"], item["variant"]))
     block_rows = [row for row in rows if row["stage"] == "block_solve"]
     fastest_block = min(block_rows, key=lambda row: float(row["mean_ms"])) if block_rows else None
@@ -2105,6 +2513,44 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
         lines.extend(["## MRG Membrane Compiler Signals", ""])
         lines.extend(f"- {note}" for note in membrane_ratios)
         lines.append("")
+    if validation_rows:
+        failed = [row for row in validation_rows if row["status"] != "pass"]
+        lines.extend(
+            [
+                "## Numerical Solver Validation",
+                "",
+                (
+                    "Status: "
+                    f"`{'pass' if not failed else 'fail'}` "
+                    f"({len(validation_rows) - len(failed)}/{len(validation_rows)} rows passed)."
+                ),
+                "",
+                "| stage | variant | reference | max abs diff | max abs Vm diff | max residual | status |",
+                "| --- | --- | --- | ---: | ---: | ---: | --- |",
+            ]
+        )
+        for row in validation_rows:
+            lines.append(
+                "| {stage} | {variant} | {reference_variant} | {max_abs:.3e} | {vm_abs} | {residual} | {status} |".format(
+                    stage=row["stage"],
+                    variant=row["variant"],
+                    reference_variant=row["reference_variant"],
+                    max_abs=float(row["max_abs_diff"]),
+                    vm_abs=_format_optional_scientific(row["max_abs_vm_diff"]),
+                    residual=_format_optional_scientific(row["max_residual_norm"]),
+                    status=row["status"],
+                )
+            )
+        lines.extend(
+            [
+                "",
+                (
+                    "Validation runs after timing measurements, so it does not hide "
+                    "first-run/cold compilation cost."
+                ),
+                "",
+            ]
+        )
     lines.extend(
         [
             "## Stage Means",
@@ -2137,6 +2583,12 @@ def _write_report(path: Path, rows: Sequence[dict[str, Any]], metadata: dict[str
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _format_optional_scientific(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    return f"{float(value):.3e}"
 
 
 def _row_for(rows: Sequence[dict[str, Any]], stage: str, variant: str) -> dict[str, Any] | None:

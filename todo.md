@@ -1730,12 +1730,43 @@ PTA/block-Thomas GPU gate:
   same-compartment lane loads. This is closer to the GPU-tridiagonal papers
   than the pure JAX scan, but still not a full PfSolve-equivalent
   shared-memory/scratch implementation. Keep it benchmark-only.
-- [ ] Run the jax-triton P11C gate on Kaggle P100:
+- [x] Run the jax-triton P11C gate on Kaggle P100:
   compare `pcr_soa_batched`, `thomas_batched_scan`, and
   `jax_triton_tiled_thomas` at least on the real-stage `Naxons=8192/16384`,
   fp32, observer-only, target `Nx=101` / actual `Nx=89`. Install the optional
   dependency with `--pip-package jax-triton`; do not promote anything until the
   artifact shows correctness and hot-step timing.
+  Result at commit `f915367`: warm Triton block solve is `0.678 ms` at
+  `Naxons=8192` versus `3.766 ms` PCR and `2.748 ms` JAX scan, then
+  `0.878 ms` at `Naxons=16384` versus `7.148 ms` PCR and `3.186 ms` JAX scan.
+  Warm one-step precomputed proxy is `1.519 ms` at `8192` and `2.421 ms` at
+  `16384`, about `2.89x` and `3.35x` faster than PCR respectively. Artifacts:
+  `benchmark/results/kaggle/20260708_185401_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-thomas-gpu-8k-f915367/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_185403`
+  and
+  `benchmark/results/kaggle/20260708_185428_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-thomas-gpu-16k-f915367/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_185428`.
+  Caveat: first standalone Triton block-solve compile/run is about
+  `40-41 min` on Kaggle P100, so cold compilation/cache behavior must be
+  controlled before any backend integration.
+- [x] Add a numerical P11C validation mode before interpreting the jax-triton
+  timing as physically coherent: `benchmark/analysis/double_cable_real_stage_profile.py`
+  now supports `--validate-solvers`, writes `real_stage_validation.csv`, compares
+  selected block-solve and one-step proxy outputs against a non-Triton reference,
+  records max absolute/relative diffs including `Vm = Vi - Ve`, records
+  block-solve residual norms, and fails the script if validation fails. The
+  validation deliberately runs after timing measurements so it does not hide the
+  first-run/cold compilation cost.
+- [ ] Run a small P11C jax-triton numerical gate on Kaggle P100 before the
+  cold-start audit: include `pcr_soa_batched`, `thomas_batched_scan`, and
+  `jax_triton_tiled_thomas` for block solve and one-step proxy, with
+  `--validate-solvers`, `--pip-package jax-triton`, fp32, observer-only, target
+  `Nx=101` / actual `Nx=89`, and a modest `Naxons` so the first Triton compile
+  is the main cost. Only after `real_stage_validation.csv` passes should P11C
+  treat the warm jax-triton timings as numerically acceptable.
+- [ ] Audit the jax-triton cold-start path after the numerical gate passes:
+  isolate install time, import time, JAX tracing/lowering time, Triton kernel
+  compilation time, cache behavior inside one process, and whether a persistent
+  cache can make the first usable simulation acceptable. Do not promote the
+  route while the first standalone Triton block solve costs about `40-41 min`.
 - [ ] P11C decision rule:
   promote only if the candidate improves large-population real-stage or curve
   throughput with acceptable memory and correctness, and without shifting cost

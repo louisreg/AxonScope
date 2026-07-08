@@ -391,6 +391,61 @@ If it loses to the JAX scan, keep the pure JAX large-Naxons route as the current
 best low-level evidence and leave deeper Triton/CUDA work as a later track.
 ```
 
+Kaggle P100 result at commit `f915367`, real-stage double-cable, fp32,
+observer-only, target `Nx=101`, actual kernel `Nx=89`:
+
+- Artifact root for `Naxons=8192`:
+  `benchmark/results/kaggle/20260708_185401_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-thomas-gpu-8k-f915367/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_185403`.
+- Artifact root for `Naxons=16384`:
+  `benchmark/results/kaggle/20260708_185428_double_cable_real_stage_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-thomas-gpu-16k-f915367/outputs/benchmark/results/double_cable_real_stage_profile_quick_gpu_20260708_185428`.
+
+Warm hot-step result:
+
+| Naxons | block solve PCR | block solve JAX scan | block solve Triton | Triton vs PCR | Triton vs JAX scan |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8192 | 3.766 ms | 2.748 ms | 0.678 ms | 5.55x faster | 4.05x faster |
+| 16384 | 7.148 ms | 3.186 ms | 0.878 ms | 8.14x faster | 3.63x faster |
+
+Warm one-step proxy result:
+
+| Naxons | one-step PCR | one-step JAX scan | one-step Triton | Triton vs PCR | Triton vs JAX scan |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8192 | 4.397 ms | 3.141 ms | 1.519 ms | 2.89x faster | 2.07x faster |
+| 16384 | 8.111 ms | 4.209 ms | 2.421 ms | 3.35x faster | 1.74x faster |
+
+Constraint:
+
+- The first standalone Triton block-solve call is extremely expensive on the
+  Kaggle P100 runs: about `2.43e6-2.46e6 ms`, roughly `40-41 min`.
+- Later one-step proxy first runs are much lower because the Triton kernels have
+  already been compiled and cached inside the process.
+
+Interpretation:
+
+```text
+jax_triton_tiled_thomas is the strongest warm large-population GPU solver
+candidate so far.
+It cannot be promoted until the cold compilation/cache behavior is understood
+and controlled.
+After Triton, non-solver work is again a major share of the one-step proxy, so
+the next optimization target may move back to assembly/membrane/layout costs.
+```
+
+Numerical validation caveat:
+
+- The first jax-triton Kaggle timing gate validated runtime execution and timing
+  only. It did not yet compare Triton `Vi`/`Ve`/`Vm`/gates to a trusted
+  non-Triton reference on the real assembled double-cable system.
+- `benchmark/analysis/double_cable_real_stage_profile.py` now has a
+  `--validate-solvers` mode for that check. It runs after timing measurements,
+  writes `real_stage_validation.csv`, compares block-solve and one-step proxy
+  outputs against a reference such as `thomas_batched_scan`, records
+  `Vm = Vi - Ve` differences and block residual norms, and returns a non-zero
+  status if validation fails.
+- P11C should run this small numerical gate on Kaggle P100 before interpreting
+  the warm Triton timing as physically coherent, then investigate the
+  `40-41 min` first standalone Triton compile/run cost.
+
 ## CPU Synthetic Cross-Check
 
 The long-running CPU synthetic P11C run on commit `ed0ccff` eventually finished:
