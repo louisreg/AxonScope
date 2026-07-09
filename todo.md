@@ -1918,6 +1918,20 @@ PTA/block-Thomas GPU gate:
   cathodic pulse, node-centered electrode). Recruitment activation counts match
   between PCR and Triton. Peak RSS end is about `+212 MiB` for threshold and
   `+215 MiB` for recruitment with Triton.
+  A corrected threshold smoke gate then passed on Kaggle P100 at commit
+  `3f60820`: the benchmark defaults were aligned with
+  `examples/basic/07_threshold_vs_diameter.py`, and the threshold spatial setup
+  now keeps axons on the intrinsic axis (`z=0`) with the point electrode at
+  `z=100 um`. The first rerun at commit `7b67a42` still produced
+  `above_range` thresholds and exposed that geometry mismatch. The corrected
+  base and Triton runs both found `64/64` thresholds in range, with identical
+  PCR/Triton thresholds (`max_abs_uA=0.0`) over `Naxons=64`, target `Nx=101`
+  / actual `Nx=89`, fp32, observer-only, double-cable, different diameters,
+  `tsim=5 ms`, `dt=0.01 ms`, `max_iterations=8`, `1..50 uA`, and monophasic
+  stimulation. Artifacts:
+  `benchmark/results/kaggle/20260709_141540_threshold_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p11c-thr64g-base/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260709_141540_threshold_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p11c-thr64g-triton/outputs/extracted`.
   Interpretation: the integrated benchmark-only Triton path survives realistic
   curve workflow timing, but policy is still open until the matrix covers
   `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison, corrected
