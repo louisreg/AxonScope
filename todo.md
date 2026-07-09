@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-08 during the P11C large-population GPU solver gate.
+Updated on 2026-07-09 during the P11C Triton workflow benchmark gate.
 
 Current state:
 
@@ -1894,6 +1894,34 @@ PTA/block-Thomas GPU gate:
   `~8-16x` at `B=16384..32768` depending on `Nx` and coefficient mode. Residuals
   stay around `1.3e-7`. Artifact:
   `benchmark/results/kaggle/20260709_092034_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-largepop-gpu-sweep/outputs/extracted`.
+  First integrated workflow GPU gate completed on Kaggle P100 at commit
+  `d722906`, comparing the current PCR route against the benchmark-only
+  `jax_triton_loop_xb` override on `threshold_curves` and `recruitment_curves`
+  with `Naxons=8192`, target `Nx=101` / actual `Nx=89`, fp32, double-cable,
+  observer-only, different diameters, `tsim=20 ms`, `dt=0.01 ms`, unchunked,
+  and RSS tracing. Artifacts:
+  `benchmark/results/kaggle/20260709_134542_threshold_curves_gpu_realistic_gpu_NvidiaTeslaP100_axs-p11c-thr8192-base/outputs/extracted`,
+  `benchmark/results/kaggle/20260709_134555_threshold_curves_gpu_realistic_gpu_NvidiaTeslaP100_axs-p11c-thr8192-triton/outputs/extracted`,
+  `benchmark/results/kaggle/20260709_134850_recruitment_curves_gpu_realistic_gpu_NvidiaTeslaP100_axs-p11c-rec8192-base/outputs/extracted`, and
+  `benchmark/results/kaggle/20260709_134904_recruitment_curves_gpu_realistic_gpu_NvidiaTeslaP100_axs-p11c-rec8192-triton/outputs/extracted`.
+  Steady repeat timing improves strongly: threshold `curve.simulate` mean
+  `10.75 s -> 2.98 s` (`3.61x`) and `kernel.dispatch_jax`
+  `8.46 s -> 1.20 s` (`7.04x`); recruitment `curve.simulate` mean
+  `11.74 s -> 3.97 s` (`2.96x`) and `kernel.dispatch_jax`
+  `9.43 s -> 2.06 s` (`4.57x`). All-phase totals including cold/warmup are
+  `87.9 s -> 45.2 s` for threshold (`1.95x`) and `305.7 s -> 122.5 s` for
+  recruitment (`2.50x`). Threshold amplitudes were too low for physical
+  threshold values in this pass (`above_range`), so use that run for timing
+  only; next threshold reruns should use the physically bracketed reference
+  setup from `examples/basic/07_threshold_vs_diameter.py` (`MRG` point-source
+  thresholds use `1..50 uA` at `100 us`, `5..150 uA` at `50 us`, monophasic
+  cathodic pulse, node-centered electrode). Recruitment activation counts match
+  between PCR and Triton. Peak RSS end is about `+212 MiB` for threshold and
+  `+215 MiB` for recruitment with Triton.
+  Interpretation: the integrated benchmark-only Triton path survives realistic
+  curve workflow timing, but policy is still open until the matrix covers
+  `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison, corrected
+  threshold amplitude ranges, and cold/warm cache behavior.
 - [ ] P11C-G promote the Triton solver if evidence supports it:
   if P11C-F shows robust wins and acceptable cold-start/memory/correctness
   behavior, make the Triton double-cable solver a selectable solver option

@@ -75,6 +75,9 @@ def test_threshold_dry_run_writes_common_case_options(tmp_path: Path, capsys):
     assert rows[0]["diameters"] == "different_diameters"
     assert rows[0]["time_chunk_policy"] == "default"
     assert rows[0]["time_chunk_steps"] == ""
+    assert rows[0]["amplitude_min"] == "1.0"
+    assert rows[0]["amplitude_max"] == "50.0"
+    assert rows[0]["stimulation"] == "monophasic"
 
 
 def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path, capsys):
@@ -207,6 +210,48 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
     assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
+
+
+def test_threshold_defaults_follow_example07_mrg_bounds():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "local_smoke",
+            "--cable",
+            "double_cable",
+        ]
+    )
+
+    options = resolved_options(args)
+
+    assert options["amplitude_min"] == 1.0
+    assert options["amplitude_max"] == 50.0
+    assert options["stimulation"] == "monophasic"
+
+
+def test_threshold_explicit_amplitude_and_stimulation_overrides_win():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "local_smoke",
+            "--cable",
+            "double_cable",
+            "--amplitude-min",
+            "0",
+            "--amplitude-max",
+            "150",
+            "--stimulation",
+            "biphasic",
+        ]
+    )
+
+    options = resolved_options(args)
+
+    assert options["amplitude_min"] == 0.0
+    assert options["amplitude_max"] == 150.0
+    assert options["stimulation"] == "biphasic"
 
 
 def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():

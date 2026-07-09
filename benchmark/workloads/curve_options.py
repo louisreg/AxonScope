@@ -285,11 +285,11 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--case-filter")
     parser.add_argument("--spatial-recording", choices=("center", "probes", "indices"), default="probes")
     parser.add_argument("--observer-criterion", default="vm_raster")
-    parser.add_argument("--amplitude-min", type=float, default=0.0)
-    parser.add_argument("--amplitude-max", type=float, default=1.0)
+    parser.add_argument("--amplitude-min", type=float)
+    parser.add_argument("--amplitude-max", type=float)
     parser.add_argument("--amplitude-tolerance", type=float, default=1e-3)
     parser.add_argument("--max-iterations", type=int)
-    parser.add_argument("--stimulation", choices=("monophasic", "biphasic", "custom"), default="biphasic")
+    parser.add_argument("--stimulation", choices=("monophasic", "biphasic", "custom"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--cache-mode", choices=("cold", "warm", "clear_codegen_cache"), default="warm")
     parser.add_argument(
@@ -306,6 +306,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--retention", choices=("summary_only", "raw_traces", "debug_artifacts"), default="summary_only")
     parser.set_defaults(
         _preset_defaults={
+            "script_name": script_name,
             "tsim": preset.tsim,
             "dt": preset.dt,
             "nx": preset.nx,
@@ -325,11 +326,14 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
             "amplitude_count": preset.amplitude_count,
         }
     )
+    parser.set_defaults(_script_name=script_name)
     return parser
 
 
 def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
     preset = PRESETS[args.preset]
+    script_name = str(getattr(args, "_script_name", ""))
+    amplitude_min, amplitude_max = _resolve_amplitude_bounds(args, script_name)
     options = {
         "preset": args.preset,
         "source": args.source,
@@ -369,15 +373,15 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "case_filter": args.case_filter,
         "spatial_recording": args.spatial_recording,
         "observer_criterion": args.observer_criterion,
-        "amplitude_min": args.amplitude_min,
-        "amplitude_max": args.amplitude_max,
+        "amplitude_min": amplitude_min,
+        "amplitude_max": amplitude_max,
         "amplitude_tolerance": args.amplitude_tolerance,
         "max_iterations": (
             args.max_iterations
             if args.max_iterations is not None
             else preset.max_iterations
         ),
-        "stimulation": args.stimulation,
+        "stimulation": args.stimulation or _default_stimulation(script_name),
         "seed": args.seed,
         "cache_mode": args.cache_mode,
         "time_chunk_policy": _time_chunk_policy(args.time_chunk_steps),
@@ -394,6 +398,47 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
             else preset.amplitude_count
         )
     return options
+
+
+def _resolve_amplitude_bounds(
+    args: argparse.Namespace,
+    script_name: str,
+) -> tuple[float, float]:
+    default_min, default_max = _default_amplitude_bounds(args, script_name)
+    amplitude_min = (
+        default_min if args.amplitude_min is None else float(args.amplitude_min)
+    )
+    amplitude_max = (
+        default_max if args.amplitude_max is None else float(args.amplitude_max)
+    )
+    return amplitude_min, amplitude_max
+
+
+def _default_amplitude_bounds(
+    args: argparse.Namespace,
+    script_name: str,
+) -> tuple[float, float]:
+    if script_name != "threshold_curves":
+        return (0.0, 1.0)
+    pulse_width_us = _default_pulse_width_us(args)
+    if str(args.population) == "mixed_models":
+        return (5.0, 650.0) if pulse_width_us <= 50 else (1.0, 350.0)
+    if str(args.cable) == "double_cable":
+        return (5.0, 150.0) if pulse_width_us <= 50 else (1.0, 50.0)
+    return (20.0, 650.0) if pulse_width_us <= 50 else (20.0, 350.0)
+
+
+def _default_pulse_width_us(args: argparse.Namespace) -> int:
+    preset = PRESETS[args.preset]
+    tsim = float(args.tsim if args.tsim is not None else preset.tsim)
+    width_ms = min(0.1, max(0.02, tsim * 0.05))
+    return int(round(width_ms * 1000.0))
+
+
+def _default_stimulation(script_name: str) -> str:
+    if script_name == "threshold_curves":
+        return "monophasic"
+    return "biphasic"
 
 
 def _profile_stages(values: list[str] | None) -> tuple[str, ...]:
