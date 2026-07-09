@@ -633,7 +633,7 @@ def _build_pool(
             z_um = radii * np.sin(angles)
         else:
             y_um = np.zeros(n_axons, dtype=float)
-            z_um = np.full(n_axons, 100.0, dtype=float)
+            z_um = np.zeros(n_axons, dtype=float)
 
     templates: dict[tuple[str, float], _AxonTemplate] = {}
     stimulus_cache: dict[float, Any] = {}
