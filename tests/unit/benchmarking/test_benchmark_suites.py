@@ -194,6 +194,8 @@ def test_resolved_options_apply_preset_and_overrides():
             "tracemalloc",
             "--memory-top-n",
             "7",
+            "--benchmark-double-cable-block-solver",
+            "jax_triton_loop_xb",
         ]
     )
 
@@ -204,6 +206,7 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["n_axons"] == 12
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
+    assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
 
 
 def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():

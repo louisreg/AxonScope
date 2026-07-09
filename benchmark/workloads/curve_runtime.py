@@ -508,6 +508,9 @@ def _evaluate_amplitudes(
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
         double_cable_block_solver=options.get("double_cable_block_solver", "auto"),
+        benchmark_double_cable_block_solver=options.get(
+            "benchmark_double_cable_block_solver"
+        ),
     ):
         recording = _recording_policy(options)
         batch_options = _batch_options(options)
@@ -543,6 +546,9 @@ def _evaluate_amplitudes(
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
         double_cable_block_solver=options.get("double_cable_block_solver", "auto"),
+        benchmark_double_cable_block_solver=options.get(
+            "benchmark_double_cable_block_solver"
+        ),
     ):
         result = simulation.run()
     with benchmark_span(

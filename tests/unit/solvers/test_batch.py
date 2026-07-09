@@ -39,6 +39,8 @@ from axonscope.solvers import (
 )
 from axonscope.backends.jax.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
+    _resolve_double_cable_run_block_solver,
+    _use_batch_native_double_cable_integrated_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
 from axonscope.backends.jax.batch_inputs import (
@@ -125,6 +127,8 @@ def test_batch_recording_resolves_common_policies():
     assert resolve_double_cable_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
     with pytest.raises(ValueError, match="double_cable_block_solver"):
         BatchOptions(double_cable_block_solver="dense")
+    with pytest.raises(ValueError, match="double_cable_block_solver"):
+        BatchOptions(double_cable_block_solver="jax_triton_loop_xb")
 
 
 def test_batch_options_none_defaults_to_observer_chunking():
@@ -166,6 +170,32 @@ def test_pcr_soa_batch_native_route_starts_at_realistic_batches():
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=50)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=2048)
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr", batch_size=50)
+    assert _use_batch_native_double_cable_integrated_solver(
+        "jax_triton_loop_xb",
+        batch_size=1,
+    )
+
+
+def test_internal_jax_triton_solver_is_benchmark_override_only():
+    with pytest.raises(ValueError, match="double_cable_block_solver"):
+        _resolve_double_cable_run_block_solver(
+            "jax_triton_loop_xb",
+            platform="gpu",
+        )
+    with pytest.raises(RuntimeError, match="requires a JAX GPU backend"):
+        _resolve_double_cable_run_block_solver(
+            "jax_triton_loop_xb",
+            platform="cpu",
+            allow_internal=True,
+        )
+    assert (
+        _resolve_double_cable_run_block_solver(
+            "jax_triton_loop_xb",
+            platform="gpu",
+            allow_internal=True,
+        )
+        == "jax_triton_loop_xb"
+    )
 
 
 def test_execution_context_auto_keeps_cpu_solver_policy():

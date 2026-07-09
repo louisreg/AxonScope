@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from axonscope.benchmarking import (
+    active_benchmark_session,
     benchmark_array_metadata,
     benchmark_span,
     benchmark_wait,
@@ -128,6 +129,19 @@ def _batch_wait_target(out: Any) -> Any:
     if hasattr(first, "words"):
         return first.words
     return first.values
+
+
+def _benchmark_double_cable_block_solver_override() -> str | None:
+    session = active_benchmark_session()
+    if session is None:
+        return None
+    options = session.metadata.get("benchmark_options")
+    if not isinstance(options, dict):
+        return None
+    solver = options.get("benchmark_double_cable_block_solver")
+    if solver in (None, ""):
+        return None
+    return str(solver)
 
 
 def _run_single_cable_batch_group(
@@ -483,6 +497,11 @@ def _run_double_cable_batch_group(
         public_group_size=int(group.size),
         public_nx=int(group.nx),
     )
+    benchmark_block_solver = _benchmark_double_cable_block_solver_override()
+    if benchmark_block_solver is not None:
+        record_benchmark_metadata(
+            benchmark_double_cable_block_solver=benchmark_block_solver
+        )
     _emit_progress(
         progress_callback,
         group,
@@ -491,6 +510,7 @@ def _run_double_cable_batch_group(
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
         block_solver=kernel_options.double_cable_block_solver,
+        benchmark_block_solver=benchmark_block_solver,
     )
     with benchmark_span(
         "kernel.enqueue",
@@ -498,6 +518,7 @@ def _run_double_cable_batch_group(
         group_size=group.size,
         mode=group.mode,
         recording_mode=kernel_options.recording.mode,
+        benchmark_double_cable_block_solver=benchmark_block_solver,
     ):
         out = DoubleCableBatchKernel(
             runtime=runtime,
@@ -510,6 +531,7 @@ def _run_double_cable_batch_group(
             options=kernel_options,
             observers=observer_plan,
             progress_callback=progress_callback,
+            benchmark_double_cable_block_solver=benchmark_block_solver,
         )
         if out.Vm is not None:
             record_benchmark_metadata(

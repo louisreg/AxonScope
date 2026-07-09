@@ -223,6 +223,15 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
         default="auto",
         help="Benchmark-only override for the double-cable block solver.",
     )
+    parser.add_argument(
+        "--benchmark-double-cable-block-solver",
+        choices=("jax_triton_loop_xb",),
+        default=None,
+        help=(
+            "Private benchmark-only override that can activate experimental "
+            "backend solver routes without adding public BatchOptions values."
+        ),
+    )
     parser.add_argument("--population", choices=("single_model", "mixed_models"), default="single_model")
     parser.add_argument(
         "--diameters",
@@ -332,6 +341,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "recording": args.recording or preset.recording,
         "cable": args.cable,
         "double_cable_block_solver": args.double_cable_block_solver,
+        "benchmark_double_cable_block_solver": args.benchmark_double_cable_block_solver,
         "population": args.population,
         "diameters": args.diameters,
         "platform": args.platform or preset.platform,

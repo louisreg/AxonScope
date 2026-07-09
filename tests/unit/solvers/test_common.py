@@ -7,7 +7,11 @@ import jax.numpy as jnp
 from axonscope.backends.jax.common import (
     apply_diffusion_operator,
     assemble_double_cable_linear_system,
+    assemble_double_cable_linear_system_xb,
+    double_cable_space_from_xb,
+    double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
+    prepare_double_cable_linear_system_static_terms_xb,
     double_cable_block_residual_norm,
     diffusion_operator_coeffs,
     double_cable_power_bucket,
@@ -202,6 +206,85 @@ def test_double_cable_linear_system_assembly_matches_explicit_formula():
         ),
         rtol=1e-6,
     )
+
+
+def test_double_cable_linear_system_xb_assembly_matches_batch_first():
+    batch_size = 3
+    n = 5
+    batch = jnp.arange(batch_size, dtype=jnp.float32)[:, None]
+    x = jnp.arange(n, dtype=jnp.float32)[None, :]
+
+    static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=jnp.linspace(1.0, 1.2, n, dtype=jnp.float32),
+        Cm_abs=jnp.linspace(0.08, 0.12, n, dtype=jnp.float32),
+        Cx_abs=jnp.linspace(0.02, 0.03, n, dtype=jnp.float32),
+        Gx_abs=jnp.linspace(0.004, 0.006, n, dtype=jnp.float32),
+        Gax_e=jnp.linspace(0.05, 0.07, n - 1, dtype=jnp.float32),
+        Gax_i=jnp.linspace(0.2, 0.3, n - 1, dtype=jnp.float32),
+        left_i=jnp.linspace(0.1, 0.2, n, dtype=jnp.float32),
+        right_i=jnp.linspace(0.15, 0.25, n, dtype=jnp.float32),
+        left_e=jnp.linspace(0.01, 0.02, n, dtype=jnp.float32),
+        right_e=jnp.linspace(0.012, 0.022, n, dtype=jnp.float32),
+        I_background=jnp.zeros((n,), dtype=jnp.float32),
+        dt_ms=jnp.asarray(0.01, dtype=jnp.float32),
+        batch_size=batch_size,
+        nx=n,
+    )
+    static_xb = prepare_double_cable_linear_system_static_terms_xb(
+        area_cm2=jnp.linspace(1.0, 1.2, n, dtype=jnp.float32),
+        Cm_abs=jnp.linspace(0.08, 0.12, n, dtype=jnp.float32),
+        Cx_abs=jnp.linspace(0.02, 0.03, n, dtype=jnp.float32),
+        Gx_abs=jnp.linspace(0.004, 0.006, n, dtype=jnp.float32),
+        Gax_e=jnp.linspace(0.05, 0.07, n - 1, dtype=jnp.float32),
+        Gax_i=jnp.linspace(0.2, 0.3, n - 1, dtype=jnp.float32),
+        left_i=jnp.linspace(0.1, 0.2, n, dtype=jnp.float32),
+        right_i=jnp.linspace(0.15, 0.25, n, dtype=jnp.float32),
+        left_e=jnp.linspace(0.01, 0.02, n, dtype=jnp.float32),
+        right_e=jnp.linspace(0.012, 0.022, n, dtype=jnp.float32),
+        I_background=jnp.zeros((n,), dtype=jnp.float32),
+        dt_ms=jnp.asarray(0.01, dtype=jnp.float32),
+        batch_size=batch_size,
+        nx=n,
+    )
+    values = {
+        "Vi": -70.0 + 0.2 * batch + 0.1 * x,
+        "Ve": 0.5 * batch - 0.05 * x,
+        "Gm_abs": 0.02 + 0.001 * x + 0.0002 * batch,
+        "GE_abs": -1.0 + 0.02 * x,
+        "Iinj_abs": 0.01 * batch + 0.002 * x,
+        "I_outward_abs": 0.003 * x,
+        "I_corr_abs": 0.001 * batch,
+        "extracellular_drive_abs": 0.04 + 0.005 * x,
+    }
+
+    system = assemble_double_cable_linear_system(static=static, **values)
+    system_xb = assemble_double_cable_linear_system_xb(
+        static=static_xb,
+        **{
+            key: double_cable_space_to_xb(value, batch_size=batch_size, nx=n)
+            for key, value in values.items()
+        },
+    )
+
+    for name in system._fields:
+        batch_first = getattr(system, name)
+        node_first = getattr(system_xb, name)
+        if name in {"off0", "off1"}:
+            np.testing.assert_allclose(
+                np.asarray(node_first),
+                np.broadcast_to(
+                    np.asarray(batch_first)[:, None],
+                    np.asarray(node_first).shape,
+                ),
+                rtol=1e-6,
+            )
+        else:
+            converted = double_cable_space_from_xb(node_first)
+            np.testing.assert_allclose(
+                np.asarray(converted),
+                np.asarray(batch_first),
+                rtol=1e-6,
+            )
 
 
 def test_double_cable_linear_system_solver_wrapper_matches_direct_pcr_soa():

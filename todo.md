@@ -1870,10 +1870,35 @@ PTA/block-Thomas GPU gate:
   the current GPU solver path rather than adding more JAX micro-variants.
   Decision after the `block_b`/direct-XB gates: proceed to a backend-private
   integration of the looped jax-triton exact double-cable solver for large
-  GPU batches, keeping the public API unchanged and falling back to the current
-  JAX/PCR routes when `jax-triton`, GPU, dtype, or shape constraints are not
-  satisfied. The integration should assemble directly into the solver's XB
-  layout; do not integrate the batch-first wrapper as the production hot path.
+  GPU batches, keeping the public API unchanged. Public routes keep the current
+  JAX/PCR behavior unless a future benchmark-backed policy explicitly changes
+  them. The integration should assemble directly into the solver's XB layout;
+  do not integrate the batch-first wrapper as the production hot path.
+- [x] P11C-E backend-private integration:
+  wire the looped jax-triton XB double-cable route behind an explicit benchmark
+  override only. Do not add a public solver option and do not add automatic
+  internal policy selection in this slice. The explicit benchmark override
+  should fail loudly when Triton/GPU constraints are not met, so benchmark
+  artifacts cannot silently measure the fallback route under a Triton label.
+- [ ] P11C-F complete policy benchmark:
+  after integration, run a full CPU/GPU benchmark matrix with realistic curve
+  workloads, recording modes, `Naxons`, `Nx`, dtype, cold/warm cache state,
+  timing traces, memory traces, correctness checks, and git metadata before
+  deciding any runtime/default policy.
+  First large-population GPU solver-only sweep completed on Kaggle P100 at
+  commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
+  batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
+  `thomas_batched_scan`, `jax_triton_tiled_thomas_loop`, and
+  `large_population_exact_double_cable_jax`. Best Triton is already faster at
+  `B=128` (`~1.1-1.3x` vs PCR/SoA), grows to `~3-6x` at `B=4096`, and reaches
+  `~8-16x` at `B=16384..32768` depending on `Nx` and coefficient mode. Residuals
+  stay around `1.3e-7`. Artifact:
+  `benchmark/results/kaggle/20260709_092034_large_population_double_cable_solver_profile_quick_gpu_NvidiaTeslaP100_axonscope-p11c-triton-largepop-gpu-sweep/outputs/extracted`.
+- [ ] P11C-G promote the Triton solver if evidence supports it:
+  if P11C-F shows robust wins and acceptable cold-start/memory/correctness
+  behavior, make the Triton double-cable solver a selectable solver option
+  alongside the existing routes. Only then consider making it part of the
+  default GPU policy for the shapes where it is demonstrably better.
 
 ### P12 - Studies, Serialization, Integration
 

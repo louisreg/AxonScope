@@ -65,6 +65,24 @@ Low-level solver gates use standalone campaigns. P11C's large-population
 double-cable solver gate is intentionally benchmark-private and does not change
 runtime policy:
 
+Workflow-level P11C checks can activate the backend-private Triton route with a
+separate benchmark override. This does not make `jax_triton_loop_xb` a public
+`BatchOptions` value yet and should not be treated as a policy decision. The
+intended next step, if the full benchmark matrix supports it, is to promote the
+Triton route to a selectable solver option and then evaluate whether it should
+enter the default GPU policy for the winning shapes:
+
+```bash
+python benchmark/run.py \
+  --script recruitment_curves \
+  --preset quick \
+  --platform gpu \
+  --cable double_cable \
+  --recording observer_only \
+  --benchmark-double-cable-block-solver jax_triton_loop_xb \
+  --output benchmark/results/p11c_runtime_override_smoke
+```
+
 ```bash
 python benchmark/analysis/large_population_double_cable_solver_profile.py \
   --platform cpu \

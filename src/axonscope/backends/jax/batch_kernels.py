@@ -20,7 +20,11 @@ from .common import (
     Array,
     apply_diffusion_operator,
     assemble_double_cable_linear_system,
+    assemble_double_cable_linear_system_xb,
+    double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
+    prepare_double_cable_linear_system_static_terms_xb,
+    solve_double_cable_linear_system_jax_triton_loop_xb,
     solve_double_cable_linear_system_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
@@ -59,6 +63,7 @@ class BatchKernelResult:
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 16
+_INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({"jax_triton_loop_xb"})
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -77,6 +82,16 @@ def _use_batch_native_double_cable_pcr_soa_solver(
     batch_size: int,
 ) -> bool:
     return solver == "pcr_soa" and int(batch_size) >= _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH
+
+
+def _use_batch_native_double_cable_integrated_solver(
+    solver: str,
+    *,
+    batch_size: int,
+) -> bool:
+    if solver in _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS:
+        return True
+    return _use_batch_native_double_cable_pcr_soa_solver(solver, batch_size=batch_size)
 
 
 def _vm_raster_probe_tables_for_kernel(
@@ -107,7 +122,14 @@ def _resolve_double_cable_run_block_solver(
     solver: str,
     *,
     platform: str,
+    allow_internal: bool = False,
 ) -> str:
+    if allow_internal and solver in _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS:
+        if platform != "gpu":
+            raise RuntimeError(
+                f"Internal double-cable solver {solver!r} requires a JAX GPU backend."
+            )
+        return solver
     return resolve_double_cable_block_solver(solver, platform=platform)
 
 
@@ -1757,6 +1779,26 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         batch_size=batch_size,
         nx=nx,
     )
+    linear_static_xb = (
+        prepare_double_cable_linear_system_static_terms_xb(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        if double_cable_block_solver == "jax_triton_loop_xb"
+        else None
+    )
     area_batch = linear_static.area
     background_abs = linear_static.background_abs
     zero_abs = linear_static.zero_abs
@@ -1896,6 +1938,45 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
+
+        if double_cable_block_solver == "jax_triton_loop_xb":
+            assert linear_static_xb is not None
+            system_xb = assemble_double_cable_linear_system_xb(
+                Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
+                Ve=double_cable_space_to_xb(Ve, batch_size=batch_size, nx=nx),
+                Gm_abs=double_cable_space_to_xb(
+                    Gm_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                GE_abs=double_cable_space_to_xb(
+                    GE_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                static=linear_static_xb,
+                Iinj_abs=double_cable_space_to_xb(
+                    Iinj_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                I_outward_abs=double_cable_space_to_xb(
+                    I_outward_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                I_corr_abs=double_cable_space_to_xb(
+                    I_corr_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                extracellular_drive_abs=double_cable_space_to_xb(
+                    extracellular_drive_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+            )
+            return solve_double_cable_linear_system_jax_triton_loop_xb(system_xb)
 
         system = assemble_double_cable_linear_system(
             Vi=Vi,
@@ -2495,6 +2576,26 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         batch_size=batch_size,
         nx=nx,
     )
+    linear_static_xb = (
+        prepare_double_cable_linear_system_static_terms_xb(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        if double_cable_block_solver == "jax_triton_loop_xb"
+        else None
+    )
     area_batch = linear_static.area
     background_abs = linear_static.background_abs
     zero_abs = linear_static.zero_abs
@@ -2677,6 +2778,45 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
         Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
         Gm_abs = Gm_den * area_batch
         GE_abs = GE_den * area_batch
+
+        if double_cable_block_solver == "jax_triton_loop_xb":
+            assert linear_static_xb is not None
+            system_xb = assemble_double_cable_linear_system_xb(
+                Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
+                Ve=double_cable_space_to_xb(Ve, batch_size=batch_size, nx=nx),
+                Gm_abs=double_cable_space_to_xb(
+                    Gm_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                GE_abs=double_cable_space_to_xb(
+                    GE_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                static=linear_static_xb,
+                Iinj_abs=double_cable_space_to_xb(
+                    Iinj_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                I_outward_abs=double_cable_space_to_xb(
+                    I_outward_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                I_corr_abs=double_cable_space_to_xb(
+                    I_corr_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+                extracellular_drive_abs=double_cable_space_to_xb(
+                    extracellular_drive_abs,
+                    batch_size=batch_size,
+                    nx=nx,
+                ),
+            )
+            return solve_double_cable_linear_system_jax_triton_loop_xb(system_xb)
 
         system = assemble_double_cable_linear_system(
             Vi=Vi,
@@ -3313,6 +3453,7 @@ class DoubleCableBatchKernel:
                 if benchmark_double_cable_block_solver is None
                 else benchmark_double_cable_block_solver,
                 platform=jax.default_backend(),
+                allow_internal=benchmark_double_cable_block_solver is not None,
             )
         if observers is not None and options.recording.mode == "none":
             if factorized_vext is not None:
@@ -4647,7 +4788,7 @@ def _run_double_cable_batch_array_chunks(
             block_solver=kernel_block_solver,
             shared_coefficients=shared_coefficients,
         ):
-            if _use_batch_native_double_cable_pcr_soa_solver(
+            if _use_batch_native_double_cable_integrated_solver(
                 kernel_block_solver,
                 batch_size=batch_size,
             ):
@@ -5136,7 +5277,10 @@ def _run_double_cable_batch_observer_chunks(
                 0 if local_observer_chunks else start,
                 dtype=jnp.int32,
             )
-        if kernel_block_solver == "pcr_soa":
+        if _use_batch_native_double_cable_integrated_solver(
+            kernel_block_solver,
+            batch_size=batch_size,
+        ):
             with benchmark_span(
                 "kernel.dispatch_jax",
                 mode="double",
