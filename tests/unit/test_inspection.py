@@ -47,7 +47,7 @@ def _inspect_simulation(axons, **kwargs):
 
 def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     policy = axs.ExecutionPolicy(
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=axs.Device.cpu(),
         precision=axs.PrecisionPolicy.float32(),
     )
@@ -102,6 +102,40 @@ def test_root_simulation_exposes_pipeline_inspection():
 
     assert report.planning.axon_count == 2
     assert report.dispatch_groups[0].batch_kind == "strict-single-cable"
+
+
+def test_inspection_reports_typed_double_cable_solver_policy():
+    axon = axs.axons.MRG(diameter=5.7 * axs.um, nodes=3)
+    population = axs.AxonPopulation([axs.AxonInstance(axon), axs.AxonInstance(axon)])
+
+    pcr_report = _inspect_simulation(
+        population,
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        execution_policy=axs.ExecutionPolicy(
+            device=axs.Device.gpu(0),
+            solvers=axs.SolverPolicy(
+                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
+            ),
+        ),
+    )
+    triton_report = _inspect_simulation(
+        population,
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        execution_policy=axs.ExecutionPolicy(
+            device=axs.Device.gpu(0),
+            solvers=axs.SolverPolicy(
+                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+                    block_b=64
+                )
+            ),
+        ),
+    )
+
+    assert pcr_report.kernels[0].cable_mode == "double"
+    assert pcr_report.kernels[0].double_cable_block_solver == "pcr_soa"
+    assert triton_report.kernels[0].double_cable_block_solver == "jax_triton_loop_xb"
 
 
 def test_inspection_reports_observer_only_lowering_and_compact_results():

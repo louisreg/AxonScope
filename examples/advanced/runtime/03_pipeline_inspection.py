@@ -122,7 +122,7 @@ def main() -> None:
     # requested backend/device/precision envelope and the double-cable `auto`
     # route can resolve against the effective device.
     policy = axs.ExecutionPolicy(
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=axs.Device.cpu(),
         precision=axs.PrecisionPolicy.float32(),
     )

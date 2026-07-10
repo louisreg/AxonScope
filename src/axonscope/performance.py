@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
-from enum import Enum
-from typing import Any, Literal, TextIO
+from dataclasses import dataclass, replace
+from typing import Any, TextIO
 
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
-from axonscope.backends.execution import (
+from axonscope.runtime.execution import (
     batch_options_from_recording,
     benchmark_lower_recording_options,
     benchmark_membrane_output_names,
@@ -20,123 +19,21 @@ from axonscope.backends.execution import (
     benchmark_vm_raster_definitions,
 )
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
+from axonscope.dispatcher.routing import can_use_batch_route
 from axonscope.population import AxonPopulation
 from axonscope.recording import Recording, RecordingPlan
+from axonscope.runtime.policy import (
+    Device,
+    ExecutionPolicy,
+    PrecisionPolicy,
+    RuntimeTarget,
+    auto as runtime_auto,
+    coerce_runtime,
+)
 from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.solvers import BatchOptions
 from axonscope.timebase import simulation_step_count
 from axonscope.utils import units
-
-
-class Runtime(Enum):
-    """Runtime target used by performance planning."""
-
-    AUTO = "auto"
-    NUMPY = "numpy"
-    JAX = "jax"
-
-
-DeviceKind = Literal["auto", "cpu", "gpu"]
-
-
-@dataclass(frozen=True)
-class Device:
-    """Structured runtime device request."""
-
-    kind: DeviceKind
-    index: int | None = None
-
-    @classmethod
-    def auto(cls) -> "Device":
-        """Let AxonScope or the backend choose a device."""
-
-        return cls("auto")
-
-    @classmethod
-    def cpu(cls) -> "Device":
-        """Request CPU execution."""
-
-        return cls("cpu")
-
-    @classmethod
-    def gpu(cls, index: int = 0) -> "Device":
-        """Request one GPU device by index."""
-
-        return cls("gpu", int(index))
-
-    def __post_init__(self) -> None:
-        if self.kind not in {"auto", "cpu", "gpu"}:
-            raise ValueError("Device kind must be 'auto', 'cpu', or 'gpu'.")
-        if self.kind == "gpu":
-            if self.index is None or int(self.index) < 0:
-                raise ValueError("GPU device index must be >= 0.")
-            object.__setattr__(self, "index", int(self.index))
-        elif self.index is not None:
-            raise ValueError("Only GPU devices accept an index.")
-
-
-@dataclass(frozen=True)
-class PrecisionPolicy:
-    """Dtype policy used by estimators and future runtime lowering."""
-
-    state_dtype: str
-    solver_dtype: str
-    accumulation_dtype: str
-
-    @classmethod
-    def float32(cls) -> "PrecisionPolicy":
-        """Use float32 for state, solver inputs, and reductions."""
-
-        return cls("float32", "float32", "float32")
-
-    @classmethod
-    def float64(cls) -> "PrecisionPolicy":
-        """Use float64 for state, solver inputs, and reductions."""
-
-        return cls("float64", "float64", "float64")
-
-    @classmethod
-    def mixed(
-        cls,
-        *,
-        state_dtype: Any = "float32",
-        solver_dtype: Any = "float32",
-        accumulation_dtype: Any = "float64",
-    ) -> "PrecisionPolicy":
-        """Build an explicit mixed-precision policy."""
-
-        return cls(
-            _dtype_name(state_dtype),
-            _dtype_name(solver_dtype),
-            _dtype_name(accumulation_dtype),
-        )
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "state_dtype", _dtype_name(self.state_dtype))
-        object.__setattr__(self, "solver_dtype", _dtype_name(self.solver_dtype))
-        object.__setattr__(
-            self,
-            "accumulation_dtype",
-            _dtype_name(self.accumulation_dtype),
-        )
-
-
-@dataclass(frozen=True)
-class ExecutionPolicy:
-    """Typed runtime, device, and precision request for executable simulations."""
-
-    runtime: Runtime = Runtime.AUTO
-    device: Device = field(default_factory=Device.auto)
-    precision: PrecisionPolicy | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "runtime", _coerce_runtime(self.runtime))
-        if not isinstance(self.device, Device):
-            raise TypeError("execution_policy.device must be an axonscope.Device value.")
-        if self.precision is not None and not isinstance(self.precision, PrecisionPolicy):
-            raise TypeError(
-                "execution_policy.precision must be an axonscope.PrecisionPolicy value."
-            )
 
 
 @dataclass(frozen=True)
@@ -245,7 +142,7 @@ class SimulationEstimate:
     max_compartments: int
     duration_ms: float
     dt_ms: float
-    runtime: Runtime
+    runtime: RuntimeTarget
     device: Device
     precision: PrecisionPolicy
     recording_width_max: int
@@ -353,7 +250,7 @@ def estimate_simulation(
     batch_options: BatchOptions | None = None,
     observers: Sequence[Any] | None = None,
     population_lifecycle: bool | None = None,
-    runtime: Runtime = Runtime.AUTO,
+    runtime: RuntimeTarget = runtime_auto,
     device: Device | None = None,
     precision: PrecisionPolicy | None = None,
     memory_budget_bytes: int | None = None,
@@ -374,7 +271,7 @@ def estimate_simulation(
     dt_ms = units.to_ms(dt)
     step_count = simulation_step_count(duration_ms, dt_ms)
     resolved_precision = precision or _precision_from_instances(instances)
-    resolved_runtime = _coerce_runtime(runtime)
+    resolved_runtime = coerce_runtime(runtime)
     resolved_device = Device.auto() if device is None else device
     max_nx = max(int(instance.axon.n_compartments) for instance in instances)
     axon_count = len(instances)
@@ -535,7 +432,12 @@ def _estimate_dispatch_group(
 ) -> SimulationEstimateGroup:
     dtype = np.dtype(precision.solver_dtype)
     state_dtype = np.dtype(precision.state_dtype)
-    can_batch = _can_batch_group(group, batch_options=batch_options, observers=observers)
+    can_batch = _can_batch_group(
+        group,
+        batch_options=batch_options,
+        recording=recording,
+        observers=observers,
+    )
     kernel_options = benchmark_lower_recording_options(
         group,
         batch_options,
@@ -915,13 +817,15 @@ def _can_batch_group(
     group: DispatchGroup,
     *,
     batch_options: BatchOptions,
+    recording: Recording | None = None,
     observers: tuple[Any, ...] | None,
 ) -> bool:
-    if group.mode not in {"single", "double"}:
-        return False
-    if group.size >= 2:
-        return True
-    return observers is not None and batch_options.recording.mode == "none"
+    return can_use_batch_route(
+        group,
+        batch_options=batch_options,
+        observers=observers,
+        record_observables=bool(recording is not None and recording.wants_observables),
+    )
 
 
 def _vm_raster_nbytes(
@@ -1038,16 +942,6 @@ def _observable_group_counts(
 
 def _call_name_tuple(model: Any, method_name: str) -> tuple[str, ...]:
     return benchmark_membrane_output_names(model, method_name)
-
-
-def _coerce_runtime(value: Runtime) -> Runtime:
-    if isinstance(value, Runtime):
-        return value
-    raise TypeError("runtime must be an axonscope.Runtime value.")
-
-
-def _dtype_name(value: Any) -> str:
-    return str(np.dtype(value))
 
 
 def _precision_from_instances(instances: Sequence[AxonInstance]) -> PrecisionPolicy:
@@ -1194,11 +1088,7 @@ def _recording_label(recording: Recording | None, batch_options: BatchOptions | 
 
 
 __all__ = [
-    "Device",
-    "ExecutionPolicy",
     "MemoryEstimateItem",
-    "PrecisionPolicy",
-    "Runtime",
     "SimulationEstimate",
     "SimulationEstimateGroup",
     "estimate_simulation",

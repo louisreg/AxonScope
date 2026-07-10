@@ -6,14 +6,14 @@ from typing import Any
 
 import numpy as np
 
-from axonscope.backends.jax.input_lowering import (
+from axonscope.runtime.jax.input_lowering import (
     LoweredExtracellularInput,
     LoweredIntracellularInput,
     dense_nbytes_for_shape,
     dense_shape_for_group,
     factorized_drive_count_from_rows,
 )
-from axonscope.backends.jax.runtime import SolverRuntime
+from axonscope.runtime.jax.runtime import SolverRuntime
 from axonscope.benchmarking import (
     benchmark_array_metadata,
     record_benchmark_metadata,

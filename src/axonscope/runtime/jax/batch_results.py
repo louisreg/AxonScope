@@ -11,7 +11,7 @@ from axonscope.benchmarking import (
     benchmark_span,
     record_benchmark_metadata,
 )
-from axonscope.backends.jax.batch_kernels import BatchKernelResult
+from axonscope.runtime.jax.batch_kernels import BatchKernelResult
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher._records import (
     DispatchCohortRecord,

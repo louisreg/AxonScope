@@ -179,7 +179,7 @@ def test_one_row_population_estimate_uses_pool_recording_width():
     assert estimate.metadata["population_lifecycle"] is True
     assert estimate.recording_width_max == 1
     assert estimate.item("outputs.recorded_vm").shape == (1, 2, 1)
-    assert estimate.groups[0].route == "scalar"
+    assert estimate.groups[0].route == "batch"
 
 
 def test_single_full_recording_estimate_includes_observable_outputs():
@@ -207,7 +207,7 @@ def test_runtime_device_and_precision_policy_are_typed_public_values():
         _hh(compartments=3),
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=axs.Device.gpu(0),
         precision=axs.PrecisionPolicy.mixed(
             state_dtype="float32",
@@ -216,13 +216,101 @@ def test_runtime_device_and_precision_policy_are_typed_public_values():
         ),
     )
 
-    assert estimate.runtime is axs.Runtime.JAX
+    assert estimate.runtime is axs.runtime.jax
     assert estimate.device == axs.Device.gpu(0)
     assert estimate.precision.accumulation_dtype == "float64"
     assert estimate.to_dict()["device"] == {"kind": "gpu", "index": 0}
 
     with pytest.raises(ValueError, match="Only GPU"):
         axs.Device("cpu", index=0)
+
+
+def test_solver_policy_is_typed_public_execution_policy_state():
+    policy = axs.ExecutionPolicy(
+        runtime=axs.runtime.jax,
+        device=axs.Device.gpu(0),
+        precision=axs.PrecisionPolicy.float32(),
+        solvers=axs.SolverPolicy(
+            single_cable=axs.runtime.jax.SingleCableSolver.jax_tridiagonal(),
+            double_cable=axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa(
+                adaptive_threshold=2048
+            ),
+        ),
+    )
+
+    assert (
+        policy.solver_policy.single_cable.kind
+        is axs.runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
+    )
+    assert (
+        policy.solver_policy.double_cable.kind
+        is axs.runtime.jax.DoubleCableSolverKind.JAX_PCR_SOA
+    )
+    assert policy.solver_policy.double_cable.pcr_options.adaptive_threshold == 2048
+    assert axs.ExecutionPolicy().solver_policy == axs.SolverPolicy()
+    assert (
+        axs.runtime.jax.cpu.DoubleCableSolver.thomas().kind
+        is axs.runtime.jax.DoubleCableSolverKind.THOMAS
+    )
+
+    tiled = axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+        block_b=64,
+        allow_fallback=True,
+    )
+    assert tiled.kind is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
+    assert tiled.tiled_thomas_options.block_b == 64
+    assert tiled.tiled_thomas_options.allow_fallback is True
+
+
+def test_solver_policy_rejects_untyped_values():
+    with pytest.raises(TypeError, match="SolverPolicy"):
+        axs.ExecutionPolicy(solvers="gpu")
+    with pytest.raises(TypeError, match="single-cable solver request"):
+        axs.SolverPolicy(single_cable="jax_tridiagonal")
+    with pytest.raises(TypeError, match="double-cable solver request"):
+        axs.SolverPolicy(double_cable="pcr_soa")
+    with pytest.raises(TypeError, match="SingleCableSolverKind"):
+        axs.runtime.jax.SingleCableSolver(kind="jax_tridiagonal")
+    with pytest.raises(TypeError, match="DoubleCableSolverKind"):
+        axs.runtime.jax.DoubleCableSolver(kind="jax_pcr_soa")
+    with pytest.raises(ValueError, match="adaptive_threshold"):
+        axs.runtime.jax.gpu.DoubleCableSolver.pcr(adaptive_threshold=0)
+    with pytest.raises(ValueError, match="block_b"):
+        axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=0)
+
+
+def test_jax_solver_engine_resolves_typed_solver_policy():
+    from axonscope.runtime.jax.solver_engines import resolve_jax_solver_engine
+
+    cpu_engine = resolve_jax_solver_engine(
+        axs.ExecutionPolicy(
+            device=axs.Device.cpu(),
+            solvers=axs.SolverPolicy(
+                double_cable=axs.runtime.jax.cpu.DoubleCableSolver.thomas()
+            ),
+        ),
+        platform="cpu",
+    )
+    gpu_engine = resolve_jax_solver_engine(
+        axs.ExecutionPolicy(
+            device=axs.Device.gpu(0),
+            solvers=axs.SolverPolicy(
+                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+                    block_b=64
+                )
+            ),
+        ),
+        platform="gpu",
+    )
+
+    assert cpu_engine is not None
+    assert cpu_engine.name == "jax_cpu_thomas"
+    assert cpu_engine.double_cable_block_solver == "thomas"
+    assert gpu_engine is not None
+    assert gpu_engine.name == "jax_gpu_tiled_thomas"
+    assert gpu_engine.double_cable_block_solver == "jax_triton_loop_xb"
+    assert gpu_engine.allow_internal_double_cable_block_solver is True
+    assert gpu_engine.tiled_thomas_block_b == 64
 
 
 def test_execution_policy_runs_jax_cpu_float32_simulation():
@@ -233,7 +321,7 @@ def test_execution_policy_runs_jax_cpu_float32_simulation():
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
         execution_policy=axs.ExecutionPolicy(
-            runtime=axs.Runtime.JAX,
+            runtime=axs.runtime.jax,
             device=axs.Device.cpu(),
             precision=axs.PrecisionPolicy.float32(),
         ),
@@ -244,12 +332,12 @@ def test_execution_policy_runs_jax_cpu_float32_simulation():
 
 
 def test_execution_policy_rejects_unsupported_runtime_for_simulation():
-    with pytest.raises(NotImplementedError, match="Runtime.NUMPY"):
+    with pytest.raises(NotImplementedError, match="axs.runtime.numpy"):
         _run_simulation(
             _hh(compartments=5),
             duration=0.10 * axs.ms,
             dt=0.05 * axs.ms,
-            execution_policy=axs.ExecutionPolicy(runtime=axs.Runtime.NUMPY),
+            execution_policy=axs.ExecutionPolicy(runtime=axs.runtime.numpy),
         )
 
 
@@ -260,7 +348,7 @@ def test_execution_policy_rejects_unavailable_or_mixed_precision_for_simulation(
             duration=0.10 * axs.ms,
             dt=0.05 * axs.ms,
             execution_policy=axs.ExecutionPolicy(
-                runtime=axs.Runtime.JAX,
+                runtime=axs.runtime.jax,
                 device=axs.Device.cpu(),
                 precision=axs.PrecisionPolicy.mixed(
                     state_dtype="float32",
@@ -297,7 +385,7 @@ def test_execution_policy_rejects_implicit_precision_casting():
             duration=0.10 * axs.ms,
             dt=0.05 * axs.ms,
             execution_policy=axs.ExecutionPolicy(
-                runtime=axs.Runtime.JAX,
+                runtime=axs.runtime.jax,
                 device=axs.Device.cpu(),
                 precision=axs.PrecisionPolicy.float32(),
             ),

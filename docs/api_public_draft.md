@@ -77,9 +77,9 @@ Advanced or semi-internal namespaces:
 
 ```text
 axonscope.dispatcher
-axonscope.backends.jax.runtime
-axonscope.backends.jax.batch_kernels
-axonscope.backends.jax.kernels
+axonscope.runtime.jax.runtime
+axonscope.runtime.jax.batch_kernels
+axonscope.runtime.jax.kernels
 axonscope.benchmarking
 ```
 

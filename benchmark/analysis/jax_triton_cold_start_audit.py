@@ -195,7 +195,7 @@ def _clear_explicit_cache_dir(path: Path) -> None:
 
 
 def _check_jax_triton_ready() -> None:
-    from axonscope.backends.jax.jax_triton_double_cable import (
+    from axonscope.runtime.jax.jax_triton_double_cable import (
         jax_triton_thomas_dependency_skip_reason,
     )
 
@@ -226,7 +226,7 @@ def _solve_tiled_thomas(
     *,
     block_b: int,
 ) -> tuple[Any, Any]:
-    from axonscope.backends.jax.jax_triton_double_cable import (
+    from axonscope.runtime.jax.jax_triton_double_cable import (
         solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
     )
 
@@ -255,7 +255,7 @@ def _solve_tiled_thomas_loop(
     *,
     block_b: int,
 ) -> tuple[Any, Any]:
-    from axonscope.backends.jax.jax_triton_double_cable import (
+    from axonscope.runtime.jax.jax_triton_double_cable import (
         solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
     )
 
@@ -282,7 +282,7 @@ def _solve_untiled_thomas(
     rhs0: Any,
     rhs1: Any,
 ) -> tuple[Any, Any]:
-    from axonscope.backends.jax.jax_triton_double_cable import (
+    from axonscope.runtime.jax.jax_triton_double_cable import (
         solve_block_tridiagonal_2x2_jax_triton_thomas_batched,
     )
 

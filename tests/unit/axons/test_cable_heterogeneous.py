@@ -7,12 +7,12 @@ from axonscope import AxonInstance
 from axonscope.axons.myelinated import MRG
 from axonscope.axons import Axon, Layout, LayoutElement, Section
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.backends.jax.membrane_backend import (
+from axonscope.runtime.jax.membrane_backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )
-from axonscope.backends.jax.runtime import build_membrane_backend_from_axon, compile_membrane_model
-from axonscope.backends.jax.stimulation_runtime import build_intracellular_current_density_fn
+from axonscope.runtime.jax.runtime import build_membrane_backend_from_axon, compile_membrane_model
+from axonscope.runtime.jax.stimulation_runtime import build_intracellular_current_density_fn
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
 

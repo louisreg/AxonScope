@@ -29,7 +29,7 @@ paths rather than preserving shims.
 Current focus after the P9 closeout:
 
 - keep only retained solver routes in active runtime code;
-- preserve the public/runtime/backend boundary;
+- preserve the public/runtime/runtime boundary;
 - prioritize a clean membrane/model/compiler surface and current JAX solver
   optimization before starting a new NumPy/SciPy solver runtime;
 - converge simulation, estimation, inspection, results, analyses, and plots on
@@ -56,7 +56,7 @@ Current focus after the P9 closeout:
   only to the membrane descriptor/source compiler. Axon templates must not own
   model defaults, aliases, equations, derived parameter formulas, or unit
   conversion contracts.
-- treat `Runtime.NUMPY` as a future bonus reference/debug backend, not the next
+- treat `axs.runtime.numpy` as a future bonus reference/debug backend, not the next
   product priority. It stays reserved and non-executable until the current JAX
   path has a clean model/compiler contract and realistic benchmark evidence.
 
@@ -80,9 +80,9 @@ Current focus after the P9 closeout:
 | 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
 | 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
-| 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with backend boundary, keep factorized Vext internal. |
-| 7.8 - Runtime policy and inspection | Done for current JAX path | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; `AxonSimulation.inspect()` explains planning, dispatch, preparation, lowering, kernel, and result assembly through the backend boundary. |
-| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `Runtime.NUMPY` stays reserved for a future bonus reference solver runtime. |
+| 7.7 - Solver surface stabilization | Done for current public surface | Archive standby candidates, align `solvers/` with runtime boundary, keep factorized Vext internal. |
+| 7.8 - Runtime policy and inspection | Done for current JAX path | `ExecutionPolicy` controls JAX device/runtime and participates in cache identity; `AxonSimulation.inspect()` explains planning, dispatch, preparation, lowering, kernel, and result assembly through the runtime boundary. |
+| 7.9 - Runtime-agnostic DSL and Model IR | Done for current P7 scope | Internally, `axonscope.model_ir` owns covered built-in membrane semantics with NumPy interpreter tests and backend-neutral membrane programs; JAX consumes `JaxMembraneProgram` directly without per-model runtime adapters. Publicly, users see `axonscope.membranes` membrane models and plain-Python equation sources under `membranes/models/`. The historical `icm/` and `channel_models/` packages have been removed from the active package. `axs.runtime.numpy` stays reserved for a future bonus reference solver runtime. |
 | 8 - NumPy/SciPy reference solver runtime | Deferred bonus | Future scalar/tiny-simulation reference solver using Model IR semantics and tridiagonal Crank-Nicolson primitives. Not a JAX-backed compatibility route, and not the next implementation priority. |
 | 9 - Cold-run/runtime benchmark closeout | Done | `cold_run_micro`, normalized scalar/batch spans, explicit hotpath chunk controls, and decisions to park larger optimization campaigns until realistic evidence exists. |
 | 10 - Model/compiler surface cleanup | Active next | Flatten membrane helper/diagnostic/explain surfaces, harden compiler/cache identity, and prepare recording-aware pruning/fusion contracts before deeper solver work. |
@@ -93,24 +93,24 @@ Current focus after the P9 closeout:
 
 - Public execution uses one canonical workflow for one axon or 10,000 axons:
   construct `AxonSimulation(...)`, then call `.run()`.
-- `Recording.to_plan()` now produces a backend-neutral `RecordingPlan`; the JAX
-  backend lowers that plan to batch-kernel options. The remaining work is to
+- `Recording.to_plan()` now produces a runtime-neutral `RecordingPlan`; the JAX
+  runtime lowers that plan to batch-kernel options. The remaining work is to
   broaden validation and move more result/observer boundaries out of solver
   modules.
 - VmRaster output remains exposed as `observations["vm_raster"]`, with
-  `VmRasterResult` and CPU unpacking under `results`. Solver/backend code owns
+  `VmRasterResult` and CPU unpacking under `results`. Solver/runtime code owns
   only plan lowering and packed bit updates.
 - Fixed-step time-grid validation lives in backend-neutral `axonscope.timebase`.
   Public planning, estimation, and inspection code must not import concrete
-  `axonscope.backends.jax.*` helpers directly. Backend-specific estimate and
-  inspection facts route through `axonscope.backends.execution`, which delegates
-  to backend-owned benchmark support such as `backends/jax/benchmark.py`
+  `axonscope.runtime.jax.*` helpers directly. Runtime-specific estimate and
+  inspection facts route through `axonscope.runtime.execution`, which delegates
+  to runtime-owned benchmark support such as `runtime/jax/benchmark.py`
   without forcing device transfers.
 - `ExecutionPolicy` now resolves JAX device requests and validates uniform
   precision. Runtime, device, and precision policy participate in JAX batch
   runtime cache identity; runtime execution still rejects implicit casting
   instead of rebuilding models.
-- `Runtime.NUMPY` is not an executable runtime yet. Passive, HH, and
+- `axs.runtime.numpy` is not an executable runtime yet. Passive, HH, and
   Rattay-Aberham membrane semantics now run through Model IR with a NumPy
   model-step oracle and JAX lowering, but a full NumPy/SciPy cable-solver
   runtime is a separate bonus phase documented in `todo.md`. Do not implement
@@ -448,14 +448,15 @@ strings.
 
 ## 4.5 Runtime, Device, And Precision
 
-Runtime is a closed enum. Device and precision are structured values.
+Runtime targets are named public objects under `axs.runtime`. Device and
+precision are structured values.
 
 Use:
 
 ```python
-axs.Runtime.AUTO
-axs.Runtime.JAX
-axs.Runtime.NUMPY  # reserved for a future bonus NumPy/SciPy reference runtime
+axs.runtime.auto
+axs.runtime.jax
+axs.runtime.numpy  # reserved for a future bonus NumPy/SciPy reference runtime
 
 axs.Device.auto()
 axs.Device.cpu()
@@ -472,7 +473,7 @@ Executable policy:
 
 ```python
 policy = axs.ExecutionPolicy(
-    runtime=axs.Runtime.JAX,
+    runtime=axs.runtime.jax,
     device=axs.Device.cpu(),
     precision=axs.PrecisionPolicy.float32(),
 )
@@ -490,8 +491,8 @@ single = result.single
 
 Current behavior:
 
-- `Runtime.AUTO` and `Runtime.JAX` are valid for execution;
-- `Runtime.NUMPY` is reserved until a future bonus NumPy/SciPy reference
+- `axs.runtime.auto` and `axs.runtime.jax` are valid for execution;
+- `axs.runtime.numpy` is reserved until a future bonus NumPy/SciPy reference
   runtime has executable behavior, docs, examples, estimates, inspection, and
   tests; it must not be advertised as executable for current solves;
 - `Device.cpu()` and `Device.gpu(index=...)` resolve through the JAX backend or
@@ -652,7 +653,7 @@ backend lowering
 
 `Recording` must not import solver-specific option classes in the final
 architecture. Current JAX lowering from `RecordingPlan` to `BatchOptions` lives
-under `backends/jax`.
+under `runtime/jax`.
 
 Unsupported combinations must be explicit. Do not create meaningless arrays or
 silently fill unavailable rows with `NaN`.
@@ -867,7 +868,7 @@ results, or replace benchmark spans for timing claims.
 
 ---
 
-# 8. Solver And Backend Boundary
+# 8. Solver And Runtime Boundary
 
 ## 8.1 Ownership Direction
 
@@ -907,54 +908,62 @@ device resolution, array placement, and kernel lowering.
 
 Current boundary:
 
-- public simulation entry points call `axonscope.backends.execution`, which
+- public simulation entry points call `axonscope.runtime.execution`, which
   resolves the currently supported concrete backend without importing JAX
   adapters from `simulation.py`;
 - scalar and batch execution enter concrete JAX code only through backend
   execution facades;
 - dispatcher modules own planning, grouping, progress, and dispatch records,
-  but must not import `axonscope.backends.jax` or call the JAX group runner
+  but must not import `axonscope.runtime.jax` or call the JAX group runner
   directly;
 - fixed-step time-grid validation and solver time-argument normalization live
   in `axonscope.timebase`;
 - `axonscope.solvers` exports only the stable solver facade: solver base,
-  `CrankNicholson`, solver options, batch options, and block-solver resolution;
+  `CrankNicholson`, solver options, and batch output/chunking options;
 - JAX runtime preparation, stimulation compilation, scalar kernels, batch
   kernels, observer packing, and backend input containers live under
-  `axonscope.backends.jax`;
+  `axonscope.runtime.jax`;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
 - `solvers/` retains only solver-facing contracts and the public solver class.
 
 ## 8.3 Public Solver Surface
 
-Retained exact double-cable block-solver choices:
+High-level execution policy is typed. Public code should choose runtime,
+device, precision, and per-cable solver policy with:
 
 ```text
-auto
-thomas
-pcr
-pcr_soa
-pcr_adaptive
+ExecutionPolicy
+Device
+PrecisionPolicy
+SolverPolicy
+runtime.jax.SingleCableSolver
+runtime.jax.DoubleCableSolver
 ```
 
 Policy:
 
-- `auto` resolves from the effective execution device;
-- CPU/default backends resolve to `thomas`;
-- GPU-like backends resolve to `pcr_adaptive`;
-- `pcr_adaptive` uses `pcr_soa` through `B <= 4096` and `pcr` above that;
-- forced choices are diagnostic unless benchmark evidence updates defaults.
+- CPU double-cable defaults remain Thomas-oriented;
+- GPU double-cable defaults remain benchmark-backed JAX PCR policy until the
+  P11C-F/P11C-G matrix decides whether Triton should be promoted;
+- solver-specific options must live under typed solver policy values, not in
+  `BatchOptions`;
+- benchmark CLIs may keep string flags, but active benchmark workloads must
+  translate them to typed policies at the benchmark boundary.
 
 Do not expose pseudo-double, split iterative, associative-transfer, Pallas,
-Triton, JAX-Triton, CUDA FFI, or other custom-kernel candidates as public
-solver choices while they remain archived or standby evidence.
+static Triton, CUDA FFI, or other custom-kernel candidates as public solver
+choices while they remain archived or standby evidence. The looped jax-triton
+tiled-Thomas route may be selectable through typed
+`axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)`
+while it is validated, but it must not become default policy without fresh P11C
+benchmark evidence.
 
 `BatchOptions` and `BatchRecording` are currently public advanced execution
-knobs for batch-kernel recording/chunking and retained solver selection.
-Public examples should import them from the root facade (`axs.BatchOptions`)
-rather than descending into `axs.solvers`. Longer term, replace public tuning
-exposure with a clearer execution/solver tuning surface and make
-`BatchRecording` internal once `Recording` covers the needed cases.
+knobs for batch-kernel retained Vm policy and time chunking. They are not the
+solver-selection surface. Public examples should import them from the root
+facade (`axs.BatchOptions`) rather than descending into `axs.solvers`. Longer
+term, replace public tuning exposure with a clearer output/chunking surface and
+make `BatchRecording` internal once `Recording` covers the needed cases.
 
 `BatchOptions.none()` is the observer-only compact-output policy and defaults
 to `axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` to reduce cold JAX recompilation
@@ -1083,7 +1092,7 @@ signals/           typed signal descriptors and registry
 simulation/        AxonInstance, AxonPopulation, AxonSimulation
 planning/          plans, cohorts, compatibility, signatures, inspection
 preparation/       host-side prepared geometry/membrane/input structures
-backends/          backend registry and concrete JAX/NumPy lowering
+runtime/           public runtime policy, runtime registry, and concrete JAX/NumPy lowering
 execution/         engine, progress, group runner, result assembly
 results/           result containers, views, manifests, serialization
 analysis/          scientific definitions and post-hoc algorithms
@@ -1099,12 +1108,12 @@ Cleanup reminders:
 
 - move `dispatcher/plan.py` responsibilities toward `planning/`;
 - keep host-side runtime-batch row helpers in `preparation/runtime_batches.py`
-  and backend array lowering under `backends/jax`;
+  and backend array lowering under `runtime/jax`;
 - keep fixed-step timebase rules out of JAX-heavy solver helper modules;
 - keep runtime dataclasses, preparation helpers, scalar kernels, and batch
   kernels out of the `axonscope.solvers` package facade;
 - keep public `recording.py` independent from solver options;
-- keep JAX membrane/solver implementation under `backends/jax`;
+- keep JAX membrane/solver implementation under `runtime/jax`;
 - keep `solvers/` as a public facade for stable solver classes/options during
   cleanup, not as a permanent catch-all for backend internals;
 - keep result-side VmRaster containers and CPU decoders out of solver modules.
@@ -1147,7 +1156,7 @@ Examples must:
 - keep benchmark/profiling and CPU/GPU measurement workflows under
   `benchmark/`, unless the example explicitly teaches a public benchmarking or
   inspection API;
-- show runtime/device/precision only through `axs.Runtime`, `axs.Device`,
+- show runtime/device/precision only through `axs.runtime`, `axs.Device`,
   `axs.PrecisionPolicy`, and `axs.ExecutionPolicy`;
 - show only retained public solver options;
 - remain syntax-checked or import-checked in CI.
@@ -1235,7 +1244,7 @@ Do not make speed or memory claims from stale benchmark outputs.
 Guardrails should cover:
 
 - no JAX imports in public/descriptive layers;
-- no direct `dispatcher` imports from `axonscope.backends.jax`;
+- no direct `dispatcher` imports from `axonscope.runtime.jax`;
 - no geometry package dependency in core AxonScope;
 - no raw strings as preferred public API for closed/structured domains;
 - no legacy compatibility aliases, migration shims, deprecated wrappers, or old
@@ -1367,7 +1376,7 @@ simulation = axs.AxonSimulation(
     dt=0.01 * axs.ms,
     recording=axs.Recording.center(axs.signals.MEMBRANE_VOLTAGE),
     execution_policy=axs.ExecutionPolicy(
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=axs.Device.gpu(0),
         precision=axs.PrecisionPolicy.float32(),
     ),

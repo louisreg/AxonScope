@@ -68,15 +68,15 @@ instructions: |
   may keep ergonomic model-specific kwargs, but they must forward those kwargs
   to the membrane source compiler instead of owning defaults or formulas.
 
-  ## Backend Boundary
+  ## Runtime Boundary
 
   Public orchestration enters concrete JAX code through
-  `axonscope.backends.execution`. Public `simulation.py`, `performance.py`,
-  and `inspection.py` must not import `axonscope.backends.jax.*` directly.
-  Backend-owned estimate/inspection facts route through backend benchmark
-  support such as `src/axonscope/backends/jax/benchmark.py`.
+  `axonscope.runtime.execution`. Public `simulation.py`, `performance.py`,
+  and `inspection.py` must not import `axonscope.runtime.jax.*` directly.
+  Runtime-owned estimate/inspection facts route through runtime benchmark
+  support such as `src/axonscope/runtime/jax/benchmark.py`.
 
-  Runtime/device/precision public values are `axs.Runtime`, `axs.Device`,
+  Runtime/device/precision public values are `axs.runtime.*`, `axs.Device`,
   `axs.PrecisionPolicy`, and `axs.ExecutionPolicy`. Do not add string-primary
   public APIs such as `"gpu"` or `"float32"`.
 
@@ -145,8 +145,8 @@ rules:
     description: Update todo.md checkboxes only after source, docs, examples, and relevant tests are checked.
   - name: Prefer clean APIs
     description: Do not preserve compatibility aliases or shims unless explicitly requested.
-  - name: Respect backend boundaries
-    description: Public simulation, estimate, and inspection modules route through axonscope.backends.execution.
+  - name: Respect runtime boundaries
+    description: Public simulation, estimate, and inspection modules route through axonscope.runtime.execution.
   - name: Validate proportionally
     description: Use fast unit checks for cleanup, NRV for numerical changes, and benchmarks for performance claims.
 

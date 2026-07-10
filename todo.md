@@ -26,7 +26,7 @@ Current state:
   stay absent.
 - Model IR remains internal compiler/runtime vocabulary. Users write membrane
   models, equations, parameters, gates, currents, and observables.
-- `Runtime.NUMPY` remains reserved for a future real NumPy/SciPy reference
+- `axs.runtime.numpy` remains reserved for a future real NumPy/SciPy reference
   runtime, but it is now a bonus/future phase. It must not become a JAX-backed
   compatibility path.
 - Solver-side observer-only execution is the strict VmRaster path under
@@ -228,19 +228,19 @@ performance claims.
 - [x] Audit public examples after benchmark flattening so examples remain
   public-API-only and benchmark/profiling material stays under `benchmark/`.
 
-### P4 - Backend Boundary For Inspection And Estimates
+### P4 - Runtime Boundary For Inspection And Estimates
 
 - [x] Decide whether `inspection.py` and `performance.py` may import
-  `axonscope.backends.jax.*` directly, or whether input/recording lowering
+  `axonscope.runtime.jax.*` directly, or whether input/recording lowering
   summaries should move behind a backend inspection/estimate facade.
 - [x] If the current inspection remains JAX-specific, label that explicitly in
   docs and inspection records. Decision: not needed for the public modules;
   JAX-specific details now live behind the backend benchmark facade.
 - [x] If a facade is preferred, route planning, estimate, and inspection through
-  the same backend boundary used by execution without forcing device transfers.
+  the same runtime boundary used by execution without forcing device transfers.
   The JAX backend exposes host-side benchmark support in
-  `src/axonscope/backends/jax/benchmark.py`, delegated through
-  `axonscope.backends.execution`.
+  `src/axonscope/runtime/jax/benchmark.py`, delegated through
+  `axonscope.runtime.execution`.
 
 ### P5 - Validation Policy
 
@@ -259,7 +259,7 @@ the model/compiler surface is flat and the current JAX solver has realistic
 benchmark evidence. The goal is a real reference solver runtime, not a
 JAX-backed compatibility path.
 
-- [ ] Keep `Runtime.NUMPY` reserved/non-executable until this phase reaches
+- [ ] Keep `axs.runtime.numpy` reserved/non-executable until this phase reaches
   executable behavior through the same `AxonSimulation(...).run()`,
   `.estimate()`, and `.inspect()` lifecycle as JAX.
 - [ ] Do not start implementation before P10 model/compiler cleanup and P11
@@ -279,7 +279,7 @@ JAX-backed compatibility path.
 - [ ] Add cross-backend validation against JAX on small deterministic cases:
   Vm traces, activation/block/latency observers, thresholds, probe recordings,
   retained membrane recordings, and model-step equivalence.
-- [ ] Wire `ExecutionPolicy(runtime=Runtime.NUMPY)` only after executable
+- [ ] Wire `ExecutionPolicy(runtime=axs.runtime.numpy)` only after executable
   behavior, examples, docs, estimates, inspection records, and tests exist.
 - [ ] Document when to use the reference runtime: debugging tiny simulations,
   semantic validation, backend comparison, and numerical regression tests;
@@ -330,8 +330,8 @@ compiler/runtime contracts before deeper solver work. This is the active bridge
 between P7 model authoring and P11 JAX solver optimization.
 
 - [x] Audit `src/axonscope/membranes/`, `src/axonscope/model_ir/`,
-  `src/axonscope/backends/jax/model_ir_lowering.py`,
-  `src/axonscope/backends/jax/membrane_program.py`, generated-code cache code,
+  `src/axonscope/runtime/jax/model_ir_lowering.py`,
+  `src/axonscope/runtime/jax/membrane_program.py`, generated-code cache code,
   custom membrane examples, and model-codegen benchmarks against the desired
   public vocabulary and optimization contract. Initial audit recorded in
   `docs/architecture/p10_model_compiler_surface_audit_2026_07_04.md`.
@@ -466,7 +466,7 @@ campaigns, presets, launchers, analysis, and generated outputs belong under
 - [x] Add a backend-neutral profiling option to the benchmark interface:
   `profile=True`, `profile_backend="auto|jax|none"`, `profile_output=...`,
   with JAX `start_trace`/TensorBoard/Perfetto traces delegated through
-  `axonscope.backends.execution`, so benchmark scripts do not import JAX
+  `axonscope.runtime.execution`, so benchmark scripts do not import JAX
   internals directly.
 - [x] Add optional profiler stage filters after the two curve case lists are
   validated. Keep whole-session profiling as the default until the runtime
@@ -1885,6 +1885,14 @@ PTA/block-Thomas GPU gate:
   workloads, recording modes, `Naxons`, `Nx`, dtype, cold/warm cache state,
   timing traces, memory traces, correctness checks, and git metadata before
   deciding any runtime/default policy.
+  Policy-campaign tooling now lives in
+  `benchmark/campaigns/double_cable_solver_policy.py`. It compares typed public
+  double-cable solver policies through `threshold_curves` and
+  `recruitment_curves`, writes a manifest, summary CSV, and markdown report,
+  and is wired through the Kaggle runner as
+  `--campaign double_cable_solver_policy`. Local CPU smoke passed under
+  `benchmark/results/p11c_solver_policy_cpu_smoke`; this validates the runner,
+  not the final policy.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
@@ -1936,11 +1944,88 @@ PTA/block-Thomas GPU gate:
   curve workflow timing, but policy is still open until the matrix covers
   `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison, corrected
   threshold amplitude ranges, and cold/warm cache behavior.
+  Solver-route inventory and decision map for the cleanup/promotion discussion:
+  `docs/architecture/p11c_solver_path_inventory_2026_07_09.md`.
 - [ ] P11C-G promote the Triton solver if evidence supports it:
   if P11C-F shows robust wins and acceptable cold-start/memory/correctness
   behavior, make the Triton double-cable solver a selectable solver option
   alongside the existing routes. Only then consider making it part of the
   default GPU policy for the shapes where it is demonstrably better.
+  The objective is to validate Triton deeply enough that it can become the
+  preferred GPU double-cable route for supported fp32 large-population shapes,
+  unless the full benchmark matrix disproves or sharply constrains that policy.
+
+### P11D - Solver Engine Flattening
+
+Goal: flatten solver execution around typed single-cable/double-cable solver
+policy and backend CPU/GPU engines instead of exposing scalar/batch and
+solver-variant internals. The migration plan lives in
+`docs/architecture/p11d_solver_engine_migration_plan_2026_07_09.md`.
+
+- [x] Add typed public solver policy objects under `ExecutionPolicy`:
+  `SolverPolicy` plus runtime-specific JAX constructors under
+  `axs.runtime.jax`, and solver-specific option dataclasses. Keep
+  `axs.runtime`, `Device`, and `PrecisionPolicy` as the high-level
+  runtime/device/precision surface. Initial P11D-A implementation adds
+  `SingleCableSolverKind`, `DoubleCableSolverKind`, `PcrSolverOptions`, and
+  `TiledThomasSolverOptions` behind that runtime namespace, with focused
+  public-policy tests. Runtime behavior is intentionally unchanged in this
+  slice.
+- [x] Move double-cable solver selection out of public `BatchOptions`.
+  Recording/output policy should come from `Recording` plus observers; solver
+  policy should come from `ExecutionPolicy.solvers`.
+  P11D-B implementation removes the solver field from `BatchOptions`, resolves
+  typed `ExecutionPolicy.solvers` through the JAX backend context, forwards
+  `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=...)` to the
+  kernel, translates active
+  benchmark curve flags to typed policies at the boundary, keeps internal
+  benchmark overrides out of `BatchOptions`, and reports the effective policy in
+  inspection.
+- [x] Introduce one internal `OutputPlan` for full Vm, probe/sampled Vm, and
+  VmRaster observer-only output so recording modes differ by output sink rather
+  than separate orchestration routes. The JAX group runner now lowers
+  `BatchOptions` into a backend-local `OutputPlan`.
+- [x] Add a backend-private CPU/GPU solver-engine resolution layer and route
+  current batch kernel solver selection through it. The active JAX context now
+  carries a `JaxSolverEngine` resolved from typed public policy.
+- [x] Normalize one-axon runs toward `B=1` in the shared population lifecycle
+  where feasible. Vm/VmRaster-compatible one-row groups now use the batch route;
+  dense observable recordings keep the scalar fallback because batch kernels do
+  not retain gates/currents/conductances payloads yet.
+- [x] Split shared solver core from engine-specific linear solvers and layouts:
+  membrane updates, RHS/system assembly, extracellular drive, scan helpers,
+  observers, and result packaging should be shared; CPU/GPU should specialize
+  only layout and linear solve hot paths. Initial slice extracts shared batched
+  membrane gate/current/linearization/state operations plus the batch-native
+  double-cable linear step into `axonscope.runtime.jax.solver_core`; broader
+  observer/result extraction remains part of the same migration if duplication
+  reappears.
+- [x] Move benchmark-only PCR/Triton probes out of production-facing solver
+  vocabulary or mark them clearly as experimental/benchmark-only. Do not expose
+  them as public runtime choices without P11C-F evidence. Legacy string
+  double-cable solver aliases and resolver helpers now live under the internal
+  JAX backend/benchmark boundary, not `axonscope.solvers`.
+- [x] Update tests, inspection, performance policy, and active benchmark curve
+  CLI mapping to the typed solver-policy surface. Benchmark CLIs may keep
+  string flags, but they must translate them to typed policies at the boundary.
+- [x] Update remaining examples, advanced examples, docs, and specialized
+  benchmark/analysis scripts to the typed solver-policy surface. Benchmark CLI
+  strings are acceptable only at the boundary. Source-of-truth docs and the
+  runtime example now use `SolverPolicy(single_cable=..., double_cable=...)`;
+  active benchmark workloads translate CLI solver strings into
+  `axs.runtime.jax` solver constructors at the boundary.
+- [x] Update public examples and advanced examples affected by the solver-engine
+  migration. Basic examples should stay simple and use defaults unless they
+  teach CPU/GPU or precision policy; targeted advanced runtime examples should
+  cover typed single-cable/double-cable solver policy, precision/device policy,
+  and any promoted GPU solver-specific options. Added
+  `examples/advanced/runtime/04_solver_policy.py` and updated
+  `examples/README.md`.
+- [x] Validate with focused unit tests and a quick local CPU benchmark artifact
+  before making any policy or performance claim. Local JAX devices expose only
+  `cpu:0`; no GPU artifact was produced on this machine. Fresh CPU artifact:
+  `benchmark/results/p11d_quick_cpu_validation`. Triton default/promotion and
+  GPU performance claims remain separate P11C-F/P11C-G Kaggle/local-GPU gates.
 
 ### P12 - Studies, Serialization, Integration
 

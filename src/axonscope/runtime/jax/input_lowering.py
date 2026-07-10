@@ -15,8 +15,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from axonscope.axon_instance import AxonInstance
-    from axonscope.backends.jax.batch_inputs import FactorizedExtracellularPotentialBatch
-    from axonscope.backends.jax.runtime import SolverRuntime
+    from axonscope.runtime.jax.batch_inputs import FactorizedExtracellularPotentialBatch
+    from axonscope.runtime.jax.runtime import SolverRuntime
     from axonscope.dispatcher.plan import DispatchGroup
     from axonscope.preparation.cohort import PreparedCohort
     from axonscope.solvers.options import BatchOptions
@@ -53,7 +53,7 @@ class LoweredExtracellularInput:
 
     @property
     def factorized(self) -> FactorizedExtracellularPotentialBatch | None:
-        from axonscope.backends.jax.batch_inputs import (
+        from axonscope.runtime.jax.batch_inputs import (
             FactorizedExtracellularPotentialBatch,
         )
 
@@ -86,7 +86,7 @@ def lower_single_cable_intracellular_input(
 ) -> LoweredIntracellularInput:
     """Lower single-cable intracellular inputs to sparse, dense, or zero."""
 
-    from axonscope.backends.jax.input_batches import (
+    from axonscope.runtime.jax.input_batches import (
         build_intracellular_current_density_batch,
         build_sparse_intracellular_current_density_batch,
     )
@@ -129,7 +129,7 @@ def lower_double_cable_intracellular_input(
 ) -> LoweredIntracellularInput:
     """Lower double-cable intracellular inputs to dense or zero."""
 
-    from axonscope.backends.jax.input_batches import (
+    from axonscope.runtime.jax.input_batches import (
         build_intracellular_current_density_batch,
     )
 
@@ -161,7 +161,7 @@ def lower_single_cable_extracellular_input(
 ) -> LoweredExtracellularInput:
     """Lower single-cable extracellular inputs to zero, factorized, or dense."""
 
-    from axonscope.backends.jax.input_batches import (
+    from axonscope.runtime.jax.input_batches import (
         build_factorized_vstim_midpoint_batch,
         build_vstim_midpoint_batch,
     )
@@ -232,7 +232,7 @@ def lower_double_cable_extracellular_input(
     benchmark coverage.
     """
 
-    from axonscope.backends.jax.input_batches import (
+    from axonscope.runtime.jax.input_batches import (
         build_factorized_vstim_midpoint_batch,
         build_vstim_midpoint_and_initial_previous_batch,
     )
@@ -334,7 +334,7 @@ def should_use_sparse_intracellular_batch(
 ) -> bool:
     """Return whether sparse point-clamp lowering can feed this group."""
 
-    from axonscope.backends.jax.input_batches import (
+    from axonscope.runtime.jax.input_batches import (
         can_build_sparse_intracellular_current_density_batch,
     )
 

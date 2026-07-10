@@ -63,7 +63,7 @@ recorded Vm chunks. They are not the solver-side observer architecture.
 ## VmRaster
 
 The backend VmRaster plan is a JAX implementation detail. It is allowed to live
-under `axonscope.backends.jax`, while public protocols and analyses consume only
+under `axonscope.runtime.jax`, while public protocols and analyses consume only
 the result-side `VmRasterResult`.
 
 The packed state shape is:

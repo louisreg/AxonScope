@@ -1,6 +1,6 @@
 """JAX execution-policy resolution.
 
-This module is the backend-owned bridge from public typed execution requests to
+This module is the runtime-owned bridge from public typed execution requests to
 JAX runtime controls. Public layers should pass an ``ExecutionPolicy`` here
 instead of importing JAX directly.
 """
@@ -15,7 +15,17 @@ import jax
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance
-from axonscope.performance import Device, ExecutionPolicy, PrecisionPolicy, Runtime
+from axonscope.runtime.jax.solver_engines import (
+    JaxSolverEngine,
+    resolve_jax_solver_engine,
+)
+from axonscope.runtime import (
+    Device,
+    ExecutionPolicy,
+    PrecisionPolicy,
+    numpy as runtime_numpy,
+)
+from axonscope.runtime.policy import RuntimeKind
 
 
 @dataclass(frozen=True)
@@ -25,6 +35,10 @@ class JaxExecutionContext:
     policy: ExecutionPolicy | None
     device: Any | None
     platform: str | None
+    solver_engine: JaxSolverEngine | None = None
+    double_cable_block_solver: str | None = None
+    double_cable_block_solver_allow_internal: bool = False
+    double_cable_tiled_thomas_block_b: int | None = None
 
 
 @contextmanager
@@ -33,7 +47,7 @@ def jax_execution_context(
     *,
     instances: Sequence[AxonInstance],
 ) -> Iterator[JaxExecutionContext]:
-    """Apply a public execution policy to the JAX backend for one run."""
+    """Apply a public execution policy to the JAX runtime for one run."""
 
     if policy is None:
         yield JaxExecutionContext(policy=None, device=None, platform=None)
@@ -41,20 +55,37 @@ def jax_execution_context(
 
     if not isinstance(policy, ExecutionPolicy):
         raise TypeError("execution_policy must be an axonscope.ExecutionPolicy value.")
-    if policy.runtime == Runtime.NUMPY:
+    if policy.runtime is runtime_numpy:
         raise NotImplementedError(
-            "Runtime.NUMPY is not implemented for executable simulations yet; "
-            "use Runtime.AUTO or Runtime.JAX."
+            "axs.runtime.numpy is not implemented for executable simulations yet; "
+            "use axs.runtime.auto or axs.runtime.jax."
         )
-    if policy.runtime not in {Runtime.AUTO, Runtime.JAX}:
+    if policy.runtime.kind not in {RuntimeKind.AUTO, RuntimeKind.JAX}:
         raise ValueError(f"Unsupported runtime: {policy.runtime!r}.")
 
     _validate_precision(policy.precision, instances=instances)
     device = _resolve_device(policy.device)
     platform = _platform_for_device(policy.device, device)
+    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
     manager = jax.default_device(device) if device is not None else nullcontext()
     with manager:
-        yield JaxExecutionContext(policy=policy, device=device, platform=platform)
+        yield JaxExecutionContext(
+            policy=policy,
+            device=device,
+            platform=platform,
+            solver_engine=solver_engine,
+            double_cable_block_solver=(
+                None if solver_engine is None else solver_engine.double_cable_block_solver
+            ),
+            double_cable_block_solver_allow_internal=(
+                False
+                if solver_engine is None
+                else solver_engine.allow_internal_double_cable_block_solver
+            ),
+            double_cable_tiled_thomas_block_b=(
+                None if solver_engine is None else solver_engine.tiled_thomas_block_b
+            ),
+        )
 
 
 def _resolve_device(request: Device) -> Any | None:
@@ -80,9 +111,35 @@ def _platform_for_device(request: Device, device: Any | None) -> str | None:
     if request.kind in {"cpu", "gpu"}:
         return request.kind
     if device is None:
-        return None
+        return _canonical_jax_platform(jax.default_backend())
     platform = getattr(device, "platform", None)
-    return None if platform is None else str(platform)
+    return None if platform is None else _canonical_jax_platform(str(platform))
+
+
+def _canonical_jax_platform(platform: str) -> str:
+    normalized = str(platform).lower()
+    if normalized in {"cuda", "gpu", "rocm", "metal"}:
+        return "gpu"
+    if normalized == "cpu":
+        return "cpu"
+    return normalized
+
+
+
+def jax_double_cable_block_solver_for_policy(
+    policy: ExecutionPolicy | None,
+) -> str | None:
+    """Return the JAX double-cable block solver selected by a public policy."""
+
+    if policy is None:
+        return None
+    platform = (
+        policy.device.kind
+        if policy.device.kind in {"cpu", "gpu"}
+        else _canonical_jax_platform(jax.default_backend())
+    )
+    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
+    return None if solver_engine is None else solver_engine.double_cable_block_solver
 
 
 def _validate_precision(
@@ -136,4 +193,8 @@ def _instance_membrane_dtypes(instance: AxonInstance) -> set[np.dtype]:
     }
 
 
-__all__ = ["JaxExecutionContext", "jax_execution_context"]
+__all__ = [
+    "JaxExecutionContext",
+    "jax_double_cable_block_solver_for_policy",
+    "jax_execution_context",
+]

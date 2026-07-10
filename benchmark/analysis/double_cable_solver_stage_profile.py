@@ -19,7 +19,7 @@ import jax.numpy as jnp
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
@@ -31,7 +31,7 @@ from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_scalar,
     solve_block_tridiagonal_2x2_scalar_batched,
 )
-from axonscope.backends.jax.observer_runtime import (
+from axonscope.runtime.jax.observer_runtime import (
     update_vm_raster_state_batch_from_tables,
 )
 from benchmark.analysis.double_cable_solver_candidates import (

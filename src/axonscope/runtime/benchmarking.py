@@ -300,7 +300,7 @@ class BenchmarkSession:
         if self.config.profile_backend == "none":
             return
         try:
-            from axonscope.backends.execution import benchmark_profile_start
+            from axonscope.runtime.execution import benchmark_profile_start
 
             self._profile_handle = benchmark_profile_start(
                 self.config.profile_backend,
@@ -320,7 +320,7 @@ class BenchmarkSession:
                 profile["active"] = False
             return
         try:
-            from axonscope.backends.execution import benchmark_profile_stop
+            from axonscope.runtime.execution import benchmark_profile_stop
 
             stopped = benchmark_profile_stop(self._profile_handle)
         except Exception as exc:  # pragma: no cover - backend-dependent.
@@ -360,9 +360,9 @@ class BenchmarkSession:
             / f"{event_id:04d}_{_safe_filename(name)}.prof"
         )
         try:
-            from axonscope.backends.execution import benchmark_save_device_memory_profile
+            from axonscope.runtime.execution import benchmark_save_device_memory_profile
 
-            metadata = benchmark_save_device_memory_profile(path, backend="jax")
+            metadata = benchmark_save_device_memory_profile(path, runtime="jax")
         except Exception as exc:  # pragma: no cover - backend-dependent.
             metadata = {"enabled": True, "error": f"{type(exc).__name__}: {exc}"}
         metadata.setdefault("stage", name)

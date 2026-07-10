@@ -4,17 +4,17 @@ from types import SimpleNamespace
 import numpy as np
 
 import axonscope as axs
-import axonscope.backends.jax.group_runner as group_runner
-import axonscope.backends.jax.input_batches as input_batches
-from axonscope.backends.jax import runtime_caches, runtime_preparation, shape_bucketing
+import axonscope.runtime.jax.group_runner as group_runner
+import axonscope.runtime.jax.input_batches as input_batches
+from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
 from axonscope.benchmarking import benchmark_span
-from axonscope.backends.jax.batch_inputs import (
+from axonscope.runtime.jax.batch_inputs import (
     materialize_factorized_extracellular_potential_batch,
 )
 from axonscope.analytical import PointSourceElectrode
-from axonscope.backends.jax.input_batches import (
+from axonscope.runtime.jax.input_batches import (
     build_factorized_vstim_midpoint_batch,
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
@@ -27,11 +27,11 @@ from axonscope.preparation.runtime_batches import (
     x_positions_batch_m,
 )
 from axonscope.solvers.axon_runtime import build_solver_axon
-from axonscope.backends.jax.batch_inputs import (
+from axonscope.runtime.jax.batch_inputs import (
     materialize_sparse_intracellular_current_density_batch,
 )
 from axonscope.solvers import BatchOptions
-from axonscope.backends.jax.runtime import (
+from axonscope.runtime.jax.runtime import (
     prepare_cable_runtime,
     prepare_extracellular_runtime,
     prepare_solver_runtime,
@@ -202,7 +202,7 @@ def test_pool_dispatch_batches_context_and_no_context_rows():
     assert [axon_result.record_indices for axon_result in result] == [(5,), (5,)]
 
 
-def test_pool_dispatch_keeps_incompatible_axons_scalar():
+def test_pool_dispatch_batches_incompatible_singleton_groups():
     axon_a = _hh_axon(nx=11, amp_nA=0.4, y_um=20.0, z_um=30.0)
     axon_b = _hh_axon(nx=13, amp_nA=0.2, y_um=60.0, z_um=10.0)
 
@@ -214,8 +214,8 @@ def test_pool_dispatch_keeps_incompatible_axons_scalar():
     )
 
     assert [axon_result.diagnostics["dispatch_method"] for axon_result in result] == [
-        "scalar",
-        "scalar",
+        "batch-single-cable",
+        "batch-single-cable",
     ]
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 1), (2, 1)]
 
@@ -360,7 +360,7 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
 
 
 def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monkeypatch):
-    from axonscope.backends.jax.membrane_program import JaxMembraneProgram
+    from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
 
     monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [
@@ -443,6 +443,7 @@ def test_run_pool_returns_internal_dispatch_results():
     assert result[0].index == 0
     assert result[0].simulation is axon
     assert result[0].axon is axon.axon
+    assert result[0].method == "batch-single-cable"
     assert np.asarray(result[0].Vm).shape == (2, 11)
 
 
@@ -705,7 +706,7 @@ def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_d
     assert "vstim_mid" not in metadata
 
 
-def test_scalar_retained_vm_emits_standard_hotpath_spans():
+def test_singleton_batch_retained_vm_emits_standard_hotpath_spans():
     axon = _hh_axon(nx=11, amp_nA=0.1)
 
     axs.enable_benchmark(
@@ -739,21 +740,19 @@ def test_scalar_retained_vm_emits_standard_hotpath_spans():
     ):
         assert name in names
 
-    scalar_events = [
+    batch_events = [
         event
         for event in report.events
         if event.name in {"kernel.enqueue", "kernel.wait", "inputs.extracellular"}
     ]
-    assert scalar_events
-    assert all(event.metadata["route"] == "scalar" for event in scalar_events)
+    assert batch_events
+    assert all(event.metadata.get("group_size") == 1 for event in batch_events)
 
     extracellular_event = next(
         event for event in report.events if event.name == "inputs.extracellular"
     )
     metadata = extracellular_event.metadata
-    assert metadata["input_format"] == "dense_precomputed"
-    assert metadata["extracellular_stimulation_count"] == 1
-    assert "vstim_mid" in metadata
+    assert metadata["input_format"] == "factorized_footprint"
 
     result_event = next(
         event for event in report.events if event.name == "results.split_batch"
@@ -1018,7 +1017,7 @@ def test_batch_runtime_cache_separates_backend_context_scope():
     group = build_dispatch_plan(pool).groups[0]
     cpu_context = SimpleNamespace(
         policy=axs.ExecutionPolicy(
-            runtime=axs.Runtime.JAX,
+            runtime=axs.runtime.jax,
             device=axs.Device.cpu(),
             precision=axs.PrecisionPolicy.float32(),
         ),
@@ -1027,7 +1026,7 @@ def test_batch_runtime_cache_separates_backend_context_scope():
     )
     gpu_context = SimpleNamespace(
         policy=axs.ExecutionPolicy(
-            runtime=axs.Runtime.JAX,
+            runtime=axs.runtime.jax,
             device=axs.Device.gpu(0),
             precision=axs.PrecisionPolicy.float32(),
         ),
@@ -1191,7 +1190,7 @@ def test_plain_chunk_progress_is_throttled():
     )
 
 
-def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
+def test_pool_dispatch_plain_progress_reports_singleton_batch_route(capsys):
     axon = _hh_axon(nx=11, amp_nA=0.1)
 
     result = _run_simulation(
@@ -1204,12 +1203,11 @@ def test_pool_dispatch_plain_progress_reports_scalar_fallback(capsys):
 
     captured = capsys.readouterr()
     assert len(result) == 1
-    assert "route   g0 1/1  single row group" in captured.out
-    assert "(scalar" in captured.out
-    assert "single row group" in captured.out
-    assert "compiling scalar kernel if needed" in captured.out
-    assert "completed scalar kernel" in captured.out
-    assert "assembled scalar rows" in captured.out
+    assert "route   g0 1/1  compatible batch route" in captured.out
+    assert "(batch" in captured.out
+    assert "compiling JAX kernel if needed" in captured.out
+    assert "completed JAX kernel" in captured.out
+    assert "assemble batch output" in captured.out
 
 
 def test_simulation_inspection_mentions_parameter_batch():

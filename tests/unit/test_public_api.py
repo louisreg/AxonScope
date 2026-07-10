@@ -32,12 +32,12 @@ from axonscope import (
     ResultAssemblyInspection,
     SimulationInspection,
     RecordingSpatial,
-    Runtime,
     Signal,
     SignalId,
     SimulationEstimate,
     SimulationEstimateGroup,
     Stimulus,
+    SolverPolicy,
     VM_RASTER_OBSERVATION_KEY,
     VmRasterResult,
     benchmark,
@@ -46,6 +46,7 @@ from axonscope import (
     enable_benchmark,
     preparation,
     reset_benchmark,
+    runtime,
     um,
 )
 from axonscope import analysis, analytical, membranes, positions, results, signals
@@ -120,6 +121,14 @@ def test_public_package_imports_are_available():
     assert BatchRecording.center().label == "center"
     assert BenchmarkReport is not None
     assert BenchmarkSession is not None
+    assert (
+        runtime.jax.SingleCableSolver.jax_tridiagonal().kind
+        is runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
+    )
+    assert (
+        runtime.jax.cpu.DoubleCableSolver.thomas().kind
+        is runtime.jax.DoubleCableSolverKind.THOMAS
+    )
     assert AssemblyDetailInspection is not None
     assert DispatchGroupInspection is not None
     assert KernelInspection is not None
@@ -129,14 +138,26 @@ def test_public_package_imports_are_available():
     assert PaddingInspection is not None
     assert Device.auto().kind == "auto"
     assert ExecutionPolicy(device=Device.cpu()).device == Device.cpu()
+    assert (
+        runtime.jax.gpu.DoubleCableSolver.pcr_soa().kind
+        is runtime.jax.DoubleCableSolverKind.JAX_PCR_SOA
+    )
+    assert runtime.jax.PcrSolverOptions().adaptive_threshold > 0
     assert MemoryEstimateItem is not None
     assert PrecisionPolicy.float32().solver_dtype == "float32"
     assert ProbeInspection is not None
     assert ResultAssemblyInspection is not None
-    assert Runtime.AUTO.value == "auto"
+    assert runtime.auto.value == "auto"
+    assert runtime.jax.value == "jax"
+    assert runtime.numpy.value == "numpy"
     assert SimulationEstimate is not None
     assert SimulationEstimateGroup is not None
     assert SimulationInspection is not None
+    assert SolverPolicy(
+        single_cable=runtime.jax.SingleCableSolver.auto(),
+        double_cable=runtime.jax.DoubleCableSolver.auto(),
+    ) is not None
+    assert runtime.jax.TiledThomasSolverOptions(block_b=32).block_b == 32
     assert VM_RASTER_OBSERVATION_KEY == "vm_raster"
     assert VmRasterResult is not None
     assert benchmark is not None

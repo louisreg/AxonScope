@@ -4,7 +4,7 @@ import jax
 import numpy as np
 import jax.numpy as jnp
 
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     apply_diffusion_operator,
     assemble_double_cable_linear_system,
     assemble_double_cable_linear_system_xb,

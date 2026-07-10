@@ -15,9 +15,9 @@ from axonscope.benchmarking import (
     benchmark_wait,
     record_benchmark_metadata,
 )
-from axonscope.backends.jax.kernels import DoubleCableKernel, SingleCableKernel
-from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
-from axonscope.backends.jax.runtime import prepare_solver_runtime
+from axonscope.runtime.jax.kernels import DoubleCableKernel, SingleCableKernel
+from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
+from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers.options import SolverOptions
 

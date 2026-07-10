@@ -10,17 +10,17 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
-from axonscope.backends.jax.rate_tables import enable_rate_tables
-from axonscope.backends.jax.membrane_backend import (
+from axonscope.runtime.jax.rate_tables import enable_rate_tables
+from axonscope.runtime.jax.membrane_backend import (
     HeterogeneousMembraneBackend,
     MembraneBackend,
     UniformMembraneBackend,
     membrane_static_signature,
 )
-from axonscope.backends.jax.membrane_layout import (
+from axonscope.runtime.jax.membrane_layout import (
     CompartmentMembraneLayout,
 )
-from axonscope.backends.jax.membrane_program import JaxMembraneProgram
+from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
 from axonscope.membranes.model import ensure_membrane_model
 from axonscope.membranes.compiler import lower_membrane_model_with_sources
 from axonscope.model_ir.source import SourceModelCompileResult
@@ -36,7 +36,7 @@ from .common import (
 )
 from axonscope.solvers.options import SolverOptions
 from .observables import membrane_observable_names
-from axonscope.backends.jax.stimulation_runtime import (
+from axonscope.runtime.jax.stimulation_runtime import (
     build_extracellular_potential_fn,
     build_intracellular_current_density_fn,
 )

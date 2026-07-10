@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.backends.jax import recording_lowering
+from axonscope.runtime.jax import recording_lowering
 from axonscope.positions import ALL, CENTER, DISTAL, Indices
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
-from axonscope.backends.jax.observer_runtime import (
+from axonscope.runtime.jax.observer_runtime import (
     build_vm_raster_plan,
     combine_vm_raster_chunk_states,
     finalize_vm_raster_state,

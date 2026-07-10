@@ -9,19 +9,19 @@ from axonscope import AxonInstance
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons.myelinated import MRG
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.backends.jax.input_batches import build_vstim_midpoint_batch
+from axonscope.runtime.jax.input_batches import build_vstim_midpoint_batch
 from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
-from axonscope.backends.jax.experimental import (
+from axonscope.runtime.jax.experimental import (
     CrankNicholsonVStimForcing,
     CrankNicholson_unoptimized,
 )
 from axonscope.utils import units
-from axonscope.backends.jax.kernels import DoubleCableKernel
-from axonscope.backends.jax.runtime import prepare_solver_runtime
+from axonscope.runtime.jax.kernels import DoubleCableKernel
+from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.timebase import simulation_step_count
 
 

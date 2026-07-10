@@ -6,7 +6,7 @@ import json
 import numpy as np
 import pytest
 
-import axonscope._runtime.benchmarking as instrumentation
+import axonscope.runtime.benchmarking as instrumentation
 from axonscope.benchmarking import (
     benchmark,
     benchmark_array_metadata,

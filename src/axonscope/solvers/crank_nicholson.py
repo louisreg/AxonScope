@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from axonscope.backends.jax.scalar_runner import run_jax_crank_nicholson
+from axonscope.runtime.jax.scalar_runner import run_jax_crank_nicholson
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.solvers._outputs import SolverOutput

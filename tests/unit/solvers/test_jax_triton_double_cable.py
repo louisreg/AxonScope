@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from axonscope.backends.jax.jax_triton_double_cable import (
+from axonscope.runtime.jax.jax_triton_double_cable import (
     jax_triton_thomas_dependency_skip_reason,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,

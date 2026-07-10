@@ -29,12 +29,14 @@ DEFAULT_SLUG = "axonscope-p11a-benchmarks"
 DEFAULT_TITLE = None
 DEFAULT_BRANCH_PREFIX = "kaggle-bench"
 TIME_CHUNK_SWEEP_CAMPAIGN = "time_chunk_sweep"
+DOUBLE_CABLE_SOLVER_POLICY_CAMPAIGN = "double_cable_solver_policy"
 SOLVER_STAGE_PROFILE_CAMPAIGN = "double_cable_solver_stage_profile"
 REAL_STAGE_PROFILE_CAMPAIGN = "double_cable_real_stage_profile"
 SOLVER_LOWERING_AUDIT_CAMPAIGN = "double_cable_solver_lowering_audit"
 LARGE_POPULATION_SOLVER_PROFILE_CAMPAIGN = "large_population_double_cable_solver_profile"
 JAX_TRITON_COLD_START_AUDIT_CAMPAIGN = "jax_triton_cold_start_audit"
 STANDALONE_CAMPAIGNS = (
+    DOUBLE_CABLE_SOLVER_POLICY_CAMPAIGN,
     SOLVER_STAGE_PROFILE_CAMPAIGN,
     REAL_STAGE_PROFILE_CAMPAIGN,
     SOLVER_LOWERING_AUDIT_CAMPAIGN,

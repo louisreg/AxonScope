@@ -5,7 +5,7 @@ from typing import Any, Sequence
 
 import jax.numpy as jnp
 
-from axonscope.backends.jax.membrane_backend import (
+from axonscope.runtime.jax.membrane_backend import (
     HeterogeneousMembraneBackend,
     MembraneStepPlan,
     membrane_static_signature,

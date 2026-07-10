@@ -1,6 +1,6 @@
 """Benchmark profiling interface.
 
-Concrete profiler implementations live behind `axonscope.backends.execution`.
+Concrete profiler implementations live behind `axonscope.runtime.execution`.
 """
 
 from __future__ import annotations
@@ -10,18 +10,18 @@ from pathlib import Path
 
 
 def profile_trace(
-    backend: str,
+    runtime: str,
     log_dir: Path | str,
     *,
     create_perfetto_link: bool = False,
     create_perfetto_trace: bool = False,
 ) -> object:
-    """Return a backend-owned profiler trace context."""
+    """Return a runtime-owned profiler trace context."""
 
-    from axonscope.backends.execution import benchmark_profile_trace
+    from axonscope.runtime.execution import benchmark_profile_trace
 
     return benchmark_profile_trace(
-        backend,
+        runtime,
         Path(log_dir),
         create_perfetto_link=create_perfetto_link,
         create_perfetto_trace=create_perfetto_trace,
@@ -34,7 +34,7 @@ def jax_profile_trace(
     create_perfetto_link: bool = False,
     create_perfetto_trace: bool = False,
 ) -> object:
-    """Return a JAX profiler trace context through the backend boundary."""
+    """Return a JAX profiler trace context through the runtime boundary."""
 
     return profile_trace(
         "jax",
@@ -45,10 +45,10 @@ def jax_profile_trace(
 
 
 def trace_annotation(name: str):
-    """Return a trace annotation context when a backend can provide one."""
+    """Return a trace annotation context when a runtime can provide one."""
 
     try:
-        from axonscope.backends.execution import benchmark_trace_annotation
+        from axonscope.runtime.execution import benchmark_trace_annotation
 
         return benchmark_trace_annotation(name)
     except Exception:

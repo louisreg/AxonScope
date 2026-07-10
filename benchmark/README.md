@@ -65,12 +65,52 @@ Low-level solver gates use standalone campaigns. P11C's large-population
 double-cable solver gate is intentionally benchmark-private and does not change
 runtime policy:
 
-Workflow-level P11C checks can activate the backend-private Triton route with a
-separate benchmark override. This does not make `jax_triton_loop_xb` a public
-`BatchOptions` value yet and should not be treated as a policy decision. The
-intended next step, if the full benchmark matrix supports it, is to promote the
-Triton route to a selectable solver option and then evaluate whether it should
-enter the default GPU policy for the winning shapes:
+Workflow-level solver-policy checks should use the dedicated double-cable
+campaign. It compares typed public solver policies through the curve workloads
+and writes one summary/report for policy decisions:
+
+```bash
+python benchmark/campaigns/double_cable_solver_policy.py \
+  --preset quick \
+  --platform cpu \
+  --curve-script threshold_curves,recruitment_curves \
+  --solver auto,thomas \
+  --recording observer_only,probe_vm \
+  --n-axons 1,64 \
+  --nx 89 \
+  --precision fp32 \
+  --repeats 2 \
+  --warmups 1 \
+  --output benchmark/results/p11c_solver_policy_cpu
+```
+
+Use the matching GPU/Kaggle run for the public GPU solver surface:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-solver-policy-gpu \
+  --campaign double_cable_solver_policy \
+  --preset gpu_smoke \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --curve-script threshold_curves,recruitment_curves \
+  --solver auto,thomas,pcr,pcr_soa,tiled_thomas \
+  --recording observer_only,probe_vm \
+  --n-axons 64,1024,4096,8192 \
+  --nx 89,129 \
+  --precision fp32 \
+  --tiled-thomas-block-b 32,64 \
+  --repeats 3 \
+  --warmups 1 \
+  --memory-trace rss \
+  --memory-top-n 0
+```
+
+The older workflow-level P11C smoke can still activate the backend-private
+Triton route with a separate benchmark override. Use it only to compare against
+pre-policy artifacts; the policy campaign above should be preferred for new
+decisions:
 
 ```bash
 python benchmark/run.py \

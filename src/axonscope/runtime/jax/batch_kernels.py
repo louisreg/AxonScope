@@ -20,12 +20,8 @@ from .common import (
     Array,
     apply_diffusion_operator,
     assemble_double_cable_linear_system,
-    assemble_double_cable_linear_system_xb,
-    double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
-    solve_double_cable_linear_system_jax_triton_loop_xb,
-    solve_double_cable_linear_system_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_scalar,
@@ -44,10 +40,11 @@ from .runtime_caches import (
     get_single_cable_factorized_forcing,
     store_single_cable_factorized_forcing,
 )
+from . import solver_core
+from .solver_engines.block_solvers import resolve_double_cable_block_solver
 from axonscope.solvers.options import (
     BatchOptions,
     BatchRecording,
-    resolve_double_cable_block_solver,
 )
 from .runtime import SolverRuntime
 
@@ -64,6 +61,7 @@ class BatchKernelResult:
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 16
 _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({"jax_triton_loop_xb"})
+_DEFAULT_TRITON_TILED_THOMAS_BLOCK_B = 32
 
 
 def _resolve_double_cable_kernel_block_solver(
@@ -131,6 +129,15 @@ def _resolve_double_cable_run_block_solver(
             )
         return solver
     return resolve_double_cable_block_solver(solver, platform=platform)
+
+
+def _normalize_tiled_thomas_block_b(block_b: int | None) -> int:
+    if block_b is None:
+        return _DEFAULT_TRITON_TILED_THOMAS_BLOCK_B
+    value = int(block_b)
+    if value < 1:
+        raise ValueError("tiled Thomas block_b must be >= 1.")
+    return value
 
 
 def _double_cable_block_solve_fn(solver: str):
@@ -1726,6 +1733,7 @@ def _run_double_cable_batch_stateful_scan(
         "stateless_vm_only",
         "record_full",
         "double_cable_block_solver",
+        "tiled_thomas_block_b",
     ),
 )
 def _run_double_cable_batch_stateful_pcr_soa_scan(
@@ -1736,6 +1744,7 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     stateless_vm_only: bool,
     record_full: bool,
     double_cable_block_solver: str,
+    tiled_thomas_block_b: int,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
@@ -1819,182 +1828,45 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
     else:
         intracellular_current_abs_mid = intracellular_current_density_mid * area_batch[:, None, :]
 
-    state_axes = tuple(0 for _ in state0)
+    batch_gate_update = partial(
+        solver_core.batch_gate_update,
+        backend=backend,
+        row_indices=row_indices,
+        dt_ms=dt_ms,
+    )
+    batch_currents = partial(
+        solver_core.batch_currents,
+        backend=backend,
+        row_indices=row_indices,
+    )
+    batch_prepare_membrane_step = partial(
+        solver_core.batch_prepare_membrane_step,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
+    batch_final_gate_update = partial(
+        solver_core.batch_final_gate_update,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
+    batch_finalize_membrane_step = partial(
+        solver_core.batch_finalize_membrane_step,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
 
-    def batch_gate_update(gates: Array, Vm: Array) -> Array:
-        row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
-        if callable(row_gate_update):
-            return jax.vmap(
-                lambda row_index, gates_row, vm_row: row_gate_update(
-                    row_index,
-                    g_prev=gates_row,
-                    V_mV=vm_row,
-                    dt=dt_ms,
-                )
-            )(row_indices, gates, Vm)
-        return jax.vmap(
-            lambda gates_row, vm_row: backend.cn_gate_update(
-                g_prev=gates_row,
-                V_mV=vm_row,
-                dt=dt_ms,
-            )
-        )(gates, Vm)
-
-    def batch_currents(Vm: Array, gates: Array) -> Array:
-        row_currents = getattr(backend, "currents_for_row", None)
-        if callable(row_currents):
-            return jax.vmap(
-                lambda row_index, vm_row, gates_row: row_currents(
-                    row_index,
-                    V_mV=vm_row,
-                    gates=gates_row,
-                )
-            )(row_indices, Vm, gates)
-        return jax.vmap(
-            lambda vm_row, gates_row: backend.currents(V_mV=vm_row, gates=gates_row)
-        )(Vm, gates)
-
-    def batch_membrane_conductance_terms(gates: Array) -> tuple[Array, Array]:
-        row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
-        if callable(row_terms):
-            return jax.vmap(
-                lambda row_index, gates_row: row_terms(row_index, gates_row)
-            )(row_indices, gates)
-        return jax.vmap(backend.membrane_conductance_terms)(gates)
-
-    def batch_prepare_membrane_step(
-        Vm: Array,
-        gates_prev: Array,
-        gates_new: Array,
-        state: tuple[Array, ...],
-        I_ion: Array,
-        I_background_row: Array,
-    ):
-        return jax.vmap(
-            lambda vm_row, gates_prev_row, gates_new_row, state_row, iion_row, ibg_row: (
-                membrane.prepare_membrane_step(
-                    V_mV=vm_row,
-                    gates_prev=gates_prev_row,
-                    gates_new=gates_new_row,
-                    state=state_row,
-                    dt=dt_ms,
-                    I_ion=iion_row,
-                    I_background=ibg_row,
-                )
-            ),
-            in_axes=(0, 0, 0, state_axes, 0, 0),
-        )(Vm, gates_prev, gates_new, state, I_ion, I_background_row)
-
-    def batch_final_gate_update(
-        gates_prev: Array,
-        Vm_prev: Array,
-        Vm_new: Array,
-        gates_predictor: Array,
-    ) -> Array:
-        return jax.vmap(
-            lambda gates_prev_row, vm_prev_row, vm_new_row, gates_predictor_row: (
-                membrane.final_gate_update(
-                    gates_prev=gates_prev_row,
-                    V_mV_prev=vm_prev_row,
-                    V_mV_new=vm_new_row,
-                    dt=dt_ms,
-                    gates_predictor=gates_predictor_row,
-                )
-            )
-        )(gates_prev, Vm_prev, Vm_new, gates_predictor)
-
-    def batch_finalize_membrane_step(
-        Vm_prev: Array,
-        Vm_new: Array,
-        gates_prev: Array,
-        gates_new: Array,
-        state_prev: tuple[Array, ...],
-        step_plan,
-    ) -> tuple[Array, ...]:
-        return jax.vmap(
-            lambda vm_prev_row, vm_new_row, gates_prev_row, gates_new_row, state_row, step_plan_row: (
-                membrane.finalize_membrane_step(
-                    V_mV_prev=vm_prev_row,
-                    V_mV_new=vm_new_row,
-                    gates_prev=gates_prev_row,
-                    gates_new=gates_new_row,
-                    state_prev=state_row,
-                    step_plan=step_plan_row,
-                    dt=dt_ms,
-                )
-            ),
-            in_axes=(0, 0, 0, 0, state_axes, 0),
-        )(Vm_prev, Vm_new, gates_prev, gates_new, state_prev, step_plan)
-
-    def solve_vi_vperi(
-        Vi: Array,
-        Ve: Array,
-        gates_new: Array,
-        Iinj_abs: Array,
-        I_outward_abs: Array,
-        I_corr_abs: Array,
-        extracellular_drive_abs: Array,
-    ) -> tuple[Array, Array]:
-        Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
-        Gm_abs = Gm_den * area_batch
-        GE_abs = GE_den * area_batch
-
-        if double_cable_block_solver == "jax_triton_loop_xb":
-            assert linear_static_xb is not None
-            system_xb = assemble_double_cable_linear_system_xb(
-                Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
-                Ve=double_cable_space_to_xb(Ve, batch_size=batch_size, nx=nx),
-                Gm_abs=double_cable_space_to_xb(
-                    Gm_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                GE_abs=double_cable_space_to_xb(
-                    GE_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                static=linear_static_xb,
-                Iinj_abs=double_cable_space_to_xb(
-                    Iinj_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                I_outward_abs=double_cable_space_to_xb(
-                    I_outward_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                I_corr_abs=double_cable_space_to_xb(
-                    I_corr_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                extracellular_drive_abs=double_cable_space_to_xb(
-                    extracellular_drive_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-            )
-            return solve_double_cable_linear_system_jax_triton_loop_xb(system_xb)
-
-        system = assemble_double_cable_linear_system(
-            Vi=Vi,
-            Ve=Ve,
-            Gm_abs=Gm_abs,
-            GE_abs=GE_abs,
-            static=linear_static,
-            Iinj_abs=Iinj_abs,
-            I_outward_abs=I_outward_abs,
-            I_corr_abs=I_corr_abs,
-            extracellular_drive_abs=extracellular_drive_abs,
-        )
-
-        if double_cable_block_solver == "pcr_soa":
-            return solve_double_cable_linear_system_pcr_soa_batched(system)
-        raise ValueError(
-            f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
-        )
+    solve_vi_vperi = partial(
+        solver_core.solve_double_cable_batch_step,
+        backend=backend,
+        row_indices=row_indices,
+        area_batch=area_batch,
+        linear_static=linear_static,
+        linear_static_xb=linear_static_xb,
+        batch_size=batch_size,
+        nx=nx,
+        double_cable_block_solver=double_cable_block_solver,
+        tiled_thomas_block_b=tiled_thomas_block_b,
+    )
 
     def step(carry, step_inputs):
         if intracellular_current_abs_mid is None:
@@ -2517,6 +2389,7 @@ def _run_double_cable_batch_observer_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "double_cable_block_solver",
+        "tiled_thomas_block_b",
     ),
 )
 def _run_double_cable_batch_observer_pcr_soa_scan(
@@ -2526,6 +2399,7 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     double_cable_block_solver: str,
+    tiled_thomas_block_b: int,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
@@ -2659,182 +2533,45 @@ def _run_double_cable_batch_observer_pcr_soa_scan(
     else:
         intracellular_current_abs_mid = intracellular_current_density_mid * area_batch[:, None, :]
 
-    state_axes = tuple(0 for _ in state0)
+    batch_gate_update = partial(
+        solver_core.batch_gate_update,
+        backend=backend,
+        row_indices=row_indices,
+        dt_ms=dt_ms,
+    )
+    batch_currents = partial(
+        solver_core.batch_currents,
+        backend=backend,
+        row_indices=row_indices,
+    )
+    batch_prepare_membrane_step = partial(
+        solver_core.batch_prepare_membrane_step,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
+    batch_final_gate_update = partial(
+        solver_core.batch_final_gate_update,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
+    batch_finalize_membrane_step = partial(
+        solver_core.batch_finalize_membrane_step,
+        membrane=membrane,
+        dt_ms=dt_ms,
+    )
 
-    def batch_gate_update(gates: Array, Vm: Array) -> Array:
-        row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
-        if callable(row_gate_update):
-            return jax.vmap(
-                lambda row_index, gates_row, vm_row: row_gate_update(
-                    row_index,
-                    g_prev=gates_row,
-                    V_mV=vm_row,
-                    dt=dt_ms,
-                )
-            )(row_indices, gates, Vm)
-        return jax.vmap(
-            lambda gates_row, vm_row: backend.cn_gate_update(
-                g_prev=gates_row,
-                V_mV=vm_row,
-                dt=dt_ms,
-            )
-        )(gates, Vm)
-
-    def batch_currents(Vm: Array, gates: Array) -> Array:
-        row_currents = getattr(backend, "currents_for_row", None)
-        if callable(row_currents):
-            return jax.vmap(
-                lambda row_index, vm_row, gates_row: row_currents(
-                    row_index,
-                    V_mV=vm_row,
-                    gates=gates_row,
-                )
-            )(row_indices, Vm, gates)
-        return jax.vmap(
-            lambda vm_row, gates_row: backend.currents(V_mV=vm_row, gates=gates_row)
-        )(Vm, gates)
-
-    def batch_membrane_conductance_terms(gates: Array) -> tuple[Array, Array]:
-        row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
-        if callable(row_terms):
-            return jax.vmap(
-                lambda row_index, gates_row: row_terms(row_index, gates_row)
-            )(row_indices, gates)
-        return jax.vmap(backend.membrane_conductance_terms)(gates)
-
-    def batch_prepare_membrane_step(
-        Vm: Array,
-        gates_prev: Array,
-        gates_new: Array,
-        state: tuple[Array, ...],
-        I_ion: Array,
-        I_background_row: Array,
-    ):
-        return jax.vmap(
-            lambda vm_row, gates_prev_row, gates_new_row, state_row, iion_row, ibg_row: (
-                membrane.prepare_membrane_step(
-                    V_mV=vm_row,
-                    gates_prev=gates_prev_row,
-                    gates_new=gates_new_row,
-                    state=state_row,
-                    dt=dt_ms,
-                    I_ion=iion_row,
-                    I_background=ibg_row,
-                )
-            ),
-            in_axes=(0, 0, 0, state_axes, 0, 0),
-        )(Vm, gates_prev, gates_new, state, I_ion, I_background_row)
-
-    def batch_final_gate_update(
-        gates_prev: Array,
-        Vm_prev: Array,
-        Vm_new: Array,
-        gates_predictor: Array,
-    ) -> Array:
-        return jax.vmap(
-            lambda gates_prev_row, vm_prev_row, vm_new_row, gates_predictor_row: (
-                membrane.final_gate_update(
-                    gates_prev=gates_prev_row,
-                    V_mV_prev=vm_prev_row,
-                    V_mV_new=vm_new_row,
-                    dt=dt_ms,
-                    gates_predictor=gates_predictor_row,
-                )
-            )
-        )(gates_prev, Vm_prev, Vm_new, gates_predictor)
-
-    def batch_finalize_membrane_step(
-        Vm_prev: Array,
-        Vm_new: Array,
-        gates_prev: Array,
-        gates_new: Array,
-        state_prev: tuple[Array, ...],
-        step_plan,
-    ) -> tuple[Array, ...]:
-        return jax.vmap(
-            lambda vm_prev_row, vm_new_row, gates_prev_row, gates_new_row, state_row, step_plan_row: (
-                membrane.finalize_membrane_step(
-                    V_mV_prev=vm_prev_row,
-                    V_mV_new=vm_new_row,
-                    gates_prev=gates_prev_row,
-                    gates_new=gates_new_row,
-                    state_prev=state_row,
-                    step_plan=step_plan_row,
-                    dt=dt_ms,
-                )
-            ),
-            in_axes=(0, 0, 0, 0, state_axes, 0),
-        )(Vm_prev, Vm_new, gates_prev, gates_new, state_prev, step_plan)
-
-    def solve_vi_vperi(
-        Vi: Array,
-        Ve: Array,
-        gates_new: Array,
-        Iinj_abs: Array,
-        I_outward_abs: Array,
-        I_corr_abs: Array,
-        extracellular_drive_abs: Array,
-    ) -> tuple[Array, Array]:
-        Gm_den, GE_den = batch_membrane_conductance_terms(gates_new)
-        Gm_abs = Gm_den * area_batch
-        GE_abs = GE_den * area_batch
-
-        if double_cable_block_solver == "jax_triton_loop_xb":
-            assert linear_static_xb is not None
-            system_xb = assemble_double_cable_linear_system_xb(
-                Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
-                Ve=double_cable_space_to_xb(Ve, batch_size=batch_size, nx=nx),
-                Gm_abs=double_cable_space_to_xb(
-                    Gm_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                GE_abs=double_cable_space_to_xb(
-                    GE_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                static=linear_static_xb,
-                Iinj_abs=double_cable_space_to_xb(
-                    Iinj_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                I_outward_abs=double_cable_space_to_xb(
-                    I_outward_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                I_corr_abs=double_cable_space_to_xb(
-                    I_corr_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-                extracellular_drive_abs=double_cable_space_to_xb(
-                    extracellular_drive_abs,
-                    batch_size=batch_size,
-                    nx=nx,
-                ),
-            )
-            return solve_double_cable_linear_system_jax_triton_loop_xb(system_xb)
-
-        system = assemble_double_cable_linear_system(
-            Vi=Vi,
-            Ve=Ve,
-            Gm_abs=Gm_abs,
-            GE_abs=GE_abs,
-            static=linear_static,
-            Iinj_abs=Iinj_abs,
-            I_outward_abs=I_outward_abs,
-            I_corr_abs=I_corr_abs,
-            extracellular_drive_abs=extracellular_drive_abs,
-        )
-
-        if double_cable_block_solver == "pcr_soa":
-            return solve_double_cable_linear_system_pcr_soa_batched(system)
-        raise ValueError(
-            f"Unsupported batch-native double-cable block solver: {double_cable_block_solver!r}"
-        )
+    solve_vi_vperi = partial(
+        solver_core.solve_double_cable_batch_step,
+        backend=backend,
+        row_indices=row_indices,
+        area_batch=area_batch,
+        linear_static=linear_static,
+        linear_static_xb=linear_static_xb,
+        batch_size=batch_size,
+        nx=nx,
+        double_cable_block_solver=double_cable_block_solver,
+        tiled_thomas_block_b=tiled_thomas_block_b,
+    )
 
     def current_to_space(value: Array) -> Array:
         value = jnp.asarray(value)
@@ -3317,6 +3054,9 @@ class DoubleCableBatchKernel:
         options: BatchOptions | None = None,
         observers: VmRasterPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
+        double_cable_block_solver: str | None = None,
+        allow_internal_double_cable_block_solver: bool = False,
+        double_cable_tiled_thomas_block_b: int | None = None,
         benchmark_double_cable_block_solver: str | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
@@ -3448,12 +3188,21 @@ class DoubleCableBatchKernel:
                 and jnp.asarray(extracellular.Gax_i).ndim == 1
                 and jnp.asarray(extracellular.Gax_e).ndim == 1
             )
+            requested_block_solver = "auto"
+            allow_internal_block_solver = False
+            if double_cable_block_solver is not None:
+                requested_block_solver = str(double_cable_block_solver)
+                allow_internal_block_solver = bool(allow_internal_double_cable_block_solver)
+            if benchmark_double_cable_block_solver is not None:
+                requested_block_solver = str(benchmark_double_cable_block_solver)
+                allow_internal_block_solver = True
             block_solver = _resolve_double_cable_run_block_solver(
-                options.double_cable_block_solver
-                if benchmark_double_cable_block_solver is None
-                else benchmark_double_cable_block_solver,
+                requested_block_solver,
                 platform=jax.default_backend(),
-                allow_internal=benchmark_double_cable_block_solver is not None,
+                allow_internal=allow_internal_block_solver,
+            )
+            tiled_thomas_block_b = _normalize_tiled_thomas_block_b(
+                double_cable_tiled_thomas_block_b
             )
         if observers is not None and options.recording.mode == "none":
             if factorized_vext is not None:
@@ -3464,6 +3213,7 @@ class DoubleCableBatchKernel:
                     has_driven_extracellular=has_driven_extracellular,
                     stateless_vm_only=stateless_vm_only,
                     double_cable_block_solver=block_solver,
+                    tiled_thomas_block_b=tiled_thomas_block_b,
                     intracellular_current_density_mid=iinj_batch,
                     extracellular_potential_mid_mV=factorized_vext,
                     extracellular_potential_initial_previous_mV=None,
@@ -3480,6 +3230,7 @@ class DoubleCableBatchKernel:
                     has_driven_extracellular=has_driven_extracellular,
                     stateless_vm_only=stateless_vm_only,
                     double_cable_block_solver=block_solver,
+                    tiled_thomas_block_b=tiled_thomas_block_b,
                     intracellular_current_density_mid=iinj_batch,
                     extracellular_potential_mid_mV=vext_batch,
                     extracellular_potential_initial_previous_mV=vext_previous_batch,
@@ -3599,6 +3350,7 @@ class DoubleCableBatchKernel:
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
                 double_cable_block_solver=block_solver,
+                tiled_thomas_block_b=tiled_thomas_block_b,
                 intracellular_current_density_mid=iinj_batch,
                 extracellular_potential_mid_mV=cast(Any, vext_batch),
                 extracellular_potential_initial_previous_mV=cast(Any, vext_previous_batch),
@@ -4710,6 +4462,7 @@ def _run_double_cable_batch_array_chunks(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     double_cable_block_solver: str,
+    tiled_thomas_block_b: int | None,
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array,
     extracellular_potential_initial_previous_mV: Array,
@@ -4730,6 +4483,7 @@ def _run_double_cable_batch_array_chunks(
         double_cable_block_solver,
         batch_size=batch_size,
     )
+    kernel_tiled_thomas_block_b = _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     (
         area_cm2,
         Cm_abs,
@@ -4768,6 +4522,11 @@ def _run_double_cable_batch_array_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             shared_coefficients=shared_coefficients,
+            tiled_thomas_block_b=(
+                kernel_tiled_thomas_block_b
+                if kernel_block_solver == "jax_triton_loop_xb"
+                else None
+            ),
         ):
             vext_chunk = extracellular_potential_mid_mV[:, start:stop]
             iinj_chunk = (
@@ -4787,6 +4546,11 @@ def _run_double_cable_batch_array_chunks(
             chunk_count=len(chunk_ranges),
             block_solver=kernel_block_solver,
             shared_coefficients=shared_coefficients,
+            tiled_thomas_block_b=(
+                kernel_tiled_thomas_block_b
+                if kernel_block_solver == "jax_triton_loop_xb"
+                else None
+            ),
         ):
             if _use_batch_native_double_cable_integrated_solver(
                 kernel_block_solver,
@@ -4799,6 +4563,7 @@ def _run_double_cable_batch_array_chunks(
                     stateless_vm_only=stateless_vm_only,
                     record_full=record_full,
                     double_cable_block_solver=kernel_block_solver,
+                    tiled_thomas_block_b=kernel_tiled_thomas_block_b,
                     Vi0_mV=Vi,
                     Ve0_mV=Ve,
                     gates0=gates,
@@ -5072,6 +4837,7 @@ def _run_double_cable_batch_observer_chunks(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     double_cable_block_solver: str,
+    tiled_thomas_block_b: int | None,
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array | FactorizedExtracellularPotentialBatch,
     extracellular_potential_initial_previous_mV: Array | None,
@@ -5128,6 +4894,7 @@ def _run_double_cable_batch_observer_chunks(
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
                 double_cable_block_solver=double_cable_block_solver,
+                tiled_thomas_block_b=tiled_thomas_block_b,
                 intracellular_current_density_mid=intracellular_current_density_mid,
                 extracellular_potential_mid_mV=dense_vext,
                 extracellular_potential_initial_previous_mV=dense_previous,
@@ -5145,6 +4912,7 @@ def _run_double_cable_batch_observer_chunks(
         double_cable_block_solver,
         batch_size=batch_size,
     )
+    kernel_tiled_thomas_block_b = _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     (
         area_cm2,
         Cm_abs,
@@ -5190,6 +4958,11 @@ def _run_double_cable_batch_observer_chunks(
             drive_count=factorized_vext.drive_count,
             shared_current=factorized_vext.shared_current,
             footprint_rank=jnp.asarray(factorized_vext.footprint_mV_per_A).ndim,
+            tiled_thomas_block_b=(
+                kernel_tiled_thomas_block_b
+                if kernel_block_solver == "jax_triton_loop_xb"
+                else None
+            ),
         ):
             previous_current_A = jnp.asarray(
                 factorized_vext.current_initial_previous_A,
@@ -5250,6 +5023,11 @@ def _run_double_cable_batch_observer_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
+            tiled_thomas_block_b=(
+                kernel_tiled_thomas_block_b
+                if kernel_block_solver == "jax_triton_loop_xb"
+                else None
+            ),
         ):
             observer_state0 = (
                 observer_chunk_state_template
@@ -5300,6 +5078,7 @@ def _run_double_cable_batch_observer_chunks(
                     has_driven_extracellular=has_driven_extracellular,
                     stateless_vm_only=stateless_vm_only,
                     double_cable_block_solver=kernel_block_solver,
+                    tiled_thomas_block_b=kernel_tiled_thomas_block_b,
                     Vi0_mV=Vi,
                     Ve0_mV=Ve,
                     gates0=gates,

@@ -13,6 +13,7 @@ from . import (
     positions,
     protocols,
     results,
+    runtime,
     signals,
     solvers,
     stimulation,
@@ -59,11 +60,7 @@ from axonscope.inspection import (
     SimulationInspection,
 )
 from axonscope.performance import (
-    Device,
-    ExecutionPolicy,
     MemoryEstimateItem,
-    PrecisionPolicy,
-    Runtime,
     SimulationEstimate,
     SimulationEstimateGroup,
 )
@@ -79,6 +76,7 @@ from axonscope.results import (
     unpack_vm_raster_words,
 )
 from axonscope.recording import Recording, RecordingPlan, RecordingSpatial
+from axonscope.runtime import Device, ExecutionPolicy, PrecisionPolicy, SolverPolicy
 from axonscope.signals import Signal
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import (
@@ -159,6 +157,7 @@ __all__ = [
     "positions",
     "protocols",
     "results",
+    "runtime",
     "signals",
     "solvers",
     "stimulation",
@@ -196,9 +195,9 @@ __all__ = [
     "ExecutionPolicy",
     "MemoryEstimateItem",
     "PrecisionPolicy",
-    "Runtime",
     "SimulationEstimate",
     "SimulationEstimateGroup",
+    "SolverPolicy",
     "AxonInstance",
     "BenchmarkReport",
     "BenchmarkOptions",

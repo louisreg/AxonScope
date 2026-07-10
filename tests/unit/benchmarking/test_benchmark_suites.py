@@ -212,6 +212,35 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
 
 
+def test_resolved_options_accept_public_tiled_thomas_solver_policy():
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "gpu_smoke",
+            "--platform",
+            "gpu",
+            "--cable",
+            "double_cable",
+            "--double-cable-block-solver",
+            "tiled_thomas",
+            "--tiled-thomas-block-b",
+            "64",
+        ]
+    )
+
+    options = resolved_options(args)
+    solver_policy = curve_runtime._solver_policy(options)
+
+    assert options["double_cable_block_solver"] == "tiled_thomas"
+    assert options["tiled_thomas_block_b"] == 64
+    assert (
+        solver_policy.double_cable.kind
+        is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
+    )
+    assert solver_policy.double_cable.tiled_thomas_options.block_b == 64
+
+
 def test_threshold_defaults_follow_example07_mrg_bounds():
     parser = build_parser("threshold_curves", description="test parser")
     args = parser.parse_args(

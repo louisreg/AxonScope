@@ -12,7 +12,7 @@ import jax.numpy as jnp
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     Carry,
     apply_diffusion_operator,
     build_cn_tridiagonal,
@@ -20,8 +20,8 @@ from axonscope.backends.jax.common import (
     diffusion_operator_coeffs,
     initial_voltage,
 )
-from axonscope.backends.jax.kernels import SingleCableKernel
-from axonscope.backends.jax.runtime import (
+from axonscope.runtime.jax.kernels import SingleCableKernel
+from axonscope.runtime.jax.runtime import (
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
@@ -32,7 +32,7 @@ from axonscope.solvers._outputs import SolverOutput
 from axonscope.solvers.options import SolverOptions
 from axonscope.timebase import resolve_time_args, simulation_step_count
 
-from axonscope.backends.jax.stimulation_runtime import build_intracellular_current_density_fn
+from axonscope.runtime.jax.stimulation_runtime import build_intracellular_current_density_fn
 
 
 class CrankNicholsonVStimForcing(Solver):

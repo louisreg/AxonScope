@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance
-from axonscope.backends.execution import (
+from axonscope.runtime.execution import (
     batch_options_for_execution_context,
     batch_options_from_recording,
     execution_context,
 )
 from axonscope.benchmarking import benchmark_span
-from axonscope.performance import ExecutionPolicy
+from axonscope.runtime import ExecutionPolicy
 from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.utils import units
 from axonscope.axons.axon import Axon

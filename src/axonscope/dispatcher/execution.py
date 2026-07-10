@@ -4,7 +4,7 @@ from typing import Any, Sequence
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.backends.execution import run_batch_group
+from axonscope.runtime.execution import run_batch_group
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
 from axonscope.dispatcher.progress import (
@@ -13,6 +13,7 @@ from axonscope.dispatcher.progress import (
     ProgressOption,
     emit_initial_progress,
 )
+from axonscope.dispatcher.routing import can_use_batch_route
 from axonscope.dispatcher._records import (
     DispatchCohortRecord,
     DispatchRecord,
@@ -111,6 +112,7 @@ def _run_pool_checked(
                     group,
                     batch_options=resolved_batch_options,
                     observers=observers,
+                    record_observables=record_observables,
                 )
                 if can_batch:
                     progress_reporter.route_group(
@@ -252,14 +254,16 @@ def _can_run_batch_group(
     *,
     batch_options: BatchOptions,
     observers: tuple[Any, ...] | None,
+    record_observables: bool = False,
 ) -> bool:
     """Return whether a dispatch group can use the current batch backend."""
 
-    if group.mode not in {"single", "double"}:
-        return False
-    if group.size >= 2:
-        return True
-    return observers is not None and batch_options.recording.mode == "none"
+    return can_use_batch_route(
+        group,
+        batch_options=batch_options,
+        observers=observers,
+        record_observables=record_observables,
+    )
 
 
 def _dispatch_method(group: DispatchGroup) -> str:
@@ -281,8 +285,8 @@ def _batch_rejection_reason(
 
     if group.size < 2:
         if observers is None or batch_options.recording.mode != "none":
-            return "single row group without observer-only batch output"
-        return "single row group"
+            return "single row group requires dense observable scalar fallback"
+        return "single row group requires scalar fallback"
     if group.mode not in {"single", "double"}:
         return f"unsupported batch mode {group.mode!r}"
     return "batch route unavailable"

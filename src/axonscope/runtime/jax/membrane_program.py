@@ -7,8 +7,8 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.backends.jax.membrane_backend import MembraneStateSpec, MembraneStepPlan
-from axonscope.backends.jax.rate_tables import RateTable, make_rate_table_config
+from axonscope.runtime.jax.membrane_backend import MembraneStateSpec, MembraneStepPlan
+from axonscope.runtime.jax.rate_tables import RateTable, make_rate_table_config
 from axonscope.model_ir import ModelIR, MembraneProgram, membrane_program_from_model_ir
 from axonscope.model_ir.interpreter import NumpyModelInterpreter
 from axonscope.solvers.rate_tables import RateTableConfig

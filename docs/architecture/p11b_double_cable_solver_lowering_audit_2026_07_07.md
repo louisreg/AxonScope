@@ -146,7 +146,7 @@ program, but it does not yet produce a large enough hot-path win.
 ## Existing PCR/SoA Probe Sweep
 
 A second P100 gate compared existing low-level PCR/SoA probes already present
-in `src/axonscope/backends/jax/common.py`:
+in `src/axonscope/runtime/jax/common.py`:
 
 - `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_lowering_gpu_512/outputs/extracted`
 - `benchmark/results/kaggle/20260707_143514_pcr_soa_probe_real_gpu_512/outputs/extracted`

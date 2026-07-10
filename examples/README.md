@@ -94,6 +94,8 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `runtime/03_pipeline_inspection.py`: inspect heterogeneous dispatch groups,
   preparation, lowering, kernel route, and result assembly without launching
   kernels.
+- `runtime/04_solver_policy.py`: choose typed single-cable/double-cable solver
+  policies and inspect the resolved double-cable backend route.
 
 ## With NRV
 

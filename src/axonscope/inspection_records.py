@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence, TextIO
 
-from axonscope.performance import ExecutionPolicy
+from axonscope.runtime import ExecutionPolicy
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
-from axonscope.backends.jax.runtime import (
+from axonscope.runtime.jax.runtime import (
     CableRuntime,
     ExtracellularRuntime,
     MembraneRuntime,
@@ -20,7 +20,7 @@ from axonscope.backends.jax.runtime import (
     prepare_solver_runtime,
     prepare_stimulation_runtime,
 )
-from axonscope.backends.jax.runtime_caches import (
+from axonscope.runtime.jax.runtime_caches import (
     get_batch_runtime,
     get_batch_static_runtime,
     get_prepared_cohort,
@@ -28,7 +28,7 @@ from axonscope.backends.jax.runtime_caches import (
     store_batch_static_runtime,
     store_prepared_cohort,
 )
-from axonscope.backends.jax.membrane_backend import (
+from axonscope.runtime.jax.membrane_backend import (
     GatedLeakStackMembraneBackend,
     HeterogeneousMembraneBackend,
     RowIndexedMembraneBackend,
@@ -250,6 +250,7 @@ def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
     runtime = getattr(policy, "runtime", None)
     device_request = getattr(policy, "device", None)
     precision = getattr(policy, "precision", None)
+    solver_engine = getattr(context, "solver_engine", None)
     resolved_device = getattr(context, "device", None)
     resolved_device_key = None
     if resolved_device is not None:
@@ -275,6 +276,15 @@ def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
             precision.state_dtype,
             precision.solver_dtype,
             precision.accumulation_dtype,
+        ),
+        None
+        if solver_engine is None
+        else (
+            getattr(solver_engine, "name", None),
+            getattr(solver_engine, "platform", None),
+            getattr(solver_engine, "double_cable_block_solver", None),
+            getattr(solver_engine, "allow_internal_double_cable_block_solver", None),
+            getattr(solver_engine, "tiled_thomas_block_b", None),
         ),
     )
 

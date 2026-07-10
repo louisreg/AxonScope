@@ -7,10 +7,10 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
-import axonscope.backends.jax.batch_kernels as batch_kernels
+import axonscope.runtime.jax.batch_kernels as batch_kernels
 from axonscope import AxonInstance
 from axonscope.axons import HodgkinHuxley
-from axonscope.backends.jax.input_batches import (
+from axonscope.runtime.jax.input_batches import (
     build_factorized_vstim_midpoint_batch,
     build_footprint_vstim_initial_previous_batch,
     build_footprint_vstim_midpoint_batch,
@@ -24,34 +24,36 @@ from axonscope.preparation.runtime_batches import (
     scale_extracellular_stimulations,
 )
 from axonscope.analytical import PointSourceElectrode
-from axonscope.backends.jax.batch_kernels import (
+from axonscope.runtime.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
-from axonscope.backends.execution import batch_options_for_execution_context
-from axonscope.backends.jax.recording import batch_options_from_recording
-from axonscope.backends.jax.kernels import DoubleCableKernel
+from axonscope.runtime.execution import batch_options_for_execution_context
+from axonscope.runtime.jax.recording import batch_options_from_recording
+from axonscope.runtime.jax.kernels import DoubleCableKernel
+from axonscope.runtime.jax.solver_engines.block_solvers import (
+    resolve_double_cable_block_solver,
+)
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
     DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
-    resolve_double_cable_block_solver,
 )
-from axonscope.backends.jax.batch_kernels import (
+from axonscope.runtime.jax.batch_kernels import (
     _resolve_double_cable_kernel_block_solver,
     _resolve_double_cable_run_block_solver,
     _use_batch_native_double_cable_integrated_solver,
     _use_batch_native_double_cable_pcr_soa_solver,
 )
-from axonscope.backends.jax.batch_inputs import (
+from axonscope.runtime.jax.batch_inputs import (
     FactorizedExtracellularPotentialBatch,
     materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
 )
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
-from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
-from axonscope.backends.jax.experimental import CrankNicholsonVStimForcing
-from axonscope.backends.jax.runtime import prepare_solver_runtime
+from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
+from axonscope.runtime.jax.experimental import CrankNicholsonVStimForcing
+from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
@@ -110,25 +112,16 @@ def test_batch_recording_resolves_common_policies():
     )
     with pytest.raises(ValueError, match="within"):
         BatchRecording.indices([5]).indices_for(5)
-    assert BatchOptions.center().double_cable_block_solver == "auto"
-    assert BatchOptions.center(double_cable_block_solver="auto").double_cable_block_solver == "auto"
-    assert BatchOptions.center(double_cable_block_solver="pcr").double_cable_block_solver == "pcr"
-    assert (
-        BatchOptions.center(double_cable_block_solver="pcr_soa").double_cable_block_solver
-        == "pcr_soa"
-    )
-    assert (
-        BatchOptions.center(double_cable_block_solver="pcr_adaptive").double_cable_block_solver
-        == "pcr_adaptive"
-    )
+    assert BatchOptions.center().recording.mode == "center"
+    assert not hasattr(BatchOptions.center(), "double_cable_block_solver")
     assert resolve_double_cable_block_solver("auto", platform="cpu") == "thomas"
     assert resolve_double_cable_block_solver("auto", platform="gpu") == "pcr_adaptive"
     assert resolve_double_cable_block_solver("thomas", platform="gpu") == "thomas"
     assert resolve_double_cable_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
     with pytest.raises(ValueError, match="double_cable_block_solver"):
-        BatchOptions(double_cable_block_solver="dense")
+        resolve_double_cable_block_solver("dense", platform="gpu")
     with pytest.raises(ValueError, match="double_cable_block_solver"):
-        BatchOptions(double_cable_block_solver="jax_triton_loop_xb")
+        resolve_double_cable_block_solver("jax_triton_loop_xb", platform="gpu")
 
 
 def test_batch_options_none_defaults_to_observer_chunking():
@@ -198,7 +191,7 @@ def test_internal_jax_triton_solver_is_benchmark_override_only():
     )
 
 
-def test_execution_context_auto_keeps_cpu_solver_policy():
+def test_execution_context_leaves_batch_options_as_output_policy():
     context = type("Context", (), {"platform": "cpu"})()
 
     full = batch_options_for_execution_context(BatchOptions.full(), context)
@@ -206,17 +199,48 @@ def test_execution_context_auto_keeps_cpu_solver_policy():
         BatchOptions.none(),
         context,
     )
-    explicit = batch_options_for_execution_context(
-        BatchOptions.none(double_cable_block_solver="thomas"),
-        context,
-    )
 
     assert full is not None
     assert compact is not None
-    assert explicit is not None
-    assert full.double_cable_block_solver == "thomas"
-    assert compact.double_cable_block_solver == "thomas"
-    assert explicit.double_cable_block_solver == "thomas"
+    assert full.recording.mode == "full"
+    assert compact.recording.mode == "none"
+    assert not hasattr(full, "double_cable_block_solver")
+    assert not hasattr(compact, "double_cable_block_solver")
+
+
+def test_execution_context_solver_policy_stays_out_of_batch_options():
+    context = type(
+        "Context",
+        (),
+        {
+            "platform": "gpu",
+            "double_cable_block_solver": "pcr_soa",
+            "double_cable_block_solver_allow_internal": False,
+        },
+    )()
+
+    full = batch_options_for_execution_context(BatchOptions.full(), context)
+
+    assert full is not None
+    assert full.recording.mode == "full"
+    assert not hasattr(full, "double_cable_block_solver")
+
+
+def test_execution_context_internal_solver_policy_stays_out_of_batch_options():
+    context = type(
+        "Context",
+        (),
+        {
+            "platform": "gpu",
+            "double_cable_block_solver": "jax_triton_loop_xb",
+            "double_cable_block_solver_allow_internal": True,
+        },
+    )()
+
+    options = batch_options_for_execution_context(BatchOptions.full(), context)
+
+    assert options is not None
+    assert not hasattr(options, "double_cable_block_solver")
 
 
 def test_single_cable_vstim_batch_matches_scalar_reference_row():
@@ -990,7 +1014,8 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
         pcr = kernel.run(
             extracellular_potential_mid_mV=vext_mid,
             extracellular_potential_initial_previous_mV=vext_previous,
-            options=BatchOptions.center(double_cable_block_solver=solver),
+            options=BatchOptions.center(),
+            double_cable_block_solver=solver,
         ).Vm
 
         assert pcr.shape == thomas.shape
@@ -1004,15 +1029,14 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
     pcr_soa_center = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.center(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.center(),
+        double_cable_block_solver="pcr_soa",
     ).Vm
     pcr_soa_chunked = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.center(
-            time_chunk_steps=7,
-            double_cable_block_solver="pcr_soa",
-        ),
+        options=BatchOptions.center(time_chunk_steps=7),
+        double_cable_block_solver="pcr_soa",
     ).Vm
     np.testing.assert_allclose(
         np.asarray(pcr_soa_chunked),
@@ -1024,7 +1048,8 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
     pcr_soa_none = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
     ).Vm
     assert pcr_soa_none.shape == (2, int(round(tsim / dt)), 0)
 
@@ -1071,13 +1096,15 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
     compact = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="thomas",
         observers=observer,
     )
     full = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.full(double_cable_block_solver="thomas"),
+        options=BatchOptions.full(),
+        double_cable_block_solver="thomas",
     )
 
     center = axon.n_compartments // 2
@@ -1139,13 +1166,15 @@ def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_v
     compact = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
         observers=observer,
     )
     full = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
-        options=BatchOptions.full(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.full(),
+        double_cable_block_solver="pcr_soa",
     )
 
     center = axon.n_compartments // 2
@@ -1208,20 +1237,20 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     dense = kernel.run(
         extracellular_potential_mid_mV=dense_mid,
         extracellular_potential_initial_previous_mV=dense_previous,
-        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="thomas",
         observers=observer,
     )
     compact = kernel.run(
         extracellular_potential_mid_mV=factorized,
-        options=BatchOptions.none(double_cable_block_solver="thomas"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="thomas",
         observers=observer,
     )
     chunked = kernel.run(
         extracellular_potential_mid_mV=factorized,
-        options=BatchOptions.none(
-            double_cable_block_solver="thomas",
-            time_chunk_steps=17,
-        ),
+        options=BatchOptions.none(time_chunk_steps=17),
+        double_cable_block_solver="thomas",
         observers=observer,
     )
 
@@ -1296,12 +1325,14 @@ def test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
     dense = kernel.run(
         extracellular_potential_mid_mV=dense_mid,
         extracellular_potential_initial_previous_mV=dense_previous,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
         observers=observer,
     )
     compact = kernel.run(
         extracellular_potential_mid_mV=factorized,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
         observers=observer,
     )
 
@@ -1373,12 +1404,14 @@ def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr
     dense = kernel.run(
         extracellular_potential_mid_mV=dense_mid,
         extracellular_potential_initial_previous_mV=dense_previous,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
         observers=observer,
     )
     compact = kernel.run(
         extracellular_potential_mid_mV=row_specific,
-        options=BatchOptions.none(double_cable_block_solver="pcr_soa"),
+        options=BatchOptions.none(),
+        double_cable_block_solver="pcr_soa",
         observers=observer,
     )
 

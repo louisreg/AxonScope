@@ -46,7 +46,10 @@ def test_public_unmyelinated_template_and_simulate():
     assert axon.resolved_formulation == "single-cable"
     assert result.axon is axon
     assert result.simulation is sim
-    assert run.recordings == (result.recordings,)
+    assert run.recordings[0] is not None
+    assert result.recordings is not None
+    assert set(run.recordings[0]) == set(result.recordings)
+    np.testing.assert_allclose(run.recordings[0]["Vm"], result.recordings["Vm"])
     assert run.recorded_axes[0].original_indices == tuple(range(11))
     assert run.final_states == (None,)
     assert result.final_state is None
@@ -829,7 +832,7 @@ def test_public_root_axon_simulation_keeps_one_row_population_lifecycle():
     assert simulation.is_single
     assert len(results) == 1
     assert results[0].simulation is population[0]
-    assert results[0].diagnostics["dispatch_method"] == "scalar"
+    assert results[0].diagnostics["dispatch_method"] == "batch-single-cable"
 
 
 def test_public_root_axon_simulation_runs_population():

@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from axonscope.backends.jax.input_lowering import (
+from axonscope.runtime.jax.input_lowering import (
     PlannedInputLowering,
     plan_input_lowering,
 )
-from axonscope.backends.jax.recording_lowering import (
+from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
     observer_output_label,
     observers_are_vm_raster_compatible,
@@ -90,7 +90,7 @@ def benchmark_membrane_output_names(
 
     method = getattr(model, method_name, None)
     if not callable(method):
-        from axonscope.backends.jax.runtime import compile_membrane_model
+        from axonscope.runtime.jax.runtime import compile_membrane_model
 
         model = compile_membrane_model(model)
         method = getattr(model, method_name, None)

@@ -35,7 +35,7 @@ def main() -> None:
     # Step 2: declare backend/runtime choices with the public policy object. This
     # is where a script says "JAX, CPU, float32" without reaching into internals.
     policy = axs.ExecutionPolicy(
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=axs.Device.cpu(),
         precision=axs.PrecisionPolicy.float32(),
     )

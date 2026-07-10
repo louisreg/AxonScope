@@ -219,9 +219,17 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--cable", choices=("single_cable", "double_cable"), default="single_cable")
     parser.add_argument(
         "--double-cable-block-solver",
-        choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"),
+        choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive", "tiled_thomas"),
         default="auto",
-        help="Benchmark-only override for the double-cable block solver.",
+        help="Typed public double-cable solver policy for JAX double-cable runs.",
+    )
+    parser.add_argument(
+        "--tiled-thomas-block-b",
+        type=int,
+        help=(
+            "Tile width for --double-cable-block-solver tiled_thomas. "
+            "When omitted, the runtime default is used."
+        ),
     )
     parser.add_argument(
         "--benchmark-double-cable-block-solver",
@@ -345,6 +353,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "recording": args.recording or preset.recording,
         "cable": args.cable,
         "double_cable_block_solver": args.double_cable_block_solver,
+        "tiled_thomas_block_b": args.tiled_thomas_block_b,
         "benchmark_double_cable_block_solver": args.benchmark_double_cable_block_solver,
         "population": args.population,
         "diameters": args.diameters,

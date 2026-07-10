@@ -5,7 +5,7 @@ from typing import Literal, NamedTuple, TypeAlias
 import jax
 import jax.numpy as jnp
 
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
 )

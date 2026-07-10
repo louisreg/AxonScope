@@ -8,14 +8,16 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.backends.execution import (
+from axonscope.runtime.execution import (
     batch_options_from_recording,
     benchmark_lower_recording_options,
     benchmark_observers_are_vm_raster_compatible,
     benchmark_plan_input_lowering,
     benchmark_vm_raster_definitions,
+    double_cable_block_solver_from_execution_policy,
 )
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
+from axonscope.dispatcher.routing import can_use_batch_route
 from axonscope.inspection_records import (
     AssemblyDetailInspection,
     DispatchGroupInspection,
@@ -31,13 +33,12 @@ from axonscope.inspection_records import (
     SimulationInspection,
 )
 from axonscope.membranes.compiler import lower_membrane_model_with_sources
-from axonscope.performance import ExecutionPolicy
+from axonscope.runtime import ExecutionPolicy
 from axonscope.population import AxonPopulation
 from axonscope.preparation.cohort import PreparedCohort
 from axonscope.recording import Recording
 from axonscope.solvers.options import (
     BatchOptions,
-    resolve_double_cable_block_solver,
 )
 from axonscope.timebase import simulation_step_count
 from axonscope.utils import units
@@ -72,6 +73,7 @@ def inspect_simulation(
         _inspect_dispatch_group(
             group,
             batch_options=resolved_batch_options,
+            recording=recording,
             observers=observer_defs,
         )
         for group in groups
@@ -83,6 +85,7 @@ def inspect_simulation(
             group,
             step_count=step_count,
             batch_options=resolved_batch_options,
+            recording=recording,
             observers=observer_defs,
         )
         for group in groups
@@ -93,6 +96,7 @@ def inspect_simulation(
             step_count=step_count,
             observers=observer_defs,
             batch_options=resolved_batch_options,
+            recording=recording,
         )
         for group in groups
     )
@@ -124,6 +128,7 @@ def inspect_simulation(
             _inspect_kernel(
                 group,
                 batch_options=resolved_batch_options,
+                recording=recording,
                 observers=observer_defs,
                 execution_policy=execution_policy,
             )
@@ -134,6 +139,7 @@ def inspect_simulation(
                 group,
                 step_count=step_count,
                 batch_options=resolved_batch_options,
+                recording=recording,
                 observers=observer_defs,
             )
             for group in groups
@@ -143,6 +149,7 @@ def inspect_simulation(
                 group,
                 step_count=step_count,
                 batch_options=resolved_batch_options,
+                recording=recording,
                 observers=observer_defs,
                 probes=probe,
             )
@@ -158,6 +165,7 @@ def _inspect_dispatch_group(
     group: DispatchGroup,
     *,
     batch_options: BatchOptions,
+    recording: Recording | None,
     observers: tuple[Any, ...] | None,
 ) -> DispatchGroupInspection:
     return DispatchGroupInspection(
@@ -169,7 +177,12 @@ def _inspect_dispatch_group(
         batch_kind=group.batch_kind,
         geometry_shared=bool(group.geometry_shared),
         has_padding=bool(group.has_padding),
-        will_batch=_can_batch(group, batch_options=batch_options, observers=observers),
+        will_batch=_can_batch(
+            group,
+            batch_options=batch_options,
+            recording=recording,
+            observers=observers,
+        ),
     )
 
 
@@ -241,13 +254,15 @@ def _can_batch(
     group: DispatchGroup,
     *,
     batch_options: BatchOptions,
+    recording: Recording | None = None,
     observers: tuple[Any, ...] | None,
 ) -> bool:
-    if group.mode not in {"single", "double"}:
-        return False
-    if group.size >= 2:
-        return True
-    return observers is not None and batch_options.recording.mode == "none"
+    return can_use_batch_route(
+        group,
+        batch_options=batch_options,
+        observers=observers,
+        record_observables=bool(recording is not None and recording.wants_observables),
+    )
 
 
 def _inspection_batch_options(
@@ -265,10 +280,16 @@ def _inspect_lowering(
     *,
     step_count: int,
     batch_options: BatchOptions,
+    recording: Recording | None,
     observers: tuple[Any, ...] | None,
 ) -> LoweringInspection:
     vm_raster_supported = benchmark_observers_are_vm_raster_compatible(observers)
-    if not _can_batch(group, batch_options=batch_options, observers=observers):
+    if not _can_batch(
+        group,
+        batch_options=batch_options,
+        recording=recording,
+        observers=observers,
+    ):
         retained_width = group.nx if batch_options.recording.mode != "none" else 0
         if observers is None:
             observer_format = "none"
@@ -347,6 +368,7 @@ def _inspect_probes(
     step_count: int,
     observers: tuple[Any, ...] | None,
     batch_options: BatchOptions,
+    recording: Recording | None,
 ) -> ProbeInspection:
     definitions = benchmark_vm_raster_definitions(observers)
     if not definitions:
@@ -354,7 +376,12 @@ def _inspect_probes(
             group_id=int(group.group_id),
             observer_names=(),
             thresholds_mV=(),
-            row_aware=_can_batch(group, batch_options=batch_options, observers=observers),
+            row_aware=_can_batch(
+                group,
+                batch_options=batch_options,
+                recording=recording,
+                observers=observers,
+            ),
             probe_indices_by_row=(),
             row_probe_counts=(),
             max_probe_count=0,
@@ -391,7 +418,12 @@ def _inspect_probes(
         group_id=int(group.group_id),
         observer_names=names,
         thresholds_mV=thresholds,
-        row_aware=_can_batch(group, batch_options=batch_options, observers=observers),
+        row_aware=_can_batch(
+            group,
+            batch_options=batch_options,
+            recording=recording,
+            observers=observers,
+        ),
         probe_indices_by_row=tuple(by_row),
         row_probe_counts=tuple(counts),
         max_probe_count=int(max_probe_count),
@@ -445,10 +477,16 @@ def _inspect_kernel(
     group: DispatchGroup,
     *,
     batch_options: BatchOptions,
+    recording: Recording | None,
     observers: tuple[Any, ...] | None,
     execution_policy: ExecutionPolicy | None,
 ) -> KernelInspection:
-    if not _can_batch(group, batch_options=batch_options, observers=observers):
+    if not _can_batch(
+        group,
+        batch_options=batch_options,
+        recording=recording,
+        observers=observers,
+    ):
         kernel = "DoubleCableKernel" if group.mode == "double" else "SingleCableKernel"
         return KernelInspection(
             group_id=int(group.group_id),
@@ -462,7 +500,6 @@ def _inspect_kernel(
     if group.mode == "double":
         kernel = "DoubleCableBatchKernel"
         block_solver = _inspect_double_cable_block_solver(
-            batch_options.double_cable_block_solver,
             execution_policy=execution_policy,
         )
     else:
@@ -483,9 +520,15 @@ def _inspect_result_assembly(
     *,
     step_count: int,
     batch_options: BatchOptions,
+    recording: Recording | None,
     observers: tuple[Any, ...] | None,
 ) -> ResultAssemblyInspection:
-    if not _can_batch(group, batch_options=batch_options, observers=observers):
+    if not _can_batch(
+        group,
+        batch_options=batch_options,
+        recording=recording,
+        observers=observers,
+    ):
         vm_output = (
             "none"
             if batch_options.recording.mode == "none"
@@ -550,6 +593,7 @@ def _inspect_assembly_details(
     *,
     step_count: int,
     batch_options: BatchOptions,
+    recording: Recording | None,
     observers: tuple[Any, ...] | None,
     probes: ProbeInspection | None = None,
 ) -> AssemblyDetailInspection:
@@ -561,7 +605,12 @@ def _inspect_assembly_details(
     width = int(kernel_options.recording.width_for(group.nx))
     vm_shape: tuple[int, ...] | None = None
     if kernel_options.recording.mode != "none":
-        if _can_batch(group, batch_options=batch_options, observers=observers):
+        if _can_batch(
+            group,
+            batch_options=batch_options,
+            recording=recording,
+            observers=observers,
+        ):
             vm_shape = (int(group.size), int(step_count), width)
         else:
             vm_shape = (int(step_count), int(group.nx))
@@ -571,6 +620,7 @@ def _inspect_assembly_details(
             step_count=step_count,
             observers=observers,
             batch_options=batch_options,
+            recording=recording,
         )
         if probes is None
         else probes
@@ -596,23 +646,28 @@ def _inspect_assembly_details(
         public_rows=(
             1
             if observations_are_batched
-            and _can_batch(group, batch_options=batch_options, observers=observers)
+            and _can_batch(
+                group,
+                batch_options=batch_options,
+                recording=recording,
+                observers=observers,
+            )
             else int(group.size)
         ),
     )
 
 
 def _inspect_double_cable_block_solver(
-    solver: str,
     *,
     execution_policy: ExecutionPolicy | None,
 ) -> str:
-    if solver != "auto":
-        return solver
+    policy_solver = double_cable_block_solver_from_execution_policy(execution_policy)
+    if policy_solver is not None:
+        return policy_solver
     platform = _execution_policy_platform(execution_policy)
     if platform is None:
         return "auto(default-backend)"
-    return resolve_double_cable_block_solver("auto", platform=platform)
+    return f"auto({platform})"
 
 
 def _execution_policy_platform(policy: ExecutionPolicy | None) -> str | None:

@@ -22,12 +22,12 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import axonscope as axs
-from axonscope.backends.jax.batch_kernels import (
+from axonscope.runtime.jax.batch_kernels import (
     _initial_double_cable_batch_state,
     _prepare_double_cable_batch_arrays,
     _resolve_double_cable_kernel_block_solver,
 )
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     double_cable_block_residual_norm,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
@@ -40,30 +40,33 @@ from axonscope.backends.jax.common import (
     solve_block_tridiagonal_2x2_scalar,
     solve_block_tridiagonal_2x2_scalar_batched,
 )
-from axonscope.backends.jax.input_lowering import (
+from axonscope.runtime.jax.input_lowering import (
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,
 )
-from axonscope.backends.jax.jax_triton_double_cable import (
+from axonscope.runtime.jax.jax_triton_double_cable import (
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
 )
-from axonscope.backends.jax.observer_runtime import (
+from axonscope.runtime.jax.observer_runtime import (
     init_vm_raster_state,
     update_vm_raster_state_batch_from_tables,
 )
-from axonscope.backends.jax.recording_lowering import (
+from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
     lower_observers_for_cohort,
 )
-from axonscope.backends.jax.runtime_preparation import (
+from axonscope.runtime.jax.runtime_preparation import (
     prepare_batch_runtime,
     prepared_cohort_for_group,
 )
-from axonscope.backends.jax.shape_bucketing import double_cable_kernel_group
+from axonscope.runtime.jax.shape_bucketing import double_cable_kernel_group
 from axonscope.dispatcher.plan import build_dispatch_plan
-from axonscope.solvers.options import BatchOptions, SolverOptions, resolve_double_cable_block_solver
+from axonscope.runtime.jax.solver_engines.block_solvers import (
+    resolve_double_cable_block_solver,
+)
+from axonscope.solvers.options import BatchOptions, SolverOptions
 
 from benchmark.analysis.double_cable_solver_candidates import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric,
@@ -1033,21 +1036,13 @@ def _assembled_from_xb(
 
 
 def _batch_options(args: argparse.Namespace) -> BatchOptions:
-    solver = args.double_cable_block_solver
     if args.recording == "observer_only":
-        return BatchOptions.none(
-            time_chunk_steps=int(args.time_chunk_steps),
-            double_cable_block_solver=solver,
-        )
+        return BatchOptions.none(time_chunk_steps=int(args.time_chunk_steps))
     if args.recording == "full_vm":
-        return BatchOptions.full(
-            time_chunk_steps=int(args.time_chunk_steps),
-            double_cable_block_solver=solver,
-        )
+        return BatchOptions.full(time_chunk_steps=int(args.time_chunk_steps))
     return BatchOptions.probes(
         8,
         time_chunk_steps=int(args.time_chunk_steps),
-        double_cable_block_solver=solver,
     )
 
 

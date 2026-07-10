@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any
 
-from axonscope.backends.jax.runtime import SolverRuntime
+from axonscope.runtime.jax.runtime import SolverRuntime
 from axonscope.preparation.cohort import PreparedCohort
 
 

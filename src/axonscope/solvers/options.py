@@ -1,37 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Sequence, cast
+from typing import Literal, Sequence
 
 import numpy as np
 
 from axonscope.solvers.rate_tables import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DoubleCableBlockSolver = Literal["auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"]
-ResolvedDoubleCableBlockSolver = Literal["thomas", "pcr", "pcr_soa", "pcr_adaptive"]
-
-_DOUBLE_CABLE_BLOCK_SOLVERS = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
-_GPU_PLATFORMS = {"cuda", "gpu", "metal", "rocm"}
 DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 50
-
-
-def resolve_double_cable_block_solver(
-    solver: DoubleCableBlockSolver | str,
-    *,
-    platform: str | None,
-) -> ResolvedDoubleCableBlockSolver:
-    """Resolve an automatic double-cable block-solver choice for a backend."""
-
-    if solver == "auto":
-        normalized = "" if platform is None else platform.lower()
-        return "pcr_adaptive" if normalized in _GPU_PLATFORMS else "thomas"
-    if solver in {"thomas", "pcr", "pcr_soa", "pcr_adaptive"}:
-        return cast(ResolvedDoubleCableBlockSolver, solver)
-    raise ValueError(
-        "double_cable_block_solver must be 'auto', 'thomas', 'pcr', "
-        "'pcr_soa', or 'pcr_adaptive'."
-    )
 
 
 @dataclass(frozen=True)
@@ -158,21 +135,18 @@ class BatchOptions:
 
     recording: BatchRecording = field(default_factory=BatchRecording.full)
     time_chunk_steps: int | None = None
-    double_cable_block_solver: DoubleCableBlockSolver = "auto"
 
     @classmethod
     def full(
         cls,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record full Vm, optionally chunking the time loop."""
 
         return cls(
             recording=BatchRecording.full(),
             time_chunk_steps=time_chunk_steps,
-            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
@@ -180,14 +154,12 @@ class BatchOptions:
         cls,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record the center compartment only."""
 
         return cls(
             recording=BatchRecording.center(),
             time_chunk_steps=time_chunk_steps,
-            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
@@ -196,14 +168,12 @@ class BatchOptions:
         count: int = 8,
         *,
         time_chunk_steps: int | None = None,
-        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record evenly spaced compartment probes."""
 
         return cls(
             recording=BatchRecording.probes(count),
             time_chunk_steps=time_chunk_steps,
-            double_cable_block_solver=double_cable_block_solver,
         )
 
     @classmethod
@@ -211,7 +181,6 @@ class BatchOptions:
         cls,
         *,
         time_chunk_steps: int | None = DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
-        double_cable_block_solver: DoubleCableBlockSolver = "auto",
     ) -> "BatchOptions":
         """Record no Vm trace, typically for solver-side observer runs.
 
@@ -223,7 +192,6 @@ class BatchOptions:
         return cls(
             recording=BatchRecording.none(),
             time_chunk_steps=time_chunk_steps,
-            double_cable_block_solver=double_cable_block_solver,
         )
 
     def __post_init__(self) -> None:
@@ -231,11 +199,6 @@ class BatchOptions:
             raise TypeError("recording must be a BatchRecording.")
         if self.time_chunk_steps is not None and int(self.time_chunk_steps) < 1:
             raise ValueError("time_chunk_steps must be >= 1.")
-        if self.double_cable_block_solver not in _DOUBLE_CABLE_BLOCK_SOLVERS:
-            raise ValueError(
-                "double_cable_block_solver must be 'auto', 'thomas', 'pcr', "
-                "'pcr_soa', or 'pcr_adaptive'."
-            )
 
 
 __all__ = [
@@ -243,8 +206,5 @@ __all__ = [
     "BatchRecording",
     "BatchRecordingMode",
     "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
-    "DoubleCableBlockSolver",
-    "ResolvedDoubleCableBlockSolver",
     "SolverOptions",
-    "resolve_double_cable_block_solver",
 ]

@@ -1,23 +1,22 @@
-"""Backend execution adapters used by public simulation orchestration.
+"""Runtime execution adapters used by public simulation orchestration.
 
-This module is the backend boundary for public simulation entry points,
+This module is the runtime boundary for public simulation entry points,
 estimates, and inspection. It keeps concrete JAX modules out of public
-orchestration modules while still centralizing the currently supported backend
+orchestration modules while still centralizing the currently supported runtime
 route.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
 from axonscope.recording import Recording, RecordingPlan
-from axonscope.solvers import BatchOptions, resolve_double_cable_block_solver
+from axonscope.solvers import BatchOptions
 
 if TYPE_CHECKING:
-    from axonscope.performance import ExecutionPolicy
+    from axonscope.runtime import ExecutionPolicy
 
 
 def execution_context(
@@ -25,9 +24,9 @@ def execution_context(
     *,
     instances: Sequence[Any],
 ):
-    """Return the execution context for the currently supported backend."""
+    """Return the execution context for the currently supported runtime."""
 
-    from axonscope.backends.jax.execution_policy import jax_execution_context
+    from axonscope.runtime.jax.execution_policy import jax_execution_context
 
     return jax_execution_context(policy, instances=instances)
 
@@ -37,9 +36,9 @@ def batch_options_from_recording(
     *,
     batch_options: BatchOptions | None,
 ) -> BatchOptions | None:
-    """Lower a public recording request to backend batch options."""
+    """Lower a public recording request to runtime batch options."""
 
-    from axonscope.backends.jax.recording import (
+    from axonscope.runtime.jax.recording import (
         batch_options_from_recording as jax_batch_options_from_recording,
     )
 
@@ -52,9 +51,9 @@ def benchmark_lower_recording_options(
     *,
     observers: tuple[Any, ...] | None,
 ) -> BatchOptions:
-    """Return backend recording options for host-side estimates and inspection."""
+    """Return runtime recording options for host-side estimates and inspection."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_lower_recording_options as jax_benchmark_lower_recording_options,
     )
 
@@ -70,9 +69,9 @@ def benchmark_observer_output_label(
     *,
     recording_mode: str,
 ) -> str:
-    """Return the backend observer output route for host-side reports."""
+    """Return the runtime observer output route for host-side reports."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_observer_output_label as jax_benchmark_observer_output_label,
     )
 
@@ -85,9 +84,9 @@ def benchmark_observer_output_label(
 def benchmark_observers_are_vm_raster_compatible(
     observers: tuple[Any, ...] | None,
 ) -> bool:
-    """Return whether observers can use the compact backend VmRaster route."""
+    """Return whether observers can use the compact runtime VmRaster route."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_observers_are_vm_raster_compatible as jax_vm_raster_compatible,
     )
 
@@ -97,9 +96,9 @@ def benchmark_observers_are_vm_raster_compatible(
 def benchmark_vm_raster_definitions(
     observers: tuple[Any, ...] | None,
 ) -> tuple[Any, ...]:
-    """Return observer definitions supported by backend VmRaster lowering."""
+    """Return observer definitions supported by runtime VmRaster lowering."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_vm_raster_definitions as jax_benchmark_vm_raster_definitions,
     )
 
@@ -115,9 +114,9 @@ def benchmark_plan_input_lowering(
     observers: tuple[Any, ...] | None,
     observer_plan: bool,
 ):
-    """Return backend input-lowering formats without materializing arrays."""
+    """Return runtime input-lowering formats without materializing arrays."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_plan_input_lowering as jax_benchmark_plan_input_lowering,
     )
 
@@ -135,9 +134,9 @@ def benchmark_membrane_output_names(
     model: Any,
     method_name: str,
 ) -> tuple[str, ...]:
-    """Return backend membrane output names for estimate-only reporting."""
+    """Return runtime membrane output names for estimate-only reporting."""
 
-    from axonscope.backends.jax.benchmark import (
+    from axonscope.runtime.jax.benchmark import (
         benchmark_membrane_output_names as jax_benchmark_membrane_output_names,
     )
 
@@ -145,30 +144,30 @@ def benchmark_membrane_output_names(
 
 
 def benchmark_profile_start(
-    backend: str,
+    runtime: str,
     output_dir: str | Path,
     *,
     create_perfetto_link: bool = False,
     create_perfetto_trace: bool = False,
 ) -> Any:
-    """Start a backend-owned profiler trace for benchmark instrumentation."""
+    """Start a runtime-owned profiler trace for benchmark instrumentation."""
 
-    resolved = _resolve_benchmark_profile_backend(backend)
+    resolved = _resolve_benchmark_profile_runtime(runtime)
     if resolved is None:
         return None
     if resolved == "jax":
-        from axonscope.backends.jax.benchmark import benchmark_profile_start as start
+        from axonscope.runtime.jax.benchmark import benchmark_profile_start as start
 
         return start(
             output_dir,
             create_perfetto_link=create_perfetto_link,
             create_perfetto_trace=create_perfetto_trace,
         )
-    raise ValueError(f"Unsupported benchmark profile backend: {backend!r}.")
+    raise ValueError(f"Unsupported benchmark profile runtime: {runtime!r}.")
 
 
 def benchmark_profile_stop(handle: Any) -> dict[str, Any]:
-    """Stop a backend-owned profiler trace and return JSON-safe metadata."""
+    """Stop a runtime-owned profiler trace and return JSON-safe metadata."""
 
     if handle is None:
         return {"enabled": False}
@@ -181,16 +180,16 @@ def benchmark_profile_stop(handle: Any) -> dict[str, Any]:
 
 @contextmanager
 def benchmark_profile_trace(
-    backend: str,
+    runtime: str,
     output_dir: str | Path,
     *,
     create_perfetto_link: bool = False,
     create_perfetto_trace: bool = False,
 ):
-    """Context manager for a backend-owned profiler trace."""
+    """Context manager for a runtime-owned profiler trace."""
 
     handle = benchmark_profile_start(
-        backend,
+        runtime,
         output_dir,
         create_perfetto_link=create_perfetto_link,
         create_perfetto_trace=create_perfetto_trace,
@@ -202,10 +201,10 @@ def benchmark_profile_trace(
 
 
 def benchmark_trace_annotation(name: str):
-    """Return a backend-owned trace annotation context when available."""
+    """Return a runtime-owned trace annotation context when available."""
 
     try:
-        from axonscope.backends.jax.benchmark import (
+        from axonscope.runtime.jax.benchmark import (
             benchmark_trace_annotation as jax_trace_annotation,
         )
 
@@ -217,52 +216,54 @@ def benchmark_trace_annotation(name: str):
 def benchmark_save_device_memory_profile(
     output_path: str | Path,
     *,
-    backend: str = "auto",
+    runtime: str = "auto",
 ) -> dict[str, Any]:
-    """Save a backend device-memory profile and return metadata."""
+    """Save a runtime device-memory profile and return metadata."""
 
-    resolved = _resolve_benchmark_profile_backend(backend)
+    resolved = _resolve_benchmark_profile_runtime(runtime)
     if resolved is None:
         return {"enabled": False}
     if resolved == "jax":
-        from axonscope.backends.jax.benchmark import (
+        from axonscope.runtime.jax.benchmark import (
             benchmark_save_device_memory_profile as save,
         )
 
         return save(output_path)
-    raise ValueError(f"Unsupported benchmark profile backend: {backend!r}.")
+    raise ValueError(f"Unsupported benchmark profile runtime: {runtime!r}.")
 
 
-def _resolve_benchmark_profile_backend(backend: str) -> str | None:
-    normalized = str(backend).lower()
+def _resolve_benchmark_profile_runtime(runtime: str) -> str | None:
+    normalized = str(runtime).lower()
     if normalized == "none":
         return None
     if normalized == "auto":
         return "jax"
     if normalized == "jax":
         return "jax"
-    raise ValueError("benchmark profile backend must be one of: auto, jax, none.")
+    raise ValueError("benchmark profile runtime must be one of: auto, jax, none.")
+
+
+def double_cable_block_solver_from_execution_policy(
+    policy: ExecutionPolicy | None,
+) -> str | None:
+    """Return the effective runtime double-cable block solver for reporting."""
+
+    if policy is None:
+        return None
+    from axonscope.runtime.jax.execution_policy import (
+        jax_double_cable_block_solver_for_policy,
+    )
+
+    return jax_double_cable_block_solver_for_policy(policy)
 
 
 def batch_options_for_execution_context(
     batch_options: BatchOptions | None,
     context: Any,
 ) -> BatchOptions | None:
-    """Apply effective backend/device routing to batch-only solver options."""
+    """Return output/chunking options unchanged for the active context."""
 
-    platform = getattr(context, "platform", None)
-    if platform is None:
-        return batch_options
-    options = BatchOptions.full() if batch_options is None else batch_options
-    if options.double_cable_block_solver != "auto":
-        return options
-    return replace(
-        options,
-        double_cable_block_solver=resolve_double_cable_block_solver(
-            "auto",
-            platform=platform,
-        ),
-    )
+    return batch_options
 
 
 def run_batch_group(
@@ -276,9 +277,9 @@ def run_batch_group(
     progress_callback: Any = None,
     backend_context: Any | None = None,
 ):
-    """Execute a prepared dispatch group through the active concrete backend."""
+    """Execute a prepared dispatch group through the active concrete runtime."""
 
-    from axonscope.backends.jax.group_runner import run_jax_batch_group
+    from axonscope.runtime.jax.group_runner import run_jax_batch_group
 
     return run_jax_batch_group(
         group,
@@ -306,6 +307,7 @@ __all__ = [
     "benchmark_save_device_memory_profile",
     "benchmark_trace_annotation",
     "benchmark_vm_raster_definitions",
+    "double_cable_block_solver_from_execution_policy",
     "execution_context",
     "run_batch_group",
 ]

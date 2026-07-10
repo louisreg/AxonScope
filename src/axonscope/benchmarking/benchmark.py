@@ -1,13 +1,13 @@
 """Public benchmark instrumentation facade.
 
 The concrete session, memory, and report implementation lives in
-`axonscope._runtime.benchmarking`. Keep this module as the user-facing import
+`axonscope.runtime.benchmarking`. Keep this module as the user-facing import
 surface only.
 """
 
 from __future__ import annotations
 
-from axonscope._runtime.benchmarking import (
+from axonscope.runtime.benchmarking import (
     BenchmarkConfig,
     BenchmarkEvent,
     BenchmarkOptions,

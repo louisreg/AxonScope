@@ -112,6 +112,74 @@ def test_kaggle_runner_dry_run_supports_time_chunk_campaign(tmp_path: Path):
     assert "benchmark/campaigns/time_chunk_sweep.py" in kernel_source
 
 
+def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
+    tmp_path: Path,
+):
+    assert (
+        run_kaggle(
+            [
+                "--username",
+                "demo-user",
+                "--slug",
+                "axonscope-p11c-solver-policy-gpu",
+                "--campaign",
+                "double_cable_solver_policy",
+                "--preset",
+                "gpu_smoke",
+                "--platform",
+                "gpu",
+                "--machine-shape",
+                "NvidiaTeslaP100",
+                "--dry-run",
+                "--no-publish-branch",
+                "--output-root",
+                str(tmp_path),
+                "--curve-script",
+                "recruitment_curves,threshold_curves",
+                "--solver",
+                "auto,pcr_soa,tiled_thomas",
+                "--n-axons",
+                "64,4096",
+                "--nx",
+                "89",
+                "--recording",
+                "observer_only",
+                "--tiled-thomas-block-b",
+                "32",
+            ]
+        )
+        == 0
+    )
+
+    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
+    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
+    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
+    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
+
+    assert metadata["id"] == "demo-user/axonscope-p11c-solver-policy-gpu"
+    assert metadata["enable_gpu"] == "true"
+    assert config["campaign"] == "double_cable_solver_policy"
+    assert config["script"] is None
+    assert config["preset"] == "gpu_smoke"
+    assert config["platform"] == "gpu"
+    assert config["require_gpu"] is True
+    assert config["benchmark_args"] == [
+        "--curve-script",
+        "recruitment_curves,threshold_curves",
+        "--solver",
+        "auto,pcr_soa,tiled_thomas",
+        "--n-axons",
+        "64,4096",
+        "--nx",
+        "89",
+        "--recording",
+        "observer_only",
+        "--tiled-thomas-block-b",
+        "32",
+    ]
+    assert "benchmark/campaigns/double_cable_solver_policy.py" in kernel_source
+
+
 def test_kaggle_runner_dry_run_supports_large_population_solver_campaign(tmp_path: Path):
     assert (
         run_kaggle(

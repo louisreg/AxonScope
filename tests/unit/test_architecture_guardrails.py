@@ -15,7 +15,7 @@ from enum import Enum
 from collections.abc import Callable, Iterable
 from dataclasses import fields
 from pathlib import Path
-from typing import get_args, get_type_hints
+from typing import get_type_hints
 
 import pytest
 import axonscope as axs
@@ -376,7 +376,7 @@ def test_public_membrane_namespace_does_not_expose_rejected_builder_dsl():
 def test_plain_python_membrane_sources_do_not_import_compiler_or_backend_internals():
     source_root = SRC_ROOT / "membranes" / "models"
     forbidden_prefixes = {
-        "axonscope.backends",
+        "axonscope.runtime",
         "axonscope.model_ir",
     }
     offenders: list[str] = []
@@ -949,7 +949,7 @@ def test_public_view_modules_use_shared_plotting_helpers():
 def test_dispatch_progress_uses_structured_dispatch_and_backend_events():
     progress_text = (SRC_ROOT / "dispatcher" / "progress.py").read_text(encoding="utf-8")
     execution_text = (SRC_ROOT / "dispatcher" / "execution.py").read_text(encoding="utf-8")
-    jax_runner_text = (SRC_ROOT / "backends" / "jax" / "group_runner.py").read_text(
+    jax_runner_text = (SRC_ROOT / "runtime" / "jax" / "group_runner.py").read_text(
         encoding="utf-8"
     )
 
@@ -985,7 +985,7 @@ def test_descriptive_layers_do_not_import_jax_backend_directly():
 
 def test_stimulation_package_stays_descriptive_without_jax_runtime_imports():
     assert not (SRC_ROOT / "stimulation" / "runtime.py").exists()
-    assert (SRC_ROOT / "backends" / "jax" / "stimulation_runtime.py").is_file()
+    assert (SRC_ROOT / "runtime" / "jax" / "stimulation_runtime.py").is_file()
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "stimulation"):
@@ -1024,11 +1024,11 @@ def test_protocols_do_not_import_jax_observer_runtime():
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == "axonscope.backends.jax.observer_runtime":
+                    if alias.name == "axonscope.runtime.jax.observer_runtime":
                         offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
-                if node.level == 0 and module == "axonscope.backends.jax.observer_runtime":
+                if node.level == 0 and module == "axonscope.runtime.jax.observer_runtime":
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
     assert offenders == []
@@ -1054,7 +1054,7 @@ def test_protocol_observer_path_uses_shared_vm_raster_decoders():
 def test_vm_raster_result_container_lives_under_results_boundary():
     assert not (SRC_ROOT / "solvers" / "observer_runtime.py").exists()
 
-    backend_text = (SRC_ROOT / "backends" / "jax" / "observer_runtime.py").read_text(
+    backend_text = (SRC_ROOT / "runtime" / "jax" / "observer_runtime.py").read_text(
         encoding="utf-8"
     )
     results_text = (SRC_ROOT / "results" / "vm_raster.py").read_text(encoding="utf-8")
@@ -1066,7 +1066,7 @@ def test_vm_raster_result_container_lives_under_results_boundary():
 
 
 def test_public_estimate_and_inspection_route_backend_details_through_facade():
-    forbidden_prefix = "axonscope.backends.jax"
+    forbidden_prefix = "axonscope.runtime.jax"
     offenders: list[str] = []
 
     for path in (SRC_ROOT / "performance.py", SRC_ROOT / "inspection.py"):
@@ -1086,9 +1086,9 @@ def test_public_estimate_and_inspection_route_backend_details_through_facade():
                     or module.startswith(f"{forbidden_prefix}.")
                 ):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-        assert "axonscope.backends.execution" in text
+        assert "axonscope.runtime.execution" in text
 
-    backend_benchmark = SRC_ROOT / "backends" / "jax" / "benchmark.py"
+    backend_benchmark = SRC_ROOT / "runtime" / "jax" / "benchmark.py"
     backend_text = backend_benchmark.read_text(encoding="utf-8")
 
     assert offenders == []
@@ -1111,7 +1111,7 @@ def test_jax_runtime_modules_live_under_backend_boundary():
 
     for filename in moved_modules:
         assert not (SRC_ROOT / "solvers" / filename).exists()
-        assert (SRC_ROOT / "backends" / "jax" / filename).is_file()
+        assert (SRC_ROOT / "runtime" / "jax" / filename).is_file()
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):
@@ -1121,7 +1121,7 @@ def test_jax_runtime_modules_live_under_backend_boundary():
 
 
 def test_jax_runtime_does_not_compile_stateful_legacy_composites():
-    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+    text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(encoding="utf-8")
 
     forbidden = {
         "Schild94CompositeICM",
@@ -1136,7 +1136,7 @@ def test_jax_runtime_does_not_compile_stateful_legacy_composites():
 
 
 def test_jax_runtime_compiles_public_membranes_through_one_model_ir_route():
-    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+    text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(encoding="utf-8")
     forbidden = {
         'model.kind == "axnode"',
         'model.kind == "composite"',
@@ -1155,7 +1155,7 @@ def test_jax_runtime_compiles_public_membranes_through_one_model_ir_route():
 
 
 def test_jax_solver_runtime_has_no_model_family_specific_fast_paths():
-    text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(encoding="utf-8")
+    text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(encoding="utf-8")
     forbidden = {
         "AxNode",
         "HodgkinHuxley",
@@ -1173,7 +1173,7 @@ def test_jax_solver_runtime_has_no_model_family_specific_fast_paths():
 
 
 def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_names():
-    text = (SRC_ROOT / "backends" / "jax" / "runtime_preparation.py").read_text(
+    text = (SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py").read_text(
         encoding="utf-8"
     )
     forbidden = {
@@ -1194,8 +1194,8 @@ def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_name
 
 
 def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
-    adapter_path = SRC_ROOT / "backends" / "jax" / "model_ir_membrane.py"
-    runtime_text = (SRC_ROOT / "backends" / "jax" / "runtime.py").read_text(
+    adapter_path = SRC_ROOT / "runtime" / "jax" / "model_ir_membrane.py"
+    runtime_text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(
         encoding="utf-8"
     )
     runtime_modules = {
@@ -1211,9 +1211,9 @@ def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
     assert "generated_module=" in runtime_text
     assert "ModelIRMembrane" not in runtime_text
     for filename in runtime_modules:
-        text = (SRC_ROOT / "backends" / "jax" / filename).read_text(encoding="utf-8")
+        text = (SRC_ROOT / "runtime" / "jax" / filename).read_text(encoding="utf-8")
         assert "CompiledMembrane" not in text
-    backend_text = (SRC_ROOT / "backends" / "jax" / "membrane_backend.py").read_text(
+    backend_text = (SRC_ROOT / "runtime" / "jax" / "membrane_backend.py").read_text(
         encoding="utf-8"
     )
     assert "class Gating" not in backend_text
@@ -1320,7 +1320,6 @@ def test_solver_facade_exposes_only_stable_solver_surface():
         "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
         "RateTableConfig",
         "SolverOptions",
-        "resolve_double_cable_block_solver",
     }
     forbidden_exports = {
         "BatchKernelResult",
@@ -1350,19 +1349,19 @@ def test_solver_facade_exposes_only_stable_solver_surface():
     assert forbidden_exports.isdisjoint(set(vars(solver_facade)))
 
     text = (SRC_ROOT / "solvers" / "__init__.py").read_text(encoding="utf-8")
-    assert "axonscope.backends.jax.batch_kernels" not in text
-    assert "axonscope.backends.jax.kernels" not in text
-    assert "axonscope.backends.jax.runtime" not in text
+    assert "axonscope.runtime.jax.batch_kernels" not in text
+    assert "axonscope.runtime.jax.kernels" not in text
+    assert "axonscope.runtime.jax.runtime" not in text
 
 
 def test_dispatcher_execution_does_not_import_concrete_jax_backend():
     path = SRC_ROOT / "dispatcher" / "execution.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
-        "axonscope.backends.jax",
-        "axonscope.backends.jax.batch_kernels",
-        "axonscope.backends.jax.group_runner",
-        "axonscope.backends.jax.runtime",
+        "axonscope.runtime.jax",
+        "axonscope.runtime.jax.batch_kernels",
+        "axonscope.runtime.jax.group_runner",
+        "axonscope.runtime.jax.runtime",
         "axonscope.icm",
         "axonscope.icm.backends",
     }
@@ -1372,14 +1371,14 @@ def test_dispatcher_execution_does_not_import_concrete_jax_backend():
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name in forbidden_modules or alias.name.startswith(
-                    "axonscope.backends.jax."
+                    "axonscope.runtime.jax."
                 ):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if node.level == 0 and (
                 module in forbidden_modules
-                or module.startswith("axonscope.backends.jax.")
+                or module.startswith("axonscope.runtime.jax.")
             ):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
@@ -1387,7 +1386,7 @@ def test_dispatcher_execution_does_not_import_concrete_jax_backend():
 
 
 def test_group_runner_routes_input_lowering_through_lowering_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     tree = ast.parse(text, filename=str(path))
     forbidden_builder_calls = {
@@ -1402,22 +1401,22 @@ def test_group_runner_routes_input_lowering_through_lowering_module():
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "axonscope.backends.jax.input_batches":
+                if alias.name == "axonscope.runtime.jax.input_batches":
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
         elif isinstance(node, ast.ImportFrom):
-            if node.module == "axonscope.backends.jax.input_batches":
+            if node.module == "axonscope.runtime.jax.input_batches":
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
         elif isinstance(node, ast.Call):
             call_name = _call_name(node.func)
             if call_name in forbidden_builder_calls:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{call_name}")
 
-    assert "axonscope.backends.jax.input_lowering" in text
+    assert "axonscope.runtime.jax.input_lowering" in text
     assert offenders == []
 
 
 def test_group_runner_routes_recording_lowering_through_lowering_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     tree = ast.parse(text, filename=str(path))
     forbidden_call_names = {
@@ -1427,7 +1426,7 @@ def test_group_runner_routes_recording_lowering_through_lowering_module():
         "_vm_raster_definitions",
     }
     forbidden_modules = {
-        "axonscope.backends.jax.observer_runtime",
+        "axonscope.runtime.jax.observer_runtime",
     }
     offenders: list[str] = []
 
@@ -1444,13 +1443,13 @@ def test_group_runner_routes_recording_lowering_through_lowering_module():
             if call_name in forbidden_call_names:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}:{call_name}")
 
-    assert "axonscope.backends.jax.recording_lowering" in text
+    assert "axonscope.runtime.jax.recording_lowering" in text
     assert "BatchRecording.full" not in text
     assert offenders == []
 
 
 def test_group_runner_routes_batch_result_assembly_through_result_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     forbidden_terms = {
         "DispatchCohortRecord",
@@ -1462,7 +1461,7 @@ def test_group_runner_routes_batch_result_assembly_through_result_module():
         "_posthoc_observations_for_row",
     }
 
-    assert "axonscope.backends.jax.batch_results" in text
+    assert "axonscope.runtime.jax.batch_results" in text
     missing_boundary = [
         term for term in ("dispatch_results_from_batch", "trim_batch_kernel_result")
         if term not in text
@@ -1473,7 +1472,7 @@ def test_group_runner_routes_batch_result_assembly_through_result_module():
 
 
 def test_group_runner_routes_shape_bucketing_through_shape_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     forbidden_terms = {
         "_DOUBLE_CABLE_SHAPE_BUCKETING_ENV",
@@ -1486,7 +1485,7 @@ def test_group_runner_routes_shape_bucketing_through_shape_module():
         "_record_kernel_bucket_metadata",
     }
 
-    assert "axonscope.backends.jax.shape_bucketing" in text
+    assert "axonscope.runtime.jax.shape_bucketing" in text
     assert "double_cable_kernel_group" in text
     assert "record_kernel_bucket_metadata" in text
     offenders = sorted(term for term in forbidden_terms if term in text)
@@ -1494,8 +1493,8 @@ def test_group_runner_routes_shape_bucketing_through_shape_module():
 
 
 def test_group_runner_routes_runtime_caches_through_cache_module():
-    group_runner = SRC_ROOT / "backends" / "jax" / "group_runner.py"
-    preparation = SRC_ROOT / "backends" / "jax" / "runtime_preparation.py"
+    group_runner = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
+    preparation = SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py"
     group_runner_text = group_runner.read_text(encoding="utf-8")
     preparation_text = preparation.read_text(encoding="utf-8")
     forbidden_terms = {
@@ -1508,14 +1507,14 @@ def test_group_runner_routes_runtime_caches_through_cache_module():
         "_cache_store",
     }
 
-    assert "axonscope.backends.jax.runtime_caches" not in group_runner_text
-    assert "axonscope.backends.jax.runtime_caches" in preparation_text
+    assert "axonscope.runtime.jax.runtime_caches" not in group_runner_text
+    assert "axonscope.runtime.jax.runtime_caches" in preparation_text
     offenders = sorted(term for term in forbidden_terms if term in group_runner_text)
     assert offenders == []
 
 
 def test_group_runner_routes_runtime_preparation_through_preparation_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     forbidden_terms = {
         "CableRuntime",
@@ -1539,7 +1538,7 @@ def test_group_runner_routes_runtime_preparation_through_preparation_module():
         "_group_cm_uF_cm2",
     }
 
-    assert "axonscope.backends.jax.runtime_preparation" in text
+    assert "axonscope.runtime.jax.runtime_preparation" in text
     for required in (
         "prepare_batch_runtime",
         "prepared_cohort_for_group",
@@ -1552,7 +1551,7 @@ def test_group_runner_routes_runtime_preparation_through_preparation_module():
 
 
 def test_group_runner_routes_benchmark_metadata_through_metadata_module():
-    path = SRC_ROOT / "backends" / "jax" / "group_runner.py"
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
     forbidden_terms = {
         "_record_intracellular_lowering_metadata",
@@ -1564,7 +1563,7 @@ def test_group_runner_routes_benchmark_metadata_through_metadata_module():
         "memory_estimate_components_nbytes",
     }
 
-    assert "axonscope.backends.jax.benchmark_metadata" in text
+    assert "axonscope.runtime.jax.benchmark_metadata" in text
     offenders = sorted(term for term in forbidden_terms if term in text)
     assert offenders == []
 
@@ -1581,8 +1580,8 @@ def test_public_simulation_orchestrator_uses_backend_execution_boundary():
     text = path.read_text(encoding="utf-8")
 
     assert _jax_import_locations(path) == []
-    assert "axonscope.backends.jax" not in text
-    assert "axonscope.backends.execution" in text
+    assert "axonscope.runtime.jax" not in text
+    assert "axonscope.runtime.execution" in text
 
 
 def test_crank_nicholson_facade_delegates_to_backend_boundary():
@@ -1590,8 +1589,8 @@ def test_crank_nicholson_facade_delegates_to_backend_boundary():
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     forbidden_modules = {
         "axonscope.solvers.axon_runtime",
-        "axonscope.backends.jax.kernels",
-        "axonscope.backends.jax.runtime",
+        "axonscope.runtime.jax.kernels",
+        "axonscope.runtime.jax.runtime",
     }
     offenders = _jax_import_locations(path)
 
@@ -1634,16 +1633,20 @@ def test_benchmarking_public_modules_are_interfaces_not_runtime_engines():
         "save_device_memory_profile",
     }
 
-    assert "axonscope._runtime.benchmarking" in benchmark_text
+    assert "axonscope.runtime.benchmarking" in benchmark_text
     assert all(term not in benchmark_text for term in forbidden_benchmark_terms)
-    assert "axonscope.backends.execution" in profiling_text
+    assert "axonscope.runtime.execution" in profiling_text
     assert all(term not in profiling_text for term in forbidden_profiling_terms)
 
 
-def test_active_double_cable_solver_surface_excludes_archived_candidates():
-    from axonscope.solvers.options import DoubleCableBlockSolver
-
-    retained_public = {"auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive"}
+def test_active_double_cable_solver_surface_uses_typed_execution_policy():
+    retained_public = {
+        "auto",
+        "thomas",
+        "jax_pcr",
+        "jax_pcr_soa",
+        "tiled_thomas",
+    }
     archived = {
         "assoc_backward",
         "assoc_transfer_dense",
@@ -1662,10 +1665,48 @@ def test_active_double_cable_solver_surface_excludes_archived_candidates():
         "split_richardson_4",
     }
 
-    assert set(get_args(DoubleCableBlockSolver)) == retained_public
+    assert {
+        item.value for item in axs.runtime.jax.DoubleCableSolverKind
+    } == retained_public
+    assert {item.value for item in axs.runtime.jax.SingleCableSolverKind} == {
+        "auto",
+        "jax_tridiagonal",
+    }
+    assert not hasattr(axs, "DoubleCableSolver")
+    assert not hasattr(axs, "SingleCableSolver")
+    assert not hasattr(axs, "PcrSolverOptions")
+    assert not hasattr(axs, "TiledThomasSolverOptions")
+    assert not hasattr(axs, "Runtime")
+    assert importlib.util.find_spec("axonscope.jax") is None
+    assert importlib.util.find_spec("axonscope.runtime.jax") is not None
+    assert axs.runtime.jax.runtime_target.value == "jax"
+    assert axs.ExecutionPolicy(runtime=axs.runtime.jax).runtime is axs.runtime.jax
+    assert not hasattr(axs.runtime, "DoubleCableSolver")
+    assert not hasattr(axs.runtime, "SingleCableSolver")
+    assert not hasattr(axs.solvers, "resolve_double_cable_block_solver")
+    assert not hasattr(axs.solvers.options, "resolve_double_cable_block_solver")
+    assert not hasattr(axs.solvers.options, "DoubleCableBlockSolver")
+    assert not hasattr(axs.BatchOptions.full(), "double_cable_block_solver")
     assert archived.isdisjoint(retained_public)
 
-    common_text = (SRC_ROOT / "backends" / "jax" / "common.py").read_text(
+    runtime_policy_text = (SRC_ROOT / "runtime" / "policy.py").read_text(
+        encoding="utf-8"
+    )
+    jax_runtime_text = (SRC_ROOT / "runtime" / "jax" / "policy.py").read_text(
+        encoding="utf-8"
+    )
+    for concrete_jax_name in (
+        "SingleCableSolverKind",
+        "DoubleCableSolverKind",
+        "PcrSolverOptions",
+        "TiledThomasSolverOptions",
+        "class SingleCableSolver(",
+        "class DoubleCableSolver(",
+    ):
+        assert concrete_jax_name not in runtime_policy_text
+        assert concrete_jax_name in jax_runtime_text
+
+    common_text = (SRC_ROOT / "runtime" / "jax" / "common.py").read_text(
         encoding="utf-8"
     )
     archived_common_functions = {
@@ -1722,11 +1763,11 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "SingleCableVStimBatchKernel",
         "DoubleCableBatchKernel",
         "build_vm_raster_plan",
-        "backends/jax/recording_lowering.py",
-        "backends/jax/batch_results.py",
-        "backends/jax/runtime_preparation.py",
-        "backends/jax/runtime_caches.py",
-        "backends/jax/shape_bucketing.py",
+        "runtime/jax/recording_lowering.py",
+        "runtime/jax/batch_results.py",
+        "runtime/jax/runtime_preparation.py",
+        "runtime/jax/runtime_caches.py",
+        "runtime/jax/shape_bucketing.py",
         "dispatch_results_from_batch",
         "compact dispatch cohort records",
         "AxonSimulationResult",

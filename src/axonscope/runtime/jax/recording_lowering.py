@@ -53,7 +53,7 @@ def lower_observers_for_cohort(
         record_benchmark_metadata(vm_raster_plan_cache="hit")
         return cached
 
-    from axonscope.backends.jax.observer_runtime import build_vm_raster_plan
+    from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
 
     row_positions_um = np.asarray(cohort.x_positions_m, dtype=float) * 1e6
     plan = build_vm_raster_plan(

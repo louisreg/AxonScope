@@ -7,11 +7,11 @@ import jax.numpy as jnp
 
 import jax
 
-from axonscope.backends.jax.common import (
+from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar,
 )
-from axonscope.backends.jax.large_population_solver import (
+from axonscope.runtime.jax.large_population_solver import (
     block_b_candidates_for_nx_bucket,
     make_large_population_layout_plan,
     pad_large_population_double_cable_system,

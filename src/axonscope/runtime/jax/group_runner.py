@@ -14,36 +14,37 @@ from axonscope.benchmarking import (
 from axonscope.dispatcher.plan import DispatchGroup
 from axonscope.dispatcher.progress import ProgressEvent, ProgressStage
 from axonscope.dispatcher._records import DispatchRecord
-from axonscope.backends.jax.benchmark_metadata import (
+from axonscope.runtime.jax.benchmark_metadata import (
     record_extracellular_lowering_metadata,
     record_group_memory_estimate,
     record_intracellular_lowering_metadata,
 )
-from axonscope.backends.jax.batch_results import (
+from axonscope.runtime.jax.batch_results import (
     dispatch_results_from_batch,
     trim_batch_kernel_result,
 )
-from axonscope.backends.jax.input_lowering import (
+from axonscope.runtime.jax.input_lowering import (
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,
     lower_single_cable_extracellular_input,
     lower_single_cable_intracellular_input,
 )
-from axonscope.backends.jax.recording_lowering import (
+from axonscope.runtime.jax.output_plan import OutputPlan
+from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
     lower_observers_for_cohort,
 )
-from axonscope.backends.jax.runtime_preparation import (
+from axonscope.runtime.jax.runtime_preparation import (
     group_cm_uF_cm2,
     prepare_batch_runtime,
     prepared_cohort_for_group,
     representative_item,
 )
-from axonscope.backends.jax.shape_bucketing import (
+from axonscope.runtime.jax.shape_bucketing import (
     double_cable_kernel_group,
     record_kernel_bucket_metadata,
 )
-from axonscope.backends.jax.batch_kernels import (
+from axonscope.runtime.jax.batch_kernels import (
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
@@ -144,6 +145,21 @@ def _benchmark_double_cable_block_solver_override() -> str | None:
     return str(solver)
 
 
+def _context_double_cable_block_solver_override(
+    backend_context: Any | None,
+) -> tuple[str | None, bool, int | None]:
+    if backend_context is None:
+        return None, False, None
+    solver = getattr(backend_context, "double_cable_block_solver", None)
+    if solver in (None, ""):
+        return None, False, None
+    return (
+        str(solver),
+        bool(getattr(backend_context, "double_cable_block_solver_allow_internal", False)),
+        getattr(backend_context, "double_cable_tiled_thomas_block_b", None),
+    )
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -198,9 +214,13 @@ def _run_single_cable_batch_group(
             ),
             extracellular_stimulation_count=cohort.extracellular_stimulation_count,
         )
-    kernel_options = lower_batch_recording_options(
+    lowered_options = lower_batch_recording_options(
         group,
         batch_options,
+        observers=observers,
+    )
+    kernel_options = OutputPlan.from_batch_options(
+        lowered_options,
         observers=observers,
     )
     _emit_progress(
@@ -210,6 +230,7 @@ def _run_single_cable_batch_group(
         "recording plan",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
+        output_sink=kernel_options.sink,
         observers=0 if observers is None else len(observers),
     )
     with benchmark_span(
@@ -347,7 +368,7 @@ def _run_single_cable_batch_group(
             observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
-            kernel_batch_options=kernel_options,
+            kernel_batch_options=kernel_options.to_batch_options(),
         )
 
 
@@ -412,11 +433,19 @@ def _run_double_cable_batch_group(
             public_nx=int(group.nx),
             kernel_nx=int(kernel_group.nx),
         )
-    kernel_options = lower_batch_recording_options(
+    lowered_options = lower_batch_recording_options(
         kernel_group,
         batch_options,
         observers=observers,
     )
+    kernel_options = OutputPlan.from_batch_options(
+        lowered_options,
+        observers=observers,
+    )
+    policy_block_solver, policy_allow_internal, policy_block_b = (
+        _context_double_cable_block_solver_override(backend_context)
+    )
+    benchmark_block_solver = _benchmark_double_cable_block_solver_override()
     _emit_progress(
         progress_callback,
         group,
@@ -424,8 +453,10 @@ def _run_double_cable_batch_group(
         "recording plan",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
+        output_sink=kernel_options.sink,
         observers=0 if observers is None else len(observers),
-        block_solver=kernel_options.double_cable_block_solver,
+        policy_block_solver=policy_block_solver,
+        benchmark_block_solver=benchmark_block_solver,
     )
     with benchmark_span(
         "observer.plan",
@@ -497,10 +528,15 @@ def _run_double_cable_batch_group(
         public_group_size=int(group.size),
         public_nx=int(group.nx),
     )
-    benchmark_block_solver = _benchmark_double_cable_block_solver_override()
     if benchmark_block_solver is not None:
         record_benchmark_metadata(
             benchmark_double_cable_block_solver=benchmark_block_solver
+        )
+    if policy_block_solver is not None:
+        record_benchmark_metadata(
+            execution_policy_double_cable_block_solver=policy_block_solver,
+            execution_policy_double_cable_block_solver_internal=policy_allow_internal,
+            execution_policy_tiled_thomas_block_b=policy_block_b,
         )
     _emit_progress(
         progress_callback,
@@ -509,7 +545,7 @@ def _run_double_cable_batch_group(
         "compiling JAX kernel if needed",
         recording=kernel_options.recording.mode,
         time_chunk_steps=kernel_options.time_chunk_steps,
-        block_solver=kernel_options.double_cable_block_solver,
+        policy_block_solver=policy_block_solver,
         benchmark_block_solver=benchmark_block_solver,
     )
     with benchmark_span(
@@ -531,6 +567,9 @@ def _run_double_cable_batch_group(
             options=kernel_options,
             observers=observer_plan,
             progress_callback=progress_callback,
+            double_cable_block_solver=policy_block_solver,
+            allow_internal_double_cable_block_solver=policy_allow_internal,
+            double_cable_tiled_thomas_block_b=policy_block_b,
             benchmark_double_cable_block_solver=benchmark_block_solver,
         )
         if out.Vm is not None:
@@ -573,7 +612,7 @@ def _run_double_cable_batch_group(
             observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
-            kernel_batch_options=kernel_options,
+            kernel_batch_options=kernel_options.to_batch_options(),
         )
 
 

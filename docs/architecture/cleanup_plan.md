@@ -35,15 +35,15 @@ AxonSimulation.run(...)
 src/axonscope/simulation.py
         |
         v
-axonscope.backends.execution.execution_context(...)
+axonscope.runtime.execution.execution_context(...)
         |
         v
 scalar: CrankNicholson.solve(...)
 pool:   dispatcher.execution.run_pool(...)
         |
         v
-backends/jax/scalar_runner.py
-backends/jax/group_runner.py
+runtime/jax/scalar_runner.py
+runtime/jax/group_runner.py
         |
         v
 internal results -> AxonSimulationResult
@@ -64,19 +64,19 @@ one canonical public result model, with internal execution result blocks.
 ### 1.2 Backend boundary reality
 
 Current public simulation, estimate, and inspection entry points route concrete
-backend details through `axonscope.backends.execution`. The historical notes
+backend details through `axonscope.runtime.execution`. The historical notes
 below explain why that boundary was added.
 
 The public simulation layer mostly respects the target boundary:
 
-- `simulation.py` enters through `axonscope.backends.execution`.
-- backend-heavy JAX runtime and kernels live under `backends/jax`.
+- `simulation.py` enters through `axonscope.runtime.execution`.
+- backend-heavy JAX runtime and kernels live under `runtime/jax`.
 - timebase and public recording concepts are mostly backend-neutral.
 
 The dispatcher group-runner exception has been removed: dispatch planning now
-delegates concrete batch execution through `axonscope.backends.execution`.
+delegates concrete batch execution through `axonscope.runtime.execution`.
 The later P4 cleanup also moved estimate/inspection lowering summaries behind
-the same backend boundary.
+the same runtime boundary.
 
 ### 1.3 Extracellular stimulation reality
 
@@ -208,8 +208,8 @@ Consequences:
 Decision: Option B.
 
 The dispatcher should plan and orchestrate, but concrete backend execution
-should route through `axonscope.backends.execution`. `dispatcher` should not
-import `backends.jax.group_runner` directly.
+should route through `axonscope.runtime.execution`. `dispatcher` should not
+import `runtime.jax.group_runner` directly.
 
 Alternatives considered:
 
@@ -223,15 +223,15 @@ Option B, stricter target boundary:
 
 - `dispatcher` owns planning, progress, grouping, and dispatch records;
 - `backends.execution` owns concrete backend group execution;
-- `dispatcher` no longer imports `backends.jax`.
+- `dispatcher` no longer imports `runtime.jax`.
 
 Implications:
 
-- easier future `Runtime.NUMPY`/SciPy backend insertion;
+- easier future `axs.runtime.numpy`/SciPy backend insertion;
 - cleaner dependency boundary for tests and guardrails;
 - slightly more boilerplate now, but less backend leakage long term.
 
-### D5. Runtime.NUMPY and mixed precision
+### D5. axs.runtime.numpy and mixed precision
 
 Recommended decision:
 
@@ -391,7 +391,7 @@ Exit criteria:
   typed stimulation;
 - old path is deleted, private, or archived with an explicit label.
 
-## P2 - Backend Boundary Cleanup
+## P2 - Runtime Boundary Cleanup
 
 Purpose: make execution ownership visible and enforceable.
 
@@ -403,7 +403,7 @@ Tasks:
   `dispatcher/execution.py`.
 - Keep dispatch plan construction backend-neutral.
 - Add a guardrail preventing dispatcher modules from importing
-  `axonscope.backends.jax`. Done for `dispatcher/execution.py`.
+  `axonscope.runtime.jax`. Done for `dispatcher/execution.py`.
 - Move public inspection lowering through the same boundary or label it as JAX
   inspection.
 - Ensure planning, performance estimates, and inspection do not import heavy JAX
@@ -430,7 +430,7 @@ Tasks:
 
 - Audit `ExecutionPolicy`, `Runtime`, `Device`, and `PrecisionPolicy` docs
   against actual runtime behavior.
-- Clearly mark `Runtime.NUMPY` as reserved if it remains non-executable.
+- Clearly mark `axs.runtime.numpy` as reserved if it remains non-executable.
 - Clearly mark mixed precision as unsupported until implemented.
 - Review performance estimates for factorized Vext:
   - avoid implying dense materialization when the retained execution path uses
@@ -538,9 +538,9 @@ Purpose: make backend execution auditable without changing behavior.
 
 Large modules to split after public-surface decisions:
 
-- `backends/jax/batch_kernels.py`
-- `backends/jax/common.py`
-- `backends/jax/group_runner.py`
+- `runtime/jax/batch_kernels.py`
+- `runtime/jax/common.py`
+- `runtime/jax/group_runner.py`
 - `inspection.py`
 
 Suggested decomposition:
@@ -659,7 +659,7 @@ This table should be updated as cleanup proceeds.
 | `BatchRecording` root export | public advanced runner object | keep during transition | make internal once `Recording` covers needs |
 | dispatcher direct JAX import | current batch execution shortcut | remove via backend execution facade | D4 accepted |
 | inspection direct JAX lowering | public inspection shortcut | route through backend or label JAX-specific | inspection boundary decision |
-| `Runtime.NUMPY` | reserved/non-executable runtime | dedicated future NumPy/SciPy solver phase | real implementation |
+| `axs.runtime.numpy` | reserved/non-executable runtime | dedicated future NumPy/SciPy solver phase | real implementation |
 | mixed precision | reserved/non-executable policy | mark unsupported or implement | precision design |
 | experimental shape bucketing | opt-in runtime experiment | keep experimental or archive | benchmark evidence |
 | `benchmark/pseudo_double/` | validation-only standby | archive/label clearly | README/docs cleanup |
@@ -737,7 +737,7 @@ Expected tests:
 
 Do after stimulation no longer depends on context/electrode adapters.
 
-- route dispatcher and inspection through the chosen backend boundary;
+- route dispatcher and inspection through the chosen runtime boundary;
 - update guardrails.
 
 Expected tests:

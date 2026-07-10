@@ -64,6 +64,49 @@ python benchmark/kaggle/run_kernel.py \
   --case-filter observer_only
 ```
 
+Submit the double-cable solver-policy campaign on the CPU path of a Kaggle GPU
+machine:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-solver-policy-cpu \
+  --campaign double_cable_solver_policy \
+  --preset quick \
+  --platform cpu \
+  --machine-shape NvidiaTeslaP100 \
+  --curve-script threshold_curves,recruitment_curves \
+  --solver auto,thomas \
+  --recording observer_only,probe_vm \
+  --n-axons 64,1024 \
+  --nx 89,129 \
+  --precision fp32 \
+  --repeats 3 \
+  --warmups 1
+```
+
+Run the matching GPU policy campaign by switching `--platform`, the slug, and
+the solver set:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username YOUR_KAGGLE_USERNAME \
+  --slug axonscope-p11c-solver-policy-gpu \
+  --campaign double_cable_solver_policy \
+  --preset gpu_smoke \
+  --platform gpu \
+  --machine-shape NvidiaTeslaP100 \
+  --curve-script threshold_curves,recruitment_curves \
+  --solver auto,thomas,pcr,pcr_soa,tiled_thomas \
+  --recording observer_only,probe_vm \
+  --n-axons 64,1024,4096,8192 \
+  --nx 89,129 \
+  --precision fp32 \
+  --tiled-thomas-block-b 32,64 \
+  --repeats 3 \
+  --warmups 1
+```
+
 Submit the P11B time-chunk sweep campaign on the CPU path of a Kaggle GPU
 machine:
 

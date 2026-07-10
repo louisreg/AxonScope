@@ -507,7 +507,8 @@ def _evaluate_amplitudes(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
-        double_cable_block_solver=options.get("double_cable_block_solver", "auto"),
+        gpu_solver=options.get("double_cable_block_solver", "auto"),
+        tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
         benchmark_double_cable_block_solver=options.get(
             "benchmark_double_cable_block_solver"
         ),
@@ -545,7 +546,8 @@ def _evaluate_amplitudes(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
-        double_cable_block_solver=options.get("double_cable_block_solver", "auto"),
+        gpu_solver=options.get("double_cable_block_solver", "auto"),
+        tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
         benchmark_double_cable_block_solver=options.get(
             "benchmark_double_cable_block_solver"
         ),
@@ -961,24 +963,15 @@ def _recording_policy(options: dict[str, Any]) -> Any:
 def _batch_options(options: dict[str, Any]) -> Any:
     policy = str(options.get("time_chunk_policy", "default"))
     time_chunk_steps = options["time_chunk_steps"]
-    block_solver = str(options.get("double_cable_block_solver", "auto"))
     if policy == "default":
-        if block_solver != "auto":
-            return axs.BatchOptions(double_cable_block_solver=block_solver)
         return None
     if policy == "unchunked":
-        return axs.BatchOptions(
-            time_chunk_steps=None,
-            double_cable_block_solver=block_solver,
-        )
+        return axs.BatchOptions(time_chunk_steps=None)
     if policy != "explicit":
         raise ValueError(f"unsupported time_chunk_policy: {policy!r}")
     if time_chunk_steps is None:
         raise ValueError("explicit time_chunk_policy requires time_chunk_steps.")
-    return axs.BatchOptions(
-        time_chunk_steps=int(time_chunk_steps),
-        double_cable_block_solver=block_solver,
-    )
+    return axs.BatchOptions(time_chunk_steps=int(time_chunk_steps))
 
 
 def _execution_policy(options: dict[str, Any]) -> Any:
@@ -993,11 +986,43 @@ def _execution_policy(options: dict[str, Any]) -> Any:
         device = axs.Device.gpu(0)
     else:
         device = axs.Device.auto()
+    solver_policy = _solver_policy(options)
     return axs.ExecutionPolicy(
-        runtime=axs.Runtime.JAX,
+        runtime=axs.runtime.jax,
         device=device,
         precision=precision,
+        solvers=solver_policy,
     )
+
+
+def _solver_policy(options: dict[str, Any]) -> Any:
+    solver = str(options.get("double_cable_block_solver", "auto"))
+    platform = str(options.get("platform", "auto"))
+    if platform == "cpu":
+        double_cable_solver = axs.runtime.jax.cpu.DoubleCableSolver
+    elif platform == "gpu":
+        double_cable_solver = axs.runtime.jax.gpu.DoubleCableSolver
+    else:
+        double_cable_solver = axs.runtime.jax.DoubleCableSolver
+
+    if solver in {"auto", "pcr_adaptive"}:
+        double_cable = double_cable_solver.auto()
+    elif solver == "thomas":
+        double_cable = double_cable_solver.thomas()
+    elif solver == "pcr":
+        double_cable = axs.runtime.jax.gpu.DoubleCableSolver.pcr()
+    elif solver == "pcr_soa":
+        double_cable = axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
+    elif solver == "tiled_thomas":
+        if platform != "gpu":
+            raise ValueError("tiled_thomas double-cable solver requires --platform gpu.")
+        block_b = options.get("tiled_thomas_block_b")
+        double_cable = axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+            block_b=None if block_b in (None, "") else int(block_b),
+        )
+    else:
+        raise ValueError(f"unsupported double-cable solver policy: {solver!r}")
+    return axs.SolverPolicy(double_cable=double_cable)
 
 
 def _row_cable(options: dict[str, Any], row: int) -> str:

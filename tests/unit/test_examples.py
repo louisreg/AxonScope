@@ -52,7 +52,7 @@ def test_public_example_scripts_are_importable_and_have_main():
 
 def test_public_examples_do_not_import_axonscope_internals():
     forbidden = (
-        "axonscope.backends",
+        "axonscope.runtime",
         "from axonscope.solvers",
         "import axonscope.solvers",
         "CrankNicholson",
