@@ -33,6 +33,7 @@ RECORDINGS = ("observer_only", "probe_vm", "full_vm")
 DIAMETER_MODES = ("same_diameter", "different_diameters")
 CPU_SOLVERS = ("auto", "thomas")
 GPU_SOLVERS = ("auto", "thomas", "pcr", "pcr_soa", "tiled_thomas")
+OBSERVER_STATE_SCOPES = ("default", "chunk", "full")
 
 SUMMARY_FIELDS = (
     "label",
@@ -44,6 +45,7 @@ SUMMARY_FIELDS = (
     "solver",
     "tiled_thomas_block_b",
     "recording",
+    "observer_state_scope",
     "n_axons",
     "nx",
     "precision",
@@ -77,6 +79,7 @@ class RunSpec:
     solver: str
     tiled_thomas_block_b: int | None
     recording: str
+    observer_state_scope: str
     n_axons: int
     nx: int
     precision: str
@@ -110,8 +113,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--time-chunk-steps")
     parser.add_argument(
         "--benchmark-observer-state-scope",
-        choices=("default", "chunk", "full"),
-        default="default",
+        action="append",
+        help="Comma-separated observer state scopes: default, chunk, full.",
     )
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
@@ -161,6 +164,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=(32,),
         label="tiled_thomas_block_b",
     )
+    observer_state_scopes = _parse_choices(
+        args.benchmark_observer_state_scope,
+        allowed=OBSERVER_STATE_SCOPES,
+        default=("default",),
+        label="benchmark_observer_state_scope",
+    )
 
     if args.repeats is not None and args.repeats < 1:
         parser.error("--repeats must be >= 1.")
@@ -178,6 +187,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         precisions=precisions,
         diameter_modes=diameter_modes,
         block_bs=block_bs,
+        observer_state_scopes=observer_state_scopes,
     )
     _write_manifest(
         args.output / "double_cable_solver_policy_manifest.json",
@@ -245,6 +255,7 @@ def _build_runs(
     precisions: Sequence[str],
     diameter_modes: Sequence[str],
     block_bs: Sequence[int],
+    observer_state_scopes: Sequence[str],
 ) -> list[RunSpec]:
     runs: list[RunSpec] = []
     for script in scripts:
@@ -253,49 +264,53 @@ def _build_runs(
                 for nx in nx_values:
                     for precision in precisions:
                         for diameters in diameter_modes:
-                            for solver in solvers:
-                                solver_block_bs: Sequence[int | None]
-                                solver_block_bs = block_bs if solver == "tiled_thomas" else (None,)
-                                for block_b in solver_block_bs:
-                                    label = _label(
-                                        script=script,
-                                        platform=args.platform,
-                                        solver=solver,
-                                        block_b=block_b,
-                                        recording=recording,
-                                        n_axons=n_axons,
-                                        nx=nx,
-                                        precision=precision,
-                                        diameters=diameters,
-                                    )
-                                    command = _curve_command(
-                                        args,
-                                        script=script,
-                                        output=args.output / label,
-                                        solver=solver,
-                                        block_b=block_b,
-                                        recording=recording,
-                                        n_axons=n_axons,
-                                        nx=nx,
-                                        precision=precision,
-                                        diameters=diameters,
-                                    )
-                                    runs.append(
-                                        RunSpec(
-                                            label=label,
-                                            run_dir=args.output / label,
-                                            command=tuple(command),
+                            for observer_state_scope in observer_state_scopes:
+                                for solver in solvers:
+                                    solver_block_bs: Sequence[int | None]
+                                    solver_block_bs = block_bs if solver == "tiled_thomas" else (None,)
+                                    for block_b in solver_block_bs:
+                                        label = _label(
                                             script=script,
-                                            platform=str(args.platform),
+                                            platform=args.platform,
                                             solver=solver,
-                                            tiled_thomas_block_b=block_b,
+                                            block_b=block_b,
                                             recording=recording,
+                                            observer_state_scope=observer_state_scope,
                                             n_axons=n_axons,
                                             nx=nx,
                                             precision=precision,
                                             diameters=diameters,
                                         )
-                                    )
+                                        command = _curve_command(
+                                            args,
+                                            script=script,
+                                            output=args.output / label,
+                                            solver=solver,
+                                            block_b=block_b,
+                                            recording=recording,
+                                            observer_state_scope=observer_state_scope,
+                                            n_axons=n_axons,
+                                            nx=nx,
+                                            precision=precision,
+                                            diameters=diameters,
+                                        )
+                                        runs.append(
+                                            RunSpec(
+                                                label=label,
+                                                run_dir=args.output / label,
+                                                command=tuple(command),
+                                                script=script,
+                                                platform=str(args.platform),
+                                                solver=solver,
+                                                tiled_thomas_block_b=block_b,
+                                                recording=recording,
+                                                observer_state_scope=observer_state_scope,
+                                                n_axons=n_axons,
+                                                nx=nx,
+                                                precision=precision,
+                                                diameters=diameters,
+                                            )
+                                        )
     return runs
 
 
@@ -311,6 +326,7 @@ def _curve_command(
     nx: int,
     precision: str,
     diameters: str,
+    observer_state_scope: str,
 ) -> list[str]:
     command = [
         args.python,
@@ -356,9 +372,9 @@ def _curve_command(
         command.extend(("--memory-top-n", str(args.memory_top_n)))
     if args.time_chunk_steps is not None:
         command.extend(("--time-chunk-steps", str(args.time_chunk_steps)))
-    if args.benchmark_observer_state_scope != "default":
+    if observer_state_scope != "default":
         command.extend(
-            ("--benchmark-observer-state-scope", args.benchmark_observer_state_scope)
+            ("--benchmark-observer-state-scope", observer_state_scope)
         )
     if script == "recruitment_curves" and args.amplitude_count is not None:
         command.extend(("--amplitude-count", str(args.amplitude_count)))
@@ -397,6 +413,10 @@ def _summarize_curve_run(
         "solver": run.solver,
         "tiled_thomas_block_b": "" if run.tiled_thomas_block_b is None else run.tiled_thomas_block_b,
         "recording": options.get("recording", run.recording),
+        "observer_state_scope": options.get(
+            "benchmark_observer_state_scope",
+            run.observer_state_scope,
+        ),
         "n_axons": options.get("n_axons", run.n_axons),
         "nx": options.get("nx", run.nx),
         "precision": options.get("precision", run.precision),
@@ -513,15 +533,21 @@ def _label(
     solver: str,
     block_b: int | None,
     recording: str,
+    observer_state_scope: str,
     n_axons: int,
     nx: int,
     precision: str,
     diameters: str,
 ) -> str:
     solver_token = solver if block_b is None else f"{solver}_b{block_b}"
+    observer_token = (
+        ""
+        if observer_state_scope == "default"
+        else f"__obs_{observer_state_scope}"
+    )
     return (
         f"{script}__{platform}__{solver_token}__{recording}__"
-        f"n{n_axons}__nx{nx}__{precision}__{diameters}"
+        f"n{n_axons}__nx{nx}__{precision}__{diameters}{observer_token}"
     )
 
 
@@ -547,6 +573,7 @@ def _run_spec_json(run: RunSpec) -> dict[str, Any]:
         "solver": run.solver,
         "tiled_thomas_block_b": run.tiled_thomas_block_b,
         "recording": run.recording,
+        "observer_state_scope": run.observer_state_scope,
         "n_axons": run.n_axons,
         "nx": run.nx,
         "precision": run.precision,
@@ -570,16 +597,17 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         [
             "## Fastest Rows",
             "",
-            "| group | solver | block_b | warm mean ms | total simulate ms | variants | status |",
-            "| --- | --- | ---: | ---: | ---: | --- | --- |",
+            "| group | solver | block_b | observer_scope | warm mean ms | total simulate ms | variants | status |",
+            "| --- | --- | ---: | --- | ---: | ---: | --- | --- |",
         ]
     )
     for group, row in _fastest_rows(rows):
         lines.append(
-            "| {group} | {solver} | {block_b} | {warm} | {total} | {variants} | {status} |".format(
+            "| {group} | {solver} | {block_b} | {observer_scope} | {warm} | {total} | {variants} | {status} |".format(
                 group=group,
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
+                observer_scope=row.get("observer_state_scope", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
                 variants=row.get("effective_variants", ""),
@@ -591,18 +619,19 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             "",
             "## All Rows",
             "",
-            "| script | platform | solver | block_b | recording | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
-            "| --- | --- | --- | ---: | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
+            "| script | platform | solver | block_b | recording | observer_scope | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
+            "| --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {script} | {platform} | {solver} | {block_b} | {recording} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
+            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
                 script=row.get("script", ""),
                 platform=row.get("platform", ""),
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
                 recording=row.get("recording", ""),
+                observer_scope=row.get("observer_state_scope", ""),
                 n_axons=row.get("n_axons", ""),
                 nx=row.get("nx", ""),
                 precision=row.get("precision", ""),

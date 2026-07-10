@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 import axonscope as axs
+from benchmark.campaigns.double_cable_solver_policy import (
+    main as run_solver_policy_campaign,
+)
 from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
@@ -213,6 +217,61 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["memory_top_n"] == 7
     assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
     assert options["benchmark_observer_state_scope"] == "full"
+
+
+def test_solver_policy_campaign_expands_observer_state_scope_matrix(
+    tmp_path: Path,
+    capsys,
+):
+    assert (
+        run_solver_policy_campaign(
+            [
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--curve-script",
+                "recruitment_curves",
+                "--solver",
+                "auto",
+                "--recording",
+                "observer_only",
+                "--n-axons",
+                "4",
+                "--nx",
+                "21",
+                "--precision",
+                "fp32",
+                "--diameters",
+                "same_diameter",
+                "--time-chunk-steps",
+                "2",
+                "--benchmark-observer-state-scope",
+                "default,full",
+                "--output",
+                str(tmp_path),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert "planned: 2 double-cable solver policy runs" in out
+    assert "__obs_full" in out
+    assert "--benchmark-observer-state-scope full" in out
+
+    manifest = json.loads(
+        (tmp_path / "double_cable_solver_policy_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [
+        run["observer_state_scope"]
+        for run in manifest["runs"]
+    ] == ["default", "full"]
+    assert "--benchmark-observer-state-scope" not in manifest["runs"][0]["command"]
+    assert "--benchmark-observer-state-scope" in manifest["runs"][1]["command"]
 
 
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():

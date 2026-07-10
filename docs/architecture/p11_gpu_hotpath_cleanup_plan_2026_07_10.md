@@ -93,3 +93,32 @@ Artifact:
 ```text
 benchmark/results/kaggle/20260710_193127_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-full-state-5bf9a8e/outputs/extracted
 ```
+
+## Same-Commit A/B Preparation
+
+The double-cable solver policy campaign now accepts comma-separated observer
+state scopes:
+
+```bash
+--benchmark-observer-state-scope default,full
+```
+
+This runs the default chunk-local observer state and the full-duration observer
+state in the same campaign, so the comparison shares one commit, one Kaggle
+image, and one hardware allocation. The campaign summary/report include
+`observer_state_scope`, and the solver-policy plotter treats that value as a
+condition dimension instead of merging `default` and `full` rows.
+
+Local gate:
+
+- two-run CPU smoke with `default,full` passed;
+- plot smoke on that summary passed;
+- unit coverage checks that `default` keeps the historical command and `full`
+  gets a distinct `__obs_full` run with the explicit benchmark override.
+
+Next gate:
+
+- rerun the P100 mini shape with
+  `--benchmark-observer-state-scope default,full`;
+- use that same-commit A/B result to decide whether the full observer-state
+  prototype deserves a broader CPU/GPU matrix.

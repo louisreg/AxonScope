@@ -2020,6 +2020,14 @@ PTA/block-Thomas GPU gate:
   versus full observer-state matrix before considering a default change.
   Artifact:
   `benchmark/results/kaggle/20260710_193127_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-full-state-5bf9a8e/outputs/extracted`.
+  The double-cable solver policy campaign now accepts comma-separated
+  `--benchmark-observer-state-scope` values, so `default,full` can run inside
+  the same Kaggle kernel/image/commit. The summary/report include
+  `observer_state_scope`, and `plot_double_cable_solver_policy.py` treats that
+  field as a condition dimension instead of merging rows. Local A/B smoke
+  `benchmark/results/p11_observer_scope_ab_campaign_smoke` and plot smoke
+  `benchmark/results/p11_observer_scope_ab_plot_smoke` passed; next gate is the
+  same P100 mini with `default,full`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
