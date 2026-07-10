@@ -383,6 +383,13 @@ def monitor_kernel(
         print(f"Kaggle run completed: {status}")
         print(f"Run artifacts: {run_dir}")
         return 0
+    if not args.no_download:
+        download_outputs(
+            kaggle_bin,
+            kernel_ref,
+            run_dir,
+            file_pattern=args.output_file_pattern,
+        )
     print(f"Kaggle run ended with {status}. See {run_dir / 'kernel.log'}")
     return 1
 

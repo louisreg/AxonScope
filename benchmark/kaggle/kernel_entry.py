@@ -40,24 +40,33 @@ def main() -> None:
     run_id = str(config.get("run_id") or _default_run_id(config))
     output_dir = WORK_DIR / "benchmark" / "results" / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        _write_json(output_dir / "kaggle_config_effective.json", config)
+        _clone_repo(config)
+        _install_repo(config)
+        _verify_gpu_if_requested(config)
+        _write_json(output_dir / "kaggle_hardware.json", _hardware_metadata(config))
 
-    _write_json(output_dir / "kaggle_config_effective.json", config)
-    _clone_repo(config)
-    _install_repo(config)
-    _verify_gpu_if_requested(config)
-    _write_json(output_dir / "kaggle_hardware.json", _hardware_metadata(config))
-
-    command = _benchmark_command(config, output_dir)
-    _write_json(
-        output_dir / "kaggle_command.json",
-        {"command": command, "cwd": str(CHECKOUT_DIR)},
-    )
-    _run(command, cwd=CHECKOUT_DIR)
-
-    archive_base = WORK_DIR / f"axonscope_benchmark_results_{run_id}"
-    archive = shutil.make_archive(str(archive_base), "zip", output_dir)
-    print(f"AxonScope benchmark results: {output_dir}")
-    print(f"AxonScope benchmark archive: {archive}")
+        command = _benchmark_command(config, output_dir)
+        _write_json(
+            output_dir / "kaggle_command.json",
+            {"command": command, "cwd": str(CHECKOUT_DIR)},
+        )
+        _run(command, cwd=CHECKOUT_DIR)
+    except BaseException as exc:
+        _write_json(
+            output_dir / "kaggle_failure.json",
+            {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+        raise
+    finally:
+        archive_base = WORK_DIR / f"axonscope_benchmark_results_{run_id}"
+        archive = shutil.make_archive(str(archive_base), "zip", output_dir)
+        print(f"AxonScope benchmark results: {output_dir}")
+        print(f"AxonScope benchmark archive: {archive}")
 
 
 def _load_config() -> dict[str, Any]:

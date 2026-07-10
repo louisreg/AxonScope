@@ -41,6 +41,10 @@ RECORDING_LABELS = {
     "observer_only": "observer",
     "probe_vm": "probe Vm",
 }
+DIAMETER_LABELS = {
+    "same_diameter": "same diameter",
+    "different_diameters": "different diameters",
+}
 METRIC_LABELS = {
     "curve_simulate_warm_mean_ms": "warm mean",
     "curve_simulate_cold_ms": "cold",
@@ -145,6 +149,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows,
             output=args.output / "warm_scaling_by_naxons.png",
             title=f"{args.title}: warm scaling by population size",
+        )
+    )
+    figures.append(
+        _plot_diameter_warm_scaling(
+            rows,
+            output=args.output / "warm_scaling_same_vs_different_diameters.png",
+            title=f"{args.title}: same vs different diameter warm scaling",
+        )
+    )
+    figures.append(
+        _plot_diameter_ratio_heatmap(
+            rows,
+            output=args.output / "warm_different_vs_same_diameter_ratio.png",
+            title=f"{args.title}: different/same diameter warm-time ratio",
         )
     )
     figures.append(
@@ -266,6 +284,21 @@ def _plot_speedup_vs_auto(
         matrix.append(row_values)
 
     finite = [value for row in matrix for value in row if not math.isnan(value)]
+    if not finite:
+        fig, ax = plt.subplots(figsize=(9.0, 3.0))
+        ax.axis("off")
+        ax.text(
+            0.5,
+            0.5,
+            "No auto baseline in this summary.\nSpeedup vs auto is not defined.",
+            ha="center",
+            va="center",
+            fontsize=12,
+        )
+        ax.set_title(title)
+        fig.tight_layout()
+        _save(fig, output)
+        return output
     vmin = min(min(finite), 0.5)
     vmax = max(max(finite), 1.5)
     norm = TwoSlopeNorm(vmin=vmin, vcenter=1.0, vmax=vmax)
@@ -302,6 +335,12 @@ def _plot_winner_grid(
     recordings = _unique_sorted(row["recording"] for row in rows)
     n_axons_values = sorted({int(row["n_axons"]) for row in rows})
     nx_values = sorted({int(row["nx"]) for row in rows})
+    diameter_values = _unique_sorted(row["diameters"] for row in rows)
+    x_values = [
+        (nx, diameters)
+        for nx in nx_values
+        for diameters in diameter_values
+    ]
     solver_to_int = {solver: index for index, solver in enumerate(SOLVER_ORDER)}
     cmap = ListedColormap([SOLVER_COLORS[solver] for solver in SOLVER_ORDER])
     norm = BoundaryNorm(range(len(SOLVER_ORDER) + 1), len(SOLVER_ORDER))
@@ -315,11 +354,17 @@ def _plot_winner_grid(
     for row_index, script in enumerate(scripts):
         for col_index, recording in enumerate(recordings):
             ax = axes[row_index][col_index]
-            data = [[math.nan for _ in nx_values] for _ in n_axons_values]
-            text = [["" for _ in nx_values] for _ in n_axons_values]
+            data = [[math.nan for _ in x_values] for _ in n_axons_values]
+            text = [["" for _ in x_values] for _ in n_axons_values]
             for y, n_axons in enumerate(n_axons_values):
-                for x, nx in enumerate(nx_values):
-                    condition = (script, recording, str(n_axons), str(nx))
+                for x, (nx, diameters) in enumerate(x_values):
+                    condition = (
+                        script,
+                        recording,
+                        str(n_axons),
+                        str(nx),
+                        diameters,
+                    )
                     solver_rows = by_condition.get(condition, {})
                     winner = _winner(solver_rows)
                     if winner:
@@ -327,7 +372,13 @@ def _plot_winner_grid(
                         text[y][x] = _short_solver(winner)
             ax.imshow(data, cmap=cmap, norm=norm, aspect="auto")
             ax.set_title(f"{SCRIPT_LABELS.get(script, script)} / {RECORDING_LABELS.get(recording, recording)}")
-            ax.set_xticks(range(len(nx_values)), [str(value) for value in nx_values])
+            ax.set_xticks(
+                range(len(x_values)),
+                [
+                    f"Nx={nx}\n{_short_diameters(diameters)}"
+                    for nx, diameters in x_values
+                ],
+            )
             ax.set_yticks(range(len(n_axons_values)), [str(value) for value in n_axons_values])
             ax.set_xlabel("Nx")
             ax.set_ylabel("Naxons")
@@ -356,7 +407,8 @@ def _plot_warm_scaling(
     scripts = _unique_sorted(row["script"] for row in rows)
     recordings = _unique_sorted(row["recording"] for row in rows)
     nx_values = sorted({int(row["nx"]) for row in rows})
-    by_key: dict[tuple[str, str, str, int, int], float] = {}
+    diameter_values = _unique_sorted(row["diameters"] for row in rows)
+    by_key: dict[tuple[str, str, str, int, int, str], float] = {}
     for row in rows:
         by_key[
             (
@@ -365,6 +417,7 @@ def _plot_warm_scaling(
                 _solver_token(row),
                 int(row["nx"]),
                 int(row["n_axons"]),
+                str(row["diameters"]),
             )
         ] = _float(row["curve_simulate_warm_mean_ms"]) or math.nan
 
@@ -379,31 +432,41 @@ def _plot_warm_scaling(
             ax = axes[row_index][col_index]
             for solver in SOLVER_ORDER:
                 for nx in nx_values:
-                    points = [
-                        (n_axons, by_key[(script, recording, solver, nx, n_axons)])
-                        for n_axons in sorted(
-                            {
-                                key[4]
-                                for key in by_key
-                                if key[0] == script and key[1] == recording and key[2] == solver and key[3] == nx
-                            }
+                    for diameters in diameter_values:
+                        points = [
+                            (
+                                n_axons,
+                                by_key[(script, recording, solver, nx, n_axons, diameters)],
+                            )
+                            for n_axons in sorted(
+                                {
+                                    key[4]
+                                    for key in by_key
+                                    if key[0] == script
+                                    and key[1] == recording
+                                    and key[2] == solver
+                                    and key[3] == nx
+                                    and key[5] == diameters
+                                }
+                            )
+                            if not math.isnan(
+                                by_key[(script, recording, solver, nx, n_axons, diameters)]
+                            )
+                        ]
+                        if not points:
+                            continue
+                        linestyle = "-" if diameters == "same_diameter" else "--"
+                        marker = "o" if nx == min(nx_values) else "s"
+                        ax.plot(
+                            [point[0] for point in points],
+                            [point[1] for point in points],
+                            color=SOLVER_COLORS[solver],
+                            linestyle=linestyle,
+                            marker=marker,
+                            linewidth=1.6,
+                            markersize=4,
+                            alpha=0.9,
                         )
-                        if not math.isnan(by_key[(script, recording, solver, nx, n_axons)])
-                    ]
-                    if not points:
-                        continue
-                    linestyle = "-" if nx == min(nx_values) else "--"
-                    marker = "o" if nx == min(nx_values) else "s"
-                    ax.plot(
-                        [point[0] for point in points],
-                        [point[1] for point in points],
-                        color=SOLVER_COLORS[solver],
-                        linestyle=linestyle,
-                        marker=marker,
-                        linewidth=1.6,
-                        markersize=4,
-                        alpha=0.9,
-                    )
             ax.set_xscale("log", base=2)
             ax.set_yscale("log")
             ax.set_xticks([64, 1024, 4096, 8192], ["64", "1024", "4096", "8192"])
@@ -420,14 +483,184 @@ def _plot_warm_scaling(
         plt.Line2D([0], [0], color="black", linestyle="-", marker="o", label=f"Nx={min(nx_values)}"),
         plt.Line2D([0], [0], color="black", linestyle="--", marker="s", label=f"Nx={max(nx_values)}"),
     ]
+    diameter_handles = [
+        plt.Line2D([0], [0], color="black", linestyle="-", label="same diameter"),
+        plt.Line2D([0], [0], color="black", linestyle="--", label="different diameters"),
+    ]
     fig.legend(
-        handles=solver_handles + nx_handles,
+        handles=solver_handles + nx_handles + diameter_handles,
         loc="lower center",
         ncol=4,
         frameon=False,
     )
     fig.suptitle(title)
     fig.tight_layout(rect=(0, 0.11, 1, 0.96))
+    _save(fig, output)
+    return output
+
+
+def _plot_diameter_warm_scaling(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    output: Path,
+    title: str,
+) -> Path:
+    scripts = _unique_sorted(row["script"] for row in rows)
+    recordings = _unique_sorted(row["recording"] for row in rows)
+    nx_values = sorted({int(row["nx"]) for row in rows})
+    solvers = [solver for solver in SOLVER_ORDER if any(_solver_token(row) == solver for row in rows)]
+    by_key: dict[tuple[str, str, str, int, int, str], float] = {}
+    for row in rows:
+        by_key[
+            (
+                str(row["script"]),
+                str(row["recording"]),
+                _solver_token(row),
+                int(row["nx"]),
+                int(row["n_axons"]),
+                str(row["diameters"]),
+            )
+        ] = _float(row["curve_simulate_warm_mean_ms"]) or math.nan
+
+    fig, axes = plt.subplots(
+        len(scripts),
+        len(recordings),
+        figsize=(6.0 * len(recordings), 4.2 * len(scripts)),
+        squeeze=False,
+    )
+    for row_index, script in enumerate(scripts):
+        for col_index, recording in enumerate(recordings):
+            ax = axes[row_index][col_index]
+            for solver in solvers:
+                for nx in nx_values:
+                    for diameters, linestyle in (
+                        ("same_diameter", "-"),
+                        ("different_diameters", "--"),
+                    ):
+                        points = [
+                            (key[4], value)
+                            for key, value in by_key.items()
+                            if key[0] == script
+                            and key[1] == recording
+                            and key[2] == solver
+                            and key[3] == nx
+                            and key[5] == diameters
+                            and not math.isnan(value)
+                        ]
+                        points.sort()
+                        if not points:
+                            continue
+                        ax.plot(
+                            [point[0] for point in points],
+                            [point[1] for point in points],
+                            color=SOLVER_COLORS.get(solver, "#4c78a8"),
+                            linestyle=linestyle,
+                            marker="o",
+                            linewidth=1.8,
+                            markersize=4,
+                            label=f"{_short_solver(solver)} / {_short_diameters(diameters)}",
+                        )
+            ax.set_xscale("log", base=2)
+            ax.set_yscale("log")
+            ax.set_xticks([64, 1024, 4096, 8192], ["64", "1024", "4096", "8192"])
+            ax.set_title(f"{SCRIPT_LABELS.get(script, script)} / {RECORDING_LABELS.get(recording, recording)}")
+            ax.set_xlabel("Naxons")
+            ax.set_ylabel("warm mean ms")
+            ax.grid(True, which="both", alpha=0.25)
+
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False)
+    fig.suptitle(title)
+    fig.tight_layout(rect=(0, 0.10 if handles else 0.0, 1, 0.96))
+    _save(fig, output)
+    return output
+
+
+def _plot_diameter_ratio_heatmap(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    output: Path,
+    title: str,
+) -> Path:
+    scripts = _unique_sorted(row["script"] for row in rows)
+    recordings = _unique_sorted(row["recording"] for row in rows)
+    n_axons_values = sorted({int(row["n_axons"]) for row in rows})
+    nx_values = sorted({int(row["nx"]) for row in rows})
+    solvers = [solver for solver in SOLVER_ORDER if any(_solver_token(row) == solver for row in rows)]
+    x_values = [(n_axons, nx) for n_axons in n_axons_values for nx in nx_values]
+    by_key: dict[tuple[str, str, str, int, int, str], float] = {}
+    for row in rows:
+        by_key[
+            (
+                str(row["script"]),
+                str(row["recording"]),
+                _solver_token(row),
+                int(row["n_axons"]),
+                int(row["nx"]),
+                str(row["diameters"]),
+            )
+        ] = _float(row["curve_simulate_warm_mean_ms"]) or math.nan
+
+    matrix: list[list[float]] = []
+    labels: list[str] = []
+    for script in scripts:
+        for recording in recordings:
+            for solver in solvers:
+                labels.append(
+                    f"{SCRIPT_LABELS.get(script, script)} | "
+                    f"{RECORDING_LABELS.get(recording, recording)} | "
+                    f"{_short_solver(solver)}"
+                )
+                row_values: list[float] = []
+                for n_axons, nx in x_values:
+                    same = by_key.get((script, recording, solver, n_axons, nx, "same_diameter"))
+                    different = by_key.get(
+                        (script, recording, solver, n_axons, nx, "different_diameters")
+                    )
+                    row_values.append(
+                        different / same
+                        if same and different and same > 0.0 and different > 0.0
+                        else math.nan
+                    )
+                matrix.append(row_values)
+
+    finite = [value for row in matrix for value in row if not math.isnan(value)]
+    if not finite:
+        fig, ax = plt.subplots(figsize=(9.0, 3.0))
+        ax.axis("off")
+        ax.text(
+            0.5,
+            0.5,
+            "Need both same_diameter and different_diameters rows\nfor this ratio plot.",
+            ha="center",
+            va="center",
+            fontsize=12,
+        )
+        ax.set_title(title)
+        fig.tight_layout()
+        _save(fig, output)
+        return output
+
+    vmin = min(min(finite), 0.75)
+    vmax = max(max(finite), 1.25)
+    norm = TwoSlopeNorm(vmin=vmin, vcenter=1.0, vmax=vmax)
+    fig, ax = plt.subplots(figsize=(max(9.0, 1.2 * len(x_values)), max(4.0, 0.5 * len(labels))))
+    image = ax.imshow(matrix, aspect="auto", cmap="RdYlGn_r", norm=norm)
+    ax.set_title(title)
+    ax.set_xticks(
+        range(len(x_values)),
+        [f"N={n_axons}\nNx={nx}" for n_axons, nx in x_values],
+    )
+    ax.set_yticks(range(len(labels)), labels)
+    ax.tick_params(axis="both", labelsize=8)
+    cbar = fig.colorbar(image, ax=ax, fraction=0.025, pad=0.02)
+    cbar.set_label("different diameter warm time / same diameter warm time")
+    for y, row in enumerate(matrix):
+        for x, value in enumerate(row):
+            if not math.isnan(value):
+                ax.text(x, y, f"{value:.2f}x", ha="center", va="center", fontsize=7)
+    fig.tight_layout()
     _save(fig, output)
     return output
 
@@ -493,21 +726,29 @@ def _plot_stage_by_solver_panels(
     recordings = _unique_sorted(row["recording"] for row in rows)
     n_axons_values = sorted({int(row["n_axons"]) for row in rows})
     nx_values = sorted({int(row["nx"]) for row in rows})
+    diameter_values = _unique_sorted(row["diameters"] for row in rows)
+    x_values = [(nx, diameters) for nx in nx_values for diameters in diameter_values]
     by_condition = _rows_by_condition(rows)
 
     for script in scripts:
         for recording in recordings:
             fig, axes = plt.subplots(
                 len(n_axons_values),
-                len(nx_values),
-                figsize=(4.9 * len(nx_values), 2.55 * len(n_axons_values)),
+                len(x_values),
+                figsize=(4.9 * len(x_values), 2.55 * len(n_axons_values)),
                 squeeze=False,
                 sharey=normalize,
             )
             for row_index, n_axons in enumerate(n_axons_values):
-                for col_index, nx in enumerate(nx_values):
+                for col_index, (nx, diameters) in enumerate(x_values):
                     ax = axes[row_index][col_index]
-                    condition = (script, recording, str(n_axons), str(nx))
+                    condition = (
+                        script,
+                        recording,
+                        str(n_axons),
+                        str(nx),
+                        diameters,
+                    )
                     solver_rows = by_condition.get(condition, {})
                     x_positions = list(range(len(SOLVER_ORDER)))
                     bottoms = [0.0] * len(SOLVER_ORDER)
@@ -563,7 +804,10 @@ def _plot_stage_by_solver_panels(
                         color="#bab0ac",
                         label="other",
                     )
-                    ax.set_title(f"N={n_axons}, Nx={nx}", fontsize=9)
+                    ax.set_title(
+                        f"N={n_axons}, Nx={nx}, {_short_diameters(diameters)}",
+                        fontsize=9,
+                    )
                     ax.set_xticks(
                         x_positions,
                         [_short_solver(solver) for solver in SOLVER_ORDER],
@@ -603,6 +847,7 @@ def _write_stage_comparison_csv(
     fields = [
         "script",
         "recording",
+        "diameters",
         "n_axons",
         "nx",
         "solver",
@@ -623,6 +868,7 @@ def _write_stage_comparison_csv(
             key=lambda item: (
                 str(item["script"]),
                 str(item["recording"]),
+                str(item["diameters"]),
                 int(item["n_axons"]),
                 int(item["nx"]),
                 SOLVER_ORDER.index(_solver_token(item))
@@ -635,6 +881,7 @@ def _write_stage_comparison_csv(
             out: dict[str, Any] = {
                 "script": row.get("script", ""),
                 "recording": row.get("recording", ""),
+                "diameters": row.get("diameters", ""),
                 "n_axons": row.get("n_axons", ""),
                 "nx": row.get("nx", ""),
                 "solver": _solver_token(row),
@@ -695,7 +942,7 @@ def _save(fig: plt.Figure, output: Path) -> None:
     plt.close(fig)
 
 
-def _conditions(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, str, str, str]]:
+def _conditions(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, str, str, str, str]]:
     return sorted(
         {
             (
@@ -703,23 +950,25 @@ def _conditions(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, str, str, 
                 str(row["recording"]),
                 str(row["n_axons"]),
                 str(row["nx"]),
+                str(row["diameters"]),
             )
             for row in rows
         },
-        key=lambda item: (item[0], item[1], int(item[2]), int(item[3])),
+        key=lambda item: (item[0], item[1], int(item[2]), int(item[3]), item[4]),
     )
 
 
 def _rows_by_condition(
     rows: Sequence[Mapping[str, Any]]
-) -> dict[tuple[str, str, str, str], dict[str, Mapping[str, Any]]]:
-    grouped: dict[tuple[str, str, str, str], dict[str, Mapping[str, Any]]] = defaultdict(dict)
+) -> dict[tuple[str, str, str, str, str], dict[str, Mapping[str, Any]]]:
+    grouped: dict[tuple[str, str, str, str, str], dict[str, Mapping[str, Any]]] = defaultdict(dict)
     for row in rows:
         condition = (
             str(row["script"]),
             str(row["recording"]),
             str(row["n_axons"]),
             str(row["nx"]),
+            str(row["diameters"]),
         )
         grouped[condition][_solver_token(row)] = row
     return grouped
@@ -740,12 +989,12 @@ def _solver_token(row: Mapping[str, Any]) -> str:
     return f"{solver}_b{block_b}" if block_b else solver
 
 
-def _condition_label(condition: tuple[str, str, str, str]) -> str:
-    script, recording, n_axons, nx = condition
+def _condition_label(condition: tuple[str, str, str, str, str]) -> str:
+    script, recording, n_axons, nx, diameters = condition
     return (
         f"{SCRIPT_LABELS.get(script, script)} | "
         f"{RECORDING_LABELS.get(recording, recording)} | "
-        f"N={n_axons} | Nx={nx}"
+        f"N={n_axons} | Nx={nx} | {_short_diameters(diameters)}"
     )
 
 
@@ -758,6 +1007,13 @@ def _short_solver(solver: str) -> str:
         "tiled_thomas_b32": "Triton b32",
         "tiled_thomas_b64": "Triton b64",
     }.get(solver, solver)
+
+
+def _short_diameters(diameters: str) -> str:
+    return {
+        "same_diameter": "same",
+        "different_diameters": "different",
+    }.get(diameters, DIAMETER_LABELS.get(diameters, diameters))
 
 
 def _format_ms(value: float) -> str:

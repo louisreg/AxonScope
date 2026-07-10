@@ -214,6 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if result.returncode != 0:
             failed = True
+            _print_failure_tail(run.run_dir / "campaign_command.log")
         rows.append(_summarize_curve_run(run, status=status, returncode=result.returncode))
         _write_csv(summary_path, rows)
         _write_report(report_path, rows)
@@ -414,6 +415,18 @@ def _summarize_curve_run(
         "results_assemble_rows_ms": _sum_duration(events, "results.assemble_rows"),
         "rss_end_mib_max": _peak_memory(events, "rss_end_mib"),
     }
+
+
+def _print_failure_tail(path: Path, *, max_lines: int = 80) -> None:
+    if not path.exists():
+        print(f"failure log missing: {path}", flush=True)
+        return
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = lines[-max_lines:]
+    print(f"--- failure log tail: {path} ---", flush=True)
+    for line in tail:
+        print(line, flush=True)
+    print("--- end failure log tail ---", flush=True)
 
 
 def _parse_scripts(values: Sequence[str] | None) -> tuple[str, ...]:
