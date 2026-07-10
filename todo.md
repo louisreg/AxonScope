@@ -2025,6 +2025,20 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/p11_observer_global_raster_local_smoke` with
   `time_chunk_steps=50`, `Nt=100`, and two solver chunks confirms
   `resolved_observer_state_scope=full` and no `kernel.combine_observer_chunks`.
+  Matching P100 mini gate at commit `2c46342` passed with explicit
+  `--time-chunk-steps 50`: it keeps two solver chunks
+  (`resolved_observer_state_scope=full`) and removes
+  `kernel.combine_observer_chunks`. Versus the old chunked path at `7b69bc5`,
+  warm `curve.simulate` improves from about `323 ms` to `283 ms`; total
+  `curve.simulate` improves from about `10.99 s` to `10.73 s`;
+  `kernel.combine_observer_chunks` drops from about `361 ms` total to absent;
+  `kernel.finalize_observer` rises from about `14 ms` to `217 ms`, so the
+  net observer-boundary gain for the explicit two-chunk case is positive but
+  still leaves finalization/to-host cost visible. Compared with the short-run
+  default `256` chunk gate, the one-chunk case remains faster, as expected; the
+  structural win is removing recombine when longer simulations genuinely need
+  multiple chunks. Artifact:
+  `benchmark/results/kaggle/20260710_205916_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-global-vmraster-2c46342/outputs/extracted`.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about
