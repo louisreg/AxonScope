@@ -63,6 +63,7 @@ class _PhasePool:
     pool: tuple[axs.AxonInstance, ...]
     row_meta: tuple[dict[str, Any], ...]
     update_handles: tuple["_DriveUpdateHandle", ...]
+    shared_stimulus: "_SharedStimulusHandle | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +88,12 @@ class _DriveUpdateHandle:
     drive_id: Any
     footprint: Any
     metadata: Any
+
+
+@dataclass(slots=True)
+class _SharedStimulusHandle:
+    stimulus: Any
+    active: bool = True
 
 
 def run_threshold_curves(args: Any) -> int:
@@ -490,12 +497,17 @@ def _build_phase_pool(
         n_axons=int(options["n_axons"]),
         case_name=selected_case,
     ):
-        pool, row_meta, update_handles = _build_pool(
+        pool, row_meta, update_handles, shared_stimulus = _build_pool(
             options,
             amplitudes_uA,
             curve_context=curve_context,
         )
-    return _PhasePool(pool=pool, row_meta=row_meta, update_handles=update_handles)
+    return _PhasePool(
+        pool=pool,
+        row_meta=row_meta,
+        update_handles=update_handles,
+        shared_stimulus=shared_stimulus,
+    )
 
 
 def _evaluate_amplitudes(
@@ -648,6 +660,7 @@ def _update_pool_amplitudes(
         raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
     if len(handles) != len(pool):
         raise RuntimeError("benchmark phase pool has inconsistent update handles.")
+    unique_amplitudes = np.unique(amplitudes)
     stimulus_cache: dict[float, Any] = {}
     stimulation_cache: dict[tuple[int, int], Any] = {}
     stimulation_cache_hits = 0
@@ -655,9 +668,31 @@ def _update_pool_amplitudes(
     with benchmark_span(
         "curve.update_amplitudes.rows",
         n_axons=len(pool),
-        unique_amplitudes=int(np.unique(amplitudes).size),
+        unique_amplitudes=int(unique_amplitudes.size),
         unique_footprints=len({id(handle.footprint) for handle in handles}),
     ):
+        if (
+            phase_pool.shared_stimulus is not None
+            and phase_pool.shared_stimulus.active
+            and unique_amplitudes.size == 1
+        ):
+            with benchmark_span("curve.update_amplitudes.stimulus_build"):
+                stimulus = _stimulus_for_amplitude(options, float(unique_amplitudes[0]))
+            _copy_stimulus_state(
+                target=phase_pool.shared_stimulus.stimulus,
+                source=stimulus,
+            )
+            record_benchmark_metadata(
+                curve_update_mode="shared_stimulus",
+                curve_update_python_row_updates=0,
+                curve_update_stimulation_cache_hits=int(len(pool)),
+                curve_update_stimulation_cache_misses=0,
+                curve_update_unique_stimulations=1,
+            )
+            return
+
+        if phase_pool.shared_stimulus is not None:
+            phase_pool.shared_stimulus.active = False
         for handle, amplitude in zip(handles, amplitudes, strict=True):
             amplitude_key = float(amplitude)
             stimulus = stimulus_cache.get(amplitude_key)
@@ -683,6 +718,8 @@ def _update_pool_amplitudes(
                 replace=True,
             )
         record_benchmark_metadata(
+            curve_update_mode="row_stimulations",
+            curve_update_python_row_updates=int(len(pool)),
             curve_update_stimulation_cache_hits=int(stimulation_cache_hits),
             curve_update_stimulation_cache_misses=int(stimulation_cache_misses),
             curve_update_unique_stimulations=int(len(stimulation_cache)),
@@ -698,6 +735,7 @@ def _build_pool(
     tuple[axs.AxonInstance, ...],
     tuple[dict[str, Any], ...],
     tuple[_DriveUpdateHandle, ...],
+    _SharedStimulusHandle | None,
 ]:
     rng = np.random.default_rng(int(options["seed"]))
     n_axons = int(options["n_axons"])
@@ -737,6 +775,14 @@ def _build_pool(
     stimulus_cache: dict[float, Any] = {}
     footprint_cache: dict[tuple[Any, ...], Any] = {}
     stimulation_cache: dict[tuple[int, int], Any] = {}
+    unique_initial_amplitudes = np.unique(amplitudes)
+    shared_stimulus = (
+        _SharedStimulusHandle(
+            _stimulus_for_amplitude(options, float(unique_initial_amplitudes[0]))
+        )
+        if unique_initial_amplitudes.size == 1
+        else None
+    )
     pool: list[axs.AxonInstance] = []
     row_meta: list[dict[str, Any]] = []
     update_handles: list[_DriveUpdateHandle] = []
@@ -760,11 +806,14 @@ def _build_pool(
                     template = _build_axon_template(options, row_cable, diameter_um)
                 templates[template_key] = template
 
-            amplitude_key = float(amplitudes[row])
-            stimulus = stimulus_cache.get(amplitude_key)
-            if stimulus is None:
-                stimulus = _stimulus_for_amplitude(options, amplitude_key)
-                stimulus_cache[amplitude_key] = stimulus
+            if shared_stimulus is not None:
+                stimulus = shared_stimulus.stimulus
+            else:
+                amplitude_key = float(amplitudes[row])
+                stimulus = stimulus_cache.get(amplitude_key)
+                if stimulus is None:
+                    stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                    stimulus_cache[amplitude_key] = stimulus
             stimulation = _point_source_stimulation_for_template(
                 template,
                 stimulus=stimulus,
@@ -803,8 +852,9 @@ def _build_pool(
             curve_build_unique_stimulations=int(
                 len({id(instance.extracellular_stimulation) for instance in pool})
             ),
+            curve_build_shared_stimulus=shared_stimulus is not None,
         )
-    return tuple(pool), tuple(row_meta), tuple(update_handles)
+    return tuple(pool), tuple(row_meta), tuple(update_handles), shared_stimulus
 
 
 def _build_axon_template(
@@ -924,6 +974,13 @@ def _point_source_stimulation_from_footprint(
     if stimulation_cache is not None:
         stimulation_cache[cache_key] = stimulation
     return stimulation
+
+
+def _copy_stimulus_state(*, target: Any, source: Any) -> None:
+    object.__setattr__(target, "t", np.asarray(source.t, dtype=float))
+    object.__setattr__(target, "y", np.asarray(source.y, dtype=float))
+    object.__setattr__(target, "mode", source.mode)
+    object.__setattr__(target, "y_unit", source.y_unit)
 
 
 def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:

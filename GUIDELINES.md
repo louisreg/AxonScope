@@ -1,6 +1,6 @@
 # AxonScope Architecture Guidelines
 
-Snapshot: 2026-07-04.
+Snapshot: 2026-07-10.
 
 This is the consolidated architecture reference for AxonScope. It is normative
 for project direction, refactors, public API shape, examples, and cleanup
@@ -123,6 +123,10 @@ Current focus after the P9 closeout:
   static-footprint or compact-source rows. Keep it behind equivalence tests and
   benchmark evidence, and remove dense internal routes when the factorized
   route covers the behavior.
+- Runtime dispatch batches rows by compatible runtime shape and membrane
+  structure plus the same temporal stimulation signature. Diameters and sampled
+  extracellular footprints may vary inside a parameterized batch; rows with
+  different temporal stimulation signatures must form separate dispatch groups.
 - Benchmark modes, presets, flags, and names are documented in
   `benchmark/README.md`. Treat fresh benchmark outputs as evidence only when
   the command, machine metadata, git state, and validation context are recorded.

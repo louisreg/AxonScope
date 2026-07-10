@@ -2015,6 +2015,20 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260710_213627_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-curve-orch-gpu-87c1f90/outputs/extracted`
   and
   `benchmark/results/kaggle/20260710_213956_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-curve-orch-thr-gpu-87c1f90/outputs/extracted`.
+  Follow-up runtime/benchmark cleanup now makes the dispatch rule explicit:
+  one batch requires compatible membrane/runtime shape plus the same temporal
+  stimulation signature; diameters and sampled footprints may vary inside a
+  parameterized batch, but different temporal stimuli form different dispatch
+  groups. The curve benchmark pool also keeps one shared mutable benchmark
+  stimulus when all rows use the same amplitude, so amplitude updates no longer
+  rebuild per-row stimulation objects. Local smoke
+  `benchmark/results/p11_shared_stimulus_local_smoke` (`recruitment_curves`,
+  CPU, observer-only, double-cable, `Naxons=512`, `Nx=89`) reports
+  `curve_build_shared_stimulus=true`, `vstim_shared_current_detection=identity`,
+  `curve.update_amplitudes.rows=0.70 ms`, and
+  `curve_update_python_row_updates=0` for 512 rows. Covered by the benchmark
+  suite and dispatcher tests; rerun a P100 mini gate before making a GPU timing
+  claim.
   Additional generic input cleanup now caches the static factorized footprint
   after conversion to a device-local JAX array, keyed by footprint, dtype, and
   current JAX device. This should avoid repeated host-to-device placement of

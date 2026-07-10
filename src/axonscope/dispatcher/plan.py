@@ -187,7 +187,7 @@ def _dispatch_plan_cache_key(
     """
 
     return (
-        "dispatch_plan_v1",
+        "dispatch_plan_v2",
         tuple(_dispatch_plan_row_cache_key(simulation) for simulation in simulations),
     )
 
@@ -196,6 +196,7 @@ def _dispatch_plan_row_cache_key(simulation: AxonInstance) -> tuple[Any, ...]:
     return (
         id(simulation),
         _solver_axon_cache_key(simulation),
+        _stimulation_temporal_identity_key(simulation),
         float(getattr(simulation, "v_init", 0.0)),
         float(getattr(simulation, "Veinit", 0.0)),
         float(getattr(simulation, "temperature", 0.0)),
@@ -215,6 +216,7 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
     items: list[DispatchItem] = []
     solver_cache: dict[tuple[Any, ...], SolverAxon] = {}
     metadata_cache: dict[tuple[Any, ...], _SolverDispatchMetadata] = {}
+    stimulus_signature_cache: dict[int, tuple[Any, ...]] = {}
     for index, axon in enumerate(axons):
         simulation = as_axon_instance(axon)
         cache_key = _solver_axon_cache_key(simulation)
@@ -232,6 +234,10 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
                 simulation=simulation,
                 solver_axon=solver_axon,
                 metadata=metadata,
+                stimulation_temporal_signature=_stimulation_temporal_signature(
+                    simulation,
+                    stimulus_signature_cache,
+                ),
             )
         )
     return tuple(items)
@@ -282,12 +288,14 @@ def _make_dispatch_item(
     solver_axon: SolverAxon,
     *,
     metadata: _SolverDispatchMetadata,
+    stimulation_temporal_signature: tuple[Any, ...],
 ) -> DispatchItem:
     signature = (
         metadata.mode,
         metadata.dtype_str,
         metadata.membrane_group_signature,
         metadata.nx_signature,
+        stimulation_temporal_signature,
         float(getattr(simulation, "v_init", 0.0)),
         float(getattr(simulation, "Veinit", 0.0)),
         float(getattr(simulation, "temperature", 0.0)),
@@ -388,6 +396,70 @@ def _array_signature(values: Any) -> tuple[tuple[int, ...], str, str]:
     arr = np.ascontiguousarray(np.asarray(values))
     digest = hashlib.sha1(arr.view(np.uint8)).hexdigest()
     return arr.shape, arr.dtype.str, digest
+
+
+def _stimulation_temporal_identity_key(simulation: AxonInstance) -> tuple[Any, ...]:
+    """Return a lightweight key that changes when stimulation objects change.
+
+    The cache follows object replacement, not waveform values. Public stimuli
+    are immutable; benchmark hot loops may mutate one shared stimulus while
+    preserving the same group compatibility.
+    """
+
+    rows = tuple(getattr(simulation, "extracellular_stimulations", ()))
+    if not rows:
+        return ()
+    return tuple(
+        tuple(id(getattr(drive, "stimulus", None)) for drive in stimulation.drives)
+        for stimulation in rows
+    )
+
+
+def _stimulation_temporal_signature(
+    simulation: AxonInstance,
+    stimulus_signature_cache: dict[int, tuple[Any, ...]],
+) -> tuple[Any, ...]:
+    """Return the temporal stimulation compatibility signature for grouping.
+
+    Footprints are deliberately excluded: a runtime batch may contain distinct
+    extracellular footprints, but rows should only share a group when their
+    temporal drive waveforms are compatible.
+    """
+
+    rows = tuple(getattr(simulation, "extracellular_stimulations", ()))
+    if not rows:
+        return ()
+    return tuple(
+        tuple(
+            _stimulus_temporal_signature(
+                getattr(drive, "stimulus", None),
+                stimulus_signature_cache,
+            )
+            for drive in stimulation.drives
+        )
+        for stimulation in rows
+    )
+
+
+def _stimulus_temporal_signature(
+    stimulus: Any,
+    stimulus_signature_cache: dict[int, tuple[Any, ...]],
+) -> tuple[Any, ...]:
+    if stimulus is None:
+        return ("none",)
+    cache_key = id(stimulus)
+    cached = stimulus_signature_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    signature = (
+        "stimulus",
+        _array_signature(getattr(stimulus, "t", ())),
+        _array_signature(getattr(stimulus, "y", ())),
+        getattr(stimulus, "mode", None),
+        getattr(stimulus, "y_unit", None),
+    )
+    stimulus_signature_cache[cache_key] = signature
+    return signature
 
 
 __all__ = [

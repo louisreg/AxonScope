@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+from axonscope.dispatcher import build_dispatch_plan
 from benchmark.campaigns.double_cable_solver_policy import (
     main as run_solver_policy_campaign,
 )
@@ -15,6 +16,23 @@ from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
 from benchmark.workloads.curve_runtime import _build_pool, _update_pool_amplitudes
+
+
+def _build_test_phase_pool(options, amplitudes, *, curve_context):
+    pool, row_meta, update_handles, shared_stimulus = _build_pool(
+        options,
+        amplitudes,
+        curve_context=curve_context,
+    )
+    return (
+        curve_runtime._PhasePool(
+            pool=pool,
+            row_meta=row_meta,
+            update_handles=update_handles,
+            shared_stimulus=shared_stimulus,
+        ),
+        row_meta,
+    )
 
 
 def test_benchmark_launcher_lists_two_curve_scripts_and_presets(capsys):
@@ -368,13 +386,14 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.asarray([0.1, 0.2], dtype=float),
         curve_context="threshold",
     )
+    pool = phase_pool.pool
 
-    _update_pool_amplitudes(pool, np.asarray([0.3, 0.4], dtype=float), options)
+    _update_pool_amplitudes(phase_pool, np.asarray([0.3, 0.4], dtype=float), options)
 
     assert [meta["row"] for meta in row_meta] == [0, 1]
     currents = []
@@ -405,11 +424,12 @@ def test_curve_workload_fast_point_source_matches_public_helper(curve_context):
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.asarray([0.1], dtype=float),
         curve_context=curve_context,
     )
+    pool = phase_pool.pool
     simulation = pool[0]
     stimulation = simulation.extracellular_stimulation
     assert stimulation is not None
@@ -457,11 +477,13 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
         ]
     )
     options = resolved_options(args)
-    pool, _row_meta = _build_pool(
+    phase_pool, _row_meta = _build_test_phase_pool(
         options,
-        np.asarray([0.1, 0.2, 0.3], dtype=float),
+        np.asarray([0.1, 0.1, 0.1], dtype=float),
         curve_context="recruitment",
     )
+    pool = phase_pool.pool
+    assert phase_pool.shared_stimulus is not None
 
     calls = []
     original_stimulus_for_amplitude = curve_runtime._stimulus_for_amplitude
@@ -475,12 +497,74 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
         "_stimulus_for_amplitude",
         stimulus_for_amplitude,
     )
-    _update_pool_amplitudes(pool, np.asarray([0.5, 0.5, 0.5], dtype=float), options)
+    original_stimulus_ids = [
+        id(simulation.extracellular_stimulation.drives[0].stimulus)
+        for simulation in pool
+        if simulation.extracellular_stimulation is not None
+    ]
+    _update_pool_amplitudes(
+        phase_pool,
+        np.asarray([0.5, 0.5, 0.5], dtype=float),
+        options,
+    )
 
     stimulations = [simulation.extracellular_stimulation for simulation in pool]
     assert all(stimulation is not None for stimulation in stimulations)
     assert len({id(stimulation) for stimulation in stimulations}) == 3
+    assert len(set(original_stimulus_ids)) == 1
+    assert [
+        id(stimulation.drives[0].stimulus)
+        for stimulation in stimulations
+        if stimulation is not None
+    ] == original_stimulus_ids
     assert calls == [0.5]
+    currents = [
+        float(np.asarray(stimulation.drives[0].stimulus.evaluate([0.21], unit=axs.uA))[0])
+        for stimulation in stimulations
+        if stimulation is not None
+    ]
+    np.testing.assert_allclose(currents, [-0.5, -0.5, -0.5])
+
+
+def test_curve_workload_dispatch_groups_require_same_temporal_stimulus():
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "3",
+            "--nx",
+            "5",
+            "--stimulation",
+            "monophasic",
+        ]
+    )
+    options = resolved_options(args)
+    phase_pool, _row_meta = _build_test_phase_pool(
+        options,
+        np.asarray([0.1, 0.1, 0.1], dtype=float),
+        curve_context="recruitment",
+    )
+
+    plan = build_dispatch_plan(phase_pool.pool)
+    assert [group.size for group in plan.groups] == [3]
+
+    _update_pool_amplitudes(
+        phase_pool,
+        np.asarray([0.5, 0.5, 0.5], dtype=float),
+        options,
+    )
+    plan = build_dispatch_plan(phase_pool.pool)
+    assert [group.size for group in plan.groups] == [3]
+
+    _update_pool_amplitudes(
+        phase_pool,
+        np.asarray([0.5, 0.6, 0.7], dtype=float),
+        options,
+    )
+    plan = build_dispatch_plan(phase_pool.pool)
+    assert sorted(group.size for group in plan.groups) == [1, 1, 1]
 
 
 def test_curve_workload_reuses_same_diameter_axon_templates():
@@ -500,11 +584,12 @@ def test_curve_workload_reuses_same_diameter_axon_templates():
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
         curve_context="threshold",
     )
+    pool = phase_pool.pool
 
     assert len({id(simulation.axon) for simulation in pool}) == 1
     assert len({id(simulation.extracellular_stimulation) for simulation in pool}) == 4
@@ -528,11 +613,12 @@ def test_curve_workload_splits_templates_by_cable_model():
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
         curve_context="threshold",
     )
+    pool = phase_pool.pool
 
     assert len({id(simulation.axon) for simulation in pool}) == 2
     assert id(pool[0].axon) == id(pool[2].axon)
@@ -562,11 +648,12 @@ def test_curve_workload_keeps_distinct_templates_for_distinct_diameters():
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.asarray([0.1, 0.2, 0.3, 0.4], dtype=float),
         curve_context="threshold",
     )
+    pool = phase_pool.pool
 
     assert len({id(simulation.axon) for simulation in pool}) == 4
     np.testing.assert_allclose(
@@ -592,11 +679,12 @@ def test_curve_workload_reuses_templates_after_axonscope_diameter_quantization()
         ]
     )
     options = resolved_options(args)
-    pool, row_meta = _build_pool(
+    phase_pool, row_meta = _build_test_phase_pool(
         options,
         np.full(100, 0.1, dtype=float),
         curve_context="threshold",
     )
+    pool = phase_pool.pool
 
     diameters = [meta["diameter_um"] for meta in row_meta]
     assert len(set(diameters)) < len(diameters)

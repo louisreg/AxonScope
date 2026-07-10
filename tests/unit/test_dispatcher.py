@@ -43,23 +43,13 @@ def _run_simulation(axons, **kwargs):
     return axs.AxonSimulation(axons, **kwargs).run()
 
 
-def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
-    length_um = 100.0
-    axon_model = axs.axons.HodgkinHuxley(
-        length=length_um * axs.um,
-        diameter=0.5 * axs.um,
-        compartments=nx,
-        celsius=6.3 * axs.degC,
-    )
-    axon = axs.AxonInstance(axon_model)
-    axon.add_current_clamp(
-        position=(length_um / 2.0) * axs.um,
-        current=Stimulus.pulse(
-            start=0.02 * axs.ms,
-            duration=0.04 * axs.ms,
-            amplitude=amp_nA,
-        ),
-    )
+def _add_hh_point_source_stimulation(
+    axon,
+    axon_model,
+    *,
+    y_um: float = 0.0,
+    z_um: float = 20.0,
+):
     electrode = PointSourceElectrode(
         x=50.0 * axs.um,
         y=0.0 * axs.um,
@@ -80,6 +70,31 @@ def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
         ),
     )
     return axon
+
+
+def _hh_axon(*, nx: int, amp_nA: float, y_um: float = 0.0, z_um: float = 20.0):
+    length_um = 100.0
+    axon_model = axs.axons.HodgkinHuxley(
+        length=length_um * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=nx,
+        celsius=6.3 * axs.degC,
+    )
+    axon = axs.AxonInstance(axon_model)
+    axon.add_current_clamp(
+        position=(length_um / 2.0) * axs.um,
+        current=Stimulus.pulse(
+            start=0.02 * axs.ms,
+            duration=0.04 * axs.ms,
+            amplitude=amp_nA,
+        ),
+    )
+    return _add_hh_point_source_stimulation(
+        axon,
+        axon_model,
+        y_um=y_um,
+        z_um=z_um,
+    )
 
 
 def _passive_double_cable_axon(
@@ -200,6 +215,26 @@ def test_pool_dispatch_batches_context_and_no_context_rows():
         "batch-single-cable"
     }
     assert [axon_result.record_indices for axon_result in result] == [(5,), (5,)]
+
+
+def test_dispatch_plan_splits_rows_without_same_extracellular_stimulus():
+    length_um = 100.0
+    axon_a = _hh_axon(nx=11, amp_nA=0.4, y_um=20.0, z_um=30.0)
+    axon_b_model = axs.axons.HodgkinHuxley(
+        length=length_um * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    axon_b = axs.AxonInstance(axon_b_model)
+    axon_b.add_current_clamp(
+        position=(length_um / 2.0) * axs.um,
+        current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.2),
+    )
+
+    plan = build_dispatch_plan([axon_a, axon_b])
+
+    assert sorted(group.size for group in plan.groups) == [1, 1]
 
 
 def test_pool_dispatch_batches_incompatible_singleton_groups():
@@ -1332,6 +1367,12 @@ def test_dispatch_plan_parameter_batches_equal_nx_different_geometry():
         position=75.0 * axs.um,
         current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
     )
+    _add_hh_point_source_stimulation(
+        axon_b,
+        axon_b_model,
+        y_um=12.0,
+        z_um=34.0,
+    )
 
     plan = build_dispatch_plan([axon_a, axon_b])
 
@@ -1352,6 +1393,12 @@ def test_pool_dispatch_parameter_batches_equal_nx_different_geometry():
     axon_b.add_current_clamp(
         position=75.0 * axs.um,
         current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
+    )
+    _add_hh_point_source_stimulation(
+        axon_b,
+        axon_b_model,
+        y_um=12.0,
+        z_um=34.0,
     )
 
     result = _run_simulation(
@@ -1445,6 +1492,7 @@ def test_simulation_inspection_mentions_parameter_batch():
         position=75.0 * axs.um,
         current=Stimulus.pulse(start=0.02 * axs.ms, duration=0.04 * axs.ms, amplitude=0.1),
     )
+    _add_hh_point_source_stimulation(axon_b, axon_b_model)
 
     text = axs.AxonSimulation(
         [axon_a, axon_b],
