@@ -67,3 +67,29 @@ If the P100 mini-gate is positive, run a small CPU/GPU matrix across `Nt`,
 `Naxons`, and observer-only/probe Vm before considering a default policy. If it
 is negative, keep the evidence and move to `curve.update_amplitudes.rows` or a
 more structural VmRaster result representation.
+
+## First P100 Gate
+
+Commit `5bf9a8e` passed the same P100 mini-gate with explicit
+`--time-chunk-steps 50` and `--benchmark-observer-state-scope full`.
+
+Compared with the `a5effea` default chunk-local observer-state mini-gate:
+
+- `kernel.combine_observer_chunks`: about `0.336 s` total -> `0`.
+- `kernel.finalize_observer`: about `0.012 s` total -> about `0.215 s`.
+- `kernel.finalize_observer.to_host`: about `0.011 s` total -> about `0.040 s`.
+- warm `curve.simulate` mean: about `329 ms` -> about `256 ms`.
+- total `curve.simulate`: about `11.59 s` -> about `10.56 s`.
+
+Interpretation:
+
+- The structural idea works: the repack disappears.
+- Some cost moves into finalization because the final observer state is larger.
+- The net mini-gate signal is positive, but it needs a same-commit A/B matrix
+  before any default or policy decision.
+
+Artifact:
+
+```text
+benchmark/results/kaggle/20260710_193127_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-full-state-5bf9a8e/outputs/extracted
+```

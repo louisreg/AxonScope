@@ -2008,6 +2008,18 @@ PTA/block-Thomas GPU gate:
   reports `resolved_observer_state_scope=full` with no
   `kernel.combine_observer_chunks`. Next gate: run the same P100 mini case as
   `a5effea` with `--benchmark-observer-state-scope full`.
+  P100 mini gate at commit `5bf9a8e` passed for the same recruitment case with
+  explicit `--time-chunk-steps 50`. `kernel.combine_observer_chunks` is removed
+  (`0.336 s -> 0` total versus the `a5effea` mini), while
+  `kernel.finalize_observer` increases (`0.012 s -> 0.215 s`) and
+  `kernel.finalize_observer.to_host` increases (`0.011 s -> 0.040 s`). The net
+  observer-side boundary still improves, and warm `curve.simulate` mean falls
+  from about `329 ms` to about `256 ms`; total `curve.simulate` falls from
+  about `11.59 s` to about `10.56 s`. Treat this as a positive prototype
+  signal, not a policy decision. Next, run a small same-commit A/B default
+  versus full observer-state matrix before considering a default change.
+  Artifact:
+  `benchmark/results/kaggle/20260710_193127_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-full-state-5bf9a8e/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
