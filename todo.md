@@ -1964,8 +1964,13 @@ PTA/block-Thomas GPU gate:
   orchestration cost, around `0.55 s` per amplitude update for 4096 rows.
   Follow-up cleanup makes `Stimulus.as_unit(...)` reuse already-canonical
   stimuli and builds benchmark curve stimuli directly in ampere units; local
-  no-solver micro-profiling updates 4096 rows in about `0.164 s`. Validate this
-  on P100 before turning it into a GPU timing claim.
+  no-solver micro-profiling updates 4096 rows in about `0.164 s`. The matching
+  P100 mini gate at `a4b3f88` passed the same case and reduced
+  `curve.update_amplitudes.rows` from about `2.216 s` total to `0.488 s` total
+  over 4 updates (`~0.554 s` to `~0.122 s` per amplitude update). Artifacts:
+  `benchmark/results/kaggle/20260710_184500_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a77f174/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260710_185247_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a4b3f88/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
