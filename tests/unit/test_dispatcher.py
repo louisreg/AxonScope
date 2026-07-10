@@ -588,6 +588,65 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
+def test_benchmark_full_observer_state_scope_skips_vm_raster_chunk_combine(tmp_path):
+    def run_case(scope: str | None):
+        axons = [
+            _passive_double_cable_axon(amp_nA=0.1),
+            _passive_double_cable_axon(amp_nA=0.2),
+        ]
+        activation = axs.analysis.Activation(
+            threshold=-80.0 * axs.mV,
+            target=axs.positions.CENTER,
+        )
+        session = axs.enable_benchmark(
+            tmp_path / ("default" if scope is None else scope),
+            print_summary=False,
+            save=False,
+        )
+        if scope is not None:
+            session.metadata["benchmark_options"] = {
+                "benchmark_observer_state_scope": scope,
+            }
+        try:
+            result = run_pool(
+                axons,
+                tsim_ms=0.2,
+                dt_ms=0.05,
+                batch_options=BatchOptions.none(time_chunk_steps=2),
+                observers=(activation,),
+            )
+            report = axs.disable_benchmark(print_summary=False, save=False)
+        finally:
+            axs.disable_benchmark(print_summary=False, save=False)
+
+        assert len(result) == 1
+        assert result[0].observations is not None
+        raster = result[0].observations[axs.VM_RASTER_OBSERVATION_KEY]
+        return np.asarray(raster.words), report
+
+    default_words, default_report = run_case(None)
+    full_words, full_report = run_case("full")
+
+    np.testing.assert_array_equal(full_words, default_words)
+    assert default_report is not None
+    assert full_report is not None
+    assert any(
+        event.name == "kernel.combine_observer_chunks"
+        for event in default_report.events
+    )
+    assert not any(
+        event.name == "kernel.combine_observer_chunks" for event in full_report.events
+    )
+    full_dispatch_events = [
+        event for event in full_report.events if event.name == "kernel.dispatch_jax"
+    ]
+    assert full_dispatch_events
+    assert {
+        event.metadata.get("resolved_observer_state_scope")
+        for event in full_dispatch_events
+    } == {"full"}
+
+
 def test_run_pool_double_cable_observer_only_batches_singleton_groups():
     axons = [
         _passive_double_cable_axon(amp_nA=0.1, compartments=11),

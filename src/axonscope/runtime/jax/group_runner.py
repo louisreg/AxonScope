@@ -146,6 +146,19 @@ def _benchmark_double_cable_block_solver_override() -> str | None:
     return str(solver)
 
 
+def _benchmark_observer_state_scope_override() -> str | None:
+    session = active_benchmark_session()
+    if session is None:
+        return None
+    options = session.metadata.get("benchmark_options")
+    if not isinstance(options, dict):
+        return None
+    scope = options.get("benchmark_observer_state_scope")
+    if scope in (None, "", "default"):
+        return None
+    return str(scope)
+
+
 def _context_double_cable_block_solver_override(
     backend_context: Any | None,
 ) -> tuple[str | None, bool, int | None]:
@@ -455,6 +468,7 @@ def _run_double_cable_batch_group(
         _context_double_cable_block_solver_override(backend_context)
     )
     benchmark_block_solver = _benchmark_double_cable_block_solver_override()
+    benchmark_observer_state_scope = _benchmark_observer_state_scope_override()
     _emit_progress(
         progress_callback,
         group,
@@ -466,6 +480,7 @@ def _run_double_cable_batch_group(
         observers=0 if observers is None else len(observers),
         policy_block_solver=policy_block_solver,
         benchmark_block_solver=benchmark_block_solver,
+        benchmark_observer_state_scope=benchmark_observer_state_scope,
     )
     with benchmark_span(
         "observer.plan",
@@ -541,6 +556,10 @@ def _run_double_cable_batch_group(
         record_benchmark_metadata(
             benchmark_double_cable_block_solver=benchmark_block_solver
         )
+    if benchmark_observer_state_scope is not None:
+        record_benchmark_metadata(
+            benchmark_observer_state_scope=benchmark_observer_state_scope
+        )
     if policy_block_solver is not None:
         record_benchmark_metadata(
             execution_policy_double_cable_block_solver=policy_block_solver,
@@ -556,6 +575,7 @@ def _run_double_cable_batch_group(
         time_chunk_steps=kernel_options.time_chunk_steps,
         policy_block_solver=policy_block_solver,
         benchmark_block_solver=benchmark_block_solver,
+        benchmark_observer_state_scope=benchmark_observer_state_scope,
     )
     with benchmark_span(
         "kernel.enqueue",
@@ -580,6 +600,7 @@ def _run_double_cable_batch_group(
             allow_internal_double_cable_block_solver=policy_allow_internal,
             double_cable_tiled_thomas_block_b=policy_block_b,
             benchmark_double_cable_block_solver=benchmark_block_solver,
+            benchmark_observer_state_scope=benchmark_observer_state_scope,
         )
         if out.Vm is not None:
             record_benchmark_metadata(

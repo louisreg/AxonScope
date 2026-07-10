@@ -3133,6 +3133,7 @@ class DoubleCableBatchKernel:
         allow_internal_double_cable_block_solver: bool = False,
         double_cable_tiled_thomas_block_b: int | None = None,
         benchmark_double_cable_block_solver: str | None = None,
+        benchmark_observer_state_scope: str | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
         extracellular = runtime.extracellular
@@ -3293,6 +3294,7 @@ class DoubleCableBatchKernel:
                     extracellular_potential_mid_mV=factorized_vext,
                     extracellular_potential_initial_previous_mV=None,
                     time_chunk_steps=chunk_steps,
+                    observer_state_scope=benchmark_observer_state_scope,
                     progress_callback=progress_callback,
                 )
             else:
@@ -3310,6 +3312,7 @@ class DoubleCableBatchKernel:
                     extracellular_potential_mid_mV=vext_batch,
                     extracellular_potential_initial_previous_mV=vext_previous_batch,
                     time_chunk_steps=chunk_steps,
+                    observer_state_scope=benchmark_observer_state_scope,
                     progress_callback=progress_callback,
                 )
             with benchmark_span(
@@ -4918,6 +4921,7 @@ def _run_double_cable_batch_observer_chunks(
     extracellular_potential_initial_previous_mV: Array | None,
     time_chunk_steps: int | None,
     progress_callback: Callable[[int, int], None] | None,
+    observer_state_scope: str | None = None,
 ) -> VmRasterState:
     membrane_runtime = runtime.membrane
     extracellular = runtime.extracellular
@@ -4974,6 +4978,7 @@ def _run_double_cable_batch_observer_chunks(
                 extracellular_potential_mid_mV=dense_vext,
                 extracellular_potential_initial_previous_mV=dense_previous,
                 time_chunk_steps=time_chunk_steps,
+                observer_state_scope=observer_state_scope,
                 progress_callback=progress_callback,
             )
         batch_size = factorized_vext.batch_size
@@ -5053,7 +5058,11 @@ def _run_double_cable_batch_observer_chunks(
             )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    local_observer_chunks = time_chunk_steps is not None
+    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+        observer_state_scope,
+        time_chunk_steps=time_chunk_steps,
+    )
+    local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -5098,6 +5107,8 @@ def _run_double_cable_batch_observer_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
+            benchmark_observer_state_scope=observer_state_scope,
+            resolved_observer_state_scope=resolved_observer_state_scope,
             tiled_thomas_block_b=(
                 kernel_tiled_thomas_block_b
                 if kernel_block_solver == "jax_triton_loop_xb"
@@ -5146,6 +5157,8 @@ def _run_double_cable_batch_observer_chunks(
                 chunk_index=chunk_index,
                 chunk_count=len(chunk_ranges),
                 observer_state_scope="chunk" if local_observer_chunks else "full",
+                benchmark_observer_state_scope=observer_state_scope,
+                resolved_observer_state_scope=resolved_observer_state_scope,
             ):
                 Vi, Ve, gates, state, observer_state = _run_double_cable_batch_observer_pcr_soa_scan(
                     backend=membrane_runtime.backend,
@@ -5196,6 +5209,8 @@ def _run_double_cable_batch_observer_chunks(
                 chunk_index=chunk_index,
                 chunk_count=len(chunk_ranges),
                 observer_state_scope="chunk" if local_observer_chunks else "full",
+                benchmark_observer_state_scope=observer_state_scope,
+                resolved_observer_state_scope=resolved_observer_state_scope,
             ):
                 Vi, Ve, gates, state, observer_state = _run_double_cable_batch_observer_scan(
                     backend=membrane_runtime.backend,
@@ -5404,6 +5419,23 @@ def _init_local_vm_raster_chunk_template(
         time_chunk_steps=time_chunk_steps,
     ):
         return init_vm_raster_state(plan, batch_size=batch_size, nt=max_chunk_steps)
+
+
+def _resolve_vm_raster_observer_state_scope(
+    scope: str | None,
+    *,
+    time_chunk_steps: int | None,
+) -> str:
+    text = "default" if scope in (None, "") else str(scope).strip().lower()
+    if text == "default":
+        return "chunk" if time_chunk_steps is not None else "full"
+    if text not in {"chunk", "full"}:
+        raise ValueError(
+            "benchmark_observer_state_scope must be 'default', 'chunk', or 'full'."
+        )
+    if text == "chunk" and time_chunk_steps is None:
+        return "full"
+    return text
 
 
 def _combine_vm_raster_chunk_states(

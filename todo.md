@@ -1998,6 +1998,16 @@ PTA/block-Thomas GPU gate:
   rather than dispatching several small JAX scatter/update ops after each
   chunked simulation. Artifact:
   `benchmark/results/kaggle/20260710_191549_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-vmraster-device-combine-c6e842b/outputs/extracted`.
+  New structural benchmark-only prototype:
+  `--benchmark-observer-state-scope full` keeps the solver time loop chunked
+  while VmRaster uses one full-duration observer state and absolute chunk start
+  indices. This avoids `kernel.combine_observer_chunks` without changing
+  `BatchOptions` or runtime defaults. Local unit coverage confirms identical
+  VmRaster words versus default chunk-local observer state, and local smoke
+  `benchmark/results/p11_observer_full_state_scope_smoke` confirms the CLI path
+  reports `resolved_observer_state_scope=full` with no
+  `kernel.combine_observer_chunks`. Next gate: run the same P100 mini case as
+  `a5effea` with `--benchmark-observer-state-scope full`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

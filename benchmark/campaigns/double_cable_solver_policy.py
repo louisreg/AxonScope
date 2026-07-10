@@ -108,6 +108,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--amplitude-count", type=int)
     parser.add_argument("--max-iterations", type=int)
     parser.add_argument("--time-chunk-steps")
+    parser.add_argument(
+        "--benchmark-observer-state-scope",
+        choices=("default", "chunk", "full"),
+        default="default",
+    )
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
     parser.add_argument(
@@ -351,6 +356,10 @@ def _curve_command(
         command.extend(("--memory-top-n", str(args.memory_top_n)))
     if args.time_chunk_steps is not None:
         command.extend(("--time-chunk-steps", str(args.time_chunk_steps)))
+    if args.benchmark_observer_state_scope != "default":
+        command.extend(
+            ("--benchmark-observer-state-scope", args.benchmark_observer_state_scope)
+        )
     if script == "recruitment_curves" and args.amplitude_count is not None:
         command.extend(("--amplitude-count", str(args.amplitude_count)))
     if script == "threshold_curves":

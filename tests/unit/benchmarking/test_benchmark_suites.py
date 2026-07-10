@@ -199,6 +199,8 @@ def test_resolved_options_apply_preset_and_overrides():
             "7",
             "--benchmark-double-cable-block-solver",
             "jax_triton_loop_xb",
+            "--benchmark-observer-state-scope",
+            "full",
         ]
     )
 
@@ -210,6 +212,7 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
     assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
+    assert options["benchmark_observer_state_scope"] == "full"
 
 
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():

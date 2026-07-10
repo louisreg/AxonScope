@@ -240,6 +240,16 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
             "backend solver routes without adding public BatchOptions values."
         ),
     )
+    parser.add_argument(
+        "--benchmark-observer-state-scope",
+        choices=("default", "chunk", "full"),
+        default="default",
+        help=(
+            "Private benchmark-only override for VmRaster observer state scope. "
+            "Use 'full' to keep a full-duration observer state while the solver "
+            "time loop remains chunked."
+        ),
+    )
     parser.add_argument("--population", choices=("single_model", "mixed_models"), default="single_model")
     parser.add_argument(
         "--diameters",
@@ -355,6 +365,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "double_cable_block_solver": args.double_cable_block_solver,
         "tiled_thomas_block_b": args.tiled_thomas_block_b,
         "benchmark_double_cable_block_solver": args.benchmark_double_cable_block_solver,
+        "benchmark_observer_state_scope": args.benchmark_observer_state_scope,
         "population": args.population,
         "diameters": args.diameters,
         "platform": args.platform or preset.platform,
