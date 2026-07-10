@@ -42,6 +42,10 @@ def test_vm_raster_plan_lowers_shared_probe_tables():
     np.testing.assert_array_equal(np.asarray(plan.probe_indices), [[1, 0], [1, 3]])
     np.testing.assert_array_equal(np.asarray(plan.probe_mask), [[True, False], [True, True]])
     np.testing.assert_array_equal(np.asarray(plan.original_indices), [[1, -1], [1, 3]])
+    np.testing.assert_array_equal(plan.probe_indices_host, [[1, 0], [1, 3]])
+    np.testing.assert_array_equal(plan.probe_mask_host, [[True, False], [True, True]])
+    assert plan.probe_indices_host.flags.writeable is False
+    assert plan.probe_mask_host.flags.writeable is False
 
 
 def test_vm_raster_plan_cache_survives_stimulation_replacement():
@@ -201,6 +205,11 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     assert result.names == ("activation", "latency")
     assert result.nt == 35
     assert result.dt_ms == 0.1
+    assert result.probe_indices is plan.probe_indices_host
+    assert result.probe_mask is plan.probe_mask_host
+    assert result.original_indices is plan.original_indices_host
+    assert result.positions_um is plan.positions_um_host
+    assert result.thresholds_mV is plan.thresholds_mV_host
     np.testing.assert_array_equal(result.unpack(), raster)
 
 

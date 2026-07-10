@@ -37,6 +37,11 @@ class VmRasterPlan:
     original_indices: Any
     positions_um: Any
     thresholds_mV: Any
+    probe_indices_host: np.ndarray
+    probe_mask_host: np.ndarray
+    original_indices_host: np.ndarray
+    positions_um_host: np.ndarray
+    thresholds_mV_host: np.ndarray
     row_aware: bool = False
 
     @property
@@ -186,6 +191,7 @@ def build_vm_raster_plan(
             original_table[raster_index, :count] = original_rows[0, selected]
             position_table[raster_index, :count] = position_rows[0, selected]
 
+    thresholds_array = np.asarray(thresholds, dtype=float)
     return VmRasterPlan(
         definitions=raster_defs,
         names=tuple(names),
@@ -193,9 +199,20 @@ def build_vm_raster_plan(
         probe_mask=jnp.asarray(mask_table, dtype=bool),
         original_indices=jnp.asarray(original_table, dtype=jnp.int32),
         positions_um=jnp.asarray(position_table, dtype=dtype),
-        thresholds_mV=jnp.asarray(thresholds, dtype=dtype),
+        thresholds_mV=jnp.asarray(thresholds_array, dtype=dtype),
+        probe_indices_host=_readonly_np_array(index_table, dtype=np.int32),
+        probe_mask_host=_readonly_np_array(mask_table, dtype=bool),
+        original_indices_host=_readonly_np_array(original_table, dtype=np.int32),
+        positions_um_host=_readonly_np_array(position_table, dtype=float),
+        thresholds_mV_host=_readonly_np_array(thresholds_array, dtype=float),
         row_aware=row_aware,
     )
+
+
+def _readonly_np_array(values: Any, *, dtype: Any) -> np.ndarray:
+    arr = np.asarray(values, dtype=dtype)
+    arr.setflags(write=False)
+    return arr
 
 
 def init_vm_raster_state(
@@ -453,11 +470,11 @@ def finalize_vm_raster_state(
         row_aware=plan.row_aware,
     ):
         words = np.asarray(state, dtype=np.uint32)
-        probe_indices = np.asarray(plan.probe_indices)
-        probe_mask = np.asarray(plan.probe_mask, dtype=bool)
-        original_indices = np.asarray(plan.original_indices, dtype=np.int32)
-        positions_um = np.asarray(plan.positions_um, dtype=float)
-        thresholds_mV = np.asarray(plan.thresholds_mV, dtype=float)
+        probe_indices = plan.probe_indices_host
+        probe_mask = plan.probe_mask_host
+        original_indices = plan.original_indices_host
+        positions_um = plan.positions_um_host
+        thresholds_mV = plan.thresholds_mV_host
 
     return {
         VM_RASTER_OBSERVATION_KEY: VmRasterResult(
