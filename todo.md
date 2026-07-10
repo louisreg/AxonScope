@@ -1988,6 +1988,12 @@ PTA/block-Thomas GPU gate:
   chunk/result handling rather than factorized footprint construction.
   Artifact:
   `benchmark/results/kaggle/20260710_190758_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a5effea/outputs/extracted`.
+  Additional generic input cleanup now caches the static factorized footprint
+  after conversion to a device-local JAX array, keyed by footprint, dtype, and
+  current JAX device. This should avoid repeated host-to-device placement of
+  the `(Naxons, Nx)` footprint on hot amplitude updates. Covered locally by
+  the factorized-footprint cache test and double-cable observer equivalence
+  smoke; rerun the same P100 mini gate before claiming GPU speedup.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about

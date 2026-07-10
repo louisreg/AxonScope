@@ -1091,6 +1091,7 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
 
     input_batches._FOOTPRINT_CACHE.clear()
     input_batches._FOOTPRINT_MV_CACHE.clear()
+    input_batches._FOOTPRINT_JAX_CACHE.clear()
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
         with benchmark_span("inputs.extracellular"):
@@ -1127,6 +1128,13 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
         if event.name == "inputs.extracellular"
     ]
     assert mv_statuses == ["miss", "hit"]
+    jax_statuses = [
+        event.metadata.get("vstim_footprint_jax_cache")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    assert jax_statuses == ["miss", "hit"]
+    assert second.footprint_mV_per_A is first.footprint_mV_per_A
     np.testing.assert_allclose(
         np.asarray(second.footprint_mV_per_A),
         np.asarray(first.footprint_mV_per_A),

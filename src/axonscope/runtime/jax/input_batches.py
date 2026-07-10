@@ -44,6 +44,8 @@ FootprintEngine = Literal["numpy", "jax"]
 
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 _FOOTPRINT_MV_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
+_FOOTPRINT_JAX_CACHE: OrderedDict[tuple[Any, ...], Array] = OrderedDict()
+_FOOTPRINT_JAX_CACHE_MAX_SIZE = 32
 _ARRAY_CONTENT_KEY_CACHE: OrderedDict[
     int,
     tuple[
@@ -1082,9 +1084,14 @@ def _try_build_factorized_footprint_vstim_batch(
             else 0.0
         ),
     )
+    footprint_jax = _cached_jax_footprint_array(
+        footprint_mV_per_A,
+        cache_key=footprint_mV_cache_key,
+        dtype_local=dtype_local,
+    )
     return FactorizedExtracellularPotentialBatch(
         current_mid_A=jnp.asarray(current_A, dtype=dtype_local),
-        footprint_mV_per_A=jnp.asarray(footprint_mV_per_A, dtype=dtype_local),
+        footprint_mV_per_A=footprint_jax,
         target_nx=int(x_rows.shape[1]),
         current_initial_previous_A=(
             None
@@ -1092,6 +1099,54 @@ def _try_build_factorized_footprint_vstim_batch(
             else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
         ),
         static_footprint_key=cache_key,
+    )
+
+
+def _cached_jax_footprint_array(
+    values: np.ndarray,
+    *,
+    cache_key: tuple[Any, ...],
+    dtype_local: jnp.dtype,
+) -> Array:
+    """Return a device-local JAX footprint for a cached static footprint."""
+
+    device_key = _current_jax_device_key()
+    key = (
+        "factorized_footprint_jax_array_v1",
+        cache_key,
+        str(np.dtype(dtype_local)),
+        device_key,
+    )
+    cached = _FOOTPRINT_JAX_CACHE.get(key)
+    if cached is not None:
+        _FOOTPRINT_JAX_CACHE.move_to_end(key)
+        record_benchmark_metadata(vstim_footprint_jax_cache="hit")
+        return cached
+
+    array = jnp.asarray(values, dtype=dtype_local)
+    _FOOTPRINT_JAX_CACHE[key] = array
+    _FOOTPRINT_JAX_CACHE.move_to_end(key)
+    while len(_FOOTPRINT_JAX_CACHE) > _FOOTPRINT_JAX_CACHE_MAX_SIZE:
+        _FOOTPRINT_JAX_CACHE.popitem(last=False)
+    record_benchmark_metadata(vstim_footprint_jax_cache="miss")
+    return array
+
+
+def _current_jax_device_key() -> tuple[Any, ...]:
+    device = getattr(jax.config, "jax_default_device", None)
+    if device is None:
+        try:
+            devices = jax.devices(jax.default_backend())
+        except Exception:
+            devices = ()
+        device = devices[0] if devices else None
+    if device is None:
+        return ("backend", jax.default_backend())
+    return (
+        "device",
+        getattr(device, "platform", None),
+        getattr(device, "id", None),
+        str(device),
     )
 
 
