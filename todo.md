@@ -2039,6 +2039,18 @@ PTA/block-Thomas GPU gate:
   structural win is removing recombine when longer simulations genuinely need
   multiple chunks. Artifact:
   `benchmark/results/kaggle/20260710_205916_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-global-vmraster-2c46342/outputs/extracted`.
+  Follow-up finalize cleanup at commit `5fab1d0` keeps VmRaster plan metadata
+  as host read-only arrays while retaining JAX tables for kernels, avoiding
+  repeated device-to-host conversion of static row-aware probe/position tables
+  during `finalize_vm_raster_state`. The matching P100 mini gate passed:
+  `kernel.finalize_observer.to_host` drops from about `44.0 ms` to `27.3 ms`
+  total, `kernel.finalize_observer` from about `217 ms` to `202 ms`, and warm
+  `curve.simulate` from about `283 ms` to `259 ms`. Treat the total/warm
+  change cautiously because `inputs.extracellular` was also noisy
+  (`508 ms -> 348 ms`), but the `to_host` reduction is directly attributable.
+  Remaining observer cost is mostly the required wait/transfer of dynamic
+  packed words. Artifact:
+  `benchmark/results/kaggle/20260710_210932_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-vmraster-hostmeta-5fab1d0/outputs/extracted`.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about
