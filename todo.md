@@ -1978,6 +1978,16 @@ PTA/block-Thomas GPU gate:
   `25-43 ms` with `vstim_footprint_mv_cache=hit` and
   `vstim_shared_current_detection=identity`. Validate this on the same P100
   mini gate before claiming GPU speedup or touching solver policy.
+  Matching P100 mini gate at commit `a5effea` passed the same single
+  recruitment case. `inputs.extracellular` fell from about `494.7 ms` total at
+  `a4b3f88` to about `353.7 ms` total, with hot events reporting
+  `vstim_footprint_mv_cache=hit` and `vstim_shared_current_detection=identity`.
+  `curve.update_amplitudes.rows` stayed in the same order (`~0.56 s` total)
+  and `kernel.combine_observer_chunks` stayed around `0.34 s` total
+  (`~56 ms/simulation`), so the next observer-only cleanup target is VmRaster
+  chunk/result handling rather than factorized footprint construction.
+  Artifact:
+  `benchmark/results/kaggle/20260710_190758_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a5effea/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
