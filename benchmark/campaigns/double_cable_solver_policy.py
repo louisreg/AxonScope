@@ -46,6 +46,8 @@ SUMMARY_FIELDS = (
     "tiled_thomas_block_b",
     "recording",
     "observer_state_scope",
+    "time_chunk_policy",
+    "time_chunk_steps",
     "n_axons",
     "nx",
     "precision",
@@ -80,6 +82,7 @@ class RunSpec:
     tiled_thomas_block_b: int | None
     recording: str
     observer_state_scope: str
+    time_chunk_steps: str | None
     n_axons: int
     nx: int
     precision: str
@@ -110,7 +113,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--warmups", type=int)
     parser.add_argument("--amplitude-count", type=int)
     parser.add_argument("--max-iterations", type=int)
-    parser.add_argument("--time-chunk-steps")
+    parser.add_argument(
+        "--time-chunk-steps",
+        action="append",
+        help=(
+            "Comma-separated time chunk policies: default, unchunked, none, "
+            "or positive integer chunk sizes."
+        ),
+    )
     parser.add_argument(
         "--benchmark-observer-state-scope",
         action="append",
@@ -170,6 +180,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=("default",),
         label="benchmark_observer_state_scope",
     )
+    time_chunk_steps_values = _parse_time_chunk_values(
+        args.time_chunk_steps,
+        default=(None,),
+    )
 
     if args.repeats is not None and args.repeats < 1:
         parser.error("--repeats must be >= 1.")
@@ -188,6 +202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         diameter_modes=diameter_modes,
         block_bs=block_bs,
         observer_state_scopes=observer_state_scopes,
+        time_chunk_steps_values=time_chunk_steps_values,
     )
     _write_manifest(
         args.output / "double_cable_solver_policy_manifest.json",
@@ -256,6 +271,7 @@ def _build_runs(
     diameter_modes: Sequence[str],
     block_bs: Sequence[int],
     observer_state_scopes: Sequence[str],
+    time_chunk_steps_values: Sequence[str | None],
 ) -> list[RunSpec]:
     runs: list[RunSpec] = []
     for script in scripts:
@@ -264,53 +280,57 @@ def _build_runs(
                 for nx in nx_values:
                     for precision in precisions:
                         for diameters in diameter_modes:
-                            for observer_state_scope in observer_state_scopes:
-                                for solver in solvers:
-                                    solver_block_bs: Sequence[int | None]
-                                    solver_block_bs = block_bs if solver == "tiled_thomas" else (None,)
-                                    for block_b in solver_block_bs:
-                                        label = _label(
-                                            script=script,
-                                            platform=args.platform,
-                                            solver=solver,
-                                            block_b=block_b,
-                                            recording=recording,
-                                            observer_state_scope=observer_state_scope,
-                                            n_axons=n_axons,
-                                            nx=nx,
-                                            precision=precision,
-                                            diameters=diameters,
-                                        )
-                                        command = _curve_command(
-                                            args,
-                                            script=script,
-                                            output=args.output / label,
-                                            solver=solver,
-                                            block_b=block_b,
-                                            recording=recording,
-                                            observer_state_scope=observer_state_scope,
-                                            n_axons=n_axons,
-                                            nx=nx,
-                                            precision=precision,
-                                            diameters=diameters,
-                                        )
-                                        runs.append(
-                                            RunSpec(
-                                                label=label,
-                                                run_dir=args.output / label,
-                                                command=tuple(command),
+                            for time_chunk_steps in time_chunk_steps_values:
+                                for observer_state_scope in observer_state_scopes:
+                                    for solver in solvers:
+                                        solver_block_bs: Sequence[int | None]
+                                        solver_block_bs = block_bs if solver == "tiled_thomas" else (None,)
+                                        for block_b in solver_block_bs:
+                                            label = _label(
                                                 script=script,
-                                                platform=str(args.platform),
+                                                platform=args.platform,
                                                 solver=solver,
-                                                tiled_thomas_block_b=block_b,
+                                                block_b=block_b,
                                                 recording=recording,
                                                 observer_state_scope=observer_state_scope,
+                                                time_chunk_steps=time_chunk_steps,
                                                 n_axons=n_axons,
                                                 nx=nx,
                                                 precision=precision,
                                                 diameters=diameters,
                                             )
-                                        )
+                                            command = _curve_command(
+                                                args,
+                                                script=script,
+                                                output=args.output / label,
+                                                solver=solver,
+                                                block_b=block_b,
+                                                recording=recording,
+                                                observer_state_scope=observer_state_scope,
+                                                time_chunk_steps=time_chunk_steps,
+                                                n_axons=n_axons,
+                                                nx=nx,
+                                                precision=precision,
+                                                diameters=diameters,
+                                            )
+                                            runs.append(
+                                                RunSpec(
+                                                    label=label,
+                                                    run_dir=args.output / label,
+                                                    command=tuple(command),
+                                                    script=script,
+                                                    platform=str(args.platform),
+                                                    solver=solver,
+                                                    tiled_thomas_block_b=block_b,
+                                                    recording=recording,
+                                                    observer_state_scope=observer_state_scope,
+                                                    time_chunk_steps=time_chunk_steps,
+                                                    n_axons=n_axons,
+                                                    nx=nx,
+                                                    precision=precision,
+                                                    diameters=diameters,
+                                                )
+                                            )
     return runs
 
 
@@ -327,6 +347,7 @@ def _curve_command(
     precision: str,
     diameters: str,
     observer_state_scope: str,
+    time_chunk_steps: str | None,
 ) -> list[str]:
     command = [
         args.python,
@@ -370,8 +391,8 @@ def _curve_command(
         command.extend(("--memory-trace", args.memory_trace))
     if args.memory_top_n is not None:
         command.extend(("--memory-top-n", str(args.memory_top_n)))
-    if args.time_chunk_steps is not None:
-        command.extend(("--time-chunk-steps", str(args.time_chunk_steps)))
+    if time_chunk_steps is not None:
+        command.extend(("--time-chunk-steps", time_chunk_steps))
     if observer_state_scope != "default":
         command.extend(
             ("--benchmark-observer-state-scope", observer_state_scope)
@@ -416,6 +437,14 @@ def _summarize_curve_run(
         "observer_state_scope": options.get(
             "benchmark_observer_state_scope",
             run.observer_state_scope,
+        ),
+        "time_chunk_policy": options.get(
+            "time_chunk_policy",
+            _time_chunk_policy_from_token(run.time_chunk_steps),
+        ),
+        "time_chunk_steps": _summary_time_chunk_steps(
+            options,
+            run.time_chunk_steps,
         ),
         "n_axons": options.get("n_axons", run.n_axons),
         "nx": options.get("nx", run.nx),
@@ -526,6 +555,75 @@ def _parse_int_values(
     return tuple(result)
 
 
+def _parse_time_chunk_values(
+    values: Sequence[str] | None,
+    *,
+    default: Sequence[str | None],
+) -> tuple[str | None, ...]:
+    if not values:
+        return tuple(default)
+    result: list[str] = []
+    for value in values:
+        for item in str(value).split(","):
+            token = item.strip()
+            if not token:
+                continue
+            parsed = _normalize_time_chunk_token(token)
+            if parsed not in result:
+                result.append(parsed)
+    if not result:
+        raise SystemExit("at least one time_chunk_steps value is required.")
+    return tuple(result)
+
+
+def _normalize_time_chunk_token(value: str) -> str:
+    text = str(value).strip().lower()
+    if text in {"", "default"}:
+        return "default"
+    if text in {"none", "off", "unchunked", "full"}:
+        return "unchunked"
+    try:
+        parsed = int(text)
+    except ValueError as exc:
+        raise SystemExit(
+            "time_chunk_steps values must be default, unchunked, none, "
+            "or positive integers."
+        ) from exc
+    if parsed < 1:
+        raise SystemExit("time_chunk_steps values must be >= 1.")
+    return str(parsed)
+
+
+def _time_chunk_policy_from_token(value: str | None) -> str:
+    if value is None or value == "default":
+        return "default"
+    if value == "unchunked":
+        return "unchunked"
+    return "explicit"
+
+
+def _summary_time_chunk_steps(
+    options: Mapping[str, Any],
+    fallback: str | None,
+) -> str:
+    policy = str(
+        options.get("time_chunk_policy")
+        or _time_chunk_policy_from_token(fallback)
+    )
+    if policy == "explicit":
+        value = options.get("time_chunk_steps")
+        return str(value if value not in (None, "") else fallback)
+    if policy == "unchunked":
+        return "unchunked"
+    return "default"
+
+
+def _time_chunk_label_token(value: str | None) -> str:
+    if value is None:
+        return ""
+    return f"__tc{value}"
+
+
 def _label(
     *,
     script: str,
@@ -534,6 +632,7 @@ def _label(
     block_b: int | None,
     recording: str,
     observer_state_scope: str,
+    time_chunk_steps: str | None,
     n_axons: int,
     nx: int,
     precision: str,
@@ -545,9 +644,11 @@ def _label(
         if observer_state_scope == "default"
         else f"__obs_{observer_state_scope}"
     )
+    time_chunk_token = _time_chunk_label_token(time_chunk_steps)
     return (
         f"{script}__{platform}__{solver_token}__{recording}__"
-        f"n{n_axons}__nx{nx}__{precision}__{diameters}{observer_token}"
+        f"n{n_axons}__nx{nx}__{precision}__{diameters}"
+        f"{time_chunk_token}{observer_token}"
     )
 
 
@@ -574,6 +675,7 @@ def _run_spec_json(run: RunSpec) -> dict[str, Any]:
         "tiled_thomas_block_b": run.tiled_thomas_block_b,
         "recording": run.recording,
         "observer_state_scope": run.observer_state_scope,
+        "time_chunk_steps": run.time_chunk_steps,
         "n_axons": run.n_axons,
         "nx": run.nx,
         "precision": run.precision,
@@ -597,17 +699,18 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         [
             "## Fastest Rows",
             "",
-            "| group | solver | block_b | observer_scope | warm mean ms | total simulate ms | variants | status |",
-            "| --- | --- | ---: | --- | ---: | ---: | --- | --- |",
+            "| group | solver | block_b | observer_scope | time_chunk | warm mean ms | total simulate ms | variants | status |",
+            "| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |",
         ]
     )
     for group, row in _fastest_rows(rows):
         lines.append(
-            "| {group} | {solver} | {block_b} | {observer_scope} | {warm} | {total} | {variants} | {status} |".format(
+            "| {group} | {solver} | {block_b} | {observer_scope} | {time_chunk} | {warm} | {total} | {variants} | {status} |".format(
                 group=group,
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
                 observer_scope=row.get("observer_state_scope", ""),
+                time_chunk=row.get("time_chunk_steps", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
                 variants=row.get("effective_variants", ""),
@@ -619,19 +722,20 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             "",
             "## All Rows",
             "",
-            "| script | platform | solver | block_b | recording | observer_scope | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
-            "| --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
+            "| script | platform | solver | block_b | recording | observer_scope | time_chunk | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
+            "| --- | --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
+            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {time_chunk} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
                 script=row.get("script", ""),
                 platform=row.get("platform", ""),
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
                 recording=row.get("recording", ""),
                 observer_scope=row.get("observer_state_scope", ""),
+                time_chunk=row.get("time_chunk_steps", ""),
                 n_axons=row.get("n_axons", ""),
                 nx=row.get("nx", ""),
                 precision=row.get("precision", ""),

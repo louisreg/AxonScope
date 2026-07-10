@@ -219,7 +219,7 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["benchmark_observer_state_scope"] == "full"
 
 
-def test_solver_policy_campaign_expands_observer_state_scope_matrix(
+def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
     tmp_path: Path,
     capsys,
 ):
@@ -245,7 +245,7 @@ def test_solver_policy_campaign_expands_observer_state_scope_matrix(
                 "--diameters",
                 "same_diameter",
                 "--time-chunk-steps",
-                "2",
+                "default,2",
                 "--benchmark-observer-state-scope",
                 "default,full",
                 "--output",
@@ -257,7 +257,8 @@ def test_solver_policy_campaign_expands_observer_state_scope_matrix(
     )
 
     out = capsys.readouterr().out
-    assert "planned: 2 double-cable solver policy runs" in out
+    assert "planned: 4 double-cable solver policy runs" in out
+    assert "__tc2" in out
     assert "__obs_full" in out
     assert "--benchmark-observer-state-scope full" in out
 
@@ -267,11 +268,18 @@ def test_solver_policy_campaign_expands_observer_state_scope_matrix(
         )
     )
     assert [
-        run["observer_state_scope"]
+        (run["time_chunk_steps"], run["observer_state_scope"])
         for run in manifest["runs"]
-    ] == ["default", "full"]
+    ] == [
+        ("default", "default"),
+        ("default", "full"),
+        ("2", "default"),
+        ("2", "full"),
+    ]
     assert "--benchmark-observer-state-scope" not in manifest["runs"][0]["command"]
     assert "--benchmark-observer-state-scope" in manifest["runs"][1]["command"]
+    assert "--time-chunk-steps" in manifest["runs"][0]["command"]
+    assert "--time-chunk-steps" in manifest["runs"][2]["command"]
 
 
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():
