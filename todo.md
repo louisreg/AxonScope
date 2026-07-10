@@ -2000,8 +2000,21 @@ PTA/block-Thomas GPU gate:
   `3.0-3.5 ms`; different-diameter cohorts use 5 unique footprints and keep
   update rows around `3.0 ms` total. A recruitment smoke with random transverse
   positions keeps 64 unique footprints for 64 rows, confirming the cache only
-  groups genuinely identical footprints. Validate on the same P100 mini gate
-  before making a GPU speedup claim.
+  groups genuinely identical footprints. Matching P100 mini gates at commit
+  `87c1f90` passed for both `recruitment_curves` and `threshold_curves` with
+  `Naxons=4096`, `Nx=89`, observer-only, fp32, and `tiled_thomas_b32`.
+  The recruitment run is a non-regression/sanity gate for this optimization:
+  random transverse positions keep 4096 unique footprints/stimulations, so the
+  new sharing path is intentionally inactive; `curve.update_amplitudes.rows`
+  is about `419 ms` total on that run. The threshold run is the actual sharing
+  gate: same-diameter rows use 1 unique footprint/stimulation,
+  `curve.build_pool.rows` is about `219 ms`, `curve.update_amplitudes.rows`
+  is about `23 ms` total (`~2.7-3.4 ms` per update), factorized row-cache hits
+  are `4095/4096`, and hot `inputs.extracellular` events are about
+  `14.7-15.6 ms`. Artifacts:
+  `benchmark/results/kaggle/20260710_213627_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-curve-orch-gpu-87c1f90/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260710_213956_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-curve-orch-thr-gpu-87c1f90/outputs/extracted`.
   Additional generic input cleanup now caches the static factorized footprint
   after conversion to a device-local JAX array, keyed by footprint, dtype, and
   current JAX device. This should avoid repeated host-to-device placement of
