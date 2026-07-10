@@ -2223,6 +2223,30 @@ PTA/block-Thomas GPU gate:
   threshold amplitude ranges, and cold/warm cache behavior.
   Solver-route inventory and decision map for the cleanup/promotion discussion:
   `docs/architecture/p11c_solver_path_inventory_2026_07_09.md`.
+  Follow-up policy-campaign tooling now exposes
+  `--repeat-pool-policy rebuild|reuse`: `rebuild` measures the complete curve
+  user path, while `reuse` keeps one phase pool and `AxonSimulation` context
+  across warmups/repeats to isolate steady-state hot costs. P100 reuse-pool
+  cartography at commit `2ba37d1` passed 8/8 rows for threshold and
+  recruitment curves, `observer_only` and `probe_vm`, `pcr_soa` versus
+  `tiled_thomas_b32`, `Naxons=4096`, `Nx=89`, fp32, same-diameter cohorts,
+  `warmups=1`, and `repeats=3`. Artifacts:
+  `benchmark/results/kaggle/20260710_223102_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-reuse-pool-cartography-gpu-2ba37d1/outputs/extracted`
+  and plots/tables under
+  `benchmark/results/p11_reuse_pool_cartography_gpu_plots_2ba37d1`.
+  In this hot-path slice, `tiled_thomas_b32` wins every row: observer-only
+  warm `curve.simulate` is about `187 ms` recruitment and `153 ms` threshold
+  versus `338/319 ms` for PCR-SoA; probe Vm is about `274/260 ms` versus
+  `416/420 ms`. The generic curve update path is no longer a bottleneck
+  (`curve.update_amplitudes` about `1.2-1.7 ms`), observer-only
+  `inputs.extracellular` is about `15-19 ms`, and probe-Vm
+  `inputs.extracellular` is about `114-115 ms`. Probe-Vm curve workflows are
+  currently dominated outside `curve.simulate` by result-side
+  `curve.analyze_activation` around `5.6 s`, so treat probe activation analysis
+  as a separate result-side optimization target before interpreting probe-Vm
+  wall-clock as solver policy evidence. Do not make the default Triton policy
+  decision from this slice alone; use it as steady-state bottleneck
+  cartography after the non-solver cleanup.
 - [ ] P11C-G promote the Triton solver if evidence supports it:
   if P11C-F shows robust wins and acceptable cold-start/memory/correctness
   behavior, make the Triton double-cable solver a selectable solver option
