@@ -1957,6 +1957,15 @@ PTA/block-Thomas GPU gate:
   hits around `0.2 ms`, and construct-simulation events only once per
   warmup/repeat phase. This is solver-independent plumbing only; validate on
   P100 before making a GPU speedup claim.
+  Mini P100 gate at `a77f174` passed one `recruitment_curves`,
+  `tiled_thomas_b32`, observer-only, `Naxons=4096`, `Nx=89`, fp32,
+  same-diameter case in about 90 s wall time. It confirmed the hot
+  `runtime.prepare` fix but exposed `curve.update_amplitudes.rows` as the next
+  orchestration cost, around `0.55 s` per amplitude update for 4096 rows.
+  Follow-up cleanup makes `Stimulus.as_unit(...)` reuse already-canonical
+  stimuli and builds benchmark curve stimuli directly in ampere units; local
+  no-solver micro-profiling updates 4096 rows in about `0.164 s`. Validate this
+  on P100 before turning it into a GPU timing claim.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

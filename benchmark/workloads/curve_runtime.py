@@ -853,19 +853,21 @@ def _double_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any
 def _stimulus_for_amplitude(options: dict[str, Any], amplitude_uA: float) -> Any:
     start = _stim_start_ms(options) * axs.ms
     width = _pulse_width_ms(options) * axs.ms
-    amplitude = float(amplitude_uA) * axs.uA
+    amplitude_A = float(amplitude_uA) * 1e-6
     if options["stimulation"] == "monophasic":
         return axs.Stimulus.pulse(
             start=start,
             duration=width,
-            amplitude=-amplitude,
+            amplitude=-amplitude_A,
+            unit="ampere",
         )
     if options["stimulation"] == "biphasic":
         return axs.Stimulus.biphasic(
             start=start,
-            cathodic_amplitude=amplitude,
+            cathodic_amplitude=amplitude_A,
             cathodic_duration=width,
             interphase=min(0.02, float(options["tsim"]) * 0.01) * axs.ms,
+            unit="ampere",
         )
     raise SystemExit("--stimulation custom requires a benchmark workload adapter.")
 

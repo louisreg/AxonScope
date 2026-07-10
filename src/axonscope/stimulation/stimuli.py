@@ -317,8 +317,12 @@ class Stimulus:
 
         unit_label = units.unit_label(unit)
         if unit_label is None:
+            if self.y_unit is None:
+                return self
             return Stimulus(self.t, self.y, self.mode, y_unit=None)
-        if self.y_unit is None or self.y_unit == unit_label:
+        if self.y_unit == unit_label:
+            return self
+        if self.y_unit is None:
             return Stimulus(self.t, self.y, self.mode, y_unit=unit_label)
         y = units.to_array(units.Q_(self.y, self.y_unit), unit_label)
         return Stimulus(self.t, y, self.mode, y_unit=unit_label)

@@ -88,6 +88,18 @@ def test_evaluate_accepts_pint_time_and_output_unit():
     assert np.allclose(vals_A, [2.0e-9])
 
 
+def test_as_unit_reuses_already_canonical_stimulus():
+    stim = Stimulus.pulse(
+        start=1.0 * axs.ms,
+        duration=1.0 * axs.ms,
+        amplitude=2.0e-6,
+        unit="ampere",
+    )
+
+    assert stim.as_unit("ampere") is stim
+    assert stim.as_unit(axs.A) is stim
+
+
 def test_plot_accepts_unit_aware_time_grid():
     import matplotlib.pyplot as plt
 
