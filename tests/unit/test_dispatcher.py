@@ -1141,6 +1141,30 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     assert second_peak > first_peak
 
 
+def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    group = build_dispatch_plan([axon]).groups[0]
+
+    runtime_caches.clear_prepared_cohort_cache()
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.positions"):
+            first = runtime_preparation.prepared_cohort_for_current_group(group)
+        with benchmark_span("inputs.positions"):
+            second = runtime_preparation.prepared_cohort_for_current_group(group)
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert second is first
+    identity_statuses = [
+        event.metadata.get("prepared_cohort_identity_cache")
+        for event in report.events
+        if event.name == "inputs.positions"
+    ]
+    assert identity_statuses == ["miss", "hit"]
+
+
 def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     stimulation = axon.extracellular_stimulations[0]

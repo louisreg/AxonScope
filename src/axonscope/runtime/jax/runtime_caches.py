@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from collections import OrderedDict
 from typing import Any
 
@@ -12,6 +13,10 @@ from axonscope.preparation.cohort import PreparedCohort
 _BATCH_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _BATCH_STATIC_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _PREPARED_COHORT_CACHE: OrderedDict[tuple[Any, ...], PreparedCohort] = OrderedDict()
+_PREPARED_COHORT_IDENTITY_CACHE: OrderedDict[
+    int,
+    tuple[weakref.ReferenceType[Any], PreparedCohort],
+] = OrderedDict()
 _SINGLE_CABLE_FACTORIZED_FORCING_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _RUNTIME_CACHE_MAX_SIZE = 64
 
@@ -52,6 +57,30 @@ def store_prepared_cohort(key: tuple[Any, ...], cohort: PreparedCohort) -> None:
     _cache_store(_PREPARED_COHORT_CACHE, key, cohort)
 
 
+def get_prepared_cohort_identity(group: Any) -> PreparedCohort | None:
+    """Return a prepared-cohort entry for this exact dispatch group object."""
+
+    cache_key = id(group)
+    cached = _PREPARED_COHORT_IDENTITY_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    ref, cohort = cached
+    if ref() is group:
+        _PREPARED_COHORT_IDENTITY_CACHE.move_to_end(cache_key)
+        return cohort
+    _PREPARED_COHORT_IDENTITY_CACHE.pop(cache_key, None)
+    return None
+
+
+def store_prepared_cohort_identity(group: Any, cohort: PreparedCohort) -> None:
+    """Store a prepared cohort for this exact dispatch group object."""
+
+    _PREPARED_COHORT_IDENTITY_CACHE[id(group)] = (weakref.ref(group), cohort)
+    _PREPARED_COHORT_IDENTITY_CACHE.move_to_end(id(group))
+    while len(_PREPARED_COHORT_IDENTITY_CACHE) > _RUNTIME_CACHE_MAX_SIZE:
+        _PREPARED_COHORT_IDENTITY_CACHE.popitem(last=False)
+
+
 def get_single_cable_factorized_forcing(key: tuple[Any, ...]) -> Any | None:
     """Return a cached single-cable forcing footprint."""
 
@@ -76,6 +105,7 @@ def clear_prepared_cohort_cache() -> None:
     """Clear the prepared-cohort cache."""
 
     _PREPARED_COHORT_CACHE.clear()
+    _PREPARED_COHORT_IDENTITY_CACHE.clear()
 
 
 def clear_all_runtime_caches() -> None:

@@ -38,7 +38,7 @@ from axonscope.runtime.jax.recording_lowering import (
 from axonscope.runtime.jax.runtime_preparation import (
     group_cm_uF_cm2,
     prepare_batch_runtime,
-    prepared_cohort_for_group,
+    prepared_cohort_for_current_group,
     representative_item,
 )
 from axonscope.runtime.jax.shape_bucketing import (
@@ -219,7 +219,7 @@ def _run_single_cable_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = prepared_cohort_for_group(group)
+        cohort = prepared_cohort_for_current_group(group)
         record_benchmark_metadata(
             **benchmark_array_metadata(
                 "x_positions_m",
@@ -438,7 +438,7 @@ def _run_double_cable_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = prepared_cohort_for_group(kernel_group)
+        cohort = prepared_cohort_for_current_group(kernel_group)
         record_benchmark_metadata(
             **benchmark_array_metadata(
                 "x_positions_m",

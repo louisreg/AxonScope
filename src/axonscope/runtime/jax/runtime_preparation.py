@@ -28,9 +28,11 @@ from axonscope.runtime.jax.runtime_caches import (
     get_batch_runtime,
     get_batch_static_runtime,
     get_prepared_cohort,
+    get_prepared_cohort_identity,
     store_batch_runtime,
     store_batch_static_runtime,
     store_prepared_cohort,
+    store_prepared_cohort_identity,
 )
 from axonscope.runtime.jax.membrane_backend import (
     GatedLeakStackMembraneBackend,
@@ -228,6 +230,25 @@ def prepared_cohort_for_group(group: DispatchGroup) -> PreparedCohort:
     cohort = PreparedCohort.from_dispatch_group(group)
     store_prepared_cohort(cache_key, cohort)
     record_benchmark_metadata(prepared_cohort_cache="miss")
+    return cohort
+
+
+def prepared_cohort_for_current_group(group: DispatchGroup) -> PreparedCohort:
+    """Return a cohort for an unchanged dispatch group object.
+
+    The structural cache remains the conservative path and refreshes current
+    stimulation rows. This exact-group cache is for hot execution of a dispatch
+    plan that has already been validated as current by the caller.
+    """
+
+    cached = get_prepared_cohort_identity(group)
+    if cached is not None:
+        record_benchmark_metadata(prepared_cohort_identity_cache="hit")
+        return cached
+
+    cohort = prepared_cohort_for_group(group)
+    store_prepared_cohort_identity(group, cohort)
+    record_benchmark_metadata(prepared_cohort_identity_cache="miss")
     return cohort
 
 
@@ -1394,6 +1415,7 @@ __all__ = [
     "GatedLeakMembraneStack",
     "group_cm_uF_cm2",
     "prepare_batch_runtime",
+    "prepared_cohort_for_current_group",
     "prepared_cohort_for_group",
     "representative_item",
     "stack_extracellular_runtime",
