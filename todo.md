@@ -1971,6 +1971,13 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/kaggle/20260710_184500_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a77f174/outputs/extracted`
   and
   `benchmark/results/kaggle/20260710_185247_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a4b3f88/outputs/extracted`.
+  Next generic input cleanup caches the factorized host footprint already
+  converted to mV and detects shared rank-1 stimuli by identity before falling
+  back to content keys. A local 4096-row, `Nx=89`, `tsim=2 ms`, `dt=0.02 ms`
+  factorized-input micro-profile now shows hot `inputs.extracellular` around
+  `25-43 ms` with `vstim_footprint_mv_cache=hit` and
+  `vstim_shared_current_detection=identity`. Validate this on the same P100
+  mini gate before claiming GPU speedup or touching solver policy.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

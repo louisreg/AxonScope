@@ -1031,6 +1031,7 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
     )
 
     input_batches._FOOTPRINT_CACHE.clear()
+    input_batches._FOOTPRINT_MV_CACHE.clear()
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
         with benchmark_span("inputs.extracellular"):
@@ -1061,6 +1062,12 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
         if event.name == "inputs.extracellular"
     ]
     assert statuses == ["miss", "hit"]
+    mv_statuses = [
+        event.metadata.get("vstim_footprint_mv_cache")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    assert mv_statuses == ["miss", "hit"]
     np.testing.assert_allclose(
         np.asarray(second.footprint_mV_per_A),
         np.asarray(first.footprint_mV_per_A),
@@ -1083,7 +1090,7 @@ def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path)
         start=0.0 * axs.ms,
         duration=0.05 * axs.ms,
         amplitude=10e-6,
-    )
+    ).as_unit("ampere")
     shared_stimulations = tuple(
         stimulation.replace_drive(drive.id, stimulus=stimulus) for _ in range(4)
     )
@@ -1128,6 +1135,7 @@ def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path)
     )
     metadata = extracellular_event.metadata
     assert metadata["shared_current"] is True
+    assert metadata["vstim_shared_current_detection"] == "identity"
     assert metadata["vstim_temporal_cache_hits"] == 3
     assert metadata["vstim_temporal_cache_misses"] == 1
     assert metadata["vstim_temporal_previous_cache_hits"] == 3
