@@ -3750,7 +3750,11 @@ def _run_single_cable_vstim_batch_observer_chunks(
     )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    local_observer_chunks = time_chunk_steps is not None
+    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+        None,
+        time_chunk_steps=time_chunk_steps,
+    )
+    local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -3920,7 +3924,11 @@ def _run_single_cable_vstim_batch_sparse_observer_chunks(
     )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    local_observer_chunks = time_chunk_steps is not None
+    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+        None,
+        time_chunk_steps=time_chunk_steps,
+    )
+    local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -4096,7 +4104,11 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         batch_size=batch_size,
     )
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    local_observer_chunks = time_chunk_steps is not None
+    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+        None,
+        time_chunk_steps=time_chunk_steps,
+    )
+    local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -4423,7 +4435,11 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
     )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    local_observer_chunks = time_chunk_steps is not None
+    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+        None,
+        time_chunk_steps=time_chunk_steps,
+    )
+    local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -5428,7 +5444,7 @@ def _resolve_vm_raster_observer_state_scope(
 ) -> str:
     text = "default" if scope in (None, "") else str(scope).strip().lower()
     if text == "default":
-        return "chunk" if time_chunk_steps is not None else "full"
+        return "full"
     if text not in {"chunk", "full"}:
         raise ValueError(
             "benchmark_observer_state_scope must be 'default', 'chunk', or 'full'."

@@ -588,7 +588,7 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
 
 
-def test_benchmark_full_observer_state_scope_skips_vm_raster_chunk_combine(tmp_path):
+def test_default_observer_state_scope_preallocates_full_vm_raster(tmp_path):
     def run_case(scope: str | None):
         axons = [
             _passive_double_cable_axon(amp_nA=0.1),
@@ -625,25 +625,25 @@ def test_benchmark_full_observer_state_scope_skips_vm_raster_chunk_combine(tmp_p
         return np.asarray(raster.words), report
 
     default_words, default_report = run_case(None)
-    full_words, full_report = run_case("full")
+    chunk_words, chunk_report = run_case("chunk")
 
-    np.testing.assert_array_equal(full_words, default_words)
+    np.testing.assert_array_equal(chunk_words, default_words)
     assert default_report is not None
-    assert full_report is not None
+    assert chunk_report is not None
+    assert not any(
+        event.name == "kernel.combine_observer_chunks" for event in default_report.events
+    )
     assert any(
         event.name == "kernel.combine_observer_chunks"
-        for event in default_report.events
+        for event in chunk_report.events
     )
-    assert not any(
-        event.name == "kernel.combine_observer_chunks" for event in full_report.events
-    )
-    full_dispatch_events = [
-        event for event in full_report.events if event.name == "kernel.dispatch_jax"
+    default_dispatch_events = [
+        event for event in default_report.events if event.name == "kernel.dispatch_jax"
     ]
-    assert full_dispatch_events
+    assert default_dispatch_events
     assert {
         event.metadata.get("resolved_observer_state_scope")
-        for event in full_dispatch_events
+        for event in default_dispatch_events
     } == {"full"}
 
 

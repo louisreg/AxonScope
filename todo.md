@@ -2008,8 +2008,23 @@ PTA/block-Thomas GPU gate:
   short runs and reduces chunk count on longer ones. Local CPU smoke
   `benchmark/results/p11_observer_default_chunk_256_local_smoke` confirms the
   `Nt=100` case now runs as one local chunk and `kernel.combine_observer_chunks`
-  is a trivial fast-path span around `0.05 ms`; rerun the same P100 mini gate
-  before making a GPU claim.
+  is a trivial fast-path span around `0.05 ms`. The matching P100 mini gate at
+  commit `98a45d0` passed the same recruitment case as `7b69bc5`: total
+  `curve.simulate` improved from about `10.99 s` to `10.13 s`, warm mean from
+  about `323 ms` to `268 ms`, and `kernel.combine_observer_chunks` fell from
+  about `361 ms` total (`~60 ms/sim`) to `0.42 ms` total (`~0.07 ms/sim`).
+  `kernel.finalize_observer` rose from about `14 ms` to `208 ms` total, so the
+  net gain is real but the broader conclusion is structural: observer-only
+  VmRaster should write into a preallocated full-duration packed state by
+  default while the solver loop remains chunked. Artifact:
+  `benchmark/results/kaggle/20260710_204538_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-chunk256-98a45d0/outputs/extracted`.
+  This structural cleanup is now implemented in the JAX runtime: the default
+  VmRaster observer state scope resolves to `full`, explicit benchmark scope
+  `chunk` remains available as the old comparison path, and the solver
+  time-loop can still use `time_chunk_steps`. Local smoke
+  `benchmark/results/p11_observer_global_raster_local_smoke` with
+  `time_chunk_steps=50`, `Nt=100`, and two solver chunks confirms
+  `resolved_observer_state_scope=full` and no `kernel.combine_observer_chunks`.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about
@@ -2067,9 +2082,10 @@ PTA/block-Thomas GPU gate:
   cost (`combine` about `0.101/0.336/0.604 s` for
   `Naxons=1024/4096/8192`), but is mostly neutral at `100/250` where default
   already avoids meaningful combine for this `tsim/dt`. Next low-level target:
-  avoid small-chunk VmRaster combine/finalize overhead while controlling memory,
-  then validate with one larger observer-only case and one probe/full-Vm
-  control before any default policy change. Artifact:
+  promote the full-duration VmRaster state to the runtime default for
+  observer-only chunked runs, keep explicit `chunk` as a benchmark comparison
+  route, then validate with one larger observer-only case and one probe/full-Vm
+  control before making a broader policy claim. Artifact:
   `benchmark/results/kaggle/20260710_200035_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-matrix-eb53d20/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and

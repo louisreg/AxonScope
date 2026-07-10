@@ -185,8 +185,8 @@ class BatchOptions:
         """Record no Vm trace, typically for solver-side observer runs.
 
         Observer-only runs default to a stable, VmRaster word-aligned time chunk
-        to reduce first-call JAX recompilation across duration sweeps while
-        avoiding small-chunk observer recombination overhead. Pass
+        to reduce first-call JAX recompilation across duration sweeps while the
+        runtime writes into one full-duration packed VmRaster state. Pass
         ``time_chunk_steps=None`` explicitly to force one unchunked scan.
         """
 
