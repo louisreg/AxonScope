@@ -1993,7 +1993,15 @@ PTA/block-Thomas GPU gate:
   current JAX device. This should avoid repeated host-to-device placement of
   the `(Naxons, Nx)` footprint on hot amplitude updates. Covered locally by
   the factorized-footprint cache test and double-cable observer equivalence
-  smoke; rerun the same P100 mini gate before claiming GPU speedup.
+  smoke. The matching P100 mini gate at commit `7b69bc5` passed the same
+  single recruitment case as `a5effea` and confirms the new metadata:
+  `vstim_footprint_jax_cache` misses on first lowering and hits on hot
+  amplitude updates. End-to-end impact is marginal/noisy rather than a clear
+  win: total `inputs.extracellular` is about `353.7 ms -> 332.2 ms`, while hot
+  hit events stay around `18 ms`. Treat this as correctness/cache hygiene, not
+  a GPU speed claim; the next cleanup should not keep drilling into static
+  footprint placement. Artifact:
+  `benchmark/results/kaggle/20260710_203539_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-7b69bc5/outputs/extracted`.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about
