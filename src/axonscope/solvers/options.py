@@ -8,7 +8,7 @@ import numpy as np
 from axonscope.solvers.rate_tables import RateTableConfig
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 50
+DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 256
 
 
 @dataclass(frozen=True)
@@ -184,9 +184,10 @@ class BatchOptions:
     ) -> "BatchOptions":
         """Record no Vm trace, typically for solver-side observer runs.
 
-        Observer-only runs default to a stable time chunk to reduce first-call
-        JAX recompilation across duration sweeps. Pass ``time_chunk_steps=None``
-        explicitly to force one unchunked scan.
+        Observer-only runs default to a stable, VmRaster word-aligned time chunk
+        to reduce first-call JAX recompilation across duration sweeps while
+        avoiding small-chunk observer recombination overhead. Pass
+        ``time_chunk_steps=None`` explicitly to force one unchunked scan.
         """
 
         return cls(

@@ -158,10 +158,11 @@ dispatch_results = run_pool(
 
 Observer-only pool runs (`Recording.none()` plus compatible solver-side
 threshold observers, or `BatchOptions.none()`) use a stable default chunk size of
-`axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps. This reduces first-call JAX
-recompilation across duration sweeps because the compiled observer kernel sees
-a stable time-axis shape. The backend writes a local packed VmRaster state for
-each chunk and assembles the public full-duration raster after the scan. Pass
+`axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps. The default is aligned with
+the packed VmRaster word layout, so small runs avoid unnecessary chunk
+recombination while longer duration sweeps still reuse a stable JAX kernel
+shape. The backend writes a local packed VmRaster state for each chunk and
+assembles the public full-duration raster after the scan. Pass
 `BatchOptions.none(time_chunk_steps=None)` explicitly when a single unchunked
 scan is desired.
 

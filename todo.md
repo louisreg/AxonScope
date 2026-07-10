@@ -2002,6 +2002,14 @@ PTA/block-Thomas GPU gate:
   a GPU speed claim; the next cleanup should not keep drilling into static
   footprint placement. Artifact:
   `benchmark/results/kaggle/20260710_203539_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-7b69bc5/outputs/extracted`.
+  Next observer-boundary cleanup changes the observer-only default chunk size
+  from `50` to `256`, a VmRaster word-aligned bounded default. This keeps the
+  duration-sweep compile-shape benefit but avoids default small-chunk combine on
+  short runs and reduces chunk count on longer ones. Local CPU smoke
+  `benchmark/results/p11_observer_default_chunk_256_local_smoke` confirms the
+  `Nt=100` case now runs as one local chunk and `kernel.combine_observer_chunks`
+  is a trivial fast-path span around `0.05 ms`; rerun the same P100 mini gate
+  before making a GPU claim.
   A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
   was rejected and reverted: it removed the explicit `kernel.wait` span, but
   `kernel.combine_observer_chunks` increased from about `0.34 s` to about

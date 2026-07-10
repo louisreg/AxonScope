@@ -241,8 +241,10 @@ There are two solver option containers and one runtime policy surface:
 
 `BatchOptions.none()` is the compact observer-only batch policy. It defaults to
 `DEFAULT_OBSERVER_TIME_CHUNK_STEPS` so duration sweeps reuse a stable JAX kernel
-chunk shape with local VmRaster chunk assembly. Passing `time_chunk_steps=None`
-explicitly keeps the old unchunked single-scan behavior.
+chunk shape with local VmRaster chunk assembly. The default is chosen to align
+with packed VmRaster words and avoid small-chunk recombination overhead on short
+runs. Passing `time_chunk_steps=None` explicitly keeps the unchunked single-scan
+behavior.
 
 The current exact double-cable block-solver options are:
 
