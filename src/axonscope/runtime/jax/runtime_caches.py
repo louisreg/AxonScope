@@ -113,9 +113,9 @@ def clear_all_runtime_caches() -> None:
 
     clear_batch_runtime_caches()
     clear_prepared_cohort_cache()
-    from axonscope.runtime.jax.execution_policy import clear_jax_execution_policy_cache
+    from axonscope.runtime.jax.execution_policy import clear_jax_execution_caches
 
-    clear_jax_execution_policy_cache()
+    clear_jax_execution_caches()
 
 
 def _cache_get(cache: OrderedDict[tuple[Any, ...], Any], key: tuple[Any, ...]) -> Any | None:

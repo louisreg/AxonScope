@@ -57,6 +57,11 @@ _RESOLVED_EXECUTION_POLICY_CACHE: OrderedDict[
     _ResolvedJaxExecutionPolicy,
 ] = OrderedDict()
 _RESOLVED_EXECUTION_POLICY_CACHE_MAX_SIZE = 32
+_PRECISION_VALIDATION_CACHE: OrderedDict[
+    tuple[int, str, str, str],
+    tuple[AxonInstance, ...],
+] = OrderedDict()
+_PRECISION_VALIDATION_CACHE_MAX_SIZE = 32
 
 
 @contextmanager
@@ -156,6 +161,19 @@ def clear_jax_execution_policy_cache() -> None:
     _RESOLVED_EXECUTION_POLICY_CACHE.clear()
 
 
+def clear_jax_precision_validation_cache() -> None:
+    """Clear cached exact-pool precision validation results."""
+
+    _PRECISION_VALIDATION_CACHE.clear()
+
+
+def clear_jax_execution_caches() -> None:
+    """Clear cached JAX execution-policy and validation lowering."""
+
+    clear_jax_execution_policy_cache()
+    clear_jax_precision_validation_cache()
+
+
 def _resolve_device(request: Device) -> Any | None:
     if request.kind == "auto":
         return None
@@ -217,7 +235,44 @@ def _validate_precision(
 ) -> None:
     if precision is None:
         return
+    cache_key = _precision_validation_cache_key(precision, instances)
+    if cache_key is not None:
+        cached_instances = _PRECISION_VALIDATION_CACHE.get(cache_key)
+        if cached_instances is instances:
+            _PRECISION_VALIDATION_CACHE.move_to_end(cache_key)
+            record_benchmark_metadata(jax_precision_validation_cache="hit")
+            return
 
+    with benchmark_span("runtime.jax.execution.validate_precision"):
+        _validate_precision_uncached(precision, instances=instances)
+
+    if cache_key is not None:
+        _PRECISION_VALIDATION_CACHE[cache_key] = instances
+        _PRECISION_VALIDATION_CACHE.move_to_end(cache_key)
+        while len(_PRECISION_VALIDATION_CACHE) > _PRECISION_VALIDATION_CACHE_MAX_SIZE:
+            _PRECISION_VALIDATION_CACHE.popitem(last=False)
+        record_benchmark_metadata(jax_precision_validation_cache="miss")
+
+
+def _precision_validation_cache_key(
+    precision: PrecisionPolicy,
+    instances: Sequence[AxonInstance],
+) -> tuple[int, str, str, str] | None:
+    if not isinstance(instances, tuple):
+        return None
+    return (
+        id(instances),
+        precision.state_dtype,
+        precision.solver_dtype,
+        precision.accumulation_dtype,
+    )
+
+
+def _validate_precision_uncached(
+    precision: PrecisionPolicy,
+    *,
+    instances: Sequence[AxonInstance],
+) -> None:
     requested = {
         "state_dtype": np.dtype(precision.state_dtype),
         "solver_dtype": np.dtype(precision.solver_dtype),
@@ -262,7 +317,9 @@ def _instance_membrane_dtypes(instance: AxonInstance) -> set[np.dtype]:
 
 
 __all__ = [
+    "clear_jax_execution_caches",
     "clear_jax_execution_policy_cache",
+    "clear_jax_precision_validation_cache",
     "JaxExecutionContext",
     "jax_double_cable_block_solver_for_policy",
     "jax_execution_context",

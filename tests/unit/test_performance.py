@@ -349,6 +349,32 @@ def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatc
     jax_execution_policy.clear_jax_execution_policy_cache()
 
 
+def test_jax_precision_validation_cache_reuses_exact_instance_tuple(monkeypatch):
+    from axonscope.runtime.jax import execution_policy as jax_execution_policy
+
+    calls = 0
+    instances = (_clamped_instance(_hh(compartments=5)),)
+    precision = axs.PrecisionPolicy.float32()
+
+    def fake_validate_precision_uncached(precision, *, instances):
+        nonlocal calls
+        calls += 1
+
+    jax_execution_policy.clear_jax_precision_validation_cache()
+    monkeypatch.setattr(
+        jax_execution_policy,
+        "_validate_precision_uncached",
+        fake_validate_precision_uncached,
+    )
+
+    jax_execution_policy._validate_precision(precision, instances=instances)
+    jax_execution_policy._validate_precision(precision, instances=instances)
+
+    assert calls == 1
+
+    jax_execution_policy.clear_jax_precision_validation_cache()
+
+
 def test_execution_policy_runs_jax_cpu_float32_simulation():
     axon = _hh(compartments=5)
 
