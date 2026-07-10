@@ -428,6 +428,8 @@ def vm_raster_any_active(
         blanking_ms=blanking_ms,
     )
     active_words = (row_words & word_mask[None, None, :]) != 0
+    if bool(np.all(probe_mask)):
+        return np.any(active_words, axis=(1, 2))
     return np.any(active_words & probe_mask[:, :, None], axis=(1, 2))
 
 
