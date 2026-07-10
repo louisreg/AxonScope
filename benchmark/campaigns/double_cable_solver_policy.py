@@ -48,6 +48,7 @@ SUMMARY_FIELDS = (
     "observer_state_scope",
     "time_chunk_policy",
     "time_chunk_steps",
+    "repeat_pool_policy",
     "n_axons",
     "nx",
     "precision",
@@ -83,6 +84,7 @@ class RunSpec:
     recording: str
     observer_state_scope: str
     time_chunk_steps: str | None
+    repeat_pool_policy: str
     n_axons: int
     nx: int
     precision: str
@@ -125,6 +127,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--benchmark-observer-state-scope",
         action="append",
         help="Comma-separated observer state scopes: default, chunk, full.",
+    )
+    parser.add_argument(
+        "--repeat-pool-policy",
+        choices=("rebuild", "reuse"),
+        default="rebuild",
+        help=(
+            "Benchmark protocol for warmups/repeats. 'rebuild' measures the "
+            "full curve user path; 'reuse' keeps one pool and simulation "
+            "context to measure steady-state hot paths."
+        ),
     )
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
@@ -294,6 +306,7 @@ def _build_runs(
                                                 recording=recording,
                                                 observer_state_scope=observer_state_scope,
                                                 time_chunk_steps=time_chunk_steps,
+                                                repeat_pool_policy=args.repeat_pool_policy,
                                                 n_axons=n_axons,
                                                 nx=nx,
                                                 precision=precision,
@@ -308,6 +321,7 @@ def _build_runs(
                                                 recording=recording,
                                                 observer_state_scope=observer_state_scope,
                                                 time_chunk_steps=time_chunk_steps,
+                                                repeat_pool_policy=args.repeat_pool_policy,
                                                 n_axons=n_axons,
                                                 nx=nx,
                                                 precision=precision,
@@ -325,6 +339,7 @@ def _build_runs(
                                                     recording=recording,
                                                     observer_state_scope=observer_state_scope,
                                                     time_chunk_steps=time_chunk_steps,
+                                                    repeat_pool_policy=args.repeat_pool_policy,
                                                     n_axons=n_axons,
                                                     nx=nx,
                                                     precision=precision,
@@ -348,6 +363,7 @@ def _curve_command(
     diameters: str,
     observer_state_scope: str,
     time_chunk_steps: str | None,
+    repeat_pool_policy: str,
 ) -> list[str]:
     command = [
         args.python,
@@ -376,6 +392,8 @@ def _curve_command(
         precision,
         "--double-cable-block-solver",
         solver,
+        "--repeat-pool-policy",
+        repeat_pool_policy,
     ]
     if block_b is not None:
         command.extend(("--tiled-thomas-block-b", str(block_b)))
@@ -445,6 +463,10 @@ def _summarize_curve_run(
         "time_chunk_steps": _summary_time_chunk_steps(
             options,
             run.time_chunk_steps,
+        ),
+        "repeat_pool_policy": options.get(
+            "repeat_pool_policy",
+            run.repeat_pool_policy,
         ),
         "n_axons": options.get("n_axons", run.n_axons),
         "nx": options.get("nx", run.nx),
@@ -633,6 +655,7 @@ def _label(
     recording: str,
     observer_state_scope: str,
     time_chunk_steps: str | None,
+    repeat_pool_policy: str,
     n_axons: int,
     nx: int,
     precision: str,
@@ -645,10 +668,13 @@ def _label(
         else f"__obs_{observer_state_scope}"
     )
     time_chunk_token = _time_chunk_label_token(time_chunk_steps)
+    repeat_pool_token = (
+        "" if repeat_pool_policy == "rebuild" else f"__pool_{repeat_pool_policy}"
+    )
     return (
         f"{script}__{platform}__{solver_token}__{recording}__"
         f"n{n_axons}__nx{nx}__{precision}__{diameters}"
-        f"{time_chunk_token}{observer_token}"
+        f"{time_chunk_token}{observer_token}{repeat_pool_token}"
     )
 
 
@@ -676,6 +702,7 @@ def _run_spec_json(run: RunSpec) -> dict[str, Any]:
         "recording": run.recording,
         "observer_state_scope": run.observer_state_scope,
         "time_chunk_steps": run.time_chunk_steps,
+        "repeat_pool_policy": run.repeat_pool_policy,
         "n_axons": run.n_axons,
         "nx": run.nx,
         "precision": run.precision,
@@ -699,18 +726,19 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         [
             "## Fastest Rows",
             "",
-            "| group | solver | block_b | observer_scope | time_chunk | warm mean ms | total simulate ms | variants | status |",
-            "| --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |",
+            "| group | solver | block_b | observer_scope | time_chunk | pool | warm mean ms | total simulate ms | variants | status |",
+            "| --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- |",
         ]
     )
     for group, row in _fastest_rows(rows):
         lines.append(
-            "| {group} | {solver} | {block_b} | {observer_scope} | {time_chunk} | {warm} | {total} | {variants} | {status} |".format(
+            "| {group} | {solver} | {block_b} | {observer_scope} | {time_chunk} | {pool} | {warm} | {total} | {variants} | {status} |".format(
                 group=group,
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
                 observer_scope=row.get("observer_state_scope", ""),
                 time_chunk=row.get("time_chunk_steps", ""),
+                pool=row.get("repeat_pool_policy", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
                 variants=row.get("effective_variants", ""),
@@ -722,13 +750,13 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             "",
             "## All Rows",
             "",
-            "| script | platform | solver | block_b | recording | observer_scope | time_chunk | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
-            "| --- | --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
+            "| script | platform | solver | block_b | recording | observer_scope | time_chunk | pool | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
+            "| --- | --- | --- | ---: | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {time_chunk} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
+            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {time_chunk} | {pool} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
                 script=row.get("script", ""),
                 platform=row.get("platform", ""),
                 solver=row.get("solver", ""),
@@ -736,6 +764,7 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
                 recording=row.get("recording", ""),
                 observer_scope=row.get("observer_state_scope", ""),
                 time_chunk=row.get("time_chunk_steps", ""),
+                pool=row.get("repeat_pool_policy", ""),
                 n_axons=row.get("n_axons", ""),
                 nx=row.get("nx", ""),
                 precision=row.get("precision", ""),

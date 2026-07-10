@@ -73,6 +73,12 @@ class _CurveExecutionContext:
 
 
 @dataclass(frozen=True, slots=True)
+class _ReusableCurveState:
+    phase_pool: "_PhasePool"
+    execution_context: _CurveExecutionContext
+
+
+@dataclass(frozen=True, slots=True)
 class _AxonTemplate:
     axon: Any
     family: str
@@ -117,25 +123,33 @@ def run_threshold_curves(args: Any) -> int:
     phase_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
+    reuse_state: _ReusableCurveState | None = None
+    reuse_pool = _reuse_repeat_pool(options)
     with _benchmark_session(output, options, "threshold_curves", selected_case) as session:
         for warmup in range(int(options["warmups"])):
-            _run_threshold_phase(
+            reuse_state = _run_threshold_phase(
                 options,
                 selected_case=selected_case,
                 phase="warmup",
                 repeat=warmup,
                 result_rows=phase_rows,
                 summary_rows=summary_rows,
+                reusable_state=reuse_state if reuse_pool else None,
             )
+            if not reuse_pool:
+                reuse_state = None
         for repeat in range(int(options["repeats"])):
-            _run_threshold_phase(
+            reuse_state = _run_threshold_phase(
                 options,
                 selected_case=selected_case,
                 phase="repeat",
                 repeat=repeat,
                 result_rows=phase_rows,
                 summary_rows=summary_rows,
+                reusable_state=reuse_state if reuse_pool else None,
             )
+            if not reuse_pool:
+                reuse_state = None
         session.metadata["curve_result_rows"] = len(phase_rows)
         session.metadata["curve_summary_rows"] = len(summary_rows)
 
@@ -161,25 +175,33 @@ def run_recruitment_curves(args: Any) -> int:
     phase_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
+    reuse_state: _ReusableCurveState | None = None
+    reuse_pool = _reuse_repeat_pool(options)
     with _benchmark_session(output, options, "recruitment_curves", selected_case) as session:
         for warmup in range(int(options["warmups"])):
-            _run_recruitment_phase(
+            reuse_state = _run_recruitment_phase(
                 options,
                 selected_case=selected_case,
                 phase="warmup",
                 repeat=warmup,
                 result_rows=phase_rows,
                 summary_rows=summary_rows,
+                reusable_state=reuse_state if reuse_pool else None,
             )
+            if not reuse_pool:
+                reuse_state = None
         for repeat in range(int(options["repeats"])):
-            _run_recruitment_phase(
+            reuse_state = _run_recruitment_phase(
                 options,
                 selected_case=selected_case,
                 phase="repeat",
                 repeat=repeat,
                 result_rows=phase_rows,
                 summary_rows=summary_rows,
+                reusable_state=reuse_state if reuse_pool else None,
             )
+            if not reuse_pool:
+                reuse_state = None
         session.metadata["curve_result_rows"] = len(phase_rows)
         session.metadata["curve_summary_rows"] = len(summary_rows)
 
@@ -250,30 +272,36 @@ def _run_threshold_phase(
     repeat: int,
     result_rows: list[dict[str, Any]],
     summary_rows: list[dict[str, Any]],
-) -> None:
+    reusable_state: _ReusableCurveState | None = None,
+) -> _ReusableCurveState:
     n_axons = int(options["n_axons"])
     low = np.full(n_axons, float(options["amplitude_min"]), dtype=float)
     high = np.full(n_axons, float(options["amplitude_max"]), dtype=float)
-    phase_pool = _build_phase_pool(
-        options,
-        low,
-        selected_case=selected_case,
-        phase=phase,
-        repeat=repeat,
-        curve="activation_threshold",
-        iteration=-2,
-        curve_context="threshold",
-    )
-    execution_context = _build_curve_execution_context(
-        options,
-        phase_pool,
-        target=axs.positions.DISTAL,
-        selected_case=selected_case,
-        phase=phase,
-        repeat=repeat,
-        curve="activation_threshold",
-        iteration=-2,
-    )
+    reused_pool = reusable_state is not None
+    if reusable_state is None:
+        phase_pool = _build_phase_pool(
+            options,
+            low,
+            selected_case=selected_case,
+            phase=phase,
+            repeat=repeat,
+            curve="activation_threshold",
+            iteration=-2,
+            curve_context="threshold",
+        )
+        execution_context = _build_curve_execution_context(
+            options,
+            phase_pool,
+            target=axs.positions.DISTAL,
+            selected_case=selected_case,
+            phase=phase,
+            repeat=repeat,
+            curve="activation_threshold",
+            iteration=-2,
+        )
+    else:
+        phase_pool = reusable_state.phase_pool
+        execution_context = reusable_state.execution_context
     active_low, row_meta = _evaluate_amplitudes(
         options,
         phase_pool,
@@ -284,7 +312,7 @@ def _run_threshold_phase(
         repeat=repeat,
         curve="activation_threshold",
         iteration=-2,
-        update_amplitudes=False,
+        update_amplitudes=reused_pool,
         execution_context=execution_context,
     )
     active_high, row_meta = _evaluate_amplitudes(
@@ -385,6 +413,10 @@ def _run_threshold_phase(
                 "activation_fraction": "",
             }
         )
+    return _ReusableCurveState(
+        phase_pool=phase_pool,
+        execution_context=execution_context,
+    )
 
 
 def _run_recruitment_phase(
@@ -395,7 +427,8 @@ def _run_recruitment_phase(
     repeat: int,
     result_rows: list[dict[str, Any]],
     summary_rows: list[dict[str, Any]],
-) -> None:
+    reusable_state: _ReusableCurveState | None = None,
+) -> _ReusableCurveState:
     count = max(int(options["amplitude_count"]), 1)
     if count == 1:
         amplitudes = np.asarray([float(options["amplitude_max"])], dtype=float)
@@ -408,9 +441,13 @@ def _run_recruitment_phase(
         )
     phase_pool: _PhasePool | None = None
     execution_context: _CurveExecutionContext | None = None
+    reused_pool = reusable_state is not None
+    if reusable_state is not None:
+        phase_pool = reusable_state.phase_pool
+        execution_context = reusable_state.execution_context
     for iteration, amplitude in enumerate(amplitudes):
         values = np.full(int(options["n_axons"]), float(amplitude), dtype=float)
-        if iteration == 0:
+        if iteration == 0 and phase_pool is None:
             phase_pool = _build_phase_pool(
                 options,
                 values,
@@ -421,6 +458,7 @@ def _run_recruitment_phase(
                 iteration=iteration,
                 curve_context="recruitment",
             )
+        if iteration == 0 and execution_context is None:
             execution_context = _build_curve_execution_context(
                 options,
                 phase_pool,
@@ -443,7 +481,7 @@ def _run_recruitment_phase(
             repeat=repeat,
             curve="recruitment",
             iteration=iteration,
-            update_amplitudes=iteration > 0,
+            update_amplitudes=iteration > 0 or reused_pool,
             execution_context=execution_context,
         )
         _append_activation_rows(
@@ -475,6 +513,16 @@ def _run_recruitment_phase(
                 "activation_fraction": _activation_fraction(activated),
             }
         )
+    if phase_pool is None or execution_context is None:
+        raise RuntimeError("recruitment phase pool was not initialized.")
+    return _ReusableCurveState(
+        phase_pool=phase_pool,
+        execution_context=execution_context,
+    )
+
+
+def _reuse_repeat_pool(options: dict[str, Any]) -> bool:
+    return str(options.get("repeat_pool_policy", "rebuild")) == "reuse"
 
 
 def _build_phase_pool(

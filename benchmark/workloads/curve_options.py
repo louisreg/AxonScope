@@ -260,6 +260,16 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--execution-policy", default="default")
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--warmups", type=int)
+    parser.add_argument(
+        "--repeat-pool-policy",
+        choices=("rebuild", "reuse"),
+        default="rebuild",
+        help=(
+            "Benchmark protocol for repeats. 'rebuild' rebuilds the curve pool "
+            "for every warmup/repeat; 'reuse' keeps one pool and simulation "
+            "context across warmups/repeats to measure steady-state hot paths."
+        ),
+    )
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
     parser.add_argument("--profile", action="store_true", dest="profile", default=None)
@@ -372,6 +382,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "execution_policy": args.execution_policy,
         "repeats": args.repeats if args.repeats is not None else preset.repeats,
         "warmups": args.warmups if args.warmups is not None else preset.warmups,
+        "repeat_pool_policy": args.repeat_pool_policy,
         "memory_trace": args.memory_trace or preset.memory_trace,
         "memory_top_n": args.memory_top_n if args.memory_top_n is not None else preset.memory_top_n,
         "profile": preset.profile if args.profile is None else bool(args.profile),

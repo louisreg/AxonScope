@@ -233,6 +233,7 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["n_axons"] == 12
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
+    assert options["repeat_pool_policy"] == "rebuild"
     assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
     assert options["benchmark_observer_state_scope"] == "full"
 
@@ -266,6 +267,8 @@ def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
                 "default,2",
                 "--benchmark-observer-state-scope",
                 "default,full",
+                "--repeat-pool-policy",
+                "reuse",
                 "--output",
                 str(tmp_path),
                 "--dry-run",
@@ -279,6 +282,8 @@ def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
     assert "__tc2" in out
     assert "__obs_full" in out
     assert "--benchmark-observer-state-scope full" in out
+    assert "__pool_reuse" in out
+    assert "--repeat-pool-policy reuse" in out
 
     manifest = json.loads(
         (tmp_path / "double_cable_solver_policy_manifest.json").read_text(
@@ -294,10 +299,12 @@ def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
         ("2", "default"),
         ("2", "full"),
     ]
+    assert {run["repeat_pool_policy"] for run in manifest["runs"]} == {"reuse"}
     assert "--benchmark-observer-state-scope" not in manifest["runs"][0]["command"]
     assert "--benchmark-observer-state-scope" in manifest["runs"][1]["command"]
     assert "--time-chunk-steps" in manifest["runs"][0]["command"]
     assert "--time-chunk-steps" in manifest["runs"][2]["command"]
+    assert "--repeat-pool-policy" in manifest["runs"][0]["command"]
 
 
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():
@@ -524,6 +531,92 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
         if stimulation is not None
     ]
     np.testing.assert_allclose(currents, [-0.5, -0.5, -0.5])
+
+
+def test_recruitment_phase_reused_pool_updates_first_amplitude(monkeypatch):
+    parser = build_parser("recruitment_curves", description="test parser")
+    parser.add_argument("--amplitude-count", type=int, default=None)
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "2",
+            "--nx",
+            "5",
+            "--amplitude-count",
+            "2",
+        ]
+    )
+    options = resolved_options(args)
+    row_meta = (
+        {"family": "row_0", "diameter_um": 0.8},
+        {"family": "row_1", "diameter_um": 0.8},
+    )
+    phase_pool = curve_runtime._PhasePool(
+        pool=(object(), object()),
+        row_meta=row_meta,
+        update_handles=(),
+    )
+    execution_context = curve_runtime._CurveExecutionContext(
+        activation=object(),
+        simulation=object(),
+    )
+    build_pool_calls = []
+    build_context_calls = []
+    update_flags = []
+
+    def build_phase_pool(options, amplitudes, **kwargs):
+        build_pool_calls.append((tuple(amplitudes.tolist()), kwargs))
+        return phase_pool
+
+    def build_curve_execution_context(options, phase_pool, **kwargs):
+        build_context_calls.append(kwargs)
+        return execution_context
+
+    def evaluate_amplitudes(
+        options,
+        phase_pool,
+        amplitudes,
+        *,
+        update_amplitudes=True,
+        execution_context=None,
+        **kwargs,
+    ):
+        update_flags.append(bool(update_amplitudes))
+        return np.asarray([False, True]), row_meta
+
+    monkeypatch.setattr(curve_runtime, "_build_phase_pool", build_phase_pool)
+    monkeypatch.setattr(
+        curve_runtime,
+        "_build_curve_execution_context",
+        build_curve_execution_context,
+    )
+    monkeypatch.setattr(curve_runtime, "_evaluate_amplitudes", evaluate_amplitudes)
+
+    result_rows: list[dict[str, object]] = []
+    summary_rows: list[dict[str, object]] = []
+    state = curve_runtime._run_recruitment_phase(
+        options,
+        selected_case="case",
+        phase="warmup",
+        repeat=0,
+        result_rows=result_rows,
+        summary_rows=summary_rows,
+    )
+    curve_runtime._run_recruitment_phase(
+        options,
+        selected_case="case",
+        phase="repeat",
+        repeat=0,
+        result_rows=result_rows,
+        summary_rows=summary_rows,
+        reusable_state=state,
+    )
+
+    assert len(build_pool_calls) == 1
+    assert len(build_context_calls) == 1
+    assert update_flags == [False, True, True, True]
 
 
 def test_curve_workload_dispatch_groups_require_same_temporal_stimulus():
