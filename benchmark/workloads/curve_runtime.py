@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 import axonscope as axs
-from axonscope.benchmarking import benchmark_span
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.positions import PositionSelector
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, activation_values_from_vm_raster
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
@@ -62,6 +62,7 @@ CURVE_SUMMARY_FIELDS = (
 class _PhasePool:
     pool: tuple[axs.AxonInstance, ...]
     row_meta: tuple[dict[str, Any], ...]
+    update_handles: tuple["_DriveUpdateHandle", ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,14 @@ class _AxonTemplate:
     electrode_x_um: float
     positions: Any
     positions_um: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class _DriveUpdateHandle:
+    instance: axs.AxonInstance
+    drive_id: Any
+    footprint: Any
+    metadata: Any
 
 
 def run_threshold_curves(args: Any) -> int:
@@ -481,12 +490,12 @@ def _build_phase_pool(
         n_axons=int(options["n_axons"]),
         case_name=selected_case,
     ):
-        pool, row_meta = _build_pool(
+        pool, row_meta, update_handles = _build_pool(
             options,
             amplitudes_uA,
             curve_context=curve_context,
         )
-    return _PhasePool(pool=pool, row_meta=row_meta)
+    return _PhasePool(pool=pool, row_meta=row_meta, update_handles=update_handles)
 
 
 def _evaluate_amplitudes(
@@ -513,7 +522,7 @@ def _evaluate_amplitudes(
             n_axons=int(options["n_axons"]),
         ):
             _update_pool_amplitudes(
-                phase_pool.pool,
+                phase_pool,
                 amplitudes_uA,
                 options,
             )
@@ -628,35 +637,56 @@ def _build_curve_execution_context(
 
 
 def _update_pool_amplitudes(
-    pool: tuple[axs.AxonInstance, ...],
+    phase_pool: _PhasePool,
     amplitudes_uA: np.ndarray,
     options: dict[str, Any],
 ) -> None:
     amplitudes = np.asarray(amplitudes_uA, dtype=float).reshape(-1)
+    pool = phase_pool.pool
+    handles = phase_pool.update_handles
     if amplitudes.shape != (len(pool),):
         raise ValueError(f"expected one amplitude per axon, got shape {amplitudes.shape}.")
+    if len(handles) != len(pool):
+        raise RuntimeError("benchmark phase pool has inconsistent update handles.")
     stimulus_cache: dict[float, Any] = {}
+    stimulation_cache: dict[tuple[int, int], Any] = {}
+    stimulation_cache_hits = 0
+    stimulation_cache_misses = 0
     with benchmark_span(
         "curve.update_amplitudes.rows",
         n_axons=len(pool),
         unique_amplitudes=int(np.unique(amplitudes).size),
+        unique_footprints=len({id(handle.footprint) for handle in handles}),
     ):
-        for instance, amplitude in zip(pool, amplitudes, strict=True):
-            stimulation = instance.extracellular_stimulation
-            if stimulation is None:
-                raise RuntimeError("benchmark pool row has no extracellular stimulation.")
-            drive = stimulation.drives[0]
+        for handle, amplitude in zip(handles, amplitudes, strict=True):
             amplitude_key = float(amplitude)
             stimulus = stimulus_cache.get(amplitude_key)
             if stimulus is None:
                 with benchmark_span("curve.update_amplitudes.stimulus_build"):
                     stimulus = _stimulus_for_amplitude(options, amplitude_key)
                 stimulus_cache[amplitude_key] = stimulus
-            updated = stimulation.replace_drive(
-                drive.id,
-                stimulus=stimulus,
+            cache_key = (id(handle.footprint), id(stimulus))
+            updated = stimulation_cache.get(cache_key)
+            if updated is None:
+                stimulation_cache_misses += 1
+                updated = _point_source_stimulation_from_footprint(
+                    handle.footprint,
+                    stimulus=stimulus,
+                    drive_id=handle.drive_id,
+                    metadata=handle.metadata,
+                )
+                stimulation_cache[cache_key] = updated
+            else:
+                stimulation_cache_hits += 1
+            handle.instance.add_extracellular_stimulation(
+                stimulation=updated,
+                replace=True,
             )
-            instance.add_extracellular_stimulation(stimulation=updated, replace=True)
+        record_benchmark_metadata(
+            curve_update_stimulation_cache_hits=int(stimulation_cache_hits),
+            curve_update_stimulation_cache_misses=int(stimulation_cache_misses),
+            curve_update_unique_stimulations=int(len(stimulation_cache)),
+        )
 
 
 def _build_pool(
@@ -664,7 +694,11 @@ def _build_pool(
     amplitudes_uA: np.ndarray,
     *,
     curve_context: str,
-) -> tuple[tuple[axs.AxonInstance, ...], tuple[dict[str, Any], ...]]:
+) -> tuple[
+    tuple[axs.AxonInstance, ...],
+    tuple[dict[str, Any], ...],
+    tuple[_DriveUpdateHandle, ...],
+]:
     rng = np.random.default_rng(int(options["seed"]))
     n_axons = int(options["n_axons"])
     amplitudes = np.asarray(amplitudes_uA, dtype=float).reshape(-1)
@@ -701,8 +735,11 @@ def _build_pool(
 
     templates: dict[tuple[str, float], _AxonTemplate] = {}
     stimulus_cache: dict[float, Any] = {}
+    footprint_cache: dict[tuple[Any, ...], Any] = {}
+    stimulation_cache: dict[tuple[int, int], Any] = {}
     pool: list[axs.AxonInstance] = []
     row_meta: list[dict[str, Any]] = []
+    update_handles: list[_DriveUpdateHandle] = []
     with benchmark_span("curve.build_pool.rows", n_axons=n_axons):
         for row in range(n_axons):
             row_cable = _row_cable(options, row)
@@ -728,18 +765,27 @@ def _build_pool(
             if stimulus is None:
                 stimulus = _stimulus_for_amplitude(options, amplitude_key)
                 stimulus_cache[amplitude_key] = stimulus
-            axon_id = axs.AxonId(f"row_{row:05d}")
             stimulation = _point_source_stimulation_for_template(
                 template,
                 stimulus=stimulus,
                 curve_context=curve_context,
                 axon_y_um=float(y_um[row]),
                 axon_z_um=float(z_um[row]),
-                axon_id=axon_id,
+                footprint_cache=footprint_cache,
+                stimulation_cache=stimulation_cache,
             )
             instance = axs.AxonInstance(template.axon)
             instance.add_extracellular_stimulation(stimulation=stimulation)
+            drive = stimulation.drives[0]
             pool.append(instance)
+            update_handles.append(
+                _DriveUpdateHandle(
+                    instance=instance,
+                    drive_id=drive.id,
+                    footprint=drive.footprint,
+                    metadata=drive.metadata,
+                )
+            )
             row_meta.append(
                 {
                     "row": row,
@@ -750,7 +796,15 @@ def _build_pool(
                     "axon_z_um": float(z_um[row]),
                 }
             )
-    return tuple(pool), tuple(row_meta)
+        record_benchmark_metadata(
+            curve_build_unique_footprints=int(
+                len({id(handle.footprint) for handle in update_handles})
+            ),
+            curve_build_unique_stimulations=int(
+                len({id(instance.extracellular_stimulation) for instance in pool})
+            ),
+        )
+    return tuple(pool), tuple(row_meta), tuple(update_handles)
 
 
 def _build_axon_template(
@@ -782,9 +836,45 @@ def _point_source_stimulation_for_template(
     curve_context: str,
     axon_y_um: float,
     axon_z_um: float,
-    axon_id: Any,
+    footprint_cache: dict[tuple[Any, ...], Any],
+    stimulation_cache: dict[tuple[int, int], Any],
+) -> Any:
+    footprint = _point_source_footprint_for_template(
+        template,
+        curve_context=curve_context,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        footprint_cache=footprint_cache,
+    )
+    return _point_source_stimulation_from_footprint(
+        footprint,
+        stimulus=stimulus,
+        drive_id=axs.DriveId("point_source"),
+        metadata={"source": "point_source_helper"},
+        stimulation_cache=stimulation_cache,
+    )
+
+
+def _point_source_footprint_for_template(
+    template: _AxonTemplate,
+    *,
+    curve_context: str,
+    axon_y_um: float,
+    axon_z_um: float,
+    footprint_cache: dict[tuple[Any, ...], Any],
 ) -> Any:
     electrode_z_um = 0.0 if curve_context == "recruitment" else 100.0
+    cache_key = (
+        id(template),
+        curve_context,
+        float(axon_y_um),
+        float(axon_z_um),
+        electrode_z_um,
+    )
+    cached = footprint_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     min_distance_um = 5.0 if curve_context == "recruitment" else 1e-3
     dx_m = (template.positions_um - float(template.electrode_x_um)) * 1e-6
     dy_m = (0.0 - float(axon_y_um)) * 1e-6
@@ -792,10 +882,9 @@ def _point_source_stimulation_for_template(
     radius_m = np.sqrt(dx_m * dx_m + dy_m * dy_m + dz_m * dz_m)
     radius_m = np.maximum(radius_m, min_distance_um * 1e-6)
     values = 1.0 / (4.0 * np.pi * 0.3 * radius_m)
-    footprint = axs.ExtracellularFootprint(
+    footprint = axs.ExtracellularFootprint.shared(
         values=values,
         positions=template.positions,
-        axon_ids=(axon_id,),
         metadata={
             "builder": "benchmark.workloads.curve_runtime.point_source",
             "source": "point_source_helper",
@@ -808,13 +897,33 @@ def _point_source_stimulation_for_template(
             "sigma_S_m": 0.3,
         },
     )
+    footprint_cache[cache_key] = footprint
+    return footprint
+
+
+def _point_source_stimulation_from_footprint(
+    footprint: Any,
+    *,
+    stimulus: Any,
+    drive_id: Any,
+    metadata: Any,
+    stimulation_cache: dict[tuple[int, int], Any] | None = None,
+) -> Any:
+    cache_key = (id(footprint), id(stimulus))
+    if stimulation_cache is not None:
+        cached = stimulation_cache.get(cache_key)
+        if cached is not None:
+            return cached
     drive = axs.ExtracellularDrive(
-        id=axs.DriveId("point_source"),
+        id=drive_id,
         footprint=footprint,
         stimulus=stimulus,
-        metadata={"source": "point_source_helper"},
+        metadata=metadata,
     )
-    return axs.ExtracellularStimulation((drive,))
+    stimulation = axs.ExtracellularStimulation((drive,))
+    if stimulation_cache is not None:
+        stimulation_cache[cache_key] = stimulation
+    return stimulation
 
 
 def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:

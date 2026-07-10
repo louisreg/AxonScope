@@ -1110,31 +1110,53 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
                 dt_ms=0.05,
                 dtype_local=np.float32,
             )
+        with benchmark_span("inputs.extracellular"):
+            third = build_factorized_vstim_midpoint_batch(
+                axon,
+                [(updated,), (updated,)],
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+            )
         report = axs.disable_benchmark(print_summary=False, save=False)
     finally:
         axs.disable_benchmark(print_summary=False, save=False)
 
     assert first is not None
     assert second is not None
+    assert third is not None
     statuses = [
         event.metadata.get("vstim_footprint_cache")
         for event in report.events
         if event.name == "inputs.extracellular"
     ]
-    assert statuses == ["miss", "hit"]
+    assert statuses == ["miss", "hit", "hit"]
     mv_statuses = [
         event.metadata.get("vstim_footprint_mv_cache")
         for event in report.events
         if event.name == "inputs.extracellular"
     ]
-    assert mv_statuses == ["miss", "hit"]
+    assert mv_statuses == ["miss", "hit", "hit"]
     jax_statuses = [
         event.metadata.get("vstim_footprint_jax_cache")
         for event in report.events
         if event.name == "inputs.extracellular"
     ]
-    assert jax_statuses == ["miss", "hit"]
+    assert jax_statuses == ["miss", "hit", "hit"]
+    row_cache_hits = [
+        event.metadata.get("vstim_factorized_row_cache_hits")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    row_cache_misses = [
+        event.metadata.get("vstim_factorized_row_cache_misses")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    assert row_cache_hits == [1, 1, 1]
+    assert row_cache_misses == [1, 1, 1]
     assert second.footprint_mV_per_A is first.footprint_mV_per_A
+    assert third.footprint_mV_per_A is first.footprint_mV_per_A
     np.testing.assert_allclose(
         np.asarray(second.footprint_mV_per_A),
         np.asarray(first.footprint_mV_per_A),

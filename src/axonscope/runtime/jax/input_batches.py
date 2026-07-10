@@ -1157,20 +1157,39 @@ def _factorizable_footprint_rows(
         return None
     drive_rows: list[tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...]] = []
     max_drive_count = 0
+    row_cache_hits = 0
+    row_cache_misses = 0
+    local_row_cache: dict[
+        tuple[int, ...],
+        tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...],
+    ] = {}
     for row in rows:
-        row_drives: list[tuple[ExtracellularStimulation, Any, Stimulus]] = []
-        for stimulation in row:
-            if not isinstance(stimulation, ExtracellularStimulation):
-                return None
-            for drive in stimulation.drives:
-                stimulus = getattr(drive, "stimulus", None)
-                if stimulus is None:
+        row_key = tuple(id(stimulation) for stimulation in row)
+        cached_row = local_row_cache.get(row_key)
+        if cached_row is None:
+            row_cache_misses += 1
+            row_drives: list[tuple[ExtracellularStimulation, Any, Stimulus]] = []
+            for stimulation in row:
+                if not isinstance(stimulation, ExtracellularStimulation):
                     return None
-                row_drives.append((stimulation, drive, stimulus))
-        max_drive_count = max(max_drive_count, len(row_drives))
-        drive_rows.append(tuple(row_drives))
+                for drive in stimulation.drives:
+                    stimulus = getattr(drive, "stimulus", None)
+                    if stimulus is None:
+                        return None
+                    row_drives.append((stimulation, drive, stimulus))
+            row_drive_tuple = tuple(row_drives)
+            local_row_cache[row_key] = row_drive_tuple
+        else:
+            row_cache_hits += 1
+            row_drive_tuple = cached_row
+        max_drive_count = max(max_drive_count, len(row_drive_tuple))
+        drive_rows.append(row_drive_tuple)
     if max_drive_count == 0:
         return None
+    record_benchmark_metadata(
+        vstim_factorized_row_cache_hits=int(row_cache_hits),
+        vstim_factorized_row_cache_misses=int(row_cache_misses),
+    )
     return tuple(drive_rows), int(max_drive_count)
 
 

@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-09 during the P11C Triton workflow benchmark gate.
+Updated on 2026-07-10 during the P11 non-solver GPU hotpath cleanup.
 
 Current state:
 
@@ -1988,6 +1988,20 @@ PTA/block-Thomas GPU gate:
   chunk/result handling rather than factorized footprint construction.
   Artifact:
   `benchmark/results/kaggle/20260710_190758_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a5effea/outputs/extracted`.
+  Follow-up curve-orchestration cleanup now reuses point-source footprints and
+  benchmark stimulation objects by `(footprint, stimulus)` instead of building
+  one stimulation per axon row when cohorts share the same footprint. This is
+  benchmark-workload plumbing, not a solver/runtime special case. Local CPU
+  threshold smokes with `Naxons=512`, `Nx=89`, observer-only, and explicit
+  50-step chunks show the expected grouping: same-diameter cohorts use
+  1 unique footprint/stimulation and reduce `curve.build_pool.rows` from about
+  `272 ms` to `67 ms`, `curve.update_amplitudes.rows` from about `66 ms` to
+  `3.3 ms`, and hot `inputs.extracellular` from about `4.4-4.9 ms` to about
+  `3.0-3.5 ms`; different-diameter cohorts use 5 unique footprints and keep
+  update rows around `3.0 ms` total. A recruitment smoke with random transverse
+  positions keeps 64 unique footprints for 64 rows, confirming the cache only
+  groups genuinely identical footprints. Validate on the same P100 mini gate
+  before making a GPU speedup claim.
   Additional generic input cleanup now caches the static factorized footprint
   after conversion to a device-local JAX array, keyed by footprint, dtype, and
   current JAX device. This should avoid repeated host-to-device placement of
