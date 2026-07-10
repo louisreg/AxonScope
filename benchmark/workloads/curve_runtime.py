@@ -65,6 +65,12 @@ class _PhasePool:
 
 
 @dataclass(frozen=True, slots=True)
+class _CurveExecutionContext:
+    activation: Any
+    simulation: Any
+
+
+@dataclass(frozen=True, slots=True)
 class _AxonTemplate:
     axon: Any
     family: str
@@ -242,6 +248,16 @@ def _run_threshold_phase(
         iteration=-2,
         curve_context="threshold",
     )
+    execution_context = _build_curve_execution_context(
+        options,
+        phase_pool,
+        target=axs.positions.DISTAL,
+        selected_case=selected_case,
+        phase=phase,
+        repeat=repeat,
+        curve="activation_threshold",
+        iteration=-2,
+    )
     active_low, row_meta = _evaluate_amplitudes(
         options,
         phase_pool,
@@ -253,6 +269,7 @@ def _run_threshold_phase(
         curve="activation_threshold",
         iteration=-2,
         update_amplitudes=False,
+        execution_context=execution_context,
     )
     active_high, row_meta = _evaluate_amplitudes(
         options,
@@ -264,6 +281,7 @@ def _run_threshold_phase(
         repeat=repeat,
         curve="activation_threshold",
         iteration=-1,
+        execution_context=execution_context,
     )
     _append_activation_rows(
         result_rows,
@@ -310,6 +328,7 @@ def _run_threshold_phase(
             repeat=repeat,
             curve="activation_threshold",
             iteration=iteration,
+            execution_context=execution_context,
         )
         _append_activation_rows(
             result_rows,
@@ -371,6 +390,8 @@ def _run_recruitment_phase(
             count,
             dtype=float,
         )
+    phase_pool: _PhasePool | None = None
+    execution_context: _CurveExecutionContext | None = None
     for iteration, amplitude in enumerate(amplitudes):
         values = np.full(int(options["n_axons"]), float(amplitude), dtype=float)
         if iteration == 0:
@@ -384,6 +405,18 @@ def _run_recruitment_phase(
                 iteration=iteration,
                 curve_context="recruitment",
             )
+            execution_context = _build_curve_execution_context(
+                options,
+                phase_pool,
+                target=axs.positions.ALL,
+                selected_case=selected_case,
+                phase=phase,
+                repeat=repeat,
+                curve="recruitment",
+                iteration=iteration,
+            )
+        if phase_pool is None or execution_context is None:
+            raise RuntimeError("recruitment phase pool was not initialized.")
         activated, row_meta = _evaluate_amplitudes(
             options,
             phase_pool,
@@ -395,6 +428,7 @@ def _run_recruitment_phase(
             curve="recruitment",
             iteration=iteration,
             update_amplitudes=iteration > 0,
+            execution_context=execution_context,
         )
         _append_activation_rows(
             result_rows,
@@ -467,6 +501,7 @@ def _evaluate_amplitudes(
     curve: str,
     iteration: int,
     update_amplitudes: bool = True,
+    execution_context: _CurveExecutionContext | None = None,
 ) -> tuple[np.ndarray, tuple[dict[str, Any], ...]]:
     if update_amplitudes:
         with benchmark_span(
@@ -482,6 +517,60 @@ def _evaluate_amplitudes(
                 amplitudes_uA,
                 options,
             )
+    if execution_context is None:
+        execution_context = _build_curve_execution_context(
+            options,
+            phase_pool,
+            target=target,
+            selected_case=selected_case,
+            phase=phase,
+            repeat=repeat,
+            curve=curve,
+            iteration=iteration,
+        )
+    activation = execution_context.activation
+    simulation = execution_context.simulation
+    with benchmark_span(
+        "curve.simulate",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        recording=options["recording"],
+        platform=options["platform"],
+        precision=options["precision"],
+        time_chunk_policy=options.get("time_chunk_policy", "default"),
+        time_chunk_steps=options.get("time_chunk_steps"),
+        gpu_solver=options.get("double_cable_block_solver", "auto"),
+        tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
+        benchmark_double_cable_block_solver=options.get(
+            "benchmark_double_cable_block_solver"
+        ),
+    ):
+        result = simulation.run()
+    with benchmark_span(
+        "curve.analyze_activation",
+        phase=phase,
+        repeat=repeat,
+        curve=curve,
+        iteration=iteration,
+        recording=options["recording"],
+    ):
+        activated = _activation_values(result, activation, recording_mode=options["recording"])
+    return activated, phase_pool.row_meta
+
+
+def _build_curve_execution_context(
+    options: dict[str, Any],
+    phase_pool: _PhasePool,
+    *,
+    target: Any,
+    selected_case: str,
+    phase: str,
+    repeat: int,
+    curve: str,
+    iteration: int,
+) -> _CurveExecutionContext:
     with benchmark_span(
         "curve.activation_definition",
         phase=phase,
@@ -535,34 +624,7 @@ def _evaluate_amplitudes(
             execution_policy=execution_policy,
             progress=False,
         )
-    with benchmark_span(
-        "curve.simulate",
-        phase=phase,
-        repeat=repeat,
-        curve=curve,
-        iteration=iteration,
-        recording=options["recording"],
-        platform=options["platform"],
-        precision=options["precision"],
-        time_chunk_policy=options.get("time_chunk_policy", "default"),
-        time_chunk_steps=options.get("time_chunk_steps"),
-        gpu_solver=options.get("double_cable_block_solver", "auto"),
-        tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
-        benchmark_double_cable_block_solver=options.get(
-            "benchmark_double_cable_block_solver"
-        ),
-    ):
-        result = simulation.run()
-    with benchmark_span(
-        "curve.analyze_activation",
-        phase=phase,
-        repeat=repeat,
-        curve=curve,
-        iteration=iteration,
-        recording=options["recording"],
-    ):
-        activated = _activation_values(result, activation, recording_mode=options["recording"])
-    return activated, phase_pool.row_meta
+    return _CurveExecutionContext(activation=activation, simulation=simulation)
 
 
 def _update_pool_amplitudes(

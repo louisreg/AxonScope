@@ -1945,6 +1945,18 @@ PTA/block-Thomas GPU gate:
   to about 5.48 s. Covered by focused factorized-input, observer-runtime,
   gated/leak membrane-stack, dispatcher, and batch tests; rerun the CPU/GPU
   Kaggle policy slice before making a fresh speedup claim.
+  Follow-up generic hot-path cleanup: `runtime.prepare` and prepared-cohort
+  cache keys now use compact digests plus per-`DispatchGroup` identity caches
+  instead of huge per-row tuple keys; prepared cohort position/transverse arrays
+  are read-only so repeated extracellular footprint cache keys can reuse
+  content digests; and curve workloads reuse one
+  `Activation`/policy/`AxonSimulation` context per phase instead of
+  reconstructing it for every amplitude. Local CPU smoke
+  `benchmark/results/p11_non_solver_opt_local_smoke_v3` confirms hot
+  intra-phase `runtime.prepare` hits around `0.05-0.08 ms`, prepared-cohort
+  hits around `0.2 ms`, and construct-simulation events only once per
+  warmup/repeat phase. This is solver-independent plumbing only; validate on
+  P100 before making a GPU speedup claim.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import weakref
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
@@ -95,6 +99,15 @@ _EXTRACELLULAR_SPACE_FIELDS = (
     "right_e",
 )
 _EXTRACELLULAR_EDGE_FIELDS = ("Gax_e", "Gax_i")
+_GROUP_SIGNATURE_CACHE_MAX_SIZE = 128
+_GROUP_STATIC_SIGNATURE_CACHE: OrderedDict[
+    int,
+    tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]],
+] = OrderedDict()
+_GROUP_RUNTIME_SIGNATURE_CACHE: OrderedDict[
+    int,
+    tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]],
+] = OrderedDict()
 
 
 def representative_item(group: DispatchGroup) -> DispatchItem:
@@ -118,10 +131,11 @@ def prepare_batch_runtime(
     backend_context: Any | None = None,
 ) -> SolverRuntime:
     backend_scope = _backend_context_cache_key(backend_context)
+    group_signature = _group_runtime_signature(group)
     cache_key = (
         "batch_runtime_v1",
         mode,
-        _group_runtime_signature(group),
+        group_signature,
         backend_scope,
         float(tsim_ms),
         float(dt_ms),
@@ -137,7 +151,7 @@ def prepare_batch_runtime(
     static_cache_key = (
         "batch_static_runtime_v1",
         mode,
-        _group_runtime_signature(group),
+        group_signature,
         backend_scope,
         repr(solver_options),
         bool(include_extracellular),
@@ -615,49 +629,122 @@ def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray
 
 
 def _group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    return _cached_group_signature(
+        group,
+        cache=_GROUP_STATIC_SIGNATURE_CACHE,
+        metadata_key="group_static_signature_cache",
+        builder=_build_group_static_signature,
+    )
+
+
+def _build_group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    rows_digest = _digest_group_items(
+        group.items,
+        include_identity=True,
+    )
     return (
-        "dispatch_group_v1",
+        "dispatch_group_v3",
         group.mode,
         int(group.nx),
         bool(group.geometry_shared),
         bool(group.has_padding),
-        tuple(
-            (
-                int(item.index),
-                id(item.simulation),
-                id(item.solver_axon),
-                item.signature,
-                item.membrane_signature,
-                item.cable_signature,
-            )
-            for item in group.items
-        ),
+        int(group.size),
+        _digest_signature_value(group.signature, cache={}),
+        rows_digest,
     )
 
 
 def _group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
     """Return a structural key for stimulation-independent solver runtimes."""
 
+    return _cached_group_signature(
+        group,
+        cache=_GROUP_RUNTIME_SIGNATURE_CACHE,
+        metadata_key="group_runtime_signature_cache",
+        builder=_build_group_runtime_signature,
+    )
+
+
+def _build_group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
+    """Build the uncached structural key for stimulation-independent runtimes."""
+
+    rows_digest = _digest_group_items(
+        group.items,
+        include_identity=False,
+    )
     return (
-        "dispatch_group_runtime_v1",
+        "dispatch_group_runtime_v3",
         group.mode,
         int(group.nx),
         bool(group.geometry_shared),
         bool(group.has_padding),
-        tuple(
-            (
-                int(item.index),
-                item.signature,
-                item.membrane_signature,
-                item.cable_signature,
-            )
-            for item in group.items
-        ),
+        int(group.size),
+        _digest_signature_value(group.signature, cache={}),
+        rows_digest,
     )
 
 
 def _group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
     return _group_static_signature(group)
+
+
+def _digest_group_items(
+    items: tuple[DispatchItem, ...],
+    *,
+    include_identity: bool,
+) -> str:
+    token_cache: dict[int, str] = {}
+    hasher = hashlib.blake2b(digest_size=16)
+    for item in items:
+        _update_digest_int(hasher, int(item.index))
+        if include_identity:
+            _update_digest_int(hasher, id(item.simulation))
+            _update_digest_int(hasher, id(item.solver_axon))
+        hasher.update(_digest_signature_value(item.membrane_signature, token_cache).encode())
+        hasher.update(b"\0")
+        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def _digest_signature_value(value: Any, cache: dict[int, str]) -> str:
+    cache_key = id(value)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    digest = hashlib.blake2b(repr(value).encode("utf-8"), digest_size=16).hexdigest()
+    cache[cache_key] = digest
+    return digest
+
+
+def _update_digest_int(hasher: Any, value: int) -> None:
+    hasher.update(int(value).to_bytes(8, byteorder="little", signed=False))
+
+
+def _cached_group_signature(
+    group: DispatchGroup,
+    *,
+    cache: OrderedDict[int, tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]]],
+    metadata_key: str,
+    builder: Callable[[DispatchGroup], tuple[Any, ...]],
+) -> tuple[Any, ...]:
+    cache_key = id(group)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        ref, signature = cached
+        if ref() is group:
+            cache.move_to_end(cache_key)
+            record_benchmark_metadata(**{metadata_key: "hit"})
+            return signature
+        cache.pop(cache_key, None)
+
+    signature = builder(group)
+    cache[cache_key] = (weakref.ref(group), signature)
+    cache.move_to_end(cache_key)
+    while len(cache) > _GROUP_SIGNATURE_CACHE_MAX_SIZE:
+        cache.popitem(last=False)
+    record_benchmark_metadata(**{metadata_key: "miss"})
+    return signature
 
 
 def _prepare_parameter_batch_base_runtime(

@@ -8,6 +8,9 @@ backend arrays for batch execution.
 from __future__ import annotations
 
 import hashlib
+import weakref
+from collections import OrderedDict
+from collections.abc import Iterable
 from typing import Any, Literal, Sequence, cast
 
 import jax
@@ -40,6 +43,17 @@ StimulationBatchRow = ExtracellularStimulation | Sequence[ExtracellularStimulati
 FootprintEngine = Literal["numpy", "jax"]
 
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
+_ARRAY_CONTENT_KEY_CACHE: OrderedDict[
+    int,
+    tuple[
+        weakref.ReferenceType[np.ndarray],
+        tuple[int, ...],
+        str,
+        tuple[int, ...],
+        tuple[tuple[int, ...], str, str],
+    ],
+] = OrderedDict()
+_ARRAY_CONTENT_KEY_CACHE_MAX_SIZE = 128
 
 
 def _cached_stimulus_current_A(
@@ -1110,14 +1124,19 @@ def _factorized_footprint_rows_cache_key(
     axon_z_um: np.ndarray,
     np_dtype: np.dtype[Any],
 ) -> tuple[Any, ...]:
+    rows_digest = _digest_cache_rows(
+        tuple(
+            _drive_static_footprint_key(drive)
+            for _stimulation, drive, _stimulus in row
+        )
+        for row in drive_rows
+    )
     return (
-        "factorized_footprint_rows",
+        "factorized_footprint_rows_v2",
         str(np_dtype),
         int(max_drive_count),
-        tuple(
-            tuple(_drive_static_footprint_key(drive) for _stimulation, drive, _stimulus in row)
-            for row in drive_rows
-        ),
+        len(drive_rows),
+        rows_digest,
         _array_content_key(x_rows),
         _array_content_key(axon_y_um),
         _array_content_key(axon_z_um),
@@ -1183,13 +1202,15 @@ def _footprint_rows_cache_key(
     axon_z_um: np.ndarray,
     np_dtype: np.dtype[Any],
 ) -> tuple[Any, ...]:
+    rows_digest = _digest_cache_rows(
+        _drive_static_footprint_key(drive)
+        for _stimulation, drive in zip(stimulations, drives, strict=True)
+    )
     return (
-        "footprint_rows",
+        "footprint_rows_v2",
         str(np_dtype),
-        tuple(
-            _drive_static_footprint_key(drive)
-            for _stimulation, drive in zip(stimulations, drives, strict=True)
-        ),
+        len(drives),
+        rows_digest,
         _array_content_key(x_rows),
         _array_content_key(axon_y_um),
         _array_content_key(axon_z_um),
@@ -1214,10 +1235,76 @@ def _drive_static_footprint_key(drive: Any) -> tuple[Any, ...]:
     )
 
 
+def _digest_cache_rows(rows: Iterable[Any]) -> str:
+    hasher = hashlib.blake2b(digest_size=16)
+    for row in rows:
+        hasher.update(repr(row).encode("utf-8"))
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
 def _array_content_key(values: np.ndarray) -> tuple[tuple[int, ...], str, str]:
-    arr = np.ascontiguousarray(np.asarray(values))
+    arr = np.asarray(values)
+    cached = _cached_array_content_key(arr)
+    if cached is not None:
+        record_benchmark_metadata(array_content_key_cache="hit")
+        return cached
+
+    arr = np.ascontiguousarray(arr)
     digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
-    return tuple(int(dim) for dim in arr.shape), arr.dtype.str, digest
+    key = tuple(int(dim) for dim in arr.shape), arr.dtype.str, digest
+    if _can_cache_array_content_key(arr):
+        _store_array_content_key(arr, key)
+        record_benchmark_metadata(array_content_key_cache="miss")
+    return key
+
+
+def _cached_array_content_key(
+    arr: np.ndarray,
+) -> tuple[tuple[int, ...], str, str] | None:
+    if not _can_cache_array_content_key(arr):
+        return None
+    cache_key = id(arr)
+    cached = _ARRAY_CONTENT_KEY_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    ref, shape, dtype_str, strides, key = cached
+    if (
+        ref() is arr
+        and shape == tuple(int(dim) for dim in arr.shape)
+        and dtype_str == arr.dtype.str
+        and strides == tuple(int(stride) for stride in arr.strides)
+    ):
+        _ARRAY_CONTENT_KEY_CACHE.move_to_end(cache_key)
+        return key
+    _ARRAY_CONTENT_KEY_CACHE.pop(cache_key, None)
+    return None
+
+
+def _store_array_content_key(
+    arr: np.ndarray,
+    key: tuple[tuple[int, ...], str, str],
+) -> None:
+    _ARRAY_CONTENT_KEY_CACHE[id(arr)] = (
+        weakref.ref(arr),
+        tuple(int(dim) for dim in arr.shape),
+        arr.dtype.str,
+        tuple(int(stride) for stride in arr.strides),
+        key,
+    )
+    _ARRAY_CONTENT_KEY_CACHE.move_to_end(id(arr))
+    while len(_ARRAY_CONTENT_KEY_CACHE) > _ARRAY_CONTENT_KEY_CACHE_MAX_SIZE:
+        _ARRAY_CONTENT_KEY_CACHE.popitem(last=False)
+
+
+def _can_cache_array_content_key(arr: np.ndarray) -> bool:
+    return (
+        isinstance(arr, np.ndarray)
+        and arr.flags.c_contiguous
+        and arr.flags.owndata
+        and not arr.flags.writeable
+        and not arr.dtype.hasobject
+    )
 
 
 def _drive_footprint_for_positions(

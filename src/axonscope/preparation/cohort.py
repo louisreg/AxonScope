@@ -60,9 +60,9 @@ class PreparedCohort:
             axons=axons,
             solver_axons=solver_axons,
             stimulations=stimulations,
-            x_positions_m=x_positions,
-            axon_y_um=axon_y_um,
-            axon_z_um=axon_z_um,
+            x_positions_m=_readonly_array(x_positions),
+            axon_y_um=_readonly_array(axon_y_um),
+            axon_z_um=_readonly_array(axon_z_um),
         )
 
     @property
@@ -110,6 +110,12 @@ def _pad_position_row(values: np.ndarray, *, target_nx: int) -> np.ndarray:
     if values.shape[-1] == 0:
         raise ValueError("cannot pad an empty spatial row.")
     return np.pad(values, (0, pad_count), mode="edge")
+
+
+def _readonly_array(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values)
+    arr.setflags(write=False)
+    return arr
 
 
 __all__ = ["PreparedCohort"]
