@@ -15,11 +15,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope.benchmarking import (
-    benchmark_span,
-    benchmark_wait,
-    record_benchmark_metadata,
-)
+from axonscope.benchmarking import benchmark_span, benchmark_wait
 from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
@@ -258,17 +254,6 @@ def combine_vm_raster_chunk_states(
         if local_count >= int(nt) and int(only.shape[-1]) == word_count:
             return only
 
-    if _vm_raster_chunks_are_jax_arrays(states):
-        record_benchmark_metadata(vm_raster_chunk_combine_backend="jax")
-        return _combine_vm_raster_chunk_states_jax(
-            states,
-            starts=starts,
-            lengths=chunk_lengths,
-            nt=int(nt),
-            word_count=word_count,
-        )
-
-    record_benchmark_metadata(vm_raster_chunk_combine_backend="numpy")
     with benchmark_span(
         "kernel.wait",
         observer="vm_raster",
@@ -332,81 +317,6 @@ def combine_vm_raster_chunk_states(
             if high_words > 0:
                 combined[..., high_word : high_word + high_words] |= (
                     values[..., :high_words] >> np.uint32(32 - offset)
-                )
-
-    return combined
-
-
-def _vm_raster_chunks_are_jax_arrays(states: Sequence[VmRasterState]) -> bool:
-    return all(isinstance(state, jax.Array) for state in states)
-
-
-def _combine_vm_raster_chunk_states_jax(
-    states: Sequence[VmRasterState],
-    *,
-    starts: Sequence[int],
-    lengths: Sequence[int | None],
-    nt: int,
-    word_count: int,
-) -> VmRasterState:
-    first = jnp.asarray(states[0], dtype=jnp.uint32)
-    if first.ndim < 1:
-        raise ValueError("VmRaster chunk state must have at least one word axis.")
-
-    combined = jnp.zeros(first.shape[:-1] + (int(word_count),), dtype=jnp.uint32)
-    static_shape = first.shape[:-1]
-
-    for state, start, length in zip(states, starts, lengths, strict=True):
-        chunk = jnp.asarray(state, dtype=jnp.uint32)
-        if chunk.shape[:-1] != static_shape:
-            raise ValueError("VmRaster chunk states must share static axes.")
-        start_index = int(start)
-        if start_index < 0:
-            raise ValueError("VmRaster chunk start indices must be non-negative.")
-        local_capacity = int(chunk.shape[-1]) * 32
-        local_count = min(
-            local_capacity if length is None else int(length),
-            local_capacity,
-            int(nt) - start_index,
-        )
-        if local_count <= 0:
-            continue
-        usable_words = min((local_count + 31) // 32, int(chunk.shape[-1]))
-        if usable_words <= 0:
-            continue
-        values = chunk[..., :usable_words]
-        valid_bits = local_count - (usable_words - 1) * 32
-        if valid_bits < 32:
-            mask = jnp.asarray((1 << valid_bits) - 1, dtype=jnp.uint32)
-            values = values.at[..., -1].set(values[..., -1] & mask)
-
-        global_word = start_index // 32
-        if global_word >= word_count:
-            continue
-        offset = start_index & 31
-        low_words = min(usable_words, word_count - global_word)
-        if low_words <= 0:
-            continue
-
-        low_slice = slice(global_word, global_word + low_words)
-        if offset == 0:
-            combined = combined.at[..., low_slice].set(
-                combined[..., low_slice] | values[..., :low_words]
-            )
-            continue
-
-        shifted_low = values[..., :low_words] << np.uint32(offset)
-        combined = combined.at[..., low_slice].set(
-            combined[..., low_slice] | shifted_low
-        )
-        high_word = global_word + 1
-        if high_word < word_count:
-            high_words = min(usable_words, word_count - high_word)
-            if high_words > 0:
-                high_slice = slice(high_word, high_word + high_words)
-                shifted_high = values[..., :high_words] >> np.uint32(32 - offset)
-                combined = combined.at[..., high_slice].set(
-                    combined[..., high_slice] | shifted_high
                 )
 
     return combined

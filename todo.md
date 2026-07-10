@@ -1988,6 +1988,16 @@ PTA/block-Thomas GPU gate:
   chunk/result handling rather than factorized footprint construction.
   Artifact:
   `benchmark/results/kaggle/20260710_190758_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-hotpath-gpu-a5effea/outputs/extracted`.
+  A follow-up device-side VmRaster chunk-combine prototype at commit `c6e842b`
+  was rejected and reverted: it removed the explicit `kernel.wait` span, but
+  `kernel.combine_observer_chunks` increased from about `0.34 s` to about
+  `0.68 s` total and `kernel.finalize_observer.to_host` increased from about
+  `0.011 s` to about `0.041 s`. Treat this as negative evidence against a
+  simple eager JAX repack; the next VmRaster cleanup should avoid the host
+  repack structurally or revisit chunk policy with a dedicated benchmark,
+  rather than dispatching several small JAX scatter/update ops after each
+  chunked simulation. Artifact:
+  `benchmark/results/kaggle/20260710_191549_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-vmraster-device-combine-c6e842b/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,
