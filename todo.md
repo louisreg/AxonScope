@@ -2036,6 +2036,15 @@ PTA/block-Thomas GPU gate:
   `curve_build_shared_stimulus=true`, and `vstim_shared_current_detection=identity`.
   Artifact:
   `benchmark/results/kaggle/20260710_220840_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-shared-stim-gpu-jt-275a6b6/outputs/extracted`.
+  Follow-up P100 warm-path gate at `3cb64f4` with `warmups=1` and `repeats=5`
+  confirms the split: within a phase, hot amplitude updates stay around
+  `0.69 ms` for `curve.update_amplitudes.rows`, hot `inputs.extracellular`
+  is stable around `18.3 ms`, and hot `kernel.dispatch_jax` is about
+  `3.5 ms`; the first amplitude of each newly rebuilt repeat is still
+  `~116-128 ms` in `inputs.extracellular` because the benchmark rebuilds the
+  phase pool and static footprint caches miss. Treat this as phase/pool
+  construction and cache reuse behavior, not a recurrent solver cost. Artifact:
+  `benchmark/results/kaggle/20260710_221438_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-shared-stim-warm-gpu-3cb64f4/outputs/extracted`.
   Additional generic input cleanup now caches the static factorized footprint
   after conversion to a device-local JAX array, keyed by footprint, dtype, and
   current JAX device. This should avoid repeated host-to-device placement of
