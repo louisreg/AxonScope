@@ -325,39 +325,55 @@ def _run_population_simulation(
     result-assembly progress.
     """
 
-    population = pool if isinstance(pool, AxonPopulation) else AxonPopulation(pool)
-    observer_defs = tuple(observers) if observers is not None else None
-    if (
-        recording is not None
-        and not recording.voltage
-        and not recording.wants_observables
-        and not observer_defs
-    ):
-        raise NotImplementedError("Recording.none() requires solver-side observers.")
-    duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
-    resolved_batch_options = _pool_batch_options_for_recording(
-        population=population,
-        recording=recording,
-        batch_options=batch_options,
-    )
-    record_observables = bool(recording is not None and recording.wants_observables)
-    with execution_context(execution_policy, instances=population.instances) as context:
-        effective_batch_options = batch_options_for_execution_context(
-            resolved_batch_options,
-            context,
+    with benchmark_span("simulation.setup"):
+        population = pool if isinstance(pool, AxonPopulation) else AxonPopulation(pool)
+        observer_defs = tuple(observers) if observers is not None else None
+        if (
+            recording is not None
+            and not recording.voltage
+            and not recording.wants_observables
+            and not observer_defs
+        ):
+            raise NotImplementedError("Recording.none() requires solver-side observers.")
+        duration_ms, step_ms = _resolve_time(duration=duration, dt=dt)
+        resolved_batch_options = _pool_batch_options_for_recording(
+            population=population,
+            recording=recording,
+            batch_options=batch_options,
         )
-        results = run_pool(
-            population,
-            tsim_ms=duration_ms,
-            dt_ms=step_ms,
-            solver_options=solver_options,
-            batch_options=effective_batch_options,
-            observers=observer_defs,
-            record_observables=record_observables,
-            progress=progress,
-            backend_context=context,
-            dispatch_plan=dispatch_plan,
-        )
+        record_observables = bool(recording is not None and recording.wants_observables)
+
+    context_manager = execution_context(execution_policy, instances=population.instances)
+    with benchmark_span("simulation.execution_context.enter"):
+        context = context_manager.__enter__()
+    try:
+        with benchmark_span("simulation.execution_context.options"):
+            effective_batch_options = batch_options_for_execution_context(
+                resolved_batch_options,
+                context,
+            )
+        with benchmark_span("simulation.run_pool"):
+            results = run_pool(
+                population,
+                tsim_ms=duration_ms,
+                dt_ms=step_ms,
+                solver_options=solver_options,
+                batch_options=effective_batch_options,
+                observers=observer_defs,
+                record_observables=record_observables,
+                progress=progress,
+                backend_context=context,
+                dispatch_plan=dispatch_plan,
+            )
+    except BaseException as exc:
+        with benchmark_span("simulation.execution_context.exit"):
+            suppress = context_manager.__exit__(type(exc), exc, exc.__traceback__)
+        if not suppress:
+            raise
+    else:
+        with benchmark_span("simulation.execution_context.exit"):
+            context_manager.__exit__(None, None, None)
+
     with benchmark_span("results.to_public", pool_size=len(population.instances)):
         if recording is not None:
             results = _filter_pool_recording(results, recording)
