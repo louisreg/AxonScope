@@ -11,6 +11,7 @@ import hashlib
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, Literal, Sequence, cast
 
 import jax
@@ -57,6 +58,31 @@ _ARRAY_CONTENT_KEY_CACHE: OrderedDict[
     ],
 ] = OrderedDict()
 _ARRAY_CONTENT_KEY_CACHE_MAX_SIZE = 128
+
+
+@dataclass(frozen=True)
+class _FactorizedRowsIdentityPlan:
+    rows: tuple[tuple[ExtracellularStimulation, ...], ...]
+    x_rows: np.ndarray
+    axon_y_um: np.ndarray
+    axon_z_um: np.ndarray
+    np_dtype_str: str
+    drive_rows: tuple[
+        tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...], ...
+    ]
+    max_drive_count: int
+    shared_rank1_stimulus: Stimulus | None
+    shared_rank1_detection: str
+    footprint_cache_key: tuple[Any, ...]
+    footprint_mV_cache_key: tuple[Any, ...]
+    footprint_V_per_A: np.ndarray
+    footprint_mV_per_A: np.ndarray
+
+
+_FACTORIZED_ROWS_IDENTITY_CACHE: OrderedDict[
+    tuple[Any, ...], _FactorizedRowsIdentityPlan
+] = OrderedDict()
+_FACTORIZED_ROWS_IDENTITY_CACHE_MAX_SIZE = 64
 
 
 def _cached_stimulus_current_A(
@@ -145,7 +171,7 @@ def build_factorized_vstim_midpoint_batch(
     ``Vstim[B, Nt, Nx]``.
     """
 
-    rows = tuple(_normalize_stimulation_row(row) for row in stimulations_batch)
+    rows = _normalize_stimulation_rows(stimulations_batch)
     if not rows or not any(rows):
         return None
     if not _can_build_stimulation_rows_from_footprints(rows):
@@ -905,20 +931,94 @@ def _try_build_factorized_footprint_vstim_batch(
     np_dtype: np.dtype[Any],
     dtype_local: jnp.dtype,
 ) -> FactorizedExtracellularPotentialBatch | None:
-    source = _factorizable_footprint_rows(rows)
-    if source is None:
-        return None
-    drive_rows, max_drive_count = source
+    rows_tuple = _normalize_stimulation_rows(rows)
+    plan = _factorized_rows_identity_cache_get(
+        rows_tuple,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype=np_dtype,
+    )
+    if plan is not None:
+        drive_rows = plan.drive_rows
+        max_drive_count = plan.max_drive_count
+        footprint_cache_key = plan.footprint_cache_key
+        footprint_mV_cache_key = plan.footprint_mV_cache_key
+        footprint_V_per_A = plan.footprint_V_per_A
+        footprint_mV_per_A = plan.footprint_mV_per_A
+        footprint_cache_status = "hit"
+        footprint_mV_cache_status = "hit"
+    else:
+        source = _factorizable_footprint_rows(rows_tuple)
+        if source is None:
+            return None
+        drive_rows, max_drive_count = source
+        footprint_cache_key = _factorized_footprint_rows_cache_key(
+            drive_rows,
+            max_drive_count=max_drive_count,
+            x_rows=x_rows,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            np_dtype=np_dtype,
+        )
+        footprint_V_per_A = _FOOTPRINT_CACHE.get(footprint_cache_key)
+        if footprint_V_per_A is None:
+            footprint_V_per_A = _compute_factorized_footprint_rows(
+                drive_rows,
+                max_drive_count=max_drive_count,
+                x_rows=x_rows,
+                np_dtype=np_dtype,
+            )
+            _FOOTPRINT_CACHE[footprint_cache_key] = footprint_V_per_A
+            footprint_cache_status = "miss"
+        else:
+            footprint_cache_status = "hit"
+
+        footprint_mV_cache_key = (
+            "factorized_footprint_mV_per_A_v1",
+            footprint_cache_key,
+            int(max_drive_count),
+            str(np_dtype),
+        )
+        footprint_mV_per_A = _FOOTPRINT_MV_CACHE.get(footprint_mV_cache_key)
+        if footprint_mV_per_A is None:
+            footprint_mV_per_A = footprint_V_per_A * np.asarray(1e3, dtype=np_dtype)
+            if max_drive_count == 1:
+                footprint_mV_per_A = footprint_mV_per_A[:, 0, :]
+            footprint_mV_per_A.setflags(write=False)
+            _FOOTPRINT_MV_CACHE[footprint_mV_cache_key] = footprint_mV_per_A
+            footprint_mV_cache_status = "miss"
+        else:
+            footprint_mV_cache_status = "hit"
+
+        _factorized_rows_identity_cache_store(
+            rows_tuple,
+            x_rows=x_rows,
+            axon_y_um=axon_y_um,
+            axon_z_um=axon_z_um,
+            np_dtype=np_dtype,
+            drive_rows=drive_rows,
+            max_drive_count=max_drive_count,
+            footprint_cache_key=footprint_cache_key,
+            footprint_mV_cache_key=footprint_mV_cache_key,
+            footprint_V_per_A=footprint_V_per_A,
+            footprint_mV_per_A=footprint_mV_per_A,
+        )
     batch_size = len(drive_rows)
     rank1_stimulus_key: tuple[Any, ...] | None = None
-    shared_rank1_detection = "none"
-    if max_drive_count == 1 and bool(drive_rows) and all(
+    shared_rank1_detection = plan.shared_rank1_detection if plan is not None else "none"
+    shared_rank1_stimulus_obj = plan.shared_rank1_stimulus if plan is not None else None
+    first_stimulus = drive_rows[0][0][2] if drive_rows and drive_rows[0] else None
+    if shared_rank1_stimulus_obj is not None and first_stimulus is not None:
+        rank1_stimulus_key = _stimulus_temporal_cache_key(shared_rank1_stimulus_obj)
+    elif max_drive_count == 1 and bool(drive_rows) and all(
         len(row) == 1 for row in drive_rows
     ):
         first_stimulus = drive_rows[0][0][2]
         if all(row[0][2] is first_stimulus for row in drive_rows[1:]):
             rank1_stimulus_key = _stimulus_temporal_cache_key(first_stimulus)
             shared_rank1_detection = "identity"
+            shared_rank1_stimulus_obj = first_stimulus
         else:
             first_key = _stimulus_temporal_cache_key(first_stimulus)
             if all(
@@ -927,15 +1027,15 @@ def _try_build_factorized_footprint_vstim_batch(
             ):
                 rank1_stimulus_key = first_key
                 shared_rank1_detection = "content"
-    shared_rank1_stimulus = rank1_stimulus_key is not None
-    if shared_rank1_stimulus and shared_rank1_detection == "none":
+    has_shared_rank1_stimulus = rank1_stimulus_key is not None
+    if has_shared_rank1_stimulus and shared_rank1_detection == "none":
         shared_rank1_detection = "content"
     temporal_mid_cache_hits = 0
     temporal_mid_cache_misses = 0
     temporal_previous_cache_hits = 0
     temporal_previous_cache_misses = 0
 
-    if shared_rank1_stimulus:
+    if has_shared_rank1_stimulus:
         stimulus = drive_rows[0][0][2]
         current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
         temporal_mid_cache_hits = max(batch_size - 1, 0)
@@ -1012,45 +1112,11 @@ def _try_build_factorized_footprint_vstim_batch(
             current_A = current_rows_A
             current_initial_previous_A = previous_rows_A
 
-    cache_key = _factorized_footprint_rows_cache_key(
-        drive_rows,
-        max_drive_count=max_drive_count,
-        x_rows=x_rows,
-        axon_y_um=axon_y_um,
-        axon_z_um=axon_z_um,
-        np_dtype=np_dtype,
-    )
-    footprint_V_per_A = _FOOTPRINT_CACHE.get(cache_key)
-    if footprint_V_per_A is None:
-        footprint_V_per_A = _compute_factorized_footprint_rows(
-            drive_rows,
-            max_drive_count=max_drive_count,
-            x_rows=x_rows,
-            np_dtype=np_dtype,
-        )
-        _FOOTPRINT_CACHE[cache_key] = footprint_V_per_A
-        footprint_cache_status = "miss"
-    else:
-        footprint_cache_status = "hit"
-
-    footprint_mV_cache_key = (
-        "factorized_footprint_mV_per_A_v1",
-        cache_key,
-        int(max_drive_count),
-        str(np_dtype),
-    )
-    footprint_mV_per_A = _FOOTPRINT_MV_CACHE.get(footprint_mV_cache_key)
-    if footprint_mV_per_A is None:
-        footprint_mV_per_A = footprint_V_per_A * np.asarray(1e3, dtype=np_dtype)
-        if max_drive_count == 1:
-            footprint_mV_per_A = footprint_mV_per_A[:, 0, :]
-        footprint_mV_per_A.setflags(write=False)
-        _FOOTPRINT_MV_CACHE[footprint_mV_cache_key] = footprint_mV_per_A
-        footprint_mV_cache_status = "miss"
-    else:
-        footprint_mV_cache_status = "hit"
     dense_equivalent_nbytes = (
-        int(len(rows)) * int(t_ms.shape[0]) * int(x_rows.shape[1]) * int(np_dtype.itemsize)
+        int(len(rows_tuple))
+        * int(t_ms.shape[0])
+        * int(x_rows.shape[1])
+        * int(np_dtype.itemsize)
     )
     previous_nbytes = (
         0
@@ -1078,6 +1144,7 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_temporal_previous_cache_misses=int(temporal_previous_cache_misses),
         vstim_temporal_unique_stimuli=int(temporal_mid_cache_misses),
         vstim_footprint_mv_cache=footprint_mV_cache_status,
+        vstim_factorized_identity_cache="hit" if plan is not None else "miss",
         vstim_factorized_dense_ratio=(
             factorized_nbytes / float(dense_equivalent_nbytes)
             if dense_equivalent_nbytes
@@ -1098,7 +1165,7 @@ def _try_build_factorized_footprint_vstim_batch(
             if current_initial_previous_A is None
             else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
         ),
-        static_footprint_key=cache_key,
+        static_footprint_key=footprint_cache_key,
     )
 
 
@@ -1406,6 +1473,125 @@ def _can_cache_array_content_key(arr: np.ndarray) -> bool:
     )
 
 
+def _factorized_rows_identity_cache_get(
+    rows: tuple[tuple[ExtracellularStimulation, ...], ...],
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+) -> _FactorizedRowsIdentityPlan | None:
+    key = _factorized_rows_identity_cache_key(
+        rows,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype=np_dtype,
+    )
+    cached = _FACTORIZED_ROWS_IDENTITY_CACHE.get(key)
+    if cached is None:
+        return None
+    if (
+        cached.rows is rows
+        and cached.x_rows is x_rows
+        and cached.axon_y_um is axon_y_um
+        and cached.axon_z_um is axon_z_um
+        and cached.np_dtype_str == str(np_dtype)
+    ):
+        _FACTORIZED_ROWS_IDENTITY_CACHE.move_to_end(key)
+        return cached
+    _FACTORIZED_ROWS_IDENTITY_CACHE.pop(key, None)
+    return None
+
+
+def _factorized_rows_identity_cache_store(
+    rows: tuple[tuple[ExtracellularStimulation, ...], ...],
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+    drive_rows: tuple[
+        tuple[tuple[ExtracellularStimulation, Any, Stimulus], ...], ...
+    ],
+    max_drive_count: int,
+    footprint_cache_key: tuple[Any, ...],
+    footprint_mV_cache_key: tuple[Any, ...],
+    footprint_V_per_A: np.ndarray,
+    footprint_mV_per_A: np.ndarray,
+) -> None:
+    shared_stimulus, shared_detection = _shared_rank1_stimulus_identity(
+        drive_rows,
+        max_drive_count=max_drive_count,
+    )
+    key = _factorized_rows_identity_cache_key(
+        rows,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype=np_dtype,
+    )
+    _FACTORIZED_ROWS_IDENTITY_CACHE[key] = _FactorizedRowsIdentityPlan(
+        rows=rows,
+        x_rows=x_rows,
+        axon_y_um=axon_y_um,
+        axon_z_um=axon_z_um,
+        np_dtype_str=str(np_dtype),
+        drive_rows=drive_rows,
+        max_drive_count=int(max_drive_count),
+        shared_rank1_stimulus=shared_stimulus,
+        shared_rank1_detection=shared_detection,
+        footprint_cache_key=footprint_cache_key,
+        footprint_mV_cache_key=footprint_mV_cache_key,
+        footprint_V_per_A=footprint_V_per_A,
+        footprint_mV_per_A=footprint_mV_per_A,
+    )
+    _FACTORIZED_ROWS_IDENTITY_CACHE.move_to_end(key)
+    while len(_FACTORIZED_ROWS_IDENTITY_CACHE) > _FACTORIZED_ROWS_IDENTITY_CACHE_MAX_SIZE:
+        _FACTORIZED_ROWS_IDENTITY_CACHE.popitem(last=False)
+
+
+def _factorized_rows_identity_cache_key(
+    rows: tuple[tuple[ExtracellularStimulation, ...], ...],
+    *,
+    x_rows: np.ndarray,
+    axon_y_um: np.ndarray,
+    axon_z_um: np.ndarray,
+    np_dtype: np.dtype[Any],
+) -> tuple[Any, ...]:
+    return (
+        "factorized_rows_identity_v1",
+        id(rows),
+        len(rows),
+        id(x_rows),
+        tuple(int(dim) for dim in x_rows.shape),
+        x_rows.dtype.str,
+        tuple(int(stride) for stride in x_rows.strides),
+        id(axon_y_um),
+        tuple(int(dim) for dim in axon_y_um.shape),
+        axon_y_um.dtype.str,
+        id(axon_z_um),
+        tuple(int(dim) for dim in axon_z_um.shape),
+        axon_z_um.dtype.str,
+        str(np_dtype),
+    )
+
+
+def _shared_rank1_stimulus_identity(
+    drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
+    *,
+    max_drive_count: int,
+) -> tuple[Stimulus | None, str]:
+    if max_drive_count != 1 or not drive_rows:
+        return None, "none"
+    if not all(len(row) == 1 for row in drive_rows):
+        return None, "none"
+    first = drive_rows[0][0][2]
+    if all(row[0][2] is first for row in drive_rows[1:]):
+        return first, "identity"
+    return None, "none"
+
+
 def _drive_footprint_for_positions(
     drive: Any,
     x_positions_m: Array,
@@ -1478,6 +1664,14 @@ def _normalize_stimulation_row(
     if isinstance(row, ExtracellularStimulation):
         return (row,)
     return tuple(row)
+
+
+def _normalize_stimulation_rows(
+    rows: Sequence[StimulationBatchRow],
+) -> tuple[tuple[ExtracellularStimulation, ...], ...]:
+    if isinstance(rows, tuple) and all(isinstance(row, tuple) for row in rows):
+        return cast(tuple[tuple[ExtracellularStimulation, ...], ...], rows)
+    return tuple(_normalize_stimulation_row(row) for row in rows)
 
 
 def _resolve_dtype(axon: object, dtype_local: jnp.dtype | None) -> jnp.dtype:

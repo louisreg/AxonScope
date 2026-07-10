@@ -1236,6 +1236,81 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
     )
 
 
+def test_factorized_identity_cache_reuses_static_rows_with_mutated_shared_stimulus(tmp_path):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    stimulus = stimulation.drives[0].stimulus
+    rows = ((stimulation,), (stimulation,))
+    x_rows = x_positions_batch_m((axon, axon))
+    y_rows = np.asarray([20.0, 20.0], dtype=float)
+    z_rows = np.asarray([30.0, 30.0], dtype=float)
+
+    input_batches._FOOTPRINT_CACHE.clear()
+    input_batches._FOOTPRINT_MV_CACHE.clear()
+    input_batches._FOOTPRINT_JAX_CACHE.clear()
+    input_batches._FACTORIZED_ROWS_IDENTITY_CACHE.clear()
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.extracellular"):
+            first = build_factorized_vstim_midpoint_batch(
+                axon,
+                rows,
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                x_positions_m=x_rows,
+                axon_y_um=y_rows,
+                axon_z_um=z_rows,
+                dtype_local=np.float32,
+                include_initial_previous=True,
+            )
+        updated = Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=20e-6,
+        ).as_unit("ampere")
+        object.__setattr__(stimulus, "t", np.asarray(updated.t, dtype=float))
+        object.__setattr__(stimulus, "y", np.asarray(updated.y, dtype=float))
+        object.__setattr__(stimulus, "mode", updated.mode)
+        object.__setattr__(stimulus, "y_unit", updated.y_unit)
+        with benchmark_span("inputs.extracellular"):
+            second = build_factorized_vstim_midpoint_batch(
+                axon,
+                rows,
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                x_positions_m=x_rows,
+                axon_y_um=y_rows,
+                axon_z_um=z_rows,
+                dtype_local=np.float32,
+                include_initial_previous=True,
+            )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert first is not None
+    assert second is not None
+    statuses = [
+        event.metadata.get("vstim_factorized_identity_cache")
+        for event in report.events
+        if event.name == "inputs.extracellular"
+    ]
+    assert statuses == ["miss", "hit"]
+    assert second.footprint_mV_per_A is first.footprint_mV_per_A
+    np.testing.assert_allclose(
+        np.asarray(second.current_mid_A),
+        2.0 * np.asarray(first.current_mid_A),
+        rtol=1e-6,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(materialize_factorized_extracellular_potential_batch(second)),
+        2.0 * np.asarray(materialize_factorized_extracellular_potential_batch(first)),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
 def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     stimulation = axon.extracellular_stimulations[0]
