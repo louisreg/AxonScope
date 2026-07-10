@@ -2028,6 +2028,16 @@ PTA/block-Thomas GPU gate:
   `benchmark/results/p11_observer_scope_ab_campaign_smoke` and plot smoke
   `benchmark/results/p11_observer_scope_ab_plot_smoke` passed; next gate is the
   same P100 mini with `default,full`.
+  P100 same-commit A/B at commit `21215c6` passed 2/2 rows. `full` improves
+  warm `curve.simulate` mean from about `341 ms` to about `312 ms` and total
+  `curve.simulate` from about `11.92 s` to about `9.02 s`. It removes
+  `kernel.combine_observer_chunks` (`~0.374 s -> 0`) while increasing
+  finalization (`kernel.finalize_observer` `~0.017 s -> ~0.219 s`). Hot solver
+  dispatch remains about `5 ms` per warm simulation, so this is a genuine
+  observer-boundary cleanup signal. Next: run a small matrix across `Naxons`,
+  `time_chunk_steps`, and recording mode before considering a default change.
+  Artifact:
+  `benchmark/results/kaggle/20260710_194628_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-ab-21215c6/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

@@ -122,3 +122,47 @@ Next gate:
   `--benchmark-observer-state-scope default,full`;
 - use that same-commit A/B result to decide whether the full observer-state
   prototype deserves a broader CPU/GPU matrix.
+
+## Same-Commit A/B Result
+
+Commit `21215c6` passed the P100 same-commit A/B mini-gate with
+`--benchmark-observer-state-scope default,full`.
+
+Summary:
+
+- default warm mean: about `341 ms`;
+- full warm mean: about `312 ms`;
+- default total `curve.simulate`: about `11.92 s`;
+- full total `curve.simulate`: about `9.02 s`;
+- cold `curve.simulate`: about `10.22 s` -> about `7.46 s`;
+- `kernel.combine_observer_chunks`: about `0.374 s` total -> `0`;
+- `kernel.finalize_observer`: about `0.017 s` total -> about `0.219 s`;
+- `kernel.finalize_observer.to_host`: about `0.014 s` total -> about
+  `0.045 s`.
+
+Per-simulation interpretation:
+
+- hot solver dispatch is unchanged in spirit: about `5 ms` per warm simulation
+  for both scopes;
+- the warm gain comes from removing about `61-67 ms` of chunk combine per
+  simulation while adding about `34-41 ms` of full-state finalization;
+- cold dispatch is also much lower for `full` in this gate, but that should be
+  confirmed on a broader matrix before treating it as a policy reason.
+
+Artifact:
+
+```text
+benchmark/results/kaggle/20260710_194628_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-ab-21215c6/outputs/extracted
+```
+
+Plots:
+
+```text
+benchmark/results/kaggle/20260710_194628_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-ab-21215c6/outputs/extracted/plots
+```
+
+Next step:
+
+- run a small matrix across `Naxons`, `time_chunk_steps`, and recording mode
+  before promoting `full` from benchmark-only prototype to default chunked
+  VmRaster behavior.
