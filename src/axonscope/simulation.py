@@ -6,12 +6,17 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 import numpy as np
 
 from axonscope.axon_instance import AxonInstance
+from axonscope.dispatcher.plan import (
+    DispatchPlan,
+    build_dispatch_plan,
+    dispatch_plan_identity_key,
+)
 from axonscope.runtime.execution import (
     batch_options_for_execution_context,
     batch_options_from_recording,
     execution_context,
 )
-from axonscope.benchmarking import benchmark_span
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.runtime import ExecutionPolicy
 from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.utils import units
@@ -85,6 +90,8 @@ class AxonSimulation:
         self.observers = tuple(observers) if observers is not None else None
         self.execution_policy = execution_policy
         self.progress = progress
+        self._dispatch_plan_cache_key: tuple[Any, ...] | None = None
+        self._dispatch_plan_cache: DispatchPlan | None = None
 
     @property
     def is_single(self) -> bool:
@@ -116,6 +123,7 @@ class AxonSimulation:
             observers=self.observers,
             execution_policy=self.execution_policy,
             progress=self.progress,
+            dispatch_plan=self._dispatch_plan_for_run(),
         )
 
     def estimate(self, **kwargs: Any):
@@ -157,6 +165,18 @@ class AxonSimulation:
             execution_policy=self.execution_policy,
             print_summary=print_summary,
         )
+
+    def _dispatch_plan_for_run(self) -> DispatchPlan:
+        key = dispatch_plan_identity_key(self.population.instances)
+        if self._dispatch_plan_cache_key == key and self._dispatch_plan_cache is not None:
+            record_benchmark_metadata(axon_simulation_dispatch_plan_cache="hit")
+            return self._dispatch_plan_cache
+
+        record_benchmark_metadata(axon_simulation_dispatch_plan_cache="miss")
+        plan = build_dispatch_plan(self.population.instances)
+        self._dispatch_plan_cache_key = key
+        self._dispatch_plan_cache = plan
+        return plan
 
 
 def _resolve_time(
@@ -290,6 +310,7 @@ def _run_population_simulation(
     observers: Sequence[Any] | None = None,
     execution_policy: ExecutionPolicy | None = None,
     progress: ProgressOption = False,
+    dispatch_plan: DispatchPlan | None = None,
 ) -> AxonSimulationResult:
     """Run a population and return the canonical ``AxonSimulationResult``.
 
@@ -335,6 +356,7 @@ def _run_population_simulation(
             record_observables=record_observables,
             progress=progress,
             backend_context=context,
+            dispatch_plan=dispatch_plan,
         )
     with benchmark_span("results.to_public", pool_size=len(population.instances)):
         if recording is not None:

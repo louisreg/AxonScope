@@ -14,6 +14,7 @@ from axonscope.solvers.options import BatchOptions, BatchRecording
 
 
 _VM_RASTER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_VM_RASTER_PLAN_IDENTITY_CACHE: OrderedDict[tuple[Any, ...], tuple[Any, Any]] = OrderedDict()
 _RECORDING_LOWERING_CACHE_MAX_SIZE = 64
 
 
@@ -81,6 +82,23 @@ def lower_observers_for_cohort(
 
     if observers is None or not prefer_vm_raster:
         return None
+    identity_key = _vm_raster_plan_identity_cache_key(
+        observers,
+        cohort=cohort,
+        dtype=dtype,
+    )
+    cached = _identity_cache_get(
+        _VM_RASTER_PLAN_IDENTITY_CACHE,
+        identity_key,
+        cohort,
+    )
+    if cached is not None:
+        record_benchmark_metadata(
+            vm_raster_plan_identity_cache="hit",
+            vm_raster_plan_cache="hit",
+        )
+        return cached
+
     cache_key = _vm_raster_plan_cache_key(
         observers,
         cohort=cohort,
@@ -88,7 +106,16 @@ def lower_observers_for_cohort(
     )
     cached = _cache_get(_VM_RASTER_PLAN_CACHE, cache_key)
     if cached is not None:
-        record_benchmark_metadata(vm_raster_plan_cache="hit")
+        _identity_cache_store(
+            _VM_RASTER_PLAN_IDENTITY_CACHE,
+            identity_key,
+            cohort,
+            cached,
+        )
+        record_benchmark_metadata(
+            vm_raster_plan_identity_cache="miss",
+            vm_raster_plan_cache="hit",
+        )
         return cached
 
     from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
@@ -101,7 +128,14 @@ def lower_observers_for_cohort(
         dtype=dtype,
     )
     _cache_store(_VM_RASTER_PLAN_CACHE, cache_key, plan)
+    _identity_cache_store(
+        _VM_RASTER_PLAN_IDENTITY_CACHE,
+        identity_key,
+        cohort,
+        plan,
+    )
     record_benchmark_metadata(
+        vm_raster_plan_identity_cache="miss",
         vm_raster_plan_cache="miss",
         vm_raster_count=0 if plan is None else plan.raster_count,
         vm_raster_probe_count=0 if plan is None else plan.probe_count,
@@ -171,6 +205,20 @@ def _vm_raster_plan_cache_key(
         "vm_raster_plan_v1",
         str(np.dtype(dtype)),
         _prepared_cohort_signature(cohort),
+        tuple(_observer_definition_signature(observer) for observer in observers),
+    )
+
+
+def _vm_raster_plan_identity_cache_key(
+    observers: tuple[Any, ...],
+    *,
+    cohort: Any,
+    dtype: Any,
+) -> tuple[Any, ...]:
+    return (
+        "vm_raster_plan_identity_v1",
+        id(cohort),
+        str(np.dtype(dtype)),
         tuple(_observer_definition_signature(observer) for observer in observers),
     )
 
@@ -246,6 +294,34 @@ def _cache_store(
     value: Any,
 ) -> None:
     cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > _RECORDING_LOWERING_CACHE_MAX_SIZE:
+        cache.popitem(last=False)
+
+
+def _identity_cache_get(
+    cache: OrderedDict[tuple[Any, ...], tuple[Any, Any]],
+    key: tuple[Any, ...],
+    cohort: Any,
+) -> Any | None:
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    cached_cohort, value = entry
+    if cached_cohort is not cohort:
+        cache.pop(key, None)
+        return None
+    cache.move_to_end(key)
+    return value
+
+
+def _identity_cache_store(
+    cache: OrderedDict[tuple[Any, ...], tuple[Any, Any]],
+    key: tuple[Any, ...],
+    cohort: Any,
+    value: Any,
+) -> None:
+    cache[key] = (cohort, value)
     cache.move_to_end(key)
     while len(cache) > _RECORDING_LOWERING_CACHE_MAX_SIZE:
         cache.popitem(last=False)

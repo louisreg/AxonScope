@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import axonscope as axs
+import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.input_batches as input_batches
 from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
@@ -361,6 +362,35 @@ def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
     monkeypatch.setattr(dispatch_plan_module, "build_solver_axon", fail_solver_rebuild)
 
     second = dispatch_plan_module.build_dispatch_plan(axons)
+
+    assert second is first
+
+
+def test_axon_simulation_reuses_cached_dispatch_plan(monkeypatch):
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
+        for index in range(3)
+    ]
+    simulation = axs.AxonSimulation(
+        axons,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=(
+            axs.analysis.Activation(
+                threshold=0.0 * axs.mV,
+                target=axs.positions.DISTAL,
+            ),
+        ),
+    )
+    first = simulation._dispatch_plan_for_run()
+
+    def fail_plan_rebuild(_axons):
+        raise AssertionError("stable AxonSimulation should reuse its dispatch plan")
+
+    monkeypatch.setattr(simulation_module, "build_dispatch_plan", fail_plan_rebuild)
+
+    second = simulation._dispatch_plan_for_run()
 
     assert second is first
 

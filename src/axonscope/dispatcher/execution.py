@@ -6,7 +6,12 @@ from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.runtime.execution import run_batch_group
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
-from axonscope.dispatcher.plan import DispatchGroup, DispatchItem, build_dispatch_plan
+from axonscope.dispatcher.plan import (
+    DispatchGroup,
+    DispatchItem,
+    DispatchPlan,
+    build_dispatch_plan,
+)
 from axonscope.dispatcher.progress import (
     DispatchProgress,
     ProgressEvent,
@@ -35,6 +40,7 @@ def run_pool(
     record_observables: bool = False,
     progress: ProgressOption = False,
     backend_context: Any | None = None,
+    dispatch_plan: DispatchPlan | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run an axon pool and return raw dispatch records.
 
@@ -73,6 +79,7 @@ def run_pool(
             record_observables=bool(record_observables),
             progress=progress,
             backend_context=backend_context,
+            dispatch_plan=dispatch_plan,
         )
 
 
@@ -87,10 +94,16 @@ def _run_pool_checked(
     record_observables: bool,
     progress: ProgressOption,
     backend_context: Any | None,
+    dispatch_plan: DispatchPlan | None,
 ) -> tuple[DispatchRecord, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
     emit_initial_progress(progress, rows=len(axons), message="building dispatch plan")
-    plan = build_dispatch_plan(axons)
+    if dispatch_plan is None:
+        plan = build_dispatch_plan(axons)
+        record_benchmark_metadata(dispatch_plan_source="builder")
+    else:
+        plan = dispatch_plan
+        record_benchmark_metadata(dispatch_plan_source="provided")
     record_benchmark_metadata(dispatch_group_count=len(plan.groups))
 
     results: list[DispatchRecord] = []

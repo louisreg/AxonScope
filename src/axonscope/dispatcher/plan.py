@@ -175,6 +175,24 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
         return plan
 
 
+def dispatch_plan_identity_key(
+    axons: Sequence[Axon | AxonInstance],
+) -> tuple[Any, ...]:
+    """Return a lightweight identity key for reusing an already-built plan.
+
+    This key follows object replacement rather than numeric waveform values.
+    Iterative curve protocols may mutate a shared stimulus amplitude while the
+    dispatch compatibility stays unchanged, but replacing a row, axon,
+    stimulation, drive, or stimulus invalidates the per-simulation plan.
+    """
+
+    simulations = tuple(as_axon_instance(axon) for axon in axons)
+    return (
+        "dispatch_plan_identity_v1",
+        tuple(_dispatch_plan_row_identity_key(simulation) for simulation in simulations),
+    )
+
+
 def _dispatch_plan_cache_key(
     simulations: Sequence[AxonInstance],
 ) -> tuple[Any, ...]:
@@ -196,6 +214,20 @@ def _dispatch_plan_row_cache_key(simulation: AxonInstance) -> tuple[Any, ...]:
     return (
         id(simulation),
         _solver_axon_cache_key(simulation),
+        _stimulation_temporal_identity_key(simulation),
+        float(getattr(simulation, "v_init", 0.0)),
+        float(getattr(simulation, "Veinit", 0.0)),
+        float(getattr(simulation, "temperature", 0.0)),
+    )
+
+
+def _dispatch_plan_row_identity_key(simulation: AxonInstance) -> tuple[Any, ...]:
+    return (
+        id(simulation),
+        id(simulation.axon),
+        id(getattr(simulation, "_xraxial_override", None)),
+        id(getattr(simulation, "_xg_override", None)),
+        id(getattr(simulation, "_xc_override", None)),
         _stimulation_temporal_identity_key(simulation),
         float(getattr(simulation, "v_init", 0.0)),
         float(getattr(simulation, "Veinit", 0.0)),
@@ -465,4 +497,5 @@ def _stimulus_temporal_signature(
 __all__ = [
     "DispatchPlan",
     "build_dispatch_plan",
+    "dispatch_plan_identity_key",
 ]
