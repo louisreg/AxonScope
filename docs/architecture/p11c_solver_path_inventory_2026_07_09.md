@@ -285,7 +285,8 @@ or public docs without a new benchmark-backed hypothesis.
 Decision:
 
 ```text
-Keep CPU auto -> thomas.
+Keep CPU double-cable Thomas-only: auto -> thomas, with explicit thomas allowed.
+Treat non-Thomas CPU double-cable routes as unsupported/invalid.
 ```
 
 ### GPU small/medium double-cable

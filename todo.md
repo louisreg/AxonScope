@@ -1893,6 +1893,58 @@ PTA/block-Thomas GPU gate:
   `--campaign double_cable_solver_policy`. Local CPU smoke passed under
   `benchmark/results/p11c_solver_policy_cpu_smoke`; this validates the runner,
   not the final policy.
+  CPU Kaggle policy gate at commit `c75dce6` passed `32/32` cases for
+  `auto`/`thomas`; every row resolved to effective `thomas`. CPU double-cable
+  policy decision for the cleanup: keep only Thomas on CPU, with
+  `auto -> thomas` and explicit
+  `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`. Do not keep, revive, or
+  optimize CPU PCR/PCR-SoA/Triton/tiled routes in the active runtime; non-Thomas
+  CPU double-cable routes are unsupported and have crashed in policy testing.
+  Artifact:
+  `benchmark/results/kaggle/20260710_091924_double_cable_solver_policy_quick_cpu_NvidiaTeslaP100_axonscope-p11c-policy-cpu-c75dce6/outputs/extracted`.
+  Full GPU policy gate at commit `c75dce6` completed on Kaggle P100 in about
+  `4h50` and passed `192/192` cases. It covered `threshold_curves` and
+  `recruitment_curves`, `observer_only` and `probe_vm`, `Naxons=64/1024/4096/8192`,
+  `Nx=89/129`, fp32, and `auto`, `thomas`, `pcr`, `pcr_soa`,
+  `tiled_thomas(block_b=32)`, and `tiled_thomas(block_b=64)`. Winner counts by
+  warm mean over the 32 shape/workflow groups: `tiled_thomas_b32` wins `12`,
+  `tiled_thomas_b64` wins `9`, `auto` wins `7`, and explicit `pcr_soa` wins
+  `4`; explicit `pcr` and explicit `thomas` win no groups. Interpretation:
+  Triton/tiled Thomas is the clear candidate for large GPU populations
+  (`Naxons >= 4096`, all groups in this run), while `auto`/PCR-SoA remains best
+  or statistically tight for tiny `Naxons=64` and mixed/tight around
+  `Naxons=1024`, especially probe Vm. Keep the default policy decision open
+  until this is turned into an explicit policy threshold and validated with a
+  smaller repeat/check run. Artifact:
+  `benchmark/results/kaggle/20260710_091941_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11c-policy-gpu-c75dce6/outputs/benchmark/results/double_cable_solver_policy_gpu_smoke_gpu_20260710_091941`.
+- [x] Start reducing GPU costs outside the solver before changing double-cable
+  solver policy. The first generic runtime fix keeps padded `center`/`probe`
+  Vm recording row-aware instead of lowering it to full Vm, and keeps multi-row
+  Vm batch outputs as one `DispatchCohortRecord` when no per-row posthoc
+  observer evaluation is needed. This directly targets the P11C-F `probe_vm`
+  bottleneck where large populations were dominated by `results.assemble_rows`
+  rather than by the solver. Covered by dispatcher tests; rerun the GPU policy
+  slice before making a fresh speedup claim.
+- [x] Continue reducing observer-only costs outside the solver before launching
+  the next Kaggle policy gate. Factorized extracellular input preparation now
+  reuses temporal-equivalent stimulus evaluations within one batch and records
+  `vstim_temporal_cache_*` metadata, including the rank-1 shared-current path
+  used by large recruitment-style observer-only cohorts even when each drive
+  owns a distinct normalized `Stimulus` object. Chunked VmRaster combination
+  now repacks chunk words with vectorized NumPy slices instead of a Python loop
+  per packed word. These are solver-independent runtime plumbing changes
+  intended to make large observer-only GPU simulations more solver-bound.
+  Local CPU smoke with `Naxons=4096`, double-cable, observer-only,
+  `tsim=2 ms`, `dt=0.02 ms`, and two 50-step chunks improved
+  `inputs.extracellular` from about 878 ms to about 192 ms and changed
+  temporal cache metadata from 4096 misses to 1 miss plus 4095 hits. The next
+  generic cleanup caches fully encoded gated/leak membrane rows by structural
+  row signature before stacking; the same smoke then reduced
+  `runtime.prepare.stack_membrane` from about 8.46 s to about 0.23 s with
+  5 unique membrane rows and 4091 cache hits, bringing local total visible time
+  to about 5.48 s. Covered by focused factorized-input, observer-runtime,
+  gated/leak membrane-stack, dispatcher, and batch tests; rerun the CPU/GPU
+  Kaggle policy slice before making a fresh speedup claim.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

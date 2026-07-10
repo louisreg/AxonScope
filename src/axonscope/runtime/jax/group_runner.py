@@ -33,6 +33,7 @@ from axonscope.runtime.jax.output_plan import OutputPlan
 from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
     lower_observers_for_cohort,
+    row_recording_indices_for_group,
 )
 from axonscope.runtime.jax.runtime_preparation import (
     group_cm_uF_cm2,
@@ -222,6 +223,10 @@ def _run_single_cable_batch_group(
     kernel_options = OutputPlan.from_batch_options(
         lowered_options,
         observers=observers,
+        row_record_indices=row_recording_indices_for_group(
+            group,
+            lowered_options.recording,
+        ),
     )
     _emit_progress(
         progress_callback,
@@ -368,7 +373,7 @@ def _run_single_cable_batch_group(
             observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
-            kernel_batch_options=kernel_options.to_batch_options(),
+            kernel_batch_options=kernel_options,
         )
 
 
@@ -441,6 +446,10 @@ def _run_double_cable_batch_group(
     kernel_options = OutputPlan.from_batch_options(
         lowered_options,
         observers=observers,
+        row_record_indices=row_recording_indices_for_group(
+            kernel_group,
+            lowered_options.recording,
+        ),
     )
     policy_block_solver, policy_allow_internal, policy_block_b = (
         _context_double_cable_block_solver_override(backend_context)
@@ -612,7 +621,7 @@ def _run_double_cable_batch_group(
             observer_definitions=observers,
             method=_dispatch_method(group),
             batch_options=batch_options,
-            kernel_batch_options=kernel_options.to_batch_options(),
+            kernel_batch_options=kernel_options,
         )
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
@@ -23,6 +23,7 @@ class OutputPlan:
     recording: BatchRecording
     time_chunk_steps: int | None
     sink: OutputSink
+    row_record_indices: Any | None = None
 
     @classmethod
     def from_batch_options(
@@ -30,6 +31,7 @@ class OutputPlan:
         options: BatchOptions,
         *,
         observers: tuple[object, ...] | None,
+        row_record_indices: Any | None = None,
     ) -> "OutputPlan":
         if options.recording.mode == "none":
             sink: OutputSink = "vm_raster" if observers else "none"
@@ -39,6 +41,7 @@ class OutputPlan:
             recording=options.recording,
             time_chunk_steps=options.time_chunk_steps,
             sink=sink,
+            row_record_indices=row_record_indices,
         )
 
     def to_batch_options(self) -> BatchOptions:

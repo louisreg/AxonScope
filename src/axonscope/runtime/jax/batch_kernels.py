@@ -340,6 +340,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
         I_background_row,
         Iinj_mid,
         vext_mid,
+        record_indices_row,
     ):
         vstim_forcing_mid = jax.vmap(
             lambda values: apply_diffusion_operator(values, lower_row, diag_row, upper_row)
@@ -388,7 +389,11 @@ def _run_single_cable_vstim_batch_stateful_scan(
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
-                output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+                output = _record_vm_row(
+                    Vm_new,
+                    record_indices_row,
+                    record_full=record_full,
+                )
                 return (Vm_new, gates_pred, *extra), output
 
             gates_new = membrane.final_gate_update(
@@ -417,7 +422,11 @@ def _run_single_cable_vstim_batch_stateful_scan(
                 step_plan=step_plan,
                 dt=dt_ms,
             )
-            output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+            output = _record_vm_row(
+                Vm_new,
+                record_indices_row,
+                record_full=record_full,
+            )
             return (Vm_new, gates_new, *state_new), output
 
         final_carry, trace = jax.lax.scan(
@@ -428,7 +437,26 @@ def _run_single_cable_vstim_batch_stateful_scan(
         return final_carry[0], final_carry[1], tuple(final_carry[2:]), trace
 
     state_axes = tuple(0 for _ in state0)
-    return jax.vmap(one_batch, in_axes=(0, 0, state_axes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))(
+    record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
+    return jax.vmap(
+        one_batch,
+        in_axes=(
+            0,
+            0,
+            state_axes,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            record_indices_axes,
+        ),
+    )(
         Vm0_mV,
         gates0,
         state0,
@@ -442,6 +470,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
         I_background,
         intracellular_current_density_mid,
         extracellular_potential_mid_mV,
+        record_indices,
     )
 
 
@@ -496,6 +525,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
         Iinj_mid,
         current_mid_row_A,
         forcing_footprint_mV_per_A,
+        record_indices_row,
     ):
         def step(carry, step_inputs):
             Iinj, current_A = step_inputs
@@ -544,7 +574,11 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
-                output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+                output = _record_vm_row(
+                    Vm_new,
+                    record_indices_row,
+                    record_full=record_full,
+                )
                 return (Vm_new, gates_pred, *extra), output
 
             gates_new = membrane.final_gate_update(
@@ -573,7 +607,11 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 step_plan=step_plan,
                 dt=dt_ms,
             )
-            output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+            output = _record_vm_row(
+                Vm_new,
+                record_indices_row,
+                record_full=record_full,
+            )
             return (Vm_new, gates_new, *state_new), output
 
         final_carry, trace = jax.lax.scan(
@@ -584,9 +622,26 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
         return final_carry[0], final_carry[1], tuple(final_carry[2:]), trace
 
     state_axes = tuple(0 for _ in state0)
+    record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
     return jax.vmap(
         one_batch,
-        in_axes=(0, 0, state_axes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        in_axes=(
+            0,
+            0,
+            state_axes,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            record_indices_axes,
+        ),
     )(
         Vm0_mV,
         gates0,
@@ -602,6 +657,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
         intracellular_current_density_mid,
         extracellular_current_mid_A,
         extracellular_forcing_footprint_mV_per_A,
+        record_indices,
     )
 
 
@@ -1490,6 +1546,7 @@ def _run_double_cable_batch_stateful_scan(
         vext_mid,
         vext_prev0,
         row_index,
+        record_indices_row,
     ):
         cm_over_dt = Cm_abs_row / dt_ms
         cx_over_dt = Cx_abs_row / dt_ms
@@ -1624,7 +1681,11 @@ def _run_double_cable_batch_stateful_scan(
             Vm_new = Vi_new - Ve_new
 
             if stateless_vm_only:
-                output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+                output = _record_vm_row(
+                    Vm_new,
+                    record_indices_row,
+                    record_full=record_full,
+                )
                 return (Vi_new, Ve_new, gates_pred, *extra), output
 
             gates_new = membrane.final_gate_update(
@@ -1658,7 +1719,11 @@ def _run_double_cable_batch_stateful_scan(
                 step_plan=step_plan,
                 dt=dt_ms,
             )
-            output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=0)
+            output = _record_vm_row(
+                Vm_new,
+                record_indices_row,
+                record_full=record_full,
+            )
             return (Vi_new, Ve_new, gates_new, *state_new), output
 
         scan_inputs = (
@@ -1678,6 +1743,7 @@ def _run_double_cable_batch_stateful_scan(
     edge_in_axes = None if jnp.asarray(Gax_i).ndim == 1 else 0
     background_in_axes = None if jnp.asarray(I_background).ndim <= 1 else 0
     iinj_in_axes = None if intracellular_current_abs_mid is None else 0
+    record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
     return jax.vmap(
         one_batch,
         in_axes=(
@@ -1700,6 +1766,7 @@ def _run_double_cable_batch_stateful_scan(
             0,
             0,
             0,
+            record_indices_axes,
         ),
     )(
         Vi0_mV,
@@ -1721,6 +1788,7 @@ def _run_double_cable_batch_stateful_scan(
         extracellular_potential_mid_mV,
         extracellular_potential_initial_previous_mV,
         row_indices,
+        record_indices,
     )
 
 
@@ -1910,7 +1978,11 @@ def _run_double_cable_batch_stateful_pcr_soa_scan(
         )
         Vm_new = Vi_new - Ve_new
 
-        output = Vm_new if record_full else jnp.take(Vm_new, record_indices, axis=1)
+        output = _record_vm_batch(
+            Vm_new,
+            record_indices,
+            record_full=record_full,
+        )
         if stateless_vm_only:
             return (Vi_new, Ve_new, gates_pred, *extra), output
 
@@ -2833,7 +2905,10 @@ class SingleCableVStimBatchKernel:
             dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
             lower, diag, upper = cable.lower, cable.diag, cable.upper
             options = _normalize_batch_options(options)
-            record_idx, record_full = _resolve_recording(options.recording, nx=membrane_runtime.Nx)
+            record_idx, record_full = _resolve_output_recording(
+                options,
+                nx=membrane_runtime.Nx,
+            )
             record_voltage = options.recording.mode != "none"
             chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
             stateless_vm_only = bool(
@@ -3172,7 +3247,7 @@ class DoubleCableBatchKernel:
                 )
 
             options = _normalize_batch_options(options)
-            record_idx, record_full = _resolve_recording(options.recording, nx=nx)
+            record_idx, record_full = _resolve_output_recording(options, nx=nx)
             chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
             has_driven_extracellular = (
                 runtime.stimulation.has_driven_extracellular
@@ -5272,6 +5347,33 @@ def _resolve_recording(recording: BatchRecording, *, nx: int) -> tuple[Array, bo
     if indices is None:
         return jnp.arange(nx, dtype=jnp.int32), True
     return jnp.asarray(indices, dtype=jnp.int32), False
+
+
+def _resolve_output_recording(options: Any, *, nx: int) -> tuple[Array, bool]:
+    row_indices = getattr(options, "row_record_indices", None)
+    if row_indices is not None:
+        indices = jnp.asarray(row_indices, dtype=jnp.int32)
+        if indices.ndim != 2:
+            raise ValueError("row_record_indices must have shape (batch, width).")
+        return indices, False
+    return _resolve_recording(options.recording, nx=nx)
+
+
+def _record_vm_row(vm: Array, record_indices: Array, *, record_full: bool) -> Array:
+    if record_full:
+        return vm
+    return jnp.take(vm, record_indices, axis=0)
+
+
+def _record_vm_batch(vm: Array, record_indices: Array, *, record_full: bool) -> Array:
+    if record_full:
+        return vm
+    indices = jnp.asarray(record_indices, dtype=jnp.int32)
+    if indices.ndim == 1:
+        return jnp.take(vm, indices, axis=1)
+    if indices.ndim != 2:
+        raise ValueError("batch record_indices must have shape (width,) or (batch, width).")
+    return jnp.take_along_axis(vm, indices, axis=1)
 
 
 def _init_local_vm_raster_chunk_template(

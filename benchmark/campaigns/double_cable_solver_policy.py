@@ -179,16 +179,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         args=args,
         runs=runs,
     )
+    summary_path = args.output / "double_cable_solver_policy_summary.csv"
+    report_path = args.output / "double_cable_solver_policy_report.md"
+    print(f"planned: {len(runs)} double-cable solver policy runs", flush=True)
 
     if args.dry_run:
         for run in runs:
-            print("$", shlex.join(run.command))
-        print(f"wrote: {args.output / 'double_cable_solver_policy_manifest.json'}")
+            print("$", shlex.join(run.command), flush=True)
+        print(f"wrote: {args.output / 'double_cable_solver_policy_manifest.json'}", flush=True)
         return 0
 
     rows: list[dict[str, Any]] = []
     failed = False
-    for run in runs:
+    for index, run in enumerate(runs, start=1):
+        print(f"running {index}/{len(runs)}: {run.label}", flush=True)
         run.run_dir.mkdir(parents=True, exist_ok=True)
         _write_json(run.run_dir / "campaign_command.json", _run_spec_json(run))
         result = subprocess.run(
@@ -203,17 +207,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             encoding="utf-8",
         )
         status = "passed" if result.returncode == 0 else "failed"
-        print(f"{status}: {run.label} (returncode={result.returncode})")
+        print(
+            f"{status}: {index}/{len(runs)} {run.label} "
+            f"(returncode={result.returncode})",
+            flush=True,
+        )
         if result.returncode != 0:
             failed = True
         rows.append(_summarize_curve_run(run, status=status, returncode=result.returncode))
+        _write_csv(summary_path, rows)
+        _write_report(report_path, rows)
+        print(f"progress: wrote {len(rows)}/{len(runs)} rows to {summary_path}", flush=True)
         if failed and not args.keep_going:
             break
 
-    _write_csv(args.output / "double_cable_solver_policy_summary.csv", rows)
-    _write_report(args.output / "double_cable_solver_policy_report.md", rows)
-    print(f"wrote: {args.output / 'double_cable_solver_policy_summary.csv'}")
-    print(f"wrote: {args.output / 'double_cable_solver_policy_report.md'}")
+    _write_csv(summary_path, rows)
+    _write_report(report_path, rows)
+    print(f"wrote: {summary_path}", flush=True)
+    print(f"wrote: {report_path}", flush=True)
     return 1 if failed else 0
 
 

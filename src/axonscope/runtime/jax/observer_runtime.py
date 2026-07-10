@@ -285,26 +285,39 @@ def combine_vm_raster_chunk_states(
         )
         if local_count <= 0:
             continue
-        for local_word in range(int(chunk.shape[-1])):
-            local_step = local_word * 32
-            remaining = local_count - local_step
-            if remaining <= 0:
-                break
-            values = chunk[..., local_word]
-            valid_bits = min(32, remaining)
-            if valid_bits < 32:
-                values = values & np.uint32((1 << valid_bits) - 1)
-            if not np.any(values):
-                continue
+        usable_words = min((local_count + 31) // 32, int(chunk.shape[-1]))
+        if usable_words <= 0:
+            continue
+        values = chunk[..., :usable_words]
+        valid_bits = local_count - (usable_words - 1) * 32
+        if valid_bits < 32:
+            values = values.copy()
+            values[..., -1] &= np.uint32((1 << valid_bits) - 1)
 
-            global_step = start_index + local_step
-            global_word = global_step // 32
-            if global_word >= word_count:
-                break
-            offset = global_step & 31
-            combined[..., global_word] |= values << np.uint32(offset)
-            if offset and global_word + 1 < word_count:
-                combined[..., global_word + 1] |= values >> np.uint32(32 - offset)
+        global_word = start_index // 32
+        if global_word >= word_count:
+            continue
+        offset = start_index & 31
+        low_words = min(usable_words, word_count - global_word)
+        if low_words <= 0:
+            continue
+
+        if offset == 0:
+            combined[..., global_word : global_word + low_words] |= values[
+                ..., :low_words
+            ]
+            continue
+
+        combined[..., global_word : global_word + low_words] |= (
+            values[..., :low_words] << np.uint32(offset)
+        )
+        high_word = global_word + 1
+        if high_word < word_count:
+            high_words = min(usable_words, word_count - high_word)
+            if high_words > 0:
+                combined[..., high_word : high_word + high_words] |= (
+                    values[..., :high_words] >> np.uint32(32 - offset)
+                )
 
     return combined
 

@@ -29,7 +29,45 @@ def lower_batch_recording_options(
         return options
     if options.recording.mode == "none" and observers is not None:
         return options
+    if row_recording_indices_for_group(group, options.recording) is not None:
+        return options
     return options if options.recording.mode == "full" else _replace_full_recording(options)
+
+
+def row_recording_indices_for_group(
+    group: Any,
+    recording: BatchRecording,
+) -> np.ndarray | None:
+    """Return row-aware retained Vm indices for padded batch groups.
+
+    ``BatchRecording`` is shape-only and normally resolves indices against one
+    ``Nx``. Padded mixed-diameter groups need the same number of retained
+    columns per row, but those columns must be selected against each row's
+    original compartment count.
+    """
+
+    if not getattr(group, "has_padding", False):
+        return None
+    if recording.mode not in {"center", "probes", "indices"}:
+        return None
+
+    rows: list[np.ndarray] = []
+    width: int | None = None
+    for item in group.items:
+        row = np.asarray(
+            recording.indices_for(int(item.solver_axon.n_compartments)),
+            dtype=np.int32,
+        )
+        if row.ndim != 1:
+            return None
+        if width is None:
+            width = int(row.shape[0])
+        elif int(row.shape[0]) != width:
+            return None
+        rows.append(row)
+    if not rows or width is None or width < 1:
+        return None
+    return np.stack(rows, axis=0)
 
 
 def lower_observers_for_cohort(
@@ -219,5 +257,6 @@ __all__ = [
     "lower_observers_for_cohort",
     "observer_output_label",
     "observers_are_vm_raster_compatible",
+    "row_recording_indices_for_group",
     "vm_raster_definitions",
 ]

@@ -187,6 +187,9 @@ For parameter-batched groups,
 the representative fields that survive batching. It must not build a full
 representative cable/extracellular runtime just to replace it immediately with
 stacked row arrays.
+The JAX runtime may cache fully encoded membrane rows by structural row
+signature while stacking gated/leak layouts; this is a backend preparation
+optimization and must remain independent of a particular membrane-model family.
 `runtime/jax/runtime_caches.py` owns the bounded runtime/cohort cache storage,
 while `runtime/jax/shape_bucketing.py` owns the opt-in double-cable kernel
 shape bucketing policy and metadata.
@@ -194,23 +197,29 @@ shape bucketing policy and metadata.
 ### VmRaster, Dense/Factorized Vext, And Results
 
 `runtime/jax/recording_lowering.py` owns batch recording/observer lowering:
-it expands padded groups to the effective kernel recording policy when needed
-and lowers compatible public observer definitions to solver-side VmRaster plans
-through `build_vm_raster_plan(...)`. Scalar kernels and batch kernels update
-packed observer output during the scan. The public result key is strictly
+it keeps padded `center`/`probes` Vm recording row-aware when all rows retain a
+common output width, expands to full Vm only when row-aware recording is not
+available, and lowers compatible public observer definitions to solver-side
+VmRaster plans through `build_vm_raster_plan(...)`. Scalar kernels and batch
+kernels update packed observer output during the scan. The public result key is strictly
 `observations["vm_raster"]`; activation, latency, velocity, threshold, and
 recruitment stay in post-processing. The result container and CPU unpacking live
 under `axonscope.results`, not in solver runtime modules.
 
 Chunked observer-only batch kernels use local VmRaster states per chunk and
-assemble them into one full-duration packed raster before result assembly. This
-keeps the public result identical while stabilizing JAX kernel signatures across
-duration sweeps.
+assemble them into one full-duration packed raster before result assembly. The
+host-side assembly repacks whole `uint32` word slices per chunk, including
+unaligned chunk starts, so this cost stays outside solver-specific code while
+avoiding per-step or per-word Python loops. This keeps the public result
+identical while stabilizing JAX kernel signatures across duration sweeps.
 
 Dense extracellular input is produced by `build_vstim_midpoint_batch(...)` or
 `build_vstim_midpoint_and_initial_previous_batch(...)`. Factorized
 extracellular input is produced by `build_factorized_vstim_midpoint_batch(...)`
-and should remain internal to backend lowering.
+and should remain internal to backend lowering. Factorized builders cache
+temporal stimulus evaluations within a batch, so cohorts sharing
+temporal-equivalent stimuli evaluate the current waveform once per time grid
+while keeping row-specific spatial footprints.
 
 Scalar solver output is the internal `SolverOutput` payload, converted to
 `AxonSimulationResult` at the public `AxonSimulation.run()` boundary. Batch
@@ -244,10 +253,15 @@ The current typed public choices are:
 | `axs.runtime.jax.SingleCableSolver.auto()` | current JAX tridiagonal route | Single-cable default. |
 | `axs.runtime.jax.SingleCableSolver.jax_tridiagonal()` | JAX tridiagonal route | Explicit single-cable route. |
 | `axs.runtime.jax.DoubleCableSolver.auto()` | CPU Thomas or current GPU adaptive PCR policy | Double-cable default by active device. |
-| `axs.runtime.jax.cpu.DoubleCableSolver.thomas()` | `thomas` | Explicit CPU reference path. |
+| `axs.runtime.jax.cpu.DoubleCableSolver.thomas()` | `thomas` | Only supported explicit CPU double-cable route. |
 | `axs.runtime.jax.gpu.DoubleCableSolver.pcr()` | `pcr` | GPU diagnostic and larger-batch adaptive fallback. |
 | `axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()` | `pcr_soa` | GPU diagnostic for small/medium batches. |
 | `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)` | `jax_triton_loop_xb` | Experimental selectable double-cable route while P11C-F/P11C-G decide promotion. |
+
+CPU double-cable policy is intentionally narrow: `auto` resolves to `thomas`,
+and the only explicit CPU route is `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`.
+Non-Thomas CPU double-cable routes are unsupported and should not be kept as
+active runtime choices.
 
 Example:
 

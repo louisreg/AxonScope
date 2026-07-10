@@ -42,6 +42,39 @@ FootprintEngine = Literal["numpy", "jax"]
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 
 
+def _cached_stimulus_current_A(
+    cache: dict[Any, np.ndarray],
+    stimulus: Stimulus,
+    t_ms: np.ndarray,
+    *,
+    np_dtype: np.dtype[Any],
+) -> tuple[np.ndarray, bool]:
+    identity_key = ("stimulus_identity", id(stimulus))
+    values = cache.get(identity_key)
+    if values is not None:
+        return values, True
+    cache_key = _stimulus_temporal_cache_key(stimulus)
+    values = cache.get(cache_key)
+    if values is not None:
+        cache[identity_key] = values
+        return values, True
+    values = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+    cache[cache_key] = values
+    cache[identity_key] = values
+    return values, False
+
+
+def _stimulus_temporal_cache_key(stimulus: Stimulus) -> tuple[Any, ...]:
+    return (
+        "stimulus_temporal_v1",
+        type(stimulus),
+        stimulus.mode,
+        stimulus.y_unit,
+        _array_content_key(np.asarray(stimulus.t)),
+        _array_content_key(np.asarray(stimulus.y)),
+    )
+
+
 def build_vstim_midpoint_batch(
     axon: object,
     stimulations_batch: Sequence[StimulationBatchRow],
@@ -304,7 +337,7 @@ def _build_intracellular_current_density_batch_from_clamps(
     np_dtype = np.dtype(dtype_local)
     t = np.asarray(t_ms, dtype=np_dtype)
     values = np.zeros((len(axons), int(t.shape[0]), int(target_nx)), dtype=np_dtype)
-    current_cache: dict[int, np.ndarray] = {}
+    current_cache: dict[Any, np.ndarray] = {}
 
     for row_index, (axon, solver_axon) in enumerate(zip(axons, solver_axons, strict=True)):
         if int(solver_axon.n_compartments) > int(target_nx):
@@ -364,7 +397,7 @@ def _build_sparse_intracellular_current_density_batch_from_clamps(
     )
     indices = np.zeros((len(axons), int(max_contexts)), dtype=np.int32)
     mask = np.zeros((len(axons), int(max_contexts)), dtype=bool)
-    current_cache: dict[int, np.ndarray] = {}
+    current_cache: dict[Any, np.ndarray] = {}
 
     for row_index, (axon, solver_axon) in enumerate(zip(axons, solver_axons, strict=True)):
         if int(solver_axon.n_compartments) > int(target_nx):
@@ -762,14 +795,12 @@ def _build_vstim_batch_from_footprints(
                     raise ValueError(
                         "Each extracellular drive must have an attached stimulus."
                     )
-                cache_key = id(stimulus)
-                current_A = current_cache.get(cache_key)
-                if current_A is None:
-                    current_A = np.asarray(
-                        stimulus.evaluate(t, unit="ampere"),
-                        dtype=np_dtype,
-                    )
-                    current_cache[cache_key] = current_A
+                current_A, _ = _cached_stimulus_current_A(
+                    current_cache,
+                    stimulus,
+                    t,
+                    np_dtype=np_dtype,
+                )
                 footprint = _drive_footprint_for_positions(
                     drive,
                     x[row_index],
@@ -794,13 +825,21 @@ def _try_build_footprint_vstim_batch(
         return None
     stimulations, drives, row_stimuli = source
 
-    current_rows_A = np.stack(
-        [
-            np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
-            for stimulus in row_stimuli
-        ],
-        axis=0,
-    )
+    current_cache: dict[int, np.ndarray] = {}
+    temporal_cache_hits = 0
+    temporal_cache_misses = 0
+    current_rows: list[np.ndarray] = []
+    for stimulus in row_stimuli:
+        current_A, cache_hit = _cached_stimulus_current_A(
+            current_cache,
+            stimulus,
+            t_ms,
+            np_dtype=np_dtype,
+        )
+        temporal_cache_hits += int(cache_hit)
+        temporal_cache_misses += int(not cache_hit)
+        current_rows.append(current_A)
+    current_rows_A = np.stack(current_rows, axis=0)
     cache_key = _footprint_rows_cache_key(
         stimulations,
         drives,
@@ -826,6 +865,9 @@ def _try_build_footprint_vstim_batch(
     record_benchmark_metadata(
         vstim_footprint_cache=footprint_cache_status,
         vstim_footprint_cache_nbytes=int(footprint.nbytes),
+        vstim_temporal_cache_hits=int(temporal_cache_hits),
+        vstim_temporal_cache_misses=int(temporal_cache_misses),
+        vstim_temporal_unique_stimuli=int(temporal_cache_misses),
     )
     values = (
         current_rows_A[:, :, None]
@@ -851,49 +893,98 @@ def _try_build_factorized_footprint_vstim_batch(
         return None
     drive_rows, max_drive_count = source
     batch_size = len(drive_rows)
-    current_rows_A = np.zeros(
-        (batch_size, max_drive_count, int(t_ms.shape[0])),
-        dtype=np_dtype,
-    )
-    previous_rows_A = (
-        None
-        if t_initial_previous_ms is None
-        else np.zeros((batch_size, max_drive_count), dtype=np_dtype)
-    )
-    for row_index, row in enumerate(drive_rows):
-        for drive_index, (_stimulation, _drive, stimulus) in enumerate(row):
-            current_rows_A[row_index, drive_index] = np.asarray(
-                stimulus.evaluate(t_ms, unit="ampere"),
-                dtype=np_dtype,
-            )
-            if previous_rows_A is not None:
-                previous_rows_A[row_index, drive_index] = np.asarray(
-                    stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
-                    dtype=np_dtype,
-                ).reshape(-1)[0]
+    rank1_stimulus_key: tuple[Any, ...] | None = None
+    if max_drive_count == 1 and bool(drive_rows) and all(
+        len(row) == 1 for row in drive_rows
+    ):
+        first_key = _stimulus_temporal_cache_key(drive_rows[0][0][2])
+        if all(
+            _stimulus_temporal_cache_key(row[0][2]) == first_key
+            for row in drive_rows[1:]
+        ):
+            rank1_stimulus_key = first_key
+    shared_rank1_stimulus = rank1_stimulus_key is not None
+    temporal_mid_cache_hits = 0
+    temporal_mid_cache_misses = 0
+    temporal_previous_cache_hits = 0
+    temporal_previous_cache_misses = 0
 
-    if max_drive_count == 1:
-        current_rows_1d_A = current_rows_A[:, 0, :]
-        shared_mid_current = all(
-            np.array_equal(current_rows_1d_A[0], row) for row in current_rows_1d_A[1:]
-        )
-        previous_rows_1d_A = None if previous_rows_A is None else previous_rows_A[:, 0]
-        shared_previous_current = previous_rows_1d_A is None or all(
-            np.array_equal(previous_rows_1d_A[0], row) for row in previous_rows_1d_A[1:]
-        )
-        shared_current = shared_mid_current and shared_previous_current
-        current_A = current_rows_1d_A[0] if shared_current else current_rows_1d_A
+    if shared_rank1_stimulus:
+        stimulus = drive_rows[0][0][2]
+        current_A = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+        temporal_mid_cache_hits = max(batch_size - 1, 0)
+        temporal_mid_cache_misses = 1
         current_initial_previous_A = None
-        if previous_rows_1d_A is not None:
-            current_initial_previous_A = (
-                np.asarray(previous_rows_1d_A[0], dtype=np_dtype)
-                if shared_current
-                else previous_rows_1d_A
-            )
+        if t_initial_previous_ms is not None:
+            current_initial_previous_A = np.asarray(
+                stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+                dtype=np_dtype,
+            ).reshape(-1)[0]
+            temporal_previous_cache_hits = max(batch_size - 1, 0)
+            temporal_previous_cache_misses = 1
+        shared_current = True
     else:
-        shared_current = False
-        current_A = current_rows_A
-        current_initial_previous_A = previous_rows_A
+        current_rows_A = np.zeros(
+            (batch_size, max_drive_count, int(t_ms.shape[0])),
+            dtype=np_dtype,
+        )
+        previous_rows_A = (
+            None
+            if t_initial_previous_ms is None
+            else np.zeros((batch_size, max_drive_count), dtype=np_dtype)
+        )
+        mid_cache: dict[Any, np.ndarray] = {}
+        previous_cache: dict[Any, np.ndarray] = {}
+        for row_index, row in enumerate(drive_rows):
+            for drive_index, (_stimulation, _drive, stimulus) in enumerate(row):
+                current_values_A, cache_hit = _cached_stimulus_current_A(
+                    mid_cache,
+                    stimulus,
+                    t_ms,
+                    np_dtype=np_dtype,
+                )
+                temporal_mid_cache_hits += int(cache_hit)
+                temporal_mid_cache_misses += int(not cache_hit)
+                current_rows_A[row_index, drive_index] = current_values_A
+                if previous_rows_A is not None and t_initial_previous_ms is not None:
+                    previous_values_A, cache_hit = _cached_stimulus_current_A(
+                        previous_cache,
+                        stimulus,
+                        t_initial_previous_ms,
+                        np_dtype=np_dtype,
+                    )
+                    temporal_previous_cache_hits += int(cache_hit)
+                    temporal_previous_cache_misses += int(not cache_hit)
+                    previous_rows_A[row_index, drive_index] = (
+                        previous_values_A.reshape(-1)[0]
+                    )
+
+        if max_drive_count == 1:
+            current_rows_1d_A = current_rows_A[:, 0, :]
+            shared_mid_current = all(
+                np.array_equal(current_rows_1d_A[0], row)
+                for row in current_rows_1d_A[1:]
+            )
+            previous_rows_1d_A = (
+                None if previous_rows_A is None else previous_rows_A[:, 0]
+            )
+            shared_previous_current = previous_rows_1d_A is None or all(
+                np.array_equal(previous_rows_1d_A[0], row)
+                for row in previous_rows_1d_A[1:]
+            )
+            shared_current = shared_mid_current and shared_previous_current
+            current_A = current_rows_1d_A[0] if shared_current else current_rows_1d_A
+            current_initial_previous_A = None
+            if previous_rows_1d_A is not None:
+                current_initial_previous_A = (
+                    np.asarray(previous_rows_1d_A[0], dtype=np_dtype)
+                    if shared_current
+                    else previous_rows_1d_A
+                )
+        else:
+            shared_current = False
+            current_A = current_rows_A
+            current_initial_previous_A = previous_rows_A
 
     cache_key = _factorized_footprint_rows_cache_key(
         drive_rows,
@@ -941,6 +1032,11 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
         shared_current=bool(shared_current),
+        vstim_temporal_cache_hits=int(temporal_mid_cache_hits),
+        vstim_temporal_cache_misses=int(temporal_mid_cache_misses),
+        vstim_temporal_previous_cache_hits=int(temporal_previous_cache_hits),
+        vstim_temporal_previous_cache_misses=int(temporal_previous_cache_misses),
+        vstim_temporal_unique_stimuli=int(temporal_mid_cache_misses),
         vstim_factorized_dense_ratio=(
             factorized_nbytes / float(dense_equivalent_nbytes)
             if dense_equivalent_nbytes

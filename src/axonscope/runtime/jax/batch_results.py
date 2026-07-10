@@ -58,6 +58,10 @@ def dispatch_results_from_batch(
     kernel_record_indices = (
         None if kernel_indices is None else tuple(int(value) for value in kernel_indices)
     )
+    row_record_indices = _row_record_indices_for_public_group(
+        kernel_batch_options,
+        batch_size=group.size,
+    )
     with benchmark_span(
         "results.materialize_vm",
         group_id=group.group_id,
@@ -82,13 +86,20 @@ def dispatch_results_from_batch(
                 retained_width=int(vm_values.shape[-1]) if vm_values.ndim >= 2 else "",
             )
 
-    if vm_values is None and observations is not None:
+    if _can_keep_cohort_record(
+        group,
+        vm_values=vm_values,
+        observations=observations,
+        observer_definitions=observer_definitions,
+        row_record_indices=row_record_indices,
+        kernel_record_indices=kernel_record_indices,
+    ):
         with benchmark_span(
             "results.assemble_cohort_record",
             group_id=group.group_id,
             group_size=group.size,
             recording_mode=batch_options.recording.mode,
-            output="observations",
+            output="observations" if vm_values is None else "Vm",
             method=method,
         ):
             return (
@@ -96,11 +107,15 @@ def dispatch_results_from_batch(
                     indices=tuple(item.index for item in group.items),
                     axons=tuple(item.simulation.axon for item in group.items),
                     simulations=tuple(item.simulation for item in group.items),
-                    Vm=None,
+                    Vm=vm_values,
                     t=t,
                     group_id=group.group_id,
                     method=method,
-                    record_indices=tuple(None for _ in group.items),
+                    record_indices=_cohort_record_indices(
+                        group,
+                        row_record_indices=row_record_indices,
+                        kernel_record_indices=kernel_record_indices,
+                    ),
                     observations=observations,
                     group_size=group.size,
                     batch_kind=group.batch_kind,
@@ -178,6 +193,60 @@ def dispatch_results_from_batch(
             posthoc_row_count=posthoc_row_count,
         )
         return tuple(results)
+
+
+def _row_record_indices_for_public_group(
+    kernel_batch_options: BatchOptions,
+    *,
+    batch_size: int,
+) -> tuple[tuple[int, ...], ...] | None:
+    values = getattr(kernel_batch_options, "row_record_indices", None)
+    if values is None:
+        return None
+    arr = np.asarray(values, dtype=np.int32)
+    if arr.ndim != 2:
+        return None
+    return tuple(
+        tuple(int(value) for value in arr[row_index])
+        for row_index in range(min(int(batch_size), int(arr.shape[0])))
+    )
+
+
+def _can_keep_cohort_record(
+    group: DispatchGroup,
+    *,
+    vm_values: np.ndarray | None,
+    observations: dict[str, Any] | None,
+    observer_definitions: tuple[Any, ...] | None,
+    row_record_indices: tuple[tuple[int, ...], ...] | None,
+    kernel_record_indices: tuple[int, ...] | None,
+) -> bool:
+    if vm_values is None:
+        return observations is not None
+    if group.size <= 1:
+        return False
+    if observer_definitions is not None and observations is None:
+        return False
+    if row_record_indices is not None:
+        return len(row_record_indices) == group.size
+    if kernel_record_indices is not None:
+        return not group.has_padding
+    return not group.has_padding
+
+
+def _cohort_record_indices(
+    group: DispatchGroup,
+    *,
+    row_record_indices: tuple[tuple[int, ...], ...] | None,
+    kernel_record_indices: tuple[int, ...] | None,
+) -> tuple[tuple[int, ...] | None, ...]:
+    if row_record_indices is not None:
+        if len(row_record_indices) != group.size:
+            raise ValueError("row-aware record indices must match public group size.")
+        return row_record_indices
+    if kernel_record_indices is not None:
+        return tuple(kernel_record_indices for _ in group.items)
+    return tuple(None for _ in group.items)
 
 
 def trim_observations_batch(

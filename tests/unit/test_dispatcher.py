@@ -262,6 +262,42 @@ def test_pool_dispatch_pads_compatible_double_cable_axons():
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 11), (2, 13)]
 
 
+def test_run_pool_double_cable_padded_probes_keeps_batched_vm_cohort():
+    axon_a = _passive_double_cable_axon(amp_nA=0.1, compartments=11)
+    axon_b = _passive_double_cable_axon(amp_nA=0.2, compartments=13)
+
+    result = run_pool(
+        [axon_a, axon_b],
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=BatchOptions.probes(count=3),
+    )
+
+    assert len(result) == 1
+    assert isinstance(result[0], DispatchCohortRecord)
+    assert result[0].indices == (0, 1)
+    assert np.asarray(result[0].Vm).shape == (2, 2, 3)
+    assert result[0].record_indices == ((0, 5, 10), (0, 6, 12))
+
+
+def test_pool_public_double_cable_padded_probes_use_row_aware_indices():
+    axon_a = _passive_double_cable_axon(amp_nA=0.1, compartments=11)
+    axon_b = _passive_double_cable_axon(amp_nA=0.2, compartments=13)
+
+    result = _run_simulation(
+        [axon_a, axon_b],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.probes(axs.signals.Vm, count=3),
+    )
+
+    assert [axon_result.Vm.shape for axon_result in result] == [(2, 3), (2, 3)]
+    assert [axon_result.record_indices for axon_result in result] == [
+        (0, 5, 10),
+        (0, 6, 12),
+    ]
+
+
 def test_dispatch_plan_groups_shifted_mrg_double_cable_rows():
     axons = [
         _mrg_axon(diameter_um=10.0, amp_nA=0.1, x_shift_um=0.0),
@@ -356,6 +392,32 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
         np.broadcast_to(expected, actual.shape),
         rtol=1e-6,
         atol=1e-7,
+    )
+
+
+def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    axons = [
+        _mrg_axon(diameter_um=7.3, amp_nA=0.1),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.2),
+        _mrg_axon(diameter_um=7.3, amp_nA=0.3),
+    ]
+    group = build_dispatch_plan(axons).groups[0]
+
+    fast_stack = runtime_preparation.try_stack_gated_leak_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=group.items[0].solver_axon.dtype,
+        solver_options=None,
+    )
+
+    assert fast_stack is not None
+    assert fast_stack.unique_rows == 2
+    assert fast_stack.cache_hits == 1
+    np.testing.assert_array_equal(fast_stack.gates0_rows[0], fast_stack.gates0_rows[2])
+    np.testing.assert_array_equal(
+        fast_stack.background_rows[0],
+        fast_stack.background_rows[2],
     )
 
 
@@ -909,8 +971,12 @@ def test_batch_static_runtime_cache_reuses_equivalent_pool_with_new_time_grid():
     finally:
         axs.disable_benchmark(print_summary=False, save=False)
 
-    assert [row.Vm.shape for row in first] == [(2, 1), (2, 1)]
-    assert [row.Vm.shape for row in second] == [(4, 1), (4, 1)]
+    assert len(first) == 1
+    assert isinstance(first[0], DispatchCohortRecord)
+    assert np.asarray(first[0].Vm).shape == (2, 2, 1)
+    assert len(second) == 1
+    assert isinstance(second[0], DispatchCohortRecord)
+    assert np.asarray(second[0].Vm).shape == (2, 4, 1)
     assert report is not None
     runtime_events = [event for event in report.events if event.name == "runtime.prepare"]
     runtime_cache_events = [
@@ -1007,6 +1073,65 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
         rtol=1e-6,
         atol=1e-6,
     )
+
+
+def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    stimulus = Stimulus.pulse(
+        start=0.0 * axs.ms,
+        duration=0.05 * axs.ms,
+        amplitude=10e-6,
+    )
+    shared_stimulations = tuple(
+        stimulation.replace_drive(drive.id, stimulus=stimulus) for _ in range(4)
+    )
+
+    original_evaluate = Stimulus.evaluate
+    call_count = 0
+
+    def counted_evaluate(self, t, *, unit=None):
+        nonlocal call_count
+        if unit == "ampere":
+            call_count += 1
+        return original_evaluate(self, t, unit=unit)
+
+    monkeypatch.setattr(Stimulus, "evaluate", counted_evaluate)
+
+    rows = [(stimulation_row,) for stimulation_row in shared_stimulations]
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.extracellular"):
+            batch = build_factorized_vstim_midpoint_batch(
+                axon,
+                rows,
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+                include_initial_previous=True,
+            )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert batch is not None
+    assert call_count == 2
+    assert np.asarray(batch.current_mid_A).shape == (2,)
+    assert np.asarray(batch.current_initial_previous_A).shape == ()
+    materialized = np.asarray(materialize_factorized_extracellular_potential_batch(batch))
+    assert materialized.shape == (4, 2, 11)
+
+    assert report is not None
+    extracellular_event = next(
+        event for event in report.events if event.name == "inputs.extracellular"
+    )
+    metadata = extracellular_event.metadata
+    assert metadata["shared_current"] is True
+    assert metadata["vstim_temporal_cache_hits"] == 3
+    assert metadata["vstim_temporal_cache_misses"] == 1
+    assert metadata["vstim_temporal_previous_cache_hits"] == 3
+    assert metadata["vstim_temporal_previous_cache_misses"] == 1
 
 
 def test_batch_runtime_cache_separates_backend_context_scope():

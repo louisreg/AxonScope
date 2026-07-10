@@ -942,7 +942,9 @@ runtime.jax.DoubleCableSolver
 
 Policy:
 
-- CPU double-cable defaults remain Thomas-oriented;
+- CPU double-cable is Thomas-only: `auto` resolves to `thomas`, and the only
+  explicit CPU double-cable route is
+  `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`;
 - GPU double-cable defaults remain benchmark-backed JAX PCR policy until the
   P11C-F/P11C-G matrix decides whether Triton should be promoted;
 - solver-specific options must live under typed solver policy values, not in
