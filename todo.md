@@ -2038,6 +2038,17 @@ PTA/block-Thomas GPU gate:
   `time_chunk_steps`, and recording mode before considering a default change.
   Artifact:
   `benchmark/results/kaggle/20260710_194628_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-ab-21215c6/outputs/extracted`.
+  Follow-up P100 matrix at commit `eb53d20` passed 18/18 rows for
+  `Naxons=1024,4096,8192`, `time_chunk_steps=50,100,250`, and
+  `observer_state_scope=default,full`. The key result is not "full everywhere":
+  `full` wins clearly when explicit `50` creates real VmRaster chunk-combine
+  cost (`combine` about `0.101/0.336/0.604 s` for
+  `Naxons=1024/4096/8192`), but is mostly neutral at `100/250` where default
+  already avoids meaningful combine for this `tsim/dt`. Next low-level target:
+  avoid small-chunk VmRaster combine/finalize overhead while controlling memory,
+  then validate with one larger observer-only case and one probe/full-Vm
+  control before any default policy change. Artifact:
+  `benchmark/results/kaggle/20260710_200035_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-matrix-eb53d20/outputs/extracted`.
   First large-population GPU solver-only sweep completed on Kaggle P100 at
   commit `7fcd109` with `fp32`, `B=128..32768`, `Nx=47/89/129`, shared and
   batched coefficients, `block_b=32`, and variants `current_pcr_soa`,

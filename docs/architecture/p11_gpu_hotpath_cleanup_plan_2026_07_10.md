@@ -166,3 +166,64 @@ Next step:
 - run a small matrix across `Naxons`, `time_chunk_steps`, and recording mode
   before promoting `full` from benchmark-only prototype to default chunked
   VmRaster behavior.
+
+## Time-Chunk Matrix Result
+
+Commit `eb53d20` added comma-separated `--time-chunk-steps` support to the
+double-cable solver policy campaign and passed a P100 observer-only matrix:
+
+- `Naxons=1024,4096,8192`;
+- `time_chunk_steps=50,100,250`;
+- `observer_state_scope=default,full`;
+- `tiled_thomas_b32`, `Nx=89`, fp32, same-diameter cohort;
+- 18/18 rows passed.
+
+Warm `curve.simulate` means:
+
+| Naxons | time chunk | default ms | full ms | default/full |
+| ---: | ---: | ---: | ---: | ---: |
+| 1024 | 50 | 97.864 | 96.100 | 1.018x |
+| 1024 | 100 | 95.932 | 93.208 | 1.029x |
+| 1024 | 250 | 95.241 | 93.124 | 1.023x |
+| 4096 | 50 | 285.415 | 271.007 | 1.053x |
+| 4096 | 100 | 266.660 | 266.235 | 1.002x |
+| 4096 | 250 | 268.664 | 263.554 | 1.019x |
+| 8192 | 50 | 460.994 | 414.529 | 1.112x |
+| 8192 | 100 | 418.485 | 431.185 | 0.971x |
+| 8192 | 250 | 451.462 | 412.748 | 1.094x |
+
+Stage reading:
+
+- At `time_chunk_steps=50`, default chunk-local observer state pays real
+  `kernel.combine_observer_chunks`, growing with population size:
+  about `0.101 s`, `0.336 s`, and `0.604 s` total for
+  `Naxons=1024,4096,8192`. The full-scope prototype removes that combine and
+  wins.
+- At `time_chunk_steps=100` and `250`, default has effectively no combine
+  (`~0.4-0.5 ms` total) because these cases avoid multi-chunk VmRaster
+  repacking for this `tsim/dt`. The full-scope prototype is then mostly neutral,
+  with extra full-state finalization/to-host cost and normal run noise deciding
+  the row.
+- The fastest rows in this matrix all select `observer_state_scope=full`,
+  `time_chunk_steps=250`, but the broader lesson is not "full everywhere".
+  The key low-level target is avoiding small-chunk VmRaster combine/finalize
+  overhead while keeping memory acceptable.
+
+Artifact:
+
+```text
+benchmark/results/kaggle/20260710_200035_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-matrix-eb53d20/outputs/extracted
+```
+
+Plots:
+
+```text
+benchmark/results/kaggle/20260710_200035_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-observer-scope-matrix-eb53d20/outputs/extracted/plots
+```
+
+Next step:
+
+- Do not promote `full` as a blanket default from this evidence alone.
+- Validate memory/behavior on one larger observer-only case and one
+  probe/full-Vm control, then optimize the result boundary around chunk
+  selection and VmRaster finalization.
