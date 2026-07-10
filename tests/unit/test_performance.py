@@ -313,6 +313,42 @@ def test_jax_solver_engine_resolves_typed_solver_policy():
     assert gpu_engine.tiled_thomas_block_b == 64
 
 
+def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatch):
+    from axonscope.runtime.jax import execution_policy as jax_execution_policy
+
+    calls = 0
+    sentinel_device = object()
+
+    def fake_resolve_device(device):
+        nonlocal calls
+        calls += 1
+        return sentinel_device
+
+    policy = axs.ExecutionPolicy(
+        runtime=axs.runtime.jax,
+        device=axs.Device.gpu(0),
+        precision=axs.PrecisionPolicy.float32(),
+        solvers=axs.SolverPolicy(
+            double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=32)
+        ),
+    )
+
+    jax_execution_policy.clear_jax_execution_policy_cache()
+    monkeypatch.setattr(jax_execution_policy, "_resolve_device", fake_resolve_device)
+
+    first = jax_execution_policy._resolve_jax_execution_policy(policy)
+    second = jax_execution_policy._resolve_jax_execution_policy(policy)
+
+    assert first is second
+    assert first.device is sentinel_device
+    assert first.platform == "gpu"
+    assert first.solver_engine is not None
+    assert first.solver_engine.name == "jax_gpu_tiled_thomas"
+    assert calls == 1
+
+    jax_execution_policy.clear_jax_execution_policy_cache()
+
+
 def test_execution_policy_runs_jax_cpu_float32_simulation():
     axon = _hh(compartments=5)
 

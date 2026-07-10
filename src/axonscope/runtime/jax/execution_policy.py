@@ -7,13 +7,15 @@ instead of importing JAX directly.
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Iterator, Sequence
 
 import jax
 import numpy as np
 
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axon_instance import AxonInstance
 from axonscope.runtime.jax.solver_engines import (
     JaxSolverEngine,
@@ -41,6 +43,22 @@ class JaxExecutionContext:
     double_cable_tiled_thomas_block_b: int | None = None
 
 
+@dataclass(frozen=True)
+class _ResolvedJaxExecutionPolicy:
+    """Cached execution-policy lowering independent of the current cohort."""
+
+    device: Any | None
+    platform: str | None
+    solver_engine: JaxSolverEngine | None
+
+
+_RESOLVED_EXECUTION_POLICY_CACHE: OrderedDict[
+    ExecutionPolicy,
+    _ResolvedJaxExecutionPolicy,
+] = OrderedDict()
+_RESOLVED_EXECUTION_POLICY_CACHE_MAX_SIZE = 32
+
+
 @contextmanager
 def jax_execution_context(
     policy: ExecutionPolicy | None,
@@ -64,28 +82,78 @@ def jax_execution_context(
         raise ValueError(f"Unsupported runtime: {policy.runtime!r}.")
 
     _validate_precision(policy.precision, instances=instances)
-    device = _resolve_device(policy.device)
-    platform = _platform_for_device(policy.device, device)
-    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
-    manager = jax.default_device(device) if device is not None else nullcontext()
-    with manager:
-        yield JaxExecutionContext(
-            policy=policy,
+
+    resolved = _resolve_jax_execution_policy(policy)
+    device = resolved.device
+    solver_engine = resolved.solver_engine
+    context = JaxExecutionContext(
+        policy=policy,
+        device=device,
+        platform=resolved.platform,
+        solver_engine=solver_engine,
+        double_cable_block_solver=(
+            None if solver_engine is None else solver_engine.double_cable_block_solver
+        ),
+        double_cable_block_solver_allow_internal=(
+            False
+            if solver_engine is None
+            else solver_engine.allow_internal_double_cable_block_solver
+        ),
+        double_cable_tiled_thomas_block_b=(
+            None if solver_engine is None else solver_engine.tiled_thomas_block_b
+        ),
+    )
+    if device is None:
+        yield context
+        return
+
+    manager = jax.default_device(device)
+    with benchmark_span("runtime.jax.execution.default_device.enter"):
+        manager.__enter__()
+    try:
+        yield context
+    except BaseException as exc:
+        with benchmark_span("runtime.jax.execution.default_device.exit"):
+            manager.__exit__(type(exc), exc, exc.__traceback__)
+        raise
+    else:
+        with benchmark_span("runtime.jax.execution.default_device.exit"):
+            manager.__exit__(None, None, None)
+
+
+def _resolve_jax_execution_policy(
+    policy: ExecutionPolicy,
+) -> _ResolvedJaxExecutionPolicy:
+    cached = _RESOLVED_EXECUTION_POLICY_CACHE.get(policy)
+    if cached is not None:
+        _RESOLVED_EXECUTION_POLICY_CACHE.move_to_end(policy)
+        record_benchmark_metadata(jax_execution_policy_cache="hit")
+        return cached
+
+    with benchmark_span("runtime.jax.execution.resolve_policy"):
+        device = _resolve_device(policy.device)
+        platform = _platform_for_device(policy.device, device)
+        solver_engine = resolve_jax_solver_engine(policy, platform=platform)
+        resolved = _ResolvedJaxExecutionPolicy(
             device=device,
             platform=platform,
             solver_engine=solver_engine,
-            double_cable_block_solver=(
-                None if solver_engine is None else solver_engine.double_cable_block_solver
-            ),
-            double_cable_block_solver_allow_internal=(
-                False
-                if solver_engine is None
-                else solver_engine.allow_internal_double_cable_block_solver
-            ),
-            double_cable_tiled_thomas_block_b=(
-                None if solver_engine is None else solver_engine.tiled_thomas_block_b
-            ),
         )
+    _RESOLVED_EXECUTION_POLICY_CACHE[policy] = resolved
+    _RESOLVED_EXECUTION_POLICY_CACHE.move_to_end(policy)
+    while (
+        len(_RESOLVED_EXECUTION_POLICY_CACHE)
+        > _RESOLVED_EXECUTION_POLICY_CACHE_MAX_SIZE
+    ):
+        _RESOLVED_EXECUTION_POLICY_CACHE.popitem(last=False)
+    record_benchmark_metadata(jax_execution_policy_cache="miss")
+    return resolved
+
+
+def clear_jax_execution_policy_cache() -> None:
+    """Clear cached JAX execution-policy lowering."""
+
+    _RESOLVED_EXECUTION_POLICY_CACHE.clear()
 
 
 def _resolve_device(request: Device) -> Any | None:
@@ -194,6 +262,7 @@ def _instance_membrane_dtypes(instance: AxonInstance) -> set[np.dtype]:
 
 
 __all__ = [
+    "clear_jax_execution_policy_cache",
     "JaxExecutionContext",
     "jax_double_cable_block_solver_for_policy",
     "jax_execution_context",
