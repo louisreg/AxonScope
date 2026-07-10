@@ -2027,8 +2027,15 @@ PTA/block-Thomas GPU gate:
   `curve_build_shared_stimulus=true`, `vstim_shared_current_detection=identity`,
   `curve.update_amplitudes.rows=0.70 ms`, and
   `curve_update_python_row_updates=0` for 512 rows. Covered by the benchmark
-  suite and dispatcher tests; rerun a P100 mini gate before making a GPU timing
-  claim.
+  suite and dispatcher tests. P100 mini gate at `275a6b6` passed after
+  explicitly installing `jax-triton` for the integrated tiled-Thomas route:
+  `recruitment_curves`, GPU P100, observer-only, double-cable,
+  `tiled_thomas_b32`, `Naxons=4096`, `Nx=89`, fp32, same-diameter. It reports
+  `curve.update_amplitudes.rows=1.46 ms` total over two amplitude updates
+  (`~0.73 ms/update`) with `curve_update_python_row_updates=0`,
+  `curve_build_shared_stimulus=true`, and `vstim_shared_current_detection=identity`.
+  Artifact:
+  `benchmark/results/kaggle/20260710_220840_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11-shared-stim-gpu-jt-275a6b6/outputs/extracted`.
   Additional generic input cleanup now caches the static factorized footprint
   after conversion to a device-local JAX array, keyed by footprint, dtype, and
   current JAX device. This should avoid repeated host-to-device placement of
