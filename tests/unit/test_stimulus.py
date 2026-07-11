@@ -22,6 +22,15 @@ def test_constant_stimulus():
     assert np.isclose(stim.evaluate([10.0])[0], 5.0)
 
 
+def test_stimulus_sample_buffers_are_read_only():
+    stim = Stimulus.constant(5.0)
+
+    assert not stim.t.flags.writeable
+    assert not stim.y.flags.writeable
+    with pytest.raises(ValueError):
+        stim.y[0] = 1.0
+
+
 def test_pulse_stimulus():
     stim = Stimulus.pulse(
         start=1.0 * axs.ms,

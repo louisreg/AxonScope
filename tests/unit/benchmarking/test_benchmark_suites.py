@@ -635,6 +635,22 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
     np.testing.assert_allclose(currents, [-0.5, -0.5, -0.5])
 
 
+def test_curve_workload_stimulus_copy_reuses_read_only_sample_buffers():
+    source = axs.Stimulus.pulse(
+        start=0.1 * axs.ms,
+        amplitude=2.0 * axs.uA,
+        duration=0.2 * axs.ms,
+    ).as_unit(axs.A)
+    target = axs.Stimulus.constant(0.0, unit=axs.A)
+
+    curve_runtime._copy_stimulus_state(target=target, source=source)
+
+    assert target.t is source.t
+    assert target.y is source.y
+    assert not target.t.flags.writeable
+    assert not target.y.flags.writeable
+
+
 def test_recruitment_phase_reused_pool_updates_first_amplitude(monkeypatch):
     parser = build_parser("recruitment_curves", description="test parser")
     parser.add_argument("--amplitude-count", type=int, default=None)

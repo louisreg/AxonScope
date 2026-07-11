@@ -1523,7 +1523,6 @@ def _array_content_key(values: np.ndarray) -> tuple[tuple[int, ...], str, str]:
     arr = np.asarray(values)
     cached = _cached_array_content_key(arr)
     if cached is not None:
-        record_benchmark_metadata(array_content_key_cache="hit")
         return cached
 
     arr = np.ascontiguousarray(arr)
@@ -1531,7 +1530,6 @@ def _array_content_key(values: np.ndarray) -> tuple[tuple[int, ...], str, str]:
     key = tuple(int(dim) for dim in arr.shape), arr.dtype.str, digest
     if _can_cache_array_content_key(arr):
         _store_array_content_key(arr, key)
-        record_benchmark_metadata(array_content_key_cache="miss")
     return key
 
 

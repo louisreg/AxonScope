@@ -2415,6 +2415,16 @@ stay as one JAX tridiagonal route.
   and `24.6%` for `N=4096`; total `curve.simulate` fell about `7.0%` and
   `9.4%` respectively. Events confirm `unique_index` with 3/5/6 temporal
   patterns and compressed current payloads plus row indices.
+- [ ] Validate the next non-solver GPU overhead cleanup on P100 before making
+  timing claims. The implementation target is generic: build non-shared group
+  `Cm_uF_cm2` as one host NumPy stack before a single JAX transfer, and make
+  `Stimulus` sample buffers immutable/read-only so repeated amplitude updates
+  can reuse content-key caches instead of hashing thousands of identical
+  temporal arrays. Do not record per-array cache metadata inside the hot
+  `_array_content_key` helper; it was measurable overhead on GPU warm runs.
+  Expected evidence to inspect: cold `kernel.prepare_cm`, warm
+  `inputs.extracellular`, `vstim_temporal_*`, and no regression in double-cable
+  factorized-input lowering.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 

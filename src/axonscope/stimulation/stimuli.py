@@ -21,6 +21,12 @@ ArrayLike = Any
 UnitLike = Any
 
 
+def _readonly_float_array(values: Any) -> np.ndarray:
+    arr = np.array(values, dtype=float, copy=True, order="C")
+    arr.setflags(write=False)
+    return arr
+
+
 def _coerce_amplitudes(values: Any, unit: UnitLike | None) -> tuple[np.ndarray, str | None]:
     """Return numeric amplitudes and their optional canonical unit label.
 
@@ -98,6 +104,9 @@ class Stimulus:
                 new_y.append(y[idx])
             t = np.asarray(new_t, dtype=float)
             y = np.asarray(new_y, dtype=float)
+
+        t = _readonly_float_array(t)
+        y = _readonly_float_array(y)
 
         object.__setattr__(self, "t", t)
         object.__setattr__(self, "y", y)

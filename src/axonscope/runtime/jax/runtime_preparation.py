@@ -663,18 +663,26 @@ def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray
                 return values
             _GROUP_CM_CACHE.pop(cache_key, None)
 
-        values = jnp.stack(
+        np_dtype = np.dtype(dtype_local)
+        host_values = np.stack(
             [
-                jnp.asarray(item.solver_axon.Cm_uF_cm2, dtype=dtype_local)
+                np.asarray(item.solver_axon.Cm_uF_cm2, dtype=np_dtype)
                 for item in group.items
             ],
             axis=0,
         )
+        host_values = np.ascontiguousarray(host_values)
+        host_values.setflags(write=False)
+        values = jnp.asarray(host_values, dtype=dtype_local)
         _GROUP_CM_CACHE[cache_key] = (weakref.ref(group), values)
         _GROUP_CM_CACHE.move_to_end(cache_key)
         while len(_GROUP_CM_CACHE) > _GROUP_SIGNATURE_CACHE_MAX_SIZE:
             _GROUP_CM_CACHE.popitem(last=False)
-        record_benchmark_metadata(group_cm_cache="miss")
+        record_benchmark_metadata(
+            group_cm_cache="miss",
+            group_cm_lowering="host_stack",
+            group_cm_nbytes=int(host_values.nbytes),
+        )
         return values
 
 
