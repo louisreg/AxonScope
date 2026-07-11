@@ -109,12 +109,16 @@ Host-side inspection and reporting use the corresponding runtime-level
 `solver_route_from_execution_policy(...)` summary instead of separate
 single-cable and double-cable string helpers.
 
-## Next Cleanup Slice
+Diagnostic double-cable solver tests are now separated from production batch
+runtime tests. `tests/unit/solvers/test_batch.py` keeps the active batch
+contract, CPU Thomas-default behavior, and policy-boundary checks.
+PCR/PCR-SoA/PCR-adaptive/internal Triton equivalence and routing probes live in
+`tests/unit/solvers/test_double_cable_diagnostic_solvers.py`.
 
-- Make CPU double-cable policy and docs say one thing everywhere:
-  `auto == thomas`, and Thomas is the only supported CPU double-cable solver.
-- Move any remaining CPU PCR/PCR-SoA/Triton usage into benchmark-only or
-  diagnostic tests, then delete stale public-facing coverage.
+## Remaining Cleanup Slice
+
 - Keep the GPU double-cable policy matrix before making Triton the default.
 - Keep the single-cable route simple unless a future GPU benchmark shows a real
   low-level solver bottleneck.
+- Continue collapsing runtime code around the typed solver-policy surface while
+  keeping benchmark-only/internal labels out of public APIs.

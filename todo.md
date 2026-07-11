@@ -2619,6 +2619,12 @@ policy matrix is finished.
   `tiled_thomas` resolves to the internal artifact label `jax_triton_loop_xb`;
   all runs keep the unified `factorized_footprint` / `shared_current`
   extracellular path.
+- [x] Split diagnostic double-cable solver coverage out of the production
+  batch-runtime test file. PCR, PCR-SoA, PCR-adaptive, and internal Triton
+  equivalence/dispatch checks now live in
+  `tests/unit/solvers/test_double_cable_diagnostic_solvers.py`, with shared
+  batch fixtures in `tests/unit/solvers/_batch_helpers.py`. Production batch
+  tests keep the CPU Thomas-default route and policy-boundary contracts.
 
 ### P12 - Studies, Serialization, Integration
 

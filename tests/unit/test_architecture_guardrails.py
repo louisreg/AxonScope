@@ -1775,8 +1775,16 @@ def test_non_thomas_double_cable_kernel_tests_are_diagnostic_or_gpu_scoped():
 
 
 def test_factorized_vext_route_has_dense_equivalence_tests():
-    text = (REPO_ROOT / "tests" / "unit" / "solvers" / "test_batch.py").read_text(
-        encoding="utf-8"
+    solver_test_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            REPO_ROOT / "tests" / "unit" / "solvers" / "test_batch.py",
+            REPO_ROOT
+            / "tests"
+            / "unit"
+            / "solvers"
+            / "test_double_cable_diagnostic_solvers.py",
+        )
     )
 
     required_tests = {
@@ -1786,7 +1794,7 @@ def test_factorized_vext_route_has_dense_equivalence_tests():
         "test_diagnostic_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
     }
 
-    missing = sorted(name for name in required_tests if f"def {name}" not in text)
+    missing = sorted(name for name in required_tests if f"def {name}" not in solver_test_text)
     assert missing == []
 
 
