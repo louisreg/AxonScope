@@ -2407,7 +2407,14 @@ stay as one JAX tridiagonal route.
   `kernel.wait`. Double-cable smoke
   `benchmark/results/p11e_double_cable_smoke_after_current_compression`
   stays on `shared_rank1` with no compressed indices. Validate on P100 before
-  making a GPU timing claim.
+  making a GPU timing claim. Mini P100 validation passed at commit `9cda8dc`
+  with `threshold_curves`, observer-only, different diameters, `Naxons=1024/4096`,
+  `Nx=89`, fp32, repeat-pool reuse. Artifact:
+  `benchmark/results/kaggle/20260711_135731_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-single-current-gpu-9cda8dc/outputs/extracted`.
+  Versus `87b22c4`, `inputs.extracellular` fell about `8.0%` for `N=1024`
+  and `24.6%` for `N=4096`; total `curve.simulate` fell about `7.0%` and
+  `9.4%` respectively. Events confirm `unique_index` with 3/5/6 temporal
+  patterns and compressed current payloads plus row indices.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
