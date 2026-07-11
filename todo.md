@@ -2587,9 +2587,23 @@ policy matrix is finished.
   `ExecutionPolicy.solvers`; the old
   `--benchmark-double-cable-block-solver jax_triton_loop_xb` surface is
   removed and tested as rejected.
-- [ ] Run a post-cleanup non-regression benchmark matrix covering single-cable
+- [x] Run a post-cleanup non-regression benchmark matrix covering single-cable
   and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
   different diameters, before making any new performance claim.
+  Completed on 2026-07-11 after the runtime cleanup: local CPU single-cable
+  passed 4/4 in `benchmark/results/p11f_post_cleanup_local_single_cpu`; local
+  CPU double-cable passed 8/8 in
+  `benchmark/results/p11f_post_cleanup_local_double_cpu`; Kaggle P100
+  single-cable passed 4/4 in
+  `benchmark/results/kaggle/20260711_230050_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axs-p11f-regress-single-gpu-3b86c28/outputs/extracted`;
+  Kaggle P100 double-cable passed 8/8 in
+  `benchmark/results/kaggle/20260711_230050_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axs-p11f-regress-double-gpu-3b86c28/outputs/extracted`.
+  The summaries confirm the expected runtime routes: single-cable uses
+  `jax_tridiagonal`; CPU double-cable `auto` and explicit `thomas` both resolve
+  to `thomas`; GPU double-cable `auto` resolves to `pcr_soa`; explicit
+  `tiled_thomas` resolves to the internal artifact label `jax_triton_loop_xb`;
+  all runs keep the unified `factorized_footprint` / `shared_current`
+  extracellular path.
 
 ### P12 - Studies, Serialization, Integration
 
