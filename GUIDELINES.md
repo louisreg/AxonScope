@@ -76,7 +76,6 @@ Current focus after the P9 closeout:
 | 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
 | 7.6.1-7.6.2 - Hotpath/memory cleanup | Done for evidence layer | Sparse/zero inputs, compact observer outputs, runtime caches, chunking, profiler traces. |
 | 7.6.3 - Exact double-cable GPU solver | Closed for current evidence | CPU double-cable is Thomas-only; GPU double-cable keeps typed explicit routes, with tiled Thomas as the promotion candidate pending the full policy matrix. |
-| 7.6.4 - Pseudo-double validation | Standby | Harness exists under `benchmark/pseudo_double/`; not a public solver replacement. |
 | 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
 | 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
@@ -957,7 +956,7 @@ Policy:
 - benchmark CLIs may keep string flags, but active benchmark workloads must
   translate them to typed policies at the benchmark boundary.
 
-Do not expose pseudo-double, split iterative, associative-transfer, Pallas,
+Do not expose approximate double-cable surrogate, split iterative, associative-transfer, Pallas,
 static Triton, CUDA FFI, or other custom-kernel candidates as public solver
 choices while they remain archived or standby evidence. The looped jax-triton
 tiled-Thomas route may be selectable through typed

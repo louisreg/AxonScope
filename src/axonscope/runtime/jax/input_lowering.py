@@ -15,6 +15,8 @@ import numpy as np
 from axonscope.runtime.input_contract import (
     ExtracellularLoweringCapabilities,
     ExtracellularLoweringMode,
+    IntracellularLoweringMode,
+    RuntimeInputContract,
 )
 
 
@@ -54,6 +56,33 @@ JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
     supports_current_table=False,
     supports_dense_fallback=True,
     requires_initial_previous=True,
+)
+JAX_SINGLE_CABLE_INPUT_CONTRACT = RuntimeInputContract(
+    cable="single-cable",
+    intracellular_modes=frozenset(
+        {
+            IntracellularLoweringMode.ZERO,
+            IntracellularLoweringMode.DENSE,
+            IntracellularLoweringMode.SPARSE_CURRENT_CLAMP,
+        }
+    ),
+    extracellular=JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES,
+    supports_padding=True,
+    supports_row_specific_parameters=True,
+    supports_observer_only_vm_raster=True,
+)
+JAX_DOUBLE_CABLE_INPUT_CONTRACT = RuntimeInputContract(
+    cable="double-cable",
+    intracellular_modes=frozenset(
+        {
+            IntracellularLoweringMode.ZERO,
+            IntracellularLoweringMode.DENSE,
+        }
+    ),
+    extracellular=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
+    supports_padding=True,
+    supports_row_specific_parameters=True,
+    supports_observer_only_vm_raster=True,
 )
 
 
@@ -521,7 +550,9 @@ __all__ = [
     "ExtracellularInputFormat",
     "IntracellularInputFormat",
     "JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES",
+    "JAX_DOUBLE_CABLE_INPUT_CONTRACT",
     "JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES",
+    "JAX_SINGLE_CABLE_INPUT_CONTRACT",
     "LoweredExtracellularInput",
     "LoweredIntracellularInput",
     "PlannedInputLowering",

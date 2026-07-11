@@ -327,20 +327,6 @@ BENCHMARK_SURFACES: tuple[BenchmarkSurface, ...] = (
         docs=("benchmark/kaggle/README.md",),
     ),
     BenchmarkSurface(
-        path="benchmark/pseudo_double",
-        status="experimental",
-        owner="solver-research",
-        description="Pseudo-double validation harness kept as standby evidence, not a public solver route.",
-        commands=(
-            BenchmarkCommand(
-                command="python -m benchmark.pseudo_double.validate --help",
-                kind="validation-only",
-                purpose="Standby pseudo-double validation harness, not a public solver route.",
-            ),
-        ),
-        docs=("benchmark/pseudo_double/README.md",),
-    ),
-    BenchmarkSurface(
         path="benchmark/archived_solver_spikes",
         status="archive",
         owner="solver-research",

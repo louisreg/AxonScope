@@ -15,6 +15,14 @@ from typing import Any, Literal
 CableFormulation = Literal["single-cable", "double-cable"]
 
 
+class IntracellularLoweringMode(Enum):
+    """Semantic intracellular payload selected before cable kernels run."""
+
+    ZERO = "zero"
+    DENSE = "dense"
+    SPARSE_CURRENT_CLAMP = "sparse_current_clamp"
+
+
 class ExtracellularLoweringMode(Enum):
     """Semantic extracellular payload selected before cable kernels run.
 
@@ -75,8 +83,79 @@ class ExtracellularLoweringCapabilities:
         }
 
 
+@dataclass(frozen=True)
+class RuntimeInputContract:
+    """Runtime-neutral input contract for one prepared cable batch.
+
+    This is the semantic contract shared by concrete runtimes. It deliberately
+    does not prescribe array libraries, kernel names, or solver algorithms:
+    JAX, NumPy/SciPy, or a future runtime may materialize these modes
+    differently as long as they accept the same grouped batch semantics.
+    """
+
+    cable: CableFormulation
+    intracellular_modes: frozenset[IntracellularLoweringMode]
+    extracellular: ExtracellularLoweringCapabilities
+    supports_padding: bool
+    supports_row_specific_parameters: bool
+    supports_observer_only_vm_raster: bool
+
+    def supports_intracellular(self, mode: IntracellularLoweringMode) -> bool:
+        """Return whether this runtime/cable path can consume ``mode``."""
+
+        if not isinstance(mode, IntracellularLoweringMode):
+            raise TypeError("mode must be an IntracellularLoweringMode value.")
+        return mode in self.intracellular_modes
+
+    def supports_extracellular(self, mode: ExtracellularLoweringMode) -> bool:
+        """Return whether this runtime/cable path can consume ``mode``."""
+
+        return self.extracellular.supports(mode)
+
+    def as_metadata(self, *, prefix: str = "runtime_input_contract_") -> dict[str, Any]:
+        """Return primitive benchmark/inspection metadata."""
+
+        metadata = {
+            f"{prefix}cable": self.cable,
+            f"{prefix}intracellular_modes": tuple(
+                mode.value
+                for mode in sorted(
+                    self.intracellular_modes,
+                    key=lambda item: item.value,
+                )
+            ),
+            f"{prefix}supports_padding": self.supports_padding,
+            f"{prefix}supports_row_specific_parameters": (
+                self.supports_row_specific_parameters
+            ),
+            f"{prefix}supports_observer_only_vm_raster": (
+                self.supports_observer_only_vm_raster
+            ),
+        }
+        metadata.update(
+            self.extracellular.as_metadata(
+                prefix=f"{prefix}extracellular_",
+            )
+        )
+        return metadata
+
+
+def normalize_cable_formulation(value: str) -> CableFormulation:
+    """Return the canonical runtime-neutral cable formulation label."""
+
+    normalized = str(value).strip().lower().replace("_", "-")
+    if normalized in {"single", "single-cable"}:
+        return "single-cable"
+    if normalized in {"double", "double-cable"}:
+        return "double-cable"
+    raise ValueError(f"Unsupported cable formulation: {value!r}.")
+
+
 __all__ = [
     "CableFormulation",
     "ExtracellularLoweringCapabilities",
     "ExtracellularLoweringMode",
+    "IntracellularLoweringMode",
+    "RuntimeInputContract",
+    "normalize_cable_formulation",
 ]

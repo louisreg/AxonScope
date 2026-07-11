@@ -367,8 +367,8 @@ Phase 3, tests and examples:
 
 - complete: active tests use sampled footprints/drives/stimulation;
 - complete: analytical helper tests stay under `axs.analytical`;
-- complete: pseudo-double reference scripts use typed validation stimulations
-  and remain benchmark validation-only.
+- complete: approximate double-cable validation scripts were removed from the
+  active benchmark and test surfaces.
 
 Phase 4, deletion or hiding:
 
@@ -578,7 +578,6 @@ Paths to classify explicitly:
 - `benchmark/realistic_examples/`: active workflow-level public-example
   benchmarks.
 - `benchmark/solvers/`: validation-only retained double-cable solver evidence.
-- `benchmark/pseudo_double/`: experimental standby evidence.
 - `benchmark/triton_solver/`: archive.
 - `benchmark/jax_triton_solver/`: archive.
 - `benchmark/cuda_ffi_solver/`: archive.
@@ -662,7 +661,6 @@ This table should be updated as cleanup proceeds.
 | `axs.runtime.numpy` | reserved/non-executable runtime | dedicated future NumPy/SciPy solver phase | real implementation |
 | mixed precision | reserved/non-executable policy | mark unsupported or implement | precision design |
 | experimental shape bucketing | opt-in runtime experiment | keep experimental or archive | benchmark evidence |
-| `benchmark/pseudo_double/` | validation-only standby | archive/label clearly | README/docs cleanup |
 | Triton/JAX-Triton/CUDA FFI/Cute DSL benchmarks | solver experiments | archive/label clearly | README/docs cleanup |
 | `benchmark/results/` repo copies | generated output/noise | keep ignored, avoid using as source | local cleanup policy |
 

@@ -25,7 +25,7 @@ Main conclusion:
 
 ## Why exact double-cable remains worth optimizing
 
-Pseudo-single or pseudo-double surrogate models are useful for fast screening, but they cannot fully replace the exact double-cable solver.
+Simplified surrogate models can be useful for fast screening, but they cannot fully replace the exact double-cable solver.
 
 Abdollahi & Prescott (2024) show that myelinated axon conduction depends strongly on how current distributes across:
 
@@ -67,7 +67,7 @@ Condition 2*:
 Implication for AxonScope:
 
 ```text
-pseudo models:
+surrogate models:
     useful for large-scale screening
 
 exact double-cable:

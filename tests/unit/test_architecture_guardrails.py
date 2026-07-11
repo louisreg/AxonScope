@@ -781,27 +781,6 @@ def test_examples_and_public_docs_teach_one_result_path():
     assert offenders == {}
 
 
-def test_benchmark_helpers_do_not_use_removed_public_result_paths():
-    benchmark_paths = sorted((REPO_ROOT / "benchmark" / "pseudo_double").rglob("*.py"))
-    forbidden = {
-        "to_sim_result",
-        "results.cohorts",
-        ".cohorts",
-        "axs.CohortResult",
-        "from axonscope.results import AxonSimulationResult, CohortResult",
-        "from axonscope.results import CohortResult",
-    }
-
-    offenders: dict[str, list[str]] = {}
-    for path in benchmark_paths:
-        text = path.read_text(encoding="utf-8")
-        hits = sorted(term for term in forbidden if term in text)
-        if hits:
-            offenders[str(path.relative_to(REPO_ROOT))] = hits
-
-    assert offenders == {}
-
-
 def test_signals_are_extensible_descriptors_not_closed_enums():
     assert not issubclass(axs.Signal, Enum)
     assert isinstance(axs.signals.MEMBRANE_VOLTAGE, axs.Signal)
@@ -1774,6 +1753,61 @@ def test_solver_route_reporting_contract_is_cable_agnostic():
     assert route.for_cable("double") is double
     assert route.for_cable("single_cable") is single
     assert route.for_cable("double_cable") is double
+
+
+def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
+    from axonscope.runtime.input_contract import (
+        ExtracellularLoweringMode,
+        IntracellularLoweringMode,
+        RuntimeInputContract,
+        normalize_cable_formulation,
+    )
+    from axonscope.runtime.jax.input_lowering import (
+        JAX_DOUBLE_CABLE_INPUT_CONTRACT,
+        JAX_SINGLE_CABLE_INPUT_CONTRACT,
+    )
+
+    assert [field.name for field in fields(RuntimeInputContract)] == [
+        "cable",
+        "intracellular_modes",
+        "extracellular",
+        "supports_padding",
+        "supports_row_specific_parameters",
+        "supports_observer_only_vm_raster",
+    ]
+
+    assert normalize_cable_formulation("single") == "single-cable"
+    assert normalize_cable_formulation("single_cable") == "single-cable"
+    assert normalize_cable_formulation("double") == "double-cable"
+    assert normalize_cable_formulation("double_cable") == "double-cable"
+
+    single = JAX_SINGLE_CABLE_INPUT_CONTRACT
+    double = JAX_DOUBLE_CABLE_INPUT_CONTRACT
+    assert isinstance(single, RuntimeInputContract)
+    assert isinstance(double, RuntimeInputContract)
+    assert single.cable == "single-cable"
+    assert double.cable == "double-cable"
+    assert single.supports_padding
+    assert double.supports_padding
+    assert single.supports_row_specific_parameters
+    assert double.supports_row_specific_parameters
+    assert single.supports_observer_only_vm_raster
+    assert double.supports_observer_only_vm_raster
+
+    assert single.supports_intracellular(
+        IntracellularLoweringMode.SPARSE_CURRENT_CLAMP
+    )
+    assert not double.supports_intracellular(
+        IntracellularLoweringMode.SPARSE_CURRENT_CLAMP
+    )
+    assert single.supports_extracellular(
+        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
+    )
+    assert double.supports_extracellular(
+        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
+    )
+    assert double.extracellular.requires_initial_previous
+    assert not single.extracellular.requires_initial_previous
 
 
 def test_public_examples_do_not_use_backend_solver_route_labels():

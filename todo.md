@@ -2655,6 +2655,24 @@ policy matrix is finished.
 
 ### P12 - Studies, Serialization, Integration
 
+- [ ] P12A runtime contract and JAX cleanup:
+  use `docs/architecture/p12_runtime_contract_2026_07_12.md` as the migration
+  target. Homogenize non-solver preparation, recording/observer lowering,
+  input semantics, benchmark metadata, and result assembly between single-cable
+  and double-cable paths as much as possible without losing P11 performance.
+- [ ] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
+  host-side code. Delete unused paths, keep solver/kernel-specific code inside
+  the JAX runtime, and move semantic-only reusable contracts to
+  `src/axonscope/runtime/` when they can support a future NumPy/SciPy runtime.
+- [ ] Define and enforce the runtime input contract before implementing
+  `axs.runtime.numpy`: prepared batches must expose one cable formulation, one
+  padded `Nx`, a dtype/time grid, typed per-cable solver policy, recording and
+  observer plans, intracellular modes, and extracellular modes
+  (`zero`, `shared_current`, `scaled_shared_waveform`, `current_table`,
+  `dense`).
+- [ ] Before claiming P12 cleanup has no performance loss, re-run the relevant
+  P11 hotpath/realistic benchmark slices for single-cable and double-cable,
+  CPU/GPU where applicable, with fresh artifact directories and git metadata.
 - [ ] Post-P11 runtime/benchmark backlog:
   continue only the deferred items tracked in
   `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
@@ -2718,7 +2736,6 @@ ledger in this TODO.
 - Benchmark lifecycle registry: `benchmark/registry.py`
 - Hotpath workloads: `benchmark/hotpaths/README.md`
 - Active solver README: `benchmark/solvers/README.md`
-- Pseudo-double standby: `benchmark/pseudo_double/README.md`
 - Archived solver spikes:
   `benchmark/archived_solver_spikes/`, `benchmark/triton_solver/`,
   `benchmark/jax_triton_solver/`, `benchmark/cuda_ffi_solver/`,

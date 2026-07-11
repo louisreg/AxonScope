@@ -34,8 +34,8 @@ the examples. In short:
   `axs.analysis.ConductionBlock` can feed the strict VmRaster observer-only
   route. `axs.analysis.PeakVoltage` remains post-hoc on recorded Vm until a
   dedicated benchmarked solver-side design is accepted.
-- `axs.SolverOptions` exposes current solver choices. Pseudo-double-cable
-  options are standby research artifacts, not recommended public API.
+- Solver policy exposes exact single-cable and double-cable solver choices.
+  Approximate double-cable surrogates are not public API.
 
 Legacy roadmap snippets below may still use older unit-suffix constructor
 names. Do not copy roadmap snippets into new examples without checking current

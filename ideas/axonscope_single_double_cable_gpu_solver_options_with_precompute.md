@@ -1531,7 +1531,7 @@ This is common for:
 ```text
 passive cables
 linearized fixed-conductance models
-some pseudo/effective models
+some effective surrogate models
 some solver-only benchmark problems
 ```
 

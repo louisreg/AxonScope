@@ -141,6 +141,62 @@ def _context_solver_engine(backend_context: Any | None) -> Any | None:
     return getattr(backend_context, "solver_engine", None)
 
 
+def _lower_output_plan_for_group(
+    *,
+    public_group: DispatchGroup,
+    kernel_group: DispatchGroup,
+    runtime: Any,
+    cohort: Any,
+    batch_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+    progress_callback: Any,
+    progress_details: dict[str, Any] | None = None,
+) -> tuple[OutputPlan, Any]:
+    """Lower recording and observers through the shared non-solver path."""
+
+    lowered_options = lower_batch_recording_options(
+        kernel_group,
+        batch_options,
+        observers=observers,
+    )
+    kernel_options = OutputPlan.from_batch_options(
+        lowered_options,
+        observers=observers,
+        row_record_indices=row_recording_indices_for_group(
+            kernel_group,
+            lowered_options.recording,
+        ),
+    )
+    details = {
+        "recording": kernel_options.recording.mode,
+        "time_chunk_steps": kernel_options.time_chunk_steps,
+        "output_sink": kernel_options.sink,
+        "observers": 0 if observers is None else len(observers),
+    }
+    if progress_details is not None:
+        details.update(progress_details)
+    _emit_progress(
+        progress_callback,
+        public_group,
+        "batch",
+        "recording plan",
+        **details,
+    )
+    with benchmark_span(
+        "observer.plan",
+        group_id=public_group.group_id,
+        group_size=public_group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        observer_plan = lower_observers_for_cohort(
+            observers,
+            cohort=cohort,
+            dtype=runtime.membrane.dtype,
+            prefer_vm_raster=kernel_options.recording.mode == "none",
+        )
+    return kernel_options, observer_plan
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -195,41 +251,15 @@ def _run_single_cable_batch_group(
             ),
             extracellular_stimulation_count=cohort.extracellular_stimulation_count,
         )
-    lowered_options = lower_batch_recording_options(
-        group,
-        batch_options,
+    kernel_options, observer_plan = _lower_output_plan_for_group(
+        public_group=group,
+        kernel_group=group,
+        runtime=runtime,
+        cohort=cohort,
+        batch_options=batch_options,
         observers=observers,
+        progress_callback=progress_callback,
     )
-    kernel_options = OutputPlan.from_batch_options(
-        lowered_options,
-        observers=observers,
-        row_record_indices=row_recording_indices_for_group(
-            group,
-            lowered_options.recording,
-        ),
-    )
-    _emit_progress(
-        progress_callback,
-        group,
-        "batch",
-        "recording plan",
-        recording=kernel_options.recording.mode,
-        time_chunk_steps=kernel_options.time_chunk_steps,
-        output_sink=kernel_options.sink,
-        observers=0 if observers is None else len(observers),
-    )
-    with benchmark_span(
-        "observer.plan",
-        group_id=group.group_id,
-        group_size=group.size,
-        recording_mode=kernel_options.recording.mode,
-    ):
-        observer_plan = lower_observers_for_cohort(
-            observers,
-            cohort=cohort,
-            dtype=runtime.membrane.dtype,
-            prefer_vm_raster=kernel_options.recording.mode == "none",
-        )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -429,19 +459,6 @@ def _run_double_cable_batch_group(
             public_nx=int(group.nx),
             kernel_nx=int(kernel_group.nx),
         )
-    lowered_options = lower_batch_recording_options(
-        kernel_group,
-        batch_options,
-        observers=observers,
-    )
-    kernel_options = OutputPlan.from_batch_options(
-        lowered_options,
-        observers=observers,
-        row_record_indices=row_recording_indices_for_group(
-            kernel_group,
-            lowered_options.recording,
-        ),
-    )
     solver_engine = _context_solver_engine(backend_context)
     policy_block_solver = (
         None if solver_engine is None else solver_engine.double_cable_block_solver
@@ -453,30 +470,19 @@ def _run_double_cable_batch_group(
     )
     policy_block_b = None if solver_engine is None else solver_engine.tiled_thomas_block_b
     benchmark_observer_state_scope = _benchmark_observer_state_scope_override()
-    _emit_progress(
-        progress_callback,
-        group,
-        "batch",
-        "recording plan",
-        recording=kernel_options.recording.mode,
-        time_chunk_steps=kernel_options.time_chunk_steps,
-        output_sink=kernel_options.sink,
-        observers=0 if observers is None else len(observers),
-        policy_block_solver=policy_block_solver,
-        benchmark_observer_state_scope=benchmark_observer_state_scope,
+    kernel_options, observer_plan = _lower_output_plan_for_group(
+        public_group=group,
+        kernel_group=kernel_group,
+        runtime=runtime,
+        cohort=cohort,
+        batch_options=batch_options,
+        observers=observers,
+        progress_callback=progress_callback,
+        progress_details={
+            "policy_block_solver": policy_block_solver,
+            "benchmark_observer_state_scope": benchmark_observer_state_scope,
+        },
     )
-    with benchmark_span(
-        "observer.plan",
-        group_id=group.group_id,
-        group_size=group.size,
-        recording_mode=kernel_options.recording.mode,
-    ):
-        observer_plan = lower_observers_for_cohort(
-            observers,
-            cohort=cohort,
-            dtype=runtime.membrane.dtype,
-            prefer_vm_raster=kernel_options.recording.mode == "none",
-        )
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,

@@ -62,8 +62,6 @@ arrays are integrated*. In particular:
   descriptions themselves remain computation-independent;
 - public `ExecutionPolicy.solvers` carries typed per-cable solver policy, while
   backend-private string solver labels are implementation details.
-- pseudo-double/pseudo-MRG validation modes are not solver options; they live
-  under `benchmark/pseudo_double/` and must not be selected by `auto`.
 
 ## Active Solver Route Map
 
@@ -295,10 +293,10 @@ policy = axs.ExecutionPolicy(
 
 Forced choices are mainly diagnostic until benchmark evidence updates the
 default policy. Split iterative, associative, Pallas, static Triton, CUDA FFI,
-and pseudo-double variants are archived or standby evidence. They must not
-appear in user-facing docs or `BatchOptions`. Benchmark CLIs may keep string
-flags, but active workload code translates them to typed policy objects at the
-benchmark boundary.
+and approximate double-cable surrogate variants are removed or archived outside
+active surfaces. They must not appear in user-facing docs or `BatchOptions`.
+Benchmark CLIs may keep string flags, but active workload code translates them
+to typed policy objects at the benchmark boundary.
 
 ## Time Grid
 

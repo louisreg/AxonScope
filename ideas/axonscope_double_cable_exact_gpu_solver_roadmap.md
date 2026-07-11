@@ -62,7 +62,7 @@ solver capability limit. Experimental custom-kernel backends may specialize or
 bucket by `Nx` for performance, but public routing should keep a JAX exact
 fallback for shapes outside the optimized buckets.
 
-This roadmap focuses on rewriting the **linear solve** used inside each implicit double-cable time step. It does **not** replace the double-cable model with a pseudo-single-cable approximation.
+This roadmap focuses on rewriting the **linear solve** used inside each implicit double-cable time step. It does **not** replace the double-cable model with a single-cable surrogate approximation.
 
 The scientific reason to keep an exact double-cable path is that recent work by Abdollahi & Prescott (2024) shows that axial, submyelin, transmyelin, and extramyelin current pathways materially affect conduction velocity, conduction reliability, energy efficiency, demyelination sensitivity, and ephaptic effects. In particular, extracellular boundary conditions change how much current reaches the next node versus how much leaks through myelin/extracellular pathways.
 
@@ -72,8 +72,6 @@ The scientific reason to keep an exact double-cable path is that recent work by 
 
 Updated on 2026-06-16 after checking `src/axonscope/solvers/`,
 `benchmark/hotpaths/`, `tests/unit/solvers/`, and
-`benchmark/pseudo_double/`.
-
 Current exact double-cable solver selection is already wired through:
 
 ```text
@@ -96,9 +94,9 @@ have Thomas-vs-candidate tests, and have benchmark evidence. Benchmark-only
 names may exist in solver-focused runners while gathering that evidence, but
 must stay out of `BatchOptions.double_cable_block_solver` and `auto`.
 
-Pseudo-double and pseudo-MRG modes are now on standby. They live only under
-`benchmark/pseudo_double/` as validation harness candidates and must not be
-used as exact double-cable solver options or selected by `auto`.
+Approximate double-cable surrogate modes were removed from the active benchmark
+surface and must not be used as exact double-cable solver options or selected
+by `auto`.
 
 ---
 
@@ -3423,7 +3421,7 @@ if split iterative wins, K <= 4 with stable residuals and unchanged activation/t
 ```text
 Pallas or associative backend gives >= 3x solver-only speedup
 end-to-end double-cable GPU becomes clearly favorable for B>500
-all threshold/recruitment workflows run through exact double-cable without pseudo approximation
+all threshold/recruitment workflows run through exact double-cable without surrogate approximation
 ```
 
 ---

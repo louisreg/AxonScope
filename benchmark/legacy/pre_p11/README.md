@@ -16,7 +16,6 @@ The lifecycle registry lives in `benchmark/registry.py`.
 | `benchmark/realistic_examples/` | active | public-runtime | Public workflow-level benchmarks. |
 | `benchmark/kaggle/` | active | remote-GPU, generated-output | Remote GPU wrapper for active suites. |
 | `benchmark/solvers/` | validation-only | validation-only | Retained double-cable solver timing and agreement checks. |
-| `benchmark/pseudo_double/` | experimental | validation-only | Standby pseudo-double evidence, not a public route. |
 | `benchmark/archived_solver_spikes/` | archive | archive | Historical solver candidates. |
 | `benchmark/triton_solver/` | archive | archive | Historical Triton candidate. |
 | `benchmark/jax_triton_solver/` | archive | archive | Historical JAX-Triton candidate. |

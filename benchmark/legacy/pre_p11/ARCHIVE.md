@@ -13,8 +13,7 @@ Archived top-level surfaces:
 - `nrv_performance/`
 - `realistic_examples/`
 - `solvers/`
-- historical solver experiments such as Triton, CUDA FFI, pseudo-double, and
-  archived spikes
+- historical solver experiments such as Triton, CUDA FFI, and archived spikes
 - old `src/axonscope/benchmarking` workload/instrumentation files archived as
   `src_benchmarking_benchmark.py`, `src_benchmarking_hotpaths.py`, and
   `src_benchmarking_profiling.py`

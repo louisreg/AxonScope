@@ -270,14 +270,13 @@ benchmark/legacy/pre_p11/solvers/
 benchmark/legacy/pre_p11/triton_solver/
 benchmark/legacy/pre_p11/jax_triton_solver/
 benchmark/legacy/pre_p11/cuda_ffi_solver/
-benchmark/legacy/pre_p11/pseudo_double/
 tests/archive/solver_spikes/
 ```
 
 Archived families include:
 
 - old Triton/Pallas/CUDA FFI spikes;
-- pseudo-double and split/approximate routes;
+- split/approximate routes;
 - old PCR layout probes and benchmark wrappers;
 - validation-failed or toolchain-blocked custom kernels.
 
