@@ -688,8 +688,8 @@ def test_run_pool_reports_scaled_extracellular_waveform_lowering(tmp_path):
     )
     metadata = extracellular_event.metadata
     assert metadata["group_size"] == 2
-    assert metadata["input_lowering_mode"] == "scaled_shared_waveform"
-    assert metadata["input_lowering_capability_supports_scaled_shared_waveform"] is True
+    assert metadata["extracellular_mode"] == "scaled_shared_waveform"
+    assert metadata["extracellular_capability_supports_scaled_shared_waveform"] is True
     assert metadata["scaled_shared_waveform"] is True
     assert metadata["vstim_current_rows_lowering"] == "scaled_shared_waveform"
 
@@ -864,7 +864,8 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     ]
     assert len(extracellular_events) == 1
     metadata = extracellular_events[0].metadata
-    assert metadata["input_format"] == "factorized_footprint"
+    assert metadata["input_role"] == "extracellular"
+    assert metadata["extracellular_format"] == "factorized_footprint"
     assert metadata["dense_vstim_avoided"] is True
     assert metadata["vstim_current_rows_lowering"] == "shared_rank1"
     assert "vstim_mid" not in metadata
@@ -971,9 +972,10 @@ def test_run_pool_double_cable_probe_prefers_scaled_factorized_vstim(tmp_path):
         event for event in report.events if event.name == "inputs.extracellular"
     )
     metadata = extracellular_event.metadata
-    assert metadata["input_format"] == "factorized_footprint"
-    assert metadata["input_lowering_mode"] == "scaled_shared_waveform"
-    assert metadata["input_lowering_capability_supports_scaled_shared_waveform"] is True
+    assert metadata["input_role"] == "extracellular"
+    assert metadata["extracellular_format"] == "factorized_footprint"
+    assert metadata["extracellular_mode"] == "scaled_shared_waveform"
+    assert metadata["extracellular_capability_supports_scaled_shared_waveform"] is True
     assert metadata["dense_vstim_avoided"] is True
     assert metadata["scaled_shared_waveform"] is True
     assert metadata["vstim_current_rows_lowering"] == "scaled_shared_waveform"
@@ -1038,7 +1040,8 @@ def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_d
     ]
     assert len(extracellular_events) == 1
     metadata = extracellular_events[0].metadata
-    assert metadata["input_format"] == "factorized_footprint"
+    assert metadata["input_role"] == "extracellular"
+    assert metadata["extracellular_format"] == "factorized_footprint"
     assert metadata["vstim_factorized_rank"] == 2
     assert metadata["dense_vstim_avoided"] is True
     assert "vstim_mid" not in metadata
@@ -1090,7 +1093,8 @@ def test_singleton_batch_retained_vm_emits_standard_hotpath_spans():
         event for event in report.events if event.name == "inputs.extracellular"
     )
     metadata = extracellular_event.metadata
-    assert metadata["input_format"] == "factorized_footprint"
+    assert metadata["input_role"] == "extracellular"
+    assert metadata["extracellular_format"] == "factorized_footprint"
 
     result_event = next(
         event for event in report.events if event.name == "results.split_batch"

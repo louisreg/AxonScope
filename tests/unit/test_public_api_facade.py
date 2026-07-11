@@ -404,7 +404,8 @@ def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     ]
     assert len(extracellular_events) == 1
     metadata = extracellular_events[0].metadata
-    assert metadata["input_format"] == "zero_no_extracellular_stimulation"
+    assert metadata["input_role"] == "extracellular"
+    assert metadata["extracellular_format"] == "zero_no_extracellular_stimulation"
     assert "vstim_mid" not in metadata
     assert metadata["skipped_dense_vstim_shape"] == [2, 2, 11]
 
@@ -458,7 +459,8 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
     ]
     assert len(intracellular_events) == 1
     metadata = intracellular_events[0].metadata
-    assert metadata["input_format"] == "zero_no_intracellular_context"
+    assert metadata["input_role"] == "intracellular"
+    assert metadata["intracellular_format"] == "zero_no_intracellular_context"
     assert "iinj_mid" not in metadata
     assert metadata["skipped_dense_iinj_shape"] == [2, 2, 11]
     group_events = [event for event in report.events if event.name == "dispatch.group.total"]

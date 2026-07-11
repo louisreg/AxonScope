@@ -25,9 +25,12 @@ if __package__ in {None, ""}:
 from benchmark.campaigns.double_cable_solver_policy import (
     _duration,
     _float_or_none,
+    _format_input_summary,
     _format_number,
+    _metadata_values,
     _mapping,
     _mean_duration,
+    _output_sinks,
     _parse_choices,
     _parse_int_values,
     _parse_scripts,
@@ -72,6 +75,11 @@ SUMMARY_FIELDS = (
     "diameters",
     "case_name",
     "effective_variants",
+    "kernel_variants",
+    "intracellular_formats",
+    "extracellular_formats",
+    "extracellular_modes",
+    "output_sinks",
     "curve_simulate_total_ms",
     "curve_simulate_cold_ms",
     "curve_simulate_warm_mean_ms",
@@ -469,6 +477,29 @@ def _summarize_curve_run(
         "diameters": options.get("diameters", run.diameters),
         "case_name": manifest.get("case_name", ""),
         "effective_variants": "/".join(_variants(events)),
+        "kernel_variants": "/".join(_variants(events)),
+        "intracellular_formats": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.intracellular",
+                key="intracellular_format",
+            )
+        ),
+        "extracellular_formats": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.extracellular",
+                key="extracellular_format",
+            )
+        ),
+        "extracellular_modes": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.extracellular",
+                key="extracellular_mode",
+            )
+        ),
+        "output_sinks": "/".join(_output_sinks(events)),
         "curve_simulate_total_ms": _sum_duration(events, "curve.simulate"),
         "curve_simulate_cold_ms": _duration(simulate[0]) if simulate else "",
         "curve_simulate_warm_mean_ms": _mean_duration(warm),
@@ -587,13 +618,13 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         [
             "## Fastest Rows",
             "",
-            "| group | solver | observer_scope | time_chunk | pool | warm mean ms | total simulate ms | variants | status |",
-            "| --- | --- | --- | --- | --- | ---: | ---: | --- | --- |",
+            "| group | solver | observer_scope | time_chunk | pool | warm mean ms | total simulate ms | kernel | inputs | status |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
         ]
     )
     for group, row in _fastest_rows(rows):
         lines.append(
-            "| {group} | {solver} | {observer_scope} | {time_chunk} | {pool} | {warm} | {total} | {variants} | {status} |".format(
+            "| {group} | {solver} | {observer_scope} | {time_chunk} | {pool} | {warm} | {total} | {kernel} | {inputs} | {status} |".format(
                 group=group,
                 solver=row.get("single_cable_solver", ""),
                 observer_scope=row.get("observer_state_scope", ""),
@@ -601,7 +632,8 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
                 pool=row.get("repeat_pool_policy", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
-                variants=row.get("effective_variants", ""),
+                kernel=row.get("kernel_variants", ""),
+                inputs=_format_input_summary(row),
                 status=row.get("status", ""),
             )
         )
@@ -610,13 +642,13 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             "",
             "## All Rows",
             "",
-            "| script | platform | solver | recording | observer_scope | time_chunk | pool | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
-            "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
+            "| script | platform | solver | recording | observer_scope | time_chunk | pool | n_axons | nx | precision | warm mean ms | total ms | kernel | inputs | status |",
+            "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {script} | {platform} | {solver} | {recording} | {observer_scope} | {time_chunk} | {pool} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
+            "| {script} | {platform} | {solver} | {recording} | {observer_scope} | {time_chunk} | {pool} | {n_axons} | {nx} | {precision} | {warm} | {total} | {kernel} | {inputs} | {status} |".format(
                 script=row.get("script", ""),
                 platform=row.get("platform", ""),
                 solver=row.get("single_cable_solver", ""),
@@ -629,7 +661,8 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
                 precision=row.get("precision", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
-                variants=row.get("effective_variants", ""),
+                kernel=row.get("kernel_variants", ""),
+                inputs=_format_input_summary(row),
                 status=row.get("status", ""),
             )
         )

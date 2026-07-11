@@ -55,6 +55,11 @@ SUMMARY_FIELDS = (
     "diameters",
     "case_name",
     "effective_variants",
+    "kernel_variants",
+    "intracellular_formats",
+    "extracellular_formats",
+    "extracellular_modes",
+    "output_sinks",
     "curve_simulate_total_ms",
     "curve_simulate_cold_ms",
     "curve_simulate_warm_mean_ms",
@@ -474,6 +479,29 @@ def _summarize_curve_run(
         "diameters": options.get("diameters", run.diameters),
         "case_name": manifest.get("case_name", ""),
         "effective_variants": "/".join(_variants(events)),
+        "kernel_variants": "/".join(_variants(events)),
+        "intracellular_formats": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.intracellular",
+                key="intracellular_format",
+            )
+        ),
+        "extracellular_formats": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.extracellular",
+                key="extracellular_format",
+            )
+        ),
+        "extracellular_modes": "/".join(
+            _metadata_values(
+                events,
+                name="inputs.extracellular",
+                key="extracellular_mode",
+            )
+        ),
+        "output_sinks": "/".join(_output_sinks(events)),
         "curve_simulate_total_ms": _sum_duration(events, "curve.simulate"),
         "curve_simulate_cold_ms": _duration(simulate[0]) if simulate else "",
         "curve_simulate_warm_mean_ms": _mean_duration(warm),
@@ -726,13 +754,13 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         [
             "## Fastest Rows",
             "",
-            "| group | solver | block_b | observer_scope | time_chunk | pool | warm mean ms | total simulate ms | variants | status |",
-            "| --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- |",
+            "| group | solver | block_b | observer_scope | time_chunk | pool | warm mean ms | total simulate ms | kernel | inputs | status |",
+            "| --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- | --- |",
         ]
     )
     for group, row in _fastest_rows(rows):
         lines.append(
-            "| {group} | {solver} | {block_b} | {observer_scope} | {time_chunk} | {pool} | {warm} | {total} | {variants} | {status} |".format(
+            "| {group} | {solver} | {block_b} | {observer_scope} | {time_chunk} | {pool} | {warm} | {total} | {kernel} | {inputs} | {status} |".format(
                 group=group,
                 solver=row.get("solver", ""),
                 block_b=row.get("tiled_thomas_block_b", ""),
@@ -741,7 +769,8 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
                 pool=row.get("repeat_pool_policy", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
-                variants=row.get("effective_variants", ""),
+                kernel=row.get("kernel_variants", ""),
+                inputs=_format_input_summary(row),
                 status=row.get("status", ""),
             )
         )
@@ -750,13 +779,13 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             "",
             "## All Rows",
             "",
-            "| script | platform | solver | block_b | recording | observer_scope | time_chunk | pool | n_axons | nx | precision | warm mean ms | total ms | variants | status |",
-            "| --- | --- | --- | ---: | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- |",
+            "| script | platform | solver | block_b | recording | observer_scope | time_chunk | pool | n_axons | nx | precision | warm mean ms | total ms | kernel | inputs | status |",
+            "| --- | --- | --- | ---: | --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | --- | --- | --- |",
         ]
     )
     for row in rows:
         lines.append(
-            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {time_chunk} | {pool} | {n_axons} | {nx} | {precision} | {warm} | {total} | {variants} | {status} |".format(
+            "| {script} | {platform} | {solver} | {block_b} | {recording} | {observer_scope} | {time_chunk} | {pool} | {n_axons} | {nx} | {precision} | {warm} | {total} | {kernel} | {inputs} | {status} |".format(
                 script=row.get("script", ""),
                 platform=row.get("platform", ""),
                 solver=row.get("solver", ""),
@@ -770,7 +799,8 @@ def _write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
                 precision=row.get("precision", ""),
                 warm=_format_number(row.get("curve_simulate_warm_mean_ms")),
                 total=_format_number(row.get("curve_simulate_total_ms")),
-                variants=row.get("effective_variants", ""),
+                kernel=row.get("kernel_variants", ""),
+                inputs=_format_input_summary(row),
                 status=row.get("status", ""),
             )
         )
@@ -812,6 +842,20 @@ def _policy_sort_key(row: Mapping[str, Any]) -> tuple[float, float]:
     )
 
 
+def _format_input_summary(row: Mapping[str, Any]) -> str:
+    parts = [
+        f"I={row.get('intracellular_formats', '') or '?'}",
+        f"E={row.get('extracellular_formats', '') or '?'}",
+    ]
+    mode = str(row.get("extracellular_modes", "") or "")
+    if mode:
+        parts.append(f"mode={mode}")
+    sink = str(row.get("output_sinks", "") or "")
+    if sink:
+        parts.append(f"out={sink}")
+    return "; ".join(parts)
+
+
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -847,12 +891,63 @@ def _mapping(value: object) -> Mapping[str, Any]:
 
 
 def _variants(events: Sequence[Mapping[str, Any]]) -> list[str]:
-    variants = {
-        str(_mapping(event.get("metadata")).get("variant"))
-        for event in events
-        if _mapping(event.get("metadata")).get("variant")
-    }
+    variants = {_kernel_variant_from_event(event) for event in events}
+    variants.discard("")
     return sorted(variants)
+
+
+def _kernel_variant_from_event(event: Mapping[str, Any]) -> str:
+    metadata = _mapping(event.get("metadata"))
+    variant = str(metadata.get("kernel_variant") or metadata.get("variant") or "")
+    if not variant:
+        return ""
+    if metadata.get("mode") == "single":
+        return "jax_tridiagonal"
+    if variant in {
+        "dense_vstim",
+        "dense_vstim_full_scan",
+        "factorized_vstim",
+        "factorized_sparse_vstim",
+        "sparse_vstim",
+        "zero_sparse_vstim",
+    }:
+        return "jax_tridiagonal"
+    return variant
+
+
+def _metadata_values(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    name: str,
+    key: str,
+) -> list[str]:
+    values = {
+        str(_mapping(event.get("metadata")).get(key))
+        for event in events
+        if str(event.get("name") or "") == name
+        and _mapping(event.get("metadata")).get(key) not in {None, ""}
+    }
+    return sorted(values)
+
+
+def _output_sinks(events: Sequence[Mapping[str, Any]]) -> list[str]:
+    values: set[str] = set()
+    for event in events:
+        name = str(event.get("name") or "")
+        metadata = _mapping(event.get("metadata"))
+        if name == "kernel.dispatch_jax":
+            output = metadata.get("output")
+            if output not in {None, ""}:
+                values.add(str(output))
+            elif metadata.get("observer") == "vm_raster":
+                values.add("observer_only")
+        elif name == "kernel.enqueue":
+            recording_mode = metadata.get("recording_mode")
+            if recording_mode == "none":
+                values.add("observer_only")
+            elif recording_mode not in {None, ""}:
+                values.add(str(recording_mode))
+    return sorted(values)
 
 
 def _duration(event: Mapping[str, Any]) -> float:

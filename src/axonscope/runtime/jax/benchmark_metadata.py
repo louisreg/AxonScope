@@ -34,7 +34,8 @@ def record_intracellular_lowering_metadata(
     if lowered.format == "sparse_current_clamp":
         iinj_mid = lowered.midpoint
         record_benchmark_metadata(
-            input_format="sparse_current_clamp",
+            input_role="intracellular",
+            intracellular_format="sparse_current_clamp",
             target_nx=iinj_mid.target_nx,
             max_sparse_entries=iinj_mid.max_sparse_entries,
             **benchmark_array_metadata(
@@ -53,7 +54,8 @@ def record_intracellular_lowering_metadata(
         _record_zero_intracellular_metadata(group=group, runtime=runtime)
     else:
         record_benchmark_metadata(
-            input_format="dense",
+            input_role="intracellular",
+            intracellular_format="dense",
             **benchmark_array_metadata("iinj_mid", lowered.midpoint, role="kernel_input"),
         )
 
@@ -70,7 +72,8 @@ def record_extracellular_lowering_metadata(
         dtype = np.dtype(runtime.membrane.dtype)
         skipped_shape = dense_shape_for_group(group=group, runtime=runtime)
         record_benchmark_metadata(
-            input_format="zero_no_extracellular_stimulation",
+            input_role="extracellular",
+            extracellular_format="zero_no_extracellular_stimulation",
             **_extracellular_contract_metadata(lowered),
             skipped_dense_vstim_shape=list(skipped_shape),
             skipped_dense_vstim_nbytes=dense_nbytes_for_shape(skipped_shape, dtype=dtype),
@@ -80,7 +83,8 @@ def record_extracellular_lowering_metadata(
         if factorized is None:
             raise TypeError("factorized_footprint lowering requires a factorized payload.")
         record_benchmark_metadata(
-            input_format="factorized_footprint",
+            input_role="extracellular",
+            extracellular_format="factorized_footprint",
             **_extracellular_contract_metadata(lowered),
             target_nx=factorized.target_nx,
             factorized_rank=factorized.drive_count,
@@ -117,7 +121,8 @@ def record_extracellular_lowering_metadata(
             )
     else:
         metadata = {
-            "input_format": "dense",
+            "input_role": "extracellular",
+            "extracellular_format": "dense",
             **_extracellular_contract_metadata(lowered),
             **benchmark_array_metadata(
                 "vstim_mid",
@@ -145,10 +150,10 @@ def _extracellular_contract_metadata(
 
     metadata: dict[str, Any] = {}
     if lowered.mode is not None:
-        metadata["input_lowering_mode"] = lowered.mode.value
+        metadata["extracellular_mode"] = lowered.mode.value
     if lowered.capabilities is not None:
         metadata.update(
-            lowered.capabilities.as_metadata(prefix="input_lowering_capability_")
+            lowered.capabilities.as_metadata(prefix="extracellular_capability_")
         )
     return metadata
 
@@ -237,7 +242,8 @@ def _record_zero_intracellular_metadata(
     dtype = np.dtype(runtime.membrane.dtype)
     skipped_shape = (group.size, runtime.grid.Nt, group.nx)
     record_benchmark_metadata(
-        input_format="zero_no_intracellular_context",
+        input_role="intracellular",
+        intracellular_format="zero_no_intracellular_context",
         skipped_dense_iinj_shape=list(skipped_shape),
         skipped_dense_iinj_nbytes=int(np.prod(skipped_shape)) * int(dtype.itemsize),
     )
