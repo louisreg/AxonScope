@@ -2347,8 +2347,22 @@ stay as one JAX tridiagonal route.
   and translate it to typed `axs.runtime.jax.*.SingleCableSolver` constructors
   at the benchmark boundary.
 - [x] Validate locally with a tiny CPU smoke before launching larger runs.
-- [ ] Run the reduced Kaggle CPU/GPU single-cable policy map and compare with
+- [x] Run the reduced Kaggle CPU/GPU single-cable policy map and compare with
   the double-cable evidence before doing any cleanup or optimization.
+  Kaggle CPU/GPU artifacts were captured at commit `65d0d12` with
+  observer-only, fp32, `Nx=89`, `tsim=2 ms`, `dt=0.02 ms`, repeats=3,
+  warmups=1, repeat-pool reuse, `Naxons=1024/4096/8192`, same/different
+  diameters, and `auto` versus `jax_tridiagonal`. GPU and CPU both passed
+  24/24 rows. Combined report:
+  `benchmark/results/p11_single_cable_policy_cpu_gpu_65d0d12/single_cable_cpu_gpu_comparison.md`.
+  `auto` and `jax_tridiagonal` are effectively equivalent. GPU wins every
+  matched row, but the signal splits sharply by diameter grouping:
+  same-diameter median CPU/GPU speedup is about 25.5x, while
+  different-diameter median speedup is about 1.7x. Same-diameter GPU warm runs
+  have `kernel.wait` around 20-41% of curve time, so they are increasingly
+  device/kernel-shaped but not pure solver-bound. Different-diameter rows are
+  dominated by grouping/orchestration/enqueue and should not be treated as a
+  single-cable solver optimization target.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
