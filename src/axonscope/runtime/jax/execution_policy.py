@@ -38,10 +38,6 @@ class JaxExecutionContext:
     device: Any | None
     platform: str | None
     solver_engine: JaxSolverEngine | None = None
-    single_cable_solver: str | None = None
-    double_cable_block_solver: str | None = None
-    double_cable_block_solver_allow_internal: bool = False
-    double_cable_tiled_thomas_block_b: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,20 +93,6 @@ def jax_execution_context(
         device=device,
         platform=resolved.platform,
         solver_engine=solver_engine,
-        single_cable_solver=(
-            None if solver_engine is None else solver_engine.single_cable_solver
-        ),
-        double_cable_block_solver=(
-            None if solver_engine is None else solver_engine.double_cable_block_solver
-        ),
-        double_cable_block_solver_allow_internal=(
-            False
-            if solver_engine is None
-            else solver_engine.allow_internal_double_cable_block_solver
-        ),
-        double_cable_tiled_thomas_block_b=(
-            None if solver_engine is None else solver_engine.tiled_thomas_block_b
-        ),
     )
     if device is None:
         yield context

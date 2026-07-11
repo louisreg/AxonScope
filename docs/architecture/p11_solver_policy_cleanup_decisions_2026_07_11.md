@@ -100,6 +100,12 @@ by typed solver policy before kernel dispatch; low-level double-cable kernels
 accept only concrete backend-private routes (`thomas`, `pcr`, `pcr_soa`,
 `pcr_adaptive`) or explicitly permitted benchmark/internal labels.
 
+The solver route is now carried through JAX orchestration as one
+`JaxSolverEngine` value. `DoubleCableBatchKernel.run(...)` consumes that engine
+instead of parallel raw arguments such as `double_cable_block_solver`,
+`allow_internal_double_cable_block_solver`, and
+`double_cable_tiled_thomas_block_b`.
+
 ## Next Cleanup Slice
 
 - Make CPU double-cable policy and docs say one thing everywhere:

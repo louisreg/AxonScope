@@ -41,6 +41,7 @@ from .runtime_caches import (
     store_single_cable_factorized_forcing,
 )
 from . import solver_core
+from .solver_engines.types import JaxSolverEngine
 from axonscope.solvers.options import (
     BatchOptions,
     BatchRecording,
@@ -120,19 +121,30 @@ def _vm_raster_probe_tables_for_kernel(
         return indices, mask
 
 
-def _resolve_double_cable_run_block_solver(
-    solver: str | None,
+def _resolve_double_cable_run_solver_settings(
+    solver_engine: JaxSolverEngine | None,
     *,
     platform: str,
-    allow_internal: bool = False,
-) -> str:
+) -> tuple[str, int]:
     normalized_platform = platform.lower()
+    solver = (
+        None if solver_engine is None else solver_engine.double_cable_block_solver
+    )
+    allow_internal = (
+        False
+        if solver_engine is None
+        else solver_engine.allow_internal_double_cable_block_solver
+    )
+    tiled_thomas_block_b = (
+        None if solver_engine is None else solver_engine.tiled_thomas_block_b
+    )
     if solver in (None, ""):
-        return (
+        resolved = (
             "pcr_adaptive"
             if normalized_platform in _GPU_PLATFORMS
             else "thomas"
         )
+        return resolved, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     if solver == "auto":
         raise ValueError(
             "double_cable_block_solver must be resolved before kernel dispatch; "
@@ -143,13 +155,25 @@ def _resolve_double_cable_run_block_solver(
             raise RuntimeError(
                 f"Internal double-cable solver {solver!r} requires a JAX GPU backend."
             )
-        return solver
+        return solver, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     if solver in _SUPPORTED_DOUBLE_CABLE_BLOCK_SOLVERS:
-        return solver
+        return solver, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     raise ValueError(
         "double_cable_block_solver must be 'thomas', 'pcr', 'pcr_soa', "
         "'pcr_adaptive', or a permitted internal benchmark solver."
     )
+
+
+def _resolve_double_cable_run_block_solver(
+    solver_engine: JaxSolverEngine | None,
+    *,
+    platform: str,
+) -> str:
+    block_solver, _ = _resolve_double_cable_run_solver_settings(
+        solver_engine,
+        platform=platform,
+    )
+    return block_solver
 
 
 def _normalize_tiled_thomas_block_b(block_b: int | None) -> int:
@@ -3520,9 +3544,7 @@ class DoubleCableBatchKernel:
         options: BatchOptions | None = None,
         observers: VmRasterPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
-        double_cable_block_solver: str | None = None,
-        allow_internal_double_cable_block_solver: bool = False,
-        double_cable_tiled_thomas_block_b: int | None = None,
+        solver_engine: JaxSolverEngine | None = None,
         benchmark_observer_state_scope: str | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
@@ -3650,18 +3672,11 @@ class DoubleCableBatchKernel:
                 and jnp.asarray(extracellular.Gax_i).ndim == 1
                 and jnp.asarray(extracellular.Gax_e).ndim == 1
             )
-            requested_block_solver = None
-            allow_internal_block_solver = False
-            if double_cable_block_solver is not None:
-                requested_block_solver = str(double_cable_block_solver)
-                allow_internal_block_solver = bool(allow_internal_double_cable_block_solver)
-            block_solver = _resolve_double_cable_run_block_solver(
-                requested_block_solver,
-                platform=jax.default_backend(),
-                allow_internal=allow_internal_block_solver,
-            )
-            tiled_thomas_block_b = _normalize_tiled_thomas_block_b(
-                double_cable_tiled_thomas_block_b
+            block_solver, tiled_thomas_block_b = (
+                _resolve_double_cable_run_solver_settings(
+                    solver_engine,
+                    platform=jax.default_backend(),
+                )
             )
         if observers is not None and options.recording.mode == "none":
             if factorized_vext is not None:

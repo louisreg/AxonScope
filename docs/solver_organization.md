@@ -167,6 +167,9 @@ through typed per-cable solver policies on `ExecutionPolicy.solvers`; `auto`
 is resolved at that policy boundary before kernel dispatch. `pcr_adaptive`
 selects `pcr_soa` for batches up to `B=4096`, then matrix-layout `pcr` above
 that.
+JAX orchestration carries the selected route as one internal `JaxSolverEngine`
+value into `DoubleCableBatchKernel.run(...)`; raw solver labels and internal
+flags are not parallel public or kernel-call arguments.
 
 Double-cable lowering uses the same `Lowered*Input` contract as single-cable,
 but a double-cable-specific strategy because the kernel needs an

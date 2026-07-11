@@ -106,6 +106,9 @@ Important implementation detail:
 - `axonscope.runtime.execution.execution_context(...)` resolves typed
   `ExecutionPolicy.solvers` into backend-private JAX solver-engine descriptors
   when an execution context knows the platform.
+- `runtime/jax/group_runner.py` carries that route as one `JaxSolverEngine`
+  value into `DoubleCableBatchKernel.run(...)`; the batch kernel no longer
+  accepts parallel raw solver-policy arguments.
 - `batch_kernels._resolve_double_cable_kernel_block_solver(...)` then resolves
   `pcr_adaptive` to `pcr_soa` for `B <= 4096`, otherwise to `pcr`.
 - Batch-native integrated paths are used for `pcr_soa` at sufficient batch size

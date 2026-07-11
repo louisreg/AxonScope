@@ -135,19 +135,10 @@ def _benchmark_observer_state_scope_override() -> str | None:
     return str(scope)
 
 
-def _context_double_cable_block_solver_override(
-    backend_context: Any | None,
-) -> tuple[str | None, bool, int | None]:
+def _context_solver_engine(backend_context: Any | None) -> Any | None:
     if backend_context is None:
-        return None, False, None
-    solver = getattr(backend_context, "double_cable_block_solver", None)
-    if solver in (None, ""):
-        return None, False, None
-    return (
-        str(solver),
-        bool(getattr(backend_context, "double_cable_block_solver_allow_internal", False)),
-        getattr(backend_context, "double_cable_tiled_thomas_block_b", None),
-    )
+        return None
+    return getattr(backend_context, "solver_engine", None)
 
 
 def _run_single_cable_batch_group(
@@ -451,9 +442,16 @@ def _run_double_cable_batch_group(
             lowered_options.recording,
         ),
     )
-    policy_block_solver, policy_allow_internal, policy_block_b = (
-        _context_double_cable_block_solver_override(backend_context)
+    solver_engine = _context_solver_engine(backend_context)
+    policy_block_solver = (
+        None if solver_engine is None else solver_engine.double_cable_block_solver
     )
+    policy_allow_internal = (
+        False
+        if solver_engine is None
+        else solver_engine.allow_internal_double_cable_block_solver
+    )
+    policy_block_b = None if solver_engine is None else solver_engine.tiled_thomas_block_b
     benchmark_observer_state_scope = _benchmark_observer_state_scope_override()
     _emit_progress(
         progress_callback,
@@ -578,9 +576,7 @@ def _run_double_cable_batch_group(
             options=kernel_options,
             observers=observer_plan,
             progress_callback=progress_callback,
-            double_cable_block_solver=policy_block_solver,
-            allow_internal_double_cable_block_solver=policy_allow_internal,
-            double_cable_tiled_thomas_block_b=policy_block_b,
+            solver_engine=solver_engine,
             benchmark_observer_state_scope=benchmark_observer_state_scope,
         )
         if out.Vm is not None:

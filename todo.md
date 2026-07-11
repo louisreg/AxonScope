@@ -2592,6 +2592,11 @@ policy matrix is finished.
   dispatch. Low-level JAX double-cable kernels accept only concrete
   backend-private routes (`thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`) or
   explicitly permitted benchmark/internal labels such as `jax_triton_loop_xb`.
+- [x] Route JAX solver policy through one internal engine object instead of
+  parallel raw kernel arguments. `JaxExecutionContext` now carries
+  `JaxSolverEngine`, `group_runner` passes that engine to
+  `DoubleCableBatchKernel.run(...)`, and the kernel signature rejects the old
+  `double_cable_block_solver` / internal-flag / tiled-block argument trio.
 - [x] Run a post-cleanup non-regression benchmark matrix covering single-cable
   and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
   different diameters, before making any new performance claim.
