@@ -172,6 +172,11 @@ value into `DoubleCableBatchKernel.run(...)`; raw solver labels and internal
 flags are not parallel public or kernel-call arguments.
 Inspection and reporting use one runtime-owned solver-route summary derived
 from that same policy resolution.
+`KernelInspection.solver` exposes the same structured contract for single- and
+double-cable groups: cable family, requested typed policy label, resolved
+backend route, internal/artifact flag, and route-specific options. Backend
+labels such as `jax_triton_loop_xb` may appear there as resolved artifacts, not
+as public policy names.
 
 Double-cable lowering uses the same `Lowered*Input` contract as single-cable,
 but a double-cable-specific strategy because the kernel needs an

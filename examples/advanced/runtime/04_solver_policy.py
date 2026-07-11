@@ -65,7 +65,8 @@ def main() -> None:
         print(f"  device: {policy.device.kind}")
         print(f"  precision: {policy.precision.solver_dtype}")
         print(f"  kernel: {kernel.kernel}")
-        print(f"  double-cable solver: {kernel.double_cable_block_solver}")
+        print(f"  solver request: {kernel.solver.requested}")
+        print(f"  solver route: {kernel.solver.backend_route}")
 
 
 if __name__ == "__main__":

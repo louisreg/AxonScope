@@ -21,16 +21,35 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class CableSolverRoute:
+    """Resolved solver route for one cable family."""
+
+    cable: str
+    requested: str | None
+    backend_route: str | None
+    internal: bool = False
+    options: tuple[tuple[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class RuntimeSolverRoute:
     """Runtime-owned solver route summary for reporting and inspection."""
 
     runtime: str | None
     platform: str | None
     engine_name: str | None
-    single_cable_solver: str | None
-    double_cable_block_solver: str | None
-    double_cable_internal: bool = False
-    tiled_thomas_block_b: int | None = None
+    single_cable: CableSolverRoute | None
+    double_cable: CableSolverRoute | None
+
+    def for_cable(self, cable_mode: str) -> CableSolverRoute | None:
+        """Return the route for a dispatch cable mode."""
+
+        normalized = str(cable_mode).replace("-", "_")
+        if normalized in {"single", "single_cable"}:
+            return self.single_cable
+        if normalized in {"double", "double_cable"}:
+            return self.double_cable
+        raise ValueError(f"Unsupported cable mode: {cable_mode!r}.")
 
 
 def execution_context(
@@ -269,16 +288,57 @@ def solver_route_from_execution_policy(
     solver_engine = jax_solver_engine_for_policy(policy)
     if solver_engine is None:
         return None
+    solver_policy = policy.solver_policy
     return RuntimeSolverRoute(
         runtime="jax",
         platform=solver_engine.platform,
         engine_name=solver_engine.name,
-        single_cable_solver=solver_engine.single_cable_solver,
-        double_cable_block_solver=solver_engine.double_cable_block_solver,
-        double_cable_internal=solver_engine.allow_internal_double_cable_block_solver,
-        tiled_thomas_block_b=solver_engine.tiled_thomas_block_b,
+        single_cable=CableSolverRoute(
+            cable="single_cable",
+            requested=_solver_request_label(solver_policy.single_cable),
+            backend_route=solver_engine.single_cable_solver,
+        ),
+        double_cable=CableSolverRoute(
+            cable="double_cable",
+            requested=_solver_request_label(solver_policy.double_cable),
+            backend_route=solver_engine.double_cable_block_solver,
+            internal=solver_engine.allow_internal_double_cable_block_solver,
+            options=_double_cable_solver_options(
+                solver_policy.double_cable,
+                tiled_thomas_block_b=solver_engine.tiled_thomas_block_b,
+            ),
+        ),
     )
 
+
+def _solver_request_label(request: Any | None) -> str:
+    if request is None:
+        return "auto"
+    kind = getattr(request, "kind", None)
+    value = getattr(kind, "value", None)
+    if value is not None:
+        return str(value)
+    return str(kind if kind is not None else request)
+
+
+def _double_cable_solver_options(
+    request: Any | None,
+    *,
+    tiled_thomas_block_b: int | None,
+) -> tuple[tuple[str, Any], ...]:
+    options: list[tuple[str, Any]] = []
+    request_label = _solver_request_label(request)
+    if request_label in {"jax_pcr", "jax_pcr_soa"}:
+        adaptive_threshold = getattr(
+            getattr(request, "pcr_options", None),
+            "adaptive_threshold",
+            None,
+        )
+        if adaptive_threshold is not None:
+            options.append(("adaptive_threshold", int(adaptive_threshold)))
+    if request_label == "tiled_thomas" and tiled_thomas_block_b is not None:
+        options.append(("block_b", int(tiled_thomas_block_b)))
+    return tuple(options)
 
 
 def batch_options_for_execution_context(
@@ -318,6 +378,7 @@ def run_batch_group(
 
 
 __all__ = [
+    "CableSolverRoute",
     "batch_options_for_execution_context",
     "batch_options_from_recording",
     "benchmark_lower_recording_options",

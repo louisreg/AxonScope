@@ -334,10 +334,18 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
     assert route.runtime == "jax"
     assert route.platform == "gpu"
     assert route.engine_name == "jax_gpu_tiled_thomas"
-    assert route.single_cable_solver == "jax_tridiagonal"
-    assert route.double_cable_block_solver == "jax_triton_loop_xb"
-    assert route.double_cable_internal is True
-    assert route.tiled_thomas_block_b == 64
+    assert route.single_cable is not None
+    assert route.single_cable.cable == "single_cable"
+    assert route.single_cable.requested == "jax_tridiagonal"
+    assert route.single_cable.backend_route == "jax_tridiagonal"
+    assert route.double_cable is not None
+    assert route.double_cable.cable == "double_cable"
+    assert route.double_cable.requested == "tiled_thomas"
+    assert route.double_cable.backend_route == "jax_triton_loop_xb"
+    assert route.double_cable.internal is True
+    assert route.double_cable.options == (("block_b", 64),)
+    assert route.for_cable("single") == route.single_cable
+    assert route.for_cable("double") == route.double_cable
 
 
 def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatch):

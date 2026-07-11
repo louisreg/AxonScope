@@ -115,6 +115,13 @@ contract, CPU Thomas-default behavior, and policy-boundary checks.
 PCR/PCR-SoA/PCR-adaptive/internal Triton equivalence and routing probes live in
 `tests/unit/solvers/test_double_cable_diagnostic_solvers.py`.
 
+The reporting contract now treats single-cable and double-cable solver routes
+uniformly. Runtime policy resolution returns structured `CableSolverRoute`
+values for both cable families, and inspection reports expose one
+`KernelInspection.solver` object instead of a double-cable-specific block-solver
+field. Backend-private labels remain allowed in resolved artifact fields, not
+as user-facing policy names.
+
 ## Remaining Cleanup Slice
 
 - Keep the GPU double-cable policy matrix before making Triton the default.

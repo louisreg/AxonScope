@@ -76,7 +76,14 @@ from axonscope.results import (
     unpack_vm_raster_words,
 )
 from axonscope.recording import Recording, RecordingPlan, RecordingSpatial
-from axonscope.runtime import Device, ExecutionPolicy, PrecisionPolicy, SolverPolicy
+from axonscope.runtime import (
+    CableSolverRoute,
+    Device,
+    ExecutionPolicy,
+    PrecisionPolicy,
+    RuntimeSolverRoute,
+    SolverPolicy,
+)
 from axonscope.signals import Signal
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import (
@@ -191,10 +198,12 @@ __all__ = [
     "PreparationInspection",
     "ResultAssemblyInspection",
     "SimulationInspection",
+    "CableSolverRoute",
     "Device",
     "ExecutionPolicy",
     "MemoryEstimateItem",
     "PrecisionPolicy",
+    "RuntimeSolverRoute",
     "SimulationEstimate",
     "SimulationEstimateGroup",
     "SolverPolicy",

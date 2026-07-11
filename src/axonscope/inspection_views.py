@@ -106,11 +106,7 @@ def format_simulation_inspection(report: SimulationInspection) -> str:
         )
     lines.append("kernel:")
     for kernel in report.kernels:
-        block_solver = (
-            ""
-            if kernel.double_cable_block_solver is None
-            else f", block_solver={kernel.double_cable_block_solver}"
-        )
+        solver = _solver_route_text(kernel.solver)
         chunking = (
             ""
             if kernel.time_chunk_steps is None
@@ -119,7 +115,7 @@ def format_simulation_inspection(report: SimulationInspection) -> str:
         lines.append(
             f"  group {kernel.group_id}: route={kernel.route}, "
             f"kernel={kernel.kernel}, mode={kernel.cable_mode}"
-            f"{block_solver}{chunking}"
+            f", solver={solver}{chunking}"
         )
     lines.append("result assembly:")
     for assembly in report.result_assembly:
@@ -544,6 +540,20 @@ def _bytes_text(value: int) -> str:
     if value < 1024**2:
         return f"{value / 1024:.2f} KiB"
     return f"{value / (1024**2):.3f} MiB"
+
+
+def _solver_route_text(solver: Any) -> str:
+    route = "auto" if solver.backend_route is None else str(solver.backend_route)
+    requested = solver.requested
+    parts = [route]
+    if requested is not None and str(requested) != route:
+        parts.append(f"requested={requested}")
+    if solver.internal:
+        parts.append("internal")
+    if solver.options:
+        option_text = ",".join(f"{key}={value}" for key, value in solver.options)
+        parts.append(option_text)
+    return " ".join(parts)
 
 
 __all__ = [

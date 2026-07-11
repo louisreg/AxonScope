@@ -2625,6 +2625,12 @@ policy matrix is finished.
   `tests/unit/solvers/test_double_cable_diagnostic_solvers.py`, with shared
   batch fixtures in `tests/unit/solvers/_batch_helpers.py`. Production batch
   tests keep the CPU Thomas-default route and policy-boundary contracts.
+- [x] Unify the runtime/inspection solver-route contract across single-cable
+  and double-cable groups. `RuntimeSolverRoute` now carries structured
+  `CableSolverRoute` values for both cable families, and `KernelInspection`
+  exposes one `solver` field with requested policy, resolved backend route,
+  internal/artifact flag, and route-specific options. Low-level kernels still
+  use backend-private labels where needed.
 
 ### P12 - Studies, Serialization, Integration
 

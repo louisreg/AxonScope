@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence, TextIO
 
 from axonscope.runtime import ExecutionPolicy
+from axonscope.runtime.execution import CableSolverRoute
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ class KernelInspection:
     route: str
     kernel: str
     cable_mode: str
-    double_cable_block_solver: str | None
+    solver: CableSolverRoute
     time_chunk_steps: int | None
 
 

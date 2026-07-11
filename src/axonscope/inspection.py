@@ -9,6 +9,7 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.runtime.execution import (
+    CableSolverRoute,
     batch_options_from_recording,
     benchmark_lower_recording_options,
     benchmark_observers_are_vm_raster_compatible,
@@ -493,24 +494,26 @@ def _inspect_kernel(
             route="scalar",
             kernel=kernel,
             cable_mode=str(group.mode),
-            double_cable_block_solver=None,
+            solver=_inspect_cable_solver_route(
+                cable_mode=str(group.mode),
+                execution_policy=execution_policy,
+            ),
             time_chunk_steps=None,
         )
 
     if group.mode == "double":
         kernel = "DoubleCableBatchKernel"
-        block_solver = _inspect_double_cable_block_solver(
-            execution_policy=execution_policy,
-        )
     else:
         kernel = "SingleCableVStimBatchKernel"
-        block_solver = None
     return KernelInspection(
         group_id=int(group.group_id),
         route="batch",
         kernel=kernel,
         cable_mode=str(group.mode),
-        double_cable_block_solver=block_solver,
+        solver=_inspect_cable_solver_route(
+            cable_mode=str(group.mode),
+            execution_policy=execution_policy,
+        ),
         time_chunk_steps=batch_options.time_chunk_steps,
     )
 
@@ -657,17 +660,24 @@ def _inspect_assembly_details(
     )
 
 
-def _inspect_double_cable_block_solver(
+def _inspect_cable_solver_route(
     *,
+    cable_mode: str,
     execution_policy: ExecutionPolicy | None,
-) -> str:
+) -> CableSolverRoute:
+    cable = f"{str(cable_mode).replace('-', '_')}_cable"
     route = solver_route_from_execution_policy(execution_policy)
-    if route is not None and route.double_cable_block_solver is not None:
-        return route.double_cable_block_solver
+    if route is not None:
+        cable_route = route.for_cable(cable_mode)
+        if cable_route is not None:
+            return cable_route
     platform = _execution_policy_platform(execution_policy)
-    if platform is None:
-        return "auto(default-backend)"
-    return f"auto({platform})"
+    auto_label = "auto(default-backend)" if platform is None else f"auto({platform})"
+    return CableSolverRoute(
+        cable=cable,
+        requested=auto_label,
+        backend_route=auto_label,
+    )
 
 
 def _execution_policy_platform(policy: ExecutionPolicy | None) -> str | None:

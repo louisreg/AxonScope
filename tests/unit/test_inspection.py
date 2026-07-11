@@ -73,6 +73,9 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     assert report.lowerings[0].extracellular_format == "dense"
     assert report.lowerings[0].dense_vstim_shape == (2, 2, 5)
     assert report.kernels[0].kernel == "SingleCableVStimBatchKernel"
+    assert report.kernels[0].solver.cable == "single_cable"
+    assert report.kernels[0].solver.requested == "auto"
+    assert report.kernels[0].solver.backend_route == "jax_tridiagonal"
     assert report.result_assembly[0].record_kind == "dispatch row records"
 
     text = report.format()
@@ -83,6 +86,7 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     assert "reasons=" in text
     assert "lowering:" in text
     assert "kernel:" in text
+    assert "solver=jax_tridiagonal requested=auto" in text
     assert "result assembly:" in text
     assert "execution_policy=runtime=jax, device=cpu, precision=float32" in text
 
@@ -134,8 +138,13 @@ def test_inspection_reports_typed_double_cable_solver_policy():
     )
 
     assert pcr_report.kernels[0].cable_mode == "double"
-    assert pcr_report.kernels[0].double_cable_block_solver == "pcr_soa"
-    assert triton_report.kernels[0].double_cable_block_solver == "jax_triton_loop_xb"
+    assert pcr_report.kernels[0].solver.cable == "double_cable"
+    assert pcr_report.kernels[0].solver.requested == "jax_pcr_soa"
+    assert pcr_report.kernels[0].solver.backend_route == "pcr_soa"
+    assert triton_report.kernels[0].solver.requested == "tiled_thomas"
+    assert triton_report.kernels[0].solver.backend_route == "jax_triton_loop_xb"
+    assert triton_report.kernels[0].solver.internal is True
+    assert triton_report.kernels[0].solver.options == (("block_b", 64),)
 
 
 def test_inspection_reports_observer_only_lowering_and_compact_results():

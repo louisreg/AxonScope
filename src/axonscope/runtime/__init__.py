@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from . import jax
+from .execution import CableSolverRoute, RuntimeSolverRoute
 from .policy import (
     Device,
     ExecutionPolicy,
@@ -16,10 +17,12 @@ from .policy import (
 )
 
 __all__ = [
+    "CableSolverRoute",
     "Device",
     "ExecutionPolicy",
     "PrecisionPolicy",
     "RuntimeKind",
+    "RuntimeSolverRoute",
     "RuntimeTarget",
     "SolverPolicy",
     "auto",
