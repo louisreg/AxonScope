@@ -246,8 +246,6 @@ packed VmRaster state. The default is chosen to align with packed VmRaster words
 and avoid post-chunk raster recombination on short runs. Passing
 `time_chunk_steps=None` explicitly keeps the unchunked single-scan behavior.
 
-The current exact double-cable block-solver options are:
-
 The current typed public choices are:
 
 | Public policy | Backend route | Use |
@@ -258,12 +256,15 @@ The current typed public choices are:
 | `axs.runtime.jax.cpu.DoubleCableSolver.thomas()` | `thomas` | Only supported explicit CPU double-cable route. |
 | `axs.runtime.jax.gpu.DoubleCableSolver.pcr()` | `pcr` | GPU diagnostic and larger-batch adaptive fallback. |
 | `axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()` | `pcr_soa` | GPU diagnostic for small/medium batches. |
-| `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)` | `jax_triton_loop_xb` | Experimental selectable double-cable route while P11C-F/P11C-G decide promotion. |
+| `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)` | `jax_triton_loop_xb` | Preferred GPU double-cable promotion candidate while P11C-F/P11C-G decide default policy. |
 
 CPU double-cable policy is intentionally narrow: `auto` resolves to `thomas`,
 and the only explicit CPU route is `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`.
 Non-Thomas CPU double-cable routes are unsupported and should not be kept as
 active runtime choices.
+
+Current cleanup decisions are tracked in
+`docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`.
 
 Example:
 

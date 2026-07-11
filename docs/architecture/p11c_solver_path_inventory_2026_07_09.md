@@ -15,20 +15,24 @@ promoting, renaming, deleting, or archiving any implementation.
 
 ## Decision Snapshot
 
-Current recommended reading:
+Current recommended reading, updated after the 2026-07-11 policy-cleanup
+decision note:
 
-- Keep the public runtime policy unchanged until the full P11C-F policy matrix
-  is finished.
-- CPU double-cable stays Thomas-oriented.
-- GPU double-cable production stays on the current JAX PCR policy for now.
-- The looped jax-triton XB route is the strongest large-population GPU
-  candidate, but it remains benchmark-only until the policy matrix covers
-  `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison, cold/warm cache,
-  memory, and corrected physical curve workflows.
+- CPU double-cable production is Thomas only. `auto` on CPU resolves to
+  Thomas; CPU PCR, PCR-SoA, tiled-Thomas, and Triton are not production choices.
+- GPU double-cable keeps explicit typed solver choices while the full policy
+  matrix is finished.
+- The looped jax-triton XB route is the preferred large-population GPU
+  promotion candidate, but it should become the default only after the policy
+  matrix covers `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison,
+  cold/warm cache, memory, dependency failure modes, and corrected physical
+  curve workflows.
 - Do not promote PCR micro-variants as-is. They are useful diagnostic evidence,
   not production candidates.
 - Do not add any membrane-model-specific solver/runtime path. MRG is a
   realistic benchmark workload, not a runtime branch.
+- Cleanup decision ledger:
+  `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`.
 
 ## Boundary Rules
 
@@ -130,7 +134,7 @@ opened later, it should be a separate evidence-backed route.
 | Source | `solve_block_tridiagonal_2x2_scalar(...)` in `src/axonscope/runtime/jax/common.py` |
 | Algorithm | Exact scalarized 2x2 block Thomas sweep |
 | Layout | one axon/system at a time |
-| CPU status | production default through `auto` |
+| CPU status | only supported production double-cable route; `auto` resolves here |
 | GPU status | production selectable, but not preferred by current policy |
 | Benchmark reading | Best CPU family; poor GPU at small/medium batch sizes |
 
@@ -148,8 +152,8 @@ Evidence:
 | Source | `solve_block_tridiagonal_2x2_pcr(...)` in `src/axonscope/runtime/jax/common.py` |
 | Algorithm | Exact matrix-layout parallel cyclic reduction |
 | Layout | per-row/vmap style in production batch kernels |
-| Runtime role | Explicit public choice and large-batch target of `pcr_adaptive` |
-| Status | production |
+| Runtime role | Explicit GPU choice and large-batch target of `pcr_adaptive` |
+| Status | GPU production/benchmark route; not a supported CPU production route |
 
 This remains part of the current production vocabulary, mainly as the
 large-batch side of the existing GPU adaptive policy.
@@ -162,7 +166,7 @@ large-batch side of the existing GPU adaptive policy.
 | Algorithm | Exact PCR using struct-of-arrays 2x2 block coefficients |
 | Layout | per-row/vmap or batch-first `[B, Nx]` |
 | Runtime role | Main current GPU-oriented exact JAX route for small/medium batches |
-| Status | production |
+| Status | GPU production/benchmark route; not a supported CPU production route |
 
 Evidence:
 
@@ -181,7 +185,7 @@ Evidence:
 | Algorithm | Policy alias, not a solver body |
 | Resolution | `pcr_soa` for `B <= 4096`, otherwise `pcr` |
 | Runtime role | Current GPU `auto` policy target |
-| Status | production policy |
+| Status | GPU production policy; never a CPU policy |
 
 This should be treated as policy glue. If Triton is promoted, the policy should
 be redesigned from fresh P11C-F evidence instead of patched ad hoc.

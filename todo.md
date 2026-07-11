@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-11 during the P11E single-cable hotpath cleanup.
+Updated on 2026-07-11 during the P11E solver-policy cleanup prep.
 
 Current state:
 
@@ -41,6 +41,11 @@ Current state:
 - The next priority is not the NumPy solver. First flatten the public
   model/compiler surface, then build realistic benchmark evidence and optimize
   the current JAX solver path.
+- Current P11 cleanup decisions are tracked in
+  `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
+  CPU double-cable keeps only Thomas as a production route; GPU double-cable
+  keeps Triton/tiled-Thomas as the preferred promotion candidate pending the
+  full policy matrix; single-cable stays on the JAX tridiagonal route for now.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -2255,6 +2260,8 @@ PTA/block-Thomas GPU gate:
   The objective is to validate Triton deeply enough that it can become the
   preferred GPU double-cable route for supported fp32 large-population shapes,
   unless the full benchmark matrix disproves or sharply constrains that policy.
+  Current cleanup decision note:
+  `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`.
 
 ### P11D - Solver Engine Flattening
 
@@ -2498,8 +2505,11 @@ stay as one JAX tridiagonal route.
   host-side scan rewrite was not kept because local smoke did not show a robust
   improvement; validate any future host-side `inputs.extracellular`
   optimization on the corrected wait boundary.
-- [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
-  low-level optimization pass or only cleanup/documentation.
+- [x] After CPU/GPU evidence is in hand, decide whether single-cable needs a
+  low-level optimization pass or only cleanup/documentation. Decision on
+  2026-07-11: keep single-cable on the simple JAX tridiagonal route for now.
+  The useful work is cleanup/documentation plus shared input-lowering
+  convergence, not a separate single-cable solver family.
 - [ ] Put non-solver extracellular input lowering on one explicit
   single-cable/double-cable path before more low-level solver work. Current
   evidence: on P100 `threshold_curves`, observer-only, `Naxons=4096`, `Nx=89`,
@@ -2542,7 +2552,34 @@ stay as one JAX tridiagonal route.
   closing: run the corrected large-population CPU/GPU smoke, decide whether
   compact double-cable `scaled_shared_waveform` is worth implementing beyond
   explicit dense fallback, and record the before/after `inputs.extracellular`
-  evidence.
+  evidence. Follow-up metadata cleanup at commit `199b7b9` validated on Kaggle
+  P100 that single-cable and double-cable recruitment runs both report the same
+  `factorized_footprint` + `shared_current` input path for `observer_only` and
+  `probe_vm`, while `kernel_variants` remains reserved for the actual solver
+  kernel.
+
+### P11F - Runtime Cleanup After Solver Policy Evidence
+
+Goal: delete or quarantine runtime paths that no longer match the solver-policy
+evidence, while keeping benchmark-only probes available until the full GPU
+policy matrix is finished.
+
+- [ ] Make CPU double-cable policy explicit everywhere:
+  `auto == thomas`, and Thomas is the only supported CPU double-cable
+  production solver. CPU PCR, PCR-SoA, tiled-Thomas, and Triton must not appear
+  as supported production choices.
+- [ ] Move any remaining CPU PCR/PCR-SoA/Triton double-cable usage into
+  benchmark-only or diagnostic-equivalence tests, then delete stale
+  public-facing tests and docs that imply those routes are supported.
+- [ ] Keep GPU double-cable Triton/tiled-Thomas as a typed explicit route while
+  the policy matrix is completed; do not make it default until the matrix
+  constrains `Naxons`, `Nx`, dtype, recording mode, cold/warm behavior, memory,
+  dependency failure, and physical-curve correctness.
+- [ ] Keep `jax_triton_loop_xb` and similar backend labels as artifact/internal
+  names, not public user-facing names.
+- [ ] Run a post-cleanup non-regression benchmark matrix covering single-cable
+  and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
+  different diameters, before making any new performance claim.
 
 ### P12 - Studies, Serialization, Integration
 
