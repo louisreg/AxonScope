@@ -2581,8 +2581,12 @@ policy matrix is finished.
   the policy matrix is completed; do not make it default until the matrix
   constrains `Naxons`, `Nx`, dtype, recording mode, cold/warm behavior, memory,
   dependency failure, and physical-curve correctness.
-- [ ] Keep `jax_triton_loop_xb` and similar backend labels as artifact/internal
-  names, not public user-facing names.
+- [x] Keep `jax_triton_loop_xb` and similar backend labels as artifact/internal
+  names, not public user-facing names. Active curve benchmarks now select the
+  route through `--double-cable-block-solver tiled_thomas` plus typed
+  `ExecutionPolicy.solvers`; the old
+  `--benchmark-double-cable-block-solver jax_triton_loop_xb` surface is
+  removed and tested as rejected.
 - [ ] Run a post-cleanup non-regression benchmark matrix covering single-cable
   and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
   different diameters, before making any new performance claim.

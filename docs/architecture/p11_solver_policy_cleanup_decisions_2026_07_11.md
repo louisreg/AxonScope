@@ -88,6 +88,12 @@ It does not by itself close the full threshold/scaled-waveform policy matrix.
 6. Delete tests for removed production behavior; keep only focused numerical
    equivalence tests for routes that remain supported or explicitly diagnostic.
 
+After the first P11F cleanup pass, active curve benchmarks also follow this
+rule: users select the Triton/tiled-Thomas candidate with
+`--double-cable-block-solver tiled_thomas` and `--tiled-thomas-block-b ...`.
+The old `--benchmark-double-cable-block-solver jax_triton_loop_xb` hook is
+removed; `jax_triton_loop_xb` remains only a runtime/artifact label.
+
 ## Next Cleanup Slice
 
 - Make CPU double-cable policy and docs say one thing everywhere:

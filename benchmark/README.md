@@ -107,10 +107,8 @@ python benchmark/kaggle/run_kernel.py \
   --memory-top-n 0
 ```
 
-The older workflow-level P11C smoke can still activate the backend-private
-Triton route with a separate benchmark override. Use it only to compare against
-pre-policy artifacts; the policy campaign above should be preferred for new
-decisions:
+For a small workflow-level Triton smoke, use the same typed solver policy
+surface as the larger policy campaign:
 
 ```bash
 python benchmark/run.py \
@@ -119,8 +117,9 @@ python benchmark/run.py \
   --platform gpu \
   --cable double_cable \
   --recording observer_only \
-  --benchmark-double-cable-block-solver jax_triton_loop_xb \
-  --output benchmark/results/p11c_runtime_override_smoke
+  --double-cable-block-solver tiled_thomas \
+  --tiled-thomas-block-b 64 \
+  --output benchmark/results/p11c_tiled_thomas_smoke
 ```
 
 ```bash

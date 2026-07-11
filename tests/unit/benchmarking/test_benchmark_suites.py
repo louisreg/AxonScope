@@ -224,8 +224,6 @@ def test_resolved_options_apply_preset_and_overrides():
             "tracemalloc",
             "--memory-top-n",
             "7",
-            "--benchmark-double-cable-block-solver",
-            "jax_triton_loop_xb",
             "--benchmark-observer-state-scope",
             "full",
         ]
@@ -239,8 +237,19 @@ def test_resolved_options_apply_preset_and_overrides():
     assert options["memory_trace"] == "tracemalloc"
     assert options["memory_top_n"] == 7
     assert options["repeat_pool_policy"] == "rebuild"
-    assert options["benchmark_double_cable_block_solver"] == "jax_triton_loop_xb"
     assert options["benchmark_observer_state_scope"] == "full"
+
+
+def test_curve_options_reject_internal_double_cable_solver_override():
+    parser = build_parser("threshold_curves", description="test parser")
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "--benchmark-double-cable-block-solver",
+                "jax_triton_loop_xb",
+            ]
+        )
 
 
 def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(

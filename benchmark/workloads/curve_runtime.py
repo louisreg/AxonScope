@@ -616,9 +616,6 @@ def _evaluate_amplitudes(
         single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
-        benchmark_double_cable_block_solver=options.get(
-            "benchmark_double_cable_block_solver"
-        ),
     ):
         result = simulation.run()
     with benchmark_span(
@@ -672,9 +669,6 @@ def _build_curve_execution_context(
         single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
-        benchmark_double_cable_block_solver=options.get(
-            "benchmark_double_cable_block_solver"
-        ),
     ):
         recording = _recording_policy(options)
         batch_options = _batch_options(options)

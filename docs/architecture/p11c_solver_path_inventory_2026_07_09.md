@@ -49,7 +49,7 @@ Benchmark-only solver routes may be used by:
 
 ```text
 benchmark/analysis/*.py
-benchmark/run.py --benchmark-double-cable-block-solver ...
+benchmark/run.py --double-cable-block-solver tiled_thomas ...
 benchmark/kaggle/run_kernel.py ...
 ```
 
@@ -80,14 +80,16 @@ axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
 axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)
 ```
 
-Current benchmark-only workflow override:
+Current internal artifact label:
 
 ```text
 jax_triton_loop_xb
 ```
 
-This override is accepted by benchmark scripts and the backend benchmark
-metadata path, but not by `BatchOptions`.
+This label may appear in benchmark metadata, inspection records, and internal
+runtime tests. Active curve benchmarks should select the route through the
+typed/public-facing `tiled_thomas` solver policy instead of accepting this
+implementation label as a CLI choice.
 
 ### Public runtime routing
 
@@ -98,7 +100,7 @@ metadata path, but not by `BatchOptions`.
 | Batch single-cable | `runtime/jax/group_runner.py` -> `runtime/jax/batch_kernels.py` | JAX `lax.linalg.tridiagonal_solve` over batch rows | production |
 | Batch double-cable, dense/probe Vm | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_array_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
 | Batch double-cable, observer-only VmRaster | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_observer_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
-| Batch double-cable, benchmark Triton override | same as above, with `benchmark_double_cable_block_solver=jax_triton_loop_xb` | looped jax-triton XB block Thomas | benchmark-only integrated candidate |
+| Batch double-cable, tiled Thomas GPU policy | same as above, with typed `DoubleCableSolver.tiled_thomas(...)` policy | looped jax-triton XB block Thomas | explicit GPU candidate |
 
 Important implementation detail:
 
@@ -108,7 +110,7 @@ Important implementation detail:
 - `batch_kernels._resolve_double_cable_kernel_block_solver(...)` then resolves
   `pcr_adaptive` to `pcr_soa` for `B <= 4096`, otherwise to `pcr`.
 - Batch-native integrated paths are used for `pcr_soa` at sufficient batch size
-  and for the internal `jax_triton_loop_xb` override.
+  and for the internal tiled-Thomas kernel label.
 - Other double-cable solvers use a row-wise/vmap style kernel body.
 
 ## Active Production Solvers
@@ -439,7 +441,8 @@ Before changing public policy:
 ## Suggested Next Cleanup Order
 
 1. Finish P11C-F as a policy benchmark, not as another implementation pass.
-2. Keep `jax_triton_loop_xb` benchmark-only until P11C-F is summarized.
+2. Keep `jax_triton_loop_xb` as an internal artifact/runtime label while
+   active curve benchmarks use the typed `tiled_thomas` policy.
 3. Move or label benchmark-only solver probes so production code is easier to
    read.
 4. If P11C-F supports promotion, add a named backend-private production route

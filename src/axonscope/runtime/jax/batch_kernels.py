@@ -3503,7 +3503,6 @@ class DoubleCableBatchKernel:
         double_cable_block_solver: str | None = None,
         allow_internal_double_cable_block_solver: bool = False,
         double_cable_tiled_thomas_block_b: int | None = None,
-        benchmark_double_cable_block_solver: str | None = None,
         benchmark_observer_state_scope: str | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
@@ -3636,9 +3635,6 @@ class DoubleCableBatchKernel:
             if double_cable_block_solver is not None:
                 requested_block_solver = str(double_cable_block_solver)
                 allow_internal_block_solver = bool(allow_internal_double_cable_block_solver)
-            if benchmark_double_cable_block_solver is not None:
-                requested_block_solver = str(benchmark_double_cable_block_solver)
-                allow_internal_block_solver = True
             block_solver = _resolve_double_cable_run_block_solver(
                 requested_block_solver,
                 platform=jax.default_backend(),

@@ -1827,9 +1827,10 @@ def test_solver_route_map_documents_retained_runtime_paths():
     missing = sorted(term for term in required_terms if term not in text)
     assert missing == []
 
-    option_section = text.split("The current exact double-cable block-solver options are:", 1)[
-        1
-    ].split("Example:", 1)[0]
+    option_section = text.split("The current typed public choices are:", 1)[1].split(
+        "Example:",
+        1,
+    )[0]
     archived_options = {
         "assoc_backward",
         "assoc_transfer_dense",
