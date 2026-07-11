@@ -2415,7 +2415,7 @@ stay as one JAX tridiagonal route.
   and `24.6%` for `N=4096`; total `curve.simulate` fell about `7.0%` and
   `9.4%` respectively. Events confirm `unique_index` with 3/5/6 temporal
   patterns and compressed current payloads plus row indices.
-- [ ] Validate the next non-solver GPU overhead cleanup on P100 before making
+- [x] Validate the next non-solver GPU overhead cleanup on P100 before making
   timing claims. The implementation target is generic: build non-shared group
   `Cm_uF_cm2` as one host NumPy stack before a single JAX transfer, and make
   `Stimulus` sample buffers immutable/read-only so repeated amplitude updates
@@ -2424,7 +2424,17 @@ stay as one JAX tridiagonal route.
   `_array_content_key` helper; it was measurable overhead on GPU warm runs.
   Expected evidence to inspect: cold `kernel.prepare_cm`, warm
   `inputs.extracellular`, `vstim_temporal_*`, and no regression in double-cable
-  factorized-input lowering.
+  factorized-input lowering. Mini P100 validation passed at commit `17d367a`
+  with `threshold_curves`, observer-only, different diameters, `Naxons=1024/4096`,
+  `Nx=89`, fp32, repeat-pool reuse. Artifact:
+  `benchmark/results/kaggle/20260711_142857_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-nonsolver-gpu-17d367a/outputs/extracted`.
+  Versus `9cda8dc`, cold `kernel.prepare_cm` fell from about `2.37 s` to
+  `1.8 ms` at `N=1024` and from about `18.35 s` to `6.0 ms` at `N=4096`.
+  Warm `inputs.extracellular` fell about `37.0%` at `N=1024` and `12.3%` at
+  `N=4096`; total warm `curve.simulate` fell about `18.7%` at `N=1024` and was
+  near-neutral/noisy at `N=4096` (`+5.1%`) because enqueue/wait still dominates.
+  The run confirms `host_stack`, `group_cm_cache` hits after the first run, and
+  `unique_index` temporal lowering with 3/5/6 patterns.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
