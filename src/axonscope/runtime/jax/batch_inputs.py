@@ -102,6 +102,8 @@ class FactorizedExtracellularPotentialBatch:
     spatial footprint with shape ``(B, Nx)`` or ``(B, K, Nx)``. The dense
     midpoint potential is their product, summed over the optional drive axis:
     ``Vstim[B, Nt, Nx] = sum_K current_mid_A * footprint_mV_per_A``.
+    ``current_row_indices`` can compress repeated row-specific rank-1 currents
+    as ``current_mid_A[U, Nt]`` plus row indices ``[B]``.
     """
 
     current_mid_A: Array
@@ -110,6 +112,7 @@ class FactorizedExtracellularPotentialBatch:
     current_initial_previous_A: Array | None = None
     static_footprint_key: tuple[Any, ...] | None = None
     single_cable_forcing_footprint_mV_per_A: Array | None = None
+    current_row_indices: Array | None = None
 
     def __post_init__(self) -> None:
         current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
@@ -118,6 +121,9 @@ class FactorizedExtracellularPotentialBatch:
         )
         footprint_shape = tuple(
             int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
+        )
+        indices_shape = tuple(
+            int(dim) for dim in getattr(self.current_row_indices, "shape", ())
         )
         forcing_shape = tuple(
             int(dim)
@@ -133,7 +139,20 @@ class FactorizedExtracellularPotentialBatch:
             raise ValueError("rank-K current_mid_A requires footprint_mV_per_A shape (B, K, Nx).")
         if len(footprint_shape) == 3 and len(current_shape) != 3:
             raise ValueError("rank-K footprint_mV_per_A requires current_mid_A shape (B, K, Nt).")
-        if len(current_shape) == 2 and current_shape[0] != batch_size:
+        if self.current_row_indices is not None:
+            if len(footprint_shape) != 2 or len(current_shape) != 2:
+                raise ValueError(
+                    "current_row_indices require rank-1 current_mid_A shape "
+                    "(U, Nt) and footprint_mV_per_A shape (B, Nx)."
+                )
+            if current_shape[0] < 1:
+                raise ValueError("compressed current_mid_A must contain at least one pattern.")
+            if indices_shape != (batch_size,):
+                raise ValueError(
+                    "current_row_indices must have shape (B,) matching footprint_mV_per_A, "
+                    f"got {indices_shape} and {footprint_shape}."
+                )
+        elif len(current_shape) == 2 and current_shape[0] != batch_size:
             raise ValueError(
                 "current_mid_A batch size must match footprint_mV_per_A, "
                 f"got {current_shape} and {footprint_shape}."
@@ -144,7 +163,9 @@ class FactorizedExtracellularPotentialBatch:
                 f"got {current_shape} and {footprint_shape}."
             )
         if self.current_initial_previous_A is not None:
-            if len(footprint_shape) == 3:
+            if self.current_row_indices is not None:
+                valid_previous_shapes = {(current_shape[0],), (batch_size,)}
+            elif len(footprint_shape) == 3:
                 valid_previous_shapes = {(batch_size, drive_count)}
             else:
                 valid_previous_shapes = {(), (batch_size,)}
@@ -212,6 +233,9 @@ def materialize_factorized_extracellular_potential_batch(
         if current_mid_A.ndim == 1:
             current = current_mid_A[None, :, None]
         else:
+            if batch.current_row_indices is not None:
+                row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+                current_mid_A = jnp.take(current_mid_A, row_indices, axis=0)
             current = current_mid_A[:, :, None]
         return current * footprint[:, None, :]
     if current_mid_A.ndim != 3:
@@ -232,6 +256,14 @@ def materialize_factorized_extracellular_potential_initial_previous(
         if current_previous_A.ndim == 0:
             current = current_previous_A
         else:
+            if batch.current_row_indices is not None:
+                row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+                if current_previous_A.shape[0] != footprint.shape[0]:
+                    current_previous_A = jnp.take(
+                        current_previous_A,
+                        row_indices,
+                        axis=0,
+                    )
             current = current_previous_A[:, None]
         return current * footprint
     if current_previous_A.ndim != 2:

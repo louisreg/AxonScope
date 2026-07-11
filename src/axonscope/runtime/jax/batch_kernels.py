@@ -4279,6 +4279,9 @@ def _factorized_current_mid_rows(
     if current.ndim == 1:
         return jnp.broadcast_to(current[None, None, :], (batch_size, 1, current.shape[0]))
     if current.ndim == 2:
+        if batch.current_row_indices is not None:
+            row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+            current = jnp.take(current, row_indices, axis=0)
         return current[:, None, :]
     if current.ndim == 3:
         return current
@@ -5600,6 +5603,11 @@ def _as_factorized_extracellular_potential_batch(
         if values.current_initial_previous_A is None
         else jnp.asarray(values.current_initial_previous_A, dtype=dtype_local)
     )
+    current_row_indices = (
+        None
+        if values.current_row_indices is None
+        else jnp.asarray(values.current_row_indices, dtype=jnp.int32)
+    )
     footprint_mV_per_A = jnp.asarray(values.footprint_mV_per_A, dtype=dtype_local)
     forcing_footprint_mV_per_A = (
         None
@@ -5620,18 +5628,33 @@ def _as_factorized_extracellular_potential_batch(
     batch_size = int(footprint_mV_per_A.shape[0])
     drive_count = 1 if footprint_mV_per_A.ndim == 2 else int(footprint_mV_per_A.shape[1])
     if footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 1:
+        if current_row_indices is not None:
+            raise ValueError(f"{name}.current_row_indices require current_mid_A shape (U, Nt).")
         if current_mid_A.shape != (nt,):
             raise ValueError(
                 f"{name}.current_mid_A must have shape (Nt,)=({nt},), "
                 f"got {current_mid_A.shape}."
             )
     elif footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 2:
-        if current_mid_A.shape != (batch_size, nt):
+        if current_row_indices is None:
+            valid_current = current_mid_A.shape == (batch_size, nt)
+            expected = f"(B, Nt)=({batch_size}, {nt})"
+        else:
+            valid_current = (
+                current_mid_A.shape[1] == nt
+                and current_row_indices.shape == (batch_size,)
+                and current_mid_A.shape[0] >= 1
+            )
+            expected = f"(U, Nt) with current_row_indices (B,), Nt={nt}, B={batch_size}"
+        if not valid_current:
             raise ValueError(
-                f"{name}.current_mid_A must have shape (B, Nt)="
-                f"({batch_size}, {nt}), got {current_mid_A.shape}."
+                f"{name}.current_mid_A must have shape {expected}, "
+                f"got current={current_mid_A.shape} and "
+                f"indices={None if current_row_indices is None else current_row_indices.shape}."
             )
     elif footprint_mV_per_A.ndim == 3 and current_mid_A.ndim == 3:
+        if current_row_indices is not None:
+            raise ValueError(f"{name}.current_row_indices are only valid for rank-1 batches.")
         if current_mid_A.shape != (batch_size, drive_count, nt):
             raise ValueError(
                 f"{name}.current_mid_A must have shape (B, K, Nt)="
@@ -5643,12 +5666,17 @@ def _as_factorized_extracellular_potential_batch(
             f"with footprint shape {footprint_mV_per_A.shape}."
         )
     if current_initial_previous_A is not None:
-        if footprint_mV_per_A.ndim == 2:
-            valid_previous = (
-                current_initial_previous_A.ndim == 0
-                or current_initial_previous_A.shape == (batch_size,)
+        if footprint_mV_per_A.ndim == 2 and current_row_indices is None:
+            valid_previous = current_initial_previous_A.ndim == 0 or (
+                current_initial_previous_A.shape == (batch_size,)
             )
             expected = f"scalar or (B,)=({batch_size},)"
+        elif footprint_mV_per_A.ndim == 2:
+            valid_previous = current_initial_previous_A.shape in {
+                (int(current_mid_A.shape[0]),),
+                (batch_size,),
+            }
+            expected = f"(U,) or (B,), U={int(current_mid_A.shape[0])}, B={batch_size}"
         else:
             valid_previous = current_initial_previous_A.shape == (batch_size, drive_count)
             expected = f"(B, K)=({batch_size}, {drive_count})"
@@ -5664,6 +5692,7 @@ def _as_factorized_extracellular_potential_batch(
         current_initial_previous_A=current_initial_previous_A,
         static_footprint_key=values.static_footprint_key,
         single_cable_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
+        current_row_indices=current_row_indices,
     )
 
 

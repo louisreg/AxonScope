@@ -1395,6 +1395,60 @@ def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path)
     assert metadata["vstim_temporal_previous_cache_misses"] == 1
 
 
+def test_factorized_vstim_lowers_repeated_row_specific_currents_by_unique_index(
+    tmp_path,
+):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    rows = []
+    for amplitude in (10e-6, 5e-6, 10e-6, 5e-6):
+        stimulus = Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=amplitude,
+        ).as_unit("ampere")
+        rows.append((stimulation.replace_drive(drive.id, stimulus=stimulus),))
+
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.extracellular"):
+            batch = build_factorized_vstim_midpoint_batch(
+                axon,
+                rows,
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+                include_initial_previous=True,
+            )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert batch is not None
+    current = np.asarray(batch.current_mid_A)
+    assert current.shape == (2, 2)
+    assert np.asarray(batch.current_initial_previous_A).shape == (2,)
+    np.testing.assert_array_equal(np.asarray(batch.current_row_indices), [0, 1, 0, 1])
+    assert batch.shared_current is False
+    assert not np.array_equal(current[0], current[1])
+    materialized = np.asarray(materialize_factorized_extracellular_potential_batch(batch))
+    assert materialized.shape == (4, 2, 11)
+
+    assert report is not None
+    extracellular_event = next(
+        event for event in report.events if event.name == "inputs.extracellular"
+    )
+    metadata = extracellular_event.metadata
+    assert metadata["shared_current"] is False
+    assert metadata["vstim_current_rows_lowering"] == "unique_index"
+    assert metadata["vstim_temporal_unique_patterns"] == 2
+    assert metadata["vstim_temporal_cache_hits"] == 2
+    assert metadata["vstim_temporal_cache_misses"] == 2
+    assert metadata["vstim_temporal_previous_cache_hits"] == 2
+    assert metadata["vstim_temporal_previous_cache_misses"] == 2
+
+
 def test_batch_runtime_cache_separates_backend_context_scope():
     pool = [
         _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0),

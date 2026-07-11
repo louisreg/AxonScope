@@ -2377,6 +2377,37 @@ stay as one JAX tridiagonal route.
   repeat-pool reuse, warm repeat `curve.simulate` is about `1.40 s` for six
   simulations and `kernel.wait` about `1.25 s` (~89%). This is local
   bottleneck cartography, not a final CPU/GPU solver-policy decision.
+- [x] Validate the single-cable different-diameter hotpath cleanup on Kaggle
+  P100 CPU/GPU at commit `87b22c4`. Artifacts:
+  `benchmark/results/kaggle/20260711_132558_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-single-hotpath-gpu-87b22c4/outputs/extracted`
+  and
+  `benchmark/results/kaggle/20260711_132629_single_cable_solver_policy_gpu_smoke_cpu_NvidiaTeslaP100_axonscope-p11e-single-hotpath-cpu-87b22c4/outputs/extracted`.
+  Both passed 2/2 rows for `threshold_curves`, observer-only,
+  different diameters, fp32, `Nx=89`, `Naxons=1024/4096`, repeat-pool reuse.
+  CPU warm repeats are kernel-bound (`kernel.wait` about 94-95% of
+  `curve.simulate`). GPU now wins the warm curve by about 10.3x at
+  `Naxons=1024` and 14.7x at `Naxons=4096`, but is not yet kernel-bound:
+  `kernel.wait` is about 12-21% of warm `curve.simulate`, with remaining cost
+  mainly in `inputs.extracellular`, `kernel.finalize_observer`, and GPU enqueue
+  plumbing. Next single-cable cleanup should target row-specific factorized
+  current lowering before any low-level single-cable solver work.
+- [x] Start the row-specific factorized-current cleanup without changing solver
+  policy. Rank-1 factorized extracellular batches can now represent repeated
+  row-specific temporal currents as unique current patterns plus row indices,
+  so threshold/recruitment bisection can transfer `U*Nt + B` instead of
+  `B*Nt` current samples when many axons share the same amplitude. The shared
+  rank-1 path remains unchanged for double-cable compact observer-only runs.
+  Local CPU evidence:
+  `benchmark/results/p11e_single_row_current_compressed_local` shows bisection
+  events with `vstim_current_rows_lowering=unique_index`, only 3/5/6 temporal
+  patterns for `Naxons=1024`, and compressed current payloads of about
+  `1.2-2.4 KB` plus `4 KB` indices. The same local run shows
+  `kernel.finalize_observer.to_host` at about `0.36 ms` total for 12
+  simulations; the visible `kernel.finalize_observer` span is almost entirely
+  `kernel.wait`. Double-cable smoke
+  `benchmark/results/p11e_double_cable_smoke_after_current_compression`
+  stays on `shared_rank1` with no compressed indices. Validate on P100 before
+  making a GPU timing claim.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 

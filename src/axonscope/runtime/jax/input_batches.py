@@ -118,6 +118,97 @@ def _stimulus_temporal_cache_key(stimulus: Stimulus) -> tuple[Any, ...]:
     )
 
 
+@dataclass(frozen=True)
+class _Rank1CurrentRows:
+    current_mid_A: np.ndarray
+    current_initial_previous_A: Any | None
+    current_row_indices: np.ndarray | None
+    shared_current: bool
+    temporal_mid_cache_hits: int
+    temporal_mid_cache_misses: int
+    temporal_previous_cache_hits: int
+    temporal_previous_cache_misses: int
+
+
+def _build_rank1_current_rows_from_unique_stimuli(
+    drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
+    t_ms: np.ndarray,
+    *,
+    t_initial_previous_ms: np.ndarray | None,
+    np_dtype: np.dtype[Any],
+) -> _Rank1CurrentRows | None:
+    if not drive_rows or not all(len(row) == 1 for row in drive_rows):
+        return None
+
+    inverse_indices = np.empty((len(drive_rows),), dtype=np.intp)
+    key_to_unique_index: dict[tuple[Any, ...], int] = {}
+    unique_stimuli: list[Stimulus] = []
+    for row_index, row in enumerate(drive_rows):
+        stimulus = row[0][2]
+        key = _stimulus_temporal_cache_key(stimulus)
+        unique_index = key_to_unique_index.get(key)
+        if unique_index is None:
+            unique_index = len(unique_stimuli)
+            key_to_unique_index[key] = unique_index
+            unique_stimuli.append(stimulus)
+        inverse_indices[row_index] = unique_index
+
+    unique_current_mid_A = np.stack(
+        [
+            np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+            for stimulus in unique_stimuli
+        ],
+        axis=0,
+    )
+    unique_count = int(unique_current_mid_A.shape[0])
+    temporal_hits = int(len(drive_rows) - unique_count)
+    temporal_misses = unique_count
+
+    unique_previous_A = None
+    if t_initial_previous_ms is not None:
+        unique_previous_A = np.asarray(
+            [
+                np.asarray(
+                    stimulus.evaluate(t_initial_previous_ms, unit="ampere"),
+                    dtype=np_dtype,
+                ).reshape(-1)[0]
+                for stimulus in unique_stimuli
+            ],
+            dtype=np_dtype,
+        )
+
+    if unique_count == 1:
+        current_mid_A = unique_current_mid_A[0]
+        current_previous_A = (
+            None if unique_previous_A is None else np.asarray(unique_previous_A[0])
+        )
+        shared_current = True
+    else:
+        current_mid_A = np.ascontiguousarray(unique_current_mid_A, dtype=np_dtype)
+        current_previous_A = (
+            None if unique_previous_A is None else np.ascontiguousarray(unique_previous_A)
+        )
+        current_row_indices = np.ascontiguousarray(inverse_indices, dtype=np.int32)
+        shared_current = False
+    if unique_count == 1:
+        current_row_indices = None
+
+    return _Rank1CurrentRows(
+        current_mid_A=current_mid_A,
+        current_initial_previous_A=current_previous_A,
+        current_row_indices=current_row_indices,
+        shared_current=shared_current,
+        temporal_mid_cache_hits=temporal_hits,
+        temporal_mid_cache_misses=temporal_misses,
+        temporal_previous_cache_hits=(
+            0 if t_initial_previous_ms is None else temporal_hits
+        ),
+        temporal_previous_cache_misses=(
+            0 if t_initial_previous_ms is None else temporal_misses
+        ),
+    )
+
+
 def build_vstim_midpoint_batch(
     axon: object,
     stimulations_batch: Sequence[StimulationBatchRow],
@@ -1034,6 +1125,8 @@ def _try_build_factorized_footprint_vstim_batch(
     temporal_mid_cache_misses = 0
     temporal_previous_cache_hits = 0
     temporal_previous_cache_misses = 0
+    current_rows_lowering = "none"
+    current_row_indices = None
 
     if has_shared_rank1_stimulus:
         stimulus = drive_rows[0][0][2]
@@ -1049,6 +1142,31 @@ def _try_build_factorized_footprint_vstim_batch(
             temporal_previous_cache_hits = max(batch_size - 1, 0)
             temporal_previous_cache_misses = 1
         shared_current = True
+        current_rows_lowering = "shared_rank1"
+    elif max_drive_count == 1:
+        rank1_current_rows = _build_rank1_current_rows_from_unique_stimuli(
+            drive_rows,
+            t_ms,
+            t_initial_previous_ms=t_initial_previous_ms,
+            np_dtype=np_dtype,
+        )
+        if rank1_current_rows is None:
+            return None
+        current_A = rank1_current_rows.current_mid_A
+        current_initial_previous_A = rank1_current_rows.current_initial_previous_A
+        current_row_indices = rank1_current_rows.current_row_indices
+        shared_current = rank1_current_rows.shared_current
+        temporal_mid_cache_hits = rank1_current_rows.temporal_mid_cache_hits
+        temporal_mid_cache_misses = rank1_current_rows.temporal_mid_cache_misses
+        temporal_previous_cache_hits = (
+            rank1_current_rows.temporal_previous_cache_hits
+        )
+        temporal_previous_cache_misses = (
+            rank1_current_rows.temporal_previous_cache_misses
+        )
+        if shared_current and shared_rank1_detection == "none":
+            shared_rank1_detection = "content"
+        current_rows_lowering = "unique_index"
     else:
         current_rows_A = np.zeros(
             (batch_size, max_drive_count, int(t_ms.shape[0])),
@@ -1085,32 +1203,10 @@ def _try_build_factorized_footprint_vstim_batch(
                         previous_values_A.reshape(-1)[0]
                     )
 
-        if max_drive_count == 1:
-            current_rows_1d_A = current_rows_A[:, 0, :]
-            shared_mid_current = all(
-                np.array_equal(current_rows_1d_A[0], row)
-                for row in current_rows_1d_A[1:]
-            )
-            previous_rows_1d_A = (
-                None if previous_rows_A is None else previous_rows_A[:, 0]
-            )
-            shared_previous_current = previous_rows_1d_A is None or all(
-                np.array_equal(previous_rows_1d_A[0], row)
-                for row in previous_rows_1d_A[1:]
-            )
-            shared_current = shared_mid_current and shared_previous_current
-            current_A = current_rows_1d_A[0] if shared_current else current_rows_1d_A
-            current_initial_previous_A = None
-            if previous_rows_1d_A is not None:
-                current_initial_previous_A = (
-                    np.asarray(previous_rows_1d_A[0], dtype=np_dtype)
-                    if shared_current
-                    else previous_rows_1d_A
-                )
-        else:
-            shared_current = False
-            current_A = current_rows_A
-            current_initial_previous_A = previous_rows_A
+        shared_current = False
+        current_A = current_rows_A
+        current_initial_previous_A = previous_rows_A
+        current_rows_lowering = "row_loop"
 
     dense_equivalent_nbytes = (
         int(len(rows_tuple))
@@ -1123,8 +1219,14 @@ def _try_build_factorized_footprint_vstim_batch(
         if current_initial_previous_A is None
         else int(np.asarray(current_initial_previous_A).nbytes)
     )
+    current_indices_nbytes = (
+        0 if current_row_indices is None else int(current_row_indices.nbytes)
+    )
     factorized_nbytes = (
-        int(current_A.nbytes) + int(footprint_mV_per_A.nbytes) + previous_nbytes
+        int(current_A.nbytes)
+        + int(footprint_mV_per_A.nbytes)
+        + previous_nbytes
+        + current_indices_nbytes
     )
     record_benchmark_metadata(
         vstim_footprint_cache=footprint_cache_status,
@@ -1133,6 +1235,7 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_factorized_rank=int(max_drive_count),
         vstim_factorized_current_nbytes=int(current_A.nbytes),
         vstim_factorized_initial_previous_nbytes=previous_nbytes,
+        vstim_factorized_current_indices_nbytes=current_indices_nbytes,
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
@@ -1143,6 +1246,8 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_temporal_previous_cache_hits=int(temporal_previous_cache_hits),
         vstim_temporal_previous_cache_misses=int(temporal_previous_cache_misses),
         vstim_temporal_unique_stimuli=int(temporal_mid_cache_misses),
+        vstim_temporal_unique_patterns=int(temporal_mid_cache_misses),
+        vstim_current_rows_lowering=current_rows_lowering,
         vstim_footprint_mv_cache=footprint_mV_cache_status,
         vstim_factorized_identity_cache="hit" if plan is not None else "miss",
         vstim_factorized_dense_ratio=(
@@ -1166,6 +1271,11 @@ def _try_build_factorized_footprint_vstim_batch(
             else jnp.asarray(current_initial_previous_A, dtype=dtype_local)
         ),
         static_footprint_key=footprint_cache_key,
+        current_row_indices=(
+            None
+            if current_row_indices is None
+            else jnp.asarray(current_row_indices, dtype=jnp.int32)
+        ),
     )
 
 
