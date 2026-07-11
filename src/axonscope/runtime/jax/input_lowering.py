@@ -50,9 +50,7 @@ JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
     cable="double-cable",
     supports_zero=True,
     supports_shared_current=True,
-    # The shared contract includes scaled waveforms for double-cable too, but
-    # the current compact JAX route is only validated for shared-current rank-1.
-    supports_scaled_shared_waveform=False,
+    supports_scaled_shared_waveform=True,
     supports_current_table=False,
     supports_dense_fallback=True,
     requires_initial_previous=True,
@@ -260,10 +258,10 @@ def lower_double_cable_extracellular_input(
 ) -> LoweredExtracellularInput:
     """Lower double-cable extracellular inputs.
 
-    Double-cable currently keeps compact factorized execution only for the
-    existing shared-current rank-1 path. Rank-K and row-specific currents are
-    explicitly materialized as dense until that solver path has equivalence and
-    benchmark coverage.
+    Double-cable prefers the compact factorized representation for rank-1
+    shared currents and scaled shared waveforms. Rank-K/current-table inputs
+    are explicitly materialized as dense until that solver path has equivalence
+    and benchmark coverage.
     """
 
     from axonscope.runtime.jax.input_batches import (
@@ -271,27 +269,26 @@ def lower_double_cable_extracellular_input(
         build_vstim_midpoint_and_initial_previous_batch,
     )
 
-    if observer_plan is not None and kernel_options.recording.mode == "none":
-        factorized = build_factorized_vstim_midpoint_batch(
-            cohort.representative,
-            cohort.stimulations,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            x_positions_m=cohort.x_positions_m,
-            axon_y_um=cohort.axon_y_um,
-            axon_z_um=cohort.axon_z_um,
-            dtype_local=runtime.membrane.dtype,
-            include_initial_previous=True,
+    factorized = build_factorized_vstim_midpoint_batch(
+        cohort.representative,
+        cohort.stimulations,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        x_positions_m=cohort.x_positions_m,
+        axon_y_um=cohort.axon_y_um,
+        axon_z_um=cohort.axon_z_um,
+        dtype_local=runtime.membrane.dtype,
+        include_initial_previous=True,
+    )
+    if factorized is not None and supports_compact_double_cable_factorized(
+        factorized
+    ):
+        return LoweredExtracellularInput(
+            format="factorized_footprint",
+            midpoint=factorized,
+            mode=_factorized_extracellular_mode(factorized),
+            capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
         )
-        if factorized is not None and supports_compact_double_cable_factorized(
-            factorized
-        ):
-            return LoweredExtracellularInput(
-                format="factorized_footprint",
-                midpoint=factorized,
-                mode=_factorized_extracellular_mode(factorized),
-                capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
-            )
 
     midpoint, initial_previous = build_vstim_midpoint_and_initial_previous_batch(
         cohort.representative,
@@ -307,7 +304,7 @@ def lower_double_cable_extracellular_input(
         format="dense",
         midpoint=midpoint,
         initial_previous=initial_previous,
-        dense_fallback_reason="double_cable_requires_dense_or_rank1_shared_compact",
+        dense_fallback_reason="unsupported_double_cable_factorized_mode",
         mode=ExtracellularLoweringMode.DENSE,
         capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
     )
@@ -471,11 +468,16 @@ def supports_compact_double_cable_factorized(
     if previous is None:
         return False
     mode = _factorized_extracellular_mode(factorized)
-    return bool(
-        JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES.supports(mode)
-        and factorized.shared_current
-        and jnp.asarray(previous).ndim == 0
-    )
+    if not JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES.supports(mode):
+        return False
+    if factorized.drive_count != 1:
+        return False
+    previous_is_scalar = jnp.asarray(previous).ndim == 0
+    if factorized.shared_current:
+        return bool(previous_is_scalar)
+    if factorized.current_row_scales is not None:
+        return bool(previous_is_scalar)
+    return False
 
 
 def _factorized_extracellular_mode(

@@ -929,6 +929,61 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert components["vstim_previous"] < 2 * 11 * 8
 
 
+def test_run_pool_double_cable_probe_prefers_scaled_factorized_vstim(tmp_path):
+    electrode = PointSourceElectrode(
+        x=50.0 * axs.um,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+    )
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1, compartments=11),
+        _passive_double_cable_axon(amp_nA=0.2, compartments=11),
+    ]
+    for axon, amplitude in zip(axons, (10e-6, 5e-6), strict=True):
+        axon.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
+                stimulus=Stimulus.pulse(
+                    start=0.0 * axs.ms,
+                    duration=0.05 * axs.ms,
+                    amplitude=amplitude,
+                ),
+                sigma=0.3 * axs.S_per_m,
+            )
+        )
+
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        result = run_pool(
+            axons,
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert result[0].Vm is not None
+    assert report is not None
+    extracellular_event = next(
+        event for event in report.events if event.name == "inputs.extracellular"
+    )
+    metadata = extracellular_event.metadata
+    assert metadata["input_format"] == "factorized_footprint"
+    assert metadata["input_lowering_mode"] == "scaled_shared_waveform"
+    assert metadata["input_lowering_capability_supports_scaled_shared_waveform"] is True
+    assert metadata["dense_vstim_avoided"] is True
+    assert metadata["scaled_shared_waveform"] is True
+    assert metadata["vstim_current_rows_lowering"] == "scaled_shared_waveform"
+    assert "vstim_mid" not in metadata
+    prepare_events = [
+        event for event in report.events if event.name == "kernel.prepare_arrays"
+    ]
+    assert any(event.metadata.get("factorized_vext") is True for event in prepare_events)
+
+
 def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_drive():
     def with_second_drive(axon):
         stimulation = axon.extracellular_stimulation

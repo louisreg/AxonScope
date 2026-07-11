@@ -758,6 +758,84 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
     )
 
 
+def test_single_cable_factorized_observer_avoids_dense_vstim_materialization(monkeypatch):
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=False,
+        include_area=False,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_stimulations = tuple(axon.extracellular_stimulations)
+    stimulation_batch = [base_stimulations, base_stimulations]
+    dense = build_vstim_midpoint_batch(
+        axon,
+        stimulation_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        stimulation_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    assert factorized is not None
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    iinj = jnp.zeros(
+        (2, runtime.grid.Nt, runtime.membrane.Nx),
+        dtype=runtime.membrane.dtype,
+    )
+    kernel = SingleCableVStimBatchKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
+        has_driven_extracellular=True,
+    )
+    dense_out = kernel.run(
+        extracellular_potential_mid_mV=dense,
+        intracellular_current_density_mid=iinj,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+
+    def fail_materialize(*_args, **_kwargs):
+        raise AssertionError("factorized observer path materialized dense Vstim")
+
+    monkeypatch.setattr(
+        batch_kernels,
+        "materialize_factorized_extracellular_potential_batch",
+        fail_materialize,
+    )
+    factorized_out = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        intracellular_current_density_mid=iinj,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+
+    dense_observations = _kernel_observations(dense_out)
+    factorized_observations = _kernel_observations(factorized_out)
+    np.testing.assert_array_equal(
+        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
 def test_single_cable_factorized_recorded_vm_avoids_dense_vstim_materialization(monkeypatch):
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
@@ -1439,6 +1517,96 @@ def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr
     np.testing.assert_array_equal(
         np.asarray(compact_observations[VM_RASTER_OBSERVATION_KEY].words),
         np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
+@pytest.mark.parametrize("solver", ["thomas", "pcr_soa"])
+def test_double_cable_scaled_factorized_probe_vm_avoids_dense_vstim_materialization(
+    monkeypatch,
+    solver,
+):
+    axon = _hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    stimulation = axon.extracellular_stimulations[0]
+    stimulations = [
+        scale_extracellular_stimulations((stimulation,), 1.0),
+        scale_extracellular_stimulations((stimulation,), 0.5),
+    ]
+    dense_mid = build_vstim_midpoint_batch(
+        axon,
+        stimulations,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    dense_previous = build_vstim_initial_previous_batch(
+        axon,
+        stimulations,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        stimulations,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+    assert factorized.scaled_shared_waveform is True
+
+    if solver == "pcr_soa":
+        monkeypatch.setattr(
+            batch_kernels,
+            "_DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH",
+            1,
+        )
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+    options = BatchOptions(
+        recording=BatchRecording.indices([axon.n_compartments // 2]),
+        time_chunk_steps=17,
+    )
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=options,
+        double_cable_block_solver=solver,
+    )
+
+    def fail_materialize(*_args, **_kwargs):
+        raise AssertionError("double-cable compact probe path materialized dense Vstim")
+
+    monkeypatch.setattr(
+        batch_kernels,
+        "materialize_factorized_extracellular_potential_batch",
+        fail_materialize,
+    )
+    monkeypatch.setattr(
+        batch_kernels,
+        "materialize_factorized_extracellular_potential_initial_previous",
+        fail_materialize,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        options=options,
+        double_cable_block_solver=solver,
+    )
+
+    assert dense.Vm is not None
+    assert compact.Vm is not None
+    np.testing.assert_allclose(
+        np.asarray(compact.Vm),
+        np.asarray(dense.Vm),
+        atol=1e-3,
+        rtol=0.0,
     )
 
 
