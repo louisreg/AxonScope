@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-10 during the P11 non-solver GPU hotpath cleanup.
+Updated on 2026-07-11 during the P11E single-cable hotpath cleanup.
 
 Current state:
 
@@ -2363,6 +2363,20 @@ stay as one JAX tridiagonal route.
   device/kernel-shaped but not pure solver-bound. Different-diameter rows are
   dominated by grouping/orchestration/enqueue and should not be treated as a
   single-cable solver optimization target.
+- [x] Reduce the local single-cable different-diameter observer-only hotpath
+  enough to make the warm route mostly kernel-bound before deciding whether a
+  solver optimization pass is useful. The threshold curve workload now keeps
+  row-local mutable stimuli for single-cable different-diameter bisection
+  updates, preserving one dispatch group as amplitudes diverge. The JAX runtime
+  now caches row-specific `Cm_uF_cm2` stacks for stable parameter-batch groups.
+  Local CPU evidence:
+  `benchmark/results/p11_single_local_kernel_bound_before`,
+  `benchmark/results/p11_single_local_kernel_bound_after`,
+  `benchmark/results/p11_single_local_kernel_bound_after_n1024_cmcache`.
+  On `Naxons=1024`, `Nx=89`, observer-only, fp32, `tsim=2 ms`, `dt=0.02 ms`,
+  repeat-pool reuse, warm repeat `curve.simulate` is about `1.40 s` for six
+  simulations and `kernel.wait` about `1.25 s` (~89%). This is local
+  bottleneck cartography, not a final CPU/GPU solver-policy decision.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 

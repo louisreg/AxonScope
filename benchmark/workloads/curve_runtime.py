@@ -93,6 +93,7 @@ class _DriveUpdateHandle:
     instance: axs.AxonInstance
     drive_id: Any
     footprint: Any
+    stimulus: Any
     metadata: Any
 
 
@@ -712,9 +713,6 @@ def _update_pool_amplitudes(
         raise RuntimeError("benchmark phase pool has inconsistent update handles.")
     unique_amplitudes = np.unique(amplitudes)
     stimulus_cache: dict[float, Any] = {}
-    stimulation_cache: dict[tuple[int, int], Any] = {}
-    stimulation_cache_hits = 0
-    stimulation_cache_misses = 0
     with benchmark_span(
         "curve.update_amplitudes.rows",
         n_axons=len(pool),
@@ -743,6 +741,43 @@ def _update_pool_amplitudes(
 
         if phase_pool.shared_stimulus is not None:
             phase_pool.shared_stimulus.active = False
+        if len({id(handle.stimulus) for handle in handles}) != len(handles):
+            stimulation_cache: dict[tuple[int, int], Any] = {}
+            stimulation_cache_hits = 0
+            stimulation_cache_misses = 0
+            for handle, amplitude in zip(handles, amplitudes, strict=True):
+                amplitude_key = float(amplitude)
+                stimulus = stimulus_cache.get(amplitude_key)
+                if stimulus is None:
+                    with benchmark_span("curve.update_amplitudes.stimulus_build"):
+                        stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                    stimulus_cache[amplitude_key] = stimulus
+                cache_key = (id(handle.footprint), id(stimulus))
+                updated = stimulation_cache.get(cache_key)
+                if updated is None:
+                    stimulation_cache_misses += 1
+                    updated = _point_source_stimulation_from_footprint(
+                        handle.footprint,
+                        stimulus=stimulus,
+                        drive_id=handle.drive_id,
+                        metadata=handle.metadata,
+                    )
+                    stimulation_cache[cache_key] = updated
+                else:
+                    stimulation_cache_hits += 1
+                handle.instance.add_extracellular_stimulation(
+                    stimulation=updated,
+                    replace=True,
+                )
+            record_benchmark_metadata(
+                curve_update_mode="row_stimulations",
+                curve_update_python_row_updates=int(len(pool)),
+                curve_update_stimulation_cache_hits=int(stimulation_cache_hits),
+                curve_update_stimulation_cache_misses=int(stimulation_cache_misses),
+                curve_update_unique_stimulations=int(len(stimulation_cache)),
+            )
+            return
+
         for handle, amplitude in zip(handles, amplitudes, strict=True):
             amplitude_key = float(amplitude)
             stimulus = stimulus_cache.get(amplitude_key)
@@ -750,29 +785,18 @@ def _update_pool_amplitudes(
                 with benchmark_span("curve.update_amplitudes.stimulus_build"):
                     stimulus = _stimulus_for_amplitude(options, amplitude_key)
                 stimulus_cache[amplitude_key] = stimulus
-            cache_key = (id(handle.footprint), id(stimulus))
-            updated = stimulation_cache.get(cache_key)
-            if updated is None:
-                stimulation_cache_misses += 1
-                updated = _point_source_stimulation_from_footprint(
-                    handle.footprint,
-                    stimulus=stimulus,
-                    drive_id=handle.drive_id,
-                    metadata=handle.metadata,
-                )
-                stimulation_cache[cache_key] = updated
-            else:
-                stimulation_cache_hits += 1
-            handle.instance.add_extracellular_stimulation(
-                stimulation=updated,
-                replace=True,
-            )
+            _copy_stimulus_state(target=handle.stimulus, source=stimulus)
         record_benchmark_metadata(
-            curve_update_mode="row_stimulations",
+            curve_update_mode="row_stimulus_mutation",
             curve_update_python_row_updates=int(len(pool)),
-            curve_update_stimulation_cache_hits=int(stimulation_cache_hits),
-            curve_update_stimulation_cache_misses=int(stimulation_cache_misses),
-            curve_update_unique_stimulations=int(len(stimulation_cache)),
+            curve_update_stimulation_cache_hits=0,
+            curve_update_stimulation_cache_misses=0,
+            curve_update_unique_stimulations=int(
+                len({id(instance.extracellular_stimulation) for instance in pool})
+            ),
+            curve_update_unique_stimuli=int(
+                len({id(handle.stimulus) for handle in handles})
+            ),
         )
 
 
@@ -826,11 +850,12 @@ def _build_pool(
     footprint_cache: dict[tuple[Any, ...], Any] = {}
     stimulation_cache: dict[tuple[int, int], Any] = {}
     unique_initial_amplitudes = np.unique(amplitudes)
+    row_local_stimuli = _use_row_local_stimuli(options, curve_context=curve_context)
     shared_stimulus = (
         _SharedStimulusHandle(
             _stimulus_for_amplitude(options, float(unique_initial_amplitudes[0]))
         )
-        if unique_initial_amplitudes.size == 1
+        if unique_initial_amplitudes.size == 1 and not row_local_stimuli
         else None
     )
     pool: list[axs.AxonInstance] = []
@@ -860,10 +885,13 @@ def _build_pool(
                 stimulus = shared_stimulus.stimulus
             else:
                 amplitude_key = float(amplitudes[row])
-                stimulus = stimulus_cache.get(amplitude_key)
-                if stimulus is None:
+                if row_local_stimuli:
                     stimulus = _stimulus_for_amplitude(options, amplitude_key)
-                    stimulus_cache[amplitude_key] = stimulus
+                else:
+                    stimulus = stimulus_cache.get(amplitude_key)
+                    if stimulus is None:
+                        stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                        stimulus_cache[amplitude_key] = stimulus
             stimulation = _point_source_stimulation_for_template(
                 template,
                 stimulus=stimulus,
@@ -882,6 +910,7 @@ def _build_pool(
                     instance=instance,
                     drive_id=drive.id,
                     footprint=drive.footprint,
+                    stimulus=drive.stimulus,
                     metadata=drive.metadata,
                 )
             )
@@ -905,6 +934,17 @@ def _build_pool(
             curve_build_shared_stimulus=shared_stimulus is not None,
         )
     return tuple(pool), tuple(row_meta), tuple(update_handles), shared_stimulus
+
+
+def _use_row_local_stimuli(options: dict[str, Any], *, curve_context: str) -> bool:
+    """Keep threshold single-cable rows batchable when amplitudes diverge."""
+
+    return (
+        curve_context == "threshold"
+        and options["cable"] == "single_cable"
+        and options["diameters"] == "different_diameters"
+        and options["population"] == "single_model"
+    )
 
 
 def _build_axon_template(

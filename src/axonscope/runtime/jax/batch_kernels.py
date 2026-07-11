@@ -4099,16 +4099,33 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             batch_size=batch_size,
         )
     Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
-    raster_probe_indices, raster_probe_mask = _vm_raster_probe_tables_for_kernel(
-        observers,
-        batch_size=batch_size,
-    )
-    chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
-    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
-        None,
+    with benchmark_span(
+        "kernel.prepare_observer_tables",
+        mode="single",
+        variant="factorized_sparse_vstim",
+        output="observer_only",
+        observer="vm_raster",
+        group_size=batch_size,
+    ):
+        raster_probe_indices, raster_probe_mask = _vm_raster_probe_tables_for_kernel(
+            observers,
+            batch_size=batch_size,
+        )
+    with benchmark_span(
+        "kernel.prepare_chunk_ranges",
+        mode="single",
+        variant="factorized_sparse_vstim",
+        output="observer_only",
+        observer="vm_raster",
+        nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
-    )
-    local_observer_chunks = resolved_observer_state_scope == "chunk"
+    ):
+        chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
+        resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+            None,
+            time_chunk_steps=time_chunk_steps,
+        )
+        local_observer_chunks = resolved_observer_state_scope == "chunk"
     observer_chunk_state_template = _init_local_vm_raster_chunk_template(
         observers,
         batch_size=batch_size,
@@ -4118,18 +4135,39 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         time_chunk_steps=time_chunk_steps,
         enabled=local_observer_chunks,
     )
-    observer_state = (
-        None
-        if local_observer_chunks
-        else init_vm_raster_state(observers, batch_size=batch_size, nt=grid.Nt)
-    )
+    if local_observer_chunks:
+        observer_state = None
+    else:
+        with benchmark_span(
+            "kernel.prepare_observer_state",
+            mode="single",
+            variant="factorized_sparse_vstim",
+            output="observer_only",
+            observer="vm_raster",
+            group_size=batch_size,
+            nt=grid.Nt,
+            time_chunk_steps=time_chunk_steps,
+        ):
+            observer_state = init_vm_raster_state(
+                observers,
+                batch_size=batch_size,
+                nt=grid.Nt,
+            )
     observer_chunk_states: list[VmRasterState] = []
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
-    current_mid_A = jnp.asarray(
-        current_rows_mid_A,
-        dtype=dtype_local,
-    )
+    with benchmark_span(
+        "kernel.prepare_factorized_current",
+        mode="single",
+        variant="factorized_sparse_vstim",
+        output="observer_only",
+        group_size=batch_size,
+        current_rank=getattr(current_rows_mid_A, "ndim", None),
+    ):
+        current_mid_A = jnp.asarray(
+            current_rows_mid_A,
+            dtype=dtype_local,
+        )
     forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint_for_batch(
         extracellular_potential_mid_mV,
         lower=lower,

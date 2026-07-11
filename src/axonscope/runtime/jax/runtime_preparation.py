@@ -110,6 +110,10 @@ _GROUP_RUNTIME_SIGNATURE_CACHE: OrderedDict[
     int,
     tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]],
 ] = OrderedDict()
+_GROUP_CM_CACHE: OrderedDict[
+    tuple[int, int, str],
+    tuple[weakref.ReferenceType[DispatchGroup], jnp.ndarray],
+] = OrderedDict()
 
 
 def representative_item(group: DispatchGroup) -> DispatchItem:
@@ -639,15 +643,39 @@ def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray
     """Return shared or row-specific membrane capacitance density arrays."""
 
     dtype_local = runtime.membrane.dtype
-    if group.geometry_shared:
-        return jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=dtype_local)
-    return jnp.stack(
-        [
-            jnp.asarray(item.solver_axon.Cm_uF_cm2, dtype=dtype_local)
-            for item in group.items
-        ],
-        axis=0,
-    )
+    with benchmark_span(
+        "kernel.prepare_cm",
+        mode=group.mode,
+        group_size=group.size,
+        geometry_shared=group.geometry_shared,
+        dtype=str(dtype_local),
+    ):
+        if group.geometry_shared:
+            record_benchmark_metadata(group_cm_cache="shared")
+            return jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=dtype_local)
+        cache_key = (id(group), id(runtime), str(dtype_local))
+        cached = _GROUP_CM_CACHE.get(cache_key)
+        if cached is not None:
+            ref, values = cached
+            if ref() is group:
+                _GROUP_CM_CACHE.move_to_end(cache_key)
+                record_benchmark_metadata(group_cm_cache="hit")
+                return values
+            _GROUP_CM_CACHE.pop(cache_key, None)
+
+        values = jnp.stack(
+            [
+                jnp.asarray(item.solver_axon.Cm_uF_cm2, dtype=dtype_local)
+                for item in group.items
+            ],
+            axis=0,
+        )
+        _GROUP_CM_CACHE[cache_key] = (weakref.ref(group), values)
+        _GROUP_CM_CACHE.move_to_end(cache_key)
+        while len(_GROUP_CM_CACHE) > _GROUP_SIGNATURE_CACHE_MAX_SIZE:
+            _GROUP_CM_CACHE.popitem(last=False)
+        record_benchmark_metadata(group_cm_cache="miss")
+        return values
 
 
 def _group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:

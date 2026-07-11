@@ -9,6 +9,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.dispatcher import build_dispatch_plan
+from axonscope.dispatcher.plan import dispatch_plan_identity_key
 from benchmark.campaigns.double_cable_solver_policy import (
     main as run_solver_policy_campaign,
 )
@@ -480,10 +481,30 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
         curve_context="threshold",
     )
     pool = phase_pool.pool
+    original_stimulation_ids = [
+        id(simulation.extracellular_stimulation)
+        for simulation in pool
+        if simulation.extracellular_stimulation is not None
+    ]
+    original_stimulus_ids = [
+        id(simulation.extracellular_stimulation.drives[0].stimulus)
+        for simulation in pool
+        if simulation.extracellular_stimulation is not None
+    ]
 
     _update_pool_amplitudes(phase_pool, np.asarray([0.3, 0.4], dtype=float), options)
 
     assert [meta["row"] for meta in row_meta] == [0, 1]
+    assert [
+        id(simulation.extracellular_stimulation)
+        for simulation in pool
+        if simulation.extracellular_stimulation is not None
+    ] == original_stimulation_ids
+    assert [
+        id(simulation.extracellular_stimulation.drives[0].stimulus)
+        for simulation in pool
+        if simulation.extracellular_stimulation is not None
+    ] == original_stimulus_ids
     currents = []
     for simulation in pool:
         stimulation = simulation.extracellular_stimulation
@@ -739,6 +760,61 @@ def test_curve_workload_dispatch_groups_require_same_temporal_stimulus():
     )
     plan = build_dispatch_plan(phase_pool.pool)
     assert sorted(group.size for group in plan.groups) == [1, 1, 1]
+
+
+def test_threshold_single_cable_row_local_stimuli_keep_one_dispatch_group():
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "3",
+            "--nx",
+            "5",
+            "--cable",
+            "single_cable",
+            "--diameters",
+            "different_diameters",
+            "--stimulation",
+            "monophasic",
+        ]
+    )
+    options = resolved_options(args)
+    phase_pool, _row_meta = _build_test_phase_pool(
+        options,
+        np.asarray([0.1, 0.1, 0.1], dtype=float),
+        curve_context="threshold",
+    )
+    assert phase_pool.shared_stimulus is None
+    assert len({id(handle.stimulus) for handle in phase_pool.update_handles}) == 3
+
+    plan = build_dispatch_plan(phase_pool.pool)
+    identity_key = dispatch_plan_identity_key(phase_pool.pool)
+    assert [group.size for group in plan.groups] == [3]
+
+    _update_pool_amplitudes(
+        phase_pool,
+        np.asarray([0.5, 0.6, 0.7], dtype=float),
+        options,
+    )
+
+    assert dispatch_plan_identity_key(phase_pool.pool) == identity_key
+    plan = build_dispatch_plan(phase_pool.pool)
+    assert [group.size for group in plan.groups] == [3]
+    currents = [
+        float(
+            np.asarray(
+                simulation.extracellular_stimulation.drives[0].stimulus.evaluate(
+                    [0.21],
+                    unit=axs.uA,
+                )
+            )[0]
+        )
+        for simulation in phase_pool.pool
+        if simulation.extracellular_stimulation is not None
+    ]
+    np.testing.assert_allclose(currents, [-0.5, -0.6, -0.7])
 
 
 def test_curve_workload_reuses_same_diameter_axon_templates():
