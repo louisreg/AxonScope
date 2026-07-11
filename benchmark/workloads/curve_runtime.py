@@ -64,6 +64,7 @@ class _PhasePool:
     row_meta: tuple[dict[str, Any], ...]
     update_handles: tuple["_DriveUpdateHandle", ...]
     shared_stimulus: "_SharedStimulusHandle | None" = None
+    stimulus_cache: dict[float, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,7 +547,7 @@ def _build_phase_pool(
         n_axons=int(options["n_axons"]),
         case_name=selected_case,
     ):
-        pool, row_meta, update_handles, shared_stimulus = _build_pool(
+        pool, row_meta, update_handles, shared_stimulus, stimulus_cache = _build_pool(
             options,
             amplitudes_uA,
             curve_context=curve_context,
@@ -556,6 +557,7 @@ def _build_phase_pool(
         row_meta=row_meta,
         update_handles=update_handles,
         shared_stimulus=shared_stimulus,
+        stimulus_cache=stimulus_cache,
     )
 
 
@@ -712,7 +714,11 @@ def _update_pool_amplitudes(
     if len(handles) != len(pool):
         raise RuntimeError("benchmark phase pool has inconsistent update handles.")
     unique_amplitudes = np.unique(amplitudes)
-    stimulus_cache: dict[float, Any] = {}
+    stimulus_cache: dict[float, Any] = (
+        phase_pool.stimulus_cache if phase_pool.stimulus_cache is not None else {}
+    )
+    stimulus_cache_hits = 0
+    stimulus_cache_misses = 0
     with benchmark_span(
         "curve.update_amplitudes.rows",
         n_axons=len(pool),
@@ -725,7 +731,14 @@ def _update_pool_amplitudes(
             and unique_amplitudes.size == 1
         ):
             with benchmark_span("curve.update_amplitudes.stimulus_build"):
-                stimulus = _stimulus_for_amplitude(options, float(unique_amplitudes[0]))
+                amplitude_key = float(unique_amplitudes[0])
+                stimulus = stimulus_cache.get(amplitude_key)
+                if stimulus is None:
+                    stimulus_cache_misses += 1
+                    stimulus = _stimulus_for_amplitude(options, amplitude_key)
+                    stimulus_cache[amplitude_key] = stimulus
+                else:
+                    stimulus_cache_hits += 1
             _copy_stimulus_state(
                 target=phase_pool.shared_stimulus.stimulus,
                 source=stimulus,
@@ -733,6 +746,8 @@ def _update_pool_amplitudes(
             record_benchmark_metadata(
                 curve_update_mode="shared_stimulus",
                 curve_update_python_row_updates=0,
+                curve_update_stimulus_cache_hits=int(stimulus_cache_hits),
+                curve_update_stimulus_cache_misses=int(stimulus_cache_misses),
                 curve_update_stimulation_cache_hits=int(len(pool)),
                 curve_update_stimulation_cache_misses=0,
                 curve_update_unique_stimulations=1,
@@ -749,9 +764,12 @@ def _update_pool_amplitudes(
                 amplitude_key = float(amplitude)
                 stimulus = stimulus_cache.get(amplitude_key)
                 if stimulus is None:
+                    stimulus_cache_misses += 1
                     with benchmark_span("curve.update_amplitudes.stimulus_build"):
                         stimulus = _stimulus_for_amplitude(options, amplitude_key)
                     stimulus_cache[amplitude_key] = stimulus
+                else:
+                    stimulus_cache_hits += 1
                 cache_key = (id(handle.footprint), id(stimulus))
                 updated = stimulation_cache.get(cache_key)
                 if updated is None:
@@ -772,6 +790,8 @@ def _update_pool_amplitudes(
             record_benchmark_metadata(
                 curve_update_mode="row_stimulations",
                 curve_update_python_row_updates=int(len(pool)),
+                curve_update_stimulus_cache_hits=int(stimulus_cache_hits),
+                curve_update_stimulus_cache_misses=int(stimulus_cache_misses),
                 curve_update_stimulation_cache_hits=int(stimulation_cache_hits),
                 curve_update_stimulation_cache_misses=int(stimulation_cache_misses),
                 curve_update_unique_stimulations=int(len(stimulation_cache)),
@@ -782,13 +802,18 @@ def _update_pool_amplitudes(
             amplitude_key = float(amplitude)
             stimulus = stimulus_cache.get(amplitude_key)
             if stimulus is None:
+                stimulus_cache_misses += 1
                 with benchmark_span("curve.update_amplitudes.stimulus_build"):
                     stimulus = _stimulus_for_amplitude(options, amplitude_key)
                 stimulus_cache[amplitude_key] = stimulus
+            else:
+                stimulus_cache_hits += 1
             _copy_stimulus_state(target=handle.stimulus, source=stimulus)
         record_benchmark_metadata(
             curve_update_mode="row_stimulus_mutation",
             curve_update_python_row_updates=int(len(pool)),
+            curve_update_stimulus_cache_hits=int(stimulus_cache_hits),
+            curve_update_stimulus_cache_misses=int(stimulus_cache_misses),
             curve_update_stimulation_cache_hits=0,
             curve_update_stimulation_cache_misses=0,
             curve_update_unique_stimulations=int(
@@ -810,6 +835,7 @@ def _build_pool(
     tuple[dict[str, Any], ...],
     tuple[_DriveUpdateHandle, ...],
     _SharedStimulusHandle | None,
+    dict[float, Any],
 ]:
     rng = np.random.default_rng(int(options["seed"]))
     n_axons = int(options["n_axons"])
@@ -933,7 +959,13 @@ def _build_pool(
             ),
             curve_build_shared_stimulus=shared_stimulus is not None,
         )
-    return tuple(pool), tuple(row_meta), tuple(update_handles), shared_stimulus
+    return (
+        tuple(pool),
+        tuple(row_meta),
+        tuple(update_handles),
+        shared_stimulus,
+        stimulus_cache,
+    )
 
 
 def _use_row_local_stimuli(options: dict[str, Any], *, curve_context: str) -> bool:

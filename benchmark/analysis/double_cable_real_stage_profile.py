@@ -449,7 +449,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         "amplitude_count": 1,
     }
     amplitudes = np.full(options["n_axons"], float(args.amplitude_uA), dtype=float)
-    pool, row_meta, _update_handles, _shared_stimulus = _build_pool(
+    pool, row_meta, _update_handles, _shared_stimulus, _stimulus_cache = _build_pool(
         options,
         amplitudes,
         curve_context="recruitment",

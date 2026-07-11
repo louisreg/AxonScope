@@ -23,7 +23,7 @@ from benchmark.workloads.curve_runtime import _build_pool, _update_pool_amplitud
 
 
 def _build_test_phase_pool(options, amplitudes, *, curve_context):
-    pool, row_meta, update_handles, shared_stimulus = _build_pool(
+    pool, row_meta, update_handles, shared_stimulus, stimulus_cache = _build_pool(
         options,
         amplitudes,
         curve_context=curve_context,
@@ -34,6 +34,7 @@ def _build_test_phase_pool(options, amplitudes, *, curve_context):
             row_meta=row_meta,
             update_handles=update_handles,
             shared_stimulus=shared_stimulus,
+            stimulus_cache=stimulus_cache,
         ),
         row_meta,
     )
@@ -649,6 +650,52 @@ def test_curve_workload_stimulus_copy_reuses_read_only_sample_buffers():
     assert target.y is source.y
     assert not target.t.flags.writeable
     assert not target.y.flags.writeable
+
+
+def test_curve_workload_reused_pool_keeps_stimulus_source_cache(tmp_path):
+    parser = build_parser("threshold_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--n-axons",
+            "3",
+            "--nx",
+            "5",
+            "--diameters",
+            "different_diameters",
+        ]
+    )
+    options = resolved_options(args)
+    phase_pool, _row_meta = _build_test_phase_pool(
+        options,
+        np.asarray([0.1, 0.1, 0.1], dtype=float),
+        curve_context="threshold",
+    )
+    amplitudes = np.asarray([0.2, 0.3, 0.2], dtype=float)
+
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        _update_pool_amplitudes(phase_pool, amplitudes, options)
+        _update_pool_amplitudes(phase_pool, amplitudes, options)
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert report is not None
+    row_events = [
+        event
+        for event in report.events
+        if event.name == "curve.update_amplitudes.rows"
+        and event.metadata.get("curve_update_mode") == "row_stimulus_mutation"
+    ]
+    assert [
+        (
+            event.metadata["curve_update_stimulus_cache_hits"],
+            event.metadata["curve_update_stimulus_cache_misses"],
+        )
+        for event in row_events
+    ] == [(1, 2), (3, 0)]
 
 
 def test_recruitment_phase_reused_pool_updates_first_amplitude(monkeypatch):

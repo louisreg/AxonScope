@@ -2435,6 +2435,14 @@ stay as one JAX tridiagonal route.
   near-neutral/noisy at `N=4096` (`+5.1%`) because enqueue/wait still dominates.
   The run confirms `host_stack`, `group_cm_cache` hits after the first run, and
   `unique_index` temporal lowering with 3/5/6 patterns.
+- [ ] Validate the persistent stimulus-source cache on P100. The implementation
+  keeps reusable source `Stimulus` objects on benchmark phase pools so repeated
+  threshold bisection updates can reuse read-only sample buffers instead of
+  rebuilding equivalent stimuli on every iteration. This targets
+  `curve.update_amplitudes.rows` and may help warm `inputs.extracellular`
+  through the existing content-key cache, without changing solver behavior.
+  Local smoke `benchmark/results/p11e_single_persistent_stimulus_cache_local`
+  confirms repeated updates reach `curve_update_stimulus_cache_misses=0`.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
