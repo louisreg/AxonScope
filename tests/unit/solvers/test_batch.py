@@ -705,7 +705,8 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
 
     assert factorized is not None
     assert factorized.drive_count == 2
-    assert factorized.current_mid_A.shape == (2, 2, int(tsim / dt))
+    assert factorized.current_mid_A.shape == (2, int(tsim / dt))
+    assert factorized.shared_current is True
     assert factorized.footprint_mV_per_A.shape == (2, 2, axon.n_compartments)
     materialized = materialize_factorized_extracellular_potential_batch(factorized)
     np.testing.assert_allclose(

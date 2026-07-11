@@ -873,6 +873,7 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert (
         "inputs.extracellular.current_shared_rank1" in event_names
         or "inputs.extracellular.current_unique_index" in event_names
+        or "inputs.extracellular.current_scaled_shared_waveform" in event_names
     )
     assert "inputs.extracellular.footprint_to_device" in event_names
     assert "inputs.extracellular.current_to_device" in event_names
@@ -1554,6 +1555,56 @@ def test_factorized_vstim_lowers_scaled_waveforms_as_row_scales(
     event_names = {event.name for event in report.events}
     assert "inputs.extracellular.current_scaled_shared_waveform" in event_names
     assert "inputs.extracellular.current_to_device" in event_names
+
+
+def test_factorized_vstim_keeps_equal_scaled_waveforms_shared(
+    tmp_path,
+):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    rows = []
+    for _ in range(4):
+        stimulus = Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=10e-6,
+        ).as_unit("ampere")
+        rows.append((stimulation.replace_drive(drive.id, stimulus=stimulus),))
+
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        with benchmark_span("inputs.extracellular"):
+            batch = build_factorized_vstim_midpoint_batch(
+                axon,
+                rows,
+                tsim_ms=0.1,
+                dt_ms=0.05,
+                dtype_local=np.float32,
+                include_initial_previous=True,
+            )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert batch is not None
+    assert batch.shared_current is True
+    assert batch.scaled_shared_waveform is False
+    assert batch.current_row_indices is None
+    assert batch.current_row_scales is None
+    assert np.asarray(batch.current_mid_A).shape == (2,)
+
+    assert report is not None
+    extracellular_event = next(
+        event for event in report.events if event.name == "inputs.extracellular"
+    )
+    metadata = extracellular_event.metadata
+    assert metadata["shared_current"] is True
+    assert metadata["scaled_shared_waveform"] is False
+    assert metadata["vstim_current_rows_lowering"] == "shared_rank1"
+    assert metadata["vstim_temporal_unique_patterns"] == 1
+    event_names = {event.name for event in report.events}
+    assert "inputs.extracellular.current_unique_index" not in event_names
 
 
 def test_factorized_vstim_keeps_current_table_for_non_scaled_waveforms(

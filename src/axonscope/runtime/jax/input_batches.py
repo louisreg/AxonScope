@@ -134,11 +134,32 @@ class _Rank1CurrentRows:
 class _ScaledSharedWaveformRows:
     current_mid_A: np.ndarray
     current_initial_previous_A: Any | None
-    current_row_scales: np.ndarray
+    current_row_scales: np.ndarray | None
+    shared_current: bool
     temporal_mid_cache_hits: int
     temporal_mid_cache_misses: int
     temporal_previous_cache_hits: int
     temporal_previous_cache_misses: int
+
+
+@dataclass(frozen=True)
+class _ScaledWaveformSignatureCacheEntry:
+    t_ref: weakref.ReferenceType[np.ndarray]
+    y_ref: weakref.ReferenceType[np.ndarray]
+    t_shape: tuple[int, ...]
+    y_shape: tuple[int, ...]
+    t_dtype: str
+    y_dtype: str
+    t_strides: tuple[int, ...]
+    y_strides: tuple[int, ...]
+    signature: tuple[Any, ...]
+    scale: float
+
+
+_STIMULUS_SCALED_WAVEFORM_CACHE: OrderedDict[
+    tuple[Any, ...], _ScaledWaveformSignatureCacheEntry
+] = OrderedDict()
+_STIMULUS_SCALED_WAVEFORM_CACHE_MAX_SIZE = 4096
 
 
 def _build_rank1_current_rows_from_unique_stimuli(
@@ -258,8 +279,7 @@ def _build_scaled_shared_waveform_rows(
                 return None
             row_scales[row_index, drive_index] = np.asarray(scale, dtype=np_dtype)
 
-    if np.all(row_scales == row_scales[0:1, :]):
-        return None
+    shared_scales = bool(np.all(row_scales == row_scales[0:1, :]))
 
     current_mid_A = np.stack(
         [
@@ -295,10 +315,36 @@ def _build_scaled_shared_waveform_rows(
                 current_initial_previous_A[0],
                 dtype=np_dtype,
             )
-        current_row_scales = np.ascontiguousarray(row_scales[:, 0], dtype=np_dtype)
+        if shared_scales:
+            shared_scale = np.asarray(row_scales[0, 0], dtype=np_dtype)
+            current_mid_A = np.ascontiguousarray(
+                current_mid_A * shared_scale,
+                dtype=np_dtype,
+            )
+            if current_initial_previous_A is not None:
+                current_initial_previous_A = np.asarray(
+                    current_initial_previous_A * shared_scale,
+                    dtype=np_dtype,
+                )
+            current_row_scales = None
+        else:
+            current_row_scales = np.ascontiguousarray(row_scales[:, 0], dtype=np_dtype)
     else:
-        current_mid_A = np.ascontiguousarray(current_mid_A, dtype=np_dtype)
-        current_row_scales = np.ascontiguousarray(row_scales, dtype=np_dtype)
+        if shared_scales:
+            shared_scale_rows = np.asarray(row_scales[0], dtype=np_dtype)
+            current_mid_A = np.ascontiguousarray(
+                current_mid_A * shared_scale_rows[:, None],
+                dtype=np_dtype,
+            )
+            if current_initial_previous_A is not None:
+                current_initial_previous_A = np.ascontiguousarray(
+                    current_initial_previous_A * shared_scale_rows,
+                    dtype=np_dtype,
+                )
+            current_row_scales = None
+        else:
+            current_mid_A = np.ascontiguousarray(current_mid_A, dtype=np_dtype)
+            current_row_scales = np.ascontiguousarray(row_scales, dtype=np_dtype)
 
     unique_waveforms = drive_count
     sample_count = len(drive_rows) * drive_count
@@ -306,6 +352,7 @@ def _build_scaled_shared_waveform_rows(
         current_mid_A=current_mid_A,
         current_initial_previous_A=current_initial_previous_A,
         current_row_scales=current_row_scales,
+        shared_current=shared_scales,
         temporal_mid_cache_hits=max(sample_count - unique_waveforms, 0),
         temporal_mid_cache_misses=unique_waveforms,
         temporal_previous_cache_hits=(
@@ -334,9 +381,17 @@ def _stimulus_scaled_waveform_signature_and_scale(
     stimulus: Stimulus,
 ) -> tuple[tuple[Any, ...], float] | None:
     try:
+        t = np.asarray(stimulus.t)
         y = np.asarray(stimulus.y, dtype=float)
     except (TypeError, ValueError):
         return None
+    cache_key = _scaled_waveform_signature_cache_key(stimulus, t, y)
+    if cache_key is not None:
+        cached = _STIMULUS_SCALED_WAVEFORM_CACHE.get(cache_key)
+        if cached is not None and _scaled_waveform_cache_entry_matches(cached, t, y):
+            _STIMULUS_SCALED_WAVEFORM_CACHE.move_to_end(cache_key)
+            return cached.signature, cached.scale
+        _STIMULUS_SCALED_WAVEFORM_CACHE.pop(cache_key, None)
     if y.ndim != 1 or not np.all(np.isfinite(y)):
         return None
     nonzero = np.flatnonzero(np.abs(y) > 0.0)
@@ -355,10 +410,65 @@ def _stimulus_scaled_waveform_signature_and_scale(
         type(stimulus),
         getattr(stimulus, "mode", None),
         getattr(stimulus, "y_unit", None),
-        _array_content_key(np.asarray(stimulus.t)),
+        _array_content_key(t),
         _array_content_key(normalized),
     )
+    if cache_key is not None:
+        _STIMULUS_SCALED_WAVEFORM_CACHE[cache_key] = (
+            _ScaledWaveformSignatureCacheEntry(
+                t_ref=weakref.ref(t),
+                y_ref=weakref.ref(y),
+                t_shape=tuple(int(dim) for dim in t.shape),
+                y_shape=tuple(int(dim) for dim in y.shape),
+                t_dtype=t.dtype.str,
+                y_dtype=y.dtype.str,
+                t_strides=tuple(int(stride) for stride in t.strides),
+                y_strides=tuple(int(stride) for stride in y.strides),
+                signature=signature,
+                scale=scale,
+            )
+        )
+        _STIMULUS_SCALED_WAVEFORM_CACHE.move_to_end(cache_key)
+        while (
+            len(_STIMULUS_SCALED_WAVEFORM_CACHE)
+            > _STIMULUS_SCALED_WAVEFORM_CACHE_MAX_SIZE
+        ):
+            _STIMULUS_SCALED_WAVEFORM_CACHE.popitem(last=False)
     return signature, scale
+
+
+def _scaled_waveform_signature_cache_key(
+    stimulus: Stimulus,
+    t: np.ndarray,
+    y: np.ndarray,
+) -> tuple[Any, ...] | None:
+    if not (_can_cache_array_content_key(t) and _can_cache_array_content_key(y)):
+        return None
+    return (
+        "stimulus_scaled_waveform_identity_v1",
+        type(stimulus),
+        getattr(stimulus, "mode", None),
+        getattr(stimulus, "y_unit", None),
+        id(t),
+        id(y),
+    )
+
+
+def _scaled_waveform_cache_entry_matches(
+    entry: _ScaledWaveformSignatureCacheEntry,
+    t: np.ndarray,
+    y: np.ndarray,
+) -> bool:
+    return (
+        entry.t_ref() is t
+        and entry.y_ref() is y
+        and entry.t_shape == tuple(int(dim) for dim in t.shape)
+        and entry.y_shape == tuple(int(dim) for dim in y.shape)
+        and entry.t_dtype == t.dtype.str
+        and entry.y_dtype == y.dtype.str
+        and entry.t_strides == tuple(int(stride) for stride in t.strides)
+        and entry.y_strides == tuple(int(stride) for stride in y.strides)
+    )
 
 
 def build_vstim_midpoint_batch(
@@ -1326,8 +1436,10 @@ def _try_build_factorized_footprint_vstim_batch(
                 scaled_waveform_rows.current_initial_previous_A
             )
             current_row_scales = scaled_waveform_rows.current_row_scales
-            shared_current = False
-            current_rows_lowering = "scaled_shared_waveform"
+            shared_current = scaled_waveform_rows.shared_current
+            current_rows_lowering = (
+                "shared_rank1" if shared_current else "scaled_shared_waveform"
+            )
             temporal_mid_cache_hits = scaled_waveform_rows.temporal_mid_cache_hits
             temporal_mid_cache_misses = (
                 scaled_waveform_rows.temporal_mid_cache_misses
