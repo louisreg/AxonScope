@@ -2500,6 +2500,38 @@ stay as one JAX tridiagonal route.
   optimization on the corrected wait boundary.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
+- [ ] Put non-solver extracellular input lowering on one explicit
+  single-cable/double-cable path before more low-level solver work. Current
+  evidence: on P100 `threshold_curves`, observer-only, `Naxons=4096`, `Nx=89`,
+  fp32, different diameters, single-cable repeat spends about
+  `inputs.extracellular ~26.7 ms/simulation`, including
+  `shared_rank1_detection ~13.8 ms` and `current_unique_index ~20.5 ms` when
+  present, while the comparable double-cable run spends about
+  `inputs.extracellular ~2.2 ms/simulation`. The difference is mostly
+  orchestration/input representation, not solver capability: double-cable keeps
+  shared waveform identity and only a few footprint rows, while single-cable
+  threshold/different-diameter workloads use row-local stimuli and repeatedly
+  prove equivalent waveform content. Introduce a preparation-level
+  `shared_waveform`/scaled-waveform concept that groups stimuli by temporal
+  shape independently of amplitude scale, so recruitment keeps the existing
+  exact shared-current route and threshold curves can remain in one group with
+  per-row amplitude scales. Then lower to one common `Nstim`-aware factorized
+  input contract: static footprints plus either `shared_current[S]`,
+  `scaled_shared_waveform[S]`, `current_table` fallback, or dense fallback.
+  Keep double-cable's compact shared-current fast path unchanged until
+  scaled-waveform double-cable equivalence and benchmarks prove it is useful;
+  use the new representation first to remove host-side single-cable
+  scans/mutations without adding solver-specific hacks.
+  Formal contract:
+  `docs/architecture/p11e_extracellular_input_contract_2026_07_11.md`.
+  Acceptance: grouping must batch same-shape waveforms with different
+  amplitudes without row-local stimulus mutation tricks; recruitment must stay
+  on `shared_current`; threshold curves should lower to
+  `scaled_shared_waveform` or an explicit measured fallback for both
+  single-cable and double-cable; double-cable shared-current observer-only
+  benchmarks must remain compact with no regression; inspection/benchmark
+  metadata must report lowering mode, fallback reason, `Nstim`, unique waveform
+  count, payload shapes, and capability decision.
 
 ### P12 - Studies, Serialization, Integration
 

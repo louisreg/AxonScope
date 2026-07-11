@@ -71,6 +71,7 @@ def record_extracellular_lowering_metadata(
         skipped_shape = dense_shape_for_group(group=group, runtime=runtime)
         record_benchmark_metadata(
             input_format="zero_no_extracellular_stimulation",
+            **_extracellular_contract_metadata(lowered),
             skipped_dense_vstim_shape=list(skipped_shape),
             skipped_dense_vstim_nbytes=dense_nbytes_for_shape(skipped_shape, dtype=dtype),
         )
@@ -80,6 +81,7 @@ def record_extracellular_lowering_metadata(
             raise TypeError("factorized_footprint lowering requires a factorized payload.")
         record_benchmark_metadata(
             input_format="factorized_footprint",
+            **_extracellular_contract_metadata(lowered),
             target_nx=factorized.target_nx,
             factorized_rank=factorized.drive_count,
             shared_current=factorized.shared_current,
@@ -106,6 +108,7 @@ def record_extracellular_lowering_metadata(
     else:
         metadata = {
             "input_format": "dense",
+            **_extracellular_contract_metadata(lowered),
             **benchmark_array_metadata(
                 "vstim_mid",
                 lowered.midpoint,
@@ -123,6 +126,21 @@ def record_extracellular_lowering_metadata(
         if lowered.dense_fallback_reason is not None:
             metadata["dense_fallback_reason"] = lowered.dense_fallback_reason
         record_benchmark_metadata(**metadata)
+
+
+def _extracellular_contract_metadata(
+    lowered: LoweredExtracellularInput,
+) -> dict[str, Any]:
+    """Return primitive metadata for the shared extracellular input contract."""
+
+    metadata: dict[str, Any] = {}
+    if lowered.mode is not None:
+        metadata["input_lowering_mode"] = lowered.mode.value
+    if lowered.capabilities is not None:
+        metadata.update(
+            lowered.capabilities.as_metadata(prefix="input_lowering_capability_")
+        )
+    return metadata
 
 
 def record_group_memory_estimate(

@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Any, Literal, Sequence
 
 import numpy as np
 
+from axonscope.runtime.input_contract import (
+    ExtracellularLoweringCapabilities,
+    ExtracellularLoweringMode,
+)
+
 
 if TYPE_CHECKING:
     from axonscope.axon_instance import AxonInstance
@@ -33,6 +38,26 @@ ExtracellularInputFormat = Literal[
     "zero_no_extracellular_stimulation",
 ]
 
+JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
+    cable="single-cable",
+    supports_zero=True,
+    supports_shared_current=True,
+    supports_scaled_shared_waveform=False,
+    supports_current_table=True,
+    supports_dense_fallback=True,
+)
+JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
+    cable="double-cable",
+    supports_zero=True,
+    supports_shared_current=True,
+    # The shared contract includes scaled waveforms for double-cable too, but
+    # the current compact JAX route is only validated for shared-current rank-1.
+    supports_scaled_shared_waveform=False,
+    supports_current_table=False,
+    supports_dense_fallback=True,
+    requires_initial_previous=True,
+)
+
 
 @dataclass(frozen=True)
 class LoweredIntracellularInput:
@@ -50,6 +75,8 @@ class LoweredExtracellularInput:
     midpoint: Any | None
     initial_previous: Any | None = None
     dense_fallback_reason: str | None = None
+    mode: ExtracellularLoweringMode | None = None
+    capabilities: ExtracellularLoweringCapabilities | None = None
 
     @property
     def factorized(self) -> FactorizedExtracellularPotentialBatch | None:
@@ -74,6 +101,7 @@ class PlannedInputLowering:
     intracellular_format: IntracellularInputFormat
     extracellular_format: ExtracellularInputFormat
     factorized_rank: int | None = None
+    extracellular_mode: ExtracellularLoweringMode | None = None
 
 
 def lower_single_cable_intracellular_input(
@@ -173,6 +201,8 @@ def lower_single_cable_extracellular_input(
         return LoweredExtracellularInput(
             format="zero_no_extracellular_stimulation",
             midpoint=None,
+            mode=ExtracellularLoweringMode.ZERO,
+            capabilities=JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES,
         )
 
     factorized = build_factorized_vstim_midpoint_batch(
@@ -189,6 +219,8 @@ def lower_single_cable_extracellular_input(
         return LoweredExtracellularInput(
             format="factorized_footprint",
             midpoint=factorized,
+            mode=_factorized_extracellular_mode(factorized),
+            capabilities=JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES,
         )
 
     if intracellular.format == "sparse_current_clamp" and observer_plan is not None:
@@ -212,6 +244,8 @@ def lower_single_cable_extracellular_input(
             dtype_local=runtime.membrane.dtype,
         ),
         dense_fallback_reason="unsupported_factorized_footprint_rows",
+        mode=ExtracellularLoweringMode.DENSE,
+        capabilities=JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES,
     )
 
 
@@ -255,6 +289,8 @@ def lower_double_cable_extracellular_input(
             return LoweredExtracellularInput(
                 format="factorized_footprint",
                 midpoint=factorized,
+                mode=_factorized_extracellular_mode(factorized),
+                capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
             )
 
     midpoint, initial_previous = build_vstim_midpoint_and_initial_previous_batch(
@@ -272,6 +308,8 @@ def lower_double_cable_extracellular_input(
         midpoint=midpoint,
         initial_previous=initial_previous,
         dense_fallback_reason="double_cable_requires_dense_or_rank1_shared_compact",
+        mode=ExtracellularLoweringMode.DENSE,
+        capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
     )
 
 
@@ -307,14 +345,18 @@ def plan_input_lowering(
         and stimulation_count == 0
     ):
         extracellular_format: ExtracellularInputFormat = "zero_no_extracellular_stimulation"
+        extracellular_mode = ExtracellularLoweringMode.ZERO
     elif group_mode == "single" and can_factorize_footprint_rows(stimulation_rows):
         extracellular_format = "factorized_footprint"
+        extracellular_mode = None
     elif observer_plan and can_plan_compact_double_cable_factorized_rows(
         stimulation_rows
     ):
         extracellular_format = "factorized_footprint"
+        extracellular_mode = ExtracellularLoweringMode.SHARED_CURRENT
     else:
         extracellular_format = "dense"
+        extracellular_mode = ExtracellularLoweringMode.DENSE
 
     return PlannedInputLowering(
         intracellular_format=intracellular_format,
@@ -322,6 +364,7 @@ def plan_input_lowering(
         factorized_rank=(
             factorized_rank if extracellular_format == "factorized_footprint" else None
         ),
+        extracellular_mode=extracellular_mode,
     )
 
 
@@ -427,7 +470,27 @@ def supports_compact_double_cable_factorized(
     previous = factorized.current_initial_previous_A
     if previous is None:
         return False
-    return bool(factorized.shared_current and jnp.asarray(previous).ndim == 0)
+    mode = _factorized_extracellular_mode(factorized)
+    return bool(
+        JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES.supports(mode)
+        and factorized.shared_current
+        and jnp.asarray(previous).ndim == 0
+    )
+
+
+def _factorized_extracellular_mode(
+    factorized: FactorizedExtracellularPotentialBatch,
+) -> ExtracellularLoweringMode:
+    """Return the semantic lowering mode for a factorized payload."""
+
+    current_shape = tuple(
+        int(dim) for dim in getattr(factorized.current_mid_A, "shape", ())
+    )
+    if factorized.shared_current:
+        return ExtracellularLoweringMode.SHARED_CURRENT
+    if factorized.current_row_indices is not None or len(current_shape) in {2, 3}:
+        return ExtracellularLoweringMode.CURRENT_TABLE
+    return ExtracellularLoweringMode.CURRENT_TABLE
 
 
 def dense_shape_for_group(
@@ -453,6 +516,8 @@ def dense_nbytes_for_shape(
 __all__ = [
     "ExtracellularInputFormat",
     "IntracellularInputFormat",
+    "JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES",
+    "JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES",
     "LoweredExtracellularInput",
     "LoweredIntracellularInput",
     "PlannedInputLowering",

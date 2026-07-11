@@ -124,9 +124,10 @@ Current focus after the P9 closeout:
   benchmark evidence, and remove dense internal routes when the factorized
   route covers the behavior.
 - Runtime dispatch batches rows by compatible runtime shape and membrane
-  structure plus the same temporal stimulation signature. Diameters and sampled
-  extracellular footprints may vary inside a parameterized batch; rows with
-  different temporal stimulation signatures must form separate dispatch groups.
+  structure plus the same temporal waveform compatibility signature. Diameters,
+  sampled extracellular footprints, and row amplitude scales may vary inside a
+  parameterized batch; rows with genuinely incompatible temporal waveform
+  shapes must form separate dispatch groups.
 - Benchmark modes, presets, flags, and names are documented in
   `benchmark/README.md`. Treat fresh benchmark outputs as evidence only when
   the command, machine metadata, git state, and validation context are recorded.
@@ -981,17 +982,29 @@ introduce a second public observer result shape. Explicit
 ## 8.4 Factorized Forcing
 
 Factorized `Vext`/`Iinj` is an internal optimization direction, not a user
-mode. The active extracellular path is deliberately narrow:
+mode. The target extracellular lowering contract is shared by single-cable and
+double-cable runtimes: prepared rows lower to static spatial footprints plus an
+explicit temporal payload mode, then each cable solver consumes the modes it
+declares as supported. The detailed contract lives in
+`docs/architecture/p11e_extracellular_input_contract_2026_07_11.md`.
+
+The active compact extracellular path is deliberately narrow:
 
 ```text
-current_mid_A[B, K, Nt]
-footprint_mV_per_A[B, K, Nx]
-Vstim[B, Nt, Nx] = sum_K current_mid_A * footprint_mV_per_A
+current_mid_A[S, Nt] or base_current_mid_A[S, Nt] + row_scales[B, S]
+footprint_mV_per_A[B, S, Nx]
+Vstim[B, Nt, Nx] = sum_S current_mid_A * footprint_mV_per_A
 ```
 
 Squeezed rank-1 forms are allowed internally for one-drive/shared-current
 batches. The active compact path is used for static-footprint single-cable
 observer-only and recorded-Vm batches to avoid dense `Vstim[B, Nt, Nx]`.
+The next cleanup target is to separate temporal waveform shape from amplitude
+scale, so threshold-style sweeps can stay in one `Nstim`-aware group with row
+numeric scales instead of rebuilding row-local public stimuli. Multi-drive
+stimulation should be represented as the same shared/scaled modes with
+`Nstim > 1`; arbitrary temporal waveforms fall back to a current table or dense
+route instead of a separate rank-K public concept.
 
 Do not expose dense/factorized as public modes. Do not keep dense internal
 preparation paths once the factorized route covers the same behavior. Do not
