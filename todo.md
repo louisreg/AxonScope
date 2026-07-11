@@ -2435,7 +2435,7 @@ stay as one JAX tridiagonal route.
   near-neutral/noisy at `N=4096` (`+5.1%`) because enqueue/wait still dominates.
   The run confirms `host_stack`, `group_cm_cache` hits after the first run, and
   `unique_index` temporal lowering with 3/5/6 patterns.
-- [ ] Validate the persistent stimulus-source cache on P100. The implementation
+- [x] Validate the persistent stimulus-source cache on P100. The implementation
   keeps reusable source `Stimulus` objects on benchmark phase pools so repeated
   threshold bisection updates can reuse read-only sample buffers instead of
   rebuilding equivalent stimuli on every iteration. This targets
@@ -2443,6 +2443,17 @@ stay as one JAX tridiagonal route.
   through the existing content-key cache, without changing solver behavior.
   Local smoke `benchmark/results/p11e_single_persistent_stimulus_cache_local`
   confirms repeated updates reach `curve_update_stimulus_cache_misses=0`.
+  Mini P100 validation passed at commit `fdf2983` with `threshold_curves`,
+  observer-only, different diameters, `Naxons=1024/4096`, `Nx=89`, fp32,
+  repeat-pool reuse. Artifact:
+  `benchmark/results/kaggle/20260711_151406_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-stim-cache-gpu-fdf2983/outputs/extracted`.
+  Versus `17d367a`, the `N=4096` warm repeat improved:
+  `curve.update_amplitudes.rows` about `100.6 ms -> 77.6 ms`, warm
+  `inputs.extracellular` about `361.3 ms -> 316.7 ms`, and warm
+  `curve.simulate` about `1325.7 ms -> 1210.0 ms`. `N=1024` is noisy and not
+  a useful target for this optimization (`curve.simulate` +4.3%, while
+  update rows still improved). Keep this as a large-population workflow cleanup,
+  not as evidence for a new solver policy.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
