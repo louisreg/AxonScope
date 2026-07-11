@@ -109,6 +109,9 @@ Important implementation detail:
 - `runtime/jax/group_runner.py` carries that route as one `JaxSolverEngine`
   value into `DoubleCableBatchKernel.run(...)`; the batch kernel no longer
   accepts parallel raw solver-policy arguments.
+- Host-side inspection/reporting reads one runtime-level solver-route summary
+  from the same policy resolution instead of resolving single- and double-cable
+  labels independently.
 - `batch_kernels._resolve_double_cable_kernel_block_solver(...)` then resolves
   `pcr_adaptive` to `pcr_soa` for `B <= 4096`, otherwise to `pcr`.
 - Batch-native integrated paths are used for `pcr_soa` at sufficient batch size

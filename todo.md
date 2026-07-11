@@ -2597,6 +2597,11 @@ policy matrix is finished.
   `JaxSolverEngine`, `group_runner` passes that engine to
   `DoubleCableBatchKernel.run(...)`, and the kernel signature rejects the old
   `double_cable_block_solver` / internal-flag / tiled-block argument trio.
+- [x] Collapse solver reporting helpers to one runtime-owned route report.
+  Inspection now asks `solver_route_from_execution_policy(...)` for the resolved
+  runtime, platform, engine, single-cable route, double-cable route, internal
+  flag, and tiled-Thomas block size instead of resolving single/double solver
+  labels through separate helpers.
 - [x] Run a post-cleanup non-regression benchmark matrix covering single-cable
   and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
   different diameters, before making any new performance claim.

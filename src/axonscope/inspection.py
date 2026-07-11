@@ -14,7 +14,7 @@ from axonscope.runtime.execution import (
     benchmark_observers_are_vm_raster_compatible,
     benchmark_plan_input_lowering,
     benchmark_vm_raster_definitions,
-    double_cable_block_solver_from_execution_policy,
+    solver_route_from_execution_policy,
 )
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
 from axonscope.dispatcher.routing import can_use_batch_route
@@ -661,9 +661,9 @@ def _inspect_double_cable_block_solver(
     *,
     execution_policy: ExecutionPolicy | None,
 ) -> str:
-    policy_solver = double_cable_block_solver_from_execution_policy(execution_policy)
-    if policy_solver is not None:
-        return policy_solver
+    route = solver_route_from_execution_policy(execution_policy)
+    if route is not None and route.double_cable_block_solver is not None:
+        return route.double_cable_block_solver
     platform = _execution_policy_platform(execution_policy)
     if platform is None:
         return "auto(default-backend)"

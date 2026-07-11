@@ -315,6 +315,31 @@ def test_jax_solver_engine_resolves_typed_solver_policy():
     assert gpu_engine.tiled_thomas_block_b == 64
 
 
+def test_runtime_solver_route_report_resolves_once_from_execution_policy():
+    from axonscope.runtime.execution import solver_route_from_execution_policy
+
+    route = solver_route_from_execution_policy(
+        axs.ExecutionPolicy(
+            device=axs.Device.gpu(0),
+            solvers=axs.SolverPolicy(
+                single_cable=axs.runtime.jax.gpu.SingleCableSolver.jax_tridiagonal(),
+                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+                    block_b=64
+                ),
+            ),
+        )
+    )
+
+    assert route is not None
+    assert route.runtime == "jax"
+    assert route.platform == "gpu"
+    assert route.engine_name == "jax_gpu_tiled_thomas"
+    assert route.single_cable_solver == "jax_tridiagonal"
+    assert route.double_cable_block_solver == "jax_triton_loop_xb"
+    assert route.double_cable_internal is True
+    assert route.tiled_thomas_block_b == 64
+
+
 def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatch):
     from axonscope.runtime.jax import execution_policy as jax_execution_policy
 

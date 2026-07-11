@@ -9,6 +9,7 @@ route.
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -17,6 +18,19 @@ from axonscope.solvers import BatchOptions
 
 if TYPE_CHECKING:
     from axonscope.runtime import ExecutionPolicy
+
+
+@dataclass(frozen=True)
+class RuntimeSolverRoute:
+    """Runtime-owned solver route summary for reporting and inspection."""
+
+    runtime: str | None
+    platform: str | None
+    engine_name: str | None
+    single_cable_solver: str | None
+    double_cable_block_solver: str | None
+    double_cable_internal: bool = False
+    tiled_thomas_block_b: int | None = None
 
 
 def execution_context(
@@ -243,32 +257,28 @@ def _resolve_benchmark_profile_runtime(runtime: str) -> str | None:
     raise ValueError("benchmark profile runtime must be one of: auto, jax, none.")
 
 
-def double_cable_block_solver_from_execution_policy(
+def solver_route_from_execution_policy(
     policy: ExecutionPolicy | None,
-) -> str | None:
-    """Return the effective runtime double-cable block solver for reporting."""
+) -> RuntimeSolverRoute | None:
+    """Return the effective runtime solver route for reporting."""
 
     if policy is None:
         return None
-    from axonscope.runtime.jax.execution_policy import (
-        jax_double_cable_block_solver_for_policy,
-    )
+    from axonscope.runtime.jax.execution_policy import jax_solver_engine_for_policy
 
-    return jax_double_cable_block_solver_for_policy(policy)
-
-
-def single_cable_solver_from_execution_policy(
-    policy: ExecutionPolicy | None,
-) -> str | None:
-    """Return the effective runtime single-cable solver for reporting."""
-
-    if policy is None:
+    solver_engine = jax_solver_engine_for_policy(policy)
+    if solver_engine is None:
         return None
-    from axonscope.runtime.jax.execution_policy import (
-        jax_single_cable_solver_for_policy,
+    return RuntimeSolverRoute(
+        runtime="jax",
+        platform=solver_engine.platform,
+        engine_name=solver_engine.name,
+        single_cable_solver=solver_engine.single_cable_solver,
+        double_cable_block_solver=solver_engine.double_cable_block_solver,
+        double_cable_internal=solver_engine.allow_internal_double_cable_block_solver,
+        tiled_thomas_block_b=solver_engine.tiled_thomas_block_b,
     )
 
-    return jax_single_cable_solver_for_policy(policy)
 
 
 def batch_options_for_execution_context(
@@ -321,8 +331,8 @@ __all__ = [
     "benchmark_save_device_memory_profile",
     "benchmark_trace_annotation",
     "benchmark_vm_raster_definitions",
-    "double_cable_block_solver_from_execution_policy",
     "execution_context",
     "run_batch_group",
-    "single_cable_solver_from_execution_policy",
+    "RuntimeSolverRoute",
+    "solver_route_from_execution_policy",
 ]

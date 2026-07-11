@@ -170,6 +170,8 @@ that.
 JAX orchestration carries the selected route as one internal `JaxSolverEngine`
 value into `DoubleCableBatchKernel.run(...)`; raw solver labels and internal
 flags are not parallel public or kernel-call arguments.
+Inspection and reporting use one runtime-owned solver-route summary derived
+from that same policy resolution.
 
 Double-cable lowering uses the same `Lowered*Input` contract as single-cable,
 but a double-cable-specific strategy because the kernel needs an

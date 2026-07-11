@@ -105,6 +105,9 @@ The solver route is now carried through JAX orchestration as one
 instead of parallel raw arguments such as `double_cable_block_solver`,
 `allow_internal_double_cable_block_solver`, and
 `double_cable_tiled_thomas_block_b`.
+Host-side inspection and reporting use the corresponding runtime-level
+`solver_route_from_execution_policy(...)` summary instead of separate
+single-cable and double-cable string helpers.
 
 ## Next Cleanup Slice
 

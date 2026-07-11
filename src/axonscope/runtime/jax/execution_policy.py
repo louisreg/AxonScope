@@ -196,12 +196,10 @@ def _canonical_jax_platform(platform: str) -> str:
         return "cpu"
     return normalized
 
-
-
-def jax_double_cable_block_solver_for_policy(
+def jax_solver_engine_for_policy(
     policy: ExecutionPolicy | None,
-) -> str | None:
-    """Return the JAX double-cable block solver selected by a public policy."""
+) -> JaxSolverEngine | None:
+    """Return the JAX solver engine selected by a public policy."""
 
     if policy is None:
         return None
@@ -210,24 +208,7 @@ def jax_double_cable_block_solver_for_policy(
         if policy.device.kind in {"cpu", "gpu"}
         else _canonical_jax_platform(jax.default_backend())
     )
-    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
-    return None if solver_engine is None else solver_engine.double_cable_block_solver
-
-
-def jax_single_cable_solver_for_policy(
-    policy: ExecutionPolicy | None,
-) -> str | None:
-    """Return the JAX single-cable solver selected by a public policy."""
-
-    if policy is None:
-        return None
-    platform = (
-        policy.device.kind
-        if policy.device.kind in {"cpu", "gpu"}
-        else _canonical_jax_platform(jax.default_backend())
-    )
-    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
-    return None if solver_engine is None else solver_engine.single_cable_solver
+    return resolve_jax_solver_engine(policy, platform=platform)
 
 
 def _validate_precision(
@@ -323,7 +304,6 @@ __all__ = [
     "clear_jax_execution_policy_cache",
     "clear_jax_precision_validation_cache",
     "JaxExecutionContext",
-    "jax_double_cable_block_solver_for_policy",
     "jax_execution_context",
-    "jax_single_cable_solver_for_policy",
+    "jax_solver_engine_for_policy",
 ]
