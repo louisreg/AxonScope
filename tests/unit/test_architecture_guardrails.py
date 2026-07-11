@@ -1723,6 +1723,57 @@ def test_active_double_cable_solver_surface_uses_typed_execution_policy():
     assert all(f"def {name}" not in common_text for name in archived_common_functions)
 
 
+def test_non_thomas_double_cable_kernel_tests_are_diagnostic_or_gpu_scoped():
+    """Keep CPU production tests from treating PCR/Triton as supported policy."""
+
+    allowed_name_markers = {"diagnostic", "gpu", "benchmark"}
+    diagnostic_solver_values = {"pcr", "pcr_soa", "pcr_adaptive", "jax_triton_loop_xb"}
+    offenders: list[str] = []
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.function_stack: list[str] = []
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.function_stack.append(node.name)
+            self.generic_visit(node)
+            self.function_stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            for keyword in node.keywords:
+                if keyword.arg == "double_cable_block_solver":
+                    self._check_value(keyword.value, node.lineno)
+            self.generic_visit(node)
+
+        def visit_Dict(self, node: ast.Dict) -> None:
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value == "double_cable_block_solver":
+                    self._check_value(value, node.lineno)
+            self.generic_visit(node)
+
+        def _check_value(self, value: ast.AST, lineno: int) -> None:
+            if not isinstance(value, ast.Constant):
+                return
+            if value.value not in diagnostic_solver_values:
+                return
+            function_name = self.function_stack[-1] if self.function_stack else ""
+            if any(marker in function_name for marker in allowed_name_markers):
+                return
+            offenders.append(f"{self.path.relative_to(REPO_ROOT)}:{lineno}:{function_name}")
+
+    unit_root = REPO_ROOT / "tests" / "unit"
+    for path in _python_sources(unit_root):
+        if "benchmarking" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        Visitor(path).visit(tree)
+
+    assert offenders == []
+
+
 def test_factorized_vext_route_has_dense_equivalence_tests():
     text = (REPO_ROOT / "tests" / "unit" / "solvers" / "test_batch.py").read_text(
         encoding="utf-8"
@@ -1731,8 +1782,8 @@ def test_factorized_vext_route_has_dense_equivalence_tests():
     required_tests = {
         "test_factorized_footprint_batch_matches_dense_builder_and_observer_raster",
         "test_factorized_footprint_batch_supports_scaled_shared_waveforms",
-        "test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa",
-        "test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
+        "test_diagnostic_double_cable_factorized_footprint_observer_matches_dense_pcr_soa",
+        "test_diagnostic_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
     }
 
     missing = sorted(name for name in required_tests if f"def {name}" not in text)

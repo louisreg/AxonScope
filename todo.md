@@ -2570,9 +2570,13 @@ policy matrix is finished.
   as supported production choices. Active docs now point to the P11 policy
   cleanup decision, and the JAX CPU solver-engine resolver rejects GPU solver
   policies before they reach kernels.
-- [ ] Move any remaining CPU PCR/PCR-SoA/Triton double-cable usage into
+- [x] Move any remaining CPU PCR/PCR-SoA/Triton double-cable usage into
   benchmark-only or diagnostic-equivalence tests, then delete stale
-  public-facing tests and docs that imply those routes are supported.
+  public-facing tests and docs that imply those routes are supported. Direct
+  PCR/PCR-SoA double-cable kernel tests are now explicitly named as
+  diagnostic/GPU-scoped, and an architecture guardrail rejects non-Thomas
+  `double_cable_block_solver` usage in ordinary unit tests unless the test name
+  is diagnostic, GPU, or benchmark scoped.
 - [ ] Keep GPU double-cable Triton/tiled-Thomas as a typed explicit route while
   the policy matrix is completed; do not make it default until the matrix
   constrains `Naxons`, `Nx`, dtype, recording mode, cold/warm behavior, memory,

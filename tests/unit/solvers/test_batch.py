@@ -61,6 +61,9 @@ from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 
 
+DIAGNOSTIC_DOUBLE_CABLE_BLOCK_SOLVERS = ("pcr", "pcr_soa", "pcr_adaptive")
+
+
 def _kernel_observations(out):
     if out.observations is not None:
         return out.observations
@@ -167,7 +170,7 @@ def test_recording_none_lowers_to_default_observer_chunking():
     assert options.time_chunk_steps == DEFAULT_OBSERVER_TIME_CHUNK_STEPS
 
 
-def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
+def test_gpu_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
     assert (
         _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4096)
         == "pcr_soa"
@@ -175,7 +178,7 @@ def test_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
     assert _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4097) == "pcr"
 
 
-def test_pcr_soa_batch_native_route_starts_at_realistic_batches():
+def test_gpu_diagnostic_pcr_soa_batch_native_route_starts_at_realistic_batches():
     assert not _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=15)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=25)
     assert _use_batch_native_double_cable_pcr_soa_solver("pcr_soa", batch_size=50)
@@ -249,7 +252,7 @@ def test_execution_context_leaves_batch_options_as_output_policy():
     assert not hasattr(compact, "double_cable_block_solver")
 
 
-def test_execution_context_solver_policy_stays_out_of_batch_options():
+def test_gpu_execution_context_solver_policy_stays_out_of_batch_options():
     context = type(
         "Context",
         (),
@@ -267,7 +270,7 @@ def test_execution_context_solver_policy_stays_out_of_batch_options():
     assert not hasattr(full, "double_cable_block_solver")
 
 
-def test_execution_context_internal_solver_policy_stays_out_of_batch_options():
+def test_gpu_execution_context_internal_solver_policy_stays_out_of_batch_options():
     context = type(
         "Context",
         (),
@@ -1099,7 +1102,9 @@ def test_double_cable_batch_absent_intracellular_matches_explicit_zero_input():
     )
 
 
-def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
+def test_diagnostic_double_cable_batch_pcr_solvers_match_thomas_kernel_reference():
+    """Diagnostic kernel equivalence only; CPU production policy is Thomas-only."""
+
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -1133,7 +1138,7 @@ def test_double_cable_batch_pcr_solver_matches_default_thomas_solver():
         extracellular_potential_initial_previous_mV=vext_previous,
         options=BatchOptions.center(),
     ).Vm
-    for solver in ("pcr", "pcr_soa", "pcr_adaptive"):
+    for solver in DIAGNOSTIC_DOUBLE_CABLE_BLOCK_SOLVERS:
         pcr = kernel.run(
             extracellular_potential_mid_mV=vext_mid,
             extracellular_potential_initial_previous_mV=vext_previous,
@@ -1239,7 +1244,7 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
     )
 
 
-def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_vm(
+def test_diagnostic_double_cable_compact_event_observer_pcr_soa_matches_full_vm(
     monkeypatch,
 ):
     axon = _hh_extracellular_axon(current_clamp=False)
@@ -1388,7 +1393,7 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     )
 
 
-def test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
+def test_diagnostic_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
     monkeypatch,
 ):
     axon = _hh_extracellular_axon(current_clamp=False)
@@ -1467,7 +1472,7 @@ def test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
     )
 
 
-def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa(
+def test_diagnostic_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa(
     monkeypatch,
 ):
     axon = _hh_extracellular_axon(current_clamp=False)
@@ -1545,7 +1550,7 @@ def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr
 
 
 @pytest.mark.parametrize("solver", ["thomas", "pcr_soa"])
-def test_double_cable_scaled_factorized_probe_vm_avoids_dense_vstim_materialization(
+def test_diagnostic_double_cable_scaled_factorized_probe_vm_avoids_dense_vstim_materialization(
     monkeypatch,
     solver,
 ):
