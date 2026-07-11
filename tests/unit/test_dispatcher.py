@@ -798,10 +798,14 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     metadata = extracellular_events[0].metadata
     assert metadata["input_format"] == "factorized_footprint"
     assert metadata["dense_vstim_avoided"] is True
+    assert metadata["vstim_current_rows_lowering"] == "shared_rank1"
     assert "vstim_mid" not in metadata
     assert "vstim_previous" not in metadata
     event_names = {event.name for event in report.events}
-    assert "inputs.extracellular.current_shared_rank1" in event_names
+    assert (
+        "inputs.extracellular.current_shared_rank1" in event_names
+        or "inputs.extracellular.current_unique_index" in event_names
+    )
     assert "inputs.extracellular.footprint_to_device" in event_names
     assert "inputs.extracellular.current_to_device" in event_names
 
@@ -841,7 +845,9 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
         event for event in report.events if event.name == "kernel.finalize_observer"
     ]
     assert len(finalize_events) == 1
-    assert finalize_events[0].parent_event_id == enqueue_events[0].event_id
+    assert finalize_events[0].parent_event_id != enqueue_events[0].event_id
+    assert finalize_events[0].metadata["synchronized_before_finalize"] is True
+    assert finalize_events[0].metadata["wait_span"] == "kernel.wait"
 
     group_events = [event for event in report.events if event.name == "dispatch.group.total"]
     assert len(group_events) == 1

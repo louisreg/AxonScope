@@ -28,10 +28,10 @@ from .common import (
 )
 from .kernels import _run_double_cable_vm_scan, _run_single_cable_vstim_vm_scan
 from .observer_runtime import (
+    PendingVmRasterObservation,
     VmRasterPlan,
     VmRasterState,
     combine_vm_raster_chunk_states,
-    finalize_vm_raster_state,
     init_vm_raster_state,
     update_vm_raster_state_batch_from_tables,
     update_vm_raster_state_scalar_from_tables,
@@ -56,6 +56,7 @@ class BatchKernelResult:
     Vm: Array | None
     t: Array
     observations: dict[str, object] | None = None
+    pending_observation: PendingVmRasterObservation | None = None
 
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
@@ -2981,25 +2982,15 @@ class SingleCableVStimBatchKernel:
                     time_chunk_steps=chunk_steps,
                     progress_callback=progress_callback,
                 )
-            with benchmark_span(
-                "kernel.finalize_observer",
-                mode="single",
-                observer="vm_raster",
-                group_size=batch_size,
-            ):
-                observations = cast(
-                    dict[str, object],
-                    finalize_vm_raster_state(
-                        observers,
-                        observer_state,
-                        nt=grid.Nt,
-                        dt_ms=grid.dt_ms,
-                    ),
-                )
             return BatchKernelResult(
                 Vm=None,
                 t=grid.t_vec_ms,
-                observations=observations,
+                pending_observation=PendingVmRasterObservation(
+                    plan=observers,
+                    state=observer_state,
+                    nt=grid.Nt,
+                    dt_ms=grid.dt_ms,
+                ),
             )
         if factorized_vext is not None and record_voltage:
             if iinj_batch is None:
@@ -3315,25 +3306,15 @@ class DoubleCableBatchKernel:
                     observer_state_scope=benchmark_observer_state_scope,
                     progress_callback=progress_callback,
                 )
-            with benchmark_span(
-                "kernel.finalize_observer",
-                mode="double",
-                observer="vm_raster",
-                group_size=batch_size,
-            ):
-                observations = cast(
-                    dict[str, object],
-                    finalize_vm_raster_state(
-                        observers,
-                        observer_state,
-                        nt=grid.Nt,
-                        dt_ms=grid.dt_ms,
-                    ),
-                )
             return BatchKernelResult(
                 Vm=None,
                 t=grid.t_vec_ms,
-                observations=observations,
+                pending_observation=PendingVmRasterObservation(
+                    plan=observers,
+                    state=observer_state,
+                    nt=grid.Nt,
+                    dt_ms=grid.dt_ms,
+                ),
             )
         if factorized_vext is not None:
             with benchmark_span(

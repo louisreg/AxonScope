@@ -46,9 +46,11 @@ from axonscope.runtime.jax.shape_bucketing import (
     record_kernel_bucket_metadata,
 )
 from axonscope.runtime.jax.batch_kernels import (
+    BatchKernelResult,
     DoubleCableBatchKernel,
     SingleCableVStimBatchKernel,
 )
+from axonscope.runtime.jax.observer_runtime import finalize_vm_raster_state
 from axonscope.solvers.options import BatchOptions, SolverOptions
 
 
@@ -125,12 +127,52 @@ def _batch_wait_target(out: Any) -> Any:
 
     if out.Vm is not None:
         return out.Vm
+    if out.pending_observation is not None:
+        return out.pending_observation.state
     if not out.observations:
         raise RuntimeError("batch kernel produced neither Vm nor observations.")
     first = next(iter(out.observations.values()))
     if hasattr(first, "words"):
         return first.words
     return first.values
+
+
+def _finalize_pending_batch_observation(
+    out: BatchKernelResult,
+    *,
+    group: DispatchGroup,
+    mode: str,
+) -> BatchKernelResult:
+    """Finalize observer output after the explicit group-level device wait."""
+
+    pending = out.pending_observation
+    if pending is None:
+        return out
+    with benchmark_span(
+        "kernel.finalize_observer",
+        mode=mode,
+        observer="vm_raster",
+        group_id=group.group_id,
+        group_size=group.size,
+        synchronized_before_finalize=True,
+        wait_span="kernel.wait",
+    ):
+        observations = cast(
+            dict[str, object],
+            finalize_vm_raster_state(
+                pending.plan,
+                pending.state,
+                nt=pending.nt,
+                dt_ms=pending.dt_ms,
+                synchronize=False,
+            ),
+        )
+    return BatchKernelResult(
+        Vm=out.Vm,
+        t=out.t,
+        observations=observations,
+        pending_observation=None,
+    )
 
 
 def _benchmark_double_cable_block_solver_override() -> str | None:
@@ -370,6 +412,11 @@ def _run_single_cable_batch_group(
         includes_device_solver_work=True,
     ):
         benchmark_wait(_batch_wait_target(out))
+    out = _finalize_pending_batch_observation(
+        out,
+        group=group,
+        mode=group.mode,
+    )
     _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
     _emit_progress(
         progress_callback,
@@ -639,6 +686,11 @@ def _run_double_cable_batch_group(
         includes_device_solver_work=True,
     ):
         benchmark_wait(_batch_wait_target(out))
+    out = _finalize_pending_batch_observation(
+        out,
+        group=group,
+        mode=group.mode,
+    )
     _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
     _emit_progress(
         progress_callback,

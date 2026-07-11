@@ -57,6 +57,31 @@ class VmRasterPlan:
         return int(np.asarray(self.probe_mask).shape[-1])
 
 
+@dataclass(frozen=True)
+class PendingVmRasterObservation:
+    """Device-resident VmRaster output awaiting synchronization/finalization."""
+
+    plan: VmRasterPlan
+    state: VmRasterState
+    nt: int
+    dt_ms: float
+
+
+def trim_pending_vm_raster_observation(
+    pending: PendingVmRasterObservation,
+    *,
+    batch_size: int,
+) -> PendingVmRasterObservation:
+    """Drop backend-only padded rows from a pending VmRaster state."""
+
+    return PendingVmRasterObservation(
+        plan=pending.plan,
+        state=pending.state[: int(batch_size)],
+        nt=pending.nt,
+        dt_ms=pending.dt_ms,
+    )
+
+
 def _require_vm_signal(signal: Any) -> None:
     if not isinstance(signal, Signal) or signal.id != MEMBRANE_VOLTAGE.id:
         raise NotImplementedError("VmRaster observers support membrane voltage only.")
@@ -447,19 +472,21 @@ def finalize_vm_raster_state(
     *,
     nt: int,
     dt_ms: float,
+    synchronize: bool = True,
 ) -> dict[str, VmRasterResult]:
     """Package packed raster words as the single solver-side observation."""
 
-    with benchmark_span(
-        "kernel.wait",
-        observer="vm_raster",
-        wait_scope="observer_state",
-        raster_count=plan.raster_count,
-        probe_count=plan.probe_count,
-        nt=int(nt),
-        row_aware=plan.row_aware,
-    ):
-        benchmark_wait(state)
+    if synchronize:
+        with benchmark_span(
+            "kernel.wait",
+            observer="vm_raster",
+            wait_scope="observer_state",
+            raster_count=plan.raster_count,
+            probe_count=plan.probe_count,
+            nt=int(nt),
+            row_aware=plan.row_aware,
+        ):
+            benchmark_wait(state)
 
     with benchmark_span(
         "kernel.finalize_observer.to_host",
@@ -468,6 +495,7 @@ def finalize_vm_raster_state(
         probe_count=plan.probe_count,
         nt=int(nt),
         row_aware=plan.row_aware,
+        synchronized_before_finalize=not synchronize,
     ):
         words = np.asarray(state, dtype=np.uint32)
         probe_indices = plan.probe_indices_host
@@ -494,12 +522,14 @@ def finalize_vm_raster_state(
 
 
 __all__ = [
+    "PendingVmRasterObservation",
     "VmRasterPlan",
     "VmRasterState",
     "build_vm_raster_plan",
     "combine_vm_raster_chunk_states",
     "finalize_vm_raster_state",
     "init_vm_raster_state",
+    "trim_pending_vm_raster_observation",
     "update_vm_raster_state_batch",
     "update_vm_raster_state_batch_from_tables",
     "update_vm_raster_state_scalar_from_tables",

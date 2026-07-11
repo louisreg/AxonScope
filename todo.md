@@ -2479,6 +2479,18 @@ stay as one JAX tridiagonal route.
   factorized current/temporal pattern detection, especially
   `inputs.extracellular.shared_rank1_detection` and
   `inputs.extracellular.current_unique_index`.
+- [x] Fix the observer-only benchmark boundary so `kernel.wait` measures the
+  real device synchronization. Batch observer-only kernels now return a pending
+  device-resident VmRaster state; `group_runner` trims padded pending states,
+  waits on that state in the group-level `kernel.wait`, and only then finalizes
+  `VmRasterResult` with `synchronize=False`. Local smoke artifact:
+  `benchmark/results/p11e_single_real_kernel_wait_local`. On the local CPU
+  smoke, `kernel.wait` is now the visible synchronization span
+  (`~245.6 ms/simulation` mean), while `kernel.finalize_observer` drops to
+  `~0.12 ms/simulation` and `kernel.finalize_observer.to_host` to
+  `~0.02 ms/simulation`. A attempted rank-1 host-side scan rewrite was not kept
+  because local smoke did not show a robust improvement; validate any future
+  host-side `inputs.extracellular` optimization on the corrected wait boundary.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 

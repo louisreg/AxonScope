@@ -12,6 +12,7 @@ from axonscope.benchmarking import (
     record_benchmark_metadata,
 )
 from axonscope.runtime.jax.batch_kernels import BatchKernelResult
+from axonscope.runtime.jax.observer_runtime import trim_pending_vm_raster_observation
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher._records import (
     DispatchCohortRecord,
@@ -35,10 +36,24 @@ def trim_batch_kernel_result(
         batch_size=size,
         has_vm=out.Vm is not None,
         has_observations=out.observations is not None,
+        has_pending_observation=out.pending_observation is not None,
     ):
         Vm = None if out.Vm is None else out.Vm[:size]
         observations = trim_observations_batch(out.observations, batch_size=size)
-    return BatchKernelResult(Vm=Vm, t=out.t, observations=observations)
+        pending = (
+            None
+            if out.pending_observation is None
+            else trim_pending_vm_raster_observation(
+                out.pending_observation,
+                batch_size=size,
+            )
+        )
+    return BatchKernelResult(
+        Vm=Vm,
+        t=out.t,
+        observations=observations,
+        pending_observation=pending,
+    )
 
 
 def dispatch_results_from_batch(
