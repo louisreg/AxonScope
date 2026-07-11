@@ -75,7 +75,7 @@ Current focus after the P9 closeout:
 | 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
 | 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
 | 7.6.1-7.6.2 - Hotpath/memory cleanup | Done for evidence layer | Sparse/zero inputs, compact observer outputs, runtime caches, chunking, profiler traces. |
-| 7.6.3 - Exact double-cable GPU solver | Closed | Retained choices: `auto`, `thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`. |
+| 7.6.3 - Exact double-cable GPU solver | Closed for current evidence | CPU double-cable is Thomas-only; GPU double-cable keeps typed explicit routes, with tiled Thomas as the promotion candidate pending the full policy matrix. |
 | 7.6.4 - Pseudo-double validation | Standby | Harness exists under `benchmark/pseudo_double/`; not a public solver replacement. |
 | 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
