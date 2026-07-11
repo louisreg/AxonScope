@@ -359,7 +359,7 @@ def run_batch_group(
     solver_options: Any | None,
     observers: Sequence[Any] | None,
     progress_callback: Any = None,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ):
     """Execute a prepared dispatch group through the active concrete runtime."""
 
@@ -373,7 +373,7 @@ def run_batch_group(
         solver_options=solver_options,
         observers=observers,
         progress_callback=progress_callback,
-        backend_context=backend_context,
+        runtime_context=runtime_context,
     )
 
 

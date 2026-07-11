@@ -39,7 +39,7 @@ def run_pool(
     observers: Sequence[Any] | None = None,
     record_observables: bool = False,
     progress: ProgressOption = False,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
     dispatch_plan: DispatchPlan | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run an axon pool and return raw dispatch records.
@@ -78,7 +78,7 @@ def run_pool(
             observers=tuple(observers) if observers is not None else None,
             record_observables=bool(record_observables),
             progress=progress,
-            backend_context=backend_context,
+            runtime_context=runtime_context,
             dispatch_plan=dispatch_plan,
         )
 
@@ -93,7 +93,7 @@ def _run_pool_checked(
     observers: tuple[Any, ...] | None,
     record_observables: bool,
     progress: ProgressOption,
-    backend_context: Any | None,
+    runtime_context: Any | None,
     dispatch_plan: DispatchPlan | None,
 ) -> tuple[DispatchRecord, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
@@ -141,7 +141,7 @@ def _run_pool_checked(
                         solver_options=solver_options,
                         observers=observers,
                         progress_callback=progress_reporter.kernel_callback(group),
-                        backend_context=backend_context,
+                        runtime_context=runtime_context,
                     )
                 else:
                     progress_reporter.route_group(
@@ -314,7 +314,7 @@ def _run_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Execute one compatible group through the active backend facade."""
 
@@ -326,7 +326,7 @@ def _run_batch_group(
         solver_options=solver_options,
         observers=observers,
         progress_callback=progress_callback,
-        backend_context=backend_context,
+        runtime_context=runtime_context,
     )
 
 

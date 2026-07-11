@@ -1711,7 +1711,7 @@ def test_factorized_vstim_keeps_current_table_for_non_scaled_waveforms(
     assert "inputs.extracellular.current_to_device" in event_names
 
 
-def test_batch_runtime_cache_separates_backend_context_scope():
+def test_batch_runtime_cache_separates_runtime_context_scope():
     pool = [
         _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0),
         _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
@@ -1745,7 +1745,7 @@ def test_batch_runtime_cache_separates_backend_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
-        backend_context=cpu_context,
+        runtime_context=cpu_context,
     )
     second = runtime_preparation.prepare_batch_runtime(
         group,
@@ -1755,7 +1755,7 @@ def test_batch_runtime_cache_separates_backend_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
-        backend_context=cpu_context,
+        runtime_context=cpu_context,
     )
     third = runtime_preparation.prepare_batch_runtime(
         group,
@@ -1765,7 +1765,7 @@ def test_batch_runtime_cache_separates_backend_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
-        backend_context=gpu_context,
+        runtime_context=gpu_context,
     )
 
     assert second is first

@@ -1810,6 +1810,30 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     assert not single.extracellular.requires_initial_previous
 
 
+def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():
+    assert (
+        REPO_ROOT / "docs" / "architecture" / "p12_runtime_contract_2026_07_12.md"
+    ).is_file()
+    assert (
+        REPO_ROOT / "docs" / "architecture" / "p12a_jax_runtime_audit_2026_07_12.md"
+    ).is_file()
+
+    active_sources = [
+        SRC_ROOT / "simulation.py",
+        SRC_ROOT / "dispatcher" / "execution.py",
+        SRC_ROOT / "runtime" / "execution.py",
+        SRC_ROOT / "runtime" / "jax" / "group_runner.py",
+        SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py",
+    ]
+    legacy_name = "backend" + "_context"
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in active_sources
+        if legacy_name in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
 def test_public_examples_do_not_use_backend_solver_route_labels():
     examples_text = "\n".join(
         path.read_text(encoding="utf-8")

@@ -63,7 +63,7 @@ def run_jax_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None = None,
     progress_callback: Any = None,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Execute one compatible group through the JAX batch backend."""
 
@@ -76,7 +76,7 @@ def run_jax_batch_group(
             solver_options=solver_options,
             observers=observers,
             progress_callback=progress_callback,
-            backend_context=backend_context,
+            runtime_context=runtime_context,
         )
     return _run_single_cable_batch_group(
         group,
@@ -86,7 +86,7 @@ def run_jax_batch_group(
         solver_options=solver_options,
         observers=observers,
         progress_callback=progress_callback,
-        backend_context=backend_context,
+        runtime_context=runtime_context,
     )
 
 
@@ -135,10 +135,10 @@ def _benchmark_observer_state_scope_override() -> str | None:
     return str(scope)
 
 
-def _context_solver_engine(backend_context: Any | None) -> Any | None:
-    if backend_context is None:
+def _runtime_context_solver_engine(runtime_context: Any | None) -> Any | None:
+    if runtime_context is None:
         return None
-    return getattr(backend_context, "solver_engine", None)
+    return getattr(runtime_context, "solver_engine", None)
 
 
 def _lower_output_plan_for_group(
@@ -197,6 +197,75 @@ def _lower_output_plan_for_group(
     return kernel_options, observer_plan
 
 
+def _wait_for_batch_kernel_output(
+    out: Any,
+    *,
+    group: DispatchGroup,
+    progress_callback: Any,
+) -> Any:
+    """Synchronize one batch kernel result and finalize pending observations."""
+
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "solving JAX kernel",
+    )
+    with benchmark_span(
+        "kernel.wait",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        timing_role="device_synchronization",
+        device_synchronization=True,
+        includes_device_solver_work=True,
+    ):
+        benchmark_wait(batch_wait_target(out))
+    out = finalize_pending_batch_observation(
+        out,
+        group=group,
+        mode=group.mode,
+    )
+    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
+    return out
+
+
+def _dispatch_batch_kernel_output(
+    out: Any,
+    *,
+    group: DispatchGroup,
+    batch_options: BatchOptions,
+    kernel_options: OutputPlan,
+    observers: tuple[Any, ...] | None,
+    progress_callback: Any,
+) -> tuple[DispatchRecord, ...]:
+    """Assemble one batch kernel output into dispatcher records."""
+
+    _emit_progress(
+        progress_callback,
+        group,
+        "result",
+        "assemble batch output",
+        output="observations" if out.Vm is None else "Vm",
+    )
+    with benchmark_span(
+        "results.split_batch",
+        group_id=group.group_id,
+        group_size=group.size,
+        recording_mode=kernel_options.recording.mode,
+    ):
+        return dispatch_results_from_batch(
+            group,
+            Vm=out.Vm,
+            t=out.t,
+            observations=out.observations,
+            observer_definitions=observers,
+            method=_dispatch_method(group),
+            batch_options=batch_options,
+            kernel_batch_options=kernel_options,
+        )
+
+
 def _run_single_cable_batch_group(
     group: DispatchGroup,
     *,
@@ -206,7 +275,7 @@ def _run_single_cable_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
@@ -228,7 +297,7 @@ def _run_single_cable_batch_group(
             mode="single",
             include_extracellular=False,
             include_area=False,
-            backend_context=backend_context,
+            runtime_context=runtime_context,
         )
         record_benchmark_metadata(
             nt=runtime.grid.Nt,
@@ -351,51 +420,19 @@ def _run_single_cable_batch_group(
             record_benchmark_metadata(
                 **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
             )
-    _emit_progress(
-        progress_callback,
-        group,
-        "kernel",
-        "solving JAX kernel",
-    )
-    with benchmark_span(
-        "kernel.wait",
-        group_id=group.group_id,
-        group_size=group.size,
-        mode=group.mode,
-        timing_role="device_synchronization",
-        device_synchronization=True,
-        includes_device_solver_work=True,
-    ):
-        benchmark_wait(batch_wait_target(out))
-    out = finalize_pending_batch_observation(
+    out = _wait_for_batch_kernel_output(
         out,
         group=group,
-        mode=group.mode,
+        progress_callback=progress_callback,
     )
-    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
-    _emit_progress(
-        progress_callback,
-        group,
-        "result",
-        "assemble batch output",
-        output="observations" if out.Vm is None else "Vm",
+    return _dispatch_batch_kernel_output(
+        out,
+        group=group,
+        batch_options=batch_options,
+        kernel_options=kernel_options,
+        observers=observers,
+        progress_callback=progress_callback,
     )
-    with benchmark_span(
-        "results.split_batch",
-        group_id=group.group_id,
-        group_size=group.size,
-        recording_mode=kernel_options.recording.mode,
-    ):
-        return dispatch_results_from_batch(
-            group,
-            Vm=out.Vm,
-            t=out.t,
-            observations=out.observations,
-            observer_definitions=observers,
-            method=_dispatch_method(group),
-            batch_options=batch_options,
-            kernel_batch_options=kernel_options,
-        )
 
 
 def _run_double_cable_batch_group(
@@ -407,7 +444,7 @@ def _run_double_cable_batch_group(
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
     progress_callback: Any = None,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
 
@@ -431,7 +468,7 @@ def _run_double_cable_batch_group(
             mode="double",
             include_extracellular=True,
             include_area=True,
-            backend_context=backend_context,
+            runtime_context=runtime_context,
         )
         record_kernel_bucket_metadata(group=group, kernel_group=kernel_group)
         record_benchmark_metadata(
@@ -459,7 +496,7 @@ def _run_double_cable_batch_group(
             public_nx=int(group.nx),
             kernel_nx=int(kernel_group.nx),
         )
-    solver_engine = _context_solver_engine(backend_context)
+    solver_engine = _runtime_context_solver_engine(runtime_context)
     policy_block_solver = (
         None if solver_engine is None else solver_engine.double_cable_block_solver
     )
@@ -597,51 +634,19 @@ def _run_double_cable_batch_group(
         recording_mode=kernel_options.recording.mode,
     ):
         out = trim_batch_kernel_result(out, batch_size=group.size)
-    _emit_progress(
-        progress_callback,
-        group,
-        "kernel",
-        "solving JAX kernel",
-    )
-    with benchmark_span(
-        "kernel.wait",
-        group_id=group.group_id,
-        group_size=group.size,
-        mode=group.mode,
-        timing_role="device_synchronization",
-        device_synchronization=True,
-        includes_device_solver_work=True,
-    ):
-        benchmark_wait(batch_wait_target(out))
-    out = finalize_pending_batch_observation(
+    out = _wait_for_batch_kernel_output(
         out,
         group=group,
-        mode=group.mode,
+        progress_callback=progress_callback,
     )
-    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
-    _emit_progress(
-        progress_callback,
-        group,
-        "result",
-        "assemble batch output",
-        output="observations" if out.Vm is None else "Vm",
+    return _dispatch_batch_kernel_output(
+        out,
+        group=group,
+        batch_options=batch_options,
+        kernel_options=kernel_options,
+        observers=observers,
+        progress_callback=progress_callback,
     )
-    with benchmark_span(
-        "results.split_batch",
-        group_id=group.group_id,
-        group_size=group.size,
-        recording_mode=kernel_options.recording.mode,
-    ):
-        return dispatch_results_from_batch(
-            group,
-            Vm=out.Vm,
-            t=out.t,
-            observations=out.observations,
-            observer_definitions=observers,
-            method=_dispatch_method(group),
-            batch_options=batch_options,
-            kernel_batch_options=kernel_options,
-        )
 
 
 __all__ = ["run_jax_batch_group"]

@@ -479,7 +479,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         mode="double",
         include_extracellular=True,
         include_area=True,
-        backend_context=None,
+        runtime_context=None,
     )
     cohort = prepared_cohort_for_group(kernel_group)
 

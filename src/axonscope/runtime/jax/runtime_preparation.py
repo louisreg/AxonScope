@@ -134,15 +134,15 @@ def prepare_batch_runtime(
     mode: str,
     include_extracellular: bool,
     include_area: bool,
-    backend_context: Any | None = None,
+    runtime_context: Any | None = None,
 ) -> SolverRuntime:
-    backend_scope = _backend_context_cache_key(backend_context)
+    runtime_scope = _runtime_context_cache_key(runtime_context)
     group_signature = _group_runtime_signature(group)
     cache_key = (
         "batch_runtime_v1",
         mode,
         group_signature,
-        backend_scope,
+        runtime_scope,
         float(tsim_ms),
         float(dt_ms),
         repr(solver_options),
@@ -158,7 +158,7 @@ def prepare_batch_runtime(
         "batch_static_runtime_v1",
         mode,
         group_signature,
-        backend_scope,
+        runtime_scope,
         repr(solver_options),
         bool(include_extracellular),
         bool(include_area),
@@ -292,8 +292,8 @@ def _same_stimulation_rows(
     return all(_same_objects(a, b) for a, b in zip(left, right, strict=True))
 
 
-def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
-    """Return the backend/runtime policy part of runtime cache identity."""
+def _runtime_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
+    """Return the runtime policy part of runtime cache identity."""
 
     if context is None:
         return None
@@ -311,7 +311,7 @@ def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
             str(resolved_device),
         )
     return (
-        "backend_context_v1",
+        "runtime_context_v1",
         getattr(runtime, "value", runtime),
         None
         if device_request is None

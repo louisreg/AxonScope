@@ -2656,7 +2656,8 @@ policy matrix is finished.
 ### P12 - Studies, Serialization, Integration
 
 - [ ] P12A runtime contract and JAX cleanup:
-  use `docs/architecture/p12_runtime_contract_2026_07_12.md` as the migration
+  use `docs/architecture/p12_runtime_contract_2026_07_12.md` and
+  `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md` as the migration
   target. Homogenize non-solver preparation, recording/observer lowering,
   input semantics, benchmark metadata, and result assembly between single-cable
   and double-cable paths as much as possible without losing P11 performance.

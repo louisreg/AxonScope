@@ -362,7 +362,7 @@ def _run_population_simulation(
                 observers=observer_defs,
                 record_observables=record_observables,
                 progress=progress,
-                backend_context=context,
+                runtime_context=context,
                 dispatch_plan=dispatch_plan,
             )
     except BaseException as exc:
