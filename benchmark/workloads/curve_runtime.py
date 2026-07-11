@@ -610,6 +610,7 @@ def _evaluate_amplitudes(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
+        single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
         benchmark_double_cable_block_solver=options.get(
@@ -665,6 +666,7 @@ def _build_curve_execution_context(
         precision=options["precision"],
         time_chunk_policy=options.get("time_chunk_policy", "default"),
         time_chunk_steps=options.get("time_chunk_steps"),
+        single_cable_solver=options.get("single_cable_solver", "auto"),
         gpu_solver=options.get("double_cable_block_solver", "auto"),
         tiled_thomas_block_b=options.get("tiled_thomas_block_b"),
         benchmark_double_cable_block_solver=options.get(
@@ -1274,14 +1276,25 @@ def _execution_policy(options: dict[str, Any]) -> Any:
 
 
 def _solver_policy(options: dict[str, Any]) -> Any:
+    single_solver = str(options.get("single_cable_solver", "auto"))
     solver = str(options.get("double_cable_block_solver", "auto"))
     platform = str(options.get("platform", "auto"))
     if platform == "cpu":
+        single_cable_solver = axs.runtime.jax.cpu.SingleCableSolver
         double_cable_solver = axs.runtime.jax.cpu.DoubleCableSolver
     elif platform == "gpu":
+        single_cable_solver = axs.runtime.jax.gpu.SingleCableSolver
         double_cable_solver = axs.runtime.jax.gpu.DoubleCableSolver
     else:
+        single_cable_solver = axs.runtime.jax.SingleCableSolver
         double_cable_solver = axs.runtime.jax.DoubleCableSolver
+
+    if single_solver == "auto":
+        single_cable = single_cable_solver.auto()
+    elif single_solver == "jax_tridiagonal":
+        single_cable = single_cable_solver.jax_tridiagonal()
+    else:
+        raise ValueError(f"unsupported single-cable solver policy: {single_solver!r}")
 
     if solver in {"auto", "pcr_adaptive"}:
         double_cable = double_cable_solver.auto()
@@ -1300,7 +1313,7 @@ def _solver_policy(options: dict[str, Any]) -> Any:
         )
     else:
         raise ValueError(f"unsupported double-cable solver policy: {solver!r}")
-    return axs.SolverPolicy(double_cable=double_cable)
+    return axs.SolverPolicy(single_cable=single_cable, double_cable=double_cable)
 
 
 def _row_cable(options: dict[str, Any], row: int) -> str:

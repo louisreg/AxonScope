@@ -218,6 +218,12 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--recording", choices=("full_vm", "probe_vm", "observer_only"))
     parser.add_argument("--cable", choices=("single_cable", "double_cable"), default="single_cable")
     parser.add_argument(
+        "--single-cable-solver",
+        choices=("auto", "jax_tridiagonal"),
+        default="auto",
+        help="Typed public single-cable solver policy for JAX single-cable runs.",
+    )
+    parser.add_argument(
         "--double-cable-block-solver",
         choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive", "tiled_thomas"),
         default="auto",
@@ -372,6 +378,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "precision": args.precision or preset.precision,
         "recording": args.recording or preset.recording,
         "cable": args.cable,
+        "single_cable_solver": args.single_cable_solver,
         "double_cable_block_solver": args.double_cable_block_solver,
         "tiled_thomas_block_b": args.tiled_thomas_block_b,
         "benchmark_double_cable_block_solver": args.benchmark_double_cable_block_solver,

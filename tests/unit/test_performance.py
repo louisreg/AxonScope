@@ -305,9 +305,11 @@ def test_jax_solver_engine_resolves_typed_solver_policy():
 
     assert cpu_engine is not None
     assert cpu_engine.name == "jax_cpu_thomas"
+    assert cpu_engine.single_cable_solver == "jax_tridiagonal"
     assert cpu_engine.double_cable_block_solver == "thomas"
     assert gpu_engine is not None
     assert gpu_engine.name == "jax_gpu_tiled_thomas"
+    assert gpu_engine.single_cable_solver == "jax_tridiagonal"
     assert gpu_engine.double_cable_block_solver == "jax_triton_loop_xb"
     assert gpu_engine.allow_internal_double_cable_block_solver is True
     assert gpu_engine.tiled_thomas_block_b == 64

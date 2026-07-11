@@ -16,6 +16,7 @@ class JaxSolverEngine:
 
     name: str
     platform: str
+    single_cable_solver: str | None
     double_cable_block_solver: str | None
     allow_internal_double_cable_block_solver: bool = False
     tiled_thomas_block_b: int | None = None

@@ -12,6 +12,9 @@ from axonscope.dispatcher import build_dispatch_plan
 from benchmark.campaigns.double_cable_solver_policy import (
     main as run_solver_policy_campaign,
 )
+from benchmark.campaigns.single_cable_solver_policy import (
+    main as run_single_cable_solver_policy_campaign,
+)
 from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
@@ -307,6 +310,59 @@ def test_solver_policy_campaign_expands_observer_scope_and_time_chunk_matrix(
     assert "--repeat-pool-policy" in manifest["runs"][0]["command"]
 
 
+def test_single_cable_solver_policy_campaign_expands_solver_matrix(
+    tmp_path: Path,
+    capsys,
+):
+    assert (
+        run_single_cable_solver_policy_campaign(
+            [
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--curve-script",
+                "recruitment_curves",
+                "--solver",
+                "auto,jax_tridiagonal",
+                "--recording",
+                "observer_only",
+                "--n-axons",
+                "4",
+                "--nx",
+                "21",
+                "--precision",
+                "fp32",
+                "--diameters",
+                "same_diameter",
+                "--repeat-pool-policy",
+                "reuse",
+                "--output",
+                str(tmp_path),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert "planned: 2 single-cable solver policy runs" in out
+    assert "--single-cable-solver auto" in out
+    assert "--single-cable-solver jax_tridiagonal" in out
+
+    manifest = json.loads(
+        (tmp_path / "single_cable_solver_policy_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [run["single_cable_solver"] for run in manifest["runs"]] == [
+        "auto",
+        "jax_tridiagonal",
+    ]
+    assert all("--cable" in run["command"] for run in manifest["runs"])
+    assert all("single_cable" in run["command"] for run in manifest["runs"])
+
+
 def test_resolved_options_accept_public_tiled_thomas_solver_policy():
     parser = build_parser("recruitment_curves", description="test parser")
     args = parser.parse_args(
@@ -334,6 +390,31 @@ def test_resolved_options_accept_public_tiled_thomas_solver_policy():
         is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     )
     assert solver_policy.double_cable.tiled_thomas_options.block_b == 64
+
+
+def test_resolved_options_accept_public_single_cable_solver_policy():
+    parser = build_parser("recruitment_curves", description="test parser")
+    args = parser.parse_args(
+        [
+            "--preset",
+            "quick",
+            "--platform",
+            "gpu",
+            "--cable",
+            "single_cable",
+            "--single-cable-solver",
+            "jax_tridiagonal",
+        ]
+    )
+
+    options = resolved_options(args)
+    solver_policy = curve_runtime._solver_policy(options)
+
+    assert options["single_cable_solver"] == "jax_tridiagonal"
+    assert (
+        solver_policy.single_cable.kind
+        is axs.runtime.jax.SingleCableSolverKind.JAX_TRIDIAGONAL
+    )
 
 
 def test_threshold_defaults_follow_example07_mrg_bounds():

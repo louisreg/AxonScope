@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from axonscope.runtime.jax.solver_engines.types import JaxSolverEngine
-from axonscope.runtime.jax.policy import DoubleCableSolver, DoubleCableSolverKind
+from axonscope.runtime.jax.policy import (
+    DoubleCableSolver,
+    DoubleCableSolverKind,
+    SingleCableSolver,
+    SingleCableSolverKind,
+)
 from axonscope.runtime.policy import SolverPolicy
 
 
 def resolve_cpu_solver_engine(policy: SolverPolicy) -> JaxSolverEngine:
     """Resolve the public CPU solver policy to a JAX CPU engine descriptor."""
 
+    single_cable = _resolve_single_cable_policy(policy)
     double_cable = _resolve_double_cable_policy(policy)
     if double_cable.kind in {
         DoubleCableSolverKind.AUTO,
@@ -18,10 +24,29 @@ def resolve_cpu_solver_engine(policy: SolverPolicy) -> JaxSolverEngine:
         return JaxSolverEngine(
             name="jax_cpu_thomas",
             platform="cpu",
+            single_cable_solver=single_cable.value,
             double_cable_block_solver="thomas",
         )
     raise ValueError(
         f"Unsupported CPU double-cable solver policy: {double_cable.kind!r}."
+    )
+
+
+def _resolve_single_cable_policy(policy: SolverPolicy) -> SingleCableSolverKind:
+    if policy.single_cable is None:
+        return SingleCableSolverKind.JAX_TRIDIAGONAL
+    if isinstance(policy.single_cable, SingleCableSolver):
+        if policy.single_cable.kind in {
+            SingleCableSolverKind.AUTO,
+            SingleCableSolverKind.JAX_TRIDIAGONAL,
+        }:
+            return SingleCableSolverKind.JAX_TRIDIAGONAL
+        raise ValueError(
+            f"Unsupported CPU single-cable solver policy: {policy.single_cable.kind!r}."
+        )
+    raise ValueError(
+        "JAX CPU execution requires a single-cable solver from "
+        "axs.runtime.jax.cpu or axs.runtime.jax."
     )
 
 

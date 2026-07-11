@@ -257,6 +257,20 @@ def double_cable_block_solver_from_execution_policy(
     return jax_double_cable_block_solver_for_policy(policy)
 
 
+def single_cable_solver_from_execution_policy(
+    policy: ExecutionPolicy | None,
+) -> str | None:
+    """Return the effective runtime single-cable solver for reporting."""
+
+    if policy is None:
+        return None
+    from axonscope.runtime.jax.execution_policy import (
+        jax_single_cable_solver_for_policy,
+    )
+
+    return jax_single_cable_solver_for_policy(policy)
+
+
 def batch_options_for_execution_context(
     batch_options: BatchOptions | None,
     context: Any,
@@ -310,4 +324,5 @@ __all__ = [
     "double_cable_block_solver_from_execution_policy",
     "execution_context",
     "run_batch_group",
+    "single_cable_solver_from_execution_policy",
 ]

@@ -151,6 +151,19 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
         ]
         command.extend(str(value) for value in config.get("benchmark_args", ()))
         return command
+    if campaign == "single_cable_solver_policy":
+        command = [
+            sys.executable,
+            "benchmark/campaigns/single_cable_solver_policy.py",
+            "--preset",
+            str(config["preset"]),
+            "--platform",
+            str(config["platform"]),
+            "--output",
+            str(output_dir),
+        ]
+        command.extend(str(value) for value in config.get("benchmark_args", ()))
+        return command
     if campaign == "double_cable_solver_stage_profile":
         command = [
             sys.executable,

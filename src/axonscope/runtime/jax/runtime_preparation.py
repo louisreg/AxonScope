@@ -329,6 +329,7 @@ def _backend_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
         else (
             getattr(solver_engine, "name", None),
             getattr(solver_engine, "platform", None),
+            getattr(solver_engine, "single_cable_solver", None),
             getattr(solver_engine, "double_cable_block_solver", None),
             getattr(solver_engine, "allow_internal_double_cable_block_solver", None),
             getattr(solver_engine, "tiled_thomas_block_b", None),

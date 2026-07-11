@@ -38,6 +38,7 @@ class JaxExecutionContext:
     device: Any | None
     platform: str | None
     solver_engine: JaxSolverEngine | None = None
+    single_cable_solver: str | None = None
     double_cable_block_solver: str | None = None
     double_cable_block_solver_allow_internal: bool = False
     double_cable_tiled_thomas_block_b: int | None = None
@@ -96,6 +97,9 @@ def jax_execution_context(
         device=device,
         platform=resolved.platform,
         solver_engine=solver_engine,
+        single_cable_solver=(
+            None if solver_engine is None else solver_engine.single_cable_solver
+        ),
         double_cable_block_solver=(
             None if solver_engine is None else solver_engine.double_cable_block_solver
         ),
@@ -228,6 +232,22 @@ def jax_double_cable_block_solver_for_policy(
     return None if solver_engine is None else solver_engine.double_cable_block_solver
 
 
+def jax_single_cable_solver_for_policy(
+    policy: ExecutionPolicy | None,
+) -> str | None:
+    """Return the JAX single-cable solver selected by a public policy."""
+
+    if policy is None:
+        return None
+    platform = (
+        policy.device.kind
+        if policy.device.kind in {"cpu", "gpu"}
+        else _canonical_jax_platform(jax.default_backend())
+    )
+    solver_engine = resolve_jax_solver_engine(policy, platform=platform)
+    return None if solver_engine is None else solver_engine.single_cable_solver
+
+
 def _validate_precision(
     precision: PrecisionPolicy | None,
     *,
@@ -323,4 +343,5 @@ __all__ = [
     "JaxExecutionContext",
     "jax_double_cable_block_solver_for_policy",
     "jax_execution_context",
+    "jax_single_cable_solver_for_policy",
 ]

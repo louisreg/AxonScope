@@ -2328,6 +2328,30 @@ solver-variant internals. The migration plan lives in
   `benchmark/results/p11d_quick_cpu_validation`. Triton default/promotion and
   GPU performance claims remain separate P11C-F/P11C-G Kaggle/local-GPU gates.
 
+### P11E - Single-Cable Solver Cartography And Cleanup Prep
+
+Goal: map the current single-cable CPU/GPU route before cleanup, then decide
+whether there is anything worth optimizing or whether the public surface should
+stay as one JAX tridiagonal route.
+
+- [x] Audit the current single-cable solver surface after P11D: typed public
+  `SolverPolicy(single_cable=...)` exists, but the JAX backend currently has
+  one numerical route, so `auto` and `jax_tridiagonal` should resolve to the
+  same implementation.
+- [x] Add a dedicated `benchmark/campaigns/single_cable_solver_policy.py`
+  campaign that records CPU/GPU, curve script, recording mode, diameter mode,
+  `Naxons`, `Nx`, precision, time-chunk policy, repeat-pool policy, runtime
+  prepare, input lowering, kernel preparation, dispatch/wait, observer finalize,
+  and memory summary.
+- [x] Add benchmark CLI support for `--single-cable-solver auto|jax_tridiagonal`
+  and translate it to typed `axs.runtime.jax.*.SingleCableSolver` constructors
+  at the benchmark boundary.
+- [x] Validate locally with a tiny CPU smoke before launching larger runs.
+- [ ] Run the reduced Kaggle CPU/GPU single-cable policy map and compare with
+  the double-cable evidence before doing any cleanup or optimization.
+- [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
+  low-level optimization pass or only cleanup/documentation.
+
 ### P12 - Studies, Serialization, Integration
 
 - [ ] Continue hardening NRV integration only where the package contract is

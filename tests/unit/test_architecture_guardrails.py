@@ -1541,7 +1541,7 @@ def test_group_runner_routes_runtime_preparation_through_preparation_module():
     assert "axonscope.runtime.jax.runtime_preparation" in text
     for required in (
         "prepare_batch_runtime",
-        "prepared_cohort_for_group",
+        "prepared_cohort_for_current_group",
         "representative_item",
         "group_cm_uF_cm2",
     ):

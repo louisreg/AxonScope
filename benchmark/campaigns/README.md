@@ -97,6 +97,62 @@ materialization, row/cohort assembly, and split-result timings. Use
 `--recording` for one mode and `--recordings` for a matrix across full Vm,
 probe Vm, and observer-only outputs.
 
+## P11 Single-Cable Solver Policy
+
+Use the single-cable policy campaign to compare the current typed public
+single-cable solver surface across CPU/GPU, recording modes, diameters, and
+population sizes. Today `auto` and `jax_tridiagonal` resolve to the same JAX
+route, so this campaign is mostly a CPU/GPU and recording cartography tool.
+
+Quick local smoke:
+
+```bash
+python benchmark/campaigns/single_cable_solver_policy.py \
+  --preset quick \
+  --platform cpu \
+  --curve-script recruitment_curves \
+  --solver auto,jax_tridiagonal \
+  --recording observer_only \
+  --n-axons 2 \
+  --nx 21 \
+  --precision fp32 \
+  --diameters same_diameter \
+  --repeats 1 \
+  --warmups 0 \
+  --amplitude-count 1 \
+  --memory-trace off \
+  --output benchmark/results/p11_single_cable_policy_local_smoke
+```
+
+Kaggle CPU/GPU policy map shape:
+
+```bash
+python benchmark/kaggle/run_kernel.py \
+  --username louisregnacq \
+  --slug p11-single-cable-policy-gpu \
+  --campaign single_cable_solver_policy \
+  --preset gpu_smoke \
+  --platform gpu \
+  --branch main \
+  --output-file-pattern '.*axonscope_benchmark_results.*' \
+  -- \
+  --curve-script recruitment_curves,threshold_curves \
+  --solver auto,jax_tridiagonal \
+  --recording observer_only,probe_vm \
+  --n-axons 1024,4096,8192 \
+  --nx 89 \
+  --precision fp32 \
+  --diameters same_diameter,different_diameters \
+  --tsim 2.0 \
+  --dt 0.02 \
+  --repeats 5 \
+  --warmups 1 \
+  --amplitude-count 3 \
+  --memory-trace off \
+  --repeat-pool-policy reuse \
+  --keep-going
+```
+
 ## Publication Outputs
 
 Publication runs should retain:
