@@ -2488,9 +2488,16 @@ stay as one JAX tridiagonal route.
   smoke, `kernel.wait` is now the visible synchronization span
   (`~245.6 ms/simulation` mean), while `kernel.finalize_observer` drops to
   `~0.12 ms/simulation` and `kernel.finalize_observer.to_host` to
-  `~0.02 ms/simulation`. A attempted rank-1 host-side scan rewrite was not kept
-  because local smoke did not show a robust improvement; validate any future
-  host-side `inputs.extracellular` optimization on the corrected wait boundary.
+  `~0.02 ms/simulation`. Mini P100 validation passed at commit `795c725` with
+  `threshold_curves`, observer-only, different diameters, `Naxons=4096`,
+  `Nx=89`, fp32, `solver=auto`, repeat-pool reuse. Artifact:
+  `benchmark/results/kaggle/20260711_155917_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-real-wait-gpu-795c725/outputs/extracted`.
+  P100 smoke means: `kernel.wait ~27.1 ms/simulation`,
+  `kernel.finalize_observer ~0.77 ms/simulation`, and
+  `kernel.finalize_observer.to_host ~0.65 ms/simulation`. An attempted rank-1
+  host-side scan rewrite was not kept because local smoke did not show a robust
+  improvement; validate any future host-side `inputs.extracellular`
+  optimization on the corrected wait boundary.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
