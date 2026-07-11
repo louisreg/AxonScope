@@ -455,7 +455,8 @@ def _stimulation_temporal_signature(
 
     Footprints are deliberately excluded: a runtime batch may contain distinct
     extracellular footprints, but rows should only share a group when their
-    temporal drive waveforms are compatible.
+    temporal drive waveform shapes are compatible. Amplitude scale is a runtime
+    numeric payload and should not split threshold-style groups.
     """
 
     rows = tuple(getattr(simulation, "extracellular_stimulations", ()))
@@ -484,14 +485,35 @@ def _stimulus_temporal_signature(
     if cached is not None:
         return cached
     signature = (
-        "stimulus",
+        "stimulus_waveform_shape",
+        type(stimulus),
         _array_signature(getattr(stimulus, "t", ())),
-        _array_signature(getattr(stimulus, "y", ())),
+        _stimulus_y_shape_signature(getattr(stimulus, "y", ())),
         getattr(stimulus, "mode", None),
         getattr(stimulus, "y_unit", None),
     )
     stimulus_signature_cache[cache_key] = signature
     return signature
+
+
+def _stimulus_y_shape_signature(values: Any) -> tuple[Any, ...]:
+    """Return an amplitude-scale-invariant waveform signature when possible."""
+
+    try:
+        y = np.asarray(values, dtype=float)
+    except (TypeError, ValueError):
+        return ("raw", _array_signature(values))
+    if y.ndim != 1 or not np.all(np.isfinite(y)):
+        return ("raw", _array_signature(values))
+    nonzero = np.flatnonzero(np.abs(y) > 0.0)
+    if len(nonzero) == 0:
+        normalized = np.zeros_like(y, dtype=float)
+    else:
+        scale = float(y[int(nonzero[0])])
+        if scale == 0.0:
+            return ("raw", _array_signature(values))
+        normalized = np.asarray(y / scale, dtype=float)
+    return ("scaled", _array_signature(normalized))
 
 
 __all__ = [

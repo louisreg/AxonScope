@@ -94,14 +94,16 @@ class FactorizedExtracellularPotentialBatch:
     """Static-footprint extracellular potential without the dense time-space tensor.
 
     ``current_mid_A`` stores the dynamic stimulus samples with shape ``(Nt,)``
-    for a shared single-drive waveform, ``(B, Nt)`` for row-specific
-    single-drive waveforms, or ``(B, K, Nt)`` for row-specific multi-drive
-    waveforms.
+    for a shared single-drive waveform, ``(S, Nt)`` for shared multi-drive
+    waveforms, ``(B, Nt)`` for row-specific single-drive waveforms, or
+    ``(B, S, Nt)`` for row-specific multi-drive waveforms.
     ``current_initial_previous_A`` optionally stores the ``t=-dt/2`` sample
     used by double-cable batches. ``footprint_mV_per_A`` stores the static
-    spatial footprint with shape ``(B, Nx)`` or ``(B, K, Nx)``. The dense
+    spatial footprint with shape ``(B, Nx)`` or ``(B, S, Nx)``. The dense
     midpoint potential is their product, summed over the optional drive axis:
-    ``Vstim[B, Nt, Nx] = sum_K current_mid_A * footprint_mV_per_A``.
+    ``Vstim[B, Nt, Nx] = sum_S current_mid_A * footprint_mV_per_A``.
+    ``current_row_scales`` stores the row amplitude payload for scaled shared
+    waveforms as ``(B,)`` or ``(B, S)``.
     ``current_row_indices`` can compress repeated row-specific rank-1 currents
     as ``current_mid_A[U, Nt]`` plus row indices ``[B]``.
     """
@@ -113,6 +115,7 @@ class FactorizedExtracellularPotentialBatch:
     static_footprint_key: tuple[Any, ...] | None = None
     single_cable_forcing_footprint_mV_per_A: Array | None = None
     current_row_indices: Array | None = None
+    current_row_scales: Array | None = None
 
     def __post_init__(self) -> None:
         current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
@@ -125,6 +128,9 @@ class FactorizedExtracellularPotentialBatch:
         indices_shape = tuple(
             int(dim) for dim in getattr(self.current_row_indices, "shape", ())
         )
+        scales_shape = tuple(
+            int(dim) for dim in getattr(self.current_row_scales, "shape", ())
+        )
         forcing_shape = tuple(
             int(dim)
             for dim in getattr(self.single_cable_forcing_footprint_mV_per_A, "shape", ())
@@ -134,11 +140,38 @@ class FactorizedExtracellularPotentialBatch:
         batch_size = footprint_shape[0]
         drive_count = 1 if len(footprint_shape) == 2 else footprint_shape[1]
         if len(current_shape) not in {1, 2, 3}:
-            raise ValueError("current_mid_A must have shape (Nt,), (B, Nt), or (B, K, Nt).")
+            raise ValueError(
+                "current_mid_A must have shape (Nt,), (S, Nt), (B, Nt), "
+                "or (B, S, Nt)."
+            )
         if len(footprint_shape) == 2 and len(current_shape) == 3:
-            raise ValueError("rank-K current_mid_A requires footprint_mV_per_A shape (B, K, Nx).")
-        if len(footprint_shape) == 3 and len(current_shape) != 3:
-            raise ValueError("rank-K footprint_mV_per_A requires current_mid_A shape (B, K, Nt).")
+            raise ValueError(
+                "multi-drive current_mid_A requires footprint_mV_per_A shape (B, S, Nx)."
+            )
+        if self.current_row_indices is not None and self.current_row_scales is not None:
+            raise ValueError("current_row_indices and current_row_scales are mutually exclusive.")
+        if self.current_row_scales is not None:
+            if len(footprint_shape) == 2:
+                if len(current_shape) != 1:
+                    raise ValueError(
+                        "rank-1 current_row_scales require current_mid_A shape (Nt,)."
+                    )
+                if scales_shape not in {(batch_size,), (batch_size, 1)}:
+                    raise ValueError(
+                        "rank-1 current_row_scales must have shape (B,) or (B, 1), "
+                        f"got {scales_shape} for footprint shape {footprint_shape}."
+                    )
+            else:
+                if len(current_shape) != 2 or current_shape[0] != drive_count:
+                    raise ValueError(
+                        "multi-drive current_row_scales require current_mid_A shape "
+                        f"(S, Nt)=({drive_count}, Nt), got {current_shape}."
+                    )
+                if scales_shape != (batch_size, drive_count):
+                    raise ValueError(
+                        "multi-drive current_row_scales must have shape (B, S), "
+                        f"got {scales_shape} for footprint shape {footprint_shape}."
+                    )
         if self.current_row_indices is not None:
             if len(footprint_shape) != 2 or len(current_shape) != 2:
                 raise ValueError(
@@ -152,27 +185,39 @@ class FactorizedExtracellularPotentialBatch:
                     "current_row_indices must have shape (B,) matching footprint_mV_per_A, "
                     f"got {indices_shape} and {footprint_shape}."
                 )
-        elif len(current_shape) == 2 and current_shape[0] != batch_size:
-            raise ValueError(
-                "current_mid_A batch size must match footprint_mV_per_A, "
-                f"got {current_shape} and {footprint_shape}."
-            )
+        elif len(current_shape) == 2:
+            if len(footprint_shape) == 2 and current_shape[0] != batch_size:
+                raise ValueError(
+                    "current_mid_A batch size must match footprint_mV_per_A; "
+                    f"got {current_shape} and {footprint_shape}."
+                )
+            if len(footprint_shape) == 3 and current_shape[0] != drive_count:
+                raise ValueError(
+                    "shared multi-drive current_mid_A must have shape (S, Nt); "
+                    f"got {current_shape} and {footprint_shape}."
+                )
         if len(current_shape) == 3 and current_shape[:2] != (batch_size, drive_count):
             raise ValueError(
                 "current_mid_A batch/drive axes must match footprint_mV_per_A, "
                 f"got {current_shape} and {footprint_shape}."
             )
         if self.current_initial_previous_A is not None:
-            if self.current_row_indices is not None:
+            if self.current_row_scales is not None:
+                valid_previous_shapes = {()} if len(footprint_shape) == 2 else {(drive_count,)}
+            elif self.current_row_indices is not None:
                 valid_previous_shapes = {(current_shape[0],), (batch_size,)}
             elif len(footprint_shape) == 3:
-                valid_previous_shapes = {(batch_size, drive_count)}
+                if len(current_shape) == 2:
+                    valid_previous_shapes = {(drive_count,)}
+                else:
+                    valid_previous_shapes = {(batch_size, drive_count)}
             else:
                 valid_previous_shapes = {(), (batch_size,)}
             if previous_shape not in valid_previous_shapes:
                 raise ValueError(
-                    "current_initial_previous_A must be scalar or shape (B,) "
-                    "for rank-1 batches, and shape (B, K) for rank-K batches; "
+                    "current_initial_previous_A must match the selected current "
+                    "layout: scalar/(B,) for rank-1, (S,) for shared/scaled "
+                    "multi-drive, or (B, S) for row-specific multi-drive; "
                     f"got {previous_shape} for footprint shape {footprint_shape}."
                 )
         footprint_width = footprint_shape[-1]
@@ -219,7 +264,25 @@ class FactorizedExtracellularPotentialBatch:
     def shared_current(self) -> bool:
         """Whether all rows share the same temporal waveform."""
 
-        return len(getattr(self.current_mid_A, "shape", ())) == 1
+        if self.current_row_indices is not None or self.current_row_scales is not None:
+            return False
+        current_shape = tuple(int(dim) for dim in getattr(self.current_mid_A, "shape", ()))
+        footprint_shape = tuple(
+            int(dim) for dim in getattr(self.footprint_mV_per_A, "shape", ())
+        )
+        if len(current_shape) == 1:
+            return True
+        return (
+            len(footprint_shape) == 3
+            and len(current_shape) == 2
+            and current_shape[0] == footprint_shape[1]
+        )
+
+    @property
+    def scaled_shared_waveform(self) -> bool:
+        """Whether rows scale shared temporal waveform shapes."""
+
+        return self.current_row_scales is not None
 
 
 def materialize_factorized_extracellular_potential_batch(
@@ -229,6 +292,19 @@ def materialize_factorized_extracellular_potential_batch(
 
     current_mid_A = jnp.asarray(batch.current_mid_A)
     footprint = jnp.asarray(batch.footprint_mV_per_A)
+    row_scales = (
+        None
+        if batch.current_row_scales is None
+        else jnp.asarray(batch.current_row_scales)
+    )
+    if row_scales is not None:
+        if footprint.ndim == 2:
+            scales = row_scales.reshape((footprint.shape[0],))
+            current = current_mid_A[None, :, None] * scales[:, None, None]
+            return current * footprint[:, None, :]
+        scales = row_scales.reshape((footprint.shape[0], footprint.shape[1]))
+        current = current_mid_A[None, :, :, None] * scales[:, :, None, None]
+        return jnp.sum(current * footprint[:, :, None, :], axis=1)
     if footprint.ndim == 2:
         if current_mid_A.ndim == 1:
             current = current_mid_A[None, :, None]
@@ -238,8 +314,16 @@ def materialize_factorized_extracellular_potential_batch(
                 current_mid_A = jnp.take(current_mid_A, row_indices, axis=0)
             current = current_mid_A[:, :, None]
         return current * footprint[:, None, :]
+    if current_mid_A.ndim == 2:
+        return jnp.sum(
+            current_mid_A[None, :, :, None] * footprint[:, :, None, :],
+            axis=1,
+        )
     if current_mid_A.ndim != 3:
-        raise ValueError("rank-K factorized Vstim requires current_mid_A shape (B, K, Nt).")
+        raise ValueError(
+            "multi-drive factorized Vstim requires current_mid_A shape (S, Nt) "
+            "or (B, S, Nt)."
+        )
     return jnp.sum(current_mid_A[:, :, :, None] * footprint[:, :, None, :], axis=1)
 
 
@@ -252,6 +336,18 @@ def materialize_factorized_extracellular_potential_initial_previous(
         raise ValueError("current_initial_previous_A is required.")
     current_previous_A = jnp.asarray(batch.current_initial_previous_A)
     footprint = jnp.asarray(batch.footprint_mV_per_A)
+    row_scales = (
+        None
+        if batch.current_row_scales is None
+        else jnp.asarray(batch.current_row_scales)
+    )
+    if row_scales is not None:
+        if footprint.ndim == 2:
+            scales = row_scales.reshape((footprint.shape[0],))
+            return (current_previous_A * scales)[:, None] * footprint
+        scales = row_scales.reshape((footprint.shape[0], footprint.shape[1]))
+        current = current_previous_A[None, :, None] * scales[:, :, None]
+        return jnp.sum(current * footprint, axis=1)
     if footprint.ndim == 2:
         if current_previous_A.ndim == 0:
             current = current_previous_A
@@ -266,10 +362,12 @@ def materialize_factorized_extracellular_potential_initial_previous(
                     )
             current = current_previous_A[:, None]
         return current * footprint
+    if current_previous_A.ndim == 1:
+        return jnp.sum(current_previous_A[None, :, None] * footprint, axis=1)
     if current_previous_A.ndim != 2:
         raise ValueError(
             "rank-K factorized previous Vstim requires current_initial_previous_A "
-            "shape (B, K)."
+            "shape (S,) or (B, S)."
         )
     return jnp.sum(current_previous_A[:, :, None] * footprint, axis=1)
 

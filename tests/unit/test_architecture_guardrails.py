@@ -1730,7 +1730,7 @@ def test_factorized_vext_route_has_dense_equivalence_tests():
 
     required_tests = {
         "test_factorized_footprint_batch_matches_dense_builder_and_observer_raster",
-        "test_factorized_footprint_batch_supports_row_specific_currents",
+        "test_factorized_footprint_batch_supports_scaled_shared_waveforms",
         "test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa",
         "test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr_soa",
     }

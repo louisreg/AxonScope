@@ -42,7 +42,7 @@ JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
     cable="single-cable",
     supports_zero=True,
     supports_shared_current=True,
-    supports_scaled_shared_waveform=False,
+    supports_scaled_shared_waveform=True,
     supports_current_table=True,
     supports_dense_fallback=True,
 )
@@ -486,6 +486,8 @@ def _factorized_extracellular_mode(
     current_shape = tuple(
         int(dim) for dim in getattr(factorized.current_mid_A, "shape", ())
     )
+    if factorized.current_row_scales is not None:
+        return ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
     if factorized.shared_current:
         return ExtracellularLoweringMode.SHARED_CURRENT
     if factorized.current_row_indices is not None or len(current_shape) in {2, 3}:

@@ -51,10 +51,27 @@ from axonscope.runtime.jax.batch_inputs import (
     materialize_factorized_extracellular_potential_batch,
 )
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
-from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
+from axonscope.runtime.jax.observer_runtime import (
+    build_vm_raster_plan,
+    finalize_vm_raster_state,
+)
 from axonscope.runtime.jax.experimental import CrankNicholsonVStimForcing
 from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
+
+
+def _kernel_observations(out):
+    if out.observations is not None:
+        return out.observations
+    pending = out.pending_observation
+    assert pending is not None
+    return finalize_vm_raster_state(
+        pending.plan,
+        pending.state,
+        nt=pending.nt,
+        dt_ms=pending.dt_ms,
+        synchronize=True,
+    )
 
 
 def _hh_extracellular_axon(*, current_clamp: bool = True) -> AxonInstance:
@@ -594,20 +611,20 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     assert dense_out.Vm is None
     assert factorized_out.Vm is None
     assert factorized_chunked.Vm is None
-    assert dense_out.observations is not None
-    assert factorized_out.observations is not None
-    assert factorized_chunked.observations is not None
+    dense_observations = _kernel_observations(dense_out)
+    factorized_observations = _kernel_observations(factorized_out)
+    factorized_chunked_observations = _kernel_observations(factorized_chunked)
     np.testing.assert_array_equal(
-        np.asarray(factorized_out.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
     np.testing.assert_array_equal(
-        np.asarray(factorized_chunked.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(factorized_chunked_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 
-def test_factorized_footprint_batch_supports_row_specific_currents():
+def test_factorized_footprint_batch_supports_scaled_shared_waveforms():
     axon = _hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -631,10 +648,13 @@ def test_factorized_footprint_batch_supports_row_specific_currents():
     )
 
     assert factorized is not None
-    assert factorized.current_mid_A.shape == (2, int(tsim / dt))
+    assert factorized.current_mid_A.shape == (int(tsim / dt),)
     assert factorized.current_initial_previous_A is not None
-    assert factorized.current_initial_previous_A.shape == (2,)
+    assert factorized.current_initial_previous_A.shape == ()
+    assert factorized.current_row_scales is not None
+    assert factorized.current_row_scales.shape == (2,)
     assert factorized.shared_current is False
+    assert factorized.scaled_shared_waveform is True
     materialized = materialize_factorized_extracellular_potential_batch(factorized)
     np.testing.assert_allclose(
         np.asarray(materialized),
@@ -729,11 +749,11 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
         observers=observer,
     )
 
-    assert dense_out.observations is not None
-    assert factorized_out.observations is not None
+    dense_observations = _kernel_observations(dense_out)
+    factorized_observations = _kernel_observations(factorized_out)
     np.testing.assert_array_equal(
-        np.asarray(factorized_out.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_out.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 
@@ -1109,8 +1129,7 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
 
     center = axon.n_compartments // 2
     assert compact.Vm is None
-    assert compact.observations is not None
-    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    raster = _kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY]
     np.testing.assert_array_equal(
         np.any(raster.unpack()[:, 0, 0, :], axis=1),
         np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
@@ -1179,8 +1198,7 @@ def test_double_cable_compact_event_observer_pcr_soa_batch_native_matches_full_v
 
     center = axon.n_compartments // 2
     assert compact.Vm is None
-    assert compact.observations is not None
-    raster = compact.observations[VM_RASTER_OBSERVATION_KEY]
+    raster = _kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY]
     np.testing.assert_array_equal(
         np.any(raster.unpack()[:, 0, 0, :], axis=1),
         np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
@@ -1254,16 +1272,16 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
         observers=observer,
     )
 
-    assert dense.observations is not None
-    assert compact.observations is not None
-    assert chunked.observations is not None
+    dense_observations = _kernel_observations(dense)
+    compact_observations = _kernel_observations(compact)
+    chunked_observations = _kernel_observations(chunked)
     np.testing.assert_array_equal(
-        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(compact_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
     np.testing.assert_array_equal(
-        np.asarray(chunked.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(chunked_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 
@@ -1338,11 +1356,11 @@ def test_double_cable_factorized_footprint_observer_matches_dense_pcr_soa(
 
     assert dense.Vm is None
     assert compact.Vm is None
-    assert dense.observations is not None
-    assert compact.observations is not None
+    dense_observations = _kernel_observations(dense)
+    compact_observations = _kernel_observations(compact)
     np.testing.assert_array_equal(
-        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(compact_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 
@@ -1415,11 +1433,11 @@ def test_double_cable_factorized_row_specific_current_observer_matches_dense_pcr
         observers=observer,
     )
 
-    assert dense.observations is not None
-    assert compact.observations is not None
+    dense_observations = _kernel_observations(dense)
+    compact_observations = _kernel_observations(compact)
     np.testing.assert_array_equal(
-        np.asarray(compact.observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense.observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(compact_observations[VM_RASTER_OBSERVATION_KEY].words),
+        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
     )
 
 

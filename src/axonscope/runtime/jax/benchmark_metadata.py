@@ -84,7 +84,9 @@ def record_extracellular_lowering_metadata(
             **_extracellular_contract_metadata(lowered),
             target_nx=factorized.target_nx,
             factorized_rank=factorized.drive_count,
+            nstim=factorized.drive_count,
             shared_current=factorized.shared_current,
+            scaled_shared_waveform=factorized.scaled_shared_waveform,
             dense_vstim_avoided=True,
             **benchmark_array_metadata(
                 "vstim_current_mid_A",
@@ -102,6 +104,14 @@ def record_extracellular_lowering_metadata(
                 **benchmark_array_metadata(
                     "vstim_current_initial_previous_A",
                     factorized.current_initial_previous_A,
+                    role="kernel_input",
+                )
+            )
+        if factorized.current_row_scales is not None:
+            record_benchmark_metadata(
+                **benchmark_array_metadata(
+                    "vstim_current_row_scales",
+                    factorized.current_row_scales,
                     role="kernel_input",
                 )
             )

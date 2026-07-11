@@ -130,6 +130,17 @@ class _Rank1CurrentRows:
     temporal_previous_cache_misses: int
 
 
+@dataclass(frozen=True)
+class _ScaledSharedWaveformRows:
+    current_mid_A: np.ndarray
+    current_initial_previous_A: Any | None
+    current_row_scales: np.ndarray
+    temporal_mid_cache_hits: int
+    temporal_mid_cache_misses: int
+    temporal_previous_cache_hits: int
+    temporal_previous_cache_misses: int
+
+
 def _build_rank1_current_rows_from_unique_stimuli(
     drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
     t_ms: np.ndarray,
@@ -207,6 +218,147 @@ def _build_rank1_current_rows_from_unique_stimuli(
             0 if t_initial_previous_ms is None else temporal_misses
         ),
     )
+
+
+def _build_scaled_shared_waveform_rows(
+    drive_rows: Sequence[Sequence[tuple[ExtracellularStimulation, Any, Stimulus]]],
+    t_ms: np.ndarray,
+    *,
+    t_initial_previous_ms: np.ndarray | None,
+    np_dtype: np.dtype[Any],
+) -> _ScaledSharedWaveformRows | None:
+    """Return shared waveform samples plus per-row scales when possible."""
+
+    if not drive_rows:
+        return None
+    drive_count = len(drive_rows[0])
+    if drive_count < 1 or not all(len(row) == drive_count for row in drive_rows):
+        return None
+
+    row_scales = np.zeros((len(drive_rows), drive_count), dtype=np_dtype)
+    base_stimuli: list[Stimulus] = []
+    base_scales: list[float] = []
+    for drive_index in range(drive_count):
+        first_stimulus = drive_rows[0][drive_index][2]
+        first = _stimulus_scaled_waveform_signature_and_scale(first_stimulus)
+        if first is None:
+            return None
+        first_signature, first_scale = first
+        base_stimuli.append(first_stimulus)
+        base_scales.append(first_scale)
+        row_scales[0, drive_index] = np.asarray(first_scale, dtype=np_dtype)
+        for row_index, row in enumerate(drive_rows[1:], start=1):
+            candidate = _stimulus_scaled_waveform_signature_and_scale(
+                row[drive_index][2]
+            )
+            if candidate is None:
+                return None
+            signature, scale = candidate
+            if signature != first_signature:
+                return None
+            row_scales[row_index, drive_index] = np.asarray(scale, dtype=np_dtype)
+
+    if np.all(row_scales == row_scales[0:1, :]):
+        return None
+
+    current_mid_A = np.stack(
+        [
+            _scaled_waveform_base_current_A(
+                stimulus,
+                scale,
+                t_ms,
+                np_dtype=np_dtype,
+            )
+            for stimulus, scale in zip(base_stimuli, base_scales, strict=True)
+        ],
+        axis=0,
+    )
+    current_initial_previous_A = None
+    if t_initial_previous_ms is not None:
+        current_initial_previous_A = np.asarray(
+            [
+                _scaled_waveform_base_current_A(
+                    stimulus,
+                    scale,
+                    t_initial_previous_ms,
+                    np_dtype=np_dtype,
+                ).reshape(-1)[0]
+                for stimulus, scale in zip(base_stimuli, base_scales, strict=True)
+            ],
+            dtype=np_dtype,
+        )
+
+    if drive_count == 1:
+        current_mid_A = np.ascontiguousarray(current_mid_A[0], dtype=np_dtype)
+        if current_initial_previous_A is not None:
+            current_initial_previous_A = np.asarray(
+                current_initial_previous_A[0],
+                dtype=np_dtype,
+            )
+        current_row_scales = np.ascontiguousarray(row_scales[:, 0], dtype=np_dtype)
+    else:
+        current_mid_A = np.ascontiguousarray(current_mid_A, dtype=np_dtype)
+        current_row_scales = np.ascontiguousarray(row_scales, dtype=np_dtype)
+
+    unique_waveforms = drive_count
+    sample_count = len(drive_rows) * drive_count
+    return _ScaledSharedWaveformRows(
+        current_mid_A=current_mid_A,
+        current_initial_previous_A=current_initial_previous_A,
+        current_row_scales=current_row_scales,
+        temporal_mid_cache_hits=max(sample_count - unique_waveforms, 0),
+        temporal_mid_cache_misses=unique_waveforms,
+        temporal_previous_cache_hits=(
+            0 if t_initial_previous_ms is None else max(sample_count - unique_waveforms, 0)
+        ),
+        temporal_previous_cache_misses=(
+            0 if t_initial_previous_ms is None else unique_waveforms
+        ),
+    )
+
+
+def _scaled_waveform_base_current_A(
+    stimulus: Stimulus,
+    scale: float,
+    t_ms: np.ndarray,
+    *,
+    np_dtype: np.dtype[Any],
+) -> np.ndarray:
+    current = np.asarray(stimulus.evaluate(t_ms, unit="ampere"), dtype=np_dtype)
+    if scale == 0.0:
+        return np.zeros_like(current, dtype=np_dtype)
+    return np.asarray(current / np.asarray(scale, dtype=np_dtype), dtype=np_dtype)
+
+
+def _stimulus_scaled_waveform_signature_and_scale(
+    stimulus: Stimulus,
+) -> tuple[tuple[Any, ...], float] | None:
+    try:
+        y = np.asarray(stimulus.y, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if y.ndim != 1 or not np.all(np.isfinite(y)):
+        return None
+    nonzero = np.flatnonzero(np.abs(y) > 0.0)
+    if len(nonzero) == 0:
+        scale = 0.0
+        normalized = np.zeros_like(y, dtype=float)
+    else:
+        scale = float(y[int(nonzero[0])])
+        if scale == 0.0:
+            return None
+        normalized = np.asarray(y / scale, dtype=float)
+    normalized = np.ascontiguousarray(normalized)
+    normalized.setflags(write=False)
+    signature = (
+        "stimulus_scaled_waveform_v1",
+        type(stimulus),
+        getattr(stimulus, "mode", None),
+        getattr(stimulus, "y_unit", None),
+        _array_content_key(np.asarray(stimulus.t)),
+        _array_content_key(normalized),
+    )
+    return signature, scale
 
 
 def build_vstim_midpoint_batch(
@@ -1131,14 +1283,6 @@ def _try_build_factorized_footprint_vstim_batch(
                 rank1_stimulus_key = _stimulus_temporal_cache_key(first_stimulus)
                 shared_rank1_detection = "identity"
                 shared_rank1_stimulus_obj = first_stimulus
-            else:
-                first_key = _stimulus_temporal_cache_key(first_stimulus)
-                if all(
-                    _stimulus_temporal_cache_key(row[0][2]) == first_key
-                    for row in drive_rows[1:]
-                ):
-                    rank1_stimulus_key = first_key
-                    shared_rank1_detection = "content"
         has_shared_rank1_stimulus = rank1_stimulus_key is not None
         if has_shared_rank1_stimulus and shared_rank1_detection == "none":
             shared_rank1_detection = "content"
@@ -1148,6 +1292,7 @@ def _try_build_factorized_footprint_vstim_batch(
     temporal_previous_cache_misses = 0
     current_rows_lowering = "none"
     current_row_indices = None
+    current_row_scales = None
 
     if has_shared_rank1_stimulus:
         with benchmark_span("inputs.extracellular.current_shared_rank1"):
@@ -1167,72 +1312,98 @@ def _try_build_factorized_footprint_vstim_batch(
                 temporal_previous_cache_misses = 1
             shared_current = True
             current_rows_lowering = "shared_rank1"
-    elif max_drive_count == 1:
-        with benchmark_span("inputs.extracellular.current_unique_index"):
-            rank1_current_rows = _build_rank1_current_rows_from_unique_stimuli(
+    else:
+        with benchmark_span("inputs.extracellular.current_scaled_shared_waveform"):
+            scaled_waveform_rows = _build_scaled_shared_waveform_rows(
                 drive_rows,
                 t_ms,
                 t_initial_previous_ms=t_initial_previous_ms,
                 np_dtype=np_dtype,
             )
-        if rank1_current_rows is None:
-            return None
-        current_A = rank1_current_rows.current_mid_A
-        current_initial_previous_A = rank1_current_rows.current_initial_previous_A
-        current_row_indices = rank1_current_rows.current_row_indices
-        shared_current = rank1_current_rows.shared_current
-        temporal_mid_cache_hits = rank1_current_rows.temporal_mid_cache_hits
-        temporal_mid_cache_misses = rank1_current_rows.temporal_mid_cache_misses
-        temporal_previous_cache_hits = (
-            rank1_current_rows.temporal_previous_cache_hits
-        )
-        temporal_previous_cache_misses = (
-            rank1_current_rows.temporal_previous_cache_misses
-        )
-        if shared_current and shared_rank1_detection == "none":
-            shared_rank1_detection = "content"
-        current_rows_lowering = "unique_index"
-    else:
-        with benchmark_span("inputs.extracellular.current_row_loop"):
-            current_rows_A = np.zeros(
-                (batch_size, max_drive_count, int(t_ms.shape[0])),
-                dtype=np_dtype,
+        if scaled_waveform_rows is not None:
+            current_A = scaled_waveform_rows.current_mid_A
+            current_initial_previous_A = (
+                scaled_waveform_rows.current_initial_previous_A
             )
-            previous_rows_A = (
-                None
-                if t_initial_previous_ms is None
-                else np.zeros((batch_size, max_drive_count), dtype=np_dtype)
+            current_row_scales = scaled_waveform_rows.current_row_scales
+            shared_current = False
+            current_rows_lowering = "scaled_shared_waveform"
+            temporal_mid_cache_hits = scaled_waveform_rows.temporal_mid_cache_hits
+            temporal_mid_cache_misses = (
+                scaled_waveform_rows.temporal_mid_cache_misses
             )
-            mid_cache: dict[Any, np.ndarray] = {}
-            previous_cache: dict[Any, np.ndarray] = {}
-            for row_index, row in enumerate(drive_rows):
-                for drive_index, (_stimulation, _drive, stimulus) in enumerate(row):
-                    current_values_A, cache_hit = _cached_stimulus_current_A(
-                        mid_cache,
-                        stimulus,
-                        t_ms,
-                        np_dtype=np_dtype,
-                    )
-                    temporal_mid_cache_hits += int(cache_hit)
-                    temporal_mid_cache_misses += int(not cache_hit)
-                    current_rows_A[row_index, drive_index] = current_values_A
-                    if previous_rows_A is not None and t_initial_previous_ms is not None:
-                        previous_values_A, cache_hit = _cached_stimulus_current_A(
-                            previous_cache,
+            temporal_previous_cache_hits = (
+                scaled_waveform_rows.temporal_previous_cache_hits
+            )
+            temporal_previous_cache_misses = (
+                scaled_waveform_rows.temporal_previous_cache_misses
+            )
+        elif max_drive_count == 1:
+            with benchmark_span("inputs.extracellular.current_unique_index"):
+                rank1_current_rows = _build_rank1_current_rows_from_unique_stimuli(
+                    drive_rows,
+                    t_ms,
+                    t_initial_previous_ms=t_initial_previous_ms,
+                    np_dtype=np_dtype,
+                )
+            if rank1_current_rows is None:
+                return None
+            current_A = rank1_current_rows.current_mid_A
+            current_initial_previous_A = rank1_current_rows.current_initial_previous_A
+            current_row_indices = rank1_current_rows.current_row_indices
+            shared_current = rank1_current_rows.shared_current
+            temporal_mid_cache_hits = rank1_current_rows.temporal_mid_cache_hits
+            temporal_mid_cache_misses = rank1_current_rows.temporal_mid_cache_misses
+            temporal_previous_cache_hits = (
+                rank1_current_rows.temporal_previous_cache_hits
+            )
+            temporal_previous_cache_misses = (
+                rank1_current_rows.temporal_previous_cache_misses
+            )
+            if shared_current and shared_rank1_detection == "none":
+                shared_rank1_detection = "content"
+            current_rows_lowering = "shared_rank1" if shared_current else "unique_index"
+        else:
+            with benchmark_span("inputs.extracellular.current_row_loop"):
+                current_rows_A = np.zeros(
+                    (batch_size, max_drive_count, int(t_ms.shape[0])),
+                    dtype=np_dtype,
+                )
+                previous_rows_A = (
+                    None
+                    if t_initial_previous_ms is None
+                    else np.zeros((batch_size, max_drive_count), dtype=np_dtype)
+                )
+                mid_cache: dict[Any, np.ndarray] = {}
+                previous_cache: dict[Any, np.ndarray] = {}
+                for row_index, row in enumerate(drive_rows):
+                    for drive_index, (_stimulation, _drive, stimulus) in enumerate(row):
+                        current_values_A, cache_hit = _cached_stimulus_current_A(
+                            mid_cache,
                             stimulus,
-                            t_initial_previous_ms,
+                            t_ms,
                             np_dtype=np_dtype,
                         )
-                        temporal_previous_cache_hits += int(cache_hit)
-                        temporal_previous_cache_misses += int(not cache_hit)
-                        previous_rows_A[row_index, drive_index] = (
-                            previous_values_A.reshape(-1)[0]
-                        )
+                        temporal_mid_cache_hits += int(cache_hit)
+                        temporal_mid_cache_misses += int(not cache_hit)
+                        current_rows_A[row_index, drive_index] = current_values_A
+                        if previous_rows_A is not None and t_initial_previous_ms is not None:
+                            previous_values_A, cache_hit = _cached_stimulus_current_A(
+                                previous_cache,
+                                stimulus,
+                                t_initial_previous_ms,
+                                np_dtype=np_dtype,
+                            )
+                            temporal_previous_cache_hits += int(cache_hit)
+                            temporal_previous_cache_misses += int(not cache_hit)
+                            previous_rows_A[row_index, drive_index] = (
+                                previous_values_A.reshape(-1)[0]
+                            )
 
-            shared_current = False
-            current_A = current_rows_A
-            current_initial_previous_A = previous_rows_A
-            current_rows_lowering = "row_loop"
+                shared_current = False
+                current_A = current_rows_A
+                current_initial_previous_A = previous_rows_A
+                current_rows_lowering = "row_loop"
 
     dense_equivalent_nbytes = (
         int(len(rows_tuple))
@@ -1248,24 +1419,31 @@ def _try_build_factorized_footprint_vstim_batch(
     current_indices_nbytes = (
         0 if current_row_indices is None else int(current_row_indices.nbytes)
     )
+    current_scales_nbytes = (
+        0 if current_row_scales is None else int(current_row_scales.nbytes)
+    )
     factorized_nbytes = (
         int(current_A.nbytes)
         + int(footprint_mV_per_A.nbytes)
         + previous_nbytes
         + current_indices_nbytes
+        + current_scales_nbytes
     )
     record_benchmark_metadata(
         vstim_footprint_cache=footprint_cache_status,
         vstim_footprint_cache_nbytes=int(footprint_V_per_A.nbytes),
         vstim_input_format="factorized_footprint",
         vstim_factorized_rank=int(max_drive_count),
+        vstim_factorized_nstim=int(max_drive_count),
         vstim_factorized_current_nbytes=int(current_A.nbytes),
         vstim_factorized_initial_previous_nbytes=previous_nbytes,
         vstim_factorized_current_indices_nbytes=current_indices_nbytes,
+        vstim_factorized_current_scales_nbytes=current_scales_nbytes,
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
         shared_current=bool(shared_current),
+        scaled_shared_waveform=current_row_scales is not None,
         vstim_shared_current_detection=shared_rank1_detection,
         vstim_temporal_cache_hits=int(temporal_mid_cache_hits),
         vstim_temporal_cache_misses=int(temporal_mid_cache_misses),
@@ -1302,6 +1480,11 @@ def _try_build_factorized_footprint_vstim_batch(
             if current_row_indices is None
             else jnp.asarray(current_row_indices, dtype=jnp.int32)
         )
+        current_row_scales_device = (
+            None
+            if current_row_scales is None
+            else jnp.asarray(current_row_scales, dtype=dtype_local)
+        )
     return FactorizedExtracellularPotentialBatch(
         current_mid_A=current_mid_A,
         footprint_mV_per_A=footprint_jax,
@@ -1309,6 +1492,7 @@ def _try_build_factorized_footprint_vstim_batch(
         current_initial_previous_A=current_initial_previous_device,
         static_footprint_key=footprint_cache_key,
         current_row_indices=current_row_indices_device,
+        current_row_scales=current_row_scales_device,
     )
 
 

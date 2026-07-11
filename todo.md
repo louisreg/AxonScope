@@ -2532,6 +2532,17 @@ stay as one JAX tridiagonal route.
   benchmarks must remain compact with no regression; inspection/benchmark
   metadata must report lowering mode, fallback reason, `Nstim`, unique waveform
   count, payload shapes, and capability decision.
+  Initial implementation landed after contract commit `07e3672`: dispatcher
+  grouping now uses amplitude-scale-invariant waveform signatures;
+  `FactorizedExtracellularPotentialBatch` supports `current_row_scales`;
+  JAX single-cable lowering reports and consumes `scaled_shared_waveform`; and
+  current-table fallback remains for genuinely non-proportional waveforms.
+  Local CPU smoke artifact:
+  `benchmark/results/p11e_scaled_waveform_local_smoke`. Remaining before
+  closing: run the corrected large-population CPU/GPU smoke, decide whether
+  compact double-cable `scaled_shared_waveform` is worth implementing beyond
+  explicit dense fallback, and record the before/after `inputs.extracellular`
+  evidence.
 
 ### P12 - Studies, Serialization, Integration
 

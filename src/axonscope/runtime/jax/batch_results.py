@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -12,7 +12,10 @@ from axonscope.benchmarking import (
     record_benchmark_metadata,
 )
 from axonscope.runtime.jax.batch_kernels import BatchKernelResult
-from axonscope.runtime.jax.observer_runtime import trim_pending_vm_raster_observation
+from axonscope.runtime.jax.observer_runtime import (
+    finalize_vm_raster_state,
+    trim_pending_vm_raster_observation,
+)
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.dispatcher._records import (
     DispatchCohortRecord,
@@ -53,6 +56,59 @@ def trim_batch_kernel_result(
         t=out.t,
         observations=observations,
         pending_observation=pending,
+    )
+
+
+def batch_wait_target(out: BatchKernelResult) -> Any:
+    """Return a JAX/NumPy object that synchronizes a batch kernel result."""
+
+    if out.Vm is not None:
+        return out.Vm
+    if out.pending_observation is not None:
+        return out.pending_observation.state
+    if not out.observations:
+        raise RuntimeError("batch kernel produced neither Vm nor observations.")
+    first = next(iter(out.observations.values()))
+    if hasattr(first, "words"):
+        return first.words
+    return first.values
+
+
+def finalize_pending_batch_observation(
+    out: BatchKernelResult,
+    *,
+    group: DispatchGroup,
+    mode: str,
+) -> BatchKernelResult:
+    """Finalize observer output after the explicit group-level device wait."""
+
+    pending = out.pending_observation
+    if pending is None:
+        return out
+    with benchmark_span(
+        "kernel.finalize_observer",
+        mode=mode,
+        observer="vm_raster",
+        group_id=group.group_id,
+        group_size=group.size,
+        synchronized_before_finalize=True,
+        wait_span="kernel.wait",
+    ):
+        observations = cast(
+            dict[str, object],
+            finalize_vm_raster_state(
+                pending.plan,
+                pending.state,
+                nt=pending.nt,
+                dt_ms=pending.dt_ms,
+                synchronize=False,
+            ),
+        )
+    return BatchKernelResult(
+        Vm=out.Vm,
+        t=out.t,
+        observations=observations,
+        pending_observation=None,
     )
 
 

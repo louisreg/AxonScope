@@ -4257,9 +4257,34 @@ def _factorized_current_mid_rows(
     batch_size: int,
 ) -> Array:
     current = jnp.asarray(batch.current_mid_A, dtype=dtype_local)
+    row_scales = (
+        None
+        if batch.current_row_scales is None
+        else jnp.asarray(batch.current_row_scales, dtype=dtype_local)
+    )
+    footprint = jnp.asarray(batch.footprint_mV_per_A)
+    if row_scales is not None:
+        if current.ndim == 1:
+            scales = row_scales.reshape((batch_size,))
+            return current[None, None, :] * scales[:, None, None]
+        if current.ndim == 2 and footprint.ndim == 3:
+            drive_count = int(footprint.shape[1])
+            scales = row_scales.reshape((batch_size, drive_count))
+            return current[None, :, :] * scales[:, :, None]
+        raise ValueError(
+            "scaled factorized current_mid_A must have shape (Nt,) or (S, Nt), "
+            f"got {current.shape}."
+        )
     if current.ndim == 1:
         return jnp.broadcast_to(current[None, None, :], (batch_size, 1, current.shape[0]))
     if current.ndim == 2:
+        if footprint.ndim == 3 and batch.current_row_indices is None:
+            drive_count = int(footprint.shape[1])
+            if int(current.shape[0]) == drive_count:
+                return jnp.broadcast_to(
+                    current[None, :, :],
+                    (batch_size, drive_count, int(current.shape[1])),
+                )
         if batch.current_row_indices is not None:
             row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
             current = jnp.take(current, row_indices, axis=0)
@@ -5589,6 +5614,11 @@ def _as_factorized_extracellular_potential_batch(
         if values.current_row_indices is None
         else jnp.asarray(values.current_row_indices, dtype=jnp.int32)
     )
+    current_row_scales = (
+        None
+        if values.current_row_scales is None
+        else jnp.asarray(values.current_row_scales, dtype=dtype_local)
+    )
     footprint_mV_per_A = jnp.asarray(values.footprint_mV_per_A, dtype=dtype_local)
     forcing_footprint_mV_per_A = (
         None
@@ -5608,6 +5638,10 @@ def _as_factorized_extracellular_potential_batch(
         )
     batch_size = int(footprint_mV_per_A.shape[0])
     drive_count = 1 if footprint_mV_per_A.ndim == 2 else int(footprint_mV_per_A.shape[1])
+    if current_row_indices is not None and current_row_scales is not None:
+        raise ValueError(
+            f"{name}.current_row_indices and current_row_scales are mutually exclusive."
+        )
     if footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 1:
         if current_row_indices is not None:
             raise ValueError(f"{name}.current_row_indices require current_mid_A shape (U, Nt).")
@@ -5616,7 +5650,20 @@ def _as_factorized_extracellular_potential_batch(
                 f"{name}.current_mid_A must have shape (Nt,)=({nt},), "
                 f"got {current_mid_A.shape}."
             )
+        if current_row_scales is not None and current_row_scales.shape not in {
+            (batch_size,),
+            (batch_size, 1),
+        }:
+            raise ValueError(
+                f"{name}.current_row_scales must have shape (B,) or (B, 1), "
+                f"B={batch_size}, got {current_row_scales.shape}."
+            )
     elif footprint_mV_per_A.ndim == 2 and current_mid_A.ndim == 2:
+        if current_row_scales is not None:
+            raise ValueError(
+                f"{name}.current_row_scales with rank-1 footprints require "
+                "current_mid_A shape (Nt,)."
+            )
         if current_row_indices is None:
             valid_current = current_mid_A.shape == (batch_size, nt)
             expected = f"(B, Nt)=({batch_size}, {nt})"
@@ -5633,9 +5680,30 @@ def _as_factorized_extracellular_potential_batch(
                 f"got current={current_mid_A.shape} and "
                 f"indices={None if current_row_indices is None else current_row_indices.shape}."
             )
+    elif footprint_mV_per_A.ndim == 3 and current_mid_A.ndim == 2:
+        if current_row_indices is not None:
+            raise ValueError(f"{name}.current_row_indices are only valid for rank-1 batches.")
+        valid_current = current_mid_A.shape == (drive_count, nt)
+        valid_scales = (
+            current_row_scales is None
+            or current_row_scales.shape == (batch_size, drive_count)
+        )
+        if not valid_current or not valid_scales:
+            raise ValueError(
+                f"{name}.current_mid_A must have shape (S, Nt)="
+                f"({drive_count}, {nt}) and current_row_scales must be absent "
+                f"or shape (B, S)=({batch_size}, {drive_count}); got "
+                f"current={current_mid_A.shape}, "
+                f"scales={None if current_row_scales is None else current_row_scales.shape}."
+            )
     elif footprint_mV_per_A.ndim == 3 and current_mid_A.ndim == 3:
         if current_row_indices is not None:
             raise ValueError(f"{name}.current_row_indices are only valid for rank-1 batches.")
+        if current_row_scales is not None:
+            raise ValueError(
+                f"{name}.current_row_scales with row-specific multi-drive current "
+                "require current_mid_A shape (S, Nt)."
+            )
         if current_mid_A.shape != (batch_size, drive_count, nt):
             raise ValueError(
                 f"{name}.current_mid_A must have shape (B, K, Nt)="
@@ -5647,7 +5715,14 @@ def _as_factorized_extracellular_potential_batch(
             f"with footprint shape {footprint_mV_per_A.shape}."
         )
     if current_initial_previous_A is not None:
-        if footprint_mV_per_A.ndim == 2 and current_row_indices is None:
+        if current_row_scales is not None:
+            if footprint_mV_per_A.ndim == 2:
+                valid_previous = current_initial_previous_A.ndim == 0
+                expected = "scalar"
+            else:
+                valid_previous = current_initial_previous_A.shape == (drive_count,)
+                expected = f"(S,)=({drive_count},)"
+        elif footprint_mV_per_A.ndim == 2 and current_row_indices is None:
             valid_previous = current_initial_previous_A.ndim == 0 or (
                 current_initial_previous_A.shape == (batch_size,)
             )
@@ -5658,6 +5733,9 @@ def _as_factorized_extracellular_potential_batch(
                 (batch_size,),
             }
             expected = f"(U,) or (B,), U={int(current_mid_A.shape[0])}, B={batch_size}"
+        elif current_mid_A.ndim == 2:
+            valid_previous = current_initial_previous_A.shape == (drive_count,)
+            expected = f"(S,)=({drive_count},)"
         else:
             valid_previous = current_initial_previous_A.shape == (batch_size, drive_count)
             expected = f"(B, K)=({batch_size}, {drive_count})"
@@ -5674,6 +5752,7 @@ def _as_factorized_extracellular_potential_batch(
         static_footprint_key=values.static_footprint_key,
         single_cable_forcing_footprint_mV_per_A=forcing_footprint_mV_per_A,
         current_row_indices=current_row_indices,
+        current_row_scales=current_row_scales,
     )
 
 
