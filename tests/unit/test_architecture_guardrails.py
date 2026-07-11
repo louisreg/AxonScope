@@ -1723,6 +1723,74 @@ def test_active_double_cable_solver_surface_uses_typed_execution_policy():
     assert all(f"def {name}" not in common_text for name in archived_common_functions)
 
 
+def test_solver_route_reporting_contract_is_cable_agnostic():
+    assert axs.CableSolverRoute is axs.runtime.CableSolverRoute
+    assert axs.RuntimeSolverRoute is axs.runtime.RuntimeSolverRoute
+
+    assert [field.name for field in fields(axs.CableSolverRoute)] == [
+        "cable",
+        "requested",
+        "backend_route",
+        "internal",
+        "options",
+    ]
+    assert [field.name for field in fields(axs.RuntimeSolverRoute)] == [
+        "runtime",
+        "platform",
+        "engine_name",
+        "single_cable",
+        "double_cable",
+    ]
+    assert [field.name for field in fields(axs.KernelInspection)] == [
+        "group_id",
+        "route",
+        "kernel",
+        "cable_mode",
+        "solver",
+        "time_chunk_steps",
+    ]
+
+    single = axs.CableSolverRoute(
+        cable="single_cable",
+        requested="auto",
+        backend_route="jax_tridiagonal",
+    )
+    double = axs.CableSolverRoute(
+        cable="double_cable",
+        requested="tiled_thomas",
+        backend_route="jax_triton_loop_xb",
+        internal=True,
+        options=(("block_b", 64),),
+    )
+    route = axs.RuntimeSolverRoute(
+        runtime="jax",
+        platform="gpu",
+        engine_name="jax_gpu_tiled_thomas",
+        single_cable=single,
+        double_cable=double,
+    )
+
+    assert route.for_cable("single") is single
+    assert route.for_cable("double") is double
+    assert route.for_cable("single_cable") is single
+    assert route.for_cable("double_cable") is double
+
+
+def test_public_examples_do_not_use_backend_solver_route_labels():
+    examples_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in _python_sources(REPO_ROOT / "examples")
+    )
+
+    forbidden = {
+        "jax_triton_loop_xb",
+        "double_cable_block_solver",
+        "allow_internal_double_cable_block_solver",
+    }
+    offenders = sorted(label for label in forbidden if label in examples_text)
+    assert offenders == []
+
+
 def test_non_thomas_double_cable_kernel_tests_are_diagnostic_or_gpu_scoped():
     """Keep CPU production tests from treating PCR/Triton as supported policy."""
 

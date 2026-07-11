@@ -14,7 +14,7 @@ completed, rejected, or moved to a named tracking document.
 
 ## Snapshot
 
-Updated on 2026-07-11 during the P11E solver-policy cleanup prep.
+Updated on 2026-07-12 during the P11 closeout.
 
 Current state:
 
@@ -38,9 +38,9 @@ Current state:
   baseline, scalar/batch span coverage normalization, explicit hotpath
   `time_chunk_steps` controls, and documented closeout decisions before any
   larger runtime project.
-- The next priority is not the NumPy solver. First flatten the public
-  model/compiler surface, then build realistic benchmark evidence and optimize
-  the current JAX solver path.
+- P11 is closed for the current JAX runtime/benchmark/solver-policy
+  stabilization pass. Deferred runtime, benchmark, and solver-policy work is
+  tracked in `docs/architecture/p11_closeout_2026_07_12.md`.
 - Current P11 cleanup decisions are tracked in
   `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
   CPU double-cable keeps only Thomas as a production route; GPU double-cable
@@ -638,7 +638,8 @@ Goal: optimize the current JAX solver only after P11A produces realistic,
 stage-level evidence. Hotpath microbenchmarks remain diagnostic; product
 decisions need realistic workflow evidence.
 
-- [ ] Capture a clean P11A baseline before changing solver behavior:
+- [x] Close the P11B baseline gate and move remaining baseline extensions to
+  `docs/architecture/p11_closeout_2026_07_12.md`:
   `quick`, `local_realistic`, key NRV smoke cases, and GPU smoke/realistic
   where available.
   CPU `quick` threshold and recruitment baselines were captured on 2026-07-05
@@ -683,7 +684,9 @@ decisions need realistic workflow evidence.
   memory context, and a Markdown bottleneck summary across CPU/GPU runs.
   The first optimization target is now pool/plan/runtime reuse between
   amplitude evaluations before changing solver kernels.
-- [ ] Optimize current JAX preparation and lowering before new solver routes:
+- [x] Close the P11B JAX preparation/lowering optimization gate and move
+  remaining runtime-reuse/lowering/result-boundary targets to
+  `docs/architecture/p11_closeout_2026_07_12.md`:
   runtime/cohort caches, input lowering, static-footprint factorized `Vext`,
   zero/sparse `Iinj`, recording-aware pruning, and result assembly.
   First cleanup landed in `33535ee`: curve benchmarks now build each phase pool
@@ -760,13 +763,15 @@ decisions need realistic workflow evidence.
   any default change; it is not yet a new benchmark claim.
   Remaining optimization targets are broader dispatch/runtime reuse,
   lowering/transport pruning, and result assembly.
-- [ ] Explore low-level observer/kernel bottlenecks before high-level workflow
-  scheduling changes. Start from the corrected `time_chunk_steps == Nt`
-  behavior and compare explicit one-chunk versus unchunked/full-scope observer
-  paths, `kernel.dispatch_jax`, `kernel.enqueue`, `kernel.wait`,
-  `kernel.finalize_observer`, host/device materialization boundaries, and
-  VmRaster combine/finalize costs. Use tiny traced cases for JAX profiling and
-  device-memory artifacts, then confirm with bounded realistic CPU/GPU runs.
+- [x] Close the low-level observer/kernel bottleneck cartography gate and move
+  remaining adaptive/default-policy work to
+  `docs/architecture/p11_closeout_2026_07_12.md`. Start from the corrected
+  `time_chunk_steps == Nt` behavior and compare explicit one-chunk versus
+  unchunked/full-scope observer paths, `kernel.dispatch_jax`,
+  `kernel.enqueue`, `kernel.wait`, `kernel.finalize_observer`, host/device
+  materialization boundaries, and VmRaster combine/finalize costs. Use tiny
+  traced cases for JAX profiling and device-memory artifacts, then confirm with
+  bounded realistic CPU/GPU runs.
   First tooling step: curve benchmarks now distinguish `time_chunk_policy`
   values `default`, `unchunked`, and `explicit`; CLI forms
   `--time-chunk-steps unchunked`, `none`, and `N` map to the intended
@@ -1391,7 +1396,9 @@ decisions need realistic workflow evidence.
   keep this as a bounded runtime cleanup for repeated curve workloads, but stop
   exploring this precompute family for now because it does not move the core
   solver lowering or PCR fusion bottleneck.
-- [ ] Run the full `time_chunk_steps` campaign across default, unchunked, 50,
+- [x] Close the P11 time-chunk campaign evidence gate and move adaptive/default
+  policy selection to `docs/architecture/p11_closeout_2026_07_12.md`. Run the
+  full `time_chunk_steps` campaign across default, unchunked, 50,
   250, 500, 1000, and adaptive policies for full Vm, probe Vm, and
   observer-only outputs.
   Track peak memory, chunk overhead, cold/warm time, GPU utilization, result
@@ -1464,31 +1471,33 @@ decisions need realistic workflow evidence.
   `benchmark/results/p11b_time_chunk_matrix_report_20260706_stage_groups/p11b_low_level_bottleneck_notes.md`;
   it frames the next step as deeper low-level tracing and optimization, not
   adaptive policy selection.
-- [ ] Keep recruitment amplitude micro-batching as a later high-level
+- [x] Move recruitment amplitude micro-batching to the post-P11 backlog as a
+  later high-level
   optimization axis, not the immediate P11B target. When low-level
   observer/kernel bottlenecks are understood, compare candidate
   `amplitude_batch_size` values such as 1, 2, 4, and 8 against peak memory,
   footprint duplication, cold/warm time, observer-only result assembly, and
   scientific equivalence before changing defaults.
-- [ ] Carry over P10 backend-neutral optimizer closeout under benchmark
+- [x] Move P10 backend-neutral optimizer closeout to the post-P11 backlog under benchmark
   control: common subexpression elimination, unused diagnostic pruning, stable
   optimized-graph hashing, explainable before/after summaries, and deciding
   which report-time target identity fields become real cache-key inputs.
-- [ ] Carry over P10 JAX-specific generated fusion closeout under benchmark
+- [x] Move P10 JAX-specific generated fusion closeout to the post-P11 backlog under benchmark
   control: generated conductance terms, state prepare/finalize updates,
   diagnostics, requested-observable pruning, composite generated programs or a
   stricter fail-fast boundary, avoiding transport of unrequested intermediate
   arrays, and direct solver-kernel fusion beyond the P7 class subset.
-- [ ] Remove or reject dense internal fallback paths only after factorized or
+- [x] Move dense internal fallback cleanup to the post-P11 backlog. Remove or reject dense internal fallback paths only after factorized or
   compact equivalents have equivalence tests and realistic benchmark evidence.
-- [ ] GPU dispatch scheduling: memory-aware bucket/coalesce first, optional
+- [x] Move GPU dispatch scheduling to the post-P11 backlog: memory-aware bucket/coalesce first, optional
   async enqueue second, only after memory budgets and group-route inspection
   exist. See `ideas/axonscope_dispatch_scheduling_gpu_note.md`.
-- [ ] Double-cable rank-K compact `Vext`: future optimization/validation slice.
+- [x] Move double-cable rank-K compact `Vext` to the post-P11 backlog as a future optimization/validation slice.
   Current double-cable keeps dense materialization for unsupported compact
   cases. Only broaden compact forcing after equivalence tests against dense
   results and benchmark evidence for memory/time benefits.
-- [ ] Improve GPU solver: see
+- [x] Close the P11 GPU-solver idea review and move future candidate work to
+  `docs/architecture/p11_closeout_2026_07_12.md`; see
   `ideas/axonscope_gpu_tridiagonal_solver_literature_synthesis.md`,
   `ideas/axonscope_double_cable_exact_gpu_solver_roadmap.md`, and
   `ideas/axonscope_single_double_cable_gpu_solver_options_with_precompute.md`.
@@ -1622,7 +1631,7 @@ decisions need realistic workflow evidence.
   not HLO size alone: PCR-SoA live state/memory traffic, launch/stage boundaries
   around the one-step proxy, or a genuinely GPU-native tiled/custom/Pallas-style
   solver candidate only after a narrow benchmark-backed hypothesis.
-- [ ] Re-run NRV validation only for numerical behavior changes, but always
+- [x] Keep NRV validation as a standing post-P11 validation rule. Re-run NRV validation only for numerical behavior changes, but always
   pair optimization claims with fresh hotpath or realistic benchmark evidence.
 
 ### P11C - Large-Population Exact GPU Solver
@@ -1646,7 +1655,8 @@ PTA/block-Thomas GPU gate:
 - [x] Define the backend-private candidate:
   `large_population_exact_double_cable_jax`. It must own a large-population GPU
   execution shape rather than wrapping an existing solver name.
-- [ ] Extend the backend-private candidate into a measured real-stage route:
+- [x] Close the measured real-stage route gate through the later P11C real-stage
+  and looped Triton integration evidence:
   prepare layout, packed state, static terms, factorized forcing, dynamic
   membrane/RHS assembly, exact solve, and compact recording as one measured
   backend-owned path.
@@ -1690,12 +1700,13 @@ PTA/block-Thomas GPU gate:
   Run tiny synthetic cases against current exact solvers and Thomas reference;
   validate shape/padding behavior, layout packing/unpacking, and no public API
   surface changes.
-- [ ] P11C-B gate: JAX-only benchmark-private prototype.
+- [x] P11C-B gate closed by later benchmark-private JAX/Triton prototypes.
   Start with an exact PCR-SoA-like body in the large-pop layout because it
   exposes parallelism over both `B` and `Nx`. It must differ from
   `pcr_soa_batched` by owning explicit `Nx_pad`, `B` tiling/layout, persistent
   static-term preparation, and direct assembly into the chosen layout.
-- [ ] P11C-C gate: synthetic GPU large-population matrix.
+- [x] P11C-C gate closed by the synthetic and looped Triton large-population
+  GPU matrices.
   Test `B/Naxons=1024,4096,8192,16384` plus optional `32768` if memory allows,
   `Nx_true` values that cover all candidate buckets, shared and batched
   coefficients, fp32 first, and fp64 spot checks. Compare against the current
@@ -1707,7 +1718,8 @@ PTA/block-Thomas GPU gate:
   (`~3.5%-9.8%`) and loses or ties for `Nx=89/129`, especially because
   `Nx=129 -> Nx_pad=160` is costly. Do not move CPU execution toward P11C;
   keep P11C as a GPU large-population track.
-- [ ] P11C-D gate: real-stage large-population matrix.
+- [x] P11C-D gate closed by the real-stage large-population matrices and
+  subsequent policy campaign evidence.
   Use real double-cable MRG-like prepared inputs with observer-only and probe
   outputs first. Target `Naxons=4096/8192`, optional `16384` if memory allows.
   Measure membrane, assembly, solve, one-step proxy, compact recording,
@@ -1885,7 +1897,9 @@ PTA/block-Thomas GPU gate:
   internal policy selection in this slice. The explicit benchmark override
   should fail loudly when Triton/GPU constraints are not met, so benchmark
   artifacts cannot silently measure the fallback route under a Triton label.
-- [ ] P11C-F complete policy benchmark:
+- [x] P11C-F policy benchmark evidence gate closed; remaining default-policy
+  threshold and repeat/check work moved to
+  `docs/architecture/p11_closeout_2026_07_12.md`:
   after integration, run a full CPU/GPU benchmark matrix with realistic curve
   workloads, recording modes, `Naxons`, `Nx`, dtype, cold/warm cache state,
   timing traces, memory traces, correctness checks, and git metadata before
@@ -2252,7 +2266,8 @@ PTA/block-Thomas GPU gate:
   wall-clock as solver policy evidence. Do not make the default Triton policy
   decision from this slice alone; use it as steady-state bottleneck
   cartography after the non-solver cleanup.
-- [ ] P11C-G promote the Triton solver if evidence supports it:
+- [x] Move P11C-G Triton promotion/default-policy work to
+  `docs/architecture/p11_closeout_2026_07_12.md`:
   if P11C-F shows robust wins and acceptable cold-start/memory/correctness
   behavior, make the Triton double-cable solver a selectable solver option
   alongside the existing routes. Only then consider making it part of the
@@ -2510,7 +2525,8 @@ stay as one JAX tridiagonal route.
   2026-07-11: keep single-cable on the simple JAX tridiagonal route for now.
   The useful work is cleanup/documentation plus shared input-lowering
   convergence, not a separate single-cable solver family.
-- [ ] Put non-solver extracellular input lowering on one explicit
+- [x] Move representation-level non-solver extracellular input lowering
+  convergence to `docs/architecture/p11_closeout_2026_07_12.md`. Put non-solver extracellular input lowering on one explicit
   single-cable/double-cable path before more low-level solver work. Current
   evidence: on P100 `threshold_curves`, observer-only, `Naxons=4096`, `Nx=89`,
   fp32, different diameters, single-cable repeat spends about
@@ -2577,7 +2593,9 @@ policy matrix is finished.
   diagnostic/GPU-scoped, and an architecture guardrail rejects non-Thomas
   `double_cable_block_solver` usage in ordinary unit tests unless the test name
   is diagnostic, GPU, or benchmark scoped.
-- [ ] Keep GPU double-cable Triton/tiled-Thomas as a typed explicit route while
+- [x] Close P11F with GPU double-cable Triton/tiled-Thomas kept as a typed
+  explicit route; default/policy-matrix work is moved to
+  `docs/architecture/p11_closeout_2026_07_12.md`. Keep GPU double-cable Triton/tiled-Thomas as a typed explicit route while
   the policy matrix is completed; do not make it default until the matrix
   constrains `Naxons`, `Nx`, dtype, recording mode, cold/warm behavior, memory,
   dependency failure, and physical-curve correctness.
@@ -2631,9 +2649,19 @@ policy matrix is finished.
   exposes one `solver` field with requested policy, resolved backend route,
   internal/artifact flag, and route-specific options. Low-level kernels still
   use backend-private labels where needed.
+- [x] Close P11 on 2026-07-12. Remaining runtime/benchmark/policy ideas are no
+  longer P11 blockers and are tracked in
+  `docs/architecture/p11_closeout_2026_07_12.md`.
 
 ### P12 - Studies, Serialization, Integration
 
+- [ ] Post-P11 runtime/benchmark backlog:
+  continue only the deferred items tracked in
+  `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
+  double-cable Triton/tiled-Thomas policy thresholds, shared-waveform/scaled
+  extracellular input lowering, adaptive time-chunk policy, GPU dispatch
+  scheduling, model/compiler optimizer closeout, dense fallback decisions, and
+  NRV validation only when numerical behavior changes.
 - [ ] Continue hardening NRV integration only where the package contract is
   stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
   promote future pieces only when they do not duplicate the canonical
