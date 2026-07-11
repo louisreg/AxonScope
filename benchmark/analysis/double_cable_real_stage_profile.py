@@ -63,9 +63,6 @@ from axonscope.runtime.jax.runtime_preparation import (
 )
 from axonscope.runtime.jax.shape_bucketing import double_cable_kernel_group
 from axonscope.dispatcher.plan import build_dispatch_plan
-from axonscope.runtime.jax.solver_engines.block_solvers import (
-    resolve_double_cable_block_solver,
-)
 from axonscope.solvers.options import BatchOptions, SolverOptions
 
 from benchmark.analysis.double_cable_solver_candidates import (
@@ -104,6 +101,19 @@ REPEAT_FIELDS = (
     "rss_delta_mib",
     "output_bytes",
 )
+
+_GPU_PLATFORMS = frozenset({"cuda", "gpu", "metal", "rocm"})
+
+
+def _resolve_profile_block_solver(solver: str, *, platform: str) -> str:
+    if solver == "auto":
+        return "pcr_adaptive" if platform.lower() in _GPU_PLATFORMS else "thomas"
+    if solver in {"thomas", "pcr", "pcr_soa", "pcr_adaptive"}:
+        return solver
+    raise ValueError(
+        "double-cable stage profile solver must be auto, thomas, pcr, "
+        "pcr_soa, or pcr_adaptive."
+    )
 
 SUMMARY_FIELDS = (
     "stage",
@@ -499,7 +509,7 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         kernel_options=kernel_options,
     )
     batch_size = int(cohort.size)
-    resolved = resolve_double_cable_block_solver(
+    resolved = _resolve_profile_block_solver(
         args.double_cable_block_solver,
         platform=args.platform,
     )

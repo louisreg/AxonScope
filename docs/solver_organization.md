@@ -162,10 +162,11 @@ prepare_batch_runtime(...)
 ```
 
 The retained exact double-cable block solvers are backend-private labels:
-`thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`, plus internal `auto`
-resolution. Public users select them through typed per-cable solver policies on
-`ExecutionPolicy.solvers`. `pcr_adaptive` selects `pcr_soa` for batches up to
-`B=4096`, then matrix-layout `pcr` above that.
+`thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. Public users select routes
+through typed per-cable solver policies on `ExecutionPolicy.solvers`; `auto`
+is resolved at that policy boundary before kernel dispatch. `pcr_adaptive`
+selects `pcr_soa` for batches up to `B=4096`, then matrix-layout `pcr` above
+that.
 
 Double-cable lowering uses the same `Lowered*Input` contract as single-cable,
 but a double-cable-specific strategy because the kernel needs an

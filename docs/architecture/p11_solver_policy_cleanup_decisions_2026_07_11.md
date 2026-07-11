@@ -94,6 +94,12 @@ rule: users select the Triton/tiled-Thomas candidate with
 The old `--benchmark-double-cable-block-solver jax_triton_loop_xb` hook is
 removed; `jax_triton_loop_xb` remains only a runtime/artifact label.
 
+The next cleanup pass removed the backend-local
+`runtime/jax/solver_engines/block_solvers.py` resolver. `auto` is now resolved
+by typed solver policy before kernel dispatch; low-level double-cable kernels
+accept only concrete backend-private routes (`thomas`, `pcr`, `pcr_soa`,
+`pcr_adaptive`) or explicitly permitted benchmark/internal labels.
+
 ## Next Cleanup Slice
 
 - Make CPU double-cable policy and docs say one thing everywhere:

@@ -66,7 +66,6 @@ They must not be treated as public API until explicitly promoted.
 | `BatchOptions` | `src/axonscope/solvers/options.py` | production | Batch recording and time chunking only. |
 | `BatchRecording` | `src/axonscope/solvers/options.py` | production | Solver-side retained Vm policy: full, center, probes, indices, none. |
 | `ExecutionPolicy.solvers` | `src/axonscope/performance.py` | production | Typed per-cable solver policy surface. |
-| `resolve_double_cable_block_solver(...)` | `src/axonscope/runtime/jax/solver_engines/block_solvers.py` | backend-private | Resolves internal backend labels. Not exported from `axonscope.solvers`. |
 
 Current typed public double-cable solver vocabulary:
 

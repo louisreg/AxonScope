@@ -2587,6 +2587,11 @@ policy matrix is finished.
   `ExecutionPolicy.solvers`; the old
   `--benchmark-double-cable-block-solver jax_triton_loop_xb` surface is
   removed and tested as rejected.
+- [x] Remove the obsolete backend-local double-cable block-solver resolver.
+  `auto` now resolves at the typed solver-policy boundary before kernel
+  dispatch. Low-level JAX double-cable kernels accept only concrete
+  backend-private routes (`thomas`, `pcr`, `pcr_soa`, `pcr_adaptive`) or
+  explicitly permitted benchmark/internal labels such as `jax_triton_loop_xb`.
 - [x] Run a post-cleanup non-regression benchmark matrix covering single-cable
   and double-cable, CPU and GPU, `observer_only` and `probe_vm`, same and
   different diameters, before making any new performance claim.

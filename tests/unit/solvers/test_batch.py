@@ -31,9 +31,6 @@ from axonscope.runtime.jax.batch_kernels import (
 from axonscope.runtime.execution import batch_options_for_execution_context
 from axonscope.runtime.jax.recording import batch_options_from_recording
 from axonscope.runtime.jax.kernels import DoubleCableKernel
-from axonscope.runtime.jax.solver_engines.block_solvers import (
-    resolve_double_cable_block_solver,
-)
 from axonscope.runtime.jax.solver_engines.cpu import resolve_cpu_solver_engine
 from axonscope.solvers import (
     BatchOptions,
@@ -135,14 +132,6 @@ def test_batch_recording_resolves_common_policies():
         BatchRecording.indices([5]).indices_for(5)
     assert BatchOptions.center().recording.mode == "center"
     assert not hasattr(BatchOptions.center(), "double_cable_block_solver")
-    assert resolve_double_cable_block_solver("auto", platform="cpu") == "thomas"
-    assert resolve_double_cable_block_solver("auto", platform="gpu") == "pcr_adaptive"
-    assert resolve_double_cable_block_solver("thomas", platform="gpu") == "thomas"
-    assert resolve_double_cable_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
-    with pytest.raises(ValueError, match="double_cable_block_solver"):
-        resolve_double_cable_block_solver("dense", platform="gpu")
-    with pytest.raises(ValueError, match="double_cable_block_solver"):
-        resolve_double_cable_block_solver("jax_triton_loop_xb", platform="gpu")
 
 
 def test_batch_options_none_defaults_to_observer_chunking():
@@ -176,6 +165,17 @@ def test_gpu_pcr_adaptive_prefers_soa_through_p100_calibrated_batch_range():
         == "pcr_soa"
     )
     assert _resolve_double_cable_kernel_block_solver("pcr_adaptive", batch_size=4097) == "pcr"
+
+
+def test_double_cable_kernel_solver_dispatch_requires_concrete_routes():
+    assert _resolve_double_cable_run_block_solver(None, platform="cpu") == "thomas"
+    assert _resolve_double_cable_run_block_solver(None, platform="gpu") == "pcr_adaptive"
+    assert _resolve_double_cable_run_block_solver("thomas", platform="gpu") == "thomas"
+    assert _resolve_double_cable_run_block_solver("pcr_soa", platform="gpu") == "pcr_soa"
+    with pytest.raises(ValueError, match="resolved before kernel dispatch"):
+        _resolve_double_cable_run_block_solver("auto", platform="gpu")
+    with pytest.raises(ValueError, match="double_cable_block_solver"):
+        _resolve_double_cable_run_block_solver("dense", platform="gpu")
 
 
 def test_gpu_diagnostic_pcr_soa_batch_native_route_starts_at_realistic_batches():

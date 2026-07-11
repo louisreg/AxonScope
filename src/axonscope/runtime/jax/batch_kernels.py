@@ -41,7 +41,6 @@ from .runtime_caches import (
     store_single_cable_factorized_forcing,
 )
 from . import solver_core
-from .solver_engines.block_solvers import resolve_double_cable_block_solver
 from axonscope.solvers.options import (
     BatchOptions,
     BatchRecording,
@@ -61,6 +60,10 @@ class BatchKernelResult:
 
 _DOUBLE_CABLE_PCR_SOA_MAX_BATCH = 4096
 _DOUBLE_CABLE_BATCH_NATIVE_PCR_SOA_MIN_BATCH = 16
+_GPU_PLATFORMS = frozenset({"cuda", "gpu", "metal", "rocm"})
+_SUPPORTED_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset(
+    {"thomas", "pcr", "pcr_soa", "pcr_adaptive"}
+)
 _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({"jax_triton_loop_xb"})
 _DEFAULT_TRITON_TILED_THOMAS_BLOCK_B = 32
 
@@ -118,18 +121,35 @@ def _vm_raster_probe_tables_for_kernel(
 
 
 def _resolve_double_cable_run_block_solver(
-    solver: str,
+    solver: str | None,
     *,
     platform: str,
     allow_internal: bool = False,
 ) -> str:
+    normalized_platform = platform.lower()
+    if solver in (None, ""):
+        return (
+            "pcr_adaptive"
+            if normalized_platform in _GPU_PLATFORMS
+            else "thomas"
+        )
+    if solver == "auto":
+        raise ValueError(
+            "double_cable_block_solver must be resolved before kernel dispatch; "
+            "use ExecutionPolicy solvers for public auto selection."
+        )
     if allow_internal and solver in _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS:
-        if platform != "gpu":
+        if normalized_platform not in _GPU_PLATFORMS:
             raise RuntimeError(
                 f"Internal double-cable solver {solver!r} requires a JAX GPU backend."
             )
         return solver
-    return resolve_double_cable_block_solver(solver, platform=platform)
+    if solver in _SUPPORTED_DOUBLE_CABLE_BLOCK_SOLVERS:
+        return solver
+    raise ValueError(
+        "double_cable_block_solver must be 'thomas', 'pcr', 'pcr_soa', "
+        "'pcr_adaptive', or a permitted internal benchmark solver."
+    )
 
 
 def _normalize_tiled_thomas_block_b(block_b: int | None) -> int:
@@ -3630,7 +3650,7 @@ class DoubleCableBatchKernel:
                 and jnp.asarray(extracellular.Gax_i).ndim == 1
                 and jnp.asarray(extracellular.Gax_e).ndim == 1
             )
-            requested_block_solver = "auto"
+            requested_block_solver = None
             allow_internal_block_solver = False
             if double_cable_block_solver is not None:
                 requested_block_solver = str(double_cable_block_solver)
