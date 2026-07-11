@@ -2454,6 +2454,18 @@ stay as one JAX tridiagonal route.
   a useful target for this optimization (`curve.simulate` +4.3%, while
   update rows still improved). Keep this as a large-population workflow cleanup,
   not as evidence for a new solver policy.
+- [x] Add the next profiling split before touching more solver code:
+  factorized extracellular input lowering now emits child spans for row
+  normalization, identity-plan lookup, row scanning, footprint key/cache/
+  compute/mV conversion, shared-rank detection, current lowering
+  (`shared_rank1`, `unique_index`, `row_loop`), footprint device placement, and
+  current device placement. This mirrors the useful double-cable cleanup
+  boundaries: host construction/cache, temporal/current lowering, then device
+  transfer. `kernel.enqueue` and `kernel.wait` now carry explicit timing-role
+  metadata, and double-cable batch trimming is separated as
+  `kernel.trim_batch_output`. Local smoke artifact:
+  `benchmark/results/p11e_single_trace_decomposition_local`. The smoke confirms
+  the traces are usable; do not use it as a GPU performance claim.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 

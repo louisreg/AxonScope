@@ -800,12 +800,34 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert metadata["dense_vstim_avoided"] is True
     assert "vstim_mid" not in metadata
     assert "vstim_previous" not in metadata
+    event_names = {event.name for event in report.events}
+    assert "inputs.extracellular.current_shared_rank1" in event_names
+    assert "inputs.extracellular.footprint_to_device" in event_names
+    assert "inputs.extracellular.current_to_device" in event_names
 
     enqueue_events = [event for event in report.events if event.name == "kernel.enqueue"]
     assert len(enqueue_events) == 1
     enqueue_metadata = enqueue_events[0].metadata
     assert enqueue_metadata["mode"] == "double"
     assert enqueue_metadata["recording_mode"] == "none"
+    assert enqueue_metadata["timing_role"] == "host_enqueue"
+    assert enqueue_metadata["device_synchronization"] is False
+
+    trim_events = [
+        event for event in report.events if event.name == "kernel.trim_batch_output"
+    ]
+    assert len(trim_events) == 1
+
+    wait_events = [
+        event
+        for event in report.events
+        if event.name == "kernel.wait"
+        and event.metadata.get("timing_role") == "device_synchronization"
+    ]
+    assert len(wait_events) == 1
+    wait_metadata = wait_events[0].metadata
+    assert wait_metadata["timing_role"] == "device_synchronization"
+    assert wait_metadata["device_synchronization"] is True
 
     dispatch_events = [event for event in report.events if event.name == "kernel.dispatch_jax"]
     assert len(dispatch_events) == 1
@@ -1447,6 +1469,9 @@ def test_factorized_vstim_lowers_repeated_row_specific_currents_by_unique_index(
     assert metadata["vstim_temporal_cache_misses"] == 2
     assert metadata["vstim_temporal_previous_cache_hits"] == 2
     assert metadata["vstim_temporal_previous_cache_misses"] == 2
+    event_names = {event.name for event in report.events}
+    assert "inputs.extracellular.current_unique_index" in event_names
+    assert "inputs.extracellular.current_to_device" in event_names
 
 
 def test_batch_runtime_cache_separates_backend_context_scope():
