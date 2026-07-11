@@ -34,6 +34,7 @@ from axonscope.runtime.jax.kernels import DoubleCableKernel
 from axonscope.runtime.jax.solver_engines.block_solvers import (
     resolve_double_cable_block_solver,
 )
+from axonscope.runtime.jax.solver_engines.cpu import resolve_cpu_solver_engine
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
@@ -206,6 +207,29 @@ def test_internal_jax_triton_solver_is_benchmark_override_only():
         )
         == "jax_triton_loop_xb"
     )
+
+
+def test_cpu_solver_engine_keeps_double_cable_thomas_only():
+    auto_engine = resolve_cpu_solver_engine(
+        axs.SolverPolicy(double_cable=axs.runtime.jax.DoubleCableSolver.auto())
+    )
+    thomas_engine = resolve_cpu_solver_engine(
+        axs.SolverPolicy(double_cable=axs.runtime.jax.cpu.DoubleCableSolver.thomas())
+    )
+
+    assert auto_engine.platform == "cpu"
+    assert auto_engine.double_cable_block_solver == "thomas"
+    assert thomas_engine.platform == "cpu"
+    assert thomas_engine.double_cable_block_solver == "thomas"
+
+    unsupported = (
+        axs.runtime.jax.gpu.DoubleCableSolver.pcr(),
+        axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa(),
+        axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=64),
+    )
+    for solver in unsupported:
+        with pytest.raises(ValueError, match="CPU double-cable supports only"):
+            resolve_cpu_solver_engine(axs.SolverPolicy(double_cable=solver))
 
 
 def test_execution_context_leaves_batch_options_as_output_policy():

@@ -28,7 +28,8 @@ def resolve_cpu_solver_engine(policy: SolverPolicy) -> JaxSolverEngine:
             double_cable_block_solver="thomas",
         )
     raise ValueError(
-        f"Unsupported CPU double-cable solver policy: {double_cable.kind!r}."
+        "Unsupported CPU double-cable solver policy "
+        f"{double_cable.kind!r}; CPU double-cable supports only auto/thomas."
     )
 
 

@@ -2564,10 +2564,12 @@ Goal: delete or quarantine runtime paths that no longer match the solver-policy
 evidence, while keeping benchmark-only probes available until the full GPU
 policy matrix is finished.
 
-- [ ] Make CPU double-cable policy explicit everywhere:
+- [x] Make CPU double-cable policy explicit everywhere:
   `auto == thomas`, and Thomas is the only supported CPU double-cable
   production solver. CPU PCR, PCR-SoA, tiled-Thomas, and Triton must not appear
-  as supported production choices.
+  as supported production choices. Active docs now point to the P11 policy
+  cleanup decision, and the JAX CPU solver-engine resolver rejects GPU solver
+  policies before they reach kernels.
 - [ ] Move any remaining CPU PCR/PCR-SoA/Triton double-cable usage into
   benchmark-only or diagnostic-equivalence tests, then delete stale
   public-facing tests and docs that imply those routes are supported.
