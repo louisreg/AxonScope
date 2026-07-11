@@ -2465,7 +2465,20 @@ stay as one JAX tridiagonal route.
   metadata, and double-cable batch trimming is separated as
   `kernel.trim_batch_output`. Local smoke artifact:
   `benchmark/results/p11e_single_trace_decomposition_local`. The smoke confirms
-  the traces are usable; do not use it as a GPU performance claim.
+  the traces are usable; do not use it as a GPU performance claim. Mini P100
+  validation passed at commit `c96ed73` with `threshold_curves`, observer-only,
+  different diameters, `Naxons=4096`, `Nx=89`, fp32, `solver=auto`, repeat-pool
+  reuse. Artifact:
+  `benchmark/results/kaggle/20260711_153305_single_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p11e-single-trace-gpu-c96ed73/outputs/final`.
+  Hot repeat means show the single-cable GPU path is still not cleanly
+  solver-bound: `curve.simulate` is about `107.8 ms`, `kernel.finalize_observer`
+  about `27.6 ms`, `inputs.extracellular` about `26.5 ms`,
+  `kernel.dispatch_jax` about `4.4 ms`, and explicit top-level `kernel.wait`
+  is already near-zero because observer finalization performs the relevant
+  synchronization. The next low-level cleanup target is the host-side
+  factorized current/temporal pattern detection, especially
+  `inputs.extracellular.shared_rank1_detection` and
+  `inputs.extracellular.current_unique_index`.
 - [ ] After CPU/GPU evidence is in hand, decide whether single-cable needs a
   low-level optimization pass or only cleanup/documentation.
 
