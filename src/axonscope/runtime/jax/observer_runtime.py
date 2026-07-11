@@ -9,6 +9,7 @@ threshold-search analyses are post-processing concerns.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Sequence
 
 import jax
@@ -238,6 +239,36 @@ def _readonly_np_array(values: Any, *, dtype: Any) -> np.ndarray:
     arr = np.asarray(values, dtype=dtype)
     arr.setflags(write=False)
     return arr
+
+
+def vm_raster_any_active_jax(
+    row_words: Any,
+    word_mask: Any,
+    probe_mask: Any,
+) -> Any:
+    """Return row-wise VmRaster activity without materializing packed words."""
+
+    word_mask_jax = jnp.asarray(word_mask, dtype=jnp.uint32)
+    probe_mask_jax = jnp.asarray(probe_mask, dtype=bool)
+    any_active_all_probes, any_active_masked = _vm_raster_any_active_jax_kernels()
+    if bool(np.all(probe_mask)):
+        return any_active_all_probes(row_words, word_mask_jax)
+    return any_active_masked(row_words, word_mask_jax, probe_mask_jax)
+
+
+@lru_cache(maxsize=1)
+def _vm_raster_any_active_jax_kernels() -> tuple[Any, Any]:
+    @jax.jit
+    def any_active_all_probes(row_words: Any, word_mask: Any) -> Any:
+        active_words = (row_words & word_mask[None, None, :]) != 0
+        return jnp.any(active_words, axis=(1, 2))
+
+    @jax.jit
+    def any_active_masked(row_words: Any, word_mask: Any, probe_mask: Any) -> Any:
+        active_words = (row_words & word_mask[None, None, :]) != 0
+        return jnp.any(active_words & probe_mask[:, :, None], axis=(1, 2))
+
+    return any_active_all_probes, any_active_masked
 
 
 def init_vm_raster_state(
@@ -473,6 +504,7 @@ def finalize_vm_raster_state(
     nt: int,
     dt_ms: float,
     synchronize: bool = True,
+    materialize_words: bool = True,
 ) -> dict[str, VmRasterResult]:
     """Package packed raster words as the single solver-side observation."""
 
@@ -488,16 +520,22 @@ def finalize_vm_raster_state(
         ):
             benchmark_wait(state)
 
+    span_name = (
+        "kernel.finalize_observer.to_host"
+        if bool(materialize_words)
+        else "kernel.finalize_observer.package"
+    )
     with benchmark_span(
-        "kernel.finalize_observer.to_host",
+        span_name,
         observer="vm_raster",
         raster_count=plan.raster_count,
         probe_count=plan.probe_count,
         nt=int(nt),
         row_aware=plan.row_aware,
+        materialize_words=bool(materialize_words),
         synchronized_before_finalize=not synchronize,
     ):
-        words = np.asarray(state, dtype=np.uint32)
+        words = np.asarray(state, dtype=np.uint32) if materialize_words else state
         probe_indices = plan.probe_indices_host
         probe_mask = plan.probe_mask_host
         original_indices = plan.original_indices_host
@@ -517,6 +555,7 @@ def finalize_vm_raster_state(
             positions_um=positions_um,
             thresholds_mV=thresholds_mV,
             row_aware=plan.row_aware,
+            _any_active_impl=None if materialize_words else vm_raster_any_active_jax,
         )
     }
 

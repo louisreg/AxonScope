@@ -784,7 +784,7 @@ def test_recruitment_phase_reused_pool_updates_first_amplitude(monkeypatch):
     assert update_flags == [False, True, True, True]
 
 
-def test_curve_workload_dispatch_groups_require_same_temporal_stimulus():
+def test_curve_workload_dispatch_groups_allow_scaled_shared_temporal_stimulus():
     parser = build_parser("recruitment_curves", description="test parser")
     args = parser.parse_args(
         [
@@ -822,7 +822,7 @@ def test_curve_workload_dispatch_groups_require_same_temporal_stimulus():
         options,
     )
     plan = build_dispatch_plan(phase_pool.pool)
-    assert sorted(group.size for group in plan.groups) == [1, 1, 1]
+    assert [group.size for group in plan.groups] == [3]
 
 
 def test_threshold_single_cable_row_local_stimuli_keep_one_dispatch_group():

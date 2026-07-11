@@ -1,5 +1,6 @@
 from typing import get_args
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -217,6 +218,27 @@ def test_vm_raster_activation_decoder_ignores_extra_words_outside_nt():
     np.testing.assert_array_equal(
         axs.results.activation_values_from_vm_raster(raster, activation),
         [False],
+    )
+
+
+def test_vm_raster_activation_decoder_supports_device_words():
+    raster = VmRasterResult(
+        words=jnp.asarray([[[[0b100]]], [[[0]]]], dtype=jnp.uint32),
+        nt=3,
+        dt_ms=1.0,
+        definitions=(),
+        names=("activation",),
+        probe_indices=np.asarray([[0]], dtype=np.int32),
+        probe_mask=np.asarray([[True]], dtype=bool),
+        original_indices=np.asarray([[0]], dtype=np.int32),
+        positions_um=np.asarray([[0.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    activation = axs.Activation(name="activation")
+
+    np.testing.assert_array_equal(
+        axs.results.activation_values_from_vm_raster(raster, activation),
+        [True, False],
     )
 
 

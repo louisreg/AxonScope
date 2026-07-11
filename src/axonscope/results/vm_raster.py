@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any, TextIO
 
 import numpy as np
@@ -33,6 +33,7 @@ class VmRasterResult:
     positions_um: Any
     thresholds_mV: Any
     row_aware: bool = False
+    _any_active_impl: Any | None = field(default=None, repr=False, compare=False)
 
     @property
     def values(self) -> Any:
@@ -407,7 +408,17 @@ def vm_raster_any_active(
     """Return whether each batch row has any active sample for one definition."""
 
     raster_index = vm_raster_definition_index(raster, name_or_definition)
-    words = np.asarray(getattr(raster, "words"), dtype=np.uint32)
+    raw_words = getattr(raster, "words")
+    any_active_impl = getattr(raster, "_any_active_impl", None)
+    if callable(any_active_impl):
+        return _vm_raster_any_active_with_impl(
+            raster,
+            raster_index=raster_index,
+            blanking=blanking,
+            any_active_impl=any_active_impl,
+        )
+
+    words = np.asarray(raw_words, dtype=np.uint32)
     if words.ndim != 4:
         raise ValueError(f"VmRaster words must have shape (B, R, P, W), got {words.shape}.")
     if int(raster_index) < 0 or int(raster_index) >= words.shape[1]:
@@ -431,6 +442,38 @@ def vm_raster_any_active(
     if bool(np.all(probe_mask)):
         return np.any(active_words, axis=(1, 2))
     return np.any(active_words & probe_mask[:, :, None], axis=(1, 2))
+
+
+def _vm_raster_any_active_with_impl(
+    raster: Any,
+    *,
+    raster_index: int,
+    blanking: Any | None,
+    any_active_impl: Any,
+) -> np.ndarray:
+    words = getattr(raster, "words")
+    words_shape = tuple(int(value) for value in getattr(words, "shape", ()))
+    if len(words_shape) != 4:
+        raise ValueError(f"VmRaster words must have shape (B, R, P, W), got {words_shape}.")
+    if int(raster_index) < 0 or int(raster_index) >= words_shape[1]:
+        raise ValueError(f"VmRaster definition index {raster_index} is out of range.")
+    row_words = words[:, int(raster_index)]
+
+    probe_mask = _probe_mask_for_definition(
+        raster,
+        raster_index=raster_index,
+        batch_size=words_shape[0],
+        probe_count=words_shape[2],
+    )
+    blanking_ms = None if blanking is None else _blanking_ms(blanking)
+    word_mask = _vm_raster_time_word_mask(
+        nt=int(raster.nt),
+        word_count=words_shape[3],
+        dt_ms=float(raster.dt_ms),
+        blanking_ms=blanking_ms,
+    )
+    activated = any_active_impl(row_words, word_mask, probe_mask)
+    return np.asarray(activated, dtype=bool)
 
 
 def activation_values_from_vm_raster(raster: Any, activation: Any) -> np.ndarray:

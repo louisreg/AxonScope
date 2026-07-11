@@ -102,6 +102,7 @@ def finalize_pending_batch_observation(
                 nt=pending.nt,
                 dt_ms=pending.dt_ms,
                 synchronize=False,
+                materialize_words=False,
             ),
         )
     return BatchKernelResult(

@@ -269,6 +269,21 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     assert result.thresholds_mV is plan.thresholds_mV_host
     np.testing.assert_array_equal(result.unpack(), raster)
 
+    lazy_observations = finalize_vm_raster_state(
+        plan,
+        state,
+        nt=35,
+        dt_ms=0.1,
+        materialize_words=False,
+    )
+    lazy_result = lazy_observations[VM_RASTER_OBSERVATION_KEY]
+    assert hasattr(lazy_result.words, "block_until_ready")
+    np.testing.assert_array_equal(lazy_result.unpack(), raster)
+    np.testing.assert_array_equal(
+        lazy_result.any_active("activation"),
+        np.any(raster[:, 0], axis=(1, 2)),
+    )
+
 
 def test_vm_raster_combines_local_chunk_states_across_word_boundaries():
     chunk0 = np.zeros((1, 1, 1, 2), dtype=np.uint32)
