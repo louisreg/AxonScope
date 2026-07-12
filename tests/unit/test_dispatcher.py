@@ -7,6 +7,7 @@ import axonscope as axs
 import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.input_batches as input_batches
+import axonscope.runtime.group_preparation as group_preparation
 from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
@@ -1320,8 +1321,8 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
 
-    runtime_caches.clear_prepared_cohort_cache()
-    first = runtime_preparation.prepared_cohort_for_group(group)
+    group_preparation.clear_prepared_cohort_cache()
+    first = group_preparation.prepared_cohort_for_group(group)
     stimulation = first.stimulations[0][0]
     drive = stimulation.drives[0]
     updated = stimulation.replace_drive(
@@ -1334,7 +1335,7 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     )
     axon.add_extracellular_stimulation(stimulation=updated, replace=True)
 
-    second = runtime_preparation.prepared_cohort_for_group(group)
+    second = group_preparation.prepared_cohort_for_group(group)
 
     assert second is not first
     assert second.x_positions_m is first.x_positions_m
@@ -1348,13 +1349,13 @@ def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
 
-    runtime_caches.clear_prepared_cohort_cache()
+    group_preparation.clear_prepared_cohort_cache()
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
         with benchmark_span("inputs.positions"):
-            first = runtime_preparation.prepared_cohort_for_current_group(group)
+            first = group_preparation.prepared_cohort_for_current_group(group)
         with benchmark_span("inputs.positions"):
-            second = runtime_preparation.prepared_cohort_for_current_group(group)
+            second = group_preparation.prepared_cohort_for_current_group(group)
         report = axs.disable_benchmark(print_summary=False, save=False)
     finally:
         axs.disable_benchmark(print_summary=False, save=False)

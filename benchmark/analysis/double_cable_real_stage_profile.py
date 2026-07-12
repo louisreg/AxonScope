@@ -59,10 +59,10 @@ from axonscope.runtime.recording import lower_batch_recording_options
 from axonscope.runtime.jax.recording_lowering import (
     lower_observers_for_cohort,
 )
-from axonscope.runtime.jax.runtime_preparation import (
-    prepare_batch_runtime,
+from axonscope.runtime.group_preparation import (
     prepared_cohort_for_group,
 )
+from axonscope.runtime.jax.runtime_preparation import prepare_batch_runtime
 from axonscope.runtime.jax.shape_bucketing import double_cable_kernel_group
 from axonscope.dispatcher.plan import build_dispatch_plan
 from axonscope.solvers.options import BatchOptions, SolverOptions

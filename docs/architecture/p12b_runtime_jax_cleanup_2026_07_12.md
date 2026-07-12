@@ -109,6 +109,15 @@ specific out of `runtime/jax/`:
   scaled-shared-waveform row planning, and cached array-content signatures are
   now reusable outside JAX. `input_batches.py` keeps JAX materialization,
   footprint device caches, and factorized payload assembly.
+- Runtime-neutral dispatch-group preparation moved from
+  `runtime/jax/runtime_preparation.py` and `runtime/jax/runtime_caches.py` to
+  `runtime/group_preparation.py`: representative-row selection, runtime-context
+  cache keys, dispatch-group structural signatures, prepared-cohort caches, and
+  exact-group prepared-cohort reuse are no longer JAX runtime state.
+  `runtime/jax/runtime_preparation.py` now keeps JAX `SolverRuntime`
+  construction, JAX array stacking, group `Cm` lowering, and JAX-specific
+  membrane/cable/extracellular materialization. `runtime/jax/runtime_caches.py`
+  keeps only JAX runtime/forcing caches.
 
 Validation:
 
@@ -123,6 +132,9 @@ python benchmark/run.py --script recruitment_curves --preset quick --platform cp
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_input_planning_single_cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_input_planning_double_cpu
+python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/preparation/test_cohort.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_group_preparation_single_cpu
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_group_preparation_double_cpu
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -142,6 +154,18 @@ passed `104/104`, and the local CPU smoke benchmarks wrote:
 - `benchmark/results/p12b_input_planning_double_cpu`: `curve.simulate`
   `3706.1 ms`, `runtime.prepare` `1914.0 ms`, `inputs.extracellular`
   `19.5 ms`, `kernel.wait` `211.7 ms`.
+
+For the dispatch-group/prepared-cohort extraction pass, `compileall` passed,
+architecture guardrails passed `84/84`, dispatcher plus prepared-cohort tests
+passed `57/57`, batch/extracellular tests passed `48/48`, and the local CPU
+smoke benchmarks wrote:
+
+- `benchmark/results/p12b_group_preparation_single_cpu`: `curve.simulate`
+  `3458.9 ms`, `runtime.prepare` `1754.7 ms`, `inputs.extracellular`
+  `20.3 ms`, `kernel.wait` `209.6 ms`.
+- `benchmark/results/p12b_group_preparation_double_cpu`: `curve.simulate`
+  `3885.8 ms`, `runtime.prepare` `2106.2 ms`, `inputs.extracellular`
+  `20.1 ms`, `kernel.wait` `228.1 ms`.
 
 ## Benchmark Gate
 

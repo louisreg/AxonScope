@@ -122,7 +122,7 @@ Preparation and lowering happen in this order:
 
 ```text
 prepare_batch_runtime(...)
-  -> prepared_cohort_for_group(...)
+  -> runtime.group_preparation.prepared_cohort_for_group(...)
   -> lower_observers_for_cohort(...)
   -> lower_single_cable_intracellular_input(...)
   -> lower_single_cable_extracellular_input(...)
@@ -151,7 +151,7 @@ Preparation and lowering happen in this order:
 
 ```text
 prepare_batch_runtime(...)
-  -> prepared_cohort_for_group(...)
+  -> runtime.group_preparation.prepared_cohort_for_group(...)
   -> lower_observers_for_cohort(...)
   -> lower_double_cable_intracellular_input(...)
   -> lower_double_cable_extracellular_input(...)
@@ -199,9 +199,10 @@ stacked row arrays.
 The JAX runtime may cache fully encoded membrane rows by structural row
 signature while stacking gated/leak layouts; this is a backend preparation
 optimization and must remain independent of a particular membrane-model family.
-`runtime/jax/runtime_caches.py` owns the bounded runtime/cohort cache storage,
-while `runtime/jax/shape_bucketing.py` owns the opt-in double-cable kernel
-shape bucketing policy and metadata.
+`runtime/group_preparation.py` owns dispatch-group signatures and
+prepared-cohort caches. `runtime/jax/runtime_caches.py` owns only bounded JAX
+runtime/forcing cache storage, while `runtime/jax/shape_bucketing.py` owns the
+opt-in double-cable kernel shape bucketing policy and metadata.
 
 ### VmRaster, Dense/Factorized Vext, And Results
 

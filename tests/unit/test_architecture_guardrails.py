@@ -1537,6 +1537,46 @@ def test_group_runner_routes_runtime_caches_through_cache_module():
     assert offenders == []
 
 
+def test_prepared_cohort_caches_are_runtime_neutral_not_jax_runtime_state():
+    group_preparation = SRC_ROOT / "runtime" / "group_preparation.py"
+    runtime_caches = SRC_ROOT / "runtime" / "jax" / "runtime_caches.py"
+    runtime_preparation = SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py"
+
+    group_text = group_preparation.read_text(encoding="utf-8")
+    caches_text = runtime_caches.read_text(encoding="utf-8")
+    preparation_text = runtime_preparation.read_text(encoding="utf-8")
+
+    assert "PreparedCohort" in group_text
+    assert "def prepared_cohort_for_group" in group_text
+    assert "def prepared_cohort_for_current_group" in group_text
+    assert "def representative_item" in group_text
+    assert "def group_runtime_signature" in group_text
+    assert "def runtime_context_cache_key" in group_text
+
+    forbidden_jax_cache_terms = {
+        "PreparedCohort",
+        "_PREPARED_COHORT_CACHE",
+        "_PREPARED_COHORT_IDENTITY_CACHE",
+        "def get_prepared_cohort",
+        "def store_prepared_cohort",
+        "def clear_prepared_cohort_cache",
+    }
+    forbidden_jax_preparation_terms = {
+        "from axonscope.preparation.cohort import PreparedCohort",
+        "extracellular_stimulation_rows",
+        "def prepared_cohort_for_group",
+        "def prepared_cohort_for_current_group",
+        "def _group_runtime_signature",
+        "def _runtime_context_cache_key",
+    }
+
+    assert sorted(term for term in forbidden_jax_cache_terms if term in caches_text) == []
+    assert (
+        sorted(term for term in forbidden_jax_preparation_terms if term in preparation_text)
+        == []
+    )
+
+
 def test_group_runner_routes_runtime_preparation_through_preparation_module():
     path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
@@ -1563,6 +1603,7 @@ def test_group_runner_routes_runtime_preparation_through_preparation_module():
     }
 
     assert "axonscope.runtime.jax.runtime_preparation" in text
+    assert "axonscope.runtime.group_preparation" in text
     for required in (
         "prepare_batch_runtime",
         "prepared_cohort_for_current_group",
