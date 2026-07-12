@@ -11,25 +11,7 @@ from axonscope.runtime.jax.input_lowering import (
     PlannedInputLowering,
     plan_input_lowering,
 )
-from axonscope.runtime.recording import (
-    lower_batch_recording_options,
-)
 from axonscope.solvers.options import BatchOptions
-
-
-def benchmark_lower_recording_options(
-    group: Any,
-    batch_options: BatchOptions,
-    *,
-    observers: tuple[Any, ...] | None,
-) -> BatchOptions:
-    """Return backend recording options used by estimates and inspection."""
-
-    return lower_batch_recording_options(
-        group,
-        batch_options,
-        observers=observers,
-    )
 
 
 def benchmark_plan_input_lowering(
@@ -153,7 +135,6 @@ def benchmark_save_device_memory_profile(output_path: str | Path) -> dict[str, A
 
 
 __all__ = [
-    "benchmark_lower_recording_options",
     "benchmark_membrane_output_names",
     "benchmark_plan_input_lowering",
     "benchmark_profile_start",

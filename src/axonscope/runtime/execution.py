@@ -94,11 +94,11 @@ def benchmark_lower_recording_options(
 ) -> BatchOptions:
     """Return runtime recording options for host-side estimates and inspection."""
 
-    from axonscope.runtime.jax.benchmark import (
-        benchmark_lower_recording_options as jax_benchmark_lower_recording_options,
+    from axonscope.runtime.recording import (
+        lower_batch_recording_options,
     )
 
-    return jax_benchmark_lower_recording_options(
+    return lower_batch_recording_options(
         group,
         batch_options,
         observers=observers,

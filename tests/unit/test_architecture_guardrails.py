@@ -1073,7 +1073,7 @@ def test_public_estimate_and_inspection_route_backend_details_through_facade():
 
     assert offenders == []
     assert "benchmark_plan_input_lowering" in backend_text
-    assert "benchmark_lower_recording_options" in backend_text
+    assert "benchmark_lower_recording_options" not in backend_text
     assert "benchmark_membrane_output_names" in backend_text
     assert "benchmark_observer_output_label" not in backend_text
     assert "benchmark_observers_are_vm_raster_compatible" not in backend_text
@@ -1981,6 +1981,7 @@ def test_runtime_recording_conversion_is_runtime_neutral():
     ).read_text(encoding="utf-8")
     assert "axonscope.runtime.recording" in execution_text
     assert "axonscope.runtime.jax.recording" not in execution_text
+    assert "benchmark_lower_recording_options as jax" not in execution_text
     assert "axonscope.runtime.recording" in group_runner_text
     assert "lower_batch_recording_options" not in jax_lowering_text
     assert "row_recording_indices_for_group" not in jax_lowering_text

@@ -86,6 +86,9 @@ specific out of `runtime/jax/`:
   recordings, and cohort original-index tables are runtime-neutral batch
   semantics. `runtime/jax/recording_lowering.py` now only owns cached lowering
   from public observers to JAX VmRaster plans.
+- Estimate/inspection recording lowering now calls `runtime.recording`
+  directly through `runtime.execution`; the old JAX benchmark proxy for
+  `benchmark_lower_recording_options` was removed.
 
 Validation:
 
