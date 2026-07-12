@@ -104,7 +104,8 @@ python -m pytest -q tests/unit/test_dispatcher.py --tb=short
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
-`102/102`, and dispatcher passed `56/56`.
+`105/105`, dispatcher passed `56/56`, and batch/observer runtime tests passed
+`38/38`.
 
 ## Benchmark Gate
 
@@ -238,10 +239,41 @@ Comparison against the recording-contract CPU gate:
 This gate shows no local CPU regression from extracting the host-array helpers.
 The JAX runtime still owns materialization into JAX runtime containers.
 
-## GPU Smoke Gate Result
+## Host-Preparation Kaggle Gate Result
+
+The matching Kaggle smoke gate was run on commit `b5d88b2` with `Naxons=1024`,
+`Nx=89`, fp32, observer-only recording, `repeats=2`, `warmups=1`, and RSS memory
+tracing. CPU and GPU runs used the same Kaggle P100 environment; CPU runs forced
+the benchmark `--platform cpu`, while GPU runs used `--platform gpu`.
+
+Artifacts:
+
+- `benchmark/results/kaggle/20260712_132342_recruitment_curves_quick_cpu_NvidiaTeslaP100_axs-p12b-hostprep-single-cpu-b5d88b2`
+- `benchmark/results/kaggle/20260712_132359_recruitment_curves_quick_cpu_NvidiaTeslaP100_axs-p12b-hostprep-double-cpu-b5d88b2`
+- `benchmark/results/kaggle/20260712_132637_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12b-hostprep-single-gpu-r2-b5d88b2`
+- `benchmark/results/kaggle/20260712_132649_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12b-hostprep-double-gpu-jt-r2-b5d88b2`
+
+Key phase totals:
+
+| Platform | Cable | Solver | `curve.simulate` | `runtime.prepare` | `inputs.extracellular` | `kernel.enqueue` | `kernel.dispatch_jax` | `kernel.wait` |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| CPU | single-cable | auto | 7896.6 ms | 1246.6 ms | 107.3 ms | 1398.3 ms | 775.9 ms | 4695.0 ms |
+| CPU | double-cable | thomas | 7704.9 ms | 1784.9 ms | 117.5 ms | 1605.4 ms | 1222.4 ms | 3783.6 ms |
+| GPU | single-cable | auto | 4043.9 ms | 1788.6 ms | 106.0 ms | 1626.7 ms | 820.5 ms | 61.6 ms |
+| GPU | double-cable | tiled-thomas b64 | 9369.7 ms | 2344.4 ms | 119.7 ms | 6395.5 ms | 6067.6 ms | 102.1 ms |
+
+This is still a smoke/non-regression gate, not a solver policy benchmark. It
+validates that the host-preparation extraction runs on CPU and GPU with both
+cable formulations. The CPU runs remain mostly solver-wait dominated at this
+scale. The GPU runs are not solver-wait dominated: the remaining cost is mostly
+runtime preparation and JAX/Triton dispatch/enqueue plumbing, especially for the
+double-cable tiled-thomas path.
+
+## Earlier GPU Smoke Gate Result
 
 Because the shared preparation helper also touches the GPU execution path, two
-small Kaggle P100 smoke runs were launched at commit `deb6954`.
+small Kaggle P100 smoke runs were launched at commit `deb6954`. This predates
+the host-preparation extraction gate above.
 
 Artifacts:
 
