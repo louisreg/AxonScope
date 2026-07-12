@@ -118,6 +118,12 @@ specific out of `runtime/jax/`:
   construction, JAX array stacking, group `Cm` lowering, and JAX-specific
   membrane/cable/extracellular materialization. `runtime/jax/runtime_caches.py`
   keeps only JAX runtime/forcing caches.
+- JAX gated/leak membrane row stacking moved from
+  `runtime/jax/runtime_preparation.py` to `runtime/jax/membrane_stacking.py`.
+  `runtime_preparation.py` now orchestrates membrane stacking, while the
+  capability-based gated/leak encoders and row caches live with the JAX
+  membrane-stacking implementation. The unused `_encode_gated_leak_members`
+  helper was removed rather than preserved.
 
 Validation:
 
@@ -135,6 +141,9 @@ python benchmark/run.py --script recruitment_curves --preset quick --platform cp
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/preparation/test_cohort.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_group_preparation_single_cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_group_preparation_double_cpu
+python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_membrane_stacking_single_cpu
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_membrane_stacking_double_cpu
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -166,6 +175,18 @@ smoke benchmarks wrote:
 - `benchmark/results/p12b_group_preparation_double_cpu`: `curve.simulate`
   `3885.8 ms`, `runtime.prepare` `2106.2 ms`, `inputs.extracellular`
   `20.1 ms`, `kernel.wait` `228.1 ms`.
+
+For the JAX membrane-stacking extraction pass, `compileall` passed,
+architecture guardrails passed `85/85`, dispatcher tests passed `56/56`,
+batch/extracellular tests passed `48/48`, and the local CPU smoke benchmarks
+wrote:
+
+- `benchmark/results/p12b_membrane_stacking_single_cpu`: `curve.simulate`
+  `3434.3 ms`, `runtime.prepare` `1653.3 ms`, `inputs.extracellular`
+  `18.0 ms`, `kernel.wait` `188.0 ms`.
+- `benchmark/results/p12b_membrane_stacking_double_cpu`: `curve.simulate`
+  `3880.1 ms`, `runtime.prepare` `2015.6 ms`, `inputs.extracellular`
+  `20.3 ms`, `kernel.wait` `222.7 ms`.
 
 ## Benchmark Gate
 

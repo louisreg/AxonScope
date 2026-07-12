@@ -1181,7 +1181,7 @@ def test_jax_solver_runtime_has_no_model_family_specific_fast_paths():
 
 
 def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_names():
-    text = (SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py").read_text(
+    text = (SRC_ROOT / "runtime" / "jax" / "membrane_stacking.py").read_text(
         encoding="utf-8"
     )
     forbidden = {
@@ -1199,6 +1199,40 @@ def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_name
     assert "GatedLeakStackMembraneBackend" in text
     assert "supports_stateless_vm_only_fast_path" in text
     assert sorted(term for term in forbidden if term in text) == []
+
+
+def test_jax_runtime_preparation_does_not_own_membrane_stacking_details():
+    preparation_text = (
+        SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py"
+    ).read_text(encoding="utf-8")
+    stacking_text = (SRC_ROOT / "runtime" / "jax" / "membrane_stacking.py").read_text(
+        encoding="utf-8"
+    )
+
+    forbidden_preparation_terms = {
+        "class GatedLeakMembraneStack",
+        "class _GatedLeakMember",
+        "class _EncodedGatedLeakRow",
+        "def try_stack_gated_leak_membrane_from_group",
+        "def _gated_leak_member",
+        "def _encode_gated_leak_group_row",
+        "def _encode_gated_leak_runtime_members",
+        "def _try_stack_gated_leak_membrane",
+        "GatedLeakStackMembraneBackend",
+        "HeterogeneousMembraneBackend",
+        "membrane_backend_model",
+    }
+    required_stacking_terms = {
+        "class GatedLeakMembraneStack",
+        "def try_stack_gated_leak_membrane_from_group",
+        "def try_stack_gated_leak_membrane_from_runtime_rows",
+    }
+
+    assert (
+        sorted(term for term in forbidden_preparation_terms if term in preparation_text)
+        == []
+    )
+    assert sorted(term for term in required_stacking_terms if term not in stacking_text) == []
 
 
 def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():

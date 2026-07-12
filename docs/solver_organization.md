@@ -196,9 +196,10 @@ For parameter-batched groups,
 the representative fields that survive batching. It must not build a full
 representative cable/extracellular runtime just to replace it immediately with
 stacked row arrays.
-The JAX runtime may cache fully encoded membrane rows by structural row
-signature while stacking gated/leak layouts; this is a backend preparation
-optimization and must remain independent of a particular membrane-model family.
+`runtime/jax/membrane_stacking.py` owns the JAX-specific gated/leak membrane
+row encoding used while stacking heterogeneous membrane layouts. This is a
+backend preparation optimization and must remain independent of a particular
+membrane-model family.
 `runtime/group_preparation.py` owns dispatch-group signatures and
 prepared-cohort caches. `runtime/jax/runtime_caches.py` owns only bounded JAX
 runtime/forcing cache storage, while `runtime/jax/shape_bucketing.py` owns the

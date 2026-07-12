@@ -8,6 +8,7 @@ import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.input_batches as input_batches
 import axonscope.runtime.group_preparation as group_preparation
+import axonscope.runtime.jax.membrane_stacking as membrane_stacking
 from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
@@ -439,7 +440,7 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
     axons = [_mrg_axon(diameter_um=10.0, amp_nA=0.1)]
     group = build_dispatch_plan(axons).groups[0]
 
-    fast_stack = runtime_preparation.try_stack_gated_leak_membrane_from_group(
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
@@ -472,7 +473,7 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
     ]
     group = build_dispatch_plan(axons).groups[0]
 
-    fast_stack = runtime_preparation.try_stack_gated_leak_membrane_from_group(
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
@@ -498,7 +499,7 @@ def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monk
         for diameter_um in (4.0, 10.0, 20.0)
     ]
     group = build_dispatch_plan(axons).groups[0]
-    fast_stack = runtime_preparation.try_stack_gated_leak_membrane_from_group(
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
