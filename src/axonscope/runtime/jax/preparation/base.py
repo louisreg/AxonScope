@@ -30,7 +30,6 @@ from axonscope.timebase import simulation_step_count
 
 from axonscope.runtime.jax.cable_geometry import (
     Array,
-    diffusion_operator_coeffs,
     initial_voltage,
 )
 from axonscope.solvers.options import SolverOptions
@@ -408,16 +407,13 @@ def prepare_cable_runtime(
     cached = _CABLE_RUNTIME_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    if not include_area:
-        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
-        area = jnp.zeros((axon.n_compartments,), dtype=dtype_local)
-        record_benchmark_metadata(cable_runtime_source="jax")
-        runtime = CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
-        _CABLE_RUNTIME_CACHE[cache_key] = runtime
-        return runtime
     np_dtype = np.dtype(dtype_local)
     lower, diag, upper = diffusion_operator_coeffs_numpy(axon, dtype=np_dtype)
-    area = compartment_area_cm2_numpy(axon, dtype=np_dtype)
+    area = (
+        compartment_area_cm2_numpy(axon, dtype=np_dtype)
+        if include_area
+        else np.zeros((axon.n_compartments,), dtype=np_dtype)
+    )
     record_benchmark_metadata(cable_runtime_source="numpy")
     runtime = CableRuntime(
         lower=jnp.asarray(lower, dtype=dtype_local),
