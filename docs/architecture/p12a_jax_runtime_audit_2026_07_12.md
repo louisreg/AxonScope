@@ -181,6 +181,55 @@ total, and public result conversion is approximately 1 ms total for each run.
 The next gate is the matching GPU smoke before claiming that P12A has no
 performance regression on the P11-sensitive GPU paths.
 
+## GPU Gate Result
+
+The GPU smoke gate was run on Kaggle P100 on 2026-07-12 at commit
+`6e9a0f525a49ee93bb178be6c80937f162192648`.
+
+Artifacts:
+
+- `benchmark/results/kaggle/20260712_111722_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12a-runtime-contract-single-gpu-6e9a0f5/outputs/axonscope_benchmark_results_recruitment_curves_gpu_smoke_gpu_20260712_111724.zip`
+- `benchmark/results/kaggle/20260712_112604_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12a-double-gpu-jt-6e9a0f5/outputs/axonscope_benchmark_results_recruitment_curves_gpu_smoke_gpu_20260712_112605.zip`
+
+Summary:
+
+| Cable | Solver | curve.simulate total | runtime.prepare total | kernel.enqueue total | kernel.wait total | inputs.extracellular total | finalize_observer total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| single-cable | auto | 4074.7 ms | 1843.7 ms | 1592.7 ms | 61.8 ms | 108.9 ms | 1.8 ms |
+| double-cable | tiled Thomas b64 | 9098.9 ms | 2340.5 ms | 6144.6 ms | 103.8 ms | 118.6 ms | 1.9 ms |
+
+The initial double-cable Kaggle run failed before useful timing because
+`jax-triton` was not installed in the kernel. The corrected run passed with
+`--pip-package jax-triton` and installed `jax-triton==0.3.1`.
+
+This gate validates that the P12A runtime-contract cleanup still runs on the
+P11-sensitive GPU observer-only paths. It does not prove that the small smoke
+configuration is solver-bound: `kernel.wait` remains minor, while
+`runtime.prepare` and `kernel.enqueue` dominate the short run.
+
+Warm-only split:
+
+| Cable | Slice | curve.simulate mean | simulation.run_pool mean | kernel.enqueue mean | kernel.dispatch_jax mean | kernel.wait mean | inputs.extracellular mean | observer.plan mean |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| single-cable | repeat phase, 6 simulations | 72.0 ms | 53.7 ms | 16.5 ms | 4.6 ms | 6.9 ms | 11.8 ms | 7.1 ms |
+| double-cable | repeat phase, 6 simulations | 67.1 ms | 53.1 ms | 11.5 ms | 4.7 ms | 13.0 ms | 13.5 ms | 7.6 ms |
+| single-cable | steady repeat amplitudes, 4 simulations | 36.7 ms | 31.8 ms | 14.2 ms | 4.6 ms | 6.9 ms | 2.0 ms | 0.1 ms |
+| double-cable | steady repeat amplitudes, 4 simulations | 37.6 ms | 32.6 ms | 11.4 ms | 4.7 ms | 13.0 ms | 2.5 ms | 0.1 ms |
+
+The first amplitude of each repeat still pays extra planning/input work. After
+that, steady warm amplitudes are much cleaner: `runtime.prepare` is
+approximately 0.06 ms, observer planning is approximately 0.1 ms, and
+extracellular lowering is approximately 2-3 ms per simulation. Double-cable is
+closer to being kernel-bound in this steady slice, but `kernel.wait` is still
+only about 40% of `simulation.run_pool`; single-cable remains more dominated by
+enqueue/orchestration than by device wait.
+
+With `repeat_pool_policy=rebuild`, the benchmark still rebuilds the pool once
+per repeat. That adds approximately 208 ms per repeat for single-cable and
+251 ms per repeat for double-cable outside the `curve.simulate` timing. This is
+useful for workflow timing, but should not be confused with steady simulation
+hot-path timing.
+
 ## Remaining Before Benchmark Claim
 
 - Add architecture guardrails for the runtime-context name and runtime input
@@ -188,7 +237,9 @@ performance regression on the P11-sensitive GPU paths.
 - Run fast unit coverage for dispatcher, batch kernels, inspection, and
   performance views. [done]
 - Run the local CPU benchmark gate above. [done]
-- Run the matching GPU smoke gate before claiming no performance loss on GPU.
+- Run the matching GPU smoke gate. [done]
+- Re-run broader P11 hotpath/realistic slices before making larger performance
+  claims beyond this small P12A sanity gate.
 
 ## Do Not Do In P12A
 

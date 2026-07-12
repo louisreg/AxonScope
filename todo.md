@@ -2681,6 +2681,19 @@ policy matrix is finished.
   extracellular input lowering, adaptive time-chunk policy, GPU dispatch
   scheduling, model/compiler optimizer closeout, dense fallback decisions, and
   NRV validation only when numerical behavior changes.
+- [ ] Evaluate targeted GPU kernels for remaining non-solver device-side
+  bottlenecks, without turning the whole host/runtime path into Triton:
+  first prototype an `extracellular_scaled_shared_waveform` path that writes
+  forcing directly in the solver layout, then prototype observer-only
+  VmRaster/probe packing that extracts or aggregates on GPU without CPU
+  round-trips. Keep this behind the JAX GPU runtime boundary and accept it only
+  with before/after stage benchmarks showing that the cost is device-side and
+  not just Python/JIT/transfer overhead.
+- [ ] After the runtime contract, benchmark surface, and hot-path cleanup are
+  stable, revisit cold-run optimization separately. Focus on JIT/lowering,
+  membrane/runtime preparation caches, pool rebuild costs, and optional
+  persistent compilation caches; do not mix cold-start policy decisions into
+  the current hot-path cleanup.
 - [ ] Continue hardening NRV integration only where the package contract is
   stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
   promote future pieces only when they do not duplicate the canonical
