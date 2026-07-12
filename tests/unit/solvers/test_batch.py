@@ -44,7 +44,7 @@ from axonscope.runtime.jax.batch_inputs import (
 )
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
 from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
-from axonscope.runtime.jax.experimental import CrankNicholsonVStimForcing
+from axonscope.runtime.jax.reference_solvers import CrankNicholsonVStimForcing
 from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from tests.unit.solvers._batch_helpers import (

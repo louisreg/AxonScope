@@ -1081,16 +1081,17 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         "batch_inputs.py",
         "batch_kernels.py",
         "common.py",
-        "experimental.py",
         "kernels.py",
         "observables.py",
         "observer_runtime.py",
+        "reference_solvers.py",
         "runtime.py",
     }
 
     for filename in moved_modules:
         assert not (SRC_ROOT / "solvers" / filename).exists()
         assert (SRC_ROOT / "runtime" / "jax" / filename).is_file()
+    assert not (SRC_ROOT / "runtime" / "jax" / "experimental.py").exists()
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):

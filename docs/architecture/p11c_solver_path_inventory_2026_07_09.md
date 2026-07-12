@@ -398,7 +398,7 @@ Before changing public policy:
    ```
 
 2. Should benchmark-only PCR probes move out of `common.py` into
-   `benchmark/analysis` or a clearly marked `runtime/jax/experimental.py`
+   `benchmark/analysis` or a clearly marked runtime-private reference/probe
    area?
 
 3. If Triton is promoted, what is the clean public name?

@@ -1,4 +1,4 @@
-"""Reference and prototype Crank-Nicholson solver variants.
+"""Reference Crank-Nicholson solver variants used by tests.
 
 Kept variants:
 - ``CrankNicholsonVStimForcing``: imposed-field single-cable extracellular path.

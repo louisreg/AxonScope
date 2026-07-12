@@ -44,8 +44,7 @@ JAX runtime implementation:
 - `runtime/jax/observer_runtime.py`: JAX-side VmRaster plan/state update.
 - `runtime/jax/observables.py`: packaging helpers for membrane observables
   produced inside solver scans.
-- `runtime/jax/experimental.py`: prototype/reference solver variants used by
-  tests and benchmarks.
+- `runtime/jax/reference_solvers.py`: reference solver variants used by tests.
 
 ## Boundaries
 

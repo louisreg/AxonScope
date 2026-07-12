@@ -198,8 +198,9 @@ Interpretation:
 ## Remaining Cleanup
 
 - Continue auditing `runtime/jax/` for dead or duplicated host-side code.
-- Keep `experimental.py` only while the reference solver tests require it;
-  archive or rename it once public examples no longer depend on those classes.
+- Keep `runtime/jax/reference_solvers.py` private to tests/reference
+  equivalence. Do not promote those dense/reference routes into public examples
+  or stable runtime policy.
 - Keep diagnostic solver routes out of public examples and stable docs.
 - Do not choose a new solver policy in P12B.
 - Do not optimize cold start until the runtime contract and hot path are stable.
