@@ -44,7 +44,7 @@ def main() -> None:
         single_instance,
         duration=1.0 * axs.ms,
         dt=0.02 * axs.ms,
-        recording=axs.Recording.full(),
+        recording=axs.Recording.voltage(),
     )
     single_run = single_simulation.run()
     single_result = single_run.single

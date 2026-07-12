@@ -182,7 +182,7 @@ def test_one_row_population_estimate_uses_pool_recording_width():
     assert estimate.groups[0].route == "batch"
 
 
-def test_single_full_recording_estimate_includes_observable_outputs():
+def test_single_full_recording_estimate_requires_future_batch_observable_route():
     axon = _hh(compartments=5)
     simulation = axs.AxonSimulation(
         axon,
@@ -191,15 +191,8 @@ def test_single_full_recording_estimate_includes_observable_outputs():
         recording=axs.Recording.full(),
     )
 
-    estimate = simulation.estimate()
-
-    assert estimate.metadata["population_lifecycle"] is True
-    assert estimate.groups[0].route == "scalar"
-    assert estimate.item("outputs.recorded_vm").shape == (1, 2, 5)
-    assert estimate.item("outputs.gates").shape[:3] == (1, 2, 5)
-    assert estimate.item("outputs.currents").shape[:3] == (1, 2, 5)
-    assert estimate.item("outputs.conductances").shape[:3] == (1, 2, 5)
-    assert estimate.retained_bytes >= estimate.item("outputs.recorded_vm").bytes
+    with pytest.raises(NotImplementedError, match="Vm only"):
+        simulation.estimate()
 
 
 def test_runtime_device_and_precision_policy_are_typed_public_values():

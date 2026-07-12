@@ -5,22 +5,18 @@ from typing import Literal, Sequence
 
 import numpy as np
 
-from axonscope.solvers.rate_tables import RateTableConfig
-
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
 DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 256
 
 
 @dataclass(frozen=True)
 class SolverOptions:
-    """Numerical options consumed by solver runtime preparation.
+    """Reserved numerical options consumed by runtime preparation.
 
     These options belong to solver construction/execution, not to dispatch
     planning. Dispatchers may forward this object unchanged when they decide
     whether a group should run through scalar or batch kernels.
     """
-
-    rate_table_config: RateTableConfig | None = None
 
 
 @dataclass(frozen=True)

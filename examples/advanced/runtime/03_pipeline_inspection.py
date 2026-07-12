@@ -5,7 +5,7 @@ Run:
 
 Inspection is the dry-run view of the solver pipeline. This example deliberately
 uses a mixed pool so the report has something interesting to show: one strict
-single-cable batch, one scalar fallback, and one padded double-cable batch.
+single-cable batch, one single-row batch, and one padded double-cable batch.
 """
 
 from __future__ import annotations
@@ -132,9 +132,9 @@ def main() -> None:
     # Step 2: build a mixed retained-Vm pool.
     #
     # Rows 0-1 share one Hodgkin-Huxley geometry and batch strictly. Row 2 is a
-    # different single-cable shape and falls back to a scalar route. Rows 3-4 are
-    # MRG double-cable axons with different node counts, so they batch with
-    # spatial padding.
+    # different single-cable shape and therefore forms a batch group with B=1.
+    # Rows 3-4 are MRG double-cable axons with different node counts, so they
+    # batch with spatial padding.
     clamped_rows: list[axs.AxonInstance] = []
     for amplitude_nA in (0.35, 0.55):
         axon = axs.axons.HodgkinHuxley(
@@ -154,14 +154,14 @@ def main() -> None:
         )
         clamped_rows.append(simulation)
 
-    scalar_axon = axs.axons.HodgkinHuxley(
+    singleton_axon = axs.axons.HodgkinHuxley(
         length=120.0 * axs.um,
         diameter=0.7 * axs.um,
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    scalar_row = axs.AxonInstance(scalar_axon)
-    scalar_row.add_current_clamp(
+    singleton_row = axs.AxonInstance(singleton_axon)
+    singleton_row.add_current_clamp(
         position=60.0 * axs.um,
         current=axs.Stimulus.pulse(
             start=0.20 * axs.ms,
@@ -169,7 +169,7 @@ def main() -> None:
             amplitude=0.75 * axs.nA,
         ),
     )
-    clamped_rows.append(scalar_row)
+    clamped_rows.append(singleton_row)
 
     for diameter_um, nodes in ((3.0, 3), (4.0, 4)):
         axon = axs.axons.MRG(
@@ -262,7 +262,7 @@ def main() -> None:
         "callable_or_precomputed_per_axon": "callable/precomputed",
         "DispatchCohortResult": "cohort result",
         "factorized_footprint": "factorized footprint",
-        "scalar fallback row": "scalar fallback",
+        "unsupported row": "unsupported",
     }
     comparison = Table(title="Retained Vm versus compact observer-only")
     for column in (

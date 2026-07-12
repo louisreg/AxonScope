@@ -50,7 +50,6 @@ from axonscope.model_ir import (
 import axonscope.model_ir.source as source_compiler
 from axonscope.model_ir.interpreter import NumpyModelInterpreter
 from axonscope.model_ir.intrinsics import exp
-from axonscope.solvers.rate_tables import RateTableConfig
 from axonscope.utils.units import (
     CONDUCTANCE_DENSITY_MS_CM2,
     CURRENT_DENSITY_UA_CM2,
@@ -1932,12 +1931,6 @@ def test_compile_membrane_model_returns_direct_jax_program_contract():
         rtol=1e-6,
     )
 
-    returned = membrane.enable_rate_table(config=RateTableConfig(step_mV=1.0))
-
-    assert returned is membrane
-    assert membrane.has_rate_table
-    assert membrane.rate_table_config == RateTableConfig(step_mV=1.0)
-
 
 def test_jax_membrane_program_caches_derived_static_values():
     membrane = compile_membrane_model(membranes.Passive(Rm=12_000.0, EL=-68.0))
@@ -1951,10 +1944,6 @@ def test_jax_membrane_program_caches_derived_static_values():
     assert membrane.E_rev is e_rev
     assert membrane.membrane_state_specs() is states
     assert membrane.static_signature() is signature
-
-    membrane.enable_rate_table(config=RateTableConfig(step_mV=1.0))
-
-    assert membrane.static_signature() is not signature
     assert membrane.g_bar is g_bar
     assert membrane.E_rev is e_rev
 

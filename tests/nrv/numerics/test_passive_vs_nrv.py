@@ -6,9 +6,9 @@ from pathlib import Path
 from axonscope import AxonInstance, ms, um
 from axonscope import membranes
 from axonscope.axons import Axon, Layout, Section
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
+from tests.nrv._helpers import run_axonscope_simulation
 
 import sys
 sys.path.append("./external/")
@@ -53,8 +53,7 @@ def test_compare_nrv_physics(save_dir="figures/physics_tests"):
     sim_py = AxonInstance(axon_py)
     sim_py.add_current_clamp(position=(0.5 * L) * um, current=Stimulus.pulse(start=t_start * ms, duration=t_on * ms, amplitude=I_inj_nA))
     
-    solver = CrankNicholson()
-    res = solver.solve(sim_py, tsim=Tsim, dt=1e-3)
+    res = run_axonscope_simulation(sim_py, tsim=Tsim, dt=1e-3)
     dt = (res.t[1]-res.t[0])
 
     

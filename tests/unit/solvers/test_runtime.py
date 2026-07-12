@@ -9,7 +9,6 @@ from axonscope import AxonInstance
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons import HodgkinHuxley
 from axonscope.analytical import PointSourceElectrode
-from axonscope.solvers import RateTableConfig
 from axonscope.stimulation import IntracellularContext
 from axonscope.runtime.jax.runtime import (
     compile_membrane_model,
@@ -364,21 +363,6 @@ def test_compile_extracellular_stimulations_returns_callable_collection():
     assert isinstance(compiled, CompiledExtracellularStimulations)
     assert compiled.n_compartments == axon.n_compartments
     assert np.asarray(compiled(0.25)).max() > 0.0
-
-
-def test_prepare_solver_runtime_applies_rate_table_config():
-    axon = HodgkinHuxley(length=300.0 * axs.um, diameter=0.5 * axs.um, compartments=11, celsius=6.3 * axs.degC)
-
-    runtime = prepare_solver_runtime(
-        axon,
-        tsim_ms=1.0,
-        dt_ms=0.1,
-        solver_options=SolverOptions(
-            rate_table_config=RateTableConfig(step_mV=1.0),
-        ),
-    )
-
-    assert runtime.membrane.membrane.rate_table_config == RateTableConfig(step_mV=1.0)
 
 
 def test_precompute_extracellular_potential_matches_axon_method():

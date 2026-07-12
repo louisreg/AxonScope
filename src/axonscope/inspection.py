@@ -302,9 +302,9 @@ def _inspect_lowering(
             observer_format = "posthoc_from_recorded_vm"
         return LoweringInspection(
             group_id=int(group.group_id),
-            route="scalar",
-            intracellular_format="callable_per_axon",
-            extracellular_format="callable_or_precomputed_per_axon",
+            route="unsupported",
+            intracellular_format="unsupported",
+            extracellular_format="unsupported",
             observer_format=observer_format,
             recording_mode=batch_options.recording.mode,
             kernel_recording_mode=batch_options.recording.mode,
@@ -487,11 +487,10 @@ def _inspect_kernel(
         recording=recording,
         observers=observers,
     ):
-        kernel = "DoubleCableKernel" if group.mode == "double" else "SingleCableKernel"
         return KernelInspection(
             group_id=int(group.group_id),
-            route="scalar",
-            kernel=kernel,
+            route="unsupported",
+            kernel="unsupported",
             cable_mode=str(group.mode),
             solver=_inspect_cable_solver_route(
                 cable_mode=str(group.mode),
@@ -549,7 +548,7 @@ def _inspect_result_assembly(
             observations = "posthoc_from_recorded_vm"
         return ResultAssemblyInspection(
             group_id=int(group.group_id),
-            record_kind="scalar fallback row",
+            record_kind="unsupported row",
             vm_output=vm_output,
             observation_output=observations,
             public_result="AxonSimulationResult row",

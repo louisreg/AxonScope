@@ -10,7 +10,6 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
-from axonscope.runtime.jax.membranes.rate_tables import enable_rate_tables
 from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     MembraneBackend,
@@ -185,21 +184,13 @@ _EXTRACELLULAR_RUNTIME_CACHE: dict[tuple[Any, ...], ExtracellularRuntime] = {}
 _SOLVER_RUNTIME_CACHE: dict[tuple[Any, ...], SolverRuntime] = {}
 
 
-def _with_rate_tables(
-    model: Any,
-    options: SolverOptions,
-) -> Any:
-    if options.rate_table_config is not None:
-        enable_rate_tables(model, config=options.rate_table_config)
-    return model
-
-
 def _resolve_solver_options(options: SolverOptions | None) -> SolverOptions:
     return SolverOptions() if options is None else options
 
 
 def _solver_options_cache_key(options: SolverOptions) -> tuple[Any, ...]:
-    return ("solver_options", repr(options))
+    _ = options
+    return ("solver_options",)
 
 
 def _membrane_runtime_cache_key(
@@ -327,7 +318,7 @@ def compile_membrane_model(
     runtime.
     """
 
-    options = _resolve_solver_options(solver_options)
+    _resolve_solver_options(solver_options)
     model = ensure_membrane_model(model)
 
     try:
@@ -340,16 +331,13 @@ def compile_membrane_model(
     _record_membrane_source_compile_metadata(model.kind, lowered.source_results)
     return cast(
         JaxMembraneProgram,
-        _with_rate_tables(
-            JaxMembraneProgram.from_model_ir(
-                lowered.model,
-                dtype_local=model.dtype,
-                generated_module=_single_generated_module(
-                    lowered.source_results,
-                    target="jax",
-                ),
+        JaxMembraneProgram.from_model_ir(
+            lowered.model,
+            dtype_local=model.dtype,
+            generated_module=_single_generated_module(
+                lowered.source_results,
+                target="jax",
             ),
-            options,
         ),
     )
 
@@ -591,16 +579,6 @@ def _prepare_membrane_initial_arrays(
     state0 = membrane.init_membrane_state(Nx=nx, dtype_local=dtype_local, V0_mV=Vm0)
     background_current = backend.background_current()
     return Vm0, gates0, tuple(state0), background_current
-
-
-def _membrane_uses_rate_table(membrane: Any) -> bool:
-    has_rate_table = getattr(membrane, "has_rate_table", False)
-    if bool(has_rate_table):
-        return True
-    components = getattr(membrane, "models", None)
-    if components is not None:
-        return any(_membrane_uses_rate_table(component) for component in components)
-    return False
 
 
 def _prepare_heterogeneous_membrane_initial_arrays(

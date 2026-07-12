@@ -8,9 +8,8 @@ import pytest
 import jax.numpy as jnp
 import numpy as np
 
-from axonscope import AxonInstance, degC, ms, um
+from axonscope import AxonInstance, AxonSimulation, degC, ms, um
 from axonscope.axons.unmyelinated import HodgkinHuxley, RattayAberham
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 
 
@@ -28,5 +27,5 @@ def small_hh_axon():
 
 @pytest.fixture(scope="session")
 def small_hh_result(small_hh_axon):
-    """Pre-computed CrankNicholson result for the small HH axon."""
-    return CrankNicholson().solve(small_hh_axon, tsim=10.0, dt=0.01)
+    """Pre-computed public simulation result for the small HH axon."""
+    return AxonSimulation(small_hh_axon, duration=10.0, dt=0.01).run().single

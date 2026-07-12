@@ -12,12 +12,8 @@ from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.runtime.jax.input_batches import build_vstim_midpoint_batch
 from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import Stimulus
-from axonscope.solvers.crank_nicholson import (
-    CrankNicholson,
-)
 from tests.unit.solvers._reference_solvers import (
-    CrankNicholsonVStimForcing,
-    CrankNicholson_unoptimized,
+    SingleCableVStimForcingReference,
 )
 from axonscope.utils import units
 from axonscope.runtime.jax.kernels import DoubleCableKernel
@@ -25,10 +21,13 @@ from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.timebase import simulation_step_count
 
 
-ALL_SOLVERS = [
-    CrankNicholson_unoptimized(),
-    CrankNicholson(),
-]
+def _run_public_batch(axon: AxonInstance, *, tsim: float, dt: float, recording=None):
+    return axs.AxonSimulation(
+        axon,
+        duration=tsim,
+        dt=dt,
+        recording=recording,
+    ).run().single
 
 
 def _passive_axon(*, L: float, d: float, Nx: int, v_init=None) -> AxonInstance:
@@ -304,9 +303,8 @@ def test_myelinated_extracellular_stimulus_has_nonzero_effect():
         sigma=0.2 * axs.S_per_m,
     )
 
-    solver = CrankNicholson()
-    vm_on = np.asarray(solver.solve(ax_on, tsim=tsim, dt=dt).Vm)
-    vm_off = np.asarray(solver.solve(ax_off, tsim=tsim, dt=dt).Vm)
+    vm_on = np.asarray(_run_public_batch(ax_on, tsim=tsim, dt=dt).Vm)
+    vm_off = np.asarray(_run_public_batch(ax_off, tsim=tsim, dt=dt).Vm)
 
     max_delta = float(np.max(np.abs(vm_on - vm_off)))
     assert max_delta > 1.0
@@ -327,12 +325,12 @@ def test_uniform_constant_vext_with_matching_veinit_does_not_charge_xc():
         stimulus=Stimulus.constant(50e-6, start=0.0 * axs.ms),
     )
 
-    res = CrankNicholson().solve(ax, tsim=0.5, dt=0.01)
+    res = _run_public_batch(ax, tsim=0.5, dt=0.01)
 
     np.testing.assert_allclose(np.asarray(res.Vm), -70.0, rtol=0.0, atol=2e-3)
 
 
-def test_public_solver_uses_vstim_forcing_for_single_cable_extracellular():
+def test_public_batch_path_uses_vstim_forcing_for_single_cable_extracellular():
     def build_axon() -> AxonInstance:
         ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
         ax.add_current_clamp(position=200.0 * axs.um,
@@ -346,10 +344,15 @@ def test_public_solver_uses_vstim_forcing_for_single_cable_extracellular():
         )
         return ax
 
-    forced = CrankNicholsonVStimForcing().solve(build_axon(), tsim=1.0, dt=0.01)
-    reference = CrankNicholson().solve(build_axon(), tsim=1.0, dt=0.01)
+    forced = SingleCableVStimForcingReference().solve(build_axon(), tsim=1.0, dt=0.01)
+    reference = _run_public_batch(build_axon(), tsim=1.0, dt=0.01)
 
-    np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(
+        np.asarray(forced.Vm),
+        np.asarray(reference.Vm),
+        atol=1e-4,
+        rtol=0.0,
+    )
 
 
 def test_public_vstim_default_is_close_to_double_cable_for_unmyelinated_nrv_defaults():
@@ -373,7 +376,7 @@ def test_public_vstim_default_is_close_to_double_cable_for_unmyelinated_nrv_defa
         precompute_intracellular=True,
     )
     reference = DoubleCableKernel(runtime=runtime, Veinit_mV=float(ax_ref.Veinit)).run()
-    forced = CrankNicholson().solve(build_axon(), tsim=1.2, dt=0.01)
+    forced = _run_public_batch(build_axon(), tsim=1.2, dt=0.01)
 
     np.testing.assert_allclose(np.asarray(forced.Vm), np.asarray(reference.Vm), atol=5e-1, rtol=0.0)
 
@@ -386,7 +389,7 @@ def test_single_cable_vstim_default_uses_inline_forcing():
         stimulus=Stimulus.constant(20e-6, start=0.0 * axs.ms),
     )
 
-    res = CrankNicholson().solve(ax, tsim=0.1, dt=0.01)
+    res = _run_public_batch(ax, tsim=0.1, dt=0.01)
 
     assert res.Vm.shape == (10, ax.n_compartments)
     assert np.isfinite(np.asarray(res.Vm)).all()
@@ -396,7 +399,7 @@ def test_vstim_forcing_rejects_double_cable_axons():
     ax = MRG(diameter=10.0 * axs.um, nodes=5)
 
     with pytest.raises(ValueError, match="single-cable solver"):
-        CrankNicholsonVStimForcing().solve(ax, tsim=1.0, dt=0.01)
+        SingleCableVStimForcingReference().solve(ax, tsim=1.0, dt=0.01)
 
 
 def test_myelinated_uses_inline_double_cable_solver():
@@ -407,13 +410,13 @@ def test_myelinated_uses_inline_double_cable_solver():
         current=Stimulus.pulse(start=0.5 * axs.ms, duration=0.05 * axs.ms, amplitude=1.0),
     )
 
-    res = CrankNicholson().solve(ax, tsim=1.0, dt=0.01)
+    res = _run_public_batch(ax, tsim=1.0, dt=0.01)
 
     assert res.Vm.shape[1] == ax.n_compartments
     assert np.isfinite(np.asarray(res.Vm)).all()
 
 
-def test_double_cable_kernel_matches_public_solver_path():
+def test_double_cable_kernel_matches_public_batch_path():
     ax = AxonInstance(MRG(diameter=10.0 * axs.um, nodes=5))
     center_node = int(ax.node_indices.shape[0] // 2)
     pos_um = float(ax.x_nodes_um[center_node])
@@ -432,14 +435,13 @@ def test_double_cable_kernel_matches_public_solver_path():
         runtime=runtime,
         Veinit_mV=float(getattr(ax, "Veinit", 0.0)),
     ).run()
-    public = CrankNicholson().solve(ax, tsim=1.0, dt=0.01)
+    public = _run_public_batch(ax, tsim=1.0, dt=0.01)
 
     np.testing.assert_allclose(np.asarray(direct.t), np.asarray(public.t), atol=0.0, rtol=0.0)
-    np.testing.assert_allclose(np.asarray(direct.Vm), np.asarray(public.Vm), atol=1e-2, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(direct.Vm), np.asarray(public.Vm), atol=2e-2, rtol=0.0)
 
 
-@pytest.mark.parametrize("solver", ALL_SOLVERS, ids=lambda s: s.__class__.__name__)
-def test_all_solvers_run_myelinated_with_extracellular(solver):
+def test_public_batch_path_runs_myelinated_with_extracellular():
     ax = AxonInstance(MRG(diameter=10.0 * axs.um, nodes=5))
     center_node = int(ax.node_indices.shape[0] // 2)
     pos_um = float(ax.x_nodes_um[center_node])
@@ -449,7 +451,7 @@ def test_all_solvers_run_myelinated_with_extracellular(solver):
 
     tsim = 4.0
     dt = 0.01
-    res = solver.solve(ax, tsim=tsim, dt=dt)
+    res = _run_public_batch(ax, tsim=tsim, dt=dt)
 
     assert res.Vm.shape[0] == simulation_step_count(tsim, dt)
     assert res.Vm.shape[1] == ax.n_compartments
@@ -464,8 +466,7 @@ def test_all_solvers_run_myelinated_with_extracellular(solver):
     assert float(np.max(center_trace[late_mask])) < 0.0
 
 
-@pytest.mark.parametrize("solver", ALL_SOLVERS, ids=lambda s: s.__class__.__name__)
-def test_all_solvers_run_unmyelinated_with_extracellular_and_vext(solver):
+def test_public_batch_path_runs_unmyelinated_with_extracellular_and_vext():
     ax = AxonInstance(HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41))
 
     xraxial = np.full((ax.n_compartments,), 1e8, dtype=float)
@@ -486,7 +487,7 @@ def test_all_solvers_run_unmyelinated_with_extracellular_and_vext(solver):
     ax.add_current_clamp(position=200.0 * axs.um,
         current=Stimulus.pulse(start=0.4 * axs.ms, duration=0.05 * axs.ms, amplitude=0.8),
     )
-    res = solver.solve(ax, tsim=1.2, dt=0.01)
+    res = _run_public_batch(ax, tsim=1.2, dt=0.01)
 
     assert res.Vm.shape[0] == simulation_step_count(1.2, 0.01)
     assert res.Vm.shape[1] == ax.n_compartments

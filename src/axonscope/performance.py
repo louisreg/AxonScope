@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, TextIO
 
 import numpy as np
@@ -21,7 +21,7 @@ from axonscope.runtime.execution import (
 from axonscope.dispatcher.plan import DispatchGroup, build_dispatch_plan
 from axonscope.dispatcher.routing import can_use_batch_route
 from axonscope.population import AxonPopulation
-from axonscope.recording import Recording, RecordingPlan
+from axonscope.recording import Recording
 from axonscope.runtime.policy import (
     Device,
     ExecutionPolicy,
@@ -30,7 +30,6 @@ from axonscope.runtime.policy import (
     auto as runtime_auto,
     coerce_runtime,
 )
-from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.solvers import BatchOptions
 from axonscope.timebase import simulation_step_count
 from axonscope.utils import units
@@ -394,31 +393,8 @@ def _estimate_batch_options(
     batch_options: BatchOptions | None,
 ) -> BatchOptions:
     options = BatchOptions.full() if batch_options is None else batch_options
-    if recording is not None and recording.wants_observables and population.is_single:
-        if not recording.voltage:
-            raise NotImplementedError(
-                "single-row observable-only recording is not supported; include Vm "
-                "or use Recording.none() with solver-side observers."
-            )
-        lowered = batch_options_from_recording(
-            _recording_as_vm_only(recording),
-            batch_options=options,
-        )
-        return options if lowered is None else lowered
     lowered = batch_options_from_recording(recording, batch_options=options)
     return options if lowered is None else lowered
-
-
-def _recording_as_vm_only(recording: Recording) -> RecordingPlan:
-    plan = recording.to_plan()
-    return replace(
-        plan,
-        gates=False,
-        currents=False,
-        conductances=False,
-        state_variables=False,
-        signals=(MEMBRANE_VOLTAGE,) if recording.voltage else (),
-    )
 
 
 def _estimate_dispatch_group(
@@ -536,7 +512,7 @@ def _estimate_dispatch_group(
     return SimulationEstimateGroup(
         group_id=int(group.group_id),
         pool_indices=group.pool_indices,
-        route="batch" if can_batch else "scalar",
+        route="batch" if can_batch else "unsupported",
         batch_kind=group.batch_kind,
         mode=str(group.mode),
         size=int(group.size),
@@ -906,7 +882,7 @@ def _observable_output_items(
                 bytes=bytes_value,
                 role="public_output",
                 retained=True,
-                note="scalar fallback observable recording",
+                note="batch observable recording not implemented",
             )
         )
     return tuple(item for item in result if item.bytes > 0)

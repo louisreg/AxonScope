@@ -411,8 +411,9 @@ results = axs.AxonSimulation(
 
 Current implementation notes:
 
-- `record_observables=True` already records gates, currents, conductances, and
-  state variables in the single-axon solver path;
+- dense observable groups such as gates, currents, conductances, and state
+  variables need a batch-native implementation before they are public
+  execution outputs;
 - `BatchOptions` and `BatchRecording` already cover part of spatial filtering
   for batch `Vm`;
 - the public API should unify these into one user-facing `Recording` object

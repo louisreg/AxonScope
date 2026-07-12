@@ -922,13 +922,14 @@ Current boundary:
   directly;
 - fixed-step time-grid validation and solver time-argument normalization live
   in `axonscope.timebase`;
-- `axonscope.solvers` exports only the stable solver facade: solver base,
-  `CrankNicholson`, solver options, and batch output/chunking options;
+- `axonscope.solvers` exports only stable solver-facing option contracts:
+  `SolverOptions`, `BatchOptions`, and `BatchRecording`;
 - JAX runtime preparation, stimulation compilation, scalar kernels, batch
   kernels, observer packing, and backend input containers live under
   `axonscope.runtime.jax`;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
-- `solvers/` retains only solver-facing contracts and the public solver class.
+- `solvers/` retains only solver-facing contracts; executable solver routes
+  live under concrete runtimes.
 
 ## 8.3 Public Solver Surface
 

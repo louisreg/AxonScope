@@ -1,8 +1,8 @@
-"""Reference Crank-Nicholson solver variants used by tests.
+"""Reference one-row solver variants used by tests.
 
 Kept variants:
-- ``CrankNicholsonVStimForcing``: imposed-field single-cable extracellular path.
-- ``CrankNicholson_unoptimized``: dense reference implementation.
+- ``SingleCableVStimForcingReference``: imposed-field single-cable extracellular path.
+- ``DenseSingleCableReference``: dense reference implementation.
 """
 
 from __future__ import annotations
@@ -25,17 +25,15 @@ from axonscope.runtime.jax.runtime import (
     prepare_membrane_runtime,
     prepare_solver_runtime,
 )
+from axonscope.runtime.row_output import RowRecordingOutput
 from axonscope.solvers.axon_runtime import build_solver_axon
-from axonscope.solvers.base import Solver
-from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.solvers._outputs import SolverOutput
 from axonscope.solvers.options import SolverOptions
 from axonscope.timebase import resolve_time_args, simulation_step_count
 
 from axonscope.runtime.jax.stimulation_runtime import build_intracellular_current_density_fn
 
 
-class CrankNicholsonVStimForcing(Solver):
+class SingleCableVStimForcingReference:
     """Single-cable Crank-Nicolson with an imposed extracellular potential.
 
     This prototype treats extracellular stimulation as a prescribed field
@@ -55,14 +53,14 @@ class CrankNicholsonVStimForcing(Solver):
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-    ) -> SolverOutput:
+    ) -> RowRecordingOutput:
         simulation = as_axon_instance(axon)
         duration, step = resolve_time_args(tsim=tsim, dt=dt)
         solver_axon = build_solver_axon(simulation)
         if solver_axon.formulation == "double-cable":
             raise ValueError(
-                "CrankNicholsonVStimForcing is a single-cable solver; "
-                "use CrankNicholson for double-cable axons."
+                "SingleCableVStimForcingReference is a single-cable solver; "
+                "use the public batch route for double-cable axons."
             )
 
         runtime = prepare_solver_runtime(
@@ -84,7 +82,7 @@ class CrankNicholsonVStimForcing(Solver):
             record_diagnostics=record_diagnostics,
             record_observables=record_observables,
         )
-        return SolverOutput(
+        return RowRecordingOutput(
             simulation.axon,
             out.Vm,
             out.t,
@@ -97,7 +95,7 @@ class CrankNicholsonVStimForcing(Solver):
 # -----------------------------------------------------------------------------
 # Crank–Nicolson (unoptimized, dense solve)
 # -----------------------------------------------------------------------------
-class CrankNicholson_unoptimized(Solver):
+class DenseSingleCableReference:
     """
     Crank–Nicolson scheme using a dense linear solver.
 
@@ -155,7 +153,7 @@ class CrankNicholson_unoptimized(Solver):
         dt: float | None = None,
         record_diagnostics: bool = False,
         record_observables: bool = False,
-    ) -> SolverOutput:
+    ) -> RowRecordingOutput:
         """
         Run CN using dense linear algebra.
 
@@ -170,18 +168,15 @@ class CrankNicholson_unoptimized(Solver):
 
         Returns
         -------
-            SolverOutput
+            RowRecordingOutput
             Voltage traces V_all and time vector t_vec.
         """
         simulation = as_axon_instance(axon)
         duration, step = resolve_time_args(tsim=tsim, dt=dt)
         if bool(getattr(simulation, "use_extracellular", False)):
-            return CrankNicholson(solver_options=self.solver_options).solve(
-                simulation,
-                tsim=duration,
-                dt=step,
-                record_diagnostics=record_diagnostics,
-                record_observables=record_observables,
+            raise ValueError(
+                "DenseSingleCableReference is an intracellular single-cable "
+                "dense reference; use the batch route for extracellular cases."
             )
 
         solver_axon = build_solver_axon(simulation)
@@ -195,7 +190,7 @@ class CrankNicholson_unoptimized(Solver):
         )
         if membrane_runtime.state0:
             raise NotImplementedError(
-                "CrankNicholson_unoptimized only supports stateless membrane models."
+                "DenseSingleCableReference only supports stateless membrane models."
             )
         backend = membrane_runtime.backend
         dtype_local = membrane_runtime.dtype
@@ -259,10 +254,10 @@ class CrankNicholson_unoptimized(Solver):
             return (V_new, gates_new), V_new
 
         (_, _), V_all = jax.lax.scan(scan_step, (V0, gates0), jnp.arange(Nt))
-        return SolverOutput(simulation.axon, V_all, t_vec, simulation=simulation)
+        return RowRecordingOutput(simulation.axon, V_all, t_vec, simulation=simulation)
 
 
 __all__ = [
-    "CrankNicholsonVStimForcing",
-    "CrankNicholson_unoptimized",
+    "DenseSingleCableReference",
+    "SingleCableVStimForcingReference",
 ]

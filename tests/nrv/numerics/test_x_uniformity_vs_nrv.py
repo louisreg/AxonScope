@@ -6,10 +6,8 @@ import os
 from axonscope import AxonInstance, ms, um
 from axonscope.axons.unmyelinated import RattayAberham
 from axonscope.analysis import conduction_velocity
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
-from axonscope.solvers._outputs import SolverOutput
-from tests.nrv._helpers import axonscope_x_um
+from tests.nrv._helpers import axonscope_x_um, run_axonscope_simulation
 
 pytestmark = pytest.mark.nrv_numerics
 
@@ -33,12 +31,10 @@ ARRIVAL_TOLERANCE_MS = 0.05         # Off-site peak time difference tolerance [m
 VELOCITY_RTOL = 0.15                # Average propagation velocity tolerance
 
 
-def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SolverOutput:
+def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float):
     simulation = AxonInstance(axon)
     simulation.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=T_START * ms, duration=T_PULSE * ms, amplitude=AMPLITUDE))
-    solver = CrankNicholson()
-    res = solver.solve(simulation, tsim=tsim, dt=dt)
-    return res
+    return run_axonscope_simulation(simulation, tsim=tsim, dt=dt)
 
 
 def nearest_index(x: np.ndarray, position_um: float) -> int:
@@ -46,13 +42,13 @@ def nearest_index(x: np.ndarray, position_um: float) -> int:
     return int(np.argmin(np.abs(np.asarray(x) - position_um)))
 
 
-def result_x_um(res: SolverOutput) -> np.ndarray:
+def result_x_um(res) -> np.ndarray:
     """Return result compartment positions from the descriptive layout."""
 
     return axonscope_x_um(res.axon)
 
 
-def peak_metrics(res: SolverOutput, position_um: float) -> tuple[float, float]:
+def peak_metrics(res, position_um: float) -> tuple[float, float]:
     """
     Return peak amplitude and its occurrence time at a fixed physical position.
 
@@ -85,8 +81,8 @@ def create_focused_non_uniform_x(L: float, Nx: int, perturbation_factor: float) 
 # ==============================================================================
 
 def plot_full_comparison(
-    res_uniform: SolverOutput,
-    res_non_uniform: SolverOutput,
+    res_uniform,
+    res_non_uniform,
     save_dir: str,
 ):
     """

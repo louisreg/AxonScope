@@ -138,7 +138,7 @@ def test_public_simulate_rejects_partial_final_time_step():
         _run_simulation(axon, duration=0.1 * axs.ms, dt=0.03 * axs.ms)
 
 
-def test_public_recording_full_requests_observables():
+def test_public_recording_full_requires_future_batch_observable_route():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -146,19 +146,13 @@ def test_public_recording_full_requests_observables():
         celsius=6.3 * axs.degC,
     )
 
-    run = _run_simulation(
-        axon,
-        duration=0.1 * axs.ms,
-        dt=0.05 * axs.ms,
-        recording=axs.Recording.full(),
-    )
-    result = run.single
-
-    assert result.recordings is not None
-    assert "Vm" in result.recordings
-    assert "gates" in result.recordings
-    assert "currents" in result.recordings
-    assert "conductances" in result.recordings
+    with pytest.raises(NotImplementedError, match="Vm only"):
+        _run_simulation(
+            axon,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            recording=axs.Recording.full(),
+        )
 
 
 def test_observer_only_run_returns_compact_observations_without_vm():
@@ -471,7 +465,7 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
     assert group_metadata["memory_estimate_components_nbytes"]["iinj_dense"] == 0
 
 
-def test_public_recording_signals_filter_single_result():
+def test_public_recording_observable_signals_require_future_batch_route():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -479,16 +473,13 @@ def test_public_recording_signals_filter_single_result():
         celsius=6.3 * axs.degC,
     )
 
-    run = _run_simulation(
-        axon,
-        duration=0.1 * axs.ms,
-        dt=0.05 * axs.ms,
-        recording=axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES]),
-    )
-    result = run.single
-
-    assert result.recordings is not None
-    assert set(result.recordings) == {"Vm", "gates"}
+    with pytest.raises(NotImplementedError, match="Vm only"):
+        _run_simulation(
+            axon,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            recording=axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES]),
+        )
 
 
 def test_public_signal_descriptors_are_extensible():
@@ -515,7 +506,7 @@ def test_public_single_recording_requires_voltage_with_observables():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="observable-only recording"):
+    with pytest.raises(NotImplementedError, match="Vm only"):
         _run_simulation(
             axon,
             duration=0.1 * axs.ms,
@@ -791,7 +782,7 @@ def test_public_root_axon_simulation_runs_single_instance():
             celsius=6.3 * axs.degC,
         )
     )
-    recording = axs.Recording.full()
+    recording = axs.Recording.voltage()
     simulation = axs.AxonSimulation(
         instance,
         duration=0.1 * axs.ms,
@@ -808,7 +799,9 @@ def test_public_root_axon_simulation_runs_single_instance():
     assert result.simulation is instance
     assert result.recording is recording
     assert result.Vm.shape == (2, 11)
-    assert run.recordings == (result.recordings,)
+    assert len(run.recordings) == 1
+    assert run.recordings[0].keys() == result.recordings.keys()
+    np.testing.assert_allclose(run.recordings[0]["Vm"], result.recordings["Vm"])
     assert run.final_states == (None,)
 
 
@@ -883,15 +876,13 @@ def test_public_root_axon_simulation_rejects_solver_object():
         compartments=11,
         celsius=6.3 * axs.degC,
     )
-    simulation = axs.AxonSimulation(
-        axon,
-        duration=0.1 * axs.ms,
-        dt=0.05 * axs.ms,
-        solver=axs.solvers.CrankNicholson(),
-    )
-
-    with pytest.raises(NotImplementedError, match="solver_options"):
-        simulation.run()
+    with pytest.raises(TypeError, match="solver"):
+        axs.AxonSimulation(
+            axon,
+            duration=0.1 * axs.ms,
+            dt=0.05 * axs.ms,
+            solver=object(),
+        )
 
 
 def test_public_pool_recording_center_maps_to_batch_recording():

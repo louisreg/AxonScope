@@ -24,9 +24,7 @@ without materializing the whole voltage movie.
 attached to the axon model.
 
 ```python
-recording = axs.Recording(
-    signals=[axs.signals.Vm, axs.signals.GATES, axs.signals.CURRENTS],
-)
+recording = axs.Recording.center(axs.signals.Vm)
 
 run = axs.AxonSimulation(
     sim,
@@ -41,25 +39,21 @@ Current support:
 
 - default runs retain `Vm` unless `Recording.none()` is requested with
   solver-side observers;
-- single-row runs can include observable groups such as `gates`, `currents`,
-  and `conductances`, but those observable recordings must include `Vm`;
 - pool runs currently support `Vm` recording with `full`, `center`, `probes`,
   or explicit compartment `indices` spatial modes;
 - `Recording.none()` is supported when solver-side observers are supplied;
-- position-based recording, temporal subsampling, observable-only single-row
-  recording, and pool observable groups are not wired to execution yet.
+- position-based recording, temporal subsampling, and dense observable groups
+  such as `gates`, `currents`, and `conductances` are not wired to batch
+  execution yet.
 
 Current solver handling:
 
-- `AxonSimulation.run()` validates the public `Recording`, forwards
-  `record_observables=True` to the scalar route when observable groups are
-  requested, then filters the internal scalar recording payload to the
-  requested groups before wrapping it in the canonical public result.
-- Population `AxonSimulation.run()` translates public pool Vm recording
-  policies to a backend-neutral `RecordingPlan`, then the JAX backend lowers
-  that plan to solver-level `BatchRecording`. Scalar fallback rows are filtered
-  after the solve so public `record_indices` match the requested
-  center/probe/index columns.
+- `AxonSimulation.run()` validates the public `Recording` and translates Vm
+  recording policies to a backend-neutral `RecordingPlan`; the JAX backend
+  lowers that plan to solver-level `BatchRecording`.
+- One-row runs use the same batch route as larger populations (`B=1`), so
+  unsupported recording requests fail explicitly instead of using a second
+  scalar execution path.
 - Low-level solvers and batch kernels still receive numerical flags/options;
   they do not own the user-facing `Recording` contract.
 
@@ -67,8 +61,6 @@ Convenience constructors:
 
 ```python
 axs.Recording.voltage()
-axs.Recording.full()
-axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES])
 axs.Recording.center(axs.signals.Vm)
 axs.Recording.probes(axs.signals.Vm, count=8)
 axs.Recording.indices([0, 5, 10], axs.signals.Vm)
@@ -78,9 +70,8 @@ Signals are descriptors, not a closed enum. Built-in descriptors live under
 `axs.signals`, and custom descriptors can be built with `axs.Signal` and
 `axs.SignalId` for future workflows that produce new result channels.
 
-`Recording.only(axs.signals.GATES)` is a valid policy object, but current
-public solvers still require Vm storage. Include `axs.signals.Vm` when
-requesting observable groups.
+`Recording.full()` and observable descriptors such as `axs.signals.GATES` are
+valid policy objects, but current public execution supports Vm outputs only.
 
 `positions` must carry length units and is stored internally as `positions_um`.
 `sample_dt` must carry time units and is stored internally as `sample_dt_ms`.

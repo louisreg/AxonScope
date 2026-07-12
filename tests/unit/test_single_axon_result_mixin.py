@@ -8,7 +8,6 @@ import axonscope as axs
 from axonscope.analysis import ActivationCriterion, detect_activation
 from axonscope.analysis import conduction_velocity, rasterize, recorded_positions_um
 from axonscope.axons.unmyelinated import RattayAberham
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from tests.helpers import FakeSingleAxonResult
 
@@ -340,7 +339,7 @@ def test_compute_propagation_velocity():
         current=Stimulus.pulse(start=1.0 * axs.ms, duration=1.0 * axs.ms, amplitude=2),
     )
 
-    simres = CrankNicholson().solve(axon, tsim=10.0, dt=0.01)
+    simres = axs.AxonSimulation(axon, duration=10.0, dt=0.01).run().single
     velocity = conduction_velocity(simres)
 
     assert velocity is not None

@@ -1,4 +1,4 @@
-"""Internal solver output payloads."""
+"""Internal row recording payloads used by result assembly."""
 
 from __future__ import annotations
 
@@ -36,12 +36,12 @@ def _normalize_recordings(
 
 
 @dataclass(init=False)
-class SolverOutput:
-    """Internal output returned by scalar solver calls.
+class RowRecordingOutput:
+    """Internal one-row output view used for post-hoc observer evaluation.
 
-    This is a solver/backend payload, not the public result model. Public
-    execution converts solver outputs through dispatcher records into
-    ``AxonSimulationResult``.
+    This is a lightweight runtime-neutral adapter, not an execution route or
+    public result model. Batch result assembly uses it only when an observer can
+    be evaluated from an already retained Vm row.
     """
 
     axon: Axon
@@ -69,7 +69,7 @@ class SolverOutput:
         simulation: AxonInstance | None = None,
     ) -> None:
         if t is None:
-            raise TypeError("SolverOutput requires a time vector `t`.")
+            raise TypeError("RowRecordingOutput requires a time vector `t`.")
         self.axon = axon
         self.t = t
         self.diagnostics = diagnostics
@@ -89,7 +89,9 @@ class SolverOutput:
         try:
             return self.signal(MEMBRANE_VOLTAGE)
         except KeyError as exc:
-            raise AttributeError("this SolverOutput does not contain a Vm recording.") from exc
+            raise AttributeError(
+                "this RowRecordingOutput does not contain a Vm recording."
+            ) from exc
 
     @Vm.setter
     def Vm(self, value: ResultArray) -> None:
@@ -149,5 +151,5 @@ __all__ = [
     "RecordingDict",
     "RecordingValue",
     "ResultArray",
-    "SolverOutput",
+    "RowRecordingOutput",
 ]

@@ -11,8 +11,7 @@ from axonscope import AxonInstance, S_per_m, ms, um
 from axonscope.axons.myelinated import MRG
 from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.stimulation import Stimulus
-from axonscope.solvers.crank_nicholson import CrankNicholson
-from tests.nrv._helpers import axonscope_x_um, normalize_nrv_matrix
+from tests.nrv._helpers import axonscope_x_um, normalize_nrv_matrix, run_axonscope_simulation
 
 pytestmark = pytest.mark.nrv_extracellular
 
@@ -65,7 +64,7 @@ def test_myelinated_extracellular_ctx_api_vs_nrv(save_dir: str = "figures/physic
         replace=True,
     )
 
-    res_as = CrankNicholson().solve(sim_as, tsim=tsim, dt=dt)
+    res_as = run_axonscope_simulation(sim_as, tsim=tsim, dt=dt)
     t_as = np.asarray(res_as.t)
     x_all_as = axonscope_x_um(ax_as)
     vm_all_as = np.asarray(res_as.Vm, dtype=float).T

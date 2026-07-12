@@ -935,8 +935,9 @@ def test_dispatch_progress_uses_structured_dispatch_and_backend_events():
 
     assert "class ProgressEvent" in progress_text
     assert "def emit(self, event: ProgressEvent)" in progress_text
-    assert "ProgressEvent(" in execution_text
+    assert "progress_reporter.start_group(" in execution_text
     assert "progress_reporter.route_group(" in execution_text
+    assert "progress_reporter.finish_group(" in execution_text
     assert "from axonscope.dispatcher.progress import ProgressEvent" in jax_runner_text
     assert "_emit_progress(" in jax_runner_text
     assert "Simulation run {status}" in progress_text
@@ -1104,6 +1105,10 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     assert not (SRC_ROOT / "runtime" / "jax" / "scalar_runner.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "reference_solvers.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "large_population_solver.py").exists()
+    assert not (SRC_ROOT / "solvers" / "base.py").exists()
+    assert not (SRC_ROOT / "solvers" / "crank_nicholson.py").exists()
+    assert not (SRC_ROOT / "solvers" / "rate_tables.py").exists()
+    assert not (SRC_ROOT / "solvers" / "_outputs.py").exists()
 
     jax_membrane_dir = SRC_ROOT / "runtime" / "jax" / "membranes"
     jax_execution_dir = SRC_ROOT / "runtime" / "jax" / "execution"
@@ -1113,12 +1118,11 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         "layout.py",
         "model_ir_lowering.py",
         "program.py",
-        "rate_tables.py",
         "stacking.py",
     }:
         assert (jax_membrane_dir / filename).is_file()
     assert (jax_execution_dir / "__init__.py").is_file()
-    assert (jax_execution_dir / "scalar_runner.py").is_file()
+    assert not (jax_execution_dir / "scalar_runner.py").exists()
 
     jax_runtime_text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(
         encoding="utf-8"
@@ -1135,9 +1139,6 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     jax_model_ir_lowering_text = (
         jax_membrane_dir / "model_ir_lowering.py"
     ).read_text(encoding="utf-8")
-    jax_rate_tables_text = (jax_membrane_dir / "rate_tables.py").read_text(
-        encoding="utf-8"
-    )
     assert "def membrane_observable_names" in jax_runtime_text
     assert "def observable_matrices" in jax_runtime_text
     assert "def package_recordings" in jax_runtime_text
@@ -1146,9 +1147,9 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     assert "def precompute_intracellular_current_density" not in jax_runtime_text
     assert "def gating_inf_tau" not in jax_membrane_program_text
     assert "def disable_rate_table" not in jax_membrane_program_text
+    assert "rate_table" not in jax_membrane_program_text
     assert "def init_gates_for_row" not in jax_membrane_backend_text
     assert "source_observable_output_names" not in jax_model_ir_lowering_text
-    assert "def disable_rate_tables" not in jax_rate_tables_text
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):
@@ -1416,12 +1417,9 @@ def test_solver_facade_exposes_only_stable_solver_surface():
     import axonscope.solvers as solver_facade
 
     stable_exports = {
-        "Solver",
-        "CrankNicholson",
         "BatchOptions",
         "BatchRecording",
         "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
-        "RateTableConfig",
         "SolverOptions",
     }
     forbidden_exports = {
@@ -1432,9 +1430,12 @@ def test_solver_facade_exposes_only_stable_solver_surface():
         "ExtracellularRuntime",
         "KernelResult",
         "MembraneRuntime",
+        "CrankNicholson",
+        "RateTableConfig",
         "SimulationGrid",
         "SingleCableKernel",
         "SingleCableVStimBatchKernel",
+        "Solver",
         "SolverAxon",
         "SolverRuntime",
         "StimulationRuntime",
@@ -1762,29 +1763,9 @@ def test_public_simulation_orchestrator_uses_backend_execution_boundary():
     assert "axonscope.runtime.execution" in text
 
 
-def test_crank_nicholson_facade_delegates_to_backend_boundary():
+def test_crank_nicholson_facade_is_not_reintroduced():
     path = SRC_ROOT / "solvers" / "crank_nicholson.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    forbidden_modules = {
-        "axonscope.solvers.axon_runtime",
-        "axonscope.runtime.jax.kernels",
-        "axonscope.runtime.jax.runtime",
-    }
-    offenders = _jax_import_locations(path)
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in forbidden_modules:
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if node.level == 0 and module in forbidden_modules:
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-            elif node.level > 0 and module in {"axon_runtime", "kernels", "runtime"}:
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
-
-    assert offenders == []
+    assert not path.exists()
 
 
 def test_benchmarking_public_modules_are_interfaces_not_runtime_engines():
@@ -2324,14 +2305,12 @@ def test_solver_route_map_documents_retained_runtime_paths():
 
     required_terms = {
         "## Active Solver Route Map",
-        "### Scalar Route",
-        "### Pool, Planning, And Fallback Route",
+        "### Single-Row Batch Route",
+        "### Pool And Planning Route",
         "### Single-Cable Batch Route",
         "### Double-Cable Batch Route",
         "### VmRaster, Dense/Factorized Vext, And Results",
-        "run_jax_crank_nicholson",
         "build_dispatch_plan",
-        "_run_scalar_group",
         "_run_batch_group",
         "_run_single_cable_batch_group",
         "_run_double_cable_batch_group",
@@ -2344,7 +2323,6 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "DoubleCableBatchKernel",
         "build_vm_raster_plan",
         "runtime/result_assembly.py",
-        "runtime/jax/execution/scalar_runner.py",
         "runtime/jax/membranes/",
         "runtime/jax/membranes/stacking.py",
         "runtime/jax/recording_lowering.py",

@@ -8,13 +8,11 @@ from axonscope.runtime.execution import run_batch_group
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import (
     DispatchGroup,
-    DispatchItem,
     DispatchPlan,
     build_dispatch_plan,
 )
 from axonscope.dispatcher.progress import (
     DispatchProgress,
-    ProgressEvent,
     ProgressOption,
     emit_initial_progress,
 )
@@ -22,10 +20,8 @@ from axonscope.dispatcher.routing import can_use_batch_route
 from axonscope.dispatcher._records import (
     DispatchCohortRecord,
     DispatchRecord,
-    DispatchRowRecord,
 )
-from axonscope.solvers import BatchOptions, CrankNicholson, SolverOptions
-from axonscope.solvers._outputs import SolverOutput
+from axonscope.solvers import BatchOptions, SolverOptions
 from axonscope.utils import units
 
 
@@ -144,58 +140,16 @@ def _run_pool_checked(
                         runtime_context=runtime_context,
                     )
                 else:
+                    reason = _batch_rejection_reason(
+                        group,
+                        record_observables=record_observables,
+                    )
                     progress_reporter.route_group(
                         group,
-                        route="scalar",
-                        reason=_batch_rejection_reason(
-                            group,
-                            batch_options=resolved_batch_options,
-                            observers=observers,
-                        ),
+                        route="unsupported",
+                        reason=reason,
                     )
-                    callback = progress_reporter.kernel_callback(group)
-                    if callback is not None:
-                        callback(
-                            ProgressEvent(
-                                stage="kernel",
-                                group_id=int(group.group_id),
-                                rows=int(group.size),
-                                nx=int(group.nx),
-                                route="scalar",
-                                message="compiling scalar kernel if needed",
-                            )
-                        )
-                    group_results = _run_scalar_group(
-                        group,
-                        tsim_ms=tsim_ms,
-                        dt_ms=dt_ms,
-                        solver_options=solver_options,
-                        observers=observers,
-                        record_observables=record_observables,
-                        recording_mode=resolved_batch_options.recording.mode,
-                    )
-                    if callback is not None:
-                        callback(
-                            ProgressEvent(
-                                stage="kernel",
-                                group_id=int(group.group_id),
-                                rows=int(group.size),
-                                nx=int(group.nx),
-                                route="scalar",
-                                message="completed scalar kernel",
-                            )
-                        )
-                        callback(1, 1)
-                    progress_reporter.emit(
-                        ProgressEvent(
-                            stage="result",
-                            group_id=int(group.group_id),
-                            rows=int(group.size),
-                            nx=int(group.nx),
-                            route="scalar",
-                            message="assembled scalar rows",
-                        )
-                    )
+                    raise NotImplementedError(reason)
                 progress_reporter.finish_group(group)
             for result in group_results:
                 indices = (
@@ -215,51 +169,6 @@ def _run_pool_checked(
     if any(index < 0 or index >= len(plan.items) for index in seen_indices):
         raise RuntimeError("pool dispatch did not produce all axon results.")
     return tuple(results)
-
-
-def _run_scalar_group(
-    group: DispatchGroup,
-    *,
-    tsim_ms: float,
-    dt_ms: float,
-    solver_options: SolverOptions | None,
-    observers: tuple[Any, ...] | None,
-    record_observables: bool,
-    recording_mode: str,
-) -> tuple[DispatchRowRecord, ...]:
-    """Execute a dispatch group through scalar solves."""
-
-    solver = CrankNicholson(solver_options=solver_options)
-    record_voltage = recording_mode != "none"
-    solved_rows = [
-        (
-            item,
-            solver.solve(
-                item.simulation,
-                tsim=tsim_ms,
-                dt=dt_ms,
-                record_observables=record_observables,
-                record_voltage=record_voltage,
-                observers=observers,
-            ),
-        )
-        for item in group.items
-    ]
-    with benchmark_span(
-        "results.split_batch",
-        group_id=group.group_id,
-        group_size=group.size,
-        recording_mode=recording_mode,
-        route="scalar",
-    ):
-        return tuple(
-            _dispatch_result_from_sim(
-                item,
-                sim,
-                group_id=group.group_id,
-            )
-            for item, sim in solved_rows
-        )
 
 
 def _can_run_batch_group(
@@ -291,15 +200,12 @@ def _dispatch_method(group: DispatchGroup) -> str:
 def _batch_rejection_reason(
     group: DispatchGroup,
     *,
-    batch_options: BatchOptions,
-    observers: tuple[Any, ...] | None,
+    record_observables: bool,
 ) -> str:
-    """Return a readable reason why a group is using scalar execution."""
+    """Return a readable reason why a group cannot use batch execution."""
 
-    if group.size < 2:
-        if observers is None or batch_options.recording.mode != "none":
-            return "single row group requires dense observable scalar fallback"
-        return "single row group requires scalar fallback"
+    if record_observables:
+        return "dense observable recording is not implemented on the batch route yet."
     if group.mode not in {"single", "double"}:
         return f"unsupported batch mode {group.mode!r}"
     return "batch route unavailable"
@@ -327,33 +233,6 @@ def _run_batch_group(
         observers=observers,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
-    )
-
-
-def _dispatch_result_from_sim(
-    item: DispatchItem,
-    sim: SolverOutput,
-    *,
-    group_id: int,
-) -> DispatchRowRecord:
-    """Convert an internal scalar solver result to a raw dispatch row."""
-
-    return DispatchRowRecord(
-        index=item.index,
-        axon=item.simulation.axon,
-        simulation=item.simulation,
-        Vm=sim.recordings["Vm"] if sim.recordings is not None and "Vm" in sim.recordings else None,
-        t=sim.t,
-        group_id=group_id,
-        method="scalar",
-        record_indices=None,
-        recordings=sim.recordings,
-        observations=sim.observations,
-        final_state=sim.final_state,
-        group_size=1,
-        batch_kind="scalar",
-        geometry_shared=True,
-        has_padding=False,
     )
 
 

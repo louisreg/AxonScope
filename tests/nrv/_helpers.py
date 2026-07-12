@@ -4,11 +4,37 @@ from typing import Iterable, Literal
 
 import numpy as np
 
+import axonscope as axs
 from axonscope.axons.flattened import flatten_layout
 
 
 AXONSCOPE_TO_NRV_CURRENT_SCALE = 1e-3
 AXONSCOPE_TO_NRV_CONDUCTANCE_SCALE = 1e-3
+
+
+def run_axonscope_simulation(
+    axon,
+    *,
+    tsim: float,
+    dt: float,
+    record_observables: bool = False,
+):
+    """Run one AxonScope axon/instance through the public simulation path."""
+
+    recording = None
+    if record_observables:
+        recording = axs.Recording(
+            voltage=True,
+            gates=True,
+            currents=True,
+            conductances=True,
+        )
+    return axs.AxonSimulation(
+        axon,
+        duration=tsim,
+        dt=dt,
+        recording=recording,
+    ).run().single
 
 
 def axonscope_x_um(axon) -> np.ndarray:

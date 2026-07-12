@@ -345,7 +345,7 @@ class DispatchProgress:
         )
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    def __exit__(self, exc_type: Any, exc: Any, _tb: Any) -> None:
         if self._rich is not None:
             self._rich.stop()
         if self._mode is None:

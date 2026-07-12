@@ -17,9 +17,9 @@ def can_use_batch_route(
 ) -> bool:
     """Return whether a dispatch group can use the current batch backend.
 
-    A one-row group is still a valid batch of size one. The explicit fallback is
-    dense observable recording, because the active batch kernels retain Vm and
-    VmRaster-style observations, not full gates/currents/conductances payloads.
+    A one-row group is still a valid batch of size one. Dense observable
+    recording is rejected until it is implemented on the batch route; it must
+    not select a separate scalar execution path.
     """
 
     del batch_options, observers

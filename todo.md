@@ -82,6 +82,9 @@ pytest -q tests/unit --tb=short
   lowering, input semantics, benchmark metadata, and result assembly between
   single-cable and double-cable paths as much as possible without losing P11
   performance.
+  - [x] Remove unused rate-table option, the direct public
+    `CrankNicholson`/`Solver` execution facade, and the JAX scalar fallback;
+    one-row public simulations use the batch route with `B=1`.
 - [ ] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
   host-side code. Delete unused paths, keep solver/kernel-specific code inside
   the JAX runtime, and move semantic-only reusable contracts to

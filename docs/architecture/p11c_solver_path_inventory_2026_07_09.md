@@ -41,8 +41,8 @@ Production solver routes are reachable through:
 ```text
 AxonSimulation(...).run()
     -> axonscope.runtime.execution
-    -> axonscope.runtime.jax.group_runner / scalar_runner
-    -> axonscope.runtime.jax.kernels / batch_kernels
+    -> axonscope.runtime.jax.group_runner
+    -> axonscope.runtime.jax.batch_kernels
 ```
 
 Benchmark-only solver routes may be used by:
@@ -61,8 +61,8 @@ They must not be treated as public API until explicitly promoted.
 
 | Surface | Path | Status | Notes |
 | --- | --- | --- | --- |
-| `CrankNicholson` | `src/axonscope/solvers/crank_nicholson.py` | production | Public optimized solver class. Delegates concrete execution to JAX backend. |
-| `SolverOptions` | `src/axonscope/solvers/options.py` | production | Numerical preparation options; currently rate-table config. |
+| `CrankNicholson` | `src/axonscope/solvers/crank_nicholson.py` | removed in P12B | Superseded by `AxonSimulation(...).run()` through the batch route, including `B=1`. |
+| `SolverOptions` | `src/axonscope/solvers/options.py` | production | Reserved numerical preparation options. |
 | `BatchOptions` | `src/axonscope/solvers/options.py` | production | Batch recording and time chunking only. |
 | `BatchRecording` | `src/axonscope/solvers/options.py` | production | Solver-side retained Vm policy: full, center, probes, indices, none. |
 | `ExecutionPolicy.solvers` | `src/axonscope/performance.py` | production | Typed per-cable solver policy surface. |
@@ -94,8 +94,8 @@ implementation label as a CLI choice.
 
 | Route | Main code path | Solver family | Status |
 | --- | --- | --- | --- |
-| Scalar single-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | JAX `lax.linalg.tridiagonal_solve` | production |
-| Scalar double-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | specialized block Thomas | production |
+| Scalar single-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | JAX `lax.linalg.tridiagonal_solve` | removed in P12B |
+| Scalar double-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | specialized block Thomas | removed in P12B |
 | Batch single-cable | `runtime/jax/group_runner.py` -> `runtime/jax/batch_kernels.py` | JAX `lax.linalg.tridiagonal_solve` over batch rows | production |
 | Batch double-cable, dense/probe Vm | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_array_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
 | Batch double-cable, observer-only VmRaster | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_observer_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
@@ -340,8 +340,6 @@ Do not make it public/default yet.
 src/axonscope/simulation.py
 src/axonscope/runtime/execution.py
 src/axonscope/runtime/jax/group_runner.py
-src/axonscope/runtime/jax/execution/scalar_runner.py
-src/axonscope/runtime/jax/kernels.py
 src/axonscope/runtime/jax/batch_kernels.py
 ```
 

@@ -132,19 +132,20 @@ specific out of `runtime/jax/`:
   active source or unit test called: `precompute_intracellular_current_density`,
   `RowIndexedMembraneBackend.init_gates_for_row`,
   `JaxModelIRLowering.source_observable_output_names`,
-  `disable_rate_tables`, `JaxMembraneProgram.gating_inf_tau`, and
+  `JaxMembraneProgram.gating_inf_tau`, and
   `JaxMembraneProgram.disable_rate_table`. The remaining `vulture` production
   warnings are contract or benchmark-analysis surfaces rather than deletion
   candidates for this pass.
 - JAX membrane compilation and membrane-backend helpers were grouped under
   `runtime/jax/membranes/`: `backend.py`, `layout.py`,
-  `model_ir_lowering.py`, `program.py`, `rate_tables.py`, and `stacking.py`.
-  `rate_tables.py` is still used through `SolverOptions.rate_table_config`, so
-  it was kept as a membrane-program implementation detail rather than deleted.
-- `runtime/jax/scalar_runner.py` moved to
-  `runtime/jax/execution/scalar_runner.py`. It remains useful because the
-  public `CrankNicholson` solver delegates unsupported scalar/fallback payloads
-  there.
+  `model_ir_lowering.py`, `program.py`, and `stacking.py`.
+- The unused rate-table option was removed completely:
+  `SolverOptions.rate_table_config`, `RateTableConfig`, and the JAX
+  `rate_tables.py` helper no longer exist.
+- The JAX scalar fallback runner was removed. One-row public simulations now
+  use the same batch route as populations (`B=1`), and unsupported dense
+  observable recordings fail explicitly instead of selecting a second execution
+  route.
 
 Validation:
 
@@ -218,9 +219,9 @@ wrote:
   `3880.1 ms`, `runtime.prepare` `2015.6 ms`, `inputs.extracellular`
   `20.3 ms`, `kernel.wait` `222.7 ms`.
 
-For the scalar-runtime observable helper merge, `git diff --check` passed,
+For the row-output helper merge, `git diff --check` passed,
 `compileall` passed, architecture guardrails passed `85/85`,
-Crank-Nicholson/runtime tests passed `25/25`, and
+single-row batch/runtime tests passed `25/25`, and
 dispatcher/batch/extracellular tests passed `104/104`.
 
 For the `vulture`-guided dead-code pass, the actionable runtime/JAX warnings
@@ -235,13 +236,19 @@ passed `62/62`.
 
 For the JAX subpackage layout pass, `compileall` passed after the move. The
 JAX root now has 22 direct Python files; membrane compilation/lowering lives in
-`runtime/jax/membranes/`, and scalar fallback execution lives in
-`runtime/jax/execution/scalar_runner.py`. `git diff --check` passed,
+`runtime/jax/membranes/`, and one-row simulations use the batch route instead
+of `runtime/jax/execution/scalar_runner.py`. `git diff --check` passed,
 architecture guardrails passed `85/85`, Model IR/public compilation/runtime
-tests passed `83/83`, heterogeneous-cable plus Crank-Nicholson tests passed
+tests passed `83/83`, heterogeneous-cable plus single-row batch tests passed
 `14/14`, and dispatcher/batch/extracellular tests passed `104/104`. `vulture`
 reported only the same retained benchmark/contract/test-archive warnings as
 before this layout pass.
+
+For the direct solver/scalar fallback removal pass, `git diff --check`,
+`compileall`, and `vulture --min-confidence 90` passed. API and architecture
+tests passed `122/122`, Model IR/runtime/single-row batch tests passed `84/84`,
+batch/extracellular/performance tests passed `82/82`, and example guardrails
+passed `7/7`.
 
 ## Benchmark Gate
 

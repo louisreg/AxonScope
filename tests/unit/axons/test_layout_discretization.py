@@ -5,8 +5,6 @@ import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.axons.unmyelinated import RattayAberham 
 from axonscope.analysis import conduction_velocity
-from axonscope.solvers.crank_nicholson import CrankNicholson
-from axonscope.solvers._outputs import SolverOutput
 from axonscope.stimulation import Stimulus
 
 # ==============================================================================
@@ -48,9 +46,9 @@ def create_focused_non_uniform_x(L: float, Nx: int, perturbation_factor: float) 
 # 3. SIMULATION EXECUTION FUNCTION
 # ==============================================================================
 
-def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SolverOutput:
+def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float):
     """
-    Sets up the stimulus and executes the simulation using the CrankNicholson solver.
+    Sets up the stimulus and executes the simulation through the public runtime path.
     """
     # Inject a current clamp in the middle of the axon
     simulation = AxonInstance(axon)
@@ -61,9 +59,7 @@ def run_ra_simulation(axon: RattayAberham, tsim: float, dt: float) -> SolverOutp
             amplitude=AMPLITUDE,
         ),
     )
-    solver = CrankNicholson() 
-    res = solver.solve(simulation, tsim=tsim, dt=dt)
-    return res
+    return axs.AxonSimulation(simulation, duration=tsim, dt=dt).run().single
 
 
 def nearest_index(x: np.ndarray, position_um: float) -> int:
@@ -71,7 +67,7 @@ def nearest_index(x: np.ndarray, position_um: float) -> int:
     return int(np.argmin(np.abs(np.asarray(x) - position_um)))
 
 
-def peak_metrics(res: SolverOutput, position_um: float) -> tuple[float, float]:
+def peak_metrics(res, position_um: float) -> tuple[float, float]:
     """
     Return peak amplitude and occurrence time at a fixed physical position.
 

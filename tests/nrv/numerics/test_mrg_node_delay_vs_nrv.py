@@ -12,9 +12,14 @@ import nrv
 
 from axonscope import AxonInstance, ms, um
 from axonscope.axons.myelinated import MRG
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
-from tests.nrv._helpers import axonscope_x_um, interp_rows, normalize_nrv_matrix, select_nearest_rows
+from tests.nrv._helpers import (
+    axonscope_x_um,
+    interp_rows,
+    normalize_nrv_matrix,
+    run_axonscope_simulation,
+    select_nearest_rows,
+)
 
 
 FIG_DIR = Path("figures/nrv_tests/velocity_vs_diameter")
@@ -83,7 +88,7 @@ def test_mrg_node_delay_vs_nrv(diameter_um: float, threshold_mV: float, rmse_tol
     sim = AxonInstance(axon)
     sim.add_current_clamp(position=stim_pos_um * um, current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=2.0))
 
-    res = CrankNicholson().solve(sim, tsim=4.0, dt=0.005)
+    res = run_axonscope_simulation(sim, tsim=4.0, dt=0.005)
     t_as = np.asarray(res.t, dtype=float)
     x_as = x_um[node_ids]
     vm_as = np.asarray(res.Vm, dtype=float)[:, node_ids].T

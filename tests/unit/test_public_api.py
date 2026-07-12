@@ -27,7 +27,6 @@ from axonscope import (
     PaddingInspection,
     PrecisionPolicy,
     ProbeInspection,
-    RateTableConfig,
     RecordingPlan,
     ResultAssemblyInspection,
     SimulationInspection,
@@ -51,10 +50,6 @@ from axonscope import (
 )
 from axonscope import analysis, analytical, membranes, positions, results, signals
 from axonscope.axons import HodgkinHuxley, MRG, RattayAberham, mrg_like_length_from_nodes
-from axonscope.solvers import (
-    CrankNicholson,
-)
-
 
 def test_public_package_imports_are_available():
     assert Stimulus.constant(1.0).y[0] == 1.0
@@ -191,6 +186,4 @@ def test_public_package_imports_are_available():
     assert HodgkinHuxley is not None
     assert RattayAberham is not None
     assert MRG is not None
-    assert CrankNicholson is not None
-    assert RateTableConfig(step_mV=1.0).step_mV == 1.0
     assert mrg_like_length_from_nodes(10.0 * um, 3) > 0.0

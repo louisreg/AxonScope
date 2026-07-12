@@ -14,8 +14,8 @@ import pytest
 from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.analysis import conduction_velocity
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
+from tests.nrv._helpers import run_axonscope_simulation
 import nrv
 
 DIAMETERS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -34,7 +34,7 @@ def test_hh_velocity_vs_diameter(save_dir="figures/nrv_tests"):
                              include_passive_leak=True, g_pas=0.001, e_pas=-70.0)
         sim = AxonInstance(axon)
         sim.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=T_START * ms, duration=DURATION * ms, amplitude=AMP))
-        res = CrankNicholson().solve(sim, tsim=TSIM, dt=DT)
+        res = run_axonscope_simulation(sim, tsim=TSIM, dt=DT)
 
         axon_nrv = nrv.unmyelinated(y=0, z=0, d=d, L=L, Nsec=Nx, dt=DT, v_init=-70, T=6.3, model="HH")
         axon_nrv.insert_I_Clamp(0.5, T_START, DURATION, AMP)

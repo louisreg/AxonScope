@@ -90,7 +90,6 @@ from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
     DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
-    RateTableConfig,
     SolverOptions,
 )
 from axonscope.stimulation import (
@@ -221,7 +220,6 @@ __all__ = [
     "BatchOptions",
     "BatchRecording",
     "DEFAULT_OBSERVER_TIME_CHUNK_STEPS",
-    "RateTableConfig",
     "SolverOptions",
     "Recording",
     "RecordingPlan",

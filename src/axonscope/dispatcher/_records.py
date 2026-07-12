@@ -26,7 +26,7 @@ class DispatchRowRecord:
     final_state: Any | None = None
     observations_are_batched: bool = False
     group_size: int = 1
-    batch_kind: str = "scalar"
+    batch_kind: str = "unknown"
     geometry_shared: bool = True
     has_padding: bool = False
 
@@ -51,7 +51,7 @@ class DispatchCohortRecord:
     observations: dict[str, Any] | None = None
     final_states: tuple[Any | None, ...] | None = None
     group_size: int = 1
-    batch_kind: str = "scalar"
+    batch_kind: str = "unknown"
     geometry_shared: bool = True
     has_padding: bool = False
 

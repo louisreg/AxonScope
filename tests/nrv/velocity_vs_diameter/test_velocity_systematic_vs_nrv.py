@@ -23,7 +23,6 @@ from axonscope.axons.unmyelinated import (
     Tigerholm,
 )
 from axonscope.analysis import conduction_velocity
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from tests.helpers import FakeSingleAxonResult
 from tests.nrv._helpers import (
@@ -32,6 +31,7 @@ from tests.nrv._helpers import (
     crossing_times,
     interp_rows,
     normalize_nrv_matrix,
+    run_axonscope_simulation,
     select_nearest_rows,
     velocity_from_crossing_times,
     velocity_from_peak_times,
@@ -476,7 +476,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
 
     for i, d in enumerate(spec.diameters_um):
         axon = spec.axonscope_factory(float(d))
-        res = CrankNicholson().solve(axon, tsim=spec.tsim_ms, dt=spec.dt_ms)
+        res = run_axonscope_simulation(axon, tsim=spec.tsim_ms, dt=spec.dt_ms)
 
         axon_nrv = spec.nrv_factory(float(d), axon, spec.dt_ms)
         results_nrv = axon_nrv.simulate(t_sim=spec.tsim_ms)

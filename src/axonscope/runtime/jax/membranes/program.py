@@ -8,10 +8,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.runtime.jax.membranes.backend import MembraneStateSpec, MembraneStepPlan
-from axonscope.runtime.jax.membranes.rate_tables import RateTable, make_rate_table_config
 from axonscope.model_ir import ModelIR, MembraneProgram, membrane_program_from_model_ir
 from axonscope.model_ir.interpreter import NumpyModelInterpreter
-from axonscope.solvers.rate_tables import RateTableConfig
 from axonscope.utils.settings import dtype
 
 from .model_ir_lowering import JaxModelIRLowering
@@ -40,7 +38,6 @@ class JaxMembraneProgram:
             generated_module=generated_module,
         )
         self.q10 = dtype(self._representative_q10())
-        self._rate_table: RateTable | None = None
         self._static_signature_cache: tuple[Any, ...] | None = None
         self._g_bar_cache: jnp.ndarray | None = None
         self._e_rev_cache: jnp.ndarray | None = None
@@ -68,7 +65,6 @@ class JaxMembraneProgram:
         cached = self._static_signature_cache
         if cached is not None:
             return cached
-        rate_table = self.rate_table_config
         signature = (
             self.__class__.__module__,
             self.__class__.__qualname__,
@@ -76,7 +72,6 @@ class JaxMembraneProgram:
             self.program.structural_hash,
             self.program.parameterized_hash,
             self.program.final_gate_update_mode,
-            None if rate_table is None else repr(rate_table),
         )
         self._static_signature_cache = signature
         return signature
@@ -128,41 +123,7 @@ class JaxMembraneProgram:
         return self.lowering.rate_constants(V_mV)
 
     def rate_constants(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        if self._rate_table is None:
-            return self.exact_rate_constants(V_mV)
-        return self._rate_table.interpolate(V_mV, dtype_local=self.dtype)
-
-    def enable_rate_table(
-        self,
-        *,
-        config: RateTableConfig | None = None,
-        v_min_mV: float = -120.0,
-        v_max_mV: float = 80.0,
-        step_mV: float = 0.05,
-        clamp: bool = True,
-    ) -> "JaxMembraneProgram":
-        resolved = make_rate_table_config(
-            config,
-            v_min_mV=v_min_mV,
-            v_max_mV=v_max_mV,
-            step_mV=step_mV,
-            clamp=clamp,
-        )
-        self._rate_table = RateTable.build(
-            resolved,
-            dtype_local=self.dtype,
-            exact_rate_constants=self.exact_rate_constants,
-        )
-        self._static_signature_cache = None
-        return self
-
-    @property
-    def has_rate_table(self) -> bool:
-        return self._rate_table is not None
-
-    @property
-    def rate_table_config(self) -> RateTableConfig | None:
-        return None if self._rate_table is None else self._rate_table.config
+        return self.exact_rate_constants(V_mV)
 
     def alpha_funcs(self, V: jnp.ndarray) -> jnp.ndarray:
         alpha, _ = self.exact_rate_constants(V)

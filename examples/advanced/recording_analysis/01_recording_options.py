@@ -19,11 +19,7 @@ import axonscope as axs
 def main() -> None:
     # Step 1: inspect the public signal descriptors used below. Recording APIs
     # accept descriptors such as `axs.signals.Vm`, not raw result-key strings.
-    requested_signals = (
-        axs.signals.Vm,
-        axs.signals.GATES,
-        axs.signals.CURRENTS,
-    )
+    requested_signals = (axs.signals.Vm,)
     print("=== Signal descriptors ===")
     for signal in requested_signals:
         print(
@@ -31,9 +27,9 @@ def main() -> None:
             f"unit={signal.unit}"
         )
 
-    # Step 2: build one single-axon run with the full observable recording. Full
-    # recording is useful while exploring a model because it keeps Vm and the
-    # membrane observable groups exposed by the backend.
+    # Step 2: build one single-axon run with retained Vm. One-row simulations
+    # use the same batch route as populations, so Vm recording policies behave
+    # consistently for B=1 and B>1.
     full_axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -49,40 +45,16 @@ def main() -> None:
             amplitude=0.8 * axs.nA,
         ),
     )
-    full_run = axs.AxonSimulation(
+    voltage_run = axs.AxonSimulation(
         full_instance,
         duration=2.0 * axs.ms,
         dt=0.001 * axs.ms,
-        recording=axs.Recording.full(),
+        recording=axs.Recording.voltage(),
     ).run()
-    full_result = full_run.single
+    voltage_result = voltage_run.single
 
-    # Step 3: run a shorter solve that explicitly asks for Vm and gates only.
-    gates_axon = axs.axons.HodgkinHuxley(
-        length=100.0 * axs.um,
-        diameter=0.5 * axs.um,
-        compartments=21,
-        celsius=6.3 * axs.degC,
-    )
-    gates_instance = axs.AxonInstance(gates_axon)
-    gates_instance.add_current_clamp(
-        position=50.0 * axs.um,
-        current=axs.Stimulus.pulse(
-            start=0.20 * axs.ms,
-            duration=0.15 * axs.ms,
-            amplitude=0.8 * axs.nA,
-        ),
-    )
-    gates_only_run = axs.AxonSimulation(
-        gates_instance,
-        duration=0.2 * axs.ms,
-        dt=0.001 * axs.ms,
-        recording=axs.Recording.only(axs.signals.Vm, axs.signals.GATES),
-    ).run()
-    gates_only_result = gates_only_run.single
-
-    # Step 4: build a small pool. Pool recording policies currently control the
-    # retained Vm columns rather than HH gates/currents.
+    # Step 3: build a small pool. Pool recording policies control the retained
+    # Vm columns.
     pool_axon_0 = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -131,7 +103,7 @@ def main() -> None:
     )
     pool = [pool_row_0, pool_row_1, pool_row_2]
 
-    # Step 5: create four public Recording objects and inspect their plans before
+    # Step 4: create four public Recording objects and inspect their plans before
     # solving. The plan is backend-neutral and answers "which columns are kept?".
     # Recording.none() is shown in 05_vmraster_observer_only.py because it is
     # useful when solver-side observers replace stored Vm traces.
@@ -146,7 +118,7 @@ def main() -> None:
         for label, recording in recording_modes.items()
     }
 
-    # Step 6: run the same pool with each policy. This makes retained Vm width
+    # Step 5: run the same pool with each policy. This makes retained Vm width
     # differences visible while keeping the scientific setup fixed.
     pool_results = {
         label: axs.AxonSimulation(
@@ -158,27 +130,18 @@ def main() -> None:
         for label, recording in recording_modes.items()
     }
 
-    # Step 7: print the single-axon observable groups. Nested dictionaries are
-    # observable families such as gates or currents.
-    full_groups: dict[str, str | tuple[str, ...]] = {}
-    for name, value in (full_result.recordings or {}).items():
+    # Step 6: print the single-axon retained outputs.
+    voltage_groups: dict[str, str | tuple[str, ...]] = {}
+    for name, value in (voltage_result.recordings or {}).items():
         if isinstance(value, dict):
-            full_groups[name] = tuple(value)
+            voltage_groups[name] = tuple(value)
         else:
-            full_groups[name] = str(np.asarray(value).shape)
+            voltage_groups[name] = str(np.asarray(value).shape)
 
-    gate_groups: dict[str, str | tuple[str, ...]] = {}
-    for name, value in (gates_only_result.recordings or {}).items():
-        if isinstance(value, dict):
-            gate_groups[name] = tuple(value)
-        else:
-            gate_groups[name] = str(np.asarray(value).shape)
+    print("=== Single-axon retained outputs ===")
+    print(f"Recording.voltage(): {voltage_groups}")
 
-    print("=== Single-axon observable groups ===")
-    print(f"Recording.full(): {full_groups}")
-    print(f"Recording.only(axs.signals.Vm, axs.signals.GATES): {gate_groups}")
-
-    # Step 8: print how each pool recording policy lowers to retained indices.
+    # Step 7: print how each pool recording policy lowers to retained indices.
     print("=== Backend-neutral pool RecordingPlans ===")
     for label, plan in recording_plans.items():
         print(
@@ -194,37 +157,19 @@ def main() -> None:
             f"record_indices={first.record_indices}"
         )
 
-    # Step 9: plot Vm, observable groups, retained widths, and retained
-    # positions together. The probe plot is the important check: "probes" means
+    # Step 8: plot Vm, retained widths, and retained positions together. The
+    # probe plot is the important check: "probes" means
     # evenly spaced compartment indices, while "indices" means the exact
     # original compartment indices supplied by the user.
-    center_index = full_result.nearest_position_index(50.0 * axs.um)
-    fig, axes = plt.subplots(2, 3, figsize=(14, 7), constrained_layout=True)
-    ax_vm, ax_gates, ax_currents, ax_widths, ax_locations, ax_pool_trace = axes.ravel()
+    center_index = voltage_result.nearest_position_index(50.0 * axs.um)
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), constrained_layout=True)
+    ax_vm, ax_widths, ax_locations, ax_pool_trace = axes.ravel()
 
-    full_result.plot_trace(
+    voltage_result.plot_trace(
         ax=ax_vm,
         index=center_index,
         voltage_unit=axs.mV,
         title="Center Vm",
-    )
-
-    full_result.plot_recording_group(
-        "gates",
-        ax=ax_gates,
-        index=center_index,
-        time_unit=axs.ms,
-        title="Center gates",
-        ylabel="Gate value",
-    )
-
-    full_result.plot_recording_group(
-        "currents",
-        ax=ax_currents,
-        index=center_index,
-        time_unit=axs.ms,
-        title="Center current densities",
-        ylabel="Current density [mA/cm2]",
     )
 
     labels = tuple(pool_results)

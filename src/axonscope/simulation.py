@@ -18,15 +18,14 @@ from axonscope.runtime.execution import (
 )
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.runtime import ExecutionPolicy
-from axonscope.signals import MEMBRANE_VOLTAGE
 from axonscope.utils import units
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher import run_pool
 from axonscope.dispatcher.progress import ProgressOption
 from axonscope.population import AxonPopulation
-from axonscope.recording import Recording, RecordingPlan
+from axonscope.recording import Recording
 from axonscope.results import AxonSimulationResult
-from axonscope.solvers import BatchOptions, Solver, SolverOptions
+from axonscope.solvers import BatchOptions, SolverOptions
 
 if TYPE_CHECKING:
     from axonscope.dispatcher._records import DispatchRecord
@@ -72,7 +71,6 @@ class AxonSimulation:
         duration: Any,
         dt: Any,
         recording: Recording | None = None,
-        solver: Solver | None = None,
         solver_options: SolverOptions | None = None,
         batch_options: BatchOptions | None = None,
         observers: Sequence[Any] | None = None,
@@ -84,7 +82,6 @@ class AxonSimulation:
         self.duration = duration
         self.dt = dt
         self.recording = recording
-        self.solver = solver
         self.solver_options = solver_options
         self.batch_options = batch_options
         self.observers = tuple(observers) if observers is not None else None
@@ -108,11 +105,6 @@ class AxonSimulation:
     def run(self) -> SimulationRunResult:
         """Execute this simulation definition and return public results."""
 
-        if self.solver is not None:
-            raise NotImplementedError(
-                "explicit solver objects are not part of the unified AxonSimulation "
-                "pipeline; use solver_options."
-            )
         return _run_population_simulation(
             self.population,
             duration=self.duration,
@@ -199,35 +191,11 @@ def _resolve_time(
     return resolved_duration, resolved_step
 
 
-def _recording_as_vm_only(recording: Recording) -> RecordingPlan:
-    """Return the same output placement policy without non-Vm observable groups."""
-
-    plan = recording.to_plan()
-    return replace(
-        plan,
-        gates=False,
-        currents=False,
-        conductances=False,
-        state_variables=False,
-        signals=(MEMBRANE_VOLTAGE,) if recording.voltage else (),
-    )
-
-
-def _validate_single_row_observable_recording(recording: Recording) -> None:
-    """Validate observable groups supported by the one-row scalar fallback."""
-
-    if not recording.voltage:
-        raise NotImplementedError(
-            "single-row observable-only recording is not supported; include Vm "
-            "or use Recording.none() with solver-side observers."
-        )
-
-
 def _filter_pool_recording(
     results: Sequence[DispatchRecord],
     recording: Recording,
 ) -> tuple[DispatchRecord, ...]:
-    """Apply public recording selection to dispatcher scalar fallback rows."""
+    """Apply public recording selection to dispatcher rows."""
 
     if not recording.voltage and not recording.wants_observables:
         return tuple(results)
@@ -290,12 +258,6 @@ def _pool_batch_options_for_recording(
 ) -> BatchOptions | None:
     """Merge explicit public recording with lower-level batch execution knobs."""
 
-    if recording is not None and recording.wants_observables and population.is_single:
-        _validate_single_row_observable_recording(recording)
-        return batch_options_from_recording(
-            _recording_as_vm_only(recording),
-            batch_options=batch_options,
-        )
     return batch_options_from_recording(recording, batch_options=batch_options)
 
 

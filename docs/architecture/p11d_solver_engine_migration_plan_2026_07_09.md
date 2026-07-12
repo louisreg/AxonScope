@@ -449,15 +449,15 @@ and do not re-enter `BatchOptions`.
 
 ### P11D-C - Normalize B=1 And B>N
 
-Status on 2026-07-09: implemented for batchable Vm/VmRaster outputs. One-row
-groups now use the batch route with `B=1` when dense solver-side observables are
-not requested. `Recording.full()`/observable recordings keep the scalar
-fallback until batch kernels can retain gates/currents/conductances payloads.
+Status on 2026-07-12: implemented for batchable Vm/VmRaster outputs. One-row
+groups use the batch route with `B=1`. `Recording.full()`/observable recordings
+raise explicitly until dense gates/currents/conductances outputs are implemented
+as batch-native result payloads.
 
 - Make dispatch always produce normalized groups with a batch axis.
-- Convert one-axon scalar execution to the same group lifecycle where possible.
-- Keep a temporary scalar fallback only for unsupported features during the
-  migration, and track every fallback in TODO/tests.
+- Route one-axon execution through the same batch group lifecycle.
+- Do not keep a temporary scalar fallback for unsupported features; unsupported
+  dense observable recordings must fail before runtime dispatch.
 - Ensure result records have one shape model for B=1 and B>N.
 
 ### P11D-D - Add CPU/GPU Engine Layer

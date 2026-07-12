@@ -15,11 +15,11 @@ Do not move them to `axonscope.runtime`:
 - `solver_core.py`
 - `jax_triton_double_cable.py`
 - `kernels.py`
-- `membrane_backend.py`
-- `membrane_layout.py`
-- `membrane_program.py`
-- `model_ir_lowering.py`
-- `rate_tables.py`
+- `membranes/backend.py`
+- `membranes/layout.py`
+- `membranes/program.py`
+- `membranes/model_ir_lowering.py`
+- `membranes/stacking.py`
 - `runtime.py`
 - `runtime_caches.py`
 - `execution_policy.py`

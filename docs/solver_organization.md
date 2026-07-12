@@ -1,7 +1,7 @@
 # Solver And Runtime Organization
 
-The solver package owns stable solver-facing contracts: solver classes, solver
-options, and the descriptive axon adapter used by execution runtimes.
+The solver package owns stable solver-facing contracts: solver options and the
+descriptive axon adapter used by execution runtimes.
 
 Concrete JAX numerical execution lives under `axonscope.runtime.jax`. That
 runtime receives descriptive axons, compiles them into runtime arrays, lowers
@@ -13,34 +13,29 @@ analysis.
 
 Solver-facing contracts:
 
-- `__init__.py`: stable solver facade only. It exports `Solver`,
-  `CrankNicholson`, `SolverOptions`, `BatchOptions`, and `BatchRecording`;
-  kernels, runtimes, and backend solver resolvers are not facade exports.
-- `base.py`: abstract solver class.
+- `__init__.py`: stable solver-facing facade only. It exports `SolverOptions`,
+  `BatchOptions`, and `BatchRecording`; kernels, runtimes, and backend solver
+  resolvers are not facade exports.
 - `axon_runtime.py`: runtime-facing descriptive axon adapter.
-- `crank_nicholson.py`: public optimized solver class; delegates concrete
-  execution to `runtime/jax/execution/scalar_runner.py`.
-- `options.py`: solver-owned execution knobs. `SolverOptions` controls runtime
-  preparation, currently rate tables. `BatchOptions` and `BatchRecording`
-  control batch-kernel memory, retained Vm columns, and optional time chunking.
-  per-cable solver choice is selected through typed `ExecutionPolicy.solvers`.
+- `options.py`: solver-owned execution knobs. `SolverOptions` is a reserved
+  numerical preparation contract. `BatchOptions` and `BatchRecording` control
+  batch-kernel memory, retained Vm columns, and optional time chunking.
+  Per-cable solver choice is selected through typed `ExecutionPolicy.solvers`.
 
 JAX runtime implementation:
 
-- `runtime/jax/runtime.py`: JAX scalar runtime containers and bridge from
+- `runtime/jax/runtime.py`: JAX runtime containers and bridge from
   descriptive axons/membranes to backend arrays: membrane backend, cable
   coefficients, stimulation callables or precomputed samples, extracellular
-  absolute arrays, time grid, and scalar-runtime observable packaging helpers.
+  absolute arrays, time grid, and observable packaging helpers.
 - `runtime/jax/membranes/`: JAX membrane compilation and execution helpers:
   Model IR lowering, generated-program facade, membrane backends, heterogeneous
-  layouts, rate-table materialization, and gated/leak row stacking.
-- `runtime/jax/execution/scalar_runner.py`: scalar fallback execution runner
-  used by the public `CrankNicholson` solver for unsupported batch payloads.
+  layouts, and gated/leak row stacking.
 - `runtime/jax/common.py`: numerical helpers shared by kernels, such as
   tridiagonal coefficients, diffusion operators, and small reference linear
   solvers.
-- `runtime/jax/kernels.py`: scalar single-axon kernels. These consume
-  `SolverRuntime` and return raw `KernelResult` values.
+- `runtime/jax/kernels.py`: lower-level one-row kernels retained for
+  implementation/reference use, not as a public execution route.
 - `runtime/jax/batch_kernels.py`: batch kernels for homogeneous groups. These
   consume already assembled batched arrays and never decide which axons belong
   together.
@@ -55,8 +50,8 @@ JAX runtime implementation:
 Dispatch decides *which axons run together*. Solver code decides *how numerical
 arrays are integrated*. In particular:
 
-- dispatch may pass `SolverOptions` through, but it should not inspect rate
-  table settings;
+- dispatch may pass `SolverOptions` through, but it should not inspect
+  runtime-specific numerical details;
 - batch kernels accept arrays such as `Iinj[B, Nt, Nx]` and
   `Vstim[B, Nt, Nx]`;
 - public `Recording` objects are translated to `BatchRecording` before batch
@@ -71,33 +66,33 @@ arrays are integrated*. In particular:
 The retained execution surface is deliberately small. Every public simulation
 path should pass through one of the routes below.
 
-### Scalar Route
+### Single-Row Batch Route
 
 A one-axon `AxonSimulation.run(...)` uses the same population lifecycle as
 larger pools. Vm/VmRaster-compatible one-row groups are normalized to a batch
-route with `B=1`. The scalar fallback remains intentional for explicitly
-unsupported output payloads, notably dense solver-side observable recordings
-such as gates, currents, conductances, and state variables.
+route with `B=1`; there is no separate scalar execution route. Dense
+solver-side observable recordings such as gates, currents, conductances, and
+state variables are not currently exposed through public execution until they
+are implemented on the batch route.
 
-The scalar JAX fallback route is:
+The one-row route is:
 
 ```text
 AxonSimulation.run()
-  -> CrankNicholson.solve(...)
-  -> run_jax_crank_nicholson(...)
-  -> build_solver_axon(...)
-  -> runtime/jax/runtime.prepare_solver_runtime(...)
-  -> runtime/jax/kernels.SingleCableKernel or DoubleCableKernel
-  -> internal scalar result
+  -> run_pool(...)
+  -> build_dispatch_plan(...)
+  -> _run_batch_group(...)
+  -> runtime/jax/group_runner._run_single_cable_batch_group(...)
+     or runtime/jax/group_runner._run_double_cable_batch_group(...)
+  -> SingleCableVStimBatchKernel or DoubleCableBatchKernel with B=1
   -> AxonSimulationResult at the public boundary
 ```
 
-`SingleCableKernel` covers normal single-cable solves and single-cable imposed
-extracellular forcing. `DoubleCableKernel` is selected only for double-cable
-axons with extracellular context. Scalar observer requests are lowered through
-`build_vm_raster_plan(...)` before the kernel scan.
+Observer requests are lowered through `build_vm_raster_plan(...)` or evaluated
+post-hoc from retained Vm using the same batch result assembly path as larger
+groups.
 
-### Pool, Planning, And Fallback Route
+### Pool And Planning Route
 
 Pool execution starts from `AxonSimulation.run(...)` for both one-row and
 many-row populations. Public orchestration stays in `simulation.py`, while
@@ -108,13 +103,10 @@ AxonSimulation.run()
   -> run_pool(...)
   -> build_dispatch_plan(...)
   -> _run_batch_group(...) for supported single/double-cable groups, including B=1
-  -> _run_scalar_group(...) otherwise
 ```
 
-The scalar fallback route is intentional for unsupported group modes and for
-one-row groups that request dense solver-side observable payloads. Ordinary
-voltage recording and observer-only singletons use the same batch route as
-larger groups.
+Unsupported group modes or unsupported recording requests fail explicitly
+instead of falling back to a second execution route.
 
 ### Single-Cable Batch Route
 
@@ -214,14 +206,16 @@ opt-in double-cable kernel shape bucketing policy and metadata.
 it keeps padded `center`/`probes` Vm recording row-aware when all rows retain a
 common output width, expands to full Vm only when row-aware recording is not
 available, and lowers compatible public observer definitions to solver-side
-VmRaster plans through `build_vm_raster_plan(...)`. Scalar kernels and batch
-kernels update packed observer output during the scan. The public result key is strictly
-`observations["vm_raster"]`; activation, latency, velocity, threshold, and
-recruitment stay in post-processing. The result container and CPU unpacking live
-under `axonscope.results`, not in solver runtime modules.
+VmRaster plans through `build_vm_raster_plan(...)`. Batch kernels update packed
+observer output during the scan, including one-row `B=1` runs. The public result
+key is strictly `observations["vm_raster"]`; activation, latency, velocity,
+threshold, and recruitment stay in post-processing. The result container and CPU
+unpacking live under `axonscope.results`, not in solver runtime modules.
 
 Chunked observer-only batch kernels use local VmRaster states per chunk and
 assemble them into one full-duration packed raster before result assembly. The
+observer-only result path can keep compact dispatch cohort records instead of
+materializing one Vm trace per axon. The
 host-side assembly repacks whole `uint32` word slices per chunk, including
 unaligned chunk starts, so this cost stays outside solver-specific code while
 avoiding per-step or per-word Python loops. This keeps the public result
@@ -235,19 +229,20 @@ temporal stimulus evaluations within a batch, so cohorts sharing
 temporal-equivalent stimuli evaluate the current waveform once per time grid
 while keeping row-specific spatial footprints.
 
-Scalar solver output is the internal `SolverOutput` payload, converted to
-`AxonSimulationResult` at the public `AxonSimulation.run()` boundary. Batch
-outputs become private dispatch row records or compact dispatch cohort records
-in `runtime/result_assembly.py`, then `AxonSimulationResult` at the same public
-boundary. JAX-specific batch result helpers stay in `runtime/jax/batch_results.py`
-for device wait, pending VmRaster finalization, and padded kernel-output trim.
+Batch outputs become private dispatch row records or compact dispatch cohort
+records in `runtime/result_assembly.py`, then `AxonSimulationResult` at the
+public `AxonSimulation.run()` boundary. JAX-specific batch result helpers stay
+in `runtime/jax/batch_results.py` for device wait, pending VmRaster
+finalization, and padded kernel-output trim. Post-hoc observer evaluation uses
+the lightweight `runtime/row_output.py` adapter only as a result view, not as an
+execution route.
 
 ## Solver Options
 
 There are two solver option containers and one runtime policy surface:
 
-- `SolverOptions`: numerical preparation options shared by scalar and batch
-  execution. It currently carries `rate_table_config`.
+- `SolverOptions`: reserved numerical preparation options shared by execution
+  routes.
 - `BatchOptions`: batch-kernel execution options. It carries
   `BatchRecording` and optional `time_chunk_steps`.
 - `ExecutionPolicy.solvers`: typed per-cable solver policy. Use

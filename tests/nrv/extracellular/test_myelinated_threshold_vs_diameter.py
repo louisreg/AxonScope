@@ -20,8 +20,7 @@ from axonscope.analysis import rasterize
 from axonscope.axons.myelinated import MRG
 from axonscope.analytical import PointSourceElectrode, point_source_stimulation
 from axonscope.stimulation import Stimulus
-from axonscope.solvers.crank_nicholson import CrankNicholson
-from tests.nrv._helpers import axonscope_x_um
+from tests.nrv._helpers import axonscope_x_um, run_axonscope_simulation
 
 DIAMETERS_UM = [5.7, 7.3, 8.7, 10.0, 11.5, 14.0]
 ELECTRODE_Y_UM = 100.0
@@ -57,7 +56,7 @@ def _has_ap(diameter_um: float, amp_uA: float) -> bool:
         ),
         replace=True,
     )
-    res = CrankNicholson().solve(sim, tsim=TSIM, dt=DT)
+    res = run_axonscope_simulation(sim, tsim=TSIM, dt=DT)
     tAP, _ = rasterize(res)
     return len(tAP) >= 3
 

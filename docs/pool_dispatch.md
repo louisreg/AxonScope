@@ -143,15 +143,12 @@ are passed separately as batch options:
 
 ```python
 import axonscope as axs
-from axonscope.solvers import RateTableConfig
 
 dispatch_results = run_pool(
     [sim_a, sim_b],
     tsim_ms=5.0,
     dt_ms=0.01,
-    solver_options=axs.SolverOptions(
-        rate_table_config=RateTableConfig(step_mV=0.05),
-    ),
+    solver_options=axs.SolverOptions(),
     batch_options=axs.BatchOptions(time_chunk_steps=50),
 )
 ```

@@ -16,9 +16,9 @@ from axonscope import AxonInstance, degC, mV, ms, um
 from axonscope import membranes
 from axonscope.axons import Axon, Layout, Section
 from axonscope.axons.unmyelinated import RattayAberham, HodgkinHuxley
-from axonscope.solvers.crank_nicholson import CrankNicholson
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
+from tests.nrv._helpers import run_axonscope_simulation
 import nrv
 
 pytestmark = pytest.mark.nrv_numerics
@@ -54,7 +54,7 @@ def test_cn_solver_smoke_traces(save_dir="figures/nrv_tests"):
 
     results = {}
     for name, simulation in simulations.items():
-        results[name] = CrankNicholson().solve(simulation, tsim=tsim, dt=dt)
+        results[name] = run_axonscope_simulation(simulation, tsim=tsim, dt=dt)
 
     fig, axs = plt.subplots(len(axons), 2, figsize=(14, 12), sharex="col")
     for i, (name, res_cn) in enumerate(results.items()):
@@ -94,8 +94,8 @@ def test_cn_fine_mesh_vs_nrv(save_dir="figures/nrv_tests"):
     for sim in (sim_ra, sim_hh):
         sim.add_current_clamp(position=(L / 2) * um, current=Stimulus.pulse(start=t_start * ms, duration=duration * ms, amplitude=amplitude))
 
-    res_ra = CrankNicholson().solve(sim_ra, tsim=tsim, dt=dt)
-    res_hh = CrankNicholson().solve(sim_hh, tsim=tsim, dt=dt)
+    res_ra = run_axonscope_simulation(sim_ra, tsim=tsim, dt=dt)
+    res_hh = run_axonscope_simulation(sim_hh, tsim=tsim, dt=dt)
 
     nrv_ra = nrv.unmyelinated(0, 0, d, L, dt=dt, Nsec=Nx, V_init=axon_ra.v_init, T=axon_ra.temperature)
     nrv_ra.insert_I_Clamp(0.5, t_start, duration, amplitude)

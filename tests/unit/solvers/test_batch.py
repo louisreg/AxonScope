@@ -44,7 +44,7 @@ from axonscope.runtime.jax.batch_inputs import (
 )
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
 from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
-from tests.unit.solvers._reference_solvers import CrankNicholsonVStimForcing
+from tests.unit.solvers._reference_solvers import SingleCableVStimForcingReference
 from axonscope.runtime.jax.runtime import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from tests.unit.solvers._batch_helpers import (
@@ -237,7 +237,11 @@ def test_single_cable_vstim_batch_matches_scalar_reference_row():
         runtime=runtime,
         Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
     ).run(extracellular_potential_mid_mV=vext_batch)
-    scalar = CrankNicholsonVStimForcing().solve(hh_extracellular_axon(), tsim=tsim, dt=dt)
+    scalar = SingleCableVStimForcingReference().solve(
+        hh_extracellular_axon(),
+        tsim=tsim,
+        dt=dt,
+    )
 
     assert batch.Vm.shape == (2, scalar.Vm.shape[0], scalar.Vm.shape[1])
     np.testing.assert_allclose(np.asarray(batch.t), np.asarray(scalar.t), atol=0.0, rtol=0.0)

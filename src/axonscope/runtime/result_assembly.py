@@ -17,7 +17,7 @@ from axonscope.dispatcher._records import (
     DispatchRowRecord,
 )
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
-from axonscope.solvers._outputs import SolverOutput
+from axonscope.runtime.row_output import RowRecordingOutput
 from axonscope.solvers.options import BatchOptions
 
 
@@ -271,7 +271,7 @@ def _posthoc_observations_for_row(
 ) -> dict[str, Any]:
     """Evaluate observers post-hoc when Vm was intentionally recorded."""
 
-    row_result = SolverOutput(
+    row_result = RowRecordingOutput(
         item.simulation.axon,
         row_vm,
         np.asarray(t),
