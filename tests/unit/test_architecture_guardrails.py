@@ -1987,6 +1987,48 @@ def test_runtime_recording_conversion_is_runtime_neutral():
     assert "row_recording_indices_for_group" not in jax_lowering_text
 
 
+def test_runtime_host_array_preparation_is_runtime_neutral():
+    assert (SRC_ROOT / "runtime" / "host_preparation.py").is_file()
+
+    from axonscope.runtime import host_preparation
+
+    for name in (
+        "compartment_area_cm2_numpy",
+        "diffusion_operator_coeffs_numpy",
+        "extracellular_runtime_numpy",
+        "pad_edge_array_numpy",
+        "pad_gate_array_numpy",
+        "pad_space_array_numpy",
+    ):
+        assert hasattr(host_preparation, name)
+
+    runtime_preparation_tree = ast.parse(
+        (SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    moved_defs = {
+        "compartment_area_cm2_numpy",
+        "diffusion_operator_coeffs_numpy",
+        "extracellular_runtime_numpy",
+        "pad_edge_array_numpy",
+        "pad_gate_array_numpy",
+        "pad_space_array_numpy",
+        "_compartment_area_cm2_numpy",
+        "_diffusion_operator_coeffs_numpy",
+        "_extracellular_runtime_numpy",
+        "_pad_edge_array_numpy",
+        "_pad_gate_array_numpy",
+        "_pad_space_array_numpy",
+    }
+    offenders = sorted(
+        node.name
+        for node in ast.walk(runtime_preparation_tree)
+        if isinstance(node, ast.FunctionDef) and node.name in moved_defs
+    )
+    assert offenders == []
+
+
 def test_public_examples_do_not_use_backend_solver_route_labels():
     examples_text = "\n".join(
         path.read_text(encoding="utf-8")

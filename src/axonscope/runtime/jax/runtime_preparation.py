@@ -13,6 +13,16 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
+from axonscope.runtime.host_preparation import (
+    EXTRACELLULAR_EDGE_FIELDS,
+    EXTRACELLULAR_SPACE_FIELDS,
+    ExtracellularRuntimeArrays,
+    compartment_area_cm2_numpy,
+    diffusion_operator_coeffs_numpy,
+    extracellular_runtime_numpy,
+    pad_gate_array_numpy,
+    pad_space_array_numpy,
+)
 from axonscope.runtime.jax.runtime import (
     CableRuntime,
     ExtracellularRuntime,
@@ -78,29 +88,6 @@ class _EncodedGatedLeakRow:
     leak_count: int
 
 
-@dataclass(frozen=True)
-class _ExtracellularRuntimeNumpy:
-    Cm_abs: np.ndarray
-    Cx_abs: np.ndarray
-    Gx_abs: np.ndarray
-    Gax_e: np.ndarray
-    Gax_i: np.ndarray
-    left_i: np.ndarray
-    right_i: np.ndarray
-    left_e: np.ndarray
-    right_e: np.ndarray
-
-
-_EXTRACELLULAR_SPACE_FIELDS = (
-    "Cm_abs",
-    "Cx_abs",
-    "Gx_abs",
-    "left_i",
-    "right_i",
-    "left_e",
-    "right_e",
-)
-_EXTRACELLULAR_EDGE_FIELDS = ("Gax_e", "Gax_i")
 _GROUP_SIGNATURE_CACHE_MAX_SIZE = 128
 _GROUP_STATIC_SIGNATURE_CACHE: OrderedDict[
     int,
@@ -353,14 +340,14 @@ def stack_extracellular_runtime(
     target_nx = int(group.nx)
     target_edges = max(target_nx - 1, 0)
     space_rows = np.empty(
-        (len(_EXTRACELLULAR_SPACE_FIELDS), batch_size, target_nx),
+        (len(EXTRACELLULAR_SPACE_FIELDS), batch_size, target_nx),
         dtype=np_dtype,
     )
     edge_rows = np.empty(
-        (len(_EXTRACELLULAR_EDGE_FIELDS), batch_size, target_edges),
+        (len(EXTRACELLULAR_EDGE_FIELDS), batch_size, target_edges),
         dtype=np_dtype,
     )
-    row_cache: dict[tuple[Any, ...], _ExtracellularRuntimeNumpy] = {}
+    row_cache: dict[tuple[Any, ...], ExtracellularRuntimeArrays] = {}
 
     for row_index, item in enumerate(group.items):
         cache_key = (
@@ -371,15 +358,15 @@ def stack_extracellular_runtime(
         )
         row = row_cache.get(cache_key)
         if row is None:
-            row = _extracellular_runtime_numpy(
+            row = extracellular_runtime_numpy(
                 item.solver_axon,
                 dtype=np_dtype,
                 target_nx=target_nx,
             )
             row_cache[cache_key] = row
-        for field_index, field_name in enumerate(_EXTRACELLULAR_SPACE_FIELDS):
+        for field_index, field_name in enumerate(EXTRACELLULAR_SPACE_FIELDS):
             space_rows[field_index, row_index] = getattr(row, field_name)
-        for field_index, field_name in enumerate(_EXTRACELLULAR_EDGE_FIELDS):
+        for field_index, field_name in enumerate(EXTRACELLULAR_EDGE_FIELDS):
             edge_rows[field_index, row_index] = getattr(row, field_name)
 
     space = jnp.asarray(space_rows, dtype=dtype_local)
@@ -932,7 +919,7 @@ def _stack_membrane_runtime(
     np_dtype = np.dtype(dtype_local)
     vm0_rows = np.stack(
         [
-            _pad_space_array_numpy(
+            pad_space_array_numpy(
                 np.full(
                     (int(item.solver_axon.n_compartments),),
                     float(getattr(item.simulation, "v_init", 0.0)),
@@ -1016,7 +1003,7 @@ def _stack_membrane_runtime(
         )
         gates0_rows = np.stack(
             [
-                _pad_gate_array_numpy(
+                pad_gate_array_numpy(
                     np.asarray(row.gates0, dtype=np_dtype),
                     target_nx=group.nx,
                     target_gates=row_backend.n_gates_max,
@@ -1027,7 +1014,7 @@ def _stack_membrane_runtime(
         )
         background_rows = np.stack(
             [
-                _pad_space_array_numpy(
+                pad_space_array_numpy(
                     np.asarray(row.background_current, dtype=np_dtype),
                     target_nx=group.nx,
                     mode="zero",
@@ -1208,22 +1195,22 @@ def _stack_cable_runtime(
     upper_rows: list[np.ndarray] = []
     area_rows: list[np.ndarray] = []
     for item in group.items:
-        lower, diag, upper = _diffusion_operator_coeffs_numpy(
+        lower, diag, upper = diffusion_operator_coeffs_numpy(
             item.solver_axon,
             dtype=np_dtype,
         )
         lower_rows.append(
-            _pad_space_array_numpy(lower, target_nx=group.nx, mode="zero")
+            pad_space_array_numpy(lower, target_nx=group.nx, mode="zero")
         )
         diag_rows.append(
-            _pad_space_array_numpy(diag, target_nx=group.nx, mode="zero")
+            pad_space_array_numpy(diag, target_nx=group.nx, mode="zero")
         )
         upper_rows.append(
-            _pad_space_array_numpy(upper, target_nx=group.nx, mode="zero")
+            pad_space_array_numpy(upper, target_nx=group.nx, mode="zero")
         )
         area_rows.append(
-            _pad_space_array_numpy(
-                _compartment_area_cm2_numpy(item.solver_axon, dtype=np_dtype)
+            pad_space_array_numpy(
+                compartment_area_cm2_numpy(item.solver_axon, dtype=np_dtype)
                 if include_area
                 else np.zeros((item.solver_axon.n_compartments,), dtype=np_dtype),
                 target_nx=group.nx,
@@ -1247,9 +1234,9 @@ def _cable_runtime_from_numpy_arrays(
     """Build one cable runtime using host arrays before a single JAX transfer."""
 
     np_dtype = np.dtype(dtype_local)
-    lower, diag, upper = _diffusion_operator_coeffs_numpy(axon, dtype=np_dtype)
+    lower, diag, upper = diffusion_operator_coeffs_numpy(axon, dtype=np_dtype)
     if include_area:
-        area = _compartment_area_cm2_numpy(axon, dtype=np_dtype)
+        area = compartment_area_cm2_numpy(axon, dtype=np_dtype)
     else:
         area = np.zeros((axon.n_compartments,), dtype=np_dtype)
     return CableRuntime(
@@ -1258,194 +1245,6 @@ def _cable_runtime_from_numpy_arrays(
         upper=jnp.asarray(upper, dtype=dtype_local),
         area_cm2=jnp.asarray(area, dtype=dtype_local),
     )
-
-
-def _diffusion_operator_coeffs_numpy(
-    axon: Any,
-    *,
-    dtype: np.dtype,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """NumPy equivalent of ``diffusion_operator_coeffs`` for batch preparation."""
-
-    nx = int(axon.n_compartments)
-    lower = np.zeros((nx,), dtype=dtype)
-    diag = np.zeros((nx,), dtype=dtype)
-    upper = np.zeros((nx,), dtype=dtype)
-
-    if bool(getattr(axon, "has_heterogeneous_cable_properties", False)):
-        lengths_cm = np.asarray(axon.compartment_lengths_um, dtype=dtype) * dtype.type(1e-4)
-        diam_um = np.asarray(axon.diam_um, dtype=dtype)
-        ra_ohm_cm = np.asarray(axon.Ra_ohm_cm, dtype=dtype)
-        cm_uF_cm2 = np.asarray(axon.Cm_uF_cm2, dtype=dtype)
-
-        area_cm2 = np.pi * (diam_um * dtype.type(1e-4)) * lengths_cm
-        radius_cm = dtype.type(0.5) * diam_um * dtype.type(1e-4)
-        cross_section_cm2 = np.pi * radius_cm**2
-        left_half_cm = dtype.type(0.5) * lengths_cm[:-1]
-        right_half_cm = dtype.type(0.5) * lengths_cm[1:]
-        edge_resistance_ohm = (
-            ra_ohm_cm[:-1] * left_half_cm / cross_section_cm2[:-1]
-            + ra_ohm_cm[1:] * right_half_cm / cross_section_cm2[1:]
-        )
-        gax_i_mS = dtype.type(1e3) / np.maximum(edge_resistance_ohm, dtype.type(1e-18))
-        cm_abs_uF = cm_uF_cm2 * area_cm2
-        lower[1:] = gax_i_mS / cm_abs_uF[1:]
-        upper[:-1] = gax_i_mS / cm_abs_uF[:-1]
-        diag = -(lower + upper)
-        return lower, diag.astype(dtype, copy=False), upper
-
-    h = np.asarray(axon.h_cm, dtype=dtype)
-    diffusion = _uniform_diffusion_coefficient_numpy(axon, dtype=dtype)
-    if nx >= 2:
-        left_coef = dtype.type(2.0) * diffusion / (h[0] ** 2)
-        right_coef = dtype.type(2.0) * diffusion / (h[-1] ** 2)
-        diag[0] = -left_coef
-        upper[0] = left_coef
-        lower[-1] = right_coef
-        diag[-1] = -right_coef
-    if nx > 2:
-        h_left = h[:-1]
-        h_right = h[1:]
-        denom = h_left + h_right
-        lower[1:-1] = dtype.type(2.0) * diffusion / (h_left * denom)
-        diag[1:-1] = -dtype.type(2.0) * diffusion / (h_left * h_right)
-        upper[1:-1] = dtype.type(2.0) * diffusion / (h_right * denom)
-    return lower, diag, upper
-
-
-def _uniform_diffusion_coefficient_numpy(axon: Any, *, dtype: np.dtype) -> np.generic:
-    diam_um = np.mean(np.asarray(axon.diam_um, dtype=dtype))
-    ra_ohm_cm = np.mean(np.asarray(axon.Ra_ohm_cm, dtype=dtype))
-    cm_uF_cm2 = np.mean(np.asarray(axon.Cm_uF_cm2, dtype=dtype))
-    radius_cm = dtype.type(0.5) * diam_um * dtype.type(1e-4)
-    cm = dtype.type(2.0) * np.pi * radius_cm * cm_uF_cm2 * dtype.type(1e-6)
-    ra = ra_ohm_cm / (np.pi * radius_cm**2)
-    return dtype.type(1.0) / (ra * cm) / dtype.type(1000.0)
-
-
-def _compartment_area_cm2_numpy(axon: Any, *, dtype: np.dtype) -> np.ndarray:
-    diam = np.asarray(axon.diam_um, dtype=dtype)
-    length_cm = np.asarray(axon.compartment_lengths_um, dtype=dtype) * dtype.type(1e-4)
-    return np.asarray(np.pi * (diam * dtype.type(1e-4)) * length_cm, dtype=dtype)
-
-
-def _extracellular_runtime_numpy(
-    axon: Any,
-    *,
-    dtype: np.dtype,
-    target_nx: int,
-) -> _ExtracellularRuntimeNumpy:
-    """Build one padded double-cable extracellular row with NumPy arrays."""
-
-    area = _compartment_area_cm2_numpy(axon, dtype=dtype)
-    cm_uF_cm2 = np.asarray(axon.Cm_uF_cm2, dtype=dtype)
-    Cm_abs = cm_uF_cm2 * area
-
-    xg = np.asarray(axon.xg_S_cm2, dtype=dtype)
-    xc = np.asarray(axon.xc_uF_cm2, dtype=dtype)
-    xraxial = np.asarray(axon.xraxial_MOhm_per_cm, dtype=dtype)
-    dx_cm = np.asarray(axon.dx_cm, dtype=dtype)
-
-    Cx_abs = xc * area
-    Gx_abs = (xg * dtype.type(1e3)) * area
-
-    if int(axon.n_compartments) <= 1:
-        Gax_e = np.zeros((0,), dtype=dtype)
-    else:
-        R_edge_MOhm = (
-            xraxial[:-1] * (dtype.type(0.5) * dx_cm[:-1])
-            + xraxial[1:] * (dtype.type(0.5) * dx_cm[1:])
-        )
-        Gax_e = dtype.type(1e-3) / np.maximum(R_edge_MOhm, dtype.type(1e-18))
-
-    lower, _, upper = _diffusion_operator_coeffs_numpy(axon, dtype=dtype)
-    Gax_i = dtype.type(0.5) * (upper[:-1] * Cm_abs[:-1] + lower[1:] * Cm_abs[1:])
-    left_i = np.concatenate([np.zeros((1,), dtype=dtype), Gax_i])
-    right_i = np.concatenate([Gax_i, np.zeros((1,), dtype=dtype)])
-    left_e = np.concatenate([np.zeros((1,), dtype=dtype), Gax_e])
-    right_e = np.concatenate([Gax_e, np.zeros((1,), dtype=dtype)])
-
-    return _ExtracellularRuntimeNumpy(
-        Cm_abs=_pad_space_array_numpy(Cm_abs, target_nx=target_nx, mode="edge"),
-        Cx_abs=_pad_space_array_numpy(Cx_abs, target_nx=target_nx, mode="edge"),
-        Gx_abs=_pad_space_array_numpy(Gx_abs, target_nx=target_nx, mode="edge"),
-        Gax_e=_pad_edge_array_numpy(Gax_e, target_nx=target_nx),
-        Gax_i=_pad_edge_array_numpy(Gax_i, target_nx=target_nx),
-        left_i=_pad_space_array_numpy(left_i, target_nx=target_nx, mode="zero"),
-        right_i=_pad_space_array_numpy(right_i, target_nx=target_nx, mode="zero"),
-        left_e=_pad_space_array_numpy(left_e, target_nx=target_nx, mode="zero"),
-        right_e=_pad_space_array_numpy(right_e, target_nx=target_nx, mode="zero"),
-    )
-
-
-def _pad_space_array_numpy(
-    values: np.ndarray,
-    *,
-    target_nx: int,
-    mode: str,
-) -> np.ndarray:
-    """Pad one host compartment-space array to ``target_nx``."""
-
-    arr = np.asarray(values)
-    pad_count = int(target_nx) - int(arr.shape[0])
-    if pad_count < 0:
-        raise ValueError(
-            f"target_nx must be >= array width, got target_nx={target_nx}, "
-            f"width={arr.shape[0]}."
-        )
-    if pad_count == 0:
-        return arr
-    if mode == "zero":
-        pad_values = np.zeros((pad_count,), dtype=arr.dtype)
-    elif mode == "edge":
-        pad_values = np.broadcast_to(arr[-1], (pad_count,)).astype(arr.dtype, copy=False)
-    else:
-        raise ValueError(f"unknown padding mode: {mode!r}.")
-    return np.concatenate([arr, pad_values], axis=0)
-
-
-def _pad_edge_array_numpy(values: np.ndarray, *, target_nx: int) -> np.ndarray:
-    """Pad one host edge-space array with zero coupling into padded compartments."""
-
-    arr = np.asarray(values)
-    target_edges = max(int(target_nx) - 1, 0)
-    pad_count = target_edges - int(arr.shape[0])
-    if pad_count < 0:
-        raise ValueError(
-            f"target_nx={target_nx} is too small for edge width={arr.shape[0]}."
-        )
-    if pad_count == 0:
-        return arr
-    return np.concatenate([arr, np.zeros((pad_count,), dtype=arr.dtype)], axis=0)
-
-
-def _pad_gate_array_numpy(
-    values: np.ndarray,
-    *,
-    target_nx: int,
-    target_gates: int,
-) -> np.ndarray:
-    """Pad one host gate matrix to shared spatial and gate widths."""
-
-    arr = np.asarray(values)
-    pad_nx = int(target_nx) - int(arr.shape[0])
-    pad_gates = int(target_gates) - int(arr.shape[1])
-    if pad_nx < 0 or pad_gates < 0:
-        raise ValueError(
-            "target_nx/target_gates must be >= gate array shape, got "
-            f"targets=({target_nx}, {target_gates}) and shape={arr.shape}."
-        )
-    if pad_gates:
-        arr = np.concatenate(
-            [arr, np.zeros((arr.shape[0], pad_gates), dtype=arr.dtype)],
-            axis=1,
-        )
-    if pad_nx:
-        arr = np.concatenate(
-            [arr, np.zeros((pad_nx, arr.shape[1]), dtype=arr.dtype)],
-            axis=0,
-        )
-    return arr
 
 
 __all__ = [

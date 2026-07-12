@@ -89,6 +89,11 @@ specific out of `runtime/jax/`:
 - Estimate/inspection recording lowering now calls `runtime.recording`
   directly through `runtime.execution`; the old JAX benchmark proxy for
   `benchmark_lower_recording_options` was removed.
+- Host-side cable/extracellular NumPy preparation moved to
+  `runtime/host_preparation.py`: diffusion coefficients, compartment areas,
+  padded space/edge/gate arrays, and double-cable extracellular host rows are
+  now runtime-neutral helpers. `runtime/jax/runtime_preparation.py` still owns
+  JAX materialization into `CableRuntime` and `ExtracellularRuntime`.
 
 Validation:
 
