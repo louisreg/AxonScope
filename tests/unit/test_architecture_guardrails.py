@@ -1086,7 +1086,6 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         "batch_kernels.py",
         "common.py",
         "kernels.py",
-        "observables.py",
         "observer_runtime.py",
         "runtime.py",
     }
@@ -1095,8 +1094,21 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         assert not (SRC_ROOT / "solvers" / filename).exists()
         assert (SRC_ROOT / "runtime" / "jax" / filename).is_file()
     assert not (SRC_ROOT / "runtime" / "jax" / "experimental.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "observables.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "reference_solvers.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "large_population_solver.py").exists()
+
+    jax_runtime_text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(
+        encoding="utf-8"
+    )
+    jax_kernels_text = (SRC_ROOT / "runtime" / "jax" / "kernels.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def membrane_observable_names" in jax_runtime_text
+    assert "def observable_matrices" in jax_runtime_text
+    assert "def package_recordings" in jax_runtime_text
+    assert ".observables" not in jax_runtime_text
+    assert ".observables" not in jax_kernels_text
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):

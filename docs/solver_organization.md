@@ -34,6 +34,8 @@ JAX runtime implementation:
 - `runtime/jax/common.py`: numerical helpers shared by kernels, such as
   tridiagonal coefficients, diffusion operators, and small reference linear
   solvers.
+- `runtime/jax/runtime.py`: JAX scalar runtime containers and scalar-runtime
+  observable packaging helpers used by the kernels.
 - `runtime/jax/kernels.py`: scalar single-axon kernels. These consume
   `SolverRuntime` and return raw `KernelResult` values.
 - `runtime/jax/batch_kernels.py`: batch kernels for homogeneous groups. These
@@ -42,8 +44,6 @@ JAX runtime implementation:
 - `runtime/jax/batch_inputs.py`: JAX-side sparse/factorized input containers
   and materializers used by batch kernels.
 - `runtime/jax/observer_runtime.py`: JAX-side VmRaster plan/state update.
-- `runtime/jax/observables.py`: packaging helpers for membrane observables
-  produced inside solver scans.
 - test-only dense/reference solver variants live under `tests/unit/solvers/`,
   not in the production JAX runtime package.
 

@@ -124,6 +124,10 @@ specific out of `runtime/jax/`:
   capability-based gated/leak encoders and row caches live with the JAX
   membrane-stacking implementation. The unused `_encode_gated_leak_members`
   helper was removed rather than preserved.
+- The tiny `runtime/jax/observables.py` module was removed. Its helpers now
+  live in `runtime/jax/runtime.py` next to `SolverRuntime`, because they package
+  scalar-runtime membrane outputs rather than defining an independent runtime
+  boundary.
 
 Validation:
 
@@ -144,6 +148,11 @@ python benchmark/run.py --script recruitment_curves --preset quick --platform cp
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_membrane_stacking_single_cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_membrane_stacking_double_cpu
+git diff --check
+python -m compileall -q src/axonscope tests/unit
+python -m pytest -q tests/unit/test_architecture_guardrails.py --tb=short
+python -m pytest -q tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_runtime.py --tb=short
+python -m pytest -q tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -187,6 +196,11 @@ wrote:
 - `benchmark/results/p12b_membrane_stacking_double_cpu`: `curve.simulate`
   `3880.1 ms`, `runtime.prepare` `2015.6 ms`, `inputs.extracellular`
   `20.3 ms`, `kernel.wait` `222.7 ms`.
+
+For the scalar-runtime observable helper merge, `git diff --check` passed,
+`compileall` passed, architecture guardrails passed `85/85`,
+Crank-Nicholson/runtime tests passed `25/25`, and
+dispatcher/batch/extracellular tests passed `104/104`.
 
 ## Benchmark Gate
 
