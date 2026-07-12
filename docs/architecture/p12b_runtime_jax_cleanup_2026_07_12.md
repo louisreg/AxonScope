@@ -103,6 +103,12 @@ specific out of `runtime/jax/`:
   PCR-SoA candidate variants moved from `runtime/jax/common.py` to
   `benchmark/analysis/double_cable_solver_candidates.py`. `common.py` now keeps
   the active runtime primitives rather than benchmark-only probes.
+- Runtime-neutral stimulus current planning moved from
+  `runtime/jax/input_batches.py` to `runtime/input_planning.py`: temporal
+  current caching, sampled-stimulus semantic keys, rank-1 current-row planning,
+  scaled-shared-waveform row planning, and cached array-content signatures are
+  now reusable outside JAX. `input_batches.py` keeps JAX materialization,
+  footprint device caches, and factorized payload assembly.
 
 Validation:
 
@@ -114,6 +120,9 @@ python -m pytest -q tests/unit/benchmarking/test_double_cable_solver_candidates.
 python -m pytest -q tests/unit/solvers/test_batch.py tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_extracellular.py --tb=short
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_single_cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_double_cpu
+python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_input_planning_single_cpu
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_input_planning_double_cpu
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -122,6 +131,17 @@ Results: `compileall` passed, guardrails/inspection/performance passed
 tests passed `56/56`. The local single-cable and double-cable CPU smoke
 benchmarks completed and wrote the two `p12b_runtime_jax_prune_*_cpu`
 artifact directories.
+
+For the input-planning extraction pass, `compileall` passed,
+architecture guardrails passed `83/83`, dispatcher/batch/extracellular tests
+passed `104/104`, and the local CPU smoke benchmarks wrote:
+
+- `benchmark/results/p12b_input_planning_single_cpu`: `curve.simulate`
+  `3245.0 ms`, `runtime.prepare` `1579.3 ms`, `inputs.extracellular`
+  `22.7 ms`, `kernel.wait` `204.5 ms`.
+- `benchmark/results/p12b_input_planning_double_cpu`: `curve.simulate`
+  `3706.1 ms`, `runtime.prepare` `1914.0 ms`, `inputs.extracellular`
+  `19.5 ms`, `kernel.wait` `211.7 ms`.
 
 ## Benchmark Gate
 

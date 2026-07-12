@@ -1931,6 +1931,46 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     assert offenders == []
 
 
+def test_jax_input_batches_does_not_own_runtime_neutral_current_planning():
+    jax_input_batches = SRC_ROOT / "runtime" / "jax" / "input_batches.py"
+    input_planning = SRC_ROOT / "runtime" / "input_planning.py"
+
+    jax_text = jax_input_batches.read_text(encoding="utf-8")
+    planning_text = input_planning.read_text(encoding="utf-8")
+
+    forbidden_jax_impl_fragments = {
+        "import weakref",
+        "_ARRAY_CONTENT_KEY_CACHE",
+        "_STIMULUS_SCALED_WAVEFORM_CACHE",
+        "class _Rank1CurrentRows",
+        "class _ScaledSharedWaveformRows",
+        "class _ScaledWaveformSignatureCacheEntry",
+        "def _cached_stimulus_current_A",
+        "def _stimulus_temporal_cache_key",
+        "def _stimulus_scaled_waveform_signature_and_scale",
+        "def _array_content_key",
+        "def _cached_array_content_key",
+    }
+
+    offenders = sorted(
+        fragment for fragment in forbidden_jax_impl_fragments if fragment in jax_text
+    )
+    assert offenders == []
+    assert "from axonscope.runtime.input_planning import (" in jax_text
+
+    required_planning_exports = {
+        "def cached_stimulus_current_A",
+        "def stimulus_temporal_cache_key",
+        "def build_rank1_current_rows_from_unique_stimuli",
+        "def build_scaled_shared_waveform_rows",
+        "def cached_array_content_signature",
+    }
+    missing = sorted(
+        fragment for fragment in required_planning_exports if fragment not in planning_text
+    )
+    assert missing == []
+
+
 def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():
     assert (
         REPO_ROOT / "docs" / "architecture" / "p12_runtime_contract_2026_07_12.md"
