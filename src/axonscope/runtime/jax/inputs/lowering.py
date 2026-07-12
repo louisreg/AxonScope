@@ -23,7 +23,7 @@ import axonscope.runtime.input_planning as input_planning
 
 if TYPE_CHECKING:
     from axonscope.axon_instance import AxonInstance
-    from axonscope.runtime.jax.inputs.payloads import FactorizedExtracellularPotentialBatch
+    from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
     from axonscope.runtime.jax.types import SolverRuntime
     from axonscope.dispatcher.plan import DispatchGroup
     from axonscope.preparation.cohort import PreparedCohort
@@ -97,7 +97,7 @@ class LoweredExtracellularInput:
 
     @property
     def factorized(self) -> FactorizedExtracellularPotentialBatch | None:
-        from axonscope.runtime.jax.inputs.payloads import (
+        from axonscope.runtime.input_payloads import (
             FactorizedExtracellularPotentialBatch,
         )
 

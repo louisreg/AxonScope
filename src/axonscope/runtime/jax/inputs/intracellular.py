@@ -11,7 +11,7 @@ import numpy as np
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.runtime.jax.inputs.payloads import SparseIntracellularCurrentDensityBatch
+from axonscope.runtime.input_payloads import SparseIntracellularCurrentDensityBatch
 from axonscope.runtime.jax.inputs.stimulus import JaxStimulus, compile_stimulus
 from axonscope.runtime.jax.types import SolverRuntime
 from axonscope.runtime.solver_axon import SolverAxon

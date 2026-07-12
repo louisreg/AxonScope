@@ -28,7 +28,7 @@ from axonscope.runtime.input_planning import (
     cached_stimulus_current_A as _cached_stimulus_current_A,
     stimulus_temporal_cache_key as _stimulus_temporal_cache_key,
 )
-from axonscope.runtime.jax.inputs.payloads import (
+from axonscope.runtime.input_payloads import (
     FactorizedExtracellularPotentialBatch,
 )
 from axonscope.runtime.jax.inputs.stimulus import JaxStimulus, compile_stimulus

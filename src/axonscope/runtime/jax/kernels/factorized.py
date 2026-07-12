@@ -7,7 +7,7 @@ from typing import Any
 import jax.numpy as jnp
 
 from axonscope.benchmarking import benchmark_span
-from axonscope.runtime.jax.inputs.payloads import FactorizedExtracellularPotentialBatch
+from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
 from axonscope.runtime.jax.cable_geometry import Array
 from axonscope.runtime.jax.preparation.caches import (
     get_single_cable_factorized_forcing,

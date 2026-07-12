@@ -2008,7 +2008,7 @@ def test_solver_route_reporting_contract_is_cable_agnostic():
     assert [field.name for field in fields(axs.CableSolverRoute)] == [
         "cable",
         "requested",
-        "backend_route",
+        "runtime_route",
         "internal",
         "options",
     ]
@@ -2031,12 +2031,12 @@ def test_solver_route_reporting_contract_is_cable_agnostic():
     single = axs.CableSolverRoute(
         cable="single_cable",
         requested="auto",
-        backend_route="jax_tridiagonal",
+        runtime_route="jax_tridiagonal",
     )
     double = axs.CableSolverRoute(
         cable="double_cable",
         requested="tiled_thomas",
-        backend_route="jax_triton_loop_xb",
+        runtime_route="jax_triton_loop_xb",
         internal=True,
         options=(("block_b", 64),),
     )
@@ -2058,7 +2058,10 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     from axonscope.runtime.input_contract import (
         ExtracellularLoweringMode,
         IntracellularLoweringMode,
+        PreparedRuntimeInputSummary,
         RuntimeInputContract,
+        intracellular_mode_from_format,
+        validate_prepared_runtime_input,
         normalize_cable_formulation,
     )
     from axonscope.runtime.jax.inputs.lowering import (
@@ -2107,6 +2110,51 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     )
     assert double.extracellular.requires_initial_previous
     assert not single.extracellular.requires_initial_previous
+    summary = PreparedRuntimeInputSummary(
+        cable="single-cable",
+        batch_size=2,
+        nx=11,
+        nt=3,
+        dtype="float32",
+        has_padding=False,
+        row_specific_parameters=False,
+        recording_mode="full",
+        output_sink="vm",
+        observer_count=0,
+        time_chunk_steps=None,
+        solver_policy="jax_single_cable_tridiagonal",
+        intracellular_format="dense",
+        intracellular_mode=intracellular_mode_from_format("dense"),
+        extracellular_format="factorized_footprint",
+        extracellular_mode=ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
+        extracellular_requires_initial_previous=False,
+        extracellular_has_initial_previous=False,
+    )
+    assert validate_prepared_runtime_input(summary, single) == ()
+    assert "prepared_input_contract_extracellular_mode" in summary.as_metadata()
+    invalid = PreparedRuntimeInputSummary(
+        cable="double-cable",
+        batch_size=2,
+        nx=11,
+        nt=3,
+        dtype="float32",
+        has_padding=False,
+        row_specific_parameters=False,
+        recording_mode="none",
+        output_sink="vm_raster",
+        observer_count=1,
+        time_chunk_steps=None,
+        solver_policy="default",
+        intracellular_format="sparse_current_clamp",
+        intracellular_mode=IntracellularLoweringMode.SPARSE_CURRENT_CLAMP,
+        extracellular_format="factorized_footprint",
+        extracellular_mode=ExtracellularLoweringMode.CURRENT_TABLE,
+        extracellular_requires_initial_previous=True,
+        extracellular_has_initial_previous=False,
+    )
+    violations = validate_prepared_runtime_input(invalid, double)
+    assert "intracellular mode 'sparse_current_clamp' is unsupported" in violations
+    assert "extracellular mode 'current_table' is unsupported" in violations
 
 
 def test_runtime_input_planning_is_independent_from_observer_output_plan():
@@ -2118,7 +2166,6 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
         dense_shape_for_group,
     )
     from axonscope.runtime.input_planning import (
-        can_plan_compact_double_cable_factorized_rows,
         planned_factorized_extracellular_mode_from_rows,
     )
     from axonscope.runtime.jax.inputs.lowering import (
@@ -2129,9 +2176,6 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     assert "observer_plan" not in inspect.signature(plan_input_lowering).parameters
     assert "observer_plan" not in inspect.signature(
         planned_factorized_extracellular_mode_from_rows
-    ).parameters
-    assert "observer_plan" not in inspect.signature(
-        can_plan_compact_double_cable_factorized_rows
     ).parameters
     assert get_type_hints(PlannedInputLowering)["extracellular_mode"] == (
         ExtracellularLoweringMode | None
@@ -2153,7 +2197,6 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     moved_planning_defs = {
         "array_content_signature",
         "can_factorize_footprint_rows",
-        "can_plan_compact_double_cable_factorized_rows",
         "extracellular_stimulation_count",
         "factorized_drive_count_from_rows",
         "planned_factorized_extracellular_mode_from_rows",
@@ -2205,6 +2248,36 @@ def test_jax_input_batches_does_not_own_runtime_neutral_current_planning():
         fragment for fragment in required_planning_exports if fragment not in planning_text
     )
     assert missing == []
+
+
+def test_compact_input_payload_contracts_are_runtime_neutral():
+    payload_contract = SRC_ROOT / "runtime" / "input_payloads.py"
+    jax_payload_materializers = SRC_ROOT / "runtime" / "jax" / "inputs" / "payloads.py"
+
+    assert payload_contract.is_file()
+    assert _jax_import_locations(payload_contract) == []
+
+    contract_tree = ast.parse(payload_contract.read_text(encoding="utf-8"))
+    assert {
+        node.name
+        for node in ast.walk(contract_tree)
+        if isinstance(node, ast.ClassDef)
+    } == {
+        "FactorizedExtracellularPotentialBatch",
+        "SparseIntracellularCurrentDensityBatch",
+    }
+
+    jax_tree = ast.parse(jax_payload_materializers.read_text(encoding="utf-8"))
+    assert [
+        node.name
+        for node in ast.walk(jax_tree)
+        if isinstance(node, ast.ClassDef)
+    ] == []
+
+    jax_text = jax_payload_materializers.read_text(encoding="utf-8")
+    assert "from axonscope.runtime.input_payloads import (" in jax_text
+    assert "materialize_factorized_extracellular_potential_batch" in jax_text
+    assert "materialize_sparse_intracellular_current_density_batch" in jax_text
 
 
 def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():
