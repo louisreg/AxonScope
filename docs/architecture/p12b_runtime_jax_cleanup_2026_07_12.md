@@ -107,6 +107,64 @@ The CPU sanity gate shows no obvious regression. The double-cable path is
 essentially unchanged, and the shared preparation helper preserved the original
 benchmark span names.
 
+## GPU Smoke Gate Result
+
+Because the shared preparation helper also touches the GPU execution path, two
+small Kaggle P100 smoke runs were launched at commit `deb6954`.
+
+Artifacts:
+
+- `benchmark/results/kaggle/20260712_115203_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12b-single-gpu-deb6954`
+- `benchmark/results/kaggle/20260712_115217_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12b-double-gpu-jt-deb6954`
+
+Comparison artifacts:
+
+- P12A single-cable GPU smoke:
+  `benchmark/results/kaggle/20260712_111722_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12a-runtime-contract-single-gpu-6e9a0f5`
+- P12A double-cable GPU smoke with `jax-triton`:
+  `benchmark/results/kaggle/20260712_112604_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axs-p12a-double-gpu-jt-6e9a0f5`
+
+All-phase totals from `summary.csv`:
+
+| Cable | Stage | P12A total | P12B total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 4074.7 ms | 4476.4 ms | +9.9% |
+| single-cable | `runtime.prepare` | 1843.7 ms | 1968.7 ms | +6.8% |
+| single-cable | `inputs.extracellular` | 108.9 ms | 136.1 ms | +25.0% |
+| single-cable | `kernel.enqueue` | 1592.7 ms | 1790.5 ms | +12.4% |
+| single-cable | `kernel.wait` | 61.8 ms | 55.7 ms | -9.7% |
+| double-cable | `curve.simulate` | 9098.9 ms | 9064.4 ms | -0.4% |
+| double-cable | `runtime.prepare` | 2340.5 ms | 2283.8 ms | -2.4% |
+| double-cable | `inputs.extracellular` | 118.6 ms | 114.9 ms | -3.1% |
+| double-cable | `kernel.enqueue` | 6144.6 ms | 6167.4 ms | +0.4% |
+| double-cable | `kernel.wait` | 103.8 ms | 103.0 ms | -0.8% |
+
+Steady repeat means use only `phase=repeat` and `iteration>0` simulations:
+
+| Cable | Stage | P12A mean | P12B mean | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 36.716 ms | 39.198 ms | +6.8% |
+| single-cable | `runtime.prepare` | 0.056 ms | 0.051 ms | -8.9% |
+| single-cable | `inputs.extracellular` | 2.047 ms | 2.291 ms | +11.9% |
+| single-cable | `kernel.enqueue` | 14.185 ms | 15.555 ms | +9.7% |
+| single-cable | `kernel.wait` | 6.908 ms | 6.655 ms | -3.7% |
+| double-cable | `curve.simulate` | 37.578 ms | 38.232 ms | +1.7% |
+| double-cable | `runtime.prepare` | 0.060 ms | 0.048 ms | -20.9% |
+| double-cable | `inputs.extracellular` | 2.520 ms | 2.606 ms | +3.4% |
+| double-cable | `kernel.enqueue` | 11.363 ms | 11.870 ms | +4.5% |
+| double-cable | `kernel.wait` | 13.048 ms | 13.024 ms | -0.2% |
+
+Interpretation:
+
+- The double-cable GPU smoke is effectively unchanged and passes the P12B
+  cleanup gate.
+- The single-cable GPU smoke is still runnable, but this small case shows a
+  modest enqueue/dispatch-side increase. Since `kernel.wait` did not worsen,
+  this is not solver degradation, but it should be watched in the broader P11
+  hot-path slices before claiming no GPU performance loss.
+- The current cleanup therefore remains acceptable as a runtime-boundary
+  cleanup, but it does not close the broader P12 performance-loss claim.
+
 ## Remaining Cleanup
 
 - Continue auditing `runtime/jax/` for dead or duplicated host-side code.
