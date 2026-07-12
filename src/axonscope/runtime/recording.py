@@ -1,4 +1,4 @@
-"""JAX lowering for backend-neutral recording plans."""
+"""Runtime-neutral lowering from public recording plans to batch options."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def recording_plan_from_recording(recording: Recording | RecordingPlan) -> Recor
 
 
 def batch_recording_from_recording_plan(plan: RecordingPlan) -> BatchRecording:
-    """Lower a backend-neutral recording plan to JAX batch recording options."""
+    """Lower a runtime-neutral recording plan to batch recording options."""
 
     if plan.wants_observables:
         raise NotImplementedError("pool recording currently supports Vm only.")
@@ -48,7 +48,7 @@ def batch_options_from_recording_plan(
     *,
     batch_options: BatchOptions | None = None,
 ) -> BatchOptions:
-    """Merge a recording plan into existing JAX batch execution options."""
+    """Merge a recording plan into existing batch execution options."""
 
     recording = batch_recording_from_recording_plan(plan)
     if batch_options is None:

@@ -77,6 +77,10 @@ specific out of `runtime/jax/`:
   footprint eligibility, factorized drive counts, planned extracellular mode,
   and scaled-shared-waveform signatures are now runtime-neutral. JAX still owns
   the actual materialized input payloads and cache behavior.
+- Recording request conversion moved from `runtime/jax/recording.py` to
+  `runtime/recording.py`. Public `Recording` and `RecordingPlan` lowering to
+  `BatchOptions` is runtime-neutral; JAX-specific padded-row and VmRaster
+  observer lowering remains in `runtime/jax/recording_lowering.py`.
 
 Validation:
 

@@ -76,11 +76,14 @@ def batch_options_from_recording(
 ) -> BatchOptions | None:
     """Lower a public recording request to runtime batch options."""
 
-    from axonscope.runtime.jax.recording import (
-        batch_options_from_recording as jax_batch_options_from_recording,
+    from axonscope.runtime.recording import (
+        batch_options_from_recording as runtime_batch_options_from_recording,
     )
 
-    return jax_batch_options_from_recording(recording, batch_options=batch_options)
+    return runtime_batch_options_from_recording(
+        recording,
+        batch_options=batch_options,
+    )
 
 
 def benchmark_lower_recording_options(

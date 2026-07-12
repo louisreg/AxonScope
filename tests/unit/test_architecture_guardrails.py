@@ -1966,6 +1966,17 @@ def test_runtime_output_plan_contract_is_runtime_neutral():
     assert vm_raster_definitions(None) == ()
 
 
+def test_runtime_recording_conversion_is_runtime_neutral():
+    assert (SRC_ROOT / "runtime" / "recording.py").is_file()
+    assert not (SRC_ROOT / "runtime" / "jax" / "recording.py").exists()
+
+    execution_text = (SRC_ROOT / "runtime" / "execution.py").read_text(
+        encoding="utf-8"
+    )
+    assert "axonscope.runtime.recording" in execution_text
+    assert "axonscope.runtime.jax.recording" not in execution_text
+
+
 def test_public_examples_do_not_use_backend_solver_route_labels():
     examples_text = "\n".join(
         path.read_text(encoding="utf-8")

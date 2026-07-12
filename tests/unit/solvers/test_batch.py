@@ -28,7 +28,7 @@ from axonscope.runtime.jax.batch_kernels import (
     SingleCableVStimBatchKernel,
 )
 from axonscope.runtime.execution import batch_options_for_execution_context
-from axonscope.runtime.jax.recording import batch_options_from_recording
+from axonscope.runtime.recording import batch_options_from_recording
 from axonscope.runtime.jax.kernels import DoubleCableKernel
 from axonscope.runtime.jax.solver_engines.cpu import resolve_cpu_solver_engine
 from axonscope.solvers import (
