@@ -1973,8 +1973,17 @@ def test_runtime_recording_conversion_is_runtime_neutral():
     execution_text = (SRC_ROOT / "runtime" / "execution.py").read_text(
         encoding="utf-8"
     )
+    group_runner_text = (
+        SRC_ROOT / "runtime" / "jax" / "group_runner.py"
+    ).read_text(encoding="utf-8")
+    jax_lowering_text = (
+        SRC_ROOT / "runtime" / "jax" / "recording_lowering.py"
+    ).read_text(encoding="utf-8")
     assert "axonscope.runtime.recording" in execution_text
     assert "axonscope.runtime.jax.recording" not in execution_text
+    assert "axonscope.runtime.recording" in group_runner_text
+    assert "lower_batch_recording_options" not in jax_lowering_text
+    assert "row_recording_indices_for_group" not in jax_lowering_text
 
 
 def test_public_examples_do_not_use_backend_solver_route_labels():

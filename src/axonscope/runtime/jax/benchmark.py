@@ -11,7 +11,7 @@ from axonscope.runtime.jax.input_lowering import (
     PlannedInputLowering,
     plan_input_lowering,
 )
-from axonscope.runtime.jax.recording_lowering import (
+from axonscope.runtime.recording import (
     lower_batch_recording_options,
 )
 from axonscope.solvers.options import BatchOptions

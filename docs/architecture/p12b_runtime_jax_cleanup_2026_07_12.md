@@ -81,6 +81,11 @@ specific out of `runtime/jax/`:
   `runtime/recording.py`. Public `Recording` and `RecordingPlan` lowering to
   `BatchOptions` is runtime-neutral; JAX-specific padded-row and VmRaster
   observer lowering remains in `runtime/jax/recording_lowering.py`.
+- Padded recording handling also moved to `runtime/recording.py`:
+  row-aware retained Vm indices, full-recording fallback for unsupported padded
+  recordings, and cohort original-index tables are runtime-neutral batch
+  semantics. `runtime/jax/recording_lowering.py` now only owns cached lowering
+  from public observers to JAX VmRaster plans.
 
 Validation:
 

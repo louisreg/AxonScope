@@ -33,10 +33,12 @@ from axonscope.runtime.jax.input_lowering import (
     lower_single_cable_intracellular_input,
 )
 from axonscope.runtime.output_contract import OutputPlan
-from axonscope.runtime.jax.recording_lowering import (
+from axonscope.runtime.recording import (
     lower_batch_recording_options,
-    lower_observers_for_cohort,
     row_recording_indices_for_group,
+)
+from axonscope.runtime.jax.recording_lowering import (
+    lower_observers_for_cohort,
 )
 from axonscope.runtime.jax.runtime_preparation import (
     group_cm_uF_cm2,

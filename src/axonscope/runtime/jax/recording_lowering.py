@@ -1,4 +1,4 @@
-"""Recording and observer lowering contracts for JAX batch execution."""
+"""JAX VmRaster observer lowering for batch execution."""
 
 from __future__ import annotations
 
@@ -9,69 +9,12 @@ from typing import Any
 import numpy as np
 
 from axonscope.benchmarking import record_benchmark_metadata
-from axonscope.runtime.output_contract import (
-    observers_are_vm_raster_compatible,
-    vm_raster_definitions,
-)
-from axonscope.solvers.options import BatchOptions, BatchRecording
+from axonscope.runtime.recording import cohort_original_indices
 
 
 _VM_RASTER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _VM_RASTER_PLAN_IDENTITY_CACHE: OrderedDict[tuple[Any, ...], tuple[Any, Any]] = OrderedDict()
 _RECORDING_LOWERING_CACHE_MAX_SIZE = 64
-
-
-def lower_batch_recording_options(
-    group: Any,
-    options: BatchOptions,
-    *,
-    observers: tuple[Any, ...] | None,
-) -> BatchOptions:
-    """Return kernel recording options after padding/observer lowering."""
-
-    if not group.has_padding:
-        return options
-    if options.recording.mode == "none" and observers is not None:
-        return options
-    if row_recording_indices_for_group(group, options.recording) is not None:
-        return options
-    return options if options.recording.mode == "full" else _replace_full_recording(options)
-
-
-def row_recording_indices_for_group(
-    group: Any,
-    recording: BatchRecording,
-) -> np.ndarray | None:
-    """Return row-aware retained Vm indices for padded batch groups.
-
-    ``BatchRecording`` is shape-only and normally resolves indices against one
-    ``Nx``. Padded mixed-diameter groups need the same number of retained
-    columns per row, but those columns must be selected against each row's
-    original compartment count.
-    """
-
-    if not getattr(group, "has_padding", False):
-        return None
-    if recording.mode not in {"center", "probes", "indices"}:
-        return None
-
-    rows: list[np.ndarray] = []
-    width: int | None = None
-    for item in group.items:
-        row = np.asarray(
-            recording.indices_for(int(item.solver_axon.n_compartments)),
-            dtype=np.int32,
-        )
-        if row.ndim != 1:
-            return None
-        if width is None:
-            width = int(row.shape[0])
-        elif int(row.shape[0]) != width:
-            return None
-        rows.append(row)
-    if not rows or width is None or width < 1:
-        return None
-    return np.stack(rows, axis=0)
 
 
 def lower_observers_for_cohort(
@@ -144,22 +87,6 @@ def lower_observers_for_cohort(
         vm_raster_probe_count=0 if plan is None else plan.probe_count,
     )
     return plan
-
-
-def cohort_original_indices(cohort: Any) -> np.ndarray:
-    """Return row-aware original compartment indices, with -1 for padding."""
-
-    rows = np.full((cohort.size, cohort.nx), -1, dtype=np.int32)
-    for row_index, solver_axon in enumerate(cohort.solver_axons):
-        original_nx = int(solver_axon.n_compartments)
-        rows[row_index, :original_nx] = np.arange(original_nx, dtype=np.int32)
-    return rows
-
-
-def _replace_full_recording(options: BatchOptions) -> BatchOptions:
-    from dataclasses import replace
-
-    return replace(options, recording=BatchRecording.full())
 
 
 def _vm_raster_plan_cache_key(
@@ -295,8 +222,5 @@ def _identity_cache_store(
 
 
 __all__ = [
-    "cohort_original_indices",
-    "lower_batch_recording_options",
     "lower_observers_for_cohort",
-    "row_recording_indices_for_group",
 ]

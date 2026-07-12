@@ -53,8 +53,8 @@ from axonscope.runtime.jax.observer_runtime import (
     init_vm_raster_state,
     update_vm_raster_state_batch_from_tables,
 )
+from axonscope.runtime.recording import lower_batch_recording_options
 from axonscope.runtime.jax.recording_lowering import (
-    lower_batch_recording_options,
     lower_observers_for_cohort,
 )
 from axonscope.runtime.jax.runtime_preparation import (
