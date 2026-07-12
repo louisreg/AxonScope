@@ -505,8 +505,6 @@ def _prepare_real_stage_inputs(args: argparse.Namespace, *, device: Any) -> Real
         runtime=runtime,
         tsim_ms=options["tsim"],
         dt_ms=options["dt"],
-        observer_plan=observer_plan,
-        kernel_options=kernel_options,
     )
     batch_size = int(cohort.size)
     resolved = _resolve_profile_block_solver(

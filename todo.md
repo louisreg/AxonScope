@@ -2655,12 +2655,18 @@ policy matrix is finished.
 
 ### P12 - Studies, Serialization, Integration
 
-- [ ] P12A runtime contract and JAX cleanup:
+- [x] P12A runtime contract and sanity benchmark gate:
   use `docs/architecture/p12_runtime_contract_2026_07_12.md` and
-  `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md` as the migration
-  target. Homogenize non-solver preparation, recording/observer lowering,
-  input semantics, benchmark metadata, and result assembly between single-cable
-  and double-cable paths as much as possible without losing P11 performance.
+  `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md` as the completed
+  local CPU plus Kaggle GPU smoke gate. This validates that the initial
+  runtime-contract cleanup still runs on the P11-sensitive single-cable and
+  double-cable observer-only paths.
+- [ ] P12B runtime/JAX cleanup:
+  use `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md` as the active
+  migration note. Homogenize non-solver preparation, recording/observer
+  lowering, input semantics, benchmark metadata, and result assembly between
+  single-cable and double-cable paths as much as possible without losing P11
+  performance.
 - [ ] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
   host-side code. Delete unused paths, keep solver/kernel-specific code inside
   the JAX runtime, and move semantic-only reusable contracts to

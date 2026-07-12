@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, cast
 
 from axonscope.benchmarking import (
@@ -54,6 +55,16 @@ from axonscope.runtime.jax.batch_kernels import (
 from axonscope.solvers.options import BatchOptions, SolverOptions
 
 
+@dataclass(frozen=True)
+class _PreparedJaxBatchGroup:
+    """Shared host-side state before cable-specific input lowering."""
+
+    public_group: DispatchGroup
+    kernel_group: DispatchGroup
+    runtime: Any
+    cohort: Any
+
+
 def run_jax_batch_group(
     group: DispatchGroup,
     *,
@@ -97,6 +108,80 @@ def _dispatch_method(group: DispatchGroup) -> str:
     if group.mode == "double":
         return f"{prefix}-double-cable"
     return f"{prefix}-single-cable"
+
+
+def _prepare_jax_batch_group(
+    group: DispatchGroup,
+    *,
+    kernel_group: DispatchGroup,
+    mode: str,
+    tsim_ms: float,
+    dt_ms: float,
+    solver_options: SolverOptions | None,
+    progress_callback: Any,
+    runtime_context: Any | None,
+) -> _PreparedJaxBatchGroup:
+    """Prepare runtime arrays and cohort rows through the shared host path."""
+
+    _emit_progress(progress_callback, group, "prepare", "runtime", mode=mode)
+    with benchmark_span(
+        "runtime.prepare",
+        group_id=group.group_id,
+        group_size=group.size,
+        mode=group.mode,
+        nx=group.nx,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+    ):
+        runtime = prepare_batch_runtime(
+            kernel_group,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            solver_options=solver_options,
+            mode=mode,
+            include_extracellular=mode == "double",
+            include_area=mode == "double",
+            runtime_context=runtime_context,
+        )
+        if kernel_group is not group:
+            record_kernel_bucket_metadata(group=group, kernel_group=kernel_group)
+        record_benchmark_metadata(
+            nt=runtime.grid.Nt,
+            nx=runtime.membrane.Nx,
+            dtype=str(runtime.membrane.dtype),
+        )
+
+    _emit_progress(progress_callback, group, "prepare", "cohort rows")
+    with benchmark_span(
+        "inputs.positions",
+        group_id=group.group_id,
+        group_size=group.size,
+        nx=group.nx,
+    ):
+        cohort = prepared_cohort_for_current_group(kernel_group)
+        metadata = {
+            **benchmark_array_metadata(
+                "x_positions_m",
+                cohort.x_positions_m,
+                role="positions",
+            ),
+            "extracellular_stimulation_count": cohort.extracellular_stimulation_count,
+        }
+        if kernel_group is not group:
+            metadata.update(
+                public_group_size=int(group.size),
+                kernel_group_size=int(kernel_group.size),
+                public_nx=int(group.nx),
+                kernel_nx=int(kernel_group.nx),
+            )
+        record_benchmark_metadata(**metadata)
+
+    return _PreparedJaxBatchGroup(
+        public_group=group,
+        kernel_group=kernel_group,
+        runtime=runtime,
+        cohort=cohort,
+    )
 
 
 def _emit_progress(
@@ -279,47 +364,18 @@ def _run_single_cable_batch_group(
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous single-cable group through imposed-field batching."""
 
-    _emit_progress(progress_callback, group, "prepare", "runtime", mode="single")
-    with benchmark_span(
-        "runtime.prepare",
-        group_id=group.group_id,
-        group_size=group.size,
-        mode=group.mode,
-        nx=group.nx,
+    prepared = _prepare_jax_batch_group(
+        group,
+        kernel_group=group,
+        mode="single",
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
-    ):
-        runtime = prepare_batch_runtime(
-            group,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            solver_options=solver_options,
-            mode="single",
-            include_extracellular=False,
-            include_area=False,
-            runtime_context=runtime_context,
-        )
-        record_benchmark_metadata(
-            nt=runtime.grid.Nt,
-            nx=runtime.membrane.Nx,
-            dtype=str(runtime.membrane.dtype),
-        )
-    _emit_progress(progress_callback, group, "prepare", "cohort rows")
-    with benchmark_span(
-        "inputs.positions",
-        group_id=group.group_id,
-        group_size=group.size,
-        nx=group.nx,
-    ):
-        cohort = prepared_cohort_for_current_group(group)
-        record_benchmark_metadata(
-            **benchmark_array_metadata(
-                "x_positions_m",
-                cohort.x_positions_m,
-                role="positions",
-            ),
-            extracellular_stimulation_count=cohort.extracellular_stimulation_count,
-        )
+        solver_options=solver_options,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+    runtime = prepared.runtime
+    cohort = prepared.cohort
     kernel_options, observer_plan = _lower_output_plan_for_group(
         public_group=group,
         kernel_group=group,
@@ -356,7 +412,6 @@ def _run_single_cable_batch_group(
         nx=group.nx,
     ):
         extracellular = lower_single_cable_extracellular_input(
-            group=group,
             cohort=cohort,
             runtime=runtime,
             tsim_ms=tsim_ms,
@@ -450,52 +505,18 @@ def _run_double_cable_batch_group(
 
     kernel_group = double_cable_kernel_group(group)
     representative = representative_item(group).simulation
-    _emit_progress(progress_callback, group, "prepare", "runtime", mode="double")
-    with benchmark_span(
-        "runtime.prepare",
-        group_id=group.group_id,
-        group_size=group.size,
-        mode=group.mode,
-        nx=group.nx,
+    prepared = _prepare_jax_batch_group(
+        group,
+        kernel_group=kernel_group,
+        mode="double",
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
-    ):
-        runtime = prepare_batch_runtime(
-            kernel_group,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            solver_options=solver_options,
-            mode="double",
-            include_extracellular=True,
-            include_area=True,
-            runtime_context=runtime_context,
-        )
-        record_kernel_bucket_metadata(group=group, kernel_group=kernel_group)
-        record_benchmark_metadata(
-            nt=runtime.grid.Nt,
-            nx=runtime.membrane.Nx,
-            dtype=str(runtime.membrane.dtype),
-        )
-    _emit_progress(progress_callback, group, "prepare", "cohort rows")
-    with benchmark_span(
-        "inputs.positions",
-        group_id=group.group_id,
-        group_size=group.size,
-        nx=group.nx,
-    ):
-        cohort = prepared_cohort_for_current_group(kernel_group)
-        record_benchmark_metadata(
-            **benchmark_array_metadata(
-                "x_positions_m",
-                cohort.x_positions_m,
-                role="positions",
-            ),
-            extracellular_stimulation_count=cohort.extracellular_stimulation_count,
-            public_group_size=int(group.size),
-            kernel_group_size=int(kernel_group.size),
-            public_nx=int(group.nx),
-            kernel_nx=int(kernel_group.nx),
-        )
+        solver_options=solver_options,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+    runtime = prepared.runtime
+    cohort = prepared.cohort
     solver_engine = _runtime_context_solver_engine(runtime_context)
     policy_block_solver = (
         None if solver_engine is None else solver_engine.double_cable_block_solver
@@ -548,8 +569,6 @@ def _run_double_cable_batch_group(
             runtime=runtime,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
-            observer_plan=observer_plan,
-            kernel_options=kernel_options,
         )
         record_extracellular_lowering_metadata(
             extracellular,

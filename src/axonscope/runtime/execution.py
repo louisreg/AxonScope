@@ -145,7 +145,6 @@ def benchmark_plan_input_lowering(
     stimulation_rows: Sequence[tuple[Any, ...]],
     kernel_options: BatchOptions,
     observers: tuple[Any, ...] | None,
-    observer_plan: bool,
 ):
     """Return runtime input-lowering formats without materializing arrays."""
 
@@ -159,7 +158,6 @@ def benchmark_plan_input_lowering(
         stimulation_rows=stimulation_rows,
         kernel_options=kernel_options,
         observers=observers,
-        observer_plan=observer_plan,
     )
 
 

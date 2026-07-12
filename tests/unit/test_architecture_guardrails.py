@@ -1810,6 +1810,27 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     assert not single.extracellular.requires_initial_previous
 
 
+def test_runtime_input_planning_is_independent_from_observer_output_plan():
+    from axonscope.runtime.input_contract import ExtracellularLoweringMode
+    from axonscope.runtime.jax.input_lowering import (
+        PlannedInputLowering,
+        can_plan_compact_double_cable_factorized_rows,
+        plan_input_lowering,
+        planned_factorized_extracellular_mode_from_rows,
+    )
+
+    assert "observer_plan" not in inspect.signature(plan_input_lowering).parameters
+    assert "observer_plan" not in inspect.signature(
+        planned_factorized_extracellular_mode_from_rows
+    ).parameters
+    assert "observer_plan" not in inspect.signature(
+        can_plan_compact_double_cable_factorized_rows
+    ).parameters
+    assert get_type_hints(PlannedInputLowering)["extracellular_mode"] == (
+        ExtracellularLoweringMode | None
+    )
+
+
 def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():
     assert (
         REPO_ROOT / "docs" / "architecture" / "p12_runtime_contract_2026_07_12.md"

@@ -7,6 +7,7 @@ formats directly.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Sequence
 
@@ -206,7 +207,6 @@ def lower_double_cable_intracellular_input(
 
 def lower_single_cable_extracellular_input(
     *,
-    group: DispatchGroup,
     cohort: PreparedCohort,
     runtime: SolverRuntime,
     tsim_ms: float,
@@ -282,8 +282,6 @@ def lower_double_cable_extracellular_input(
     runtime: SolverRuntime,
     tsim_ms: float,
     dt_ms: float,
-    observer_plan: Any | None,
-    kernel_options: BatchOptions,
 ) -> LoweredExtracellularInput:
     """Lower double-cable extracellular inputs.
 
@@ -346,7 +344,6 @@ def plan_input_lowering(
     stimulation_rows: Sequence[tuple[Any, ...]],
     kernel_options: BatchOptions,
     observers: tuple[Any, ...] | None,
-    observer_plan: bool,
 ) -> PlannedInputLowering:
     """Return the input formats that runtime lowering will select."""
 
@@ -365,6 +362,9 @@ def plan_input_lowering(
 
     stimulation_count = extracellular_stimulation_count(stimulation_rows)
     factorized_rank = factorized_drive_count_from_rows(stimulation_rows)
+    factorized_mode = planned_factorized_extracellular_mode_from_rows(
+        stimulation_rows
+    )
     if (
         group_mode == "single"
         and sparse_intracellular
@@ -374,12 +374,13 @@ def plan_input_lowering(
         extracellular_mode = ExtracellularLoweringMode.ZERO
     elif group_mode == "single" and can_factorize_footprint_rows(stimulation_rows):
         extracellular_format = "factorized_footprint"
-        extracellular_mode = None
-    elif observer_plan and can_plan_compact_double_cable_factorized_rows(
-        stimulation_rows
-    ):
+        extracellular_mode = factorized_mode
+    elif group_mode == "double" and factorized_mode in {
+        ExtracellularLoweringMode.SHARED_CURRENT,
+        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
+    }:
         extracellular_format = "factorized_footprint"
-        extracellular_mode = ExtracellularLoweringMode.SHARED_CURRENT
+        extracellular_mode = factorized_mode
     else:
         extracellular_format = "dense"
         extracellular_mode = ExtracellularLoweringMode.DENSE
@@ -458,26 +459,48 @@ def can_plan_compact_double_cable_factorized_rows(
 ) -> bool:
     """Conservatively predict the current double-cable compact factorized path."""
 
-    if not can_factorize_footprint_rows(rows):
-        return False
-    if factorized_drive_count_from_rows(rows) != 1:
-        return False
+    return planned_factorized_extracellular_mode_from_rows(rows) in {
+        ExtracellularLoweringMode.SHARED_CURRENT,
+        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
+    }
 
-    shared_stimulus_id: int | None = None
+
+def planned_factorized_extracellular_mode_from_rows(
+    rows: Sequence[tuple[Any, ...]],
+) -> ExtracellularLoweringMode | None:
+    """Predict the semantic factorized extracellular mode without arrays."""
+
+    if not can_factorize_footprint_rows(rows):
+        return None
+    if factorized_drive_count_from_rows(rows) != 1:
+        return ExtracellularLoweringMode.CURRENT_TABLE
+
+    row_stimuli: list[Any] = []
     for row in rows:
-        row_stimuli = [
+        stimuli = [
             getattr(drive, "stimulus", None)
             for stimulation in row
             for drive in tuple(getattr(stimulation, "drives", ()))
         ]
-        if len(row_stimuli) != 1 or row_stimuli[0] is None:
-            return False
-        stimulus_id = id(row_stimuli[0])
-        if shared_stimulus_id is None:
-            shared_stimulus_id = stimulus_id
-        elif stimulus_id != shared_stimulus_id:
-            return False
-    return shared_stimulus_id is not None
+        if len(stimuli) != 1 or stimuli[0] is None:
+            return ExtracellularLoweringMode.CURRENT_TABLE
+        row_stimuli.append(stimuli[0])
+    if not row_stimuli:
+        return None
+
+    first = row_stimuli[0]
+    if all(stimulus is first for stimulus in row_stimuli[1:]):
+        return ExtracellularLoweringMode.SHARED_CURRENT
+
+    scaled = [_stimulus_scaled_waveform_signature_and_scale(stimulus) for stimulus in row_stimuli]
+    if any(item is None for item in scaled):
+        return ExtracellularLoweringMode.CURRENT_TABLE
+    first_signature, first_scale = scaled[0]  # type: ignore[index]
+    if not all(item[0] == first_signature for item in scaled[1:] if item is not None):
+        return ExtracellularLoweringMode.CURRENT_TABLE
+    if all(item is not None and item[1] == first_scale for item in scaled[1:]):
+        return ExtracellularLoweringMode.SHARED_CURRENT
+    return ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
 
 
 def extracellular_stimulation_count(rows: Sequence[tuple[Any, ...]]) -> int:
@@ -526,6 +549,45 @@ def _factorized_extracellular_mode(
     return ExtracellularLoweringMode.CURRENT_TABLE
 
 
+def _stimulus_scaled_waveform_signature_and_scale(
+    stimulus: Any,
+) -> tuple[tuple[Any, ...], float] | None:
+    try:
+        t = np.asarray(stimulus.t)
+        y = np.asarray(stimulus.y, dtype=float)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if y.ndim != 1 or not np.all(np.isfinite(y)):
+        return None
+    nonzero = np.flatnonzero(np.abs(y) > 0.0)
+    if len(nonzero) == 0:
+        scale = 0.0
+        normalized = np.zeros_like(y, dtype=float)
+    else:
+        scale = float(y[int(nonzero[0])])
+        if scale == 0.0:
+            return None
+        normalized = np.asarray(y / scale, dtype=float)
+    signature = (
+        "stimulus_scaled_waveform_v1",
+        type(stimulus),
+        getattr(stimulus, "mode", None),
+        getattr(stimulus, "y_unit", None),
+        _array_content_signature(t),
+        _array_content_signature(normalized),
+    )
+    return signature, scale
+
+
+def _array_content_signature(values: np.ndarray) -> tuple[Any, ...]:
+    arr = np.ascontiguousarray(np.asarray(values))
+    return (
+        tuple(int(dim) for dim in arr.shape),
+        arr.dtype.str,
+        hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest(),
+    )
+
+
 def dense_shape_for_group(
     *,
     group: DispatchGroup,
@@ -568,6 +630,7 @@ __all__ = [
     "lower_single_cable_extracellular_input",
     "lower_single_cable_intracellular_input",
     "plan_input_lowering",
+    "planned_factorized_extracellular_mode_from_rows",
     "should_use_sparse_intracellular_batch",
     "supports_compact_double_cable_factorized",
 ]

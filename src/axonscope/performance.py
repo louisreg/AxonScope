@@ -458,7 +458,6 @@ def _estimate_dispatch_group(
             stimulation_rows=stimulation_rows,
             kernel_options=kernel_options,
             observers=observers,
-            observer_plan=observer_plan,
         )
         intracellular_format = planned.intracellular_format
         extracellular_format = planned.extracellular_format

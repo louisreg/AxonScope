@@ -331,7 +331,6 @@ def _inspect_lowering(
         stimulation_rows=cohort.stimulations,
         kernel_options=kernel_options,
         observers=observers,
-        observer_plan=observer_plan,
     )
     intracellular_format = planned.intracellular_format
     extracellular_format = planned.extracellular_format

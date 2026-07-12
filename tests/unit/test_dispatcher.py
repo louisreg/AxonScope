@@ -11,9 +11,11 @@ from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_buc
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
 from axonscope.benchmarking import benchmark_span
+from axonscope.runtime.input_contract import ExtracellularLoweringMode
 from axonscope.runtime.jax.batch_inputs import (
     materialize_factorized_extracellular_potential_batch,
 )
+from axonscope.runtime.jax.input_lowering import plan_input_lowering
 from axonscope.analytical import PointSourceElectrode
 from axonscope.runtime.jax.input_batches import (
     build_factorized_vstim_midpoint_batch,
@@ -984,6 +986,51 @@ def test_run_pool_double_cable_probe_prefers_scaled_factorized_vstim(tmp_path):
         event for event in report.events if event.name == "kernel.prepare_arrays"
     ]
     assert any(event.metadata.get("factorized_vext") is True for event in prepare_events)
+
+
+def test_double_cable_planned_input_lowering_matches_scaled_probe_runtime():
+    electrode = PointSourceElectrode(
+        x=50.0 * axs.um,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+    )
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1, compartments=11),
+        _passive_double_cable_axon(amp_nA=0.2, compartments=11),
+    ]
+    for axon, amplitude in zip(axons, (10e-6, 5e-6), strict=True):
+        axon.add_extracellular_stimulation(
+            stimulation=axs.analytical.point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
+                stimulus=Stimulus.pulse(
+                    start=0.0 * axs.ms,
+                    duration=0.05 * axs.ms,
+                    amplitude=amplitude,
+                ),
+                sigma=0.3 * axs.S_per_m,
+            )
+        )
+
+    plan = build_dispatch_plan(axons)
+    assert len(plan.groups) == 1
+    group = plan.groups[0]
+    simulations = tuple(item.simulation for item in group.items)
+
+    planned = plan_input_lowering(
+        group_mode=group.mode,
+        axons=simulations,
+        stimulation_rows=extracellular_stimulation_rows(simulations),
+        kernel_options=BatchOptions.center(),
+        observers=None,
+    )
+
+    assert planned.extracellular_format == "factorized_footprint"
+    assert planned.factorized_rank == 1
+    assert (
+        planned.extracellular_mode
+        is ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
+    )
 
 
 def test_run_pool_single_cable_observer_uses_rank_k_factorized_vstim_for_multi_drive():
