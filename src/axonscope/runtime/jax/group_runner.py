@@ -22,10 +22,10 @@ from axonscope.runtime.jax.benchmark_metadata import (
 )
 from axonscope.runtime.jax.batch_results import (
     batch_wait_target,
-    dispatch_results_from_batch,
     finalize_pending_batch_observation,
     trim_batch_kernel_result,
 )
+from axonscope.runtime.result_assembly import dispatch_results_from_batch
 from axonscope.runtime.jax.input_lowering import (
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,

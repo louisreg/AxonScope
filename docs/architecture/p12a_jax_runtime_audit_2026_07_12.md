@@ -43,7 +43,8 @@ should converge across single-cable and double-cable execution:
 - `benchmark_metadata.py`
 - `recording.py`
 - `recording_lowering.py`
-- `output_plan.py`
+- `output_contract.py` for runtime-neutral output sink labels and
+  `runtime/jax/recording_lowering.py` for JAX VmRaster-plan construction
 - `batch_results.py`
 - `observer_runtime.py`
 - `benchmark.py`

@@ -66,6 +66,9 @@ specific out of `runtime/jax/`:
 - Dead observer-output proxy helpers were removed from `runtime/jax/benchmark.py`.
   The active facade for estimate/inspection code is now `runtime.execution`,
   backed by the runtime-neutral output contract for observer-output labels.
+- Public dispatch-record assembly moved from `runtime/jax/batch_results.py` to
+  `runtime/result_assembly.py`. The JAX module now keeps only JAX kernel-output
+  synchronization, pending VmRaster finalization, and padded kernel-output trim.
 
 Validation:
 

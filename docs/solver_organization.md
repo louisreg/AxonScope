@@ -126,7 +126,7 @@ prepare_batch_runtime(...)
   -> lower_single_cable_intracellular_input(...)
   -> lower_single_cable_extracellular_input(...)
   -> SingleCableVStimBatchKernel
-  -> dispatch_results_from_batch(...)
+  -> runtime.result_assembly.dispatch_results_from_batch(...)
 ```
 
 `runtime/jax/input_lowering.py` owns the representation decision. It wraps
@@ -155,7 +155,7 @@ prepare_batch_runtime(...)
   -> lower_double_cable_intracellular_input(...)
   -> lower_double_cable_extracellular_input(...)
   -> DoubleCableBatchKernel
-  -> dispatch_results_from_batch(...)
+  -> runtime.result_assembly.dispatch_results_from_batch(...)
 ```
 
 The retained exact double-cable block solvers are backend-private labels:
@@ -232,8 +232,9 @@ while keeping row-specific spatial footprints.
 Scalar solver output is the internal `SolverOutput` payload, converted to
 `AxonSimulationResult` at the public `AxonSimulation.run()` boundary. Batch
 outputs become private dispatch row records or compact dispatch cohort records
-in `runtime/jax/batch_results.py`, then `AxonSimulationResult` at the same
-public boundary.
+in `runtime/result_assembly.py`, then `AxonSimulationResult` at the same public
+boundary. JAX-specific batch result helpers stay in `runtime/jax/batch_results.py`
+for device wait, pending VmRaster finalization, and padded kernel-output trim.
 
 ## Solver Options
 

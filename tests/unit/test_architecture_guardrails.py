@@ -1445,6 +1445,7 @@ def test_group_runner_routes_batch_result_assembly_through_result_module():
         "_posthoc_observations_for_row",
     }
 
+    assert "axonscope.runtime.result_assembly" in text
     assert "axonscope.runtime.jax.batch_results" in text
     missing_boundary = [
         term for term in ("dispatch_results_from_batch", "trim_batch_kernel_result")
@@ -1453,6 +1454,21 @@ def test_group_runner_routes_batch_result_assembly_through_result_module():
     assert missing_boundary == []
     offenders = sorted(term for term in forbidden_terms if term in text)
     assert offenders == []
+
+    jax_results_text = (SRC_ROOT / "runtime" / "jax" / "batch_results.py").read_text(
+        encoding="utf-8"
+    )
+    generic_result_terms = {
+        "DispatchCohortRecord",
+        "DispatchRowRecord",
+        "SolverOutput",
+        "dispatch_results_from_batch",
+        "_posthoc_observations_for_row",
+    }
+    generic_offenders = sorted(
+        term for term in generic_result_terms if term in jax_results_text
+    )
+    assert generic_offenders == []
 
 
 def test_group_runner_routes_shape_bucketing_through_shape_module():
@@ -2025,6 +2041,7 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "SingleCableVStimBatchKernel",
         "DoubleCableBatchKernel",
         "build_vm_raster_plan",
+        "runtime/result_assembly.py",
         "runtime/jax/recording_lowering.py",
         "runtime/jax/batch_results.py",
         "runtime/jax/runtime_preparation.py",
