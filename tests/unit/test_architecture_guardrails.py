@@ -1857,11 +1857,13 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
         dense_nbytes_for_shape,
         dense_shape_for_group,
     )
+    from axonscope.runtime.input_planning import (
+        can_plan_compact_double_cable_factorized_rows,
+        planned_factorized_extracellular_mode_from_rows,
+    )
     from axonscope.runtime.jax.input_lowering import (
         PlannedInputLowering,
-        can_plan_compact_double_cable_factorized_rows,
         plan_input_lowering,
-        planned_factorized_extracellular_mode_from_rows,
     )
 
     assert "observer_plan" not in inspect.signature(plan_input_lowering).parameters
@@ -1884,6 +1886,25 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     runtime = type("Runtime", (), {"grid": type("Grid", (), {"Nt": 11})()})()
     assert dense_shape_for_group(group=group, runtime=runtime) == (3, 11, 7)
     assert dense_nbytes_for_shape((3, 11, 7), dtype=np.dtype("float32")) == 924
+
+    input_lowering_tree = ast.parse(
+        (SRC_ROOT / "runtime" / "jax" / "input_lowering.py").read_text()
+    )
+    moved_planning_defs = {
+        "array_content_signature",
+        "can_factorize_footprint_rows",
+        "can_plan_compact_double_cable_factorized_rows",
+        "extracellular_stimulation_count",
+        "factorized_drive_count_from_rows",
+        "planned_factorized_extracellular_mode_from_rows",
+        "stimulus_scaled_waveform_signature_and_scale",
+    }
+    offenders = sorted(
+        node.name
+        for node in ast.walk(input_lowering_tree)
+        if isinstance(node, ast.FunctionDef) and node.name in moved_planning_defs
+    )
+    assert offenders == []
 
 
 def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():

@@ -73,6 +73,10 @@ specific out of `runtime/jax/`:
   single-cable and double-cable input lowering remain cable-specific helpers,
   while shared progress, memory-estimate metadata, kernel compile progress, and
   retained Vm output metadata go through common helpers.
+- Prepared-row input planning moved to `runtime/input_planning.py`: sampled
+  footprint eligibility, factorized drive counts, planned extracellular mode,
+  and scaled-shared-waveform signatures are now runtime-neutral. JAX still owns
+  the actual materialized input payloads and cache behavior.
 
 Validation:
 

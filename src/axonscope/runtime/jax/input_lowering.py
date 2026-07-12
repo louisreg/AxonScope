@@ -7,11 +7,8 @@ formats directly.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Sequence
-
-import numpy as np
 
 from axonscope.runtime.input_contract import (
     ExtracellularInputFormat,
@@ -21,6 +18,7 @@ from axonscope.runtime.input_contract import (
     IntracellularLoweringMode,
     RuntimeInputContract,
 )
+import axonscope.runtime.input_planning as input_planning
 
 
 if TYPE_CHECKING:
@@ -351,9 +349,13 @@ def plan_input_lowering(
     else:
         intracellular_format = "zero_no_intracellular_context"
 
-    stimulation_count = extracellular_stimulation_count(stimulation_rows)
-    factorized_rank = factorized_drive_count_from_rows(stimulation_rows)
-    factorized_mode = planned_factorized_extracellular_mode_from_rows(
+    stimulation_count = input_planning.extracellular_stimulation_count(
+        stimulation_rows
+    )
+    factorized_rank = input_planning.factorized_drive_count_from_rows(
+        stimulation_rows
+    )
+    factorized_mode = input_planning.planned_factorized_extracellular_mode_from_rows(
         stimulation_rows
     )
     if (
@@ -363,7 +365,9 @@ def plan_input_lowering(
     ):
         extracellular_format: ExtracellularInputFormat = "zero_no_extracellular_stimulation"
         extracellular_mode = ExtracellularLoweringMode.ZERO
-    elif group_mode == "single" and can_factorize_footprint_rows(stimulation_rows):
+    elif group_mode == "single" and input_planning.can_factorize_footprint_rows(
+        stimulation_rows
+    ):
         extracellular_format = "factorized_footprint"
         extracellular_mode = factorized_mode
     elif group_mode == "double" and factorized_mode in {
@@ -413,93 +417,6 @@ def has_intracellular_contexts(axons: Sequence[AxonInstance]) -> bool:
     return any(getattr(axon, "intracellular_contexts", ()) for axon in axons)
 
 
-def can_factorize_footprint_rows(
-    rows: Sequence[tuple[Any, ...]],
-) -> bool:
-    """Return whether rows use sampled footprint/drive stimulation objects."""
-
-    if not rows or not any(rows):
-        return False
-    for row in rows:
-        for stimulation in row:
-            drives = tuple(getattr(stimulation, "drives", ()))
-            if not drives:
-                return False
-            for drive in drives:
-                if getattr(drive, "stimulus", None) is None:
-                    return False
-                if getattr(drive, "footprint", None) is None:
-                    return False
-    return True
-
-
-def factorized_drive_count_from_rows(rows: Sequence[tuple[Any, ...]]) -> int:
-    """Return the maximum factorized drive count per row."""
-
-    max_count = 1
-    for row in rows:
-        row_count = 0
-        for stimulation in row:
-            row_count += len(tuple(getattr(stimulation, "drives", ())))
-        max_count = max(max_count, row_count)
-    return int(max_count)
-
-
-def can_plan_compact_double_cable_factorized_rows(
-    rows: Sequence[tuple[Any, ...]],
-) -> bool:
-    """Conservatively predict the current double-cable compact factorized path."""
-
-    return planned_factorized_extracellular_mode_from_rows(rows) in {
-        ExtracellularLoweringMode.SHARED_CURRENT,
-        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
-    }
-
-
-def planned_factorized_extracellular_mode_from_rows(
-    rows: Sequence[tuple[Any, ...]],
-) -> ExtracellularLoweringMode | None:
-    """Predict the semantic factorized extracellular mode without arrays."""
-
-    if not can_factorize_footprint_rows(rows):
-        return None
-    if factorized_drive_count_from_rows(rows) != 1:
-        return ExtracellularLoweringMode.CURRENT_TABLE
-
-    row_stimuli: list[Any] = []
-    for row in rows:
-        stimuli = [
-            getattr(drive, "stimulus", None)
-            for stimulation in row
-            for drive in tuple(getattr(stimulation, "drives", ()))
-        ]
-        if len(stimuli) != 1 or stimuli[0] is None:
-            return ExtracellularLoweringMode.CURRENT_TABLE
-        row_stimuli.append(stimuli[0])
-    if not row_stimuli:
-        return None
-
-    first = row_stimuli[0]
-    if all(stimulus is first for stimulus in row_stimuli[1:]):
-        return ExtracellularLoweringMode.SHARED_CURRENT
-
-    scaled = [_stimulus_scaled_waveform_signature_and_scale(stimulus) for stimulus in row_stimuli]
-    if any(item is None for item in scaled):
-        return ExtracellularLoweringMode.CURRENT_TABLE
-    first_signature, first_scale = scaled[0]  # type: ignore[index]
-    if not all(item[0] == first_signature for item in scaled[1:] if item is not None):
-        return ExtracellularLoweringMode.CURRENT_TABLE
-    if all(item is not None and item[1] == first_scale for item in scaled[1:]):
-        return ExtracellularLoweringMode.SHARED_CURRENT
-    return ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
-
-
-def extracellular_stimulation_count(rows: Sequence[tuple[Any, ...]]) -> int:
-    """Return the number of attached extracellular stimulation objects."""
-
-    return sum(len(tuple(row)) for row in rows)
-
-
 def supports_compact_double_cable_factorized(
     factorized: FactorizedExtracellularPotentialBatch,
 ) -> bool:
@@ -540,45 +457,6 @@ def _factorized_extracellular_mode(
     return ExtracellularLoweringMode.CURRENT_TABLE
 
 
-def _stimulus_scaled_waveform_signature_and_scale(
-    stimulus: Any,
-) -> tuple[tuple[Any, ...], float] | None:
-    try:
-        t = np.asarray(stimulus.t)
-        y = np.asarray(stimulus.y, dtype=float)
-    except (AttributeError, TypeError, ValueError):
-        return None
-    if y.ndim != 1 or not np.all(np.isfinite(y)):
-        return None
-    nonzero = np.flatnonzero(np.abs(y) > 0.0)
-    if len(nonzero) == 0:
-        scale = 0.0
-        normalized = np.zeros_like(y, dtype=float)
-    else:
-        scale = float(y[int(nonzero[0])])
-        if scale == 0.0:
-            return None
-        normalized = np.asarray(y / scale, dtype=float)
-    signature = (
-        "stimulus_scaled_waveform_v1",
-        type(stimulus),
-        getattr(stimulus, "mode", None),
-        getattr(stimulus, "y_unit", None),
-        _array_content_signature(t),
-        _array_content_signature(normalized),
-    )
-    return signature, scale
-
-
-def _array_content_signature(values: np.ndarray) -> tuple[Any, ...]:
-    arr = np.ascontiguousarray(np.asarray(values))
-    return (
-        tuple(int(dim) for dim in arr.shape),
-        arr.dtype.str,
-        hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest(),
-    )
-
-
 __all__ = [
     "ExtracellularInputFormat",
     "IntracellularInputFormat",
@@ -589,17 +467,12 @@ __all__ = [
     "LoweredExtracellularInput",
     "LoweredIntracellularInput",
     "PlannedInputLowering",
-    "can_plan_compact_double_cable_factorized_rows",
-    "can_factorize_footprint_rows",
-    "extracellular_stimulation_count",
-    "factorized_drive_count_from_rows",
     "has_intracellular_contexts",
     "lower_double_cable_extracellular_input",
     "lower_double_cable_intracellular_input",
     "lower_single_cable_extracellular_input",
     "lower_single_cable_intracellular_input",
     "plan_input_lowering",
-    "planned_factorized_extracellular_mode_from_rows",
     "should_use_sparse_intracellular_batch",
     "supports_compact_double_cable_factorized",
 ]

@@ -26,6 +26,9 @@ from axonscope.stimulation import (
     IntracellularCurrentClamp,
     Stimulus,
 )
+from axonscope.runtime.input_planning import (
+    stimulus_scaled_waveform_signature_and_scale,
+)
 from axonscope.runtime.jax.stimulation_runtime import (
     compile_intracellular_contexts,
     compile_stimulus,
@@ -392,27 +395,13 @@ def _stimulus_scaled_waveform_signature_and_scale(
             _STIMULUS_SCALED_WAVEFORM_CACHE.move_to_end(cache_key)
             return cached.signature, cached.scale
         _STIMULUS_SCALED_WAVEFORM_CACHE.pop(cache_key, None)
-    if y.ndim != 1 or not np.all(np.isfinite(y)):
-        return None
-    nonzero = np.flatnonzero(np.abs(y) > 0.0)
-    if len(nonzero) == 0:
-        scale = 0.0
-        normalized = np.zeros_like(y, dtype=float)
-    else:
-        scale = float(y[int(nonzero[0])])
-        if scale == 0.0:
-            return None
-        normalized = np.asarray(y / scale, dtype=float)
-    normalized = np.ascontiguousarray(normalized)
-    normalized.setflags(write=False)
-    signature = (
-        "stimulus_scaled_waveform_v1",
-        type(stimulus),
-        getattr(stimulus, "mode", None),
-        getattr(stimulus, "y_unit", None),
-        _array_content_key(t),
-        _array_content_key(normalized),
+    computed = stimulus_scaled_waveform_signature_and_scale(
+        stimulus,
+        array_signature=_array_content_key,
     )
+    if computed is None:
+        return None
+    signature, scale = computed
     if cache_key is not None:
         _STIMULUS_SCALED_WAVEFORM_CACHE[cache_key] = (
             _ScaledWaveformSignatureCacheEntry(

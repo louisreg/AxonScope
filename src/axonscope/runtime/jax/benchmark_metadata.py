@@ -10,10 +10,10 @@ from axonscope.runtime.input_contract import (
     dense_nbytes_for_shape,
     dense_shape_for_group,
 )
+from axonscope.runtime.input_planning import factorized_drive_count_from_rows
 from axonscope.runtime.jax.input_lowering import (
     LoweredExtracellularInput,
     LoweredIntracellularInput,
-    factorized_drive_count_from_rows,
 )
 from axonscope.runtime.jax.runtime import SolverRuntime
 from axonscope.benchmarking import (
