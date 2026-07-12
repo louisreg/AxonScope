@@ -163,6 +163,40 @@ The CPU sanity gate shows no obvious regression. The double-cable path is
 essentially unchanged, and the shared preparation helper preserved the original
 benchmark span names.
 
+## Recording-Contract CPU Gate Result
+
+After moving runtime-neutral recording conversion, padded recording lowering,
+row-aware retained Vm indices, and cohort original-index tables to
+`runtime/recording.py`, the local CPU sanity gate was repeated on 2026-07-12.
+
+Artifacts:
+
+- `benchmark/results/p12b_runtime_recording_contract_single_cpu`
+- `benchmark/results/p12b_runtime_recording_contract_double_cpu`
+
+Comparison against the previous P12B CPU gate:
+
+| Cable | Stage | Previous total | Recording-contract total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 3184.5 ms | 3293.4 ms | +3.4% |
+| single-cable | `runtime.prepare` | 1514.1 ms | 1557.2 ms | +2.9% |
+| single-cable | `inputs.extracellular` | 24.2 ms | 24.5 ms | +1.2% |
+| single-cable | `observer.plan` | 31.5 ms | 33.0 ms | +4.9% |
+| single-cable | `kernel.enqueue` | 1264.1 ms | 1315.1 ms | +4.0% |
+| single-cable | `kernel.wait` | 249.1 ms | 257.3 ms | +3.3% |
+| single-cable | `kernel.finalize_observer` | 1.4 ms | 1.4 ms | +0.0% |
+| double-cable | `curve.simulate` | 3581.1 ms | 3623.1 ms | +1.2% |
+| double-cable | `runtime.prepare` | 1851.6 ms | 1858.6 ms | +0.4% |
+| double-cable | `inputs.extracellular` | 26.3 ms | 26.9 ms | +2.1% |
+| double-cable | `observer.plan` | 20.0 ms | 20.3 ms | +1.4% |
+| double-cable | `kernel.enqueue` | 1277.2 ms | 1299.3 ms | +1.7% |
+| double-cable | `kernel.wait` | 321.1 ms | 329.9 ms | +2.8% |
+| double-cable | `kernel.finalize_observer` | 1.5 ms | 1.5 ms | +0.2% |
+
+This is a smoke gate, not a policy benchmark. The moved recording-contract code
+does not show a targeted observer/finalization regression, and the total deltas
+are within the expected noise range for these small cold-heavy CPU runs.
+
 ## GPU Smoke Gate Result
 
 Because the shared preparation helper also touches the GPU execution path, two
