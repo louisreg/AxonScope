@@ -154,13 +154,41 @@ These runs are not for choosing policy. They only check that P12A host-side
 cleanup did not obviously regress the P11-sensitive single/double observer-only
 paths.
 
+## CPU Gate Result
+
+The local CPU gate was run on 2026-07-12 at commit
+`5266e8559018e43126ce2a360e39ce5d703b2c04` with `--memory-trace rss`,
+`repeats=2`, `warmups=1`, `Naxons=64`, `Nx=89`, `fp32`, and
+`observer_only` recording.
+
+Artifacts:
+
+- `benchmark/results/p12a_runtime_contract_single_cpu`
+- `benchmark/results/p12a_runtime_contract_double_cpu`
+
+Summary:
+
+| Cable | curve.simulate total | runtime.prepare total | kernel.enqueue total | kernel.wait total | inputs.extracellular total | finalize_observer total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| single-cable | 4115.5 ms | 2367.4 ms | 1317.2 ms | 254.5 ms | 23.5 ms | 1.4 ms |
+| double-cable | 3560.6 ms | 1831.9 ms | 1278.4 ms | 321.9 ms | 26.3 ms | 1.7 ms |
+
+This is a sanity gate, not a performance-policy benchmark. On these small CPU
+runs, wall time is dominated by cold preparation/JIT work. The shared
+non-solver costs targeted by P12A are small: extracellular lowering is
+approximately 23-26 ms total, observer finalization is approximately 1-2 ms
+total, and public result conversion is approximately 1 ms total for each run.
+The next gate is the matching GPU smoke before claiming that P12A has no
+performance regression on the P11-sensitive GPU paths.
+
 ## Remaining Before Benchmark Claim
 
 - Add architecture guardrails for the runtime-context name and runtime input
   contract. [done]
 - Run fast unit coverage for dispatcher, batch kernels, inspection, and
   performance views. [done]
-- Run the benchmark gate above before claiming no performance loss.
+- Run the local CPU benchmark gate above. [done]
+- Run the matching GPU smoke gate before claiming no performance loss on GPU.
 
 ## Do Not Do In P12A
 
