@@ -1095,8 +1095,30 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         assert (SRC_ROOT / "runtime" / "jax" / filename).is_file()
     assert not (SRC_ROOT / "runtime" / "jax" / "experimental.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "observables.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "membrane_backend.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "membrane_layout.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "membrane_program.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "membrane_stacking.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "model_ir_lowering.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "rate_tables.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "scalar_runner.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "reference_solvers.py").exists()
     assert not (SRC_ROOT / "runtime" / "jax" / "large_population_solver.py").exists()
+
+    jax_membrane_dir = SRC_ROOT / "runtime" / "jax" / "membranes"
+    jax_execution_dir = SRC_ROOT / "runtime" / "jax" / "execution"
+    for filename in {
+        "__init__.py",
+        "backend.py",
+        "layout.py",
+        "model_ir_lowering.py",
+        "program.py",
+        "rate_tables.py",
+        "stacking.py",
+    }:
+        assert (jax_membrane_dir / filename).is_file()
+    assert (jax_execution_dir / "__init__.py").is_file()
+    assert (jax_execution_dir / "scalar_runner.py").is_file()
 
     jax_runtime_text = (SRC_ROOT / "runtime" / "jax" / "runtime.py").read_text(
         encoding="utf-8"
@@ -1104,18 +1126,18 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     jax_kernels_text = (SRC_ROOT / "runtime" / "jax" / "kernels.py").read_text(
         encoding="utf-8"
     )
-    jax_membrane_program_text = (
-        SRC_ROOT / "runtime" / "jax" / "membrane_program.py"
-    ).read_text(encoding="utf-8")
-    jax_membrane_backend_text = (
-        SRC_ROOT / "runtime" / "jax" / "membrane_backend.py"
-    ).read_text(encoding="utf-8")
+    jax_membrane_program_text = (jax_membrane_dir / "program.py").read_text(
+        encoding="utf-8"
+    )
+    jax_membrane_backend_text = (jax_membrane_dir / "backend.py").read_text(
+        encoding="utf-8"
+    )
     jax_model_ir_lowering_text = (
-        SRC_ROOT / "runtime" / "jax" / "model_ir_lowering.py"
+        jax_membrane_dir / "model_ir_lowering.py"
     ).read_text(encoding="utf-8")
-    jax_rate_tables_text = (
-        SRC_ROOT / "runtime" / "jax" / "rate_tables.py"
-    ).read_text(encoding="utf-8")
+    jax_rate_tables_text = (jax_membrane_dir / "rate_tables.py").read_text(
+        encoding="utf-8"
+    )
     assert "def membrane_observable_names" in jax_runtime_text
     assert "def observable_matrices" in jax_runtime_text
     assert "def package_recordings" in jax_runtime_text
@@ -1211,7 +1233,9 @@ def test_jax_solver_runtime_has_no_model_family_specific_fast_paths():
 
 
 def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_names():
-    text = (SRC_ROOT / "runtime" / "jax" / "membrane_stacking.py").read_text(
+    text = (
+        SRC_ROOT / "runtime" / "jax" / "membranes" / "stacking.py"
+    ).read_text(
         encoding="utf-8"
     )
     forbidden = {
@@ -1235,9 +1259,9 @@ def test_jax_runtime_preparation_does_not_own_membrane_stacking_details():
     preparation_text = (
         SRC_ROOT / "runtime" / "jax" / "runtime_preparation.py"
     ).read_text(encoding="utf-8")
-    stacking_text = (SRC_ROOT / "runtime" / "jax" / "membrane_stacking.py").read_text(
-        encoding="utf-8"
-    )
+    stacking_text = (
+        SRC_ROOT / "runtime" / "jax" / "membranes" / "stacking.py"
+    ).read_text(encoding="utf-8")
 
     forbidden_preparation_terms = {
         "class GatedLeakMembraneStack",
@@ -1272,9 +1296,11 @@ def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
     )
     runtime_modules = {
         "runtime.py",
-        "membrane_backend.py",
-        "membrane_layout.py",
-        "membrane_program.py",
+    }
+    membrane_modules = {
+        "backend.py",
+        "layout.py",
+        "program.py",
     }
 
     assert not adapter_path.exists()
@@ -1285,9 +1311,14 @@ def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
     for filename in runtime_modules:
         text = (SRC_ROOT / "runtime" / "jax" / filename).read_text(encoding="utf-8")
         assert "CompiledMembrane" not in text
-    backend_text = (SRC_ROOT / "runtime" / "jax" / "membrane_backend.py").read_text(
-        encoding="utf-8"
-    )
+    for filename in membrane_modules:
+        text = (
+            SRC_ROOT / "runtime" / "jax" / "membranes" / filename
+        ).read_text(encoding="utf-8")
+        assert "CompiledMembrane" not in text
+    backend_text = (
+        SRC_ROOT / "runtime" / "jax" / "membranes" / "backend.py"
+    ).read_text(encoding="utf-8")
     assert "class Gating" not in backend_text
     assert "GFunc" not in backend_text
     assert "RateFunc" not in backend_text
@@ -2313,6 +2344,9 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "DoubleCableBatchKernel",
         "build_vm_raster_plan",
         "runtime/result_assembly.py",
+        "runtime/jax/execution/scalar_runner.py",
+        "runtime/jax/membranes/",
+        "runtime/jax/membranes/stacking.py",
         "runtime/jax/recording_lowering.py",
         "runtime/jax/batch_results.py",
         "runtime/jax/runtime_preparation.py",

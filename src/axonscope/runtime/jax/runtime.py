@@ -10,17 +10,17 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
-from axonscope.runtime.jax.rate_tables import enable_rate_tables
-from axonscope.runtime.jax.membrane_backend import (
+from axonscope.runtime.jax.membranes.rate_tables import enable_rate_tables
+from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     MembraneBackend,
     UniformMembraneBackend,
     membrane_static_signature,
 )
-from axonscope.runtime.jax.membrane_layout import (
+from axonscope.runtime.jax.membranes.layout import (
     CompartmentMembraneLayout,
 )
-from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
+from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.membranes.model import ensure_membrane_model
 from axonscope.membranes.compiler import lower_membrane_model_with_sources
 from axonscope.model_ir.source import SourceModelCompileResult

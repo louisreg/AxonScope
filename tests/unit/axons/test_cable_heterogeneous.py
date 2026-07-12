@@ -7,7 +7,7 @@ from axonscope import AxonInstance
 from axonscope.axons.myelinated import MRG
 from axonscope.axons import Axon, Layout, LayoutElement, Section
 from axonscope.axons.unmyelinated import HodgkinHuxley
-from axonscope.runtime.jax.membrane_backend import (
+from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )

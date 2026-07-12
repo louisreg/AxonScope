@@ -12,11 +12,11 @@ import pytest
 import axonscope as axs
 from axonscope import membranes
 from axonscope.benchmarking import benchmark_span
-from axonscope.runtime.jax.membrane_backend import (
+from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )
-from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
+from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.jax.runtime import compile_membrane_model
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
 from axonscope.membranes.model import MembraneModel

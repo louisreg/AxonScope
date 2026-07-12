@@ -36,7 +36,7 @@ from axonscope.runtime.jax.runtime import (
     prepare_solver_runtime,
     prepare_stimulation_runtime,
 )
-from axonscope.runtime.jax.membrane_stacking import (
+from axonscope.runtime.jax.membranes.stacking import (
     try_stack_gated_leak_membrane_from_group,
     try_stack_gated_leak_membrane_from_runtime_rows,
 )
@@ -46,7 +46,7 @@ from axonscope.runtime.jax.runtime_caches import (
     store_batch_runtime,
     store_batch_static_runtime,
 )
-from axonscope.runtime.jax.membrane_backend import (
+from axonscope.runtime.jax.membranes.backend import (
     RowIndexedMembraneBackend,
 )
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem

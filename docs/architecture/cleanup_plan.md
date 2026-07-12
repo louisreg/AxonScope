@@ -42,7 +42,7 @@ scalar: CrankNicholson.solve(...)
 pool:   dispatcher.execution.run_pool(...)
         |
         v
-runtime/jax/scalar_runner.py
+runtime/jax/execution/scalar_runner.py
 runtime/jax/group_runner.py
         |
         v

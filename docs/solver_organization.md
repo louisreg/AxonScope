@@ -19,7 +19,7 @@ Solver-facing contracts:
 - `base.py`: abstract solver class.
 - `axon_runtime.py`: runtime-facing descriptive axon adapter.
 - `crank_nicholson.py`: public optimized solver class; delegates concrete
-  execution to `runtime/jax/scalar_runner.py`.
+  execution to `runtime/jax/execution/scalar_runner.py`.
 - `options.py`: solver-owned execution knobs. `SolverOptions` controls runtime
   preparation, currently rate tables. `BatchOptions` and `BatchRecording`
   control batch-kernel memory, retained Vm columns, and optional time chunking.
@@ -27,15 +27,18 @@ Solver-facing contracts:
 
 JAX runtime implementation:
 
-- `runtime/jax/runtime.py`: bridge from descriptive axons/membranes to
-  backend arrays:
-  membrane backend, cable coefficients, stimulation callables or precomputed
-  samples, extracellular absolute arrays, and time grid.
+- `runtime/jax/runtime.py`: JAX scalar runtime containers and bridge from
+  descriptive axons/membranes to backend arrays: membrane backend, cable
+  coefficients, stimulation callables or precomputed samples, extracellular
+  absolute arrays, time grid, and scalar-runtime observable packaging helpers.
+- `runtime/jax/membranes/`: JAX membrane compilation and execution helpers:
+  Model IR lowering, generated-program facade, membrane backends, heterogeneous
+  layouts, rate-table materialization, and gated/leak row stacking.
+- `runtime/jax/execution/scalar_runner.py`: scalar fallback execution runner
+  used by the public `CrankNicholson` solver for unsupported batch payloads.
 - `runtime/jax/common.py`: numerical helpers shared by kernels, such as
   tridiagonal coefficients, diffusion operators, and small reference linear
   solvers.
-- `runtime/jax/runtime.py`: JAX scalar runtime containers and scalar-runtime
-  observable packaging helpers used by the kernels.
 - `runtime/jax/kernels.py`: scalar single-axon kernels. These consume
   `SolverRuntime` and return raw `KernelResult` values.
 - `runtime/jax/batch_kernels.py`: batch kernels for homogeneous groups. These
@@ -196,7 +199,7 @@ For parameter-batched groups,
 the representative fields that survive batching. It must not build a full
 representative cable/extracellular runtime just to replace it immediately with
 stacked row arrays.
-`runtime/jax/membrane_stacking.py` owns the JAX-specific gated/leak membrane
+`runtime/jax/membranes/stacking.py` owns the JAX-specific gated/leak membrane
 row encoding used while stacking heterogeneous membrane layouts. This is a
 backend preparation optimization and must remain independent of a particular
 membrane-model family.

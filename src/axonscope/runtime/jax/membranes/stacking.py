@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
-from axonscope.runtime.jax.membrane_backend import (
+from axonscope.runtime.jax.membranes.backend import (
     GatedLeakStackMembraneBackend,
     HeterogeneousMembraneBackend,
     membrane_backend_model,

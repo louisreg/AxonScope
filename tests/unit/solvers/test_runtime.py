@@ -21,7 +21,7 @@ from axonscope.runtime.jax.runtime import (
     prepare_simulation_grid,
     prepare_solver_runtime,
 )
-from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
+from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.solvers.axon_runtime import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus

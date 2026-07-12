@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import axonscope as axs
 from axonscope.axons.unmyelinated import Schild94, Schild97, Tigerholm
-from axonscope.runtime.jax.membrane_program import is_jax_membrane_program_kind
+from axonscope.runtime.jax.membranes.program import is_jax_membrane_program_kind
 from axonscope.runtime.jax.runtime import compile_membrane_model
 
 

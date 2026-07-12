@@ -195,12 +195,12 @@ The membrane implementation is now deliberately split by responsibility:
   execution contract from `ModelIR`: names, raw/grouped current and
   conductance columns, auxiliary state names, diagnostics, final gate update
   policy, and stable hashes;
-- `axonscope.runtime.jax.membrane_program.JaxMembraneProgram` is the
+- `axonscope.runtime.jax.membranes.program.JaxMembraneProgram` is the
   executable contract for Model IR membranes. It owns JAX lowering, rate-table
   policy, traces, state updates, diagnostics, and static signatures;
 - `UniformMembraneBackend`, `HeterogeneousMembraneBackend`, and the structural
   `GatedLeakStackMembraneBackend` consume `JaxMembraneProgram` directly;
-- `axonscope.runtime.jax.model_ir_lowering` lowers Model IR expressions and
+- `axonscope.runtime.jax.membranes.model_ir_lowering` lowers Model IR expressions and
   step programs to JAX callables;
 - `axonscope.runtime.jax.runtime` is intentionally model-family agnostic:
   it no longer carries Rattay/AxNode/passive membrane equations or model-name

@@ -119,7 +119,7 @@ specific out of `runtime/jax/`:
   membrane/cable/extracellular materialization. `runtime/jax/runtime_caches.py`
   keeps only JAX runtime/forcing caches.
 - JAX gated/leak membrane row stacking moved from
-  `runtime/jax/runtime_preparation.py` to `runtime/jax/membrane_stacking.py`.
+  `runtime/jax/runtime_preparation.py` to `runtime/jax/membranes/stacking.py`.
   `runtime_preparation.py` now orchestrates membrane stacking, while the
   capability-based gated/leak encoders and row caches live with the JAX
   membrane-stacking implementation. The unused `_encode_gated_leak_members`
@@ -136,6 +136,15 @@ specific out of `runtime/jax/`:
   `JaxMembraneProgram.disable_rate_table`. The remaining `vulture` production
   warnings are contract or benchmark-analysis surfaces rather than deletion
   candidates for this pass.
+- JAX membrane compilation and membrane-backend helpers were grouped under
+  `runtime/jax/membranes/`: `backend.py`, `layout.py`,
+  `model_ir_lowering.py`, `program.py`, `rate_tables.py`, and `stacking.py`.
+  `rate_tables.py` is still used through `SolverOptions.rate_table_config`, so
+  it was kept as a membrane-program implementation detail rather than deleted.
+- `runtime/jax/scalar_runner.py` moved to
+  `runtime/jax/execution/scalar_runner.py`. It remains useful because the
+  public `CrankNicholson` solver delegates unsupported scalar/fallback payloads
+  there.
 
 Validation:
 
@@ -162,6 +171,9 @@ python -m pytest -q tests/unit/test_architecture_guardrails.py --tb=short
 python -m pytest -q tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_runtime.py --tb=short
 python -m pytest -q tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
 python -m vulture src/axonscope/runtime/jax src/axonscope/runtime tests --min-confidence 60
+git diff --check
+python -m compileall -q src/axonscope tests/unit
+python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/model_ir/test_model_ir.py tests/unit/model_ir/test_public_membrane_compilation.py tests/unit/solvers/test_runtime.py tests/unit/axons/test_cable_heterogeneous.py tests/unit/solvers/test_cranknicholson.py --tb=short
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -220,6 +232,16 @@ contract. Test/archive warnings are outside the runtime cleanup scope.
 `85/85`, Model IR plus runtime tests passed `81/81`, common/batch/extracellular
 solver tests passed `76/76`, and dispatcher plus heterogeneous-cable tests
 passed `62/62`.
+
+For the JAX subpackage layout pass, `compileall` passed after the move. The
+JAX root now has 22 direct Python files; membrane compilation/lowering lives in
+`runtime/jax/membranes/`, and scalar fallback execution lives in
+`runtime/jax/execution/scalar_runner.py`. `git diff --check` passed,
+architecture guardrails passed `85/85`, Model IR/public compilation/runtime
+tests passed `83/83`, heterogeneous-cable plus Crank-Nicholson tests passed
+`14/14`, and dispatcher/batch/extracellular tests passed `104/104`. `vulture`
+reported only the same retained benchmark/contract/test-archive warnings as
+before this layout pass.
 
 ## Benchmark Gate
 

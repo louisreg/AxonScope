@@ -8,7 +8,7 @@ import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.input_batches as input_batches
 import axonscope.runtime.group_preparation as group_preparation
-import axonscope.runtime.jax.membrane_stacking as membrane_stacking
+import axonscope.runtime.jax.membranes.stacking as membrane_stacking
 from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
@@ -491,7 +491,7 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
 
 
 def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monkeypatch):
-    from axonscope.runtime.jax.membrane_program import JaxMembraneProgram
+    from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 
     monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [

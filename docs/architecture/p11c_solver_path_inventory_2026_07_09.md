@@ -94,8 +94,8 @@ implementation label as a CLI choice.
 
 | Route | Main code path | Solver family | Status |
 | --- | --- | --- | --- |
-| Scalar single-cable | `runtime/jax/scalar_runner.py` -> `runtime/jax/kernels.py` | JAX `lax.linalg.tridiagonal_solve` | production |
-| Scalar double-cable | `runtime/jax/scalar_runner.py` -> `runtime/jax/kernels.py` | specialized block Thomas | production |
+| Scalar single-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | JAX `lax.linalg.tridiagonal_solve` | production |
+| Scalar double-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | specialized block Thomas | production |
 | Batch single-cable | `runtime/jax/group_runner.py` -> `runtime/jax/batch_kernels.py` | JAX `lax.linalg.tridiagonal_solve` over batch rows | production |
 | Batch double-cable, dense/probe Vm | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_array_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
 | Batch double-cable, observer-only VmRaster | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_observer_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
@@ -340,7 +340,7 @@ Do not make it public/default yet.
 src/axonscope/simulation.py
 src/axonscope/runtime/execution.py
 src/axonscope/runtime/jax/group_runner.py
-src/axonscope/runtime/jax/scalar_runner.py
+src/axonscope/runtime/jax/execution/scalar_runner.py
 src/axonscope/runtime/jax/kernels.py
 src/axonscope/runtime/jax/batch_kernels.py
 ```

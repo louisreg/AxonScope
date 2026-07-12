@@ -8,8 +8,8 @@ membrane cleanup. It is a working architecture note, not a user tutorial.
 - Public membrane authoring in `src/axonscope/membranes/`.
 - Built-in source-backed models in `src/axonscope/membranes/models/`.
 - Internal compiler/runtime semantics in `src/axonscope/model_ir/`.
-- JAX model lowering in `src/axonscope/runtime/jax/model_ir_lowering.py`.
-- JAX membrane execution facade in `src/axonscope/runtime/jax/membrane_program.py`.
+- JAX model lowering in `src/axonscope/runtime/jax/membranes/model_ir_lowering.py`.
+- JAX membrane execution facade in `src/axonscope/runtime/jax/membranes/program.py`.
 - Generated NumPy/JAX model-step cache code in `src/axonscope/model_ir/source.py`.
 - Custom membrane example and model-codegen benchmark surface at a high level.
 
