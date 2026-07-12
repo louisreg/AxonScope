@@ -205,6 +205,39 @@ This is a smoke gate, not a policy benchmark. The moved recording-contract code
 does not show a targeted observer/finalization regression, and the total deltas
 are within the expected noise range for these small cold-heavy CPU runs.
 
+## Host-Preparation CPU Gate Result
+
+After moving runtime-neutral host-array preparation to
+`runtime/host_preparation.py`, the local CPU sanity gate was repeated on
+2026-07-12.
+
+Artifacts:
+
+- `benchmark/results/p12b_host_preparation_contract_single_cpu`
+- `benchmark/results/p12b_host_preparation_contract_double_cpu`
+
+Comparison against the recording-contract CPU gate:
+
+| Cable | Stage | Previous total | Host-prep total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 3293.4 ms | 3186.6 ms | -3.2% |
+| single-cable | `runtime.prepare` | 1557.2 ms | 1524.7 ms | -2.1% |
+| single-cable | `inputs.extracellular` | 24.5 ms | 23.7 ms | -3.2% |
+| single-cable | `observer.plan` | 33.0 ms | 31.6 ms | -4.3% |
+| single-cable | `kernel.enqueue` | 1315.1 ms | 1252.3 ms | -4.8% |
+| single-cable | `kernel.wait` | 257.3 ms | 251.2 ms | -2.4% |
+| single-cable | `kernel.finalize_observer` | 1.4 ms | 1.4 ms | +1.0% |
+| double-cable | `curve.simulate` | 3623.1 ms | 3618.7 ms | -0.1% |
+| double-cable | `runtime.prepare` | 1858.6 ms | 1872.2 ms | +0.7% |
+| double-cable | `inputs.extracellular` | 26.9 ms | 26.0 ms | -3.5% |
+| double-cable | `observer.plan` | 20.3 ms | 20.1 ms | -1.0% |
+| double-cable | `kernel.enqueue` | 1299.3 ms | 1291.5 ms | -0.6% |
+| double-cable | `kernel.wait` | 329.9 ms | 323.8 ms | -1.9% |
+| double-cable | `kernel.finalize_observer` | 1.5 ms | 1.5 ms | -2.7% |
+
+This gate shows no local CPU regression from extracting the host-array helpers.
+The JAX runtime still owns materialization into JAX runtime containers.
+
 ## GPU Smoke Gate Result
 
 Because the shared preparation helper also touches the GPU execution path, two
