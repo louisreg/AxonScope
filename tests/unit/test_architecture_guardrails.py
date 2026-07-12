@@ -17,6 +17,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import get_type_hints
 
+import numpy as np
 import pytest
 import axonscope as axs
 from axonscope.axons import Myelinated, Unmyelinated
@@ -1816,6 +1817,8 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
         ExtracellularInputFormat,
         ExtracellularLoweringMode,
         IntracellularInputFormat,
+        dense_nbytes_for_shape,
+        dense_shape_for_group,
     )
     from axonscope.runtime.jax.input_lowering import (
         PlannedInputLowering,
@@ -1840,6 +1843,10 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     assert get_type_hints(PlannedInputLowering)["extracellular_format"] == (
         ExtracellularInputFormat
     )
+    group = type("Group", (), {"size": 3, "nx": 7})()
+    runtime = type("Runtime", (), {"grid": type("Grid", (), {"Nt": 11})()})()
+    assert dense_shape_for_group(group=group, runtime=runtime) == (3, 11, 7)
+    assert dense_nbytes_for_shape((3, 11, 7), dtype=np.dtype("float32")) == 924
 
 
 def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():

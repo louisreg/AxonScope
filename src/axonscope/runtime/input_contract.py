@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
 
+import numpy as np
+
 
 CableFormulation = Literal["single-cable", "double-cable"]
 IntracellularInputFormat = Literal[
@@ -161,6 +163,26 @@ def normalize_cable_formulation(value: str) -> CableFormulation:
     raise ValueError(f"Unsupported cable formulation: {value!r}.")
 
 
+def dense_shape_for_group(
+    *,
+    group: Any,
+    runtime: Any,
+) -> tuple[int, int, int]:
+    """Return the dense ``(B, Nt, Nx)`` equivalent shape for group inputs."""
+
+    return (int(group.size), int(runtime.grid.Nt), int(group.nx))
+
+
+def dense_nbytes_for_shape(
+    shape: tuple[int, ...],
+    *,
+    dtype: np.dtype[Any],
+) -> int:
+    """Return byte count for a dense array shape."""
+
+    return int(np.prod(shape, dtype=np.int64)) * int(dtype.itemsize)
+
+
 __all__ = [
     "CableFormulation",
     "ExtracellularInputFormat",
@@ -169,5 +191,7 @@ __all__ = [
     "IntracellularInputFormat",
     "IntracellularLoweringMode",
     "RuntimeInputContract",
+    "dense_nbytes_for_shape",
+    "dense_shape_for_group",
     "normalize_cable_formulation",
 ]

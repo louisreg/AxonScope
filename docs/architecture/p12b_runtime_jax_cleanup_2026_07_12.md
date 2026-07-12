@@ -60,6 +60,9 @@ specific out of `runtime/jax/`:
   `runtime.jax.benchmark`.
 - Guardrails now assert that `runtime/jax/output_plan.py` stays absent and that
   input/output labels remain runtime-neutral.
+- Dense-equivalent input shape and byte-size helpers moved to
+  `runtime/input_contract.py`, so JAX benchmark metadata no longer imports
+  those generic memory-estimate helpers from JAX input lowering.
 
 Validation:
 

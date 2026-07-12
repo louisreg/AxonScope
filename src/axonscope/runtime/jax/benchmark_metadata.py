@@ -6,11 +6,13 @@ from typing import Any
 
 import numpy as np
 
+from axonscope.runtime.input_contract import (
+    dense_nbytes_for_shape,
+    dense_shape_for_group,
+)
 from axonscope.runtime.jax.input_lowering import (
     LoweredExtracellularInput,
     LoweredIntracellularInput,
-    dense_nbytes_for_shape,
-    dense_shape_for_group,
     factorized_drive_count_from_rows,
 )
 from axonscope.runtime.jax.runtime import SolverRuntime

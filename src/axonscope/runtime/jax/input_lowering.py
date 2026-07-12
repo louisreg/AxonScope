@@ -579,26 +579,6 @@ def _array_content_signature(values: np.ndarray) -> tuple[Any, ...]:
     )
 
 
-def dense_shape_for_group(
-    *,
-    group: DispatchGroup,
-    runtime: SolverRuntime,
-) -> tuple[int, int, int]:
-    """Return the dense ``(B, Nt, Nx)`` equivalent shape for group inputs."""
-
-    return (int(group.size), int(runtime.grid.Nt), int(group.nx))
-
-
-def dense_nbytes_for_shape(
-    shape: tuple[int, ...],
-    *,
-    dtype: np.dtype[Any],
-) -> int:
-    """Return byte count for a dense array shape."""
-
-    return int(np.prod(shape, dtype=np.int64)) * int(dtype.itemsize)
-
-
 __all__ = [
     "ExtracellularInputFormat",
     "IntracellularInputFormat",
@@ -611,8 +591,6 @@ __all__ = [
     "PlannedInputLowering",
     "can_plan_compact_double_cable_factorized_rows",
     "can_factorize_footprint_rows",
-    "dense_nbytes_for_shape",
-    "dense_shape_for_group",
     "extracellular_stimulation_count",
     "factorized_drive_count_from_rows",
     "has_intracellular_contexts",
