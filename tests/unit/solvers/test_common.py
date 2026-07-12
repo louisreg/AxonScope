@@ -22,7 +22,6 @@ from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_scalar,
 )
 from benchmark.analysis.double_cable_solver_candidates import (
-    double_cable_block_residual_norm,
     double_cable_power_bucket,
     pad_double_cable_system_to_power_bucket,
     solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,

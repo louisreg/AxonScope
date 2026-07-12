@@ -625,9 +625,6 @@ class RowIndexedMembraneBackend:
         ]
         return jax.lax.switch(row_index, branches, *args)
 
-    def init_gates_for_row(self, row_index, V0_mV: Array1D) -> Array2D:
-        return self._switch(row_index, "init_gates", V0_mV)
-
     def cn_gate_update_for_row(
         self,
         row_index,

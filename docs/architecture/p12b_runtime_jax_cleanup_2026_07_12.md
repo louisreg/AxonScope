@@ -128,6 +128,14 @@ specific out of `runtime/jax/`:
   live in `runtime/jax/runtime.py` next to `SolverRuntime`, because they package
   scalar-runtime membrane outputs rather than defining an independent runtime
   boundary.
+- A `vulture`-guided dead-code pass removed unused JAX runtime helpers that no
+  active source or unit test called: `precompute_intracellular_current_density`,
+  `RowIndexedMembraneBackend.init_gates_for_row`,
+  `JaxModelIRLowering.source_observable_output_names`,
+  `disable_rate_tables`, `JaxMembraneProgram.gating_inf_tau`, and
+  `JaxMembraneProgram.disable_rate_table`. The remaining `vulture` production
+  warnings are contract or benchmark-analysis surfaces rather than deletion
+  candidates for this pass.
 
 Validation:
 
@@ -153,6 +161,7 @@ python -m compileall -q src/axonscope tests/unit
 python -m pytest -q tests/unit/test_architecture_guardrails.py --tb=short
 python -m pytest -q tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_runtime.py --tb=short
 python -m pytest -q tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py tests/unit/solvers/test_extracellular.py --tb=short
+python -m vulture src/axonscope/runtime/jax src/axonscope/runtime tests --min-confidence 60
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -201,6 +210,16 @@ For the scalar-runtime observable helper merge, `git diff --check` passed,
 `compileall` passed, architecture guardrails passed `85/85`,
 Crank-Nicholson/runtime tests passed `25/25`, and
 dispatcher/batch/extracellular tests passed `104/104`.
+
+For the `vulture`-guided dead-code pass, the actionable runtime/JAX warnings
+were removed. The remaining production warnings are retained intentionally for
+this pass: jax-triton solver entry points are exercised by benchmark-analysis
+scripts, and `OutputPlan.to_batch_options` is part of the runtime-neutral output
+contract. Test/archive warnings are outside the runtime cleanup scope.
+`git diff --check` and `compileall` passed, architecture guardrails passed
+`85/85`, Model IR plus runtime tests passed `81/81`, common/batch/extracellular
+solver tests passed `76/76`, and dispatcher plus heterogeneous-cable tests
+passed `62/62`.
 
 ## Benchmark Gate
 

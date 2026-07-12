@@ -86,7 +86,6 @@ class JaxModelIRLowering:
             name: index for index, name in enumerate(self.generated_output_names)
         }
         self.source_current_output_names = _source_output_names(model, "currents")
-        self.source_observable_output_names = _source_output_names(model, "observables")
 
     @property
     def generated_model_step_available(self) -> bool:

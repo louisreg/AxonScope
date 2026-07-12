@@ -132,13 +132,6 @@ class JaxMembraneProgram:
             return self.exact_rate_constants(V_mV)
         return self._rate_table.interpolate(V_mV, dtype_local=self.dtype)
 
-    def gating_inf_tau(self, V_mV: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        alpha, beta = self.rate_constants(V_mV)
-        sum_ab = jnp.maximum(alpha + beta, dtype(1e-12))
-        g_inf = alpha / sum_ab
-        tau = dtype(1.0) / (self.q10 * sum_ab)
-        return g_inf, tau
-
     def enable_rate_table(
         self,
         *,
@@ -160,11 +153,6 @@ class JaxMembraneProgram:
             dtype_local=self.dtype,
             exact_rate_constants=self.exact_rate_constants,
         )
-        self._static_signature_cache = None
-        return self
-
-    def disable_rate_table(self) -> "JaxMembraneProgram":
-        self._rate_table = None
         self._static_signature_cache = None
         return self
 

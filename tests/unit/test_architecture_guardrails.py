@@ -1104,11 +1104,29 @@ def test_jax_runtime_modules_live_under_backend_boundary():
     jax_kernels_text = (SRC_ROOT / "runtime" / "jax" / "kernels.py").read_text(
         encoding="utf-8"
     )
+    jax_membrane_program_text = (
+        SRC_ROOT / "runtime" / "jax" / "membrane_program.py"
+    ).read_text(encoding="utf-8")
+    jax_membrane_backend_text = (
+        SRC_ROOT / "runtime" / "jax" / "membrane_backend.py"
+    ).read_text(encoding="utf-8")
+    jax_model_ir_lowering_text = (
+        SRC_ROOT / "runtime" / "jax" / "model_ir_lowering.py"
+    ).read_text(encoding="utf-8")
+    jax_rate_tables_text = (
+        SRC_ROOT / "runtime" / "jax" / "rate_tables.py"
+    ).read_text(encoding="utf-8")
     assert "def membrane_observable_names" in jax_runtime_text
     assert "def observable_matrices" in jax_runtime_text
     assert "def package_recordings" in jax_runtime_text
     assert ".observables" not in jax_runtime_text
     assert ".observables" not in jax_kernels_text
+    assert "def precompute_intracellular_current_density" not in jax_runtime_text
+    assert "def gating_inf_tau" not in jax_membrane_program_text
+    assert "def disable_rate_table" not in jax_membrane_program_text
+    assert "def init_gates_for_row" not in jax_membrane_backend_text
+    assert "source_observable_output_names" not in jax_model_ir_lowering_text
+    assert "def disable_rate_tables" not in jax_rate_tables_text
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):

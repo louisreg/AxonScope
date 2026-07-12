@@ -844,24 +844,6 @@ def precompute_extracellular_potential_mV(
     return sample_extracellular_potential_mV(vext_fun, t, dtype_local=dtype_local)
 
 
-def precompute_intracellular_current_density(
-    axon: Axon,
-    t_ms: Array,
-    *,
-    dtype_local: jnp.dtype | None = None,
-) -> Array:
-    """Sample intracellular current density on a time grid, returning shape (Nt, Nx)."""
-    if dtype_local is None:
-        solver_axon = build_solver_axon(axon)
-        runtime = prepare_membrane_runtime(axon, solver_axon=solver_axon)
-        dtype_local = runtime.dtype
-    else:
-        solver_axon = build_solver_axon(axon)
-    t = jnp.asarray(t_ms, dtype=dtype_local)
-    inj_fun = build_intracellular_current_density_fn(axon, solver_axon=solver_axon)
-    return sample_intracellular_current_density(inj_fun, t, dtype_local=dtype_local)
-
-
 def sample_intracellular_current_density(
     current_density_fn: Callable[[float], Array],
     t_ms: Array,

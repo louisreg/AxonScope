@@ -139,26 +139,3 @@ def _enable_unique_children(model: Any, config: RateTableConfig) -> int:
             enable(config=config)
             count += 1
     return count
-
-
-def disable_rate_tables(model: Any, *, recursive: bool = False) -> int:
-    """Disable lookup tables on a model, optionally walking child models."""
-    count = 0
-    if recursive:
-        seen: set[int] = set()
-        for child in getattr(model, "models", ()):
-            ident = id(child)
-            if ident in seen:
-                continue
-            seen.add(ident)
-            disable = getattr(child, "disable_rate_table", None)
-            if callable(disable):
-                disable()
-                count += 1
-        return count
-
-    disable = getattr(model, "disable_rate_table", None)
-    if callable(disable):
-        disable()
-        count += 1
-    return count
