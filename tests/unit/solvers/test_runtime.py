@@ -124,6 +124,41 @@ def test_prepare_rattay_initial_state_uses_generic_membrane_backend():
     )
 
 
+def test_prepare_mrg_initial_state_uses_model_ir_numpy_for_heterogeneous_backend(tmp_path):
+    axon = axs.axons.MRG(
+        diameter=10.0 * axs.um,
+        nodes=3,
+        v_init=-78.123 * axs.mV,
+    )
+
+    report = None
+    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
+    try:
+        runtime = prepare_membrane_runtime(axon)
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        if report is None:
+            axs.disable_benchmark(print_summary=False, save=False)
+
+    init_events = [
+        event
+        for event in report.events
+        if event.name == "runtime.prepare.membrane_init"
+    ]
+    assert init_events
+    assert (
+        init_events[-1].metadata["membrane_init_source"]
+        == "heterogeneous_model_ir_numpy"
+    )
+    np.testing.assert_allclose(
+        np.asarray(runtime.gates0),
+        np.asarray(runtime.backend.init_gates(runtime.Vm0_mV)),
+        rtol=2e-6,
+        atol=2e-7,
+    )
+    np.testing.assert_allclose(np.asarray(runtime.background_current), 0.0)
+
+
 def test_prepare_solver_runtime_reuses_batch_safe_runtime_with_existing_solver_axon():
     axon = AxonInstance(
         HodgkinHuxley(

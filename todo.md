@@ -213,6 +213,13 @@ improvements.
   regression versus the recording-contract gate; remaining P12 optimization
   targets are cold/preparation spans before broader P11/GPU slices can close
   the performance-loss claim.
+  Kaggle P100 GPU rerun on commit `aab5384` wrote
+  `benchmark/results/p12_final_gpu_single_aab5384` and
+  `benchmark/results/p12_final_gpu_double_jt_aab5384`. The single-cable cold
+  path improved, but warm single-cable is still dispatch-bound (`kernel.wait`
+  near zero). Double-cable with `jax-triton` is closer to the warm solver-bound
+  target, with dispatch and wait both around 4 ms in repeat runs. Keep this item
+  open until larger P11 hot-path/realistic slices confirm the pattern.
 - [ ] Post-P11 runtime/benchmark backlog:
   continue only the deferred items tracked in
   `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
@@ -238,6 +245,24 @@ improvements.
   Local CPU single-cable `runtime.prepare.membrane_init` dropped from 708.2 ms
   to 3.3 ms in `p12_opt_uniform_init_single_cpu`; keep the broader cold-start
   item open for double-cable, compile/backend, GPU, and persistent-cache work.
+  Second targeted P12 optimization: stateless heterogeneous Model IR membrane
+  groups now use the same NumPy init path while keeping the JAX backend for
+  execution. Local CPU double-cable `runtime.prepare.membrane_init` dropped from
+  914.5 ms to 4.6 ms, and `runtime.prepare` from 2005.9 ms to 1211.6 ms, in
+  `benchmark/results/p12_opt_heterogeneous_init_double_cpu`. Keep the broader
+  cold-start item open for compile/backend, GPU confirmation, dispatch/enqueue,
+  and persistent-cache work.
+  Third targeted P12 optimization: shared double-cable base runtime now builds
+  cable coefficients and extracellular absolute arrays with the runtime-neutral
+  NumPy host-preparation helpers before compact JAX materialization. Local CPU
+  double-cable `runtime.prepare.base_runtime` dropped from 1209.0 ms to
+  337.5-351.0 ms, and `runtime.prepare` from 1211.6 ms to 341.0-353.9 ms, in
+  `benchmark/results/p12_opt_host_double_only_double_cpu_serial*`. This host
+  cable path is deliberately limited to double-cable for now; single-cable keeps
+  the previous JAX cable preparation until a separate benchmark shows no kernel
+  timing regression. Remaining local costs are mostly enqueue/dispatch, cold
+  membrane compile, and kernel state/observer preparation; confirm this path on
+  GPU before claiming the P12 GPU cold-start target improved.
 
 ### P3 - Documentation And Examples
 
@@ -292,6 +317,7 @@ These items are intentionally not ordered or scoped into a phase yet.
   show it helps.
 - [ ] Remove public API surface that is unused or not documented in advanced
   examples.
+- [ ] Check `examples/basic/06`; it seems surprisingly slow.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models.
 - [ ] Re-check each built-in model against the NRV implementation; some details
   may have been lost during model translation.

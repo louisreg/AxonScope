@@ -500,6 +500,142 @@ continues to report `membrane_init_source=heterogeneous_numpy`, so the modest
 double-cable total increase is not attributed to this patch and should be
 rechecked in the broader P11/GPU performance pass before making a global claim.
 
+## Heterogeneous Membrane Init Optimization
+
+The next P12 optimization applies the same host-side principle to stateless
+heterogeneous Model IR membranes, which covers the current MRG/double-cable
+path. Heterogeneous groups still keep their existing JAX backend for solver
+execution, but cold `Vm0`, `gates0`, and background-current arrays are now
+constructed through `NumpyModelInterpreter` when every group is a
+`JaxMembraneProgram`. Non-Model-IR heterogeneous groups keep the previous
+fallback path.
+
+Artifact:
+
+- `benchmark/results/p12_opt_heterogeneous_init_double_cpu`
+
+Comparison against the uniform-init double-cable CPU guard:
+
+| Cable | Stage | Before total | After total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| double-cable | `curve.simulate` | 4001.8 ms | 3115.8 ms | -22.1% |
+| double-cable | `runtime.prepare` | 2005.9 ms | 1211.6 ms | -39.6% |
+| double-cable | `runtime.prepare.base_runtime` | 2003.5 ms | 1209.0 ms | -39.7% |
+| double-cable | `runtime.prepare.membrane_init` | 914.5 ms | 4.6 ms | -99.5% |
+| double-cable | `runtime.prepare.membrane_compile` | 195.8 ms | 193.2 ms | -1.3% |
+| double-cable | `inputs.extracellular` | 33.4 ms | 26.9 ms | -19.5% |
+| double-cable | `kernel.enqueue` | 1471.3 ms | 1363.5 ms | -7.3% |
+| double-cable | `kernel.dispatch_jax` | 1086.7 ms | 1015.4 ms | -6.6% |
+| double-cable | `kernel.wait` | 346.9 ms | 326.1 ms | -6.0% |
+
+Benchmark metadata now records
+`membrane_init_source=heterogeneous_model_ir_numpy`. This is a cold-run
+preparation optimization only; it does not change the public runtime boundary
+or solver path, and it leaves compile/backend, dispatch/enqueue, and GPU
+solver-bound work as the remaining P12 performance targets.
+
+## Host Cable/Extracellular Runtime Optimization
+
+The following P12 pass removes another cold-start cost from the shared
+double-cable base runtime. The one-row cable coefficients and double-cable
+extracellular absolute arrays now reuse the runtime-neutral NumPy host
+preparation helpers before one compact JAX materialization step. This mirrors
+the existing parameter-batch stacking path and keeps the public runtime
+contract unchanged.
+
+Artifact:
+
+- `benchmark/results/p12_opt_host_double_only_double_cpu_serial`
+- `benchmark/results/p12_opt_host_double_only_double_cpu_serial2`
+
+Comparison against the heterogeneous-init double-cable CPU guard:
+
+| Cable | Stage | Before total | After total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| double-cable | `curve.simulate` | 3115.8 ms | 2826.1-3040.1 ms | -9.3% to -2.4% |
+| double-cable | `runtime.prepare` | 1211.6 ms | 341.0-353.9 ms | -71.9% to -70.8% |
+| double-cable | `runtime.prepare.base_runtime` | 1209.0 ms | 337.5-351.0 ms | -72.1% to -71.0% |
+| double-cable | `runtime.prepare.membrane_compile` | 193.2 ms | 205.2-205.8 ms | +6.2% to +6.5% |
+| double-cable | `runtime.prepare.membrane_init` | 4.6 ms | 4.1-5.1 ms | -12.4% to +10.2% |
+
+Benchmark metadata records `cable_runtime_source=numpy` and
+`extracellular_runtime_source=numpy`. The remaining large costs in this local
+guardrail are now mostly `kernel.enqueue`/`kernel.dispatch_jax`, cold membrane
+compile, and kernel state/observer preparation rather than base runtime array
+construction. The host cable path is currently limited to the double-cable
+runtime (`include_area=True`); single-cable keeps the previous JAX cable
+preparation path until a separate benchmark shows that changing it improves
+both cold preparation and kernel timing.
+
+## Final P12 GPU Gate Result
+
+The matching Kaggle P100 GPU smoke gate was rerun on commit `aab5384` after the
+uniform membrane-initialization optimization. The single-cable run used the
+normal GPU environment; the double-cable tiled-Thomas route required
+`jax-triton`, so the first double-cable submission without that package failed
+before producing a benchmark and was replaced by the `-jt` run below.
+
+Artifacts:
+
+- `benchmark/results/p12_final_gpu_single_aab5384/outputs/benchmark/results/recruitment_curves_gpu_smoke_gpu_20260712_234919`
+- `benchmark/results/p12_final_gpu_double_jt_aab5384/outputs/benchmark/results/recruitment_curves_gpu_smoke_gpu_20260712_235200`
+- Failed dependency probe:
+  `benchmark/results/p12_final_gpu_double_aab5384`
+  (`RuntimeError: Python package 'jax-triton' is not installed.`)
+
+All-phase totals compared with the host-preparation Kaggle gate:
+
+| Cable | Stage | Host-prep total | Current total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 4043.9 ms | 3360.2 ms | -16.9% |
+| single-cable | `runtime.prepare` | 1788.6 ms | 1390.7 ms | -22.2% |
+| single-cable | `runtime.prepare.membrane_init` | 640.0 ms | 4.2 ms | -99.3% |
+| single-cable | `kernel.enqueue` | 1626.7 ms | 1608.1 ms | -1.1% |
+| single-cable | `kernel.dispatch_jax` | 820.5 ms | 805.9 ms | -1.8% |
+| single-cable | `kernel.wait` | 61.6 ms | 0.3 ms | -99.4% |
+| single-cable | `inputs.extracellular` | 106.0 ms | 29.9 ms | -71.8% |
+| double-cable | `curve.simulate` | 9369.7 ms | 9632.3 ms | +2.8% |
+| double-cable | `runtime.prepare` | 2344.4 ms | 2268.6 ms | -3.2% |
+| double-cable | `runtime.prepare.membrane_init` | 963.3 ms | 936.2 ms | -2.8% |
+| double-cable | `kernel.enqueue` | 6395.5 ms | 7044.9 ms | +10.2% |
+| double-cable | `kernel.dispatch_jax` | 6067.6 ms | 6726.4 ms | +10.9% |
+| double-cable | `kernel.wait` | 102.1 ms | 33.6 ms | -67.1% |
+| double-cable | `inputs.extracellular` | 119.7 ms | 31.9 ms | -73.3% |
+
+Warm repeat means use only `phase=repeat` and `iteration>0` simulations:
+
+| Cable | Stage | Host-prep mean | Current mean | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 35.226 ms | 27.764 ms | -21.2% |
+| single-cable | `runtime.prepare` | 0.044 ms | 0.062 ms | +40.1% |
+| single-cable | `inputs.extracellular` | 1.982 ms | 1.998 ms | +0.8% |
+| single-cable | `observer.plan` | 0.119 ms | 0.139 ms | +17.2% |
+| single-cable | `kernel.enqueue` | 13.683 ms | 16.830 ms | +23.0% |
+| single-cable | `kernel.dispatch_jax` | 4.404 ms | 6.393 ms | +45.2% |
+| single-cable | `kernel.wait` | 6.888 ms | 0.029 ms | -99.6% |
+| double-cable | `curve.simulate` | 38.747 ms | 23.077 ms | -40.4% |
+| double-cable | `runtime.prepare` | 0.055 ms | 0.043 ms | -21.1% |
+| double-cable | `inputs.extracellular` | 2.749 ms | 2.215 ms | -19.4% |
+| double-cable | `observer.plan` | 0.137 ms | 0.118 ms | -14.1% |
+| double-cable | `kernel.enqueue` | 11.598 ms | 11.472 ms | -1.1% |
+| double-cable | `kernel.dispatch_jax` | 4.772 ms | 4.639 ms | -2.8% |
+| double-cable | `kernel.wait` | 12.935 ms | 4.241 ms | -67.2% |
+
+Interpretation:
+
+- The single-cable cold path validates the uniform NumPy initialization
+  optimization on GPU: `runtime.prepare.membrane_init` is now about 4 ms and
+  records `membrane_init_source=uniform_numpy`. Warm single-cable is still not
+  solver-bound: `kernel.wait` is near zero while dispatch/enqueue dominate.
+- Double-cable with `jax-triton` is the closer warm solver-bound target in this
+  small smoke case. Warm dispatch and wait are the same order of magnitude
+  (`kernel.dispatch_jax` about 4.6 ms, `kernel.wait` about 4.2 ms), but the cold
+  first compile/enqueue path still dominates all-phase totals.
+- The final P12 performance target is therefore two-sided: make warm GPU runs
+  increasingly solver-bound by reducing dispatch/enqueue/input/observer overhead,
+  and reduce cold-run latency via preparation, membrane/runtime compilation, and
+  cache policy improvements.
+
 ## Host-Preparation Kaggle Gate Result
 
 The matching Kaggle smoke gate was run on commit `b5d88b2` with `Naxons=1024`,

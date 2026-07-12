@@ -21,13 +21,16 @@ from axonscope.runtime.jax.membranes.compile import (
 )
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.solver_axon import SolverAxon, build_solver_axon
+from axonscope.runtime.host_preparation import (
+    compartment_area_cm2_numpy,
+    diffusion_operator_coeffs_numpy,
+    extracellular_runtime_numpy,
+)
 from axonscope.timebase import simulation_step_count
 
 from axonscope.runtime.jax.cable_geometry import (
     Array,
-    compartment_area_cm2,
     diffusion_operator_coeffs,
-    extracellular_absolute_arrays,
     initial_voltage,
 )
 from axonscope.solvers.options import SolverOptions
@@ -275,7 +278,12 @@ def _prepare_membrane_initial_arrays(
             dtype_local=dtype_local,
         )
     if isinstance(backend, HeterogeneousMembraneBackend) and not membrane.membrane_state_specs():
-        record_benchmark_metadata(membrane_init_source="heterogeneous_numpy")
+        source = (
+            "heterogeneous_model_ir_numpy"
+            if all(isinstance(group.model, JaxMembraneProgram) for group in backend.groups)
+            else "heterogeneous_numpy"
+        )
+        record_benchmark_metadata(membrane_init_source=source)
         return _prepare_heterogeneous_membrane_initial_arrays(
             axon,
             backend,
@@ -329,21 +337,27 @@ def _prepare_heterogeneous_membrane_initial_arrays(
     vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
     gates_np = np.zeros((nx, backend.n_gates_max), dtype=np_dtype)
     background_np = np.zeros((nx,), dtype=np_dtype)
+    interpreters: dict[int, NumpyModelInterpreter] = {}
     for group in backend.groups:
         indices = np.asarray(group.indices, dtype=np.int64)
         if group.gate_size:
-            local_v = jnp.asarray([vm0_np[indices[0]]], dtype=dtype_local)
-            local_gates = np.asarray(
-                group.model.init_gates(local_v),
-                dtype=np_dtype,
+            local_v = np.asarray([vm0_np[indices[0]]], dtype=np_dtype)
+            local_gates = _initial_gates_for_heterogeneous_group(
+                group.model,
+                local_v,
+                dtype_local=dtype_local,
+                np_dtype=np_dtype,
+                interpreters=interpreters,
             )
             gates_np[indices, : group.gate_size] = np.asarray(
                 np.broadcast_to(local_gates, (len(indices), group.gate_size)),
                 dtype=np_dtype,
             )
-        background_np[indices] = np.asarray(
-            group.model.I_background(len(indices)),
-            dtype=np_dtype,
+        background_np[indices] = _background_current_for_heterogeneous_group(
+            group.model,
+            len(indices),
+            dtype_local=dtype_local,
+            np_dtype=np_dtype,
         )
     return (
         jnp.asarray(vm0_np, dtype=dtype_local),
@@ -351,6 +365,37 @@ def _prepare_heterogeneous_membrane_initial_arrays(
         (),
         jnp.asarray(background_np, dtype=dtype_local),
     )
+
+
+def _initial_gates_for_heterogeneous_group(
+    model: Any,
+    local_v_np: np.ndarray,
+    *,
+    dtype_local: jnp.dtype,
+    np_dtype: np.dtype,
+    interpreters: dict[int, NumpyModelInterpreter],
+) -> np.ndarray:
+    if isinstance(model, JaxMembraneProgram):
+        identity = id(model)
+        interpreter = interpreters.get(identity)
+        if interpreter is None:
+            interpreter = NumpyModelInterpreter(model.model_ir, dtype=np_dtype)
+            interpreters[identity] = interpreter
+        return np.asarray(interpreter.init_gates(local_v_np), dtype=np_dtype)
+    local_v = jnp.asarray(local_v_np, dtype=dtype_local)
+    return np.asarray(model.init_gates(local_v), dtype=np_dtype)
+
+
+def _background_current_for_heterogeneous_group(
+    model: Any,
+    count: int,
+    *,
+    dtype_local: jnp.dtype,
+    np_dtype: np.dtype,
+) -> np.ndarray:
+    if isinstance(model, JaxMembraneProgram):
+        return np.zeros((count,), dtype=np_dtype)
+    return np.asarray(model.I_background(count), dtype=np_dtype)
 
 
 def prepare_cable_runtime(
@@ -363,13 +408,23 @@ def prepare_cable_runtime(
     cached = _CABLE_RUNTIME_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
-    area = (
-        compartment_area_cm2(axon, dtype_local)
-        if include_area
-        else jnp.zeros((axon.n_compartments,), dtype=dtype_local)
+    if not include_area:
+        lower, diag, upper = diffusion_operator_coeffs(axon, dtype_local)
+        area = jnp.zeros((axon.n_compartments,), dtype=dtype_local)
+        record_benchmark_metadata(cable_runtime_source="jax")
+        runtime = CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
+        _CABLE_RUNTIME_CACHE[cache_key] = runtime
+        return runtime
+    np_dtype = np.dtype(dtype_local)
+    lower, diag, upper = diffusion_operator_coeffs_numpy(axon, dtype=np_dtype)
+    area = compartment_area_cm2_numpy(axon, dtype=np_dtype)
+    record_benchmark_metadata(cable_runtime_source="numpy")
+    runtime = CableRuntime(
+        lower=jnp.asarray(lower, dtype=dtype_local),
+        diag=jnp.asarray(diag, dtype=dtype_local),
+        upper=jnp.asarray(upper, dtype=dtype_local),
+        area_cm2=jnp.asarray(area, dtype=dtype_local),
     )
-    runtime = CableRuntime(lower=lower, diag=diag, upper=upper, area_cm2=area)
     _CABLE_RUNTIME_CACHE[cache_key] = runtime
     return runtime
 
@@ -438,22 +493,23 @@ def prepare_extracellular_runtime(
     cached = _EXTRACELLULAR_RUNTIME_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    Cm_abs, Cx_abs, Gx_abs, Gax_e = extracellular_absolute_arrays(axon, dtype_local)
-    Gax_i = 0.5 * (cable.upper[:-1] * Cm_abs[:-1] + cable.lower[1:] * Cm_abs[1:])
-    left_i = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_i])
-    right_i = jnp.concatenate([Gax_i, jnp.zeros((1,), dtype=dtype_local)])
-    left_e = jnp.concatenate([jnp.zeros((1,), dtype=dtype_local), Gax_e])
-    right_e = jnp.concatenate([Gax_e, jnp.zeros((1,), dtype=dtype_local)])
+    _ = cable
+    host_arrays = extracellular_runtime_numpy(
+        axon,
+        dtype=np.dtype(dtype_local),
+        target_nx=int(axon.n_compartments),
+    )
+    record_benchmark_metadata(extracellular_runtime_source="numpy")
     runtime = ExtracellularRuntime(
-        Cm_abs=Cm_abs,
-        Cx_abs=Cx_abs,
-        Gx_abs=Gx_abs,
-        Gax_e=Gax_e,
-        Gax_i=Gax_i,
-        left_i=left_i,
-        right_i=right_i,
-        left_e=left_e,
-        right_e=right_e,
+        Cm_abs=jnp.asarray(host_arrays.Cm_abs, dtype=dtype_local),
+        Cx_abs=jnp.asarray(host_arrays.Cx_abs, dtype=dtype_local),
+        Gx_abs=jnp.asarray(host_arrays.Gx_abs, dtype=dtype_local),
+        Gax_e=jnp.asarray(host_arrays.Gax_e, dtype=dtype_local),
+        Gax_i=jnp.asarray(host_arrays.Gax_i, dtype=dtype_local),
+        left_i=jnp.asarray(host_arrays.left_i, dtype=dtype_local),
+        right_i=jnp.asarray(host_arrays.right_i, dtype=dtype_local),
+        left_e=jnp.asarray(host_arrays.left_e, dtype=dtype_local),
+        right_e=jnp.asarray(host_arrays.right_e, dtype=dtype_local),
     )
     _EXTRACELLULAR_RUNTIME_CACHE[cache_key] = runtime
     return runtime
