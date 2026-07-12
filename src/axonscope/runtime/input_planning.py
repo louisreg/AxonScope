@@ -108,6 +108,8 @@ def stimulus_scaled_waveform_signature_and_scale(
     stimulus: Any,
     *,
     array_signature: ArraySignatureFn | None = None,
+    t: Any | None = None,
+    y: Any | None = None,
 ) -> tuple[tuple[Any, ...], float] | None:
     """Return a normalized-waveform signature plus its amplitude scale.
 
@@ -118,27 +120,27 @@ def stimulus_scaled_waveform_signature_and_scale(
     if array_signature is None:
         array_signature = array_content_signature
     try:
-        t = np.asarray(stimulus.t)
-        y = np.asarray(stimulus.y, dtype=float)
+        t_array = np.asarray(stimulus.t if t is None else t)
+        y_array = np.asarray(stimulus.y if y is None else y, dtype=float)
     except (AttributeError, TypeError, ValueError):
         return None
-    if y.ndim != 1 or not np.all(np.isfinite(y)):
+    if y_array.ndim != 1 or not np.all(np.isfinite(y_array)):
         return None
-    nonzero = np.flatnonzero(np.abs(y) > 0.0)
+    nonzero = np.flatnonzero(np.abs(y_array) > 0.0)
     if len(nonzero) == 0:
         scale = 0.0
-        normalized = np.zeros_like(y, dtype=float)
+        normalized = np.zeros_like(y_array, dtype=float)
     else:
-        scale = float(y[int(nonzero[0])])
+        scale = float(y_array[int(nonzero[0])])
         if scale == 0.0:
             return None
-        normalized = np.asarray(y / scale, dtype=float)
+        normalized = np.asarray(y_array / scale, dtype=float)
     signature = (
         "stimulus_scaled_waveform_v1",
         type(stimulus),
         getattr(stimulus, "mode", None),
         getattr(stimulus, "y_unit", None),
-        array_signature(t),
+        array_signature(t_array),
         array_signature(normalized),
     )
     return signature, scale

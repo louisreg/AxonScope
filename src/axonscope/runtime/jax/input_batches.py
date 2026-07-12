@@ -398,6 +398,8 @@ def _stimulus_scaled_waveform_signature_and_scale(
     computed = stimulus_scaled_waveform_signature_and_scale(
         stimulus,
         array_signature=_array_content_key,
+        t=t,
+        y=y,
     )
     if computed is None:
         return None
