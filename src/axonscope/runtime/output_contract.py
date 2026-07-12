@@ -90,9 +90,43 @@ def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
     )
 
 
+def observer_definition_signature(observer: Any) -> tuple[Any, ...]:
+    """Return a runtime-neutral cache signature for one observer definition."""
+
+    signal = getattr(observer, "signal", None)
+    signal_id = getattr(signal, "id", repr(signal))
+    target = getattr(observer, "target", None)
+    return (
+        type(observer).__module__,
+        type(observer).__qualname__,
+        str(getattr(observer, "name", "")),
+        str(signal_id),
+        repr(target),
+        _maybe_millivolt(getattr(observer, "threshold", None)),
+        _maybe_millisecond(getattr(observer, "blanking", None)),
+    )
+
+
+def _maybe_millivolt(value: Any) -> float | None:
+    if value is None:
+        return None
+    from axonscope.utils import units
+
+    return float(units.to_mV(value))
+
+
+def _maybe_millisecond(value: Any) -> float | None:
+    if value is None:
+        return None
+    from axonscope.utils import units
+
+    return float(units.to_ms(value))
+
+
 __all__ = [
     "OutputPlan",
     "OutputSink",
+    "observer_definition_signature",
     "observer_output_label",
     "observers_are_vm_raster_compatible",
     "vm_raster_definitions",

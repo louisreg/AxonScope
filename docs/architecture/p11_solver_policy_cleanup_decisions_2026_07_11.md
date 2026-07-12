@@ -95,10 +95,10 @@ The old `--benchmark-double-cable-block-solver jax_triton_loop_xb` hook is
 removed; `jax_triton_loop_xb` remains only a runtime/artifact label.
 
 The next cleanup pass removed the backend-local
-`runtime/jax/solver_engines/block_solvers.py` resolver. `auto` is now resolved
+`runtime/jax/policy/block_solvers.py` resolver. `auto` is now resolved
 by typed solver policy before kernel dispatch; low-level double-cable kernels
-accept only concrete backend-private routes (`thomas`, `pcr`, `pcr_soa`,
-`pcr_adaptive`) or explicitly permitted benchmark/internal labels.
+accept only the retained backend-private routes: CPU `thomas` and GPU
+`jax_triton_loop_xb`.
 
 The solver route is now carried through JAX orchestration as one
 `JaxSolverEngine` value. `DoubleCableBatchKernel.run(...)` consumes that engine
@@ -111,9 +111,9 @@ single-cable and double-cable string helpers.
 
 Diagnostic double-cable solver tests are now separated from production batch
 runtime tests. `tests/unit/solvers/test_batch.py` keeps the active batch
-contract, CPU Thomas-default behavior, and policy-boundary checks.
-PCR/PCR-SoA/PCR-adaptive/internal Triton equivalence and routing probes live in
-`tests/unit/solvers/test_double_cable_diagnostic_solvers.py`.
+contract, CPU Thomas-default behavior, GPU tiled-Thomas routing, and
+policy-boundary checks. Old PCR/PCR-SoA/PCR-adaptive unit probes are no longer
+part of the active unit suite.
 
 The reporting contract now treats single-cable and double-cable solver routes
 uniformly. Runtime policy resolution returns structured `CableSolverRoute`

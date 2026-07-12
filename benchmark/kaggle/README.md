@@ -97,7 +97,7 @@ python benchmark/kaggle/run_kernel.py \
   --platform gpu \
   --machine-shape NvidiaTeslaP100 \
   --curve-script threshold_curves,recruitment_curves \
-  --solver auto,thomas,pcr,pcr_soa,tiled_thomas \
+  --solver auto,tiled_thomas \
   --recording observer_only,probe_vm \
   --n-axons 64,1024,4096,8192 \
   --nx 89,129 \
@@ -134,96 +134,9 @@ python benchmark/kaggle/run_kernel.py \
 Switch only `--platform gpu`, the slug, and the memory trace to `device` for
 the matching GPU sweep.
 
-Submit the low-level double-cable solver-stage profiler on the CPU path of a
-Kaggle GPU machine:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11b-solver-stage-cpu \
-  --campaign double_cable_solver_stage_profile \
-  --platform cpu \
-  --machine-shape NvidiaTeslaP100 \
-  --nx 21 51 101 \
-  --batch-size 4 32 128 \
-  --dtype fp32 \
-  --coefficient-mode both \
-  --repeats 5 \
-  --warmups 1
-```
-
-Run the matching GPU path by switching only `--platform gpu` and the slug:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11b-solver-stage-gpu \
-  --campaign double_cable_solver_stage_profile \
-  --platform gpu \
-  --machine-shape NvidiaTeslaP100 \
-  --nx 21 51 101 \
-  --batch-size 4 32 128 \
-  --dtype fp32 \
-  --coefficient-mode both \
-  --repeats 5 \
-  --warmups 1
-```
-
-Submit the P11C large-population double-cable solver gate on the CPU path of a
-Kaggle GPU machine:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11c-large-pop-cpu \
-  --campaign large_population_double_cable_solver_profile \
-  --platform cpu \
-  --machine-shape NvidiaTeslaP100 \
-  --batch-size 1024 4096 8192 \
-  --nx 47 89 129 \
-  --coefficient-mode both \
-  --layout TILED \
-  --repeats 5 \
-  --warmups 1
-```
-
-Run the matching GPU path by switching only `--platform gpu` and the slug:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11c-large-pop-gpu \
-  --campaign large_population_double_cable_solver_profile \
-  --platform gpu \
-  --machine-shape NvidiaTeslaP100 \
-  --batch-size 1024 4096 8192 \
-  --nx 47 89 129 \
-  --coefficient-mode both \
-  --layout TILED \
-  --repeats 5 \
-  --warmups 1
-```
-
-Run the P11C JAX Thomas/PTA feasibility baseline on GPU by adding
-`thomas_batched_scan` explicitly:
-
-```bash
-python benchmark/kaggle/run_kernel.py \
-  --username YOUR_KAGGLE_USERNAME \
-  --slug axonscope-p11c-pta-jax-gpu \
-  --campaign large_population_double_cable_solver_profile \
-  --platform gpu \
-  --machine-shape NvidiaTeslaP100 \
-  --variant current_pcr_soa \
-  --variant thomas_batched_scan \
-  --variant large_population_exact_double_cable_jax \
-  --batch-size 1024 4096 8192 16384 \
-  --nx 47 89 129 \
-  --coefficient-mode both \
-  --layout TILED \
-  --repeats 5 \
-  --warmups 1
-```
+Older P11B/P11C solver-stage, lowering, PCR-state, and large-population
+analysis campaigns are no longer part of the active Kaggle runner. Keep current
+Kaggle validation on curve scripts and solver-policy campaigns.
 
 Run recruitment on a T4:
 

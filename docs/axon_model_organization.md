@@ -153,13 +153,13 @@ execution.
 
 The executable root object. It binds one `Axon`/`AxonInstance` or an
 `AxonPopulation` to duration, time step, recording policy, and execution
-options. Its current `.run()` implementation delegates to the public scalar and
-pool execution paths.
+options. Its current `.run()` implementation delegates to the public population
+execution path, including one-row `B=1` batch runs.
 
 `SolverAxon`
 
-The NumPy-only solver-side representation built from an `Axon` or
-`AxonInstance` in `axonscope.solvers.axon_runtime`. It combines the flattened
+The NumPy-only runtime-neutral representation built from an `Axon` or
+`AxonInstance` in `axonscope.runtime.solver_axon`. It combines the flattened
 layout with formulation and simulation-level periaxonal overrides.
 
 ## Module Responsibilities
@@ -209,14 +209,14 @@ Defines:
 
 - `AxonSimulation`
 
-`src/axonscope/solvers/axon_runtime.py`
+`src/axonscope/runtime/solver_axon.py`
 
 Defines:
 
 - `SolverAxon`
 - `build_solver_axon`
 
-This is the solver-side bridge from descriptive axons to numerical arrays.
+This is the runtime-neutral bridge from descriptive axons to numerical arrays.
 
 `src/axonscope/axons/unmyelinated.py`
 
@@ -296,7 +296,8 @@ length; it must be an integer multiple of `sum(section_lengths)`.
 - no time-stepping policy;
 - no stimulation protocol state.
 
-Membrane/cable runtime compilation belongs in `axonscope.runtime.jax.runtime`.
+Membrane/cable runtime compilation belongs in
+`axonscope.runtime.jax.preparation.base`.
 Stimulation runtime compilation belongs in
-`axonscope.runtime.jax.stimulation_runtime`.
+`axonscope.runtime.jax.inputs`.
 Pool and batch row preparation belongs in `axonscope.preparation`.

@@ -3,7 +3,7 @@ import pytest
 
 import axonscope as axs
 from axonscope.analytical import PointSourceElectrode
-from axonscope.runtime.jax.stimulation_runtime import (
+from axonscope.runtime.jax.inputs.extracellular import (
     CompiledExtracellularStimulation,
     compile_extracellular_stimulation,
 )

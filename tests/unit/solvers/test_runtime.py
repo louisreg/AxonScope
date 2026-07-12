@@ -10,8 +10,7 @@ from axonscope.axons import Axon, Layout, Section
 from axonscope.axons import HodgkinHuxley
 from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import IntracellularContext
-from axonscope.runtime.jax.runtime import (
-    compile_membrane_model,
+from axonscope.runtime.jax.preparation.base import (
     _membrane_runtime_cache_key,
     precompute_extracellular_potential_mV,
     prepare_cable_runtime,
@@ -21,13 +20,15 @@ from axonscope.runtime.jax.runtime import (
     prepare_solver_runtime,
 )
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
-from axonscope.solvers.axon_runtime import build_solver_axon
+from axonscope.runtime.solver_axon import build_solver_axon
 from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
-from axonscope.runtime.jax.stimulation_runtime import (
+from axonscope.runtime.jax.inputs.extracellular import (
     CompiledExtracellularStimulations,
-    CompiledIntracellularContexts,
     compile_extracellular_stimulations,
+)
+from axonscope.runtime.jax.inputs.intracellular import (
+    CompiledIntracellularContexts,
     compile_intracellular_contexts,
 )
 from axonscope.utils import units

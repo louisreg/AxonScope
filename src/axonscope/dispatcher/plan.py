@@ -10,7 +10,7 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
-from axonscope.solvers.axon_runtime import SolverAxon, build_solver_axon
+from axonscope.runtime.solver_axon import SolverAxon, build_solver_axon
 
 
 _CableMode = Literal["single", "double"]

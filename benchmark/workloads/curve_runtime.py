@@ -1362,14 +1362,12 @@ def _solver_policy(options: dict[str, Any]) -> Any:
     else:
         raise ValueError(f"unsupported single-cable solver policy: {single_solver!r}")
 
-    if solver in {"auto", "pcr_adaptive"}:
+    if solver == "auto":
         double_cable = double_cable_solver.auto()
     elif solver == "thomas":
+        if platform == "gpu":
+            raise ValueError("thomas double-cable solver requires --platform cpu.")
         double_cable = double_cable_solver.thomas()
-    elif solver == "pcr":
-        double_cable = axs.runtime.jax.gpu.DoubleCableSolver.pcr()
-    elif solver == "pcr_soa":
-        double_cable = axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
     elif solver == "tiled_thomas":
         if platform != "gpu":
             raise ValueError("tiled_thomas double-cable solver requires --platform gpu.")

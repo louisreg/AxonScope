@@ -915,8 +915,8 @@ Current boundary:
 - public simulation entry points call `axonscope.runtime.execution`, which
   resolves the currently supported concrete backend without importing JAX
   adapters from `simulation.py`;
-- scalar and batch execution enter concrete JAX code only through backend
-  execution facades;
+- batch execution enters concrete JAX code only through backend execution
+  facades, including one-row `B=1` simulations;
 - dispatcher modules own planning, grouping, progress, and dispatch records,
   but must not import `axonscope.runtime.jax` or call the JAX group runner
   directly;
@@ -924,9 +924,9 @@ Current boundary:
   in `axonscope.timebase`;
 - `axonscope.solvers` exports only stable solver-facing option contracts:
   `SolverOptions`, `BatchOptions`, and `BatchRecording`;
-- JAX runtime preparation, stimulation compilation, scalar kernels, batch
-  kernels, observer packing, and backend input containers live under
-  `axonscope.runtime.jax`;
+- JAX runtime preparation, stimulation compilation, batch kernels, low-level
+  numerical helper kernels, observer packing, and backend input containers live
+  under `axonscope.runtime.jax`;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
 - `solvers/` retains only solver-facing contracts; executable solver routes
   live under concrete runtimes.
@@ -1129,11 +1129,11 @@ Cleanup reminders:
 - keep host-side runtime-batch row helpers in `preparation/runtime_batches.py`
   and backend array lowering under `runtime/jax`;
 - keep fixed-step timebase rules out of JAX-heavy solver helper modules;
-- keep runtime dataclasses, preparation helpers, scalar kernels, and batch
-  kernels out of the `axonscope.solvers` package facade;
+- keep runtime dataclasses, preparation helpers, numerical helper kernels, and
+  batch kernels out of the `axonscope.solvers` package facade;
 - keep public `recording.py` independent from solver options;
 - keep JAX membrane/solver implementation under `runtime/jax`;
-- keep `solvers/` as a public facade for stable solver classes/options during
+- keep `solvers/` as a public facade for stable solver option contracts during
   cleanup, not as a permanent catch-all for backend internals;
 - keep result-side VmRaster containers and CPU decoders out of solver modules.
 

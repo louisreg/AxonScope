@@ -8,44 +8,49 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
-import axonscope.runtime.jax.batch_kernels as batch_kernels
+import axonscope.runtime.jax.kernels.single_cable as single_cable_kernels
 from axonscope.analytical import PointSourceElectrode
-from axonscope.runtime.jax.input_batches import (
+from axonscope.runtime.jax.inputs.extracellular import (
     build_factorized_vstim_midpoint_batch,
     build_footprint_vstim_initial_previous_batch,
     build_footprint_vstim_midpoint_batch,
-    build_sparse_intracellular_current_density_batch,
     build_vstim_batch,
     build_vstim_initial_previous_batch,
     build_vstim_midpoint_and_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
+from axonscope.runtime.jax.inputs.intracellular import (
+    build_sparse_intracellular_current_density_batch,
+)
 from axonscope.preparation.runtime_batches import (
     scale_extracellular_stimulations,
 )
-from axonscope.runtime.jax.batch_kernels import (
+from axonscope.runtime.jax.cable_geometry import apply_diffusion_operator
+from axonscope.runtime.jax.kernels.chunking import _normalize_time_chunk_steps
+from axonscope.runtime.jax.kernels.double_cable import (
     DoubleCableBatchKernel,
-    SingleCableVStimBatchKernel,
+    _resolve_double_cable_kernel_block_solver,
+    _resolve_double_cable_run_block_solver,
 )
+from axonscope.runtime.jax.kernels.factorized import (
+    _compute_single_cable_factorized_forcing_footprint,
+)
+from axonscope.runtime.jax.kernels.single_cable import SingleCableVStimBatchKernel
 from axonscope.runtime.execution import batch_options_for_execution_context
 from axonscope.runtime.recording import batch_options_from_recording
-from axonscope.runtime.jax.kernels import DoubleCableKernel
-from axonscope.runtime.jax.solver_engines.cpu import resolve_cpu_solver_engine
+from axonscope.runtime.jax.policy.engine_cpu import resolve_cpu_solver_engine
 from axonscope.solvers import (
     BatchOptions,
     BatchRecording,
     DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
 )
-from axonscope.runtime.jax.batch_kernels import (
-    _resolve_double_cable_run_block_solver,
-)
-from axonscope.runtime.jax.batch_inputs import (
+from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
+    materialize_sparse_intracellular_current_density_batch,
 )
 from axonscope.results import VM_RASTER_OBSERVATION_KEY
-from axonscope.runtime.jax.observer_runtime import build_vm_raster_plan
-from tests.unit.solvers._reference_solvers import SingleCableVStimForcingReference
-from axonscope.runtime.jax.runtime import prepare_solver_runtime
+from axonscope.runtime.jax.recording.observer import build_vm_raster_plan
+from axonscope.runtime.jax.preparation.base import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from tests.unit.solvers._batch_helpers import (
     diagnostic_double_cable_solver_engine,
@@ -83,10 +88,10 @@ def test_batch_options_none_defaults_to_observer_chunking():
 
 
 def test_explicit_time_chunk_steps_are_clamped_not_disabled():
-    assert batch_kernels._normalize_time_chunk_steps(None, nt=1000) is None
-    assert batch_kernels._normalize_time_chunk_steps(50, nt=1000) == 50
-    assert batch_kernels._normalize_time_chunk_steps(1000, nt=1000) == 1000
-    assert batch_kernels._normalize_time_chunk_steps(5000, nt=1000) == 1000
+    assert _normalize_time_chunk_steps(None, nt=1000) is None
+    assert _normalize_time_chunk_steps(50, nt=1000) == 50
+    assert _normalize_time_chunk_steps(1000, nt=1000) == 1000
+    assert _normalize_time_chunk_steps(5000, nt=1000) == 1000
 
 
 def test_recording_none_lowers_to_default_observer_chunking():
@@ -99,20 +104,27 @@ def test_recording_none_lowers_to_default_observer_chunking():
 
 def test_double_cable_kernel_solver_dispatch_requires_concrete_routes():
     assert _resolve_double_cable_run_block_solver(None, platform="cpu") == "thomas"
-    assert _resolve_double_cable_run_block_solver(None, platform="gpu") == "pcr_adaptive"
+    assert (
+        _resolve_double_cable_run_block_solver(None, platform="gpu")
+        == "jax_triton_loop_xb"
+    )
     assert (
         _resolve_double_cable_run_block_solver(
             diagnostic_double_cable_solver_engine("thomas"),
-            platform="gpu",
+            platform="cpu",
         )
         == "thomas"
     )
     assert (
         _resolve_double_cable_run_block_solver(
-            diagnostic_double_cable_solver_engine("pcr_soa"),
+            diagnostic_double_cable_solver_engine(
+                "jax_triton_loop_xb",
+                platform="gpu",
+                allow_internal=True,
+            ),
             platform="gpu",
         )
-        == "pcr_soa"
+        == "jax_triton_loop_xb"
     )
     with pytest.raises(ValueError, match="resolved before kernel dispatch"):
         _resolve_double_cable_run_block_solver(
@@ -124,6 +136,13 @@ def test_double_cable_kernel_solver_dispatch_requires_concrete_routes():
             diagnostic_double_cable_solver_engine("dense"),
             platform="gpu",
         )
+    with pytest.raises(RuntimeError, match="requires a non-GPU"):
+        _resolve_double_cable_run_block_solver(
+            diagnostic_double_cable_solver_engine("thomas"),
+            platform="gpu",
+        )
+    with pytest.raises(ValueError, match="double_cable_block_solver"):
+        _resolve_double_cable_kernel_block_solver("pcr_soa", batch_size=32)
 
 
 def test_double_cable_batch_kernel_accepts_solver_engine_not_raw_policy_bits():
@@ -148,14 +167,14 @@ def test_cpu_solver_engine_keeps_double_cable_thomas_only():
     assert thomas_engine.platform == "cpu"
     assert thomas_engine.double_cable_block_solver == "thomas"
 
-    unsupported = (
-        axs.runtime.jax.gpu.DoubleCableSolver.pcr(),
-        axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa(),
-        axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=64),
-    )
-    for solver in unsupported:
-        with pytest.raises(ValueError, match="CPU double-cable supports only"):
-            resolve_cpu_solver_engine(axs.SolverPolicy(double_cable=solver))
+    with pytest.raises(ValueError, match="CPU double-cable supports only"):
+        resolve_cpu_solver_engine(
+            axs.SolverPolicy(
+                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+                    block_b=64
+                )
+            )
+        )
 
 
 def test_execution_context_leaves_batch_options_as_output_policy():
@@ -182,8 +201,9 @@ def test_gpu_execution_context_solver_policy_stays_out_of_batch_options():
         {
             "platform": "gpu",
             "solver_engine": diagnostic_double_cable_solver_engine(
-                "pcr_soa",
+                "jax_triton_loop_xb",
                 platform="gpu",
+                allow_internal=True,
             ),
         },
     )()
@@ -215,7 +235,7 @@ def test_gpu_execution_context_internal_solver_policy_stays_out_of_batch_options
     assert not hasattr(options, "double_cable_block_solver")
 
 
-def test_single_cable_vstim_batch_matches_scalar_reference_row():
+def test_single_cable_vstim_batch_matches_single_row_batch():
     axon = hh_extracellular_axon()
     tsim = 1.2
     dt = 0.01
@@ -237,15 +257,15 @@ def test_single_cable_vstim_batch_matches_scalar_reference_row():
         runtime=runtime,
         Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
     ).run(extracellular_potential_mid_mV=vext_batch)
-    scalar = SingleCableVStimForcingReference().solve(
-        hh_extracellular_axon(),
-        tsim=tsim,
-        dt=dt,
-    )
+    single = SingleCableVStimBatchKernel(
+        runtime=runtime,
+        Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
+    ).run(extracellular_potential_mid_mV=vext_mid[None, :, :])
 
-    assert batch.Vm.shape == (2, scalar.Vm.shape[0], scalar.Vm.shape[1])
-    np.testing.assert_allclose(np.asarray(batch.t), np.asarray(scalar.t), atol=0.0, rtol=0.0)
-    np.testing.assert_allclose(np.asarray(batch.Vm[0]), np.asarray(scalar.Vm), atol=1e-3, rtol=0.0)
+    assert single.Vm is not None
+    assert batch.Vm.shape == (2, single.Vm.shape[1], single.Vm.shape[2])
+    np.testing.assert_allclose(np.asarray(batch.t), np.asarray(single.t), atol=0.0, rtol=0.0)
+    np.testing.assert_allclose(np.asarray(batch.Vm[0]), np.asarray(single.Vm[0]), atol=1e-3, rtol=0.0)
     assert np.isfinite(np.asarray(batch.Vm)).all()
     assert float(np.max(np.abs(np.asarray(batch.Vm[0]) - np.asarray(batch.Vm[1])))) > 1e-8
 
@@ -502,7 +522,7 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     footprint = jnp.asarray(factorized.footprint_mV_per_A, dtype=runtime.membrane.dtype)
     lower_rows = jnp.broadcast_to(runtime.cable.lower[None, :], footprint.shape)
     upper_rows = jnp.broadcast_to(runtime.cable.upper[None, :], footprint.shape)
-    forcing = batch_kernels._compute_single_cable_factorized_forcing_footprint(
+    forcing = _compute_single_cable_factorized_forcing_footprint(
         footprint,
         lower=lower_rows,
         upper=upper_rows,
@@ -510,7 +530,7 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     )
     expected_forcing = jnp.stack(
         [
-            batch_kernels.apply_diffusion_operator(
+            apply_diffusion_operator(
                 row,
                 runtime.cable.lower,
                 runtime.cable.diag,
@@ -532,6 +552,7 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
         runtime,
         solver_axons=[runtime.axon, runtime.axon],
     )
+    dense_iinj = materialize_sparse_intracellular_current_density_batch(sparse_iinj)
     activation = axs.analysis.Activation(
         threshold=-20.0 * axs.mV,
         target=axs.positions.CENTER,
@@ -550,7 +571,7 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
 
     dense_out = kernel.run(
         extracellular_potential_mid_mV=dense,
-        intracellular_current_density_mid=sparse_iinj,
+        intracellular_current_density_mid=dense_iinj,
         options=BatchOptions.none(),
         observers=observer,
     )
@@ -680,6 +701,7 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
         runtime,
         solver_axons=[runtime.axon, runtime.axon],
     )
+    dense_iinj = materialize_sparse_intracellular_current_density_batch(sparse_iinj)
     activation = axs.analysis.Activation(
         threshold=-20.0 * axs.mV,
         target=axs.positions.CENTER,
@@ -698,7 +720,7 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
 
     dense_out = kernel.run(
         extracellular_potential_mid_mV=dense,
-        intracellular_current_density_mid=sparse_iinj,
+        intracellular_current_density_mid=dense_iinj,
         options=BatchOptions.none(),
         observers=observer,
     )
@@ -776,7 +798,7 @@ def test_single_cable_factorized_observer_avoids_dense_vstim_materialization(mon
         raise AssertionError("factorized observer path materialized dense Vstim")
 
     monkeypatch.setattr(
-        batch_kernels,
+        single_cable_kernels,
         "materialize_factorized_extracellular_potential_batch",
         fail_materialize,
     )
@@ -849,7 +871,7 @@ def test_single_cable_factorized_recorded_vm_avoids_dense_vstim_materialization(
         raise AssertionError("factorized recorded-Vm path materialized dense Vstim")
 
     monkeypatch.setattr(
-        batch_kernels,
+        single_cable_kernels,
         "materialize_factorized_extracellular_potential_batch",
         fail_materialize,
     )
@@ -918,7 +940,7 @@ def test_build_footprint_vstim_batch_matches_generic_stimulation_builder():
     )
 
 
-def test_double_cable_batch_matches_scalar_loop_rows():
+def test_double_cable_batch_matches_single_row_batch_runs():
     axon = hh_extracellular_axon()
     tsim = 0.8
     dt = 0.01
@@ -951,23 +973,22 @@ def test_double_cable_batch_matches_scalar_loop_rows():
         extracellular_potential_initial_previous_mV=vext_previous,
     )
 
-    scalar_rows = []
+    single_rows = []
     for batch_index in range(vext_mid.shape[0]):
-        row_stimulation = replace(
-            runtime.stimulation,
-            extracellular_potential_mid_mV=vext_mid[batch_index],
-            extracellular_potential_initial_previous_mV=vext_previous[batch_index],
+        row = DoubleCableBatchKernel(
+            runtime=runtime,
+            Veinit_mV=float(axon.Veinit),
+        ).run(
+            extracellular_potential_mid_mV=vext_mid[batch_index : batch_index + 1],
+            extracellular_potential_initial_previous_mV=vext_previous[
+                batch_index : batch_index + 1
+            ],
         )
-        row_runtime = replace(runtime, stimulation=row_stimulation)
-        scalar_rows.append(
-            DoubleCableKernel(
-                runtime=row_runtime,
-                Veinit_mV=float(axon.Veinit),
-            ).run().Vm
-        )
-    scalar = jnp.stack(scalar_rows)
+        assert row.Vm is not None
+        single_rows.append(row.Vm[0])
+    single = jnp.stack(single_rows)
 
-    assert batch.Vm.shape == scalar.shape
+    assert batch.Vm.shape == single.shape
     np.testing.assert_allclose(
         np.asarray(batch.t),
         np.asarray(runtime.grid.t_vec_ms),
@@ -976,7 +997,7 @@ def test_double_cable_batch_matches_scalar_loop_rows():
     )
     np.testing.assert_allclose(
         np.asarray(batch.Vm),
-        np.asarray(scalar),
+        np.asarray(single),
         atol=1e-3,
         rtol=0.0,
     )

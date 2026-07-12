@@ -7,7 +7,7 @@ import nrv
 
 from axonscope import um
 from axonscope.axons.myelinated import MRG
-from axonscope.solvers.axon_runtime import build_solver_axon
+from axonscope.runtime.solver_axon import build_solver_axon
 from tests.nrv._helpers import (
     axonscope_compartment_lengths_um,
     axonscope_section_names,

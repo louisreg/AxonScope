@@ -1,0 +1,37 @@
+"""CPU JAX solver-engine resolution."""
+
+from __future__ import annotations
+
+from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
+from axonscope.runtime.jax.policy.engine_common import (
+    resolve_double_cable_policy,
+    resolve_single_cable_policy,
+)
+from axonscope.runtime.jax.policy import (
+    DoubleCableSolverKind,
+)
+from axonscope.runtime.policy import SolverPolicy
+
+
+def resolve_cpu_solver_engine(policy: SolverPolicy) -> JaxSolverEngine:
+    """Resolve the public CPU solver policy to a JAX CPU engine descriptor."""
+
+    single_cable = resolve_single_cable_policy(policy, platform="cpu")
+    double_cable = resolve_double_cable_policy(policy, platform="cpu")
+    if double_cable.kind in {
+        DoubleCableSolverKind.AUTO,
+        DoubleCableSolverKind.THOMAS,
+    }:
+        return JaxSolverEngine(
+            name="jax_cpu_thomas",
+            platform="cpu",
+            single_cable_solver=single_cable.value,
+            double_cable_block_solver="thomas",
+        )
+    raise ValueError(
+        "Unsupported CPU double-cable solver policy "
+        f"{double_cable.kind!r}; CPU double-cable supports only auto/thomas."
+    )
+
+
+__all__ = ["resolve_cpu_solver_engine"]

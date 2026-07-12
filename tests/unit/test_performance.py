@@ -225,8 +225,8 @@ def test_solver_policy_is_typed_public_execution_policy_state():
         precision=axs.PrecisionPolicy.float32(),
         solvers=axs.SolverPolicy(
             single_cable=axs.runtime.jax.SingleCableSolver.jax_tridiagonal(),
-            double_cable=axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa(
-                adaptive_threshold=2048
+            double_cable=axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
+                block_b=64
             ),
         ),
     )
@@ -237,22 +237,18 @@ def test_solver_policy_is_typed_public_execution_policy_state():
     )
     assert (
         policy.solver_policy.double_cable.kind
-        is axs.runtime.jax.DoubleCableSolverKind.JAX_PCR_SOA
+        is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     )
-    assert policy.solver_policy.double_cable.pcr_options.adaptive_threshold == 2048
+    assert policy.solver_policy.double_cable.tiled_thomas_options.block_b == 64
     assert axs.ExecutionPolicy().solver_policy == axs.SolverPolicy()
     assert (
         axs.runtime.jax.cpu.DoubleCableSolver.thomas().kind
         is axs.runtime.jax.DoubleCableSolverKind.THOMAS
     )
 
-    tiled = axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(
-        block_b=64,
-        allow_fallback=True,
-    )
+    tiled = axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=64)
     assert tiled.kind is axs.runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     assert tiled.tiled_thomas_options.block_b == 64
-    assert tiled.tiled_thomas_options.allow_fallback is True
 
 
 def test_solver_policy_rejects_untyped_values():
@@ -266,14 +262,12 @@ def test_solver_policy_rejects_untyped_values():
         axs.runtime.jax.SingleCableSolver(kind="jax_tridiagonal")
     with pytest.raises(TypeError, match="DoubleCableSolverKind"):
         axs.runtime.jax.DoubleCableSolver(kind="jax_pcr_soa")
-    with pytest.raises(ValueError, match="adaptive_threshold"):
-        axs.runtime.jax.gpu.DoubleCableSolver.pcr(adaptive_threshold=0)
     with pytest.raises(ValueError, match="block_b"):
         axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(block_b=0)
 
 
 def test_jax_solver_engine_resolves_typed_solver_policy():
-    from axonscope.runtime.jax.solver_engines import resolve_jax_solver_engine
+    from axonscope.runtime.jax.policy.engine import resolve_jax_solver_engine
 
     cpu_engine = resolve_jax_solver_engine(
         axs.ExecutionPolicy(
@@ -342,7 +336,7 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
 
 
 def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatch):
-    from axonscope.runtime.jax import execution_policy as jax_execution_policy
+    from axonscope.runtime.jax.policy import execution as jax_execution_policy
 
     calls = 0
     sentinel_device = object()
@@ -378,7 +372,7 @@ def test_jax_execution_policy_resolution_cache_reuses_resolved_device(monkeypatc
 
 
 def test_jax_precision_validation_cache_reuses_exact_instance_tuple(monkeypatch):
-    from axonscope.runtime.jax import execution_policy as jax_execution_policy
+    from axonscope.runtime.jax.policy import execution as jax_execution_policy
 
     calls = 0
     instances = (_clamped_instance(_hh(compartments=5)),)

@@ -15,7 +15,8 @@ from axonscope.runtime.jax.membranes.backend import (
     membrane_backend_model,
     membrane_static_signature,
 )
-from axonscope.runtime.jax.runtime import MembraneRuntime, compile_membrane_model
+from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+from axonscope.runtime.jax.types import MembraneRuntime
 from axonscope.solvers.options import SolverOptions
 
 

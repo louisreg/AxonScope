@@ -16,8 +16,8 @@ from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )
+from axonscope.runtime.jax.membranes.compile import compile_membrane_model
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
-from axonscope.runtime.jax.runtime import compile_membrane_model
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
 from axonscope.membranes.model import MembraneModel
 from axonscope.model_ir import (

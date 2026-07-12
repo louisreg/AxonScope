@@ -1,7 +1,6 @@
 """Reference one-row solver variants used by tests.
 
 Kept variants:
-- ``SingleCableVStimForcingReference``: imposed-field single-cable extracellular path.
 - ``DenseSingleCableReference``: dense reference implementation.
 """
 
@@ -12,89 +11,53 @@ import jax.numpy as jnp
 
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
-from axonscope.runtime.jax.common import (
-    Carry,
+from axonscope.runtime.jax.cable_geometry import (
     apply_diffusion_operator,
-    build_cn_tridiagonal,
-    build_dense_from_tridiagonal,
     diffusion_operator_coeffs,
     initial_voltage,
 )
-from axonscope.runtime.jax.kernels import SingleCableKernel
-from axonscope.runtime.jax.runtime import (
-    prepare_membrane_runtime,
-    prepare_solver_runtime,
-)
+from axonscope.runtime.jax.preparation.base import prepare_membrane_runtime
 from axonscope.runtime.row_output import RowRecordingOutput
-from axonscope.solvers.axon_runtime import build_solver_axon
+from axonscope.runtime.solver_axon import build_solver_axon
 from axonscope.solvers.options import SolverOptions
 from axonscope.timebase import resolve_time_args, simulation_step_count
 
-from axonscope.runtime.jax.stimulation_runtime import build_intracellular_current_density_fn
+from axonscope.runtime.jax.inputs.intracellular import (
+    build_intracellular_current_density_fn,
+)
+
+Carry = tuple[jnp.ndarray, jnp.ndarray]
 
 
-class SingleCableVStimForcingReference:
-    """Single-cable Crank-Nicolson with an imposed extracellular potential.
-
-    This prototype treats extracellular stimulation as a prescribed field
-    ``Vstim(t, x)`` rather than as a dynamic periaxonal state. The cable solve
-    remains scalar on Vm and adds the known forcing term ``L(Vstim)``.
-    """
-
-    def __init__(self, *, solver_options: SolverOptions | None = None) -> None:
-        self.solver_options = (
-            SolverOptions() if solver_options is None else solver_options
-        )
-
-    def solve(
-        self,
-        axon: Axon | AxonInstance,
-        tsim: float | None = None,
-        dt: float | None = None,
-        record_diagnostics: bool = False,
-        record_observables: bool = False,
-    ) -> RowRecordingOutput:
-        simulation = as_axon_instance(axon)
-        duration, step = resolve_time_args(tsim=tsim, dt=dt)
-        solver_axon = build_solver_axon(simulation)
-        if solver_axon.formulation == "double-cable":
-            raise ValueError(
-                "SingleCableVStimForcingReference is a single-cable solver; "
-                "use the public batch route for double-cable axons."
-            )
-
-        runtime = prepare_solver_runtime(
-            simulation,
-            duration,
-            step,
-            solver_axon=solver_axon,
-            include_extracellular=False,
-            include_area=False,
-            precompute_intracellular=True,
-            precompute_extracellular=True,
-            solver_options=self.solver_options,
-        )
-        kernel = SingleCableKernel(
-            runtime=runtime,
-            Cm_uF_cm2=jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=runtime.membrane.dtype),
-        )
-        out = kernel.run(
-            record_diagnostics=record_diagnostics,
-            record_observables=record_observables,
-        )
-        return RowRecordingOutput(
-            simulation.axon,
-            out.Vm,
-            out.t,
-            diagnostics=out.diagnostics,
-            recordings=out.recordings,
-            simulation=simulation,
-        )
+def _build_cn_tridiagonal(
+    lower: jnp.ndarray,
+    diag: jnp.ndarray,
+    upper: jnp.ndarray,
+    dt: float,
+    dtype_local: jnp.dtype,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    dt_local = dtype_local(dt)
+    dl = -0.5 * dt_local * lower
+    d = jnp.ones_like(diag, dtype=dtype_local) - 0.5 * dt_local * diag
+    du = -0.5 * dt_local * upper
+    return dl, d, du
 
 
-# -----------------------------------------------------------------------------
-# Crank–Nicolson (unoptimized, dense solve)
-# -----------------------------------------------------------------------------
+def _build_dense_from_tridiagonal(
+    dl: jnp.ndarray,
+    d: jnp.ndarray,
+    du: jnp.ndarray,
+    dtype_local: jnp.dtype,
+) -> jnp.ndarray:
+    nx = d.shape[0]
+    matrix = jnp.zeros((nx, nx), dtype=dtype_local)
+    idx = jnp.arange(nx)
+    matrix = matrix.at[idx, idx].set(d)
+    matrix = matrix.at[idx[1:], idx[:-1]].set(dl[1:])
+    matrix = matrix.at[idx[:-1], idx[1:]].set(du[:-1])
+    return matrix
+
+
 class DenseSingleCableReference:
     """
     Crank–Nicolson scheme using a dense linear solver.
@@ -140,7 +103,6 @@ class DenseSingleCableReference:
         International Journal of Bio-Medical Computing, 15(1), 69–76.
     """
 
-
     def __init__(self, *, solver_options: SolverOptions | None = None) -> None:
         self.solver_options = (
             SolverOptions() if solver_options is None else solver_options
@@ -151,8 +113,6 @@ class DenseSingleCableReference:
         axon: Axon | AxonInstance,
         tsim: float | None = None,
         dt: float | None = None,
-        record_diagnostics: bool = False,
-        record_observables: bool = False,
     ) -> RowRecordingOutput:
         """
         Run CN using dense linear algebra.
@@ -200,8 +160,8 @@ class DenseSingleCableReference:
         t_vec: jnp.ndarray = (jnp.arange(Nt, dtype=dtype_local) + 1.0) * step
 
         lower, diag, upper = diffusion_operator_coeffs(solver_axon, dtype_local)
-        dl, d, du = build_cn_tridiagonal(lower, diag, upper, step, dtype_local)
-        A: jnp.ndarray = build_dense_from_tridiagonal(dl, d, du, dtype_local)
+        dl, d, du = _build_cn_tridiagonal(lower, diag, upper, step, dtype_local)
+        A: jnp.ndarray = _build_dense_from_tridiagonal(dl, d, du, dtype_local)
         I_bg = membrane_runtime.background_current
         inj_fun = build_intracellular_current_density_fn(
             simulation,
@@ -259,5 +219,4 @@ class DenseSingleCableReference:
 
 __all__ = [
     "DenseSingleCableReference",
-    "SingleCableVStimForcingReference",
 ]

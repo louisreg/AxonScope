@@ -2,6 +2,16 @@
 
 Date: 2026-07-09
 
+P12B update, 2026-07-12: this file is retained as historical P11C evidence.
+The active double-cable runtime surface is now intentionally smaller:
+
+- CPU double-cable: Thomas only; CPU `auto` resolves to Thomas.
+- GPU double-cable: looped jax-triton tiled Thomas only; GPU `auto` and
+  `tiled_thomas(...)` resolve to the internal `jax_triton_loop_xb` route.
+- PCR, PCR-SoA, PCR-adaptive, static-unrolled Triton, and large-population JAX
+  prototypes are no longer active runtime or benchmark-entry routes. Their code
+  evidence lives under `benchmark/legacy/p11_solver_exploration/`.
+
 This is a working inventory for the solver cleanup decision after the P11B and
 P11C benchmark gates. It separates:
 
@@ -16,19 +26,15 @@ promoting, renaming, deleting, or archiving any implementation.
 ## Decision Snapshot
 
 Current recommended reading, updated after the 2026-07-11 policy-cleanup
-decision note:
+decision note and the 2026-07-12 P12B runtime cleanup:
 
 - CPU double-cable production is Thomas only. `auto` on CPU resolves to
   Thomas; CPU PCR, PCR-SoA, tiled-Thomas, and Triton are not production choices.
-- GPU double-cable keeps explicit typed solver choices while the full policy
-  matrix is finished.
-- The looped jax-triton XB route is the preferred large-population GPU
-  promotion candidate, but it should become the default only after the policy
-  matrix covers `Naxons`, `Nx`, dtype, recording modes, CPU/GPU comparison,
-  cold/warm cache, memory, dependency failure modes, and corrected physical
-  curve workflows.
+- GPU double-cable keeps one supported solver family: looped jax-triton tiled
+  Thomas. `auto` and explicit `tiled_thomas(...)` both route there.
 - Do not promote PCR micro-variants as-is. They are useful diagnostic evidence,
-  not production candidates.
+  not production candidates, and are now archived outside active benchmark
+  entry points.
 - Do not add any membrane-model-specific solver/runtime path. MRG is a
   realistic benchmark workload, not a runtime branch.
 - Cleanup decision ledger:
@@ -42,7 +48,7 @@ Production solver routes are reachable through:
 AxonSimulation(...).run()
     -> axonscope.runtime.execution
     -> axonscope.runtime.jax.group_runner
-    -> axonscope.runtime.jax.batch_kernels
+    -> axonscope.runtime.jax.kernels.batch
 ```
 
 Benchmark-only solver routes may be used by:
@@ -74,8 +80,6 @@ axs.runtime.jax.SingleCableSolver.auto()
 axs.runtime.jax.SingleCableSolver.jax_tridiagonal()
 axs.runtime.jax.DoubleCableSolver.auto()
 axs.runtime.jax.cpu.DoubleCableSolver.thomas()
-axs.runtime.jax.gpu.DoubleCableSolver.pcr()
-axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
 axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)
 ```
 
@@ -97,9 +101,8 @@ implementation label as a CLI choice.
 | Scalar single-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | JAX `lax.linalg.tridiagonal_solve` | removed in P12B |
 | Scalar double-cable | `runtime/jax/execution/scalar_runner.py` -> `runtime/jax/kernels.py` | specialized block Thomas | removed in P12B |
 | Batch single-cable | `runtime/jax/group_runner.py` -> `runtime/jax/batch_kernels.py` | JAX `lax.linalg.tridiagonal_solve` over batch rows | production |
-| Batch double-cable, dense/probe Vm | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_array_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
-| Batch double-cable, observer-only VmRaster | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> `_run_double_cable_batch_observer_chunks(...)` | Thomas/PCR/PCR-SoA policy | production |
-| Batch double-cable, tiled Thomas GPU policy | same as above, with typed `DoubleCableSolver.tiled_thomas(...)` policy | looped jax-triton XB block Thomas | explicit GPU candidate |
+| Batch double-cable, CPU | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> CPU chunk scan | Thomas | production |
+| Batch double-cable, GPU | `group_runner.py` -> `DoubleCableBatchKernel.run(...)` -> GPU integrated scan | looped jax-triton XB block Thomas | production GPU route |
 
 Important implementation detail:
 
@@ -112,13 +115,13 @@ Important implementation detail:
 - Host-side inspection/reporting reads one runtime-level solver-route summary
   from the same policy resolution instead of resolving single- and double-cable
   labels independently.
-- `batch_kernels._resolve_double_cable_kernel_block_solver(...)` then resolves
-  `pcr_adaptive` to `pcr_soa` for `B <= 4096`, otherwise to `pcr`.
-- Batch-native integrated paths are used for `pcr_soa` at sufficient batch size
-  and for the internal tiled-Thomas kernel label.
-- Other double-cable solvers use a row-wise/vmap style kernel body.
+- `runtime/jax/kernels/double_cable.py` resolves only CPU `thomas` or the
+  internal GPU `jax_triton_loop_xb` route. Other double-cable solver labels are
+  rejected before kernel dispatch.
+- The active GPU path uses the batch-native integrated scan. The CPU path uses
+  the Thomas scan.
 
-## Active Production Solvers
+## Historical Solver Notes With P12B Status
 
 ### Single-cable JAX tridiagonal solve
 
@@ -142,7 +145,7 @@ opened later, it should be a separate evidence-backed route.
 | Algorithm | Exact scalarized 2x2 block Thomas sweep |
 | Layout | one axon/system at a time |
 | CPU status | only supported production double-cable route; `auto` resolves here |
-| GPU status | production selectable, but not preferred by current policy |
+| GPU status | not supported after P12B; GPU uses looped jax-triton tiled Thomas |
 | Benchmark reading | Best CPU family; poor GPU at small/medium batch sizes |
 
 Evidence:
@@ -152,28 +155,27 @@ Evidence:
 - GPU `Naxons=512`, actual `Nx=89`: Thomas-family solves are around
   `2.1-2.2 ms`, while PCR/SoA is around `0.44-0.46 ms`.
 
-### Double-cable `pcr`
+### Double-cable `pcr` historical
 
 | Item | Value |
 | --- | --- |
 | Source | `solve_block_tridiagonal_2x2_pcr(...)` in `src/axonscope/runtime/jax/common.py` |
 | Algorithm | Exact matrix-layout parallel cyclic reduction |
 | Layout | per-row/vmap style in production batch kernels |
-| Runtime role | Explicit GPU choice and large-batch target of `pcr_adaptive` |
-| Status | GPU production/benchmark route; not a supported CPU production route |
+| Runtime role | historical explicit GPU choice and large-batch target of `pcr_adaptive` |
+| Status | removed from active runtime in P12B |
 
-This remains part of the current production vocabulary, mainly as the
-large-batch side of the existing GPU adaptive policy.
+This no longer remains part of the active production vocabulary.
 
-### Double-cable `pcr_soa`
+### Double-cable `pcr_soa` historical
 
 | Item | Value |
 | --- | --- |
 | Source | `solve_block_tridiagonal_2x2_pcr_soa(...)` and `solve_block_tridiagonal_2x2_pcr_soa_batched(...)` in `src/axonscope/runtime/jax/common.py` |
 | Algorithm | Exact PCR using struct-of-arrays 2x2 block coefficients |
 | Layout | per-row/vmap or batch-first `[B, Nx]` |
-| Runtime role | Main current GPU-oriented exact JAX route for small/medium batches |
-| Status | GPU production/benchmark route; not a supported CPU production route |
+| Runtime role | historical GPU-oriented exact JAX route for small/medium batches |
+| Status | removed from active runtime in P12B |
 
 Evidence:
 
@@ -184,18 +186,17 @@ Evidence:
   is around `0.44-0.46 ms` for block solve and close to the fused one-step
   time, making the GPU path solver-sensitive.
 
-### Double-cable `pcr_adaptive`
+### Double-cable `pcr_adaptive` historical
 
 | Item | Value |
 | --- | --- |
 | Source | `src/axonscope/runtime/jax/batch_kernels.py` |
 | Algorithm | Policy alias, not a solver body |
 | Resolution | `pcr_soa` for `B <= 4096`, otherwise `pcr` |
-| Runtime role | Current GPU `auto` policy target |
-| Status | GPU production policy; never a CPU policy |
+| Runtime role | historical GPU `auto` policy target |
+| Status | removed from active runtime in P12B |
 
-This should be treated as policy glue. If Triton is promoted, the policy should
-be redesigned from fresh P11C-F evidence instead of patched ad hoc.
+This should be treated as historical policy glue, not a route to revive.
 
 ## Backend-Private Integrated Candidate
 
@@ -204,14 +205,14 @@ be redesigned from fresh P11C-F evidence instead of patched ad hoc.
 | Item | Value |
 | --- | --- |
 | Runtime override name | `jax_triton_loop_xb` |
-| Source | `src/axonscope/runtime/jax/jax_triton_double_cable.py` and `src/axonscope/runtime/jax/common.py` |
+| Source | `src/axonscope/runtime/jax/kernels/triton_double_cable.py` and `src/axonscope/runtime/jax/kernels/common.py` |
 | Runtime hook | `solve_double_cable_linear_system_jax_triton_loop_xb(...)` |
 | Kernel path | `solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(...)` |
 | Layout | node-first `[Nx, B]`, one Triton program per axon tile |
 | Algorithm | Exact tiled 2x2 block Thomas, looped `tl.range` recurrence |
 | Supported target | GPU, fp32, optional `jax-triton`/`triton` dependency |
-| Public API status | not public |
-| Benchmark status | integrated benchmark-only override |
+| Public API status | selected by GPU `auto`/`tiled_thomas(...)`; internal label is not public |
+| Benchmark status | active GPU runtime route |
 
 Why it exists:
 
@@ -236,10 +237,11 @@ Why it exists:
 Current decision:
 
 ```text
-Promising, but not yet policy.
+Promoted as the only active GPU double-cable route in P12B.
 ```
 
-Promotion requires the full P11C-F policy matrix and a clean API decision.
+Future work can still tune its options, but not by re-opening rejected solver
+families as runtime routes.
 
 ## Benchmark-Only Diagnostic Solvers
 
@@ -249,16 +251,16 @@ These routes are useful for comparison but should not be exposed through
 | Candidate | Source | Status | Main evidence |
 | --- | --- | --- | --- |
 | `thomas_batched_scan` | `solve_block_tridiagonal_2x2_scalar_batched(...)` in `common.py` | diagnostic | Poor GPU at `Naxons=512`, but becomes useful at very large `Naxons`; kept as reference for large-population gates. |
-| `large_population_exact_double_cable_jax` | `benchmark/analysis/large_population_solver.py` | diagnostic/prototype | Validated layout/bucketing ideas, but mixed timing and not enough for production. CPU route should not move here. Moved out of `runtime/jax` during P12B cleanup. |
-| `jax_triton_tiled_thomas` | `jax_triton_double_cable.py` | rejected as static-unrolled route | Strong warm timing but unacceptable static-range lowering time at realistic `Nx`. Superseded by looped version. |
-| `jax_triton_tiled_thomas_loop` | `jax_triton_double_cable.py` | diagnostic plus integrated candidate source | Strong warm large-population GPU signal; looped XB form is the current integrated benchmark candidate. |
+| `large_population_exact_double_cable_jax` | `benchmark/legacy/p11_solver_exploration/large_population_solver.py` | historical diagnostic/prototype | Validated layout/bucketing ideas, but mixed timing and not enough for production. CPU route should not move here. |
+| `jax_triton_tiled_thomas` | archived P11C code | rejected static-unrolled route | Strong warm timing but unacceptable static-range lowering time at realistic `Nx`. Superseded by looped version. |
+| `jax_triton_tiled_thomas_loop` | `runtime/jax/kernels/triton_double_cable.py` | retained active GPU route | Strong warm large-population GPU signal; looped XB form is the current integrated route. |
 | `pcr_soa_vmap` | benchmark analysis wrappers | diagnostic | Optimized HLO essentially equivalent to batch-native PCR/SoA; no separate runtime route needed. |
-| `pcr_soa_symmetric_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic | Reduced HLO state and estimated fusion output, but hot solve improved only about `2.6%` at P100 `B=512`. Not enough. |
-| `pcr_soa_nomask_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Lower select count, slower hot runtime. |
-| `pcr_soa_shift_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic reference | Removed gathers/selects and improved first-run behavior, but hot runtime did not improve. |
-| `pcr_soa_transposed_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Slower hot runtime. |
-| `pcr_soa_padded_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic reference | Similar hot runtime to baseline within noise; not a clear win. |
-| `pcr_soa_hybrid_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Much larger HLO/fusion surface and much slower. |
+| `pcr_soa_symmetric_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | historical diagnostic | Reduced HLO state and estimated fusion output, but hot solve improved only about `2.6%` at P100 `B=512`. Not enough. |
+| `pcr_soa_nomask_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | rejected diagnostic | Lower select count, slower hot runtime. |
+| `pcr_soa_shift_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | historical diagnostic reference | Removed gathers/selects and improved first-run behavior, but hot runtime did not improve. |
+| `pcr_soa_transposed_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | rejected diagnostic | Slower hot runtime. |
+| `pcr_soa_padded_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | historical diagnostic reference | Similar hot runtime to baseline within noise; not a clear win. |
+| `pcr_soa_hybrid_batched` | `benchmark/legacy/p11_solver_exploration/double_cable_solver_candidates.py` | rejected diagnostic | Much larger HLO/fusion surface and much slower. |
 | reciprocal inverse rewrite | reverted code, documented in `p11b_reciprocal_inverse_gate_2026_07_07.md` | rejected | Reduced divide count but regressed hot block solve and one-step timing. |
 
 ## Archived Or Historical Solver Families
@@ -270,6 +272,7 @@ benchmark/legacy/pre_p11/solvers/
 benchmark/legacy/pre_p11/triton_solver/
 benchmark/legacy/pre_p11/jax_triton_solver/
 benchmark/legacy/pre_p11/cuda_ffi_solver/
+benchmark/legacy/p11_solver_exploration/
 tests/archive/solver_spikes/
 ```
 
@@ -328,8 +331,7 @@ Do not promote PCR micro-variants.
 Decision:
 
 ```text
-Continue P11C-F. The candidate is worth full policy benchmarking.
-Do not make it public/default yet.
+P12B keeps the looped Triton route and archives the rejected solver probes.
 ```
 
 ## Source Path Map
@@ -340,22 +342,24 @@ Do not make it public/default yet.
 src/axonscope/simulation.py
 src/axonscope/runtime/execution.py
 src/axonscope/runtime/jax/group_runner.py
-src/axonscope/runtime/jax/batch_kernels.py
+src/axonscope/runtime/jax/kernels/
 ```
 
 ### Production solver implementation path
 
 ```text
 src/axonscope/solvers/options.py
-src/axonscope/runtime/jax/common.py
-src/axonscope/runtime/jax/batch_kernels.py
+src/axonscope/runtime/jax/kernels/common.py
+src/axonscope/runtime/jax/kernels/double_cable.py
+src/axonscope/runtime/jax/kernels/double_cable_cpu.py
+src/axonscope/runtime/jax/kernels/double_cable_gpu.py
+src/axonscope/runtime/jax/kernels/triton_double_cable.py
 ```
 
-### Backend-private P11C implementation path
+### Historical P11C implementation path
 
 ```text
-src/axonscope/runtime/jax/jax_triton_double_cable.py
-benchmark/analysis/large_population_solver.py
+benchmark/legacy/p11_solver_exploration/
 ```
 
 ### Benchmark entry points
@@ -372,13 +376,12 @@ benchmark/kaggle/run_kernel.py
 ### Low-level analysis tools
 
 ```text
-benchmark/analysis/double_cable_real_stage_profile.py
-benchmark/analysis/large_population_double_cable_solver_profile.py
-benchmark/analysis/double_cable_solver_stage_profile.py
-benchmark/analysis/double_cable_solver_lowering_audit.py
-benchmark/analysis/pcr_soa_stage_state_audit.py
-benchmark/analysis/jax_triton_cold_start_audit.py
 benchmark/analysis/hlo_fusion_summary.py
+benchmark/legacy/p11_solver_exploration/double_cable_real_stage_profile.py
+benchmark/legacy/p11_solver_exploration/large_population_double_cable_solver_profile.py
+benchmark/legacy/p11_solver_exploration/double_cable_solver_stage_profile.py
+benchmark/legacy/p11_solver_exploration/double_cable_solver_lowering_audit.py
+benchmark/legacy/p11_solver_exploration/pcr_soa_stage_state_audit.py
 ```
 
 ## Flattening Questions For The Next Decision

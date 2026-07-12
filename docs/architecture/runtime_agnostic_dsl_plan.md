@@ -145,7 +145,7 @@ historical membrane packages and the per-model backend adapter layer.
 
 - Public `Model` instances are backend-neutral. Flattening normalizes them to
   internal `MembraneModel` descriptors, and
-  `runtime/jax/runtime.py::compile_membrane_model` translates those
+  `runtime/jax/membranes/compile.py::compile_axon_membrane` translates those
   descriptors to `JaxMembraneProgram` through the single Model IR path.
 - The JAX membrane backend protocol exposes the hot solver terms today:
   `init_gates`, `cn_gate_update`, `currents`, `total_conductance`,
@@ -202,7 +202,7 @@ The membrane implementation is now deliberately split by responsibility:
   `GatedLeakStackMembraneBackend` consume `JaxMembraneProgram` directly;
 - `axonscope.runtime.jax.membranes.model_ir_lowering` lowers Model IR expressions and
   step programs to JAX callables;
-- `axonscope.runtime.jax.runtime` is intentionally model-family agnostic:
+- `axonscope.runtime.jax.preparation.base` is intentionally model-family agnostic:
   it no longer carries Rattay/AxNode/passive membrane equations or model-name
   fast paths.
 

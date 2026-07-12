@@ -225,7 +225,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     )
     parser.add_argument(
         "--double-cable-block-solver",
-        choices=("auto", "thomas", "pcr", "pcr_soa", "pcr_adaptive", "tiled_thomas"),
+        choices=("auto", "thomas", "tiled_thomas"),
         default="auto",
         help="Typed public double-cable solver policy for JAX double-cable runs.",
     )

@@ -38,7 +38,7 @@ shape, benchmark vocabulary, and result assembly concepts.
 - extracellular modes: `zero`, `shared_current`,
   `scaled_shared_waveform`, `current_table`, `dense`.
 
-`runtime/jax/input_lowering.py` owns the current JAX implementation of those
+`runtime/jax/inputs/lowering.py` owns the current JAX implementation of those
 semantics. It may use JAX-specific containers internally, but benchmark and
 inspection metadata should report the runtime-neutral mode labels.
 
@@ -52,23 +52,30 @@ specific out of `runtime/jax/`:
   concept describes output sinks (`vm`, `vm_raster`, `none`) and chunking, not
   JAX kernels.
 - Intracellular and extracellular input-format type labels moved to
-  `runtime/input_contract.py`; `runtime/jax/input_lowering.py` now owns only
+  `runtime/input_contract.py`; `runtime/jax/inputs/lowering.py` now owns only
   the JAX implementation of those labels.
 - Observer-output labels and VmRaster observer compatibility moved to
   `runtime/output_contract.py`. Public estimate/inspection helpers can now ask
   `runtime.execution` for those labels without routing through
-  `runtime.jax.benchmark`.
+  `runtime.execution`.
 - Guardrails now assert that `runtime/jax/output_plan.py` stays absent and that
   input/output labels remain runtime-neutral.
 - Dense-equivalent input shape and byte-size helpers moved to
   `runtime/input_contract.py`, so JAX benchmark metadata no longer imports
   those generic memory-estimate helpers from JAX input lowering.
-- Dead observer-output proxy helpers were removed from `runtime/jax/benchmark.py`.
+- Batch memory-estimate arithmetic moved to `runtime/memory_estimates.py`.
+  `runtime/jax/benchmarking/metadata.py` now adapts JAX lowered payloads and
+  adds optional JAX device-capacity metadata, but it no longer owns the
+  runtime-neutral byte accounting for positions, dense/factorized Vstim,
+  intracellular inputs, or retained Vm output.
+- Dead observer-output proxy helpers were removed from the JAX benchmarking
+  facade.
   The active facade for estimate/inspection code is now `runtime.execution`,
   backed by the runtime-neutral output contract for observer-output labels.
-- Public dispatch-record assembly moved from `runtime/jax/batch_results.py` to
-  `runtime/result_assembly.py`. The JAX module now keeps only JAX kernel-output
-  synchronization, pending VmRaster finalization, and padded kernel-output trim.
+- Public dispatch-record assembly moved from JAX result helpers to
+  `runtime/result_assembly.py`. `runtime/jax/recording/results.py` now keeps only
+  JAX kernel-output synchronization, pending VmRaster finalization, and
+  padded kernel-output trim.
 - `runtime/jax/group_runner.py` now has a narrower orchestration shape:
   single-cable and double-cable input lowering remain cable-specific helpers,
   while shared progress, memory-estimate metadata, kernel compile progress, and
@@ -80,54 +87,60 @@ specific out of `runtime/jax/`:
 - Recording request conversion moved from `runtime/jax/recording.py` to
   `runtime/recording.py`. Public `Recording` and `RecordingPlan` lowering to
   `BatchOptions` is runtime-neutral; JAX-specific padded-row and VmRaster
-  observer lowering remains in `runtime/jax/recording_lowering.py`.
+  observer lowering remains in `runtime/jax/recording/lowering.py`.
 - Padded recording handling also moved to `runtime/recording.py`:
   row-aware retained Vm indices, full-recording fallback for unsupported padded
   recordings, and cohort original-index tables are runtime-neutral batch
-  semantics. `runtime/jax/recording_lowering.py` now only owns cached lowering
+  semantics. `runtime/jax/recording/lowering.py` now only owns cached lowering
   from public observers to JAX VmRaster plans.
+- Observer cache signatures moved to `runtime/output_contract.py`, so a future
+  NumPy/SciPy runtime can reuse the same stable observer-definition identity
+  instead of copying the JAX VmRaster-plan cache key logic.
 - Estimate/inspection recording lowering now calls `runtime.recording`
   directly through `runtime.execution`; the old JAX benchmark proxy for
   `benchmark_lower_recording_options` was removed.
 - Host-side cable/extracellular NumPy preparation moved to
   `runtime/host_preparation.py`: diffusion coefficients, compartment areas,
   padded space/edge/gate arrays, and double-cable extracellular host rows are
-  now runtime-neutral helpers. `runtime/jax/runtime_preparation.py` still owns
-  JAX materialization into `CableRuntime` and `ExtracellularRuntime`.
+  now runtime-neutral helpers. `runtime/jax/preparation/stacking.py` owns JAX
+  materialization into `CableRuntime` and `ExtracellularRuntime`.
 - P12B source-pruning pass:
   test-only dense/reference Crank-Nicholson solvers moved from
   `runtime/jax/reference_solvers.py` to `tests/unit/solvers/_reference_solvers.py`;
-  the P11C large-population prototype moved from
-  `runtime/jax/large_population_solver.py` to
-  `benchmark/analysis/large_population_solver.py`; rejected or diagnostic
-  PCR-SoA candidate variants moved from `runtime/jax/common.py` to
-  `benchmark/analysis/double_cable_solver_candidates.py`. `common.py` now keeps
-  the active runtime primitives rather than benchmark-only probes.
+  the P11B/P11C solver prototypes and rejected PCR-SoA probes moved under
+  `benchmark/legacy/p11_solver_exploration/`; rejected or diagnostic
+  candidate variants were removed from the active runtime primitive modules.
+  The old `runtime/jax/kernels/common.py` bucket is gone; active shared
+  primitives now live in `runtime/jax/cable_geometry.py`,
+  `runtime/jax/kernels/double_cable_linear.py`, and
+  `runtime/jax/kernels/block_tridiagonal.py` rather than benchmark-only probe
+  code.
 - Runtime-neutral stimulus current planning moved from
-  `runtime/jax/input_batches.py` to `runtime/input_planning.py`: temporal
+  `runtime/jax/inputs/extracellular.py` to `runtime/input_planning.py`: temporal
   current caching, sampled-stimulus semantic keys, rank-1 current-row planning,
   scaled-shared-waveform row planning, and cached array-content signatures are
-  now reusable outside JAX. `input_batches.py` keeps JAX materialization,
-  footprint device caches, and factorized payload assembly.
+  now reusable outside JAX. JAX input materialization is split between
+  `inputs/extracellular.py` for footprints/factorized potentials and
+  `inputs/intracellular.py` for dense/sparse current-density batches.
 - Runtime-neutral dispatch-group preparation moved from
-  `runtime/jax/runtime_preparation.py` and `runtime/jax/runtime_caches.py` to
+  `runtime/jax/preparation/runtime.py` and `runtime/jax/preparation/caches.py` to
   `runtime/group_preparation.py`: representative-row selection, runtime-context
   cache keys, dispatch-group structural signatures, prepared-cohort caches, and
   exact-group prepared-cohort reuse are no longer JAX runtime state.
-  `runtime/jax/runtime_preparation.py` now keeps JAX `SolverRuntime`
-  construction, JAX array stacking, group `Cm` lowering, and JAX-specific
-  membrane/cable/extracellular materialization. `runtime/jax/runtime_caches.py`
-  keeps only JAX runtime/forcing caches.
+  `runtime/jax/preparation/runtime.py` keeps JAX `SolverRuntime` construction,
+  while `runtime/jax/preparation/stacking.py` keeps JAX array stacking, group
+  `Cm` lowering, and JAX-specific membrane/cable/extracellular
+  materialization. `runtime/jax/preparation/caches.py` keeps only JAX
+  runtime/forcing caches.
 - JAX gated/leak membrane row stacking moved from
-  `runtime/jax/runtime_preparation.py` to `runtime/jax/membranes/stacking.py`.
-  `runtime_preparation.py` now orchestrates membrane stacking, while the
+  `runtime/jax/preparation/stacking.py` to `runtime/jax/membranes/stacking.py`.
+  `runtime/jax/preparation/stacking.py` now orchestrates membrane stacking, while the
   capability-based gated/leak encoders and row caches live with the JAX
   membrane-stacking implementation. The unused `_encode_gated_leak_members`
   helper was removed rather than preserved.
-- The tiny `runtime/jax/observables.py` module was removed. Its helpers now
-  live in `runtime/jax/runtime.py` next to `SolverRuntime`, because they package
-  scalar-runtime membrane outputs rather than defining an independent runtime
-  boundary.
+- The tiny `runtime/jax/observables.py` module was removed. Its helper now lives
+  in `runtime/jax/preparation/base.py`, because it packages base-runtime
+  membrane outputs rather than defining an independent runtime boundary.
 - A `vulture`-guided dead-code pass removed unused JAX runtime helpers that no
   active source or unit test called: `precompute_intracellular_current_density`,
   `RowIndexedMembraneBackend.init_gates_for_row`,
@@ -153,7 +166,7 @@ Validation:
 python -m compileall -q src/axonscope tests/unit
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_inspection.py tests/unit/test_performance.py --tb=short
 python -m pytest -q tests/unit/test_dispatcher.py --tb=short
-python -m pytest -q tests/unit/benchmarking/test_double_cable_solver_candidates.py tests/unit/solvers/test_large_population_solver.py tests/unit/solvers/test_common.py --tb=short
+python -m pytest -q tests/unit/solvers/test_common.py --tb=short
 python -m pytest -q tests/unit/solvers/test_batch.py tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_extracellular.py --tb=short
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_single_cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_double_cpu

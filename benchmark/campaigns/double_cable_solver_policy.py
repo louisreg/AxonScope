@@ -32,7 +32,7 @@ CURVE_SCRIPTS = ("threshold_curves", "recruitment_curves")
 RECORDINGS = ("observer_only", "probe_vm", "full_vm")
 DIAMETER_MODES = ("same_diameter", "different_diameters")
 CPU_SOLVERS = ("auto", "thomas")
-GPU_SOLVERS = ("auto", "thomas", "pcr", "pcr_soa", "tiled_thomas")
+GPU_SOLVERS = ("auto", "tiled_thomas")
 OBSERVER_STATE_SCOPES = ("default", "chunk", "full")
 
 SUMMARY_FIELDS = (
@@ -908,7 +908,6 @@ def _kernel_variant_from_event(event: Mapping[str, Any]) -> str:
         "dense_vstim_full_scan",
         "factorized_vstim",
         "factorized_sparse_vstim",
-        "sparse_vstim",
         "zero_sparse_vstim",
     }:
         return "jax_tridiagonal"

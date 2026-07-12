@@ -38,8 +38,9 @@ Current state:
 - Current solver-policy decisions are tracked in
   `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
   CPU double-cable keeps only Thomas as a production route; GPU double-cable
-  keeps Triton/tiled-Thomas as the preferred promotion candidate pending the
-  full policy matrix; single-cable stays on the JAX tridiagonal route for now.
+  currently resolves `auto` through the Triton/tiled-Thomas route while the
+  full policy matrix remains the benchmark gate; single-cable stays on the JAX
+  tridiagonal route for now.
 
 Fresh local validation from the 2026-07-02 audit:
 
@@ -85,10 +86,83 @@ pytest -q tests/unit --tb=short
   - [x] Remove unused rate-table option, the direct public
     `CrankNicholson`/`Solver` execution facade, and the JAX scalar fallback;
     one-row public simulations use the batch route with `B=1`.
-- [ ] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
+  - [x] Split the former JAX batch-kernel monolith into explicit
+    `runtime/jax/kernels/single_cable.py`,
+    `runtime/jax/kernels/double_cable.py`, shared chunking/factorized/input
+    helpers, and `runtime/jax/recording/results.py`; remove the old
+    `runtime/jax/batch_kernels.py`/`kernels/batch.py` path.
+  - [x] Split active shared numerical primitives out of the old
+    `runtime/jax/kernels/common.py` bucket into
+    `runtime/jax/cable_geometry.py`,
+    `runtime/jax/kernels/double_cable_linear.py`, and
+    `runtime/jax/kernels/block_tridiagonal.py`; remove legacy PCR/PCR-SoA and
+    diagnostic batched-Thomas helpers from active runtime code, and keep
+    double-cable scan bodies split into CPU Thomas and GPU tiled-Thomas/Triton
+    files.
+  - [x] Review `chunking`, `factorized`, `inputs`, `results`, `core`, and
+    `cable_geometry` one by one: keep `chunking`, `factorized`, and `inputs`
+    as kernel-only shared helpers; move JAX geometry to
+    `runtime/jax/cable_geometry.py`, move result synchronization to
+    `runtime/jax/recording/results.py`, and rename the former vague kernel
+    `core.py` to `runtime/jax/kernels/double_cable_step.py`.
+  - [x] Archive historical P11B/P11C solver probes under
+    `benchmark/legacy/p11_solver_exploration/`, delete the
+    `jax_triton_cold_start_audit` runner/test surface, and keep the active
+    double-cable routes limited to CPU Thomas and GPU looped Triton/tiled
+    Thomas.
+  - [x] Clean the single-cable JAX kernel surface: split scan bodies into
+    `runtime/jax/kernels/single_cable_scans.py`, remove the unsupported
+    observer-only sparse-current plus dense-Vstim route, and keep only dense,
+    factorized, factorized-sparse, and zero-sparse routes that are reachable
+    from the runtime lowering contract.
+  - [x] Reorganize the remaining JAX runtime modules by responsibility:
+    typed runtime policy in `runtime/jax/policy/`, input payload/build/lowering
+    in `runtime/jax/inputs/`, host-side batch preparation and caches in
+    `runtime/jax/preparation/`, observer/recording/result synchronization in
+    `runtime/jax/recording/`, and JAX profiling/metadata helpers in
+    `runtime/jax/benchmarking/`.
+  - [ ] Reintroduce dense recording only as a batch-native result path:
+    `Recording.full()`, gates, currents, conductances, and state variables must
+    lower through the batch route for `B=1` and `B>N`, with explicit signal
+    names, result manifests, memory accounting, tests, examples, and benchmark
+    evidence. Do not reintroduce scalar fallback execution for this.
+- [x] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
   host-side code. Delete unused paths, keep solver/kernel-specific code inside
   the JAX runtime, and move semantic-only reusable contracts to
   `src/axonscope/runtime/` when they can support a future NumPy/SciPy runtime.
+  Use `docs/architecture/p12b_jax_runtime_reorganization_proposal_2026_07_12.md`
+  as the proposed file-responsibility map before moving more modules.
+  Method: do the whole audit/move/delete pass first, without running the full
+  test suite after each file or folder. Validate once at the end with
+  `compileall`, `tests/unit`, `git diff --check`, `vulture`, and only then
+  targeted benchmarks if hotpath behavior changed.
+  For every directory or root file below, verify that all retained paths are
+  still used, that there is no dead or duplicate code, that responsibility is
+  not split across redundant routes, and that the code is genuinely
+  JAX-specific. If a contract, planning rule, metadata shape, or host-side
+  semantic helper is runtime-neutral, move it to `src/axonscope/runtime/` so it
+  can serve the future NumPy/SciPy runtime too.
+  - [x] Root JAX files: `__init__.py`, `group_runner.py`, `types.py`, and
+    `cable_geometry.py`.
+  - [x] `runtime/jax/policy/`: typed JAX solver requests, execution context,
+    device/precision lowering, and solver-engine resolution.
+  - [x] `runtime/jax/inputs/`: payload dataclasses, dense/sparse/factorized
+    builders, footprint caches, and semantic input lowering.
+  - [x] `runtime/jax/preparation/`: batch runtime materialization, caches,
+    shape bucketing, host-to-device array preparation, and row stacking.
+  - [x] `runtime/jax/recording/`: VmRaster observer plan/state/update,
+    recording lowering, result synchronization, waits, trimming, and
+    finalization.
+  - [x] `runtime/jax/kernels/`: single-cable, double-cable CPU/GPU, shared
+    chunking/factorized/input helpers, double-cable linear-system helpers, and
+    Triton integration.
+  - [x] `runtime/jax/membranes/`: membrane compiler bridge, Model IR lowering,
+    membrane backend implementations, layout aggregation, programs, and
+    stacking optimizations.
+  - [x] `runtime/jax/benchmarking/`: JAX profiling hooks, memory profiling,
+    benchmark metadata, and estimate/inspection support helpers. Source audit
+    pass started: the runtime-neutral batch memory-estimate math now lives in
+    `runtime/memory_estimates.py`.
 - [ ] Define and enforce the runtime input contract before implementing
   `axs.runtime.numpy`: prepared batches must expose one cable formulation, one
   padded `Nx`, a dtype/time grid, typed per-cable solver policy, recording and

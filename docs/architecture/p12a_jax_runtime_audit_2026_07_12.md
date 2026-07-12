@@ -10,11 +10,17 @@ single-cable or double-cable performance.
 These modules own JAX arrays, JIT behavior, device placement, or solver kernels.
 Do not move them to `axonscope.runtime`:
 
-- `batch_kernels.py`
-- `common.py`
-- `solver_core.py`
-- `jax_triton_double_cable.py`
-- `kernels.py`
+- `kernels/single_cable.py`
+- `kernels/double_cable.py`
+- `kernels/double_cable_cpu.py`
+- `kernels/double_cable_gpu.py`
+- `kernels/chunking.py`
+- `kernels/factorized.py`
+- `kernels/inputs.py`
+- `kernels/results.py`
+- `kernels/common.py`
+- `kernels/core.py`
+- `kernels/triton_double_cable.py`
 - `membranes/backend.py`
 - `membranes/layout.py`
 - `membranes/program.py`
@@ -23,7 +29,7 @@ Do not move them to `axonscope.runtime`:
 - `runtime.py`
 - `runtime_caches.py`
 - `execution_policy.py`
-- `solver_engines/`
+- `policy/`
 - `stimulation_runtime.py`
 
 Changes in these files can affect solver performance or compilation behavior
@@ -43,8 +49,7 @@ should converge across single-cable and double-cable execution:
 - `recording.py`
 - `recording_lowering.py`
 - `output_contract.py` for runtime-neutral output sink labels and
-  `runtime/jax/recording_lowering.py` for JAX VmRaster-plan construction
-- `batch_results.py`
+  `runtime/jax/recording/lowering.py` for JAX VmRaster-plan construction
 - `observer_runtime.py`
 - `benchmark.py`
 

@@ -267,7 +267,7 @@ public output contract should be `Recording(...)` plus `observers=(...)`.
 Add a backend-private solver engine layer:
 
 ```text
-src/axonscope/runtime/jax/solver_engines/
+src/axonscope/runtime/jax/policy/
     __init__.py
     types.py
     policy.py
@@ -463,18 +463,18 @@ as batch-native result payloads.
 ### P11D-D - Add CPU/GPU Engine Layer
 
 Status on 2026-07-09: initial JAX engine-resolution layer implemented under
-`src/axonscope/runtime/jax/solver_engines/`. It resolves typed public policy
+`src/axonscope/runtime/jax/policy/`. It resolves typed public policy
 to CPU/GPU engine descriptors and feeds the current batch kernels; it is not yet
 a full solver-core extraction.
 
-- Add `solver_engines/types.py` with the internal protocol.
-- Add `solver_engines/policy.py` to resolve a typed public policy to a concrete
+- Add `policy/types.py` with the internal protocol.
+- Add `policy/policy.py` to resolve a typed public policy to a concrete
   backend engine and internal solver route.
-- Add `solver_engines/cpu.py`:
+- Add `policy/cpu.py`:
   - single-cable JAX tridiagonal;
   - double-cable Thomas;
   - no public PCR choices initially.
-- Add `solver_engines/gpu.py`:
+- Add `policy/gpu.py`:
   - single-cable JAX tridiagonal;
   - double-cable current JAX PCR policy;
   - optional benchmark-only Triton route still gated.

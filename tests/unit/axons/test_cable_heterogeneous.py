@@ -11,8 +11,13 @@ from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )
-from axonscope.runtime.jax.runtime import build_membrane_backend_from_axon, compile_membrane_model
-from axonscope.runtime.jax.stimulation_runtime import build_intracellular_current_density_fn
+from axonscope.runtime.jax.membranes.compile import (
+    build_membrane_backend_from_axon,
+    compile_membrane_model,
+)
+from axonscope.runtime.jax.inputs.intracellular import (
+    build_intracellular_current_density_fn,
+)
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
 

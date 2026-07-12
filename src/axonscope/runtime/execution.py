@@ -64,7 +64,7 @@ def execution_context(
 ):
     """Return the execution context for the currently supported runtime."""
 
-    from axonscope.runtime.jax.execution_policy import jax_execution_context
+    from axonscope.runtime.jax.policy.execution import jax_execution_context
 
     return jax_execution_context(policy, instances=instances)
 
@@ -141,7 +141,7 @@ def benchmark_plan_input_lowering(
 ):
     """Return runtime input-lowering formats without materializing arrays."""
 
-    from axonscope.runtime.jax.benchmark import (
+    from axonscope.runtime.jax.benchmarking.profile import (
         benchmark_plan_input_lowering as jax_benchmark_plan_input_lowering,
     )
 
@@ -160,7 +160,7 @@ def benchmark_membrane_output_names(
 ) -> tuple[str, ...]:
     """Return runtime membrane output names for estimate-only reporting."""
 
-    from axonscope.runtime.jax.benchmark import (
+    from axonscope.runtime.jax.benchmarking.profile import (
         benchmark_membrane_output_names as jax_benchmark_membrane_output_names,
     )
 
@@ -180,7 +180,7 @@ def benchmark_profile_start(
     if resolved is None:
         return None
     if resolved == "jax":
-        from axonscope.runtime.jax.benchmark import benchmark_profile_start as start
+        from axonscope.runtime.jax.benchmarking.profile import benchmark_profile_start as start
 
         return start(
             output_dir,
@@ -228,7 +228,7 @@ def benchmark_trace_annotation(name: str):
     """Return a runtime-owned trace annotation context when available."""
 
     try:
-        from axonscope.runtime.jax.benchmark import (
+        from axonscope.runtime.jax.benchmarking.profile import (
             benchmark_trace_annotation as jax_trace_annotation,
         )
 
@@ -248,7 +248,7 @@ def benchmark_save_device_memory_profile(
     if resolved is None:
         return {"enabled": False}
     if resolved == "jax":
-        from axonscope.runtime.jax.benchmark import (
+        from axonscope.runtime.jax.benchmarking.profile import (
             benchmark_save_device_memory_profile as save,
         )
 
@@ -274,7 +274,7 @@ def solver_route_from_execution_policy(
 
     if policy is None:
         return None
-    from axonscope.runtime.jax.execution_policy import jax_solver_engine_for_policy
+    from axonscope.runtime.jax.policy.execution import jax_solver_engine_for_policy
 
     solver_engine = jax_solver_engine_for_policy(policy)
     if solver_engine is None:
@@ -319,14 +319,6 @@ def _double_cable_solver_options(
 ) -> tuple[tuple[str, Any], ...]:
     options: list[tuple[str, Any]] = []
     request_label = _solver_request_label(request)
-    if request_label in {"jax_pcr", "jax_pcr_soa"}:
-        adaptive_threshold = getattr(
-            getattr(request, "pcr_options", None),
-            "adaptive_threshold",
-            None,
-        )
-        if adaptive_threshold is not None:
-            options.append(("adaptive_threshold", int(adaptive_threshold)))
     if request_label == "tiled_thomas" and tiled_thomas_block_b is not None:
         options.append(("block_b", int(tiled_thomas_block_b)))
     return tuple(options)

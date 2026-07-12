@@ -112,18 +112,7 @@ def test_inspection_reports_typed_double_cable_solver_policy():
     axon = axs.axons.MRG(diameter=5.7 * axs.um, nodes=3)
     population = axs.AxonPopulation([axs.AxonInstance(axon), axs.AxonInstance(axon)])
 
-    pcr_report = _inspect_simulation(
-        population,
-        duration=0.10 * axs.ms,
-        dt=0.05 * axs.ms,
-        execution_policy=axs.ExecutionPolicy(
-            device=axs.Device.gpu(0),
-            solvers=axs.SolverPolicy(
-                double_cable=axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()
-            ),
-        ),
-    )
-    triton_report = _inspect_simulation(
+    report = _inspect_simulation(
         population,
         duration=0.10 * axs.ms,
         dt=0.05 * axs.ms,
@@ -137,14 +126,12 @@ def test_inspection_reports_typed_double_cable_solver_policy():
         ),
     )
 
-    assert pcr_report.kernels[0].cable_mode == "double"
-    assert pcr_report.kernels[0].solver.cable == "double_cable"
-    assert pcr_report.kernels[0].solver.requested == "jax_pcr_soa"
-    assert pcr_report.kernels[0].solver.backend_route == "pcr_soa"
-    assert triton_report.kernels[0].solver.requested == "tiled_thomas"
-    assert triton_report.kernels[0].solver.backend_route == "jax_triton_loop_xb"
-    assert triton_report.kernels[0].solver.internal is True
-    assert triton_report.kernels[0].solver.options == (("block_b", 64),)
+    assert report.kernels[0].cable_mode == "double"
+    assert report.kernels[0].solver.cable == "double_cable"
+    assert report.kernels[0].solver.requested == "tiled_thomas"
+    assert report.kernels[0].solver.backend_route == "jax_triton_loop_xb"
+    assert report.kernels[0].solver.internal is True
+    assert report.kernels[0].solver.options == (("block_b", 64),)
 
 
 def test_inspection_reports_observer_only_lowering_and_compact_results():

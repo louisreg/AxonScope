@@ -11,7 +11,7 @@ from axonscope.axon_instance import AxonInstance
 from axonscope.preparation.runtime_batches import (
     extracellular_stimulation_rows,
 )
-from axonscope.solvers.axon_runtime import SolverAxon
+from axonscope.runtime.solver_axon import SolverAxon
 from axonscope.stimulation import ExtracellularStimulation
 
 

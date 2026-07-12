@@ -6,15 +6,15 @@ import numpy as np
 import pytest
 
 import axonscope as axs
-from axonscope.runtime.jax import recording_lowering
+from axonscope.runtime.jax.recording import lowering as recording_lowering
 from axonscope.positions import ALL, CENTER, DISTAL, Indices
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
-from axonscope.runtime.jax.observer_runtime import (
+from axonscope.runtime.jax.recording.observer import (
     build_vm_raster_plan,
     combine_vm_raster_chunk_states,
     finalize_vm_raster_state,
     init_vm_raster_state,
-    update_vm_raster_state_batch,
+    update_vm_raster_state_batch_from_tables,
 )
 
 
@@ -206,7 +206,7 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     )
 
     state = init_vm_raster_state(plan, batch_size=2, nt=35)
-    state = update_vm_raster_state_batch(
+    state = update_vm_raster_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -216,9 +216,11 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
             dtype=np.float32,
         ),
         step_index=0,
-        plan=plan,
+        probe_indices=plan.probe_indices,
+        probe_mask=plan.probe_mask,
+        thresholds_mV=plan.thresholds_mV,
     )
-    state = update_vm_raster_state_batch(
+    state = update_vm_raster_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -228,9 +230,11 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
             dtype=np.float32,
         ),
         step_index=1,
-        plan=plan,
+        probe_indices=plan.probe_indices,
+        probe_mask=plan.probe_mask,
+        thresholds_mV=plan.thresholds_mV,
     )
-    state = update_vm_raster_state_batch(
+    state = update_vm_raster_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -240,7 +244,9 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
             dtype=np.float32,
         ),
         step_index=33,
-        plan=plan,
+        probe_indices=plan.probe_indices,
+        probe_mask=plan.probe_mask,
+        thresholds_mV=plan.thresholds_mV,
     )
 
     words = np.asarray(state)

@@ -5,7 +5,6 @@ from __future__ import annotations
 from .policy import (
     DoubleCableSolver,
     DoubleCableSolverKind,
-    PcrSolverOptions,
     SingleCableSolver,
     SingleCableSolverKind,
     TiledThomasSolverOptions,
@@ -19,7 +18,6 @@ from .policy import (
 __all__ = [
     "DoubleCableSolver",
     "DoubleCableSolverKind",
-    "PcrSolverOptions",
     "SingleCableSolver",
     "SingleCableSolverKind",
     "TiledThomasSolverOptions",

@@ -6,24 +6,31 @@ import numpy as np
 import axonscope as axs
 import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
-import axonscope.runtime.jax.input_batches as input_batches
+import axonscope.runtime.jax.inputs.extracellular as input_batches
 import axonscope.runtime.group_preparation as group_preparation
 import axonscope.runtime.jax.membranes.stacking as membrane_stacking
-from axonscope.runtime.jax import runtime_caches, runtime_preparation, shape_bucketing
+from axonscope.runtime.jax.preparation import (
+    caches as runtime_caches,
+    runtime as runtime_preparation,
+    shape_bucketing,
+    stacking as runtime_stacking,
+)
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
 from axonscope.benchmarking import benchmark_span
 from axonscope.runtime.input_contract import ExtracellularLoweringMode
-from axonscope.runtime.jax.batch_inputs import (
+from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
 )
-from axonscope.runtime.jax.input_lowering import plan_input_lowering
+from axonscope.runtime.jax.inputs.lowering import plan_input_lowering
 from axonscope.analytical import PointSourceElectrode
-from axonscope.runtime.jax.input_batches import (
+from axonscope.runtime.jax.inputs.extracellular import (
     build_factorized_vstim_midpoint_batch,
+    build_vstim_midpoint_batch,
+)
+from axonscope.runtime.jax.inputs.intracellular import (
     build_intracellular_current_density_batch,
     build_sparse_intracellular_current_density_batch,
-    build_vstim_midpoint_batch,
 )
 from axonscope.dispatcher import build_dispatch_plan, run_pool
 from axonscope.dispatcher._records import DispatchCohortRecord
@@ -31,12 +38,12 @@ from axonscope.preparation.runtime_batches import (
     extracellular_stimulation_rows,
     x_positions_batch_m,
 )
-from axonscope.solvers.axon_runtime import build_solver_axon
-from axonscope.runtime.jax.batch_inputs import (
+from axonscope.runtime.solver_axon import build_solver_axon
+from axonscope.runtime.jax.inputs.payloads import (
     materialize_sparse_intracellular_current_density_batch,
 )
 from axonscope.solvers import BatchOptions
-from axonscope.runtime.jax.runtime import (
+from axonscope.runtime.jax.preparation.base import (
     prepare_cable_runtime,
     prepare_extracellular_runtime,
     prepare_solver_runtime,
@@ -1164,7 +1171,7 @@ def test_double_cable_batch_extracellular_stack_matches_row_runtime():
         include_extracellular=True,
     ).membrane.dtype
 
-    stacked = runtime_preparation.stack_extracellular_runtime(
+    stacked = runtime_stacking.stack_extracellular_runtime(
         group,
         dtype_local=dtype_local,
     )

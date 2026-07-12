@@ -137,7 +137,7 @@ def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
                 "--curve-script",
                 "recruitment_curves,threshold_curves",
                 "--solver",
-                "auto,pcr_soa,tiled_thomas",
+                "auto,tiled_thomas",
                 "--n-axons",
                 "64,4096",
                 "--nx",
@@ -167,7 +167,7 @@ def test_kaggle_runner_dry_run_supports_double_cable_solver_policy_campaign(
         "--curve-script",
         "recruitment_curves,threshold_curves",
         "--solver",
-        "auto,pcr_soa,tiled_thomas",
+        "auto,tiled_thomas",
         "--n-axons",
         "64,4096",
         "--nx",
@@ -242,122 +242,6 @@ def test_kaggle_runner_dry_run_supports_single_cable_solver_policy_campaign(
         "observer_only",
     ]
     assert "benchmark/campaigns/single_cable_solver_policy.py" in kernel_source
-
-
-def test_kaggle_runner_dry_run_supports_large_population_solver_campaign(tmp_path: Path):
-    assert (
-        run_kaggle(
-            [
-                "--username",
-                "demo-user",
-                "--slug",
-                "axonscope-p11c-large-pop-solver",
-                "--campaign",
-                "large_population_double_cable_solver_profile",
-                "--platform",
-                "gpu",
-                "--machine-shape",
-                "NvidiaTeslaP100",
-                "--dry-run",
-                "--no-publish-branch",
-                "--output-root",
-                str(tmp_path),
-                "--batch-size",
-                "1024",
-                "--nx",
-                "89",
-                "--layout",
-                "TILED",
-                "--block-b",
-                "64",
-                "--pip-package",
-                "jax-triton",
-            ]
-        )
-        == 0
-    )
-
-    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
-    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
-    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
-
-    assert metadata["id"] == "demo-user/axonscope-p11c-large-pop-solver"
-    assert metadata["enable_gpu"] == "true"
-    assert metadata["machine_shape"] == "NvidiaTeslaP100"
-    assert config["campaign"] == "large_population_double_cable_solver_profile"
-    assert config["script"] is None
-    assert config["preset"] == "quick"
-    assert config["platform"] == "gpu"
-    assert config["require_gpu"] is True
-    assert config["pip_packages"] == ["jax-triton"]
-    assert config["benchmark_args"] == [
-        "--batch-size",
-        "1024",
-        "--nx",
-        "89",
-        "--layout",
-        "TILED",
-        "--block-b",
-        "64",
-    ]
-    assert "benchmark/analysis/large_population_double_cable_solver_profile.py" in kernel_source
-
-
-def test_kaggle_runner_dry_run_supports_jax_triton_cold_start_audit(tmp_path: Path):
-    assert (
-        run_kaggle(
-            [
-                "--username",
-                "demo-user",
-                "--slug",
-                "axonscope-p11c-triton-cold-start",
-                "--campaign",
-                "jax_triton_cold_start_audit",
-                "--platform",
-                "gpu",
-                "--machine-shape",
-                "NvidiaTeslaP100",
-                "--dry-run",
-                "--no-publish-branch",
-                "--output-root",
-                str(tmp_path),
-                "--nx",
-                "89",
-                "--batch-size",
-                "1024",
-                "--variant",
-                "tiled_thomas",
-                "--pip-package",
-                "jax-triton",
-            ]
-        )
-        == 0
-    )
-
-    package = next(path for path in tmp_path.iterdir() if path.is_dir()) / "kernel"
-    metadata = json.loads((package / "kernel-metadata.json").read_text(encoding="utf-8"))
-    config = json.loads((package / "kaggle_config.json").read_text(encoding="utf-8"))
-    kernel_source = (package / "axonscope_benchmark_kernel.py").read_text(encoding="utf-8")
-
-    assert metadata["id"] == "demo-user/axonscope-p11c-triton-cold-start"
-    assert metadata["enable_gpu"] == "true"
-    assert metadata["machine_shape"] == "NvidiaTeslaP100"
-    assert config["campaign"] == "jax_triton_cold_start_audit"
-    assert config["script"] is None
-    assert config["preset"] == "quick"
-    assert config["platform"] == "gpu"
-    assert config["require_gpu"] is True
-    assert config["pip_packages"] == ["jax-triton"]
-    assert config["benchmark_args"] == [
-        "--nx",
-        "89",
-        "--batch-size",
-        "1024",
-        "--variant",
-        "tiled_thomas",
-    ]
-    assert "benchmark/analysis/jax_triton_cold_start_audit.py" in kernel_source
 
 
 def test_kaggle_runner_cpu_shape_forces_cpu_platform(tmp_path: Path):

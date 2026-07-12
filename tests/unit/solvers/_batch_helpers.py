@@ -6,12 +6,9 @@ import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.analytical import PointSourceElectrode
 from axonscope.axons import HodgkinHuxley
-from axonscope.runtime.jax.observer_runtime import finalize_vm_raster_state
-from axonscope.runtime.jax.solver_engines.types import JaxSolverEngine
+from axonscope.runtime.jax.recording.observer import finalize_vm_raster_state
+from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
 from axonscope.stimulation import Stimulus
-
-
-DIAGNOSTIC_DOUBLE_CABLE_BLOCK_SOLVERS = ("pcr", "pcr_soa", "pcr_adaptive")
 
 
 def diagnostic_double_cable_solver_engine(

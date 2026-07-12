@@ -1,7 +1,7 @@
 # Solver And Runtime Organization
 
-The solver package owns stable solver-facing contracts: solver options and the
-descriptive axon adapter used by execution runtimes.
+The solver package owns only stable solver-facing option contracts. The
+runtime-neutral descriptive axon adapter lives under `axonscope.runtime`.
 
 Concrete JAX numerical execution lives under `axonscope.runtime.jax`. That
 runtime receives descriptive axons, compiles them into runtime arrays, lowers
@@ -16,32 +16,57 @@ Solver-facing contracts:
 - `__init__.py`: stable solver-facing facade only. It exports `SolverOptions`,
   `BatchOptions`, and `BatchRecording`; kernels, runtimes, and backend solver
   resolvers are not facade exports.
-- `axon_runtime.py`: runtime-facing descriptive axon adapter.
 - `options.py`: solver-owned execution knobs. `SolverOptions` is a reserved
   numerical preparation contract. `BatchOptions` and `BatchRecording` control
   batch-kernel memory, retained Vm columns, and optional time chunking.
   Per-cable solver choice is selected through typed `ExecutionPolicy.solvers`.
 
+Runtime-neutral preparation contracts:
+
+- `runtime/solver_axon.py`: descriptive axon to numerical array adapter shared
+  by current JAX execution and future reference runtimes.
+
 JAX runtime implementation:
 
-- `runtime/jax/runtime.py`: JAX runtime containers and bridge from
-  descriptive axons/membranes to backend arrays: membrane backend, cable
-  coefficients, stimulation callables or precomputed samples, extracellular
-  absolute arrays, time grid, and observable packaging helpers.
+- `runtime/jax/types.py`: prepared JAX runtime dataclasses consumed by kernels
+  and batch preparation.
+- `runtime/jax/preparation/base.py`: preparation bridge from descriptive axons to
+  backend arrays: cable coefficients, stimulation callables or precomputed
+  samples, extracellular absolute arrays, time grid, and membrane runtime
+  assembly.
 - `runtime/jax/membranes/`: JAX membrane compilation and execution helpers:
   Model IR lowering, generated-program facade, membrane backends, heterogeneous
-  layouts, and gated/leak row stacking.
-- `runtime/jax/common.py`: numerical helpers shared by kernels, such as
-  tridiagonal coefficients, diffusion operators, and small reference linear
-  solvers.
-- `runtime/jax/kernels.py`: lower-level one-row kernels retained for
-  implementation/reference use, not as a public execution route.
-- `runtime/jax/batch_kernels.py`: batch kernels for homogeneous groups. These
-  consume already assembled batched arrays and never decide which axons belong
-  together.
-- `runtime/jax/batch_inputs.py`: JAX-side sparse/factorized input containers
-  and materializers used by batch kernels.
-- `runtime/jax/observer_runtime.py`: JAX-side VmRaster plan/state update.
+  layouts, gated/leak row stacking, and the membrane-to-JAX compiler bridge.
+- `runtime/jax/cable_geometry.py`: JAX cable-geometry helpers,
+  diffusion coefficients/operators, compartment areas, and extracellular
+  absolute arrays. This is runtime preparation support, not a kernel module.
+- `runtime/jax/kernels/block_tridiagonal.py`: the active CPU Thomas solver for
+  double-cable 2x2 block-tridiagonal systems.
+- `runtime/jax/kernels/double_cable_linear.py`: double-cable linear-system
+  layouts, static-term preparation, system assembly, and the Triton
+  node-first solve bridge.
+- `runtime/jax/kernels/single_cable.py` and
+  `runtime/jax/kernels/double_cable.py`: batch kernels for homogeneous groups.
+  These consume already assembled batched arrays and never decide which axons
+  belong together.
+- `runtime/jax/kernels/double_cable_cpu.py` and
+  `runtime/jax/kernels/double_cable_gpu.py`: backend-specific double-cable
+  scan bodies. CPU owns the Thomas route; GPU owns the tiled-Thomas/Triton
+  route. The shared `double_cable.py` file remains the route/chunk wrapper.
+- `runtime/jax/kernels/chunking.py`, `runtime/jax/kernels/factorized.py`,
+  `runtime/jax/kernels/inputs.py`, and `runtime/jax/recording/results.py`:
+  shared batch-kernel support for chunking, factorized inputs, array coercion,
+  result waits, VmRaster finalization, and padded-output trim.
+- `runtime/jax/kernels/double_cable_step.py`: shared batched membrane-step
+  helpers used by batch-native double-cable paths.
+- `runtime/jax/kernels/triton_double_cable.py`: optional Triton double-cable
+  linear-system kernels.
+- `runtime/jax/inputs/payloads.py`: JAX-side sparse/factorized input
+  containers used by batch kernels.
+- `runtime/jax/inputs/extracellular.py`,
+  `runtime/jax/inputs/intracellular.py`, and `runtime/jax/inputs/lowering.py`:
+  JAX input materialization and semantic-to-kernel input lowering.
+- `runtime/jax/recording/observer.py`: JAX-side VmRaster plan/state update.
 - test-only dense/reference solver variants live under `tests/unit/solvers/`,
   not in the production JAX runtime package.
 
@@ -125,7 +150,7 @@ prepare_batch_runtime(...)
   -> runtime.result_assembly.dispatch_results_from_batch(...)
 ```
 
-`runtime/jax/input_lowering.py` owns the representation decision. It wraps
+`runtime/jax/inputs/lowering.py` owns the representation decision. It wraps
 `build_sparse_intracellular_current_density_batch(...)`,
 `build_intracellular_current_density_batch(...)`,
 `build_factorized_vstim_midpoint_batch(...)`, and
@@ -154,12 +179,11 @@ prepare_batch_runtime(...)
   -> runtime.result_assembly.dispatch_results_from_batch(...)
 ```
 
-The retained exact double-cable block solvers are backend-private labels:
-`thomas`, `pcr`, `pcr_soa`, and `pcr_adaptive`. Public users select routes
-through typed per-cable solver policies on `ExecutionPolicy.solvers`; `auto`
-is resolved at that policy boundary before kernel dispatch. `pcr_adaptive`
-selects `pcr_soa` for batches up to `B=4096`, then matrix-layout `pcr` above
-that.
+The retained exact double-cable block solvers are intentionally narrow. CPU
+uses the backend-private `thomas` label. GPU uses the backend-private
+`jax_triton_loop_xb` tiled-Thomas label. Public users select routes through
+typed per-cable solver policies on `ExecutionPolicy.solvers`; `auto` is
+resolved at that policy boundary before kernel dispatch.
 JAX orchestration carries the selected route as one internal `JaxSolverEngine`
 value into `DoubleCableBatchKernel.run(...)`; raw solver labels and internal
 flags are not parallel public or kernel-call arguments.
@@ -187,22 +211,24 @@ the JAX backend receives a row-indexed membrane backend plus already padded
 cable/extracellular arrays.
 
 For parameter-batched groups,
-`runtime/jax/runtime_preparation.py::prepare_batch_runtime(...)` prepares only
+`runtime/jax/preparation/runtime.py::prepare_batch_runtime(...)` prepares only
 the representative fields that survive batching. It must not build a full
 representative cable/extracellular runtime just to replace it immediately with
 stacked row arrays.
+`runtime/jax/preparation/stacking.py` owns the JAX array stacking for cable,
+membrane, extracellular, and group `Cm` rows.
 `runtime/jax/membranes/stacking.py` owns the JAX-specific gated/leak membrane
 row encoding used while stacking heterogeneous membrane layouts. This is a
 backend preparation optimization and must remain independent of a particular
 membrane-model family.
 `runtime/group_preparation.py` owns dispatch-group signatures and
-prepared-cohort caches. `runtime/jax/runtime_caches.py` owns only bounded JAX
-runtime/forcing cache storage, while `runtime/jax/shape_bucketing.py` owns the
+prepared-cohort caches. `runtime/jax/preparation/caches.py` owns only bounded JAX
+runtime/forcing cache storage, while `runtime/jax/preparation/shape_bucketing.py` owns the
 opt-in double-cable kernel shape bucketing policy and metadata.
 
 ### VmRaster, Dense/Factorized Vext, And Results
 
-`runtime/jax/recording_lowering.py` owns batch recording/observer lowering:
+`runtime/jax/recording/lowering.py` owns batch recording/observer lowering:
 it keeps padded `center`/`probes` Vm recording row-aware when all rows retain a
 common output width, expands to full Vm only when row-aware recording is not
 available, and lowers compatible public observer definitions to solver-side
@@ -232,7 +258,7 @@ while keeping row-specific spatial footprints.
 Batch outputs become private dispatch row records or compact dispatch cohort
 records in `runtime/result_assembly.py`, then `AxonSimulationResult` at the
 public `AxonSimulation.run()` boundary. JAX-specific batch result helpers stay
-in `runtime/jax/batch_results.py` for device wait, pending VmRaster
+in `runtime/jax/recording/results.py` for device wait, pending VmRaster
 finalization, and padded kernel-output trim. Post-hoc observer evaluation uses
 the lightweight `runtime/row_output.py` adapter only as a result view, not as an
 execution route.
@@ -262,11 +288,9 @@ The current typed public choices are:
 | --- | --- | --- |
 | `axs.runtime.jax.SingleCableSolver.auto()` | current JAX tridiagonal route | Single-cable default. |
 | `axs.runtime.jax.SingleCableSolver.jax_tridiagonal()` | JAX tridiagonal route | Explicit single-cable route. |
-| `axs.runtime.jax.DoubleCableSolver.auto()` | CPU Thomas or current GPU adaptive PCR policy | Double-cable default by active device. |
+| `axs.runtime.jax.DoubleCableSolver.auto()` | CPU Thomas or GPU tiled Thomas | Double-cable default by active device. |
 | `axs.runtime.jax.cpu.DoubleCableSolver.thomas()` | `thomas` | Only supported explicit CPU double-cable route. |
-| `axs.runtime.jax.gpu.DoubleCableSolver.pcr()` | `pcr` | GPU diagnostic and larger-batch adaptive fallback. |
-| `axs.runtime.jax.gpu.DoubleCableSolver.pcr_soa()` | `pcr_soa` | GPU diagnostic for small/medium batches. |
-| `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)` | tiled Thomas GPU route | Preferred GPU double-cable promotion candidate while P11C-F/P11C-G decide default policy. Runtime artifacts may still record the internal kernel label. |
+| `axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)` | tiled Thomas GPU route | Supported explicit GPU double-cable route. Runtime artifacts may still record the internal kernel label. |
 
 CPU double-cable policy is intentionally narrow: `auto` resolves to `thomas`,
 and the only explicit CPU route is `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`.

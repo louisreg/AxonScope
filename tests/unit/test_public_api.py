@@ -134,10 +134,9 @@ def test_public_package_imports_are_available():
     assert Device.auto().kind == "auto"
     assert ExecutionPolicy(device=Device.cpu()).device == Device.cpu()
     assert (
-        runtime.jax.gpu.DoubleCableSolver.pcr_soa().kind
-        is runtime.jax.DoubleCableSolverKind.JAX_PCR_SOA
+        runtime.jax.gpu.DoubleCableSolver.tiled_thomas().kind
+        is runtime.jax.DoubleCableSolverKind.TILED_THOMAS
     )
-    assert runtime.jax.PcrSolverOptions().adaptive_threshold > 0
     assert MemoryEstimateItem is not None
     assert PrecisionPolicy.float32().solver_dtype == "float32"
     assert ProbeInspection is not None

@@ -15,18 +15,18 @@ from axonscope.benchmarking import (
 from axonscope.dispatcher.plan import DispatchGroup
 from axonscope.dispatcher.progress import ProgressEvent, ProgressStage
 from axonscope.dispatcher._records import DispatchRecord
-from axonscope.runtime.jax.benchmark_metadata import (
+from axonscope.runtime.jax.benchmarking.metadata import (
     record_extracellular_lowering_metadata,
     record_group_memory_estimate,
     record_intracellular_lowering_metadata,
 )
-from axonscope.runtime.jax.batch_results import (
+from axonscope.runtime.jax.recording.results import (
     batch_wait_target,
     finalize_pending_batch_observation,
     trim_batch_kernel_result,
 )
 from axonscope.runtime.result_assembly import dispatch_results_from_batch
-from axonscope.runtime.jax.input_lowering import (
+from axonscope.runtime.jax.inputs.lowering import (
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,
     lower_single_cable_extracellular_input,
@@ -37,25 +37,21 @@ from axonscope.runtime.recording import (
     lower_batch_recording_options,
     row_recording_indices_for_group,
 )
-from axonscope.runtime.jax.recording_lowering import (
+from axonscope.runtime.jax.recording.lowering import (
     lower_observers_for_cohort,
 )
 from axonscope.runtime.group_preparation import (
     prepared_cohort_for_current_group,
     representative_item,
 )
-from axonscope.runtime.jax.runtime_preparation import (
-    group_cm_uF_cm2,
-    prepare_batch_runtime,
-)
-from axonscope.runtime.jax.shape_bucketing import (
+from axonscope.runtime.jax.preparation.runtime import prepare_batch_runtime
+from axonscope.runtime.jax.preparation.stacking import group_cm_uF_cm2
+from axonscope.runtime.jax.preparation.shape_bucketing import (
     double_cable_kernel_group,
     record_kernel_bucket_metadata,
 )
-from axonscope.runtime.jax.batch_kernels import (
-    DoubleCableBatchKernel,
-    SingleCableVStimBatchKernel,
-)
+from axonscope.runtime.jax.kernels.double_cable import DoubleCableBatchKernel
+from axonscope.runtime.jax.kernels.single_cable import SingleCableVStimBatchKernel
 from axonscope.solvers.options import BatchOptions, SolverOptions
 
 
