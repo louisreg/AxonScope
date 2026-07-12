@@ -9,14 +9,17 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
+from axonscope.model_ir.interpreter import NumpyModelInterpreter
 from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     MembraneBackend,
+    UniformMembraneBackend,
 )
 from axonscope.runtime.jax.membranes.compile import (
     backend_from_membrane,
     compile_axon_membrane,
 )
+from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.solver_axon import SolverAxon, build_solver_axon
 from axonscope.timebase import simulation_step_count
 
@@ -260,6 +263,17 @@ def _prepare_membrane_initial_arrays(
 ) -> tuple[Array, Array, tuple[Array, ...], Array]:
     """Prepare initial membrane arrays without unnecessary eager JAX scatter."""
 
+    if isinstance(backend, UniformMembraneBackend) and isinstance(
+        membrane, JaxMembraneProgram
+    ) and not membrane.membrane_state_specs():
+        record_benchmark_metadata(membrane_init_source="uniform_numpy")
+        return _prepare_uniform_model_ir_initial_arrays(
+            axon,
+            membrane,
+            backend,
+            nx=nx,
+            dtype_local=dtype_local,
+        )
     if isinstance(backend, HeterogeneousMembraneBackend) and not membrane.membrane_state_specs():
         record_benchmark_metadata(membrane_init_source="heterogeneous_numpy")
         return _prepare_heterogeneous_membrane_initial_arrays(
@@ -274,6 +288,32 @@ def _prepare_membrane_initial_arrays(
     state0 = membrane.init_membrane_state(Nx=nx, dtype_local=dtype_local, V0_mV=Vm0)
     background_current = backend.background_current()
     return Vm0, gates0, tuple(state0), background_current
+
+
+def _prepare_uniform_model_ir_initial_arrays(
+    axon: Axon,
+    membrane: JaxMembraneProgram,
+    backend: UniformMembraneBackend,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+) -> tuple[Array, Array, tuple[Array, ...], Array]:
+    """Host-side initial arrays for uniform stateless Model IR membranes."""
+
+    _ = backend
+    np_dtype = np.dtype(dtype_local)
+    vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
+    gates_np = NumpyModelInterpreter(
+        membrane.model_ir,
+        dtype=np_dtype,
+    ).init_gates(vm0_np)
+    background_np = np.zeros((nx,), dtype=np_dtype)
+    return (
+        jnp.asarray(vm0_np, dtype=dtype_local),
+        jnp.asarray(gates_np, dtype=dtype_local),
+        (),
+        jnp.asarray(background_np, dtype=dtype_local),
+    )
 
 
 def _prepare_heterogeneous_membrane_initial_arrays(

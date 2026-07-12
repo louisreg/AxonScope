@@ -159,6 +159,17 @@ specific out of `runtime/jax/`:
   use the same batch route as populations (`B=1`), and unsupported dense
   observable recordings fail explicitly instead of selecting a second execution
   route.
+- Compact input payload dataclasses moved from
+  `runtime/jax/inputs/payloads.py` to runtime-neutral
+  `runtime/input_payloads.py`. JAX now owns only the materializers that expand
+  those payloads into JAX arrays; kernels and input builders import the payload
+  contracts from the runtime layer.
+- Prepared runtime input summaries now live in `runtime/input_contract.py`.
+  The JAX group runner builds one after recording/observer and input lowering,
+  validates it against the cable-specific runtime input contract, and records
+  primitive benchmark metadata for cable formulation, batch shape, dtype, solver
+  policy label, recording/output sink, observer count, and intracellular plus
+  extracellular semantic modes before enqueueing the kernel.
 
 Validation:
 
@@ -188,6 +199,10 @@ python -m vulture src/axonscope/runtime/jax src/axonscope/runtime tests --min-co
 git diff --check
 python -m compileall -q src/axonscope tests/unit
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/model_ir/test_model_ir.py tests/unit/model_ir/test_public_membrane_compilation.py tests/unit/solvers/test_runtime.py tests/unit/axons/test_cable_heterogeneous.py tests/unit/solvers/test_cranknicholson.py --tb=short
+python -m compileall -q src/axonscope tests/unit
+python -m pytest -q tests/unit/test_architecture_guardrails.py --tb=short
+python -m pytest -q tests/unit/test_dispatcher.py tests/unit/solvers/test_batch.py --tb=short
+git diff --check
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
@@ -247,6 +262,10 @@ contract. Test/archive warnings are outside the runtime cleanup scope.
 solver tests passed `76/76`, and dispatcher plus heterogeneous-cable tests
 passed `62/62`.
 
+For the prepared runtime input contract enforcement pass, `compileall` passed,
+the targeted contract and scaled-waveform dispatcher tests passed `2/2`, and
+architecture guardrails plus dispatcher tests passed `143/143`.
+
 For the JAX subpackage layout pass, `compileall` passed after the move. The
 JAX root now has 22 direct Python files; membrane compilation/lowering lives in
 `runtime/jax/membranes/`, and one-row simulations use the batch route instead
@@ -262,6 +281,12 @@ For the direct solver/scalar fallback removal pass, `git diff --check`,
 tests passed `122/122`, Model IR/runtime/single-row batch tests passed `84/84`,
 batch/extracellular/performance tests passed `82/82`, and example guardrails
 passed `7/7`.
+
+For the compact input payload contract extraction, `compileall` passed,
+architecture guardrails passed `87/87`, dispatcher plus batch tests passed
+`87/87`, and `git diff --check` passed. The new guardrail asserts that
+`runtime/input_payloads.py` has no JAX imports and that
+`runtime/jax/inputs/payloads.py` owns no payload class definitions.
 
 ## Benchmark Gate
 
@@ -394,6 +419,86 @@ Comparison against the recording-contract CPU gate:
 
 This gate shows no local CPU regression from extracting the host-array helpers.
 The JAX runtime still owns materialization into JAX runtime containers.
+
+## Prepared-Input Contract CPU Gate Result
+
+After enforcing the prepared runtime input contract in the JAX group runner, the
+local CPU sanity gate was repeated on 2026-07-12 with the same quick recruitment
+configuration as the recording-contract gate: `Naxons=64`, `Nx=89`, fp32,
+observer-only recording, `repeats=2`, `warmups=1`, and RSS tracing.
+
+Artifacts:
+
+- `benchmark/results/p12_current_repeats2_single_cpu`
+- `benchmark/results/p12_current_repeats2_double_cpu`
+
+Superseded exploratory artifacts from the same pass used `repeats=1` and should
+not be used for apples-to-apples comparison:
+
+- `benchmark/results/p12_current_single_cpu`
+- `benchmark/results/p12_current_double_cpu`
+
+Comparison against the recording-contract CPU gate:
+
+| Cable | Stage | Recording-contract total | Current total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 3293.4 ms | 3476.4 ms | +5.6% |
+| single-cable | `runtime.prepare` | 1557.2 ms | 1576.9 ms | +1.3% |
+| single-cable | `inputs.extracellular` | 24.5 ms | 26.0 ms | +6.5% |
+| single-cable | `kernel.dispatch_jax` | 663.2 ms | 617.2 ms | -6.9% |
+| single-cable | `kernel.wait` | 257.3 ms | 242.3 ms | -5.8% |
+| single-cable | `results.split_batch` | 3.3 ms | 3.3 ms | +0.1% |
+| double-cable | `curve.simulate` | 3623.1 ms | 3760.2 ms | +3.8% |
+| double-cable | `runtime.prepare` | 1858.6 ms | 1963.3 ms | +5.6% |
+| double-cable | `inputs.extracellular` | 26.9 ms | 29.5 ms | +9.7% |
+| double-cable | `kernel.dispatch_jax` | 979.2 ms | 966.7 ms | -1.3% |
+| double-cable | `kernel.wait` | 329.9 ms | 331.2 ms | +0.4% |
+| double-cable | `results.split_batch` | 3.4 ms | 3.5 ms | +3.3% |
+
+The rerun does not point to solver degradation: single-cable dispatch and wait
+improved, and double-cable dispatch/wait are effectively flat. The remaining
+P12 optimization target is the cold/preparation side, especially
+`runtime.prepare.base_runtime`, membrane init/compile/backend setup, and small
+extracellular input preparation overheads. Keep this as a local CPU guardrail;
+it does not close the broader P12 performance-loss claim until the relevant
+P11 hot-path and GPU slices are rerun.
+
+## Uniform Membrane Init Optimization
+
+The first P12 optimization from the current CPU guardrail targets the
+single-cable cold path. Uniform stateless Model IR membranes now build initial
+`Vm0`, `gates0`, and background-current arrays through the NumPy interpreter
+instead of using the JAX backend for initial gate values. Solver execution still
+uses the JAX membrane backend; this only removes an avoidable cold initialization
+cost.
+
+Artifacts:
+
+- `benchmark/results/p12_opt_uniform_init_single_cpu`
+- `benchmark/results/p12_opt_uniform_init_double_cpu`
+
+Comparison against the prepared-input contract CPU gate:
+
+| Cable | Stage | Before total | After total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 3476.4 ms | 2901.4 ms | -16.5% |
+| single-cable | `runtime.prepare` | 1576.9 ms | 979.5 ms | -37.9% |
+| single-cable | `runtime.prepare.base_runtime` | 1570.2 ms | 972.7 ms | -38.0% |
+| single-cable | `runtime.prepare.membrane_init` | 708.2 ms | 3.3 ms | -99.5% |
+| single-cable | `kernel.dispatch_jax` | 617.2 ms | 694.8 ms | +12.6% |
+| single-cable | `kernel.wait` | 242.3 ms | 257.6 ms | +6.3% |
+| double-cable | `curve.simulate` | 3760.2 ms | 4001.8 ms | +6.4% |
+| double-cable | `runtime.prepare` | 1963.3 ms | 2005.9 ms | +2.2% |
+| double-cable | `runtime.prepare.membrane_init` | 943.6 ms | 914.5 ms | -3.1% |
+| double-cable | `kernel.dispatch_jax` | 966.7 ms | 1086.7 ms | +12.4% |
+| double-cable | `kernel.wait` | 331.2 ms | 346.9 ms | +4.7% |
+
+The single-cable result is the accepted signal: benchmark metadata changed from
+`membrane_init_source=backend_jax` to `membrane_init_source=uniform_numpy`, and
+the cold membrane initialization span nearly disappears. The double-cable run
+continues to report `membrane_init_source=heterogeneous_numpy`, so the modest
+double-cable total increase is not attributed to this patch and should be
+rechecked in the broader P11/GPU performance pass before making a global claim.
 
 ## Host-Preparation Kaggle Gate Result
 

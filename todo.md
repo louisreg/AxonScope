@@ -71,6 +71,14 @@ pytest -q tests/unit --tb=short
 
 ### P12 - Runtime Cleanup, Studies, Serialization, Integration
 
+Final P12 performance objective: make warm GPU runs as solver-bound as possible,
+especially by reducing JAX/Python dispatch, input lowering, observer packing,
+and host/device transfer overheads around the solver. In parallel, reduce
+cold-run latency as much as possible through preparation, membrane/runtime
+caching, compilation/lowering reuse, and eventually persistent caches. Keep
+benchmark evidence separated between warm solver-bound claims and cold-start
+improvements.
+
 - [x] P12A runtime contract and sanity benchmark gate:
   use `docs/architecture/p12_runtime_contract_2026_07_12.md` and
   `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md` as the completed
@@ -121,11 +129,14 @@ pytest -q tests/unit --tb=short
     `runtime/jax/preparation/`, observer/recording/result synchronization in
     `runtime/jax/recording/`, and JAX profiling/metadata helpers in
     `runtime/jax/benchmarking/`.
-  - [ ] Reintroduce dense recording only as a batch-native result path:
-    `Recording.full()`, gates, currents, conductances, and state variables must
-    lower through the batch route for `B=1` and `B>N`, with explicit signal
-    names, result manifests, memory accounting, tests, examples, and benchmark
-    evidence. Do not reintroduce scalar fallback execution for this.
+  - [x] Reintroduce dense recording only as a batch-native result path for
+    single-cable groups: `Recording.full()`, gates, currents, conductances, and
+    available state variables lower through the batch route for `B=1` and `B>N`,
+    with explicit signal names, result manifests, memory accounting, focused
+    tests, and a runnable public example. Do not reintroduce scalar fallback
+    execution for this.
+  - [ ] Add fresh benchmark evidence for dense observable recording after the
+    hotpath benchmark surface for P12B is stable.
 - [x] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
   host-side code. Delete unused paths, keep solver/kernel-specific code inside
   the JAX runtime, and move semantic-only reusable contracts to
@@ -163,15 +174,45 @@ pytest -q tests/unit --tb=short
     benchmark metadata, and estimate/inspection support helpers. Source audit
     pass started: the runtime-neutral batch memory-estimate math now lives in
     `runtime/memory_estimates.py`.
-- [ ] Define and enforce the runtime input contract before implementing
+- [x] Audit root `src/axonscope/runtime/` for the future NumPy/SciPy runtime
+  contract. Group files by responsibility, verify every retained path is used,
+  delete dead or duplicate code, and keep only runtime-neutral contracts,
+  host-side semantic planning, public policy, and the concrete-runtime
+  execution boundary at this level. Concrete numerical lowering, device
+  profiling, and solver implementation details must stay under the concrete
+  runtime namespace such as `runtime/jax/`.
+  Method: do the audit/move/delete pass first, without running the full test
+  suite after each file. Validate once at the end with `compileall`,
+  `tests/unit`, `git diff --check`, `vulture`, and targeted benchmarks only if
+  a hot path changes.
+  - [x] Public runtime namespace and policy: `runtime/__init__.py`,
+    `runtime/policy.py`, and `runtime/execution.py`.
+  - [x] Runtime input/output contracts: `runtime/input_contract.py`,
+    `runtime/input_payloads.py`, `runtime/output_contract.py`,
+    `runtime/recording.py`, `runtime/row_output.py`, and
+    `runtime/solver_axon.py`.
+  - [x] Runtime-neutral host planning and preparation:
+    `runtime/input_planning.py`, `runtime/host_preparation.py`,
+    `runtime/group_preparation.py`, `runtime/result_assembly.py`, and
+    `runtime/memory_estimates.py`.
+  - [x] Benchmarking interface and runtime-specific profiling boundary:
+    `runtime/benchmarking.py`.
+- [x] Define and enforce the runtime input contract before implementing
   `axs.runtime.numpy`: prepared batches must expose one cable formulation, one
   padded `Nx`, a dtype/time grid, typed per-cable solver policy, recording and
   observer plans, intracellular modes, and extracellular modes
   (`zero`, `shared_current`, `scaled_shared_waveform`, `current_table`,
-  `dense`).
+  `dense`). The JAX runner now validates and records a runtime-neutral prepared
+  input summary before kernel enqueue.
 - [ ] Before claiming P12 cleanup has no performance loss, re-run the relevant
   P11 hotpath/realistic benchmark slices for single-cable and double-cable,
   CPU/GPU where applicable, with fresh artifact directories and git metadata.
+  Fresh local CPU guard rerun on 2026-07-12 wrote
+  `benchmark/results/p12_current_repeats2_single_cpu` and
+  `benchmark/results/p12_current_repeats2_double_cpu`. It shows no solver-side
+  regression versus the recording-contract gate; remaining P12 optimization
+  targets are cold/preparation spans before broader P11/GPU slices can close
+  the performance-loss claim.
 - [ ] Post-P11 runtime/benchmark backlog:
   continue only the deferred items tracked in
   `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
@@ -192,6 +233,31 @@ pytest -q tests/unit --tb=short
   membrane/runtime preparation caches, pool rebuild costs, and optional
   persistent compilation caches; do not mix cold-start policy decisions into
   the current hot-path cleanup.
+  First targeted P12 optimization: uniform stateless Model IR membrane initial
+  arrays now use the NumPy interpreter for cold `Vm0`/`gates0` construction.
+  Local CPU single-cable `runtime.prepare.membrane_init` dropped from 708.2 ms
+  to 3.3 ms in `p12_opt_uniform_init_single_cpu`; keep the broader cold-start
+  item open for double-cable, compile/backend, GPU, and persistent-cache work.
+
+### P3 - Documentation And Examples
+
+- [x] README rewritten after post-P7 stabilization.
+- [x] Manual cleanup of `docs/`, `GUIDELINES.md`, and `AGENTS.md`.
+- [x] Public examples audited after benchmark flattening.
+- [ ] Write real notebook tutorials under `examples/tutorials/` following the
+  indexed mini-course sequence.
+- [ ] Add a didactic basic example for high-frequency block after block
+  detection exists, so the example distinguishes propagation, activation
+  failure, and true conduction block.
+- [ ] Prepare proper Sphinx documentation.
+- [ ] Do/update all public docstrings.
+
+## Future Phases
+
+### Unsorted Future Work
+
+These items are intentionally not ordered or scoped into a phase yet.
+
 - [ ] Continue hardening NRV integration only where the package contract is
   stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
   promote future pieces only when they do not duplicate the canonical
@@ -209,21 +275,37 @@ pytest -q tests/unit --tb=short
   avoid repeated point-location by introducing an axon embedding/projection
   representation; then choose between full precomputed footprints, chunked
   projection, and future fused projection-solver paths by memory budget.
-
-### P3 - Documentation And Examples
-
-- [x] README rewritten after post-P7 stabilization.
-- [x] Manual cleanup of `docs/`, `GUIDELINES.md`, and `AGENTS.md`.
-- [x] Public examples audited after benchmark flattening.
-- [ ] Write real notebook tutorials under `examples/tutorials/` following the
-  indexed mini-course sequence.
-- [ ] Add a didactic basic example for high-frequency block after block
-  detection exists, so the example distinguishes propagation, activation
-  failure, and true conduction block.
-- [ ] Prepare proper Sphinx documentation.
-- [ ] Do/update all public docstrings.
-
-## Future Phases
+- [ ] Add a KES block example after implementing the missing support needed for
+  that workflow, including filtering and the remaining block-analysis pieces.
+- [ ] Reorganize `src/`, especially the Python modules still living at package
+  root.
+- [ ] Revisit the caching strategy: generate artifacts only for the requested
+  runtime, keep cache state clean, and decide whether built-in models should be
+  built on first call and/or at package install time.
+- [ ] After CPU/GPU optimization work is complete, run a broad cleanup pass to
+  remove unused code and verify contracts. Treat `runtime/jax` as the first
+  completed target, and use Graphify to guide the wider pass.
+- [ ] Test GPU async scheduling. Candidate grouping contract: one batch has the
+  same model, same padded `Nx`, potentially variable diameter, potentially
+  variable footprint, and the same stimulus; incompatible rows form separate
+  groups, then groups may be launched with async GPU scheduling if benchmarks
+  show it helps.
+- [ ] Remove public API surface that is unused or not documented in advanced
+  examples.
+- [ ] Implement Nav1.x-family and other Markov-based membrane models.
+- [ ] Re-check each built-in model against the NRV implementation; some details
+  may have been lost during model translation.
+- [ ] Finish missing membrane models, including Gaines and Markov families.
+- [ ] Before v1, make a full list of Python files and package organization.
+- [ ] Before v1, inspect every function/type/module and delete anything not
+  called outside tests, using `vulture` as one input.
+- [ ] Before v1, check where retained code is used, what it is for, whether it
+  respects contracts, and whether it duplicates another implementation. Use
+  Graphify to guide the pass.
+- [ ] Before v1, clean `pyproject.toml`, including optional GPU extras for
+  CUDA/Triton.
+- [ ] Test Apple Metal acceleration with `jax-mps`:
+  https://github.com/tillahoffmann/jax-mps
 
 ### P8 - Future Bonus NumPy/SciPy Reference Solver Runtime
 
