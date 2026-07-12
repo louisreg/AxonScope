@@ -1075,6 +1075,9 @@ def test_public_estimate_and_inspection_route_backend_details_through_facade():
     assert "benchmark_plan_input_lowering" in backend_text
     assert "benchmark_lower_recording_options" in backend_text
     assert "benchmark_membrane_output_names" in backend_text
+    assert "benchmark_observer_output_label" not in backend_text
+    assert "benchmark_observers_are_vm_raster_compatible" not in backend_text
+    assert "benchmark_vm_raster_definitions" not in backend_text
 
 
 def test_jax_runtime_modules_live_under_backend_boundary():

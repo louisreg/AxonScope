@@ -63,6 +63,9 @@ specific out of `runtime/jax/`:
 - Dense-equivalent input shape and byte-size helpers moved to
   `runtime/input_contract.py`, so JAX benchmark metadata no longer imports
   those generic memory-estimate helpers from JAX input lowering.
+- Dead observer-output proxy helpers were removed from `runtime/jax/benchmark.py`.
+  The active facade for estimate/inspection code is now `runtime.execution`,
+  backed by the runtime-neutral output contract for observer-output labels.
 
 Validation:
 

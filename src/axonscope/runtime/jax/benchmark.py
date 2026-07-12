@@ -11,11 +11,6 @@ from axonscope.runtime.jax.input_lowering import (
     PlannedInputLowering,
     plan_input_lowering,
 )
-from axonscope.runtime.output_contract import (
-    observer_output_label,
-    observers_are_vm_raster_compatible,
-    vm_raster_definitions,
-)
 from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
 )
@@ -35,32 +30,6 @@ def benchmark_lower_recording_options(
         batch_options,
         observers=observers,
     )
-
-
-def benchmark_observer_output_label(
-    observers: tuple[Any, ...] | None,
-    *,
-    recording_mode: str,
-) -> str:
-    """Return the backend observer output route for host-side reports."""
-
-    return observer_output_label(observers, recording_mode=recording_mode)
-
-
-def benchmark_observers_are_vm_raster_compatible(
-    observers: tuple[Any, ...] | None,
-) -> bool:
-    """Return whether observers can use the compact VmRaster route."""
-
-    return observers_are_vm_raster_compatible(observers)
-
-
-def benchmark_vm_raster_definitions(
-    observers: tuple[Any, ...] | None,
-) -> tuple[Any, ...]:
-    """Return observer definitions supported by backend VmRaster lowering."""
-
-    return vm_raster_definitions(observers)
 
 
 def benchmark_plan_input_lowering(
@@ -186,12 +155,9 @@ def benchmark_save_device_memory_profile(output_path: str | Path) -> dict[str, A
 __all__ = [
     "benchmark_lower_recording_options",
     "benchmark_membrane_output_names",
-    "benchmark_observer_output_label",
-    "benchmark_observers_are_vm_raster_compatible",
     "benchmark_plan_input_lowering",
     "benchmark_profile_start",
     "benchmark_save_device_memory_profile",
     "benchmark_trace_annotation",
-    "benchmark_vm_raster_definitions",
     "JaxBenchmarkProfile",
 ]
