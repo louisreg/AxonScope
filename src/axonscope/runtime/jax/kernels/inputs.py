@@ -4,19 +4,39 @@ from __future__ import annotations
 
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 
-from axonscope.runtime.jax.inputs.payloads import (
+from axonscope.runtime.input_payloads import (
     FactorizedExtracellularPotentialBatch,
     SparseIntracellularCurrentDensityBatch,
 )
 from axonscope.runtime.jax.cable_geometry import Array
+from axonscope.runtime.jax.preparation.caches import (
+    get_batched_static_array,
+    store_batched_static_array,
+)
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
 
 def _broadcast_batch_leading(values: Array, batch_size: int) -> Array:
     arr = jnp.asarray(values)
     return jnp.broadcast_to(arr, (batch_size, *arr.shape))
+
+def _cached_broadcast_batch_leading(values: Array, batch_size: int) -> Array:
+    arr = jnp.asarray(values)
+    key = _batched_static_array_cache_key(
+        "leading",
+        values,
+        arr=arr,
+        batch_size=batch_size,
+    )
+    cached = get_batched_static_array(key)
+    if cached is not None:
+        return cached
+    out = jnp.broadcast_to(arr, (batch_size, *arr.shape))
+    store_batched_static_array(key, out)
+    return out
 
 def _normalize_batch_options(options: BatchOptions | None) -> BatchOptions:
     return BatchOptions.full() if options is None else options
@@ -352,6 +372,55 @@ def _as_batched_space_array(
         return jnp.broadcast_to(arr, (batch_size, nx))
     raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
 
+def _as_cached_batched_space_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+    batch_size: int,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 1:
+        if arr.shape != (nx,):
+            raise ValueError(
+                f"{name} must have shape (Nx,)=({nx},) or (B, Nx), got {arr.shape}."
+            )
+        key = _batched_static_array_cache_key(
+            "space",
+            values,
+            arr=arr,
+            batch_size=batch_size,
+        )
+        cached = get_batched_static_array(key)
+        if cached is not None:
+            return cached
+        out = jnp.broadcast_to(arr[jnp.newaxis, :], (batch_size, nx))
+        store_batched_static_array(key, out)
+        return out
+    if arr.ndim == 2:
+        if arr.shape[1:] != (nx,):
+            raise ValueError(
+                f"{name} must have trailing shape (Nx,)=({nx},), got {arr.shape}."
+            )
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            key = _batched_static_array_cache_key(
+                "space",
+                values,
+                arr=arr,
+                batch_size=batch_size,
+            )
+            cached = get_batched_static_array(key)
+            if cached is not None:
+                return cached
+            out = jnp.broadcast_to(arr, (batch_size, nx))
+            store_batched_static_array(key, out)
+            return out
+        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
+    raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
+
 def _as_batched_edge_array(
     name: str,
     values: Array,
@@ -404,6 +473,38 @@ def _as_batched_scalar_or_space_array(
         batch_size=batch_size,
     )
 
+def _as_cached_batched_scalar_or_space_array(
+    name: str,
+    values: Array,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+    batch_size: int,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim == 0:
+        key = _batched_static_array_cache_key(
+            "scalar",
+            values,
+            arr=arr,
+            batch_size=batch_size,
+        )
+        cached = get_batched_static_array(key)
+        if cached is not None:
+            return cached
+        out = jnp.broadcast_to(arr[jnp.newaxis], (batch_size,))
+        store_batched_static_array(key, out)
+        return out
+    if arr.ndim == 1 and arr.shape == (batch_size,):
+        return arr
+    return _as_cached_batched_space_array(
+        name,
+        arr,
+        nx=nx,
+        dtype_local=dtype_local,
+        batch_size=batch_size,
+    )
+
 def _as_batched_row_array(
     name: str,
     values: Array,
@@ -423,18 +524,54 @@ def _as_batched_row_array(
         raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
     raise ValueError(f"{name} must have shape {row_shape} or (B, *{row_shape}), got {arr.shape}.")
 
+def _batched_static_array_cache_key(
+    kind: str,
+    values: Array,
+    *,
+    arr: Array,
+    batch_size: int,
+) -> tuple[Any, ...]:
+    return (
+        "batched_static_array_v1",
+        kind,
+        id(values),
+        tuple(int(dim) for dim in arr.shape),
+        str(arr.dtype),
+        int(batch_size),
+        _current_jax_device_key(),
+    )
+
+def _current_jax_device_key() -> tuple[Any, ...]:
+    device = getattr(jax.config, "jax_default_device", None)
+    if device is None:
+        try:
+            devices = jax.devices(jax.default_backend())
+        except Exception:
+            devices = ()
+        device = devices[0] if devices else None
+    if device is None:
+        return ("backend", jax.default_backend())
+    return (
+        "device",
+        getattr(device, "platform", None),
+        getattr(device, "id", None),
+    )
+
 __all__ = [
     "_as_batched_edge_array",
     "_as_batched_row_array",
     "_as_batched_scalar_or_space_array",
     "_as_batched_space_array",
     "_as_batched_time_space_array",
+    "_as_cached_batched_scalar_or_space_array",
+    "_as_cached_batched_space_array",
     "_as_edge_array",
     "_as_factorized_extracellular_potential_batch",
     "_as_scalar_or_space_array",
     "_as_space_array",
     "_as_sparse_intracellular_current_density_batch",
     "_broadcast_batch_leading",
+    "_cached_broadcast_batch_leading",
     "_normalize_batch_options",
     "_record_vm_batch",
     "_record_vm_row",

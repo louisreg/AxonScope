@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast
+from typing import Any, Callable, NamedTuple, cast
 
 import jax.numpy as jnp
 
 from axonscope.benchmarking import benchmark_span
-from axonscope.runtime.jax.inputs.payloads import (
+from axonscope.runtime.input_payloads import (
     FactorizedExtracellularPotentialBatch,
     SparseIntracellularCurrentDensityBatch,
+)
+from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
     materialize_sparse_intracellular_current_density_batch,
 )
@@ -41,13 +43,16 @@ from .inputs import (
     _as_batched_scalar_or_space_array,
     _as_batched_space_array,
     _as_batched_time_space_array,
+    _as_cached_batched_scalar_or_space_array,
+    _as_cached_batched_space_array,
     _as_factorized_extracellular_potential_batch,
     _as_sparse_intracellular_current_density_batch,
-    _broadcast_batch_leading,
+    _cached_broadcast_batch_leading,
     _normalize_batch_options,
     _resolve_output_recording,
 )
 from axonscope.runtime.jax.recording.results import BatchKernelResult
+from axonscope.recording import RecordingPlan
 
 from .single_cable_scans import (
     _run_single_cable_factorized_vstim_batch_observer_scan,
@@ -57,6 +62,11 @@ from .single_cable_scans import (
     _run_single_cable_vstim_batch_stateful_scan,
     _run_single_cable_zero_vstim_batch_sparse_observer_scan,
 )
+
+
+class _RecordedTrace(NamedTuple):
+    Vm: Array
+    recordings: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,7 @@ class SingleCableVStimBatchKernel:
         ) = None,
         options: BatchOptions | None = None,
         observers: VmRasterPlan | None = None,
+        recording_plan: RecordingPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> BatchKernelResult:
         runtime = self.runtime
@@ -181,7 +192,11 @@ class SingleCableVStimBatchKernel:
                 options,
                 nx=membrane_runtime.Nx,
             )
-            record_voltage = options.recording.mode != "none"
+            record_voltage = (
+                options.recording.mode != "none"
+                and (recording_plan is None or recording_plan.voltage)
+            )
+            record_outputs = _recording_output_flags(recording_plan)
             chunk_steps = _normalize_time_chunk_steps(options.time_chunk_steps, nt=grid.Nt)
             stateless_vm_only = bool(
                 membrane_runtime.membrane.supports_stateless_vm_only_fast_path()
@@ -275,9 +290,18 @@ class SingleCableVStimBatchKernel:
                 record_indices=record_idx,
                 record_full=record_full,
                 time_chunk_steps=chunk_steps,
+                record_outputs=record_outputs,
                 progress_callback=progress_callback,
             )
-            return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
+            return BatchKernelResult(
+                Vm=out.Vm if record_voltage else None,
+                t=grid.t_vec_ms,
+                recordings=_recordings_for_plan(
+                    recording_plan,
+                    out,
+                    observable_names=membrane_runtime.observable_names,
+                ),
+            )
         if factorized_vext is not None and vext_batch is None:
             with benchmark_span(
                 "kernel.materialize_inputs",
@@ -309,9 +333,18 @@ class SingleCableVStimBatchKernel:
             record_indices=record_idx,
             record_full=record_full,
             time_chunk_steps=chunk_steps,
+            record_outputs=record_outputs,
             progress_callback=progress_callback,
         )
-        return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
+        return BatchKernelResult(
+            Vm=out.Vm if record_voltage else None,
+            t=grid.t_vec_ms,
+            recordings=_recordings_for_plan(
+                recording_plan,
+                out,
+                observable_names=membrane_runtime.observable_names,
+            ),
+        )
 
 def _run_single_cable_vstim_batch_array_chunks(
     *,
@@ -324,8 +357,9 @@ def _run_single_cable_vstim_batch_array_chunks(
     record_indices: Array,
     record_full: bool,
     time_chunk_steps: int | None,
+    record_outputs: dict[str, bool],
     progress_callback: Callable[[int, int], None] | None,
-) -> Array:
+) -> _RecordedTrace:
     membrane_runtime = runtime.membrane
     grid = runtime.grid
     cable = runtime.cable
@@ -342,23 +376,23 @@ def _run_single_cable_vstim_batch_array_chunks(
         nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
     ):
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -367,6 +401,7 @@ def _run_single_cable_vstim_batch_array_chunks(
         )
     Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
     chunks = []
+    recording_chunks: list[dict[str, Any]] = []
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
@@ -394,12 +429,16 @@ def _run_single_cable_vstim_batch_array_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
         ):
-            Vm, gates, state, trace = _run_single_cable_vstim_batch_stateful_scan(
+            Vm, gates, state, trace, recording_trace = _run_single_cable_vstim_batch_stateful_scan(
                 backend=membrane_runtime.backend,
                 membrane=membrane_runtime.membrane,
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
                 record_full=record_full,
+                record_gates=record_outputs["gates"],
+                record_currents=record_outputs["currents"],
+                record_conductances=record_outputs["conductances"],
+                record_states=record_outputs["states"],
                 lower=lower,
                 diag=diag,
                 upper=upper,
@@ -426,10 +465,14 @@ def _run_single_cable_vstim_batch_array_chunks(
             chunk_count=len(chunk_ranges),
         ):
             chunks.append(trace)
+            recording_chunks.append(recording_trace)
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
-    return _concat_trace_chunks(chunks)
+    return _RecordedTrace(
+        Vm=_concat_trace_chunks(chunks),
+        recordings=_concat_recording_chunks(recording_chunks),
+    )
 
 def _run_single_cable_factorized_vstim_batch_array_chunks(
     *,
@@ -442,8 +485,9 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
     record_indices: Array,
     record_full: bool,
     time_chunk_steps: int | None,
+    record_outputs: dict[str, bool],
     progress_callback: Callable[[int, int], None] | None,
-) -> Array:
+) -> _RecordedTrace:
     membrane_runtime = runtime.membrane
     grid = runtime.grid
     cable = runtime.cable
@@ -465,23 +509,23 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -498,6 +542,7 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
         )
     Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
     chunks = []
+    recording_chunks: list[dict[str, Any]] = []
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
@@ -525,12 +570,16 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
         ):
-            Vm, gates, state, trace = _run_single_cable_factorized_vstim_batch_stateful_scan(
+            Vm, gates, state, trace, recording_trace = _run_single_cable_factorized_vstim_batch_stateful_scan(
                 backend=membrane_runtime.backend,
                 membrane=membrane_runtime.membrane,
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
                 record_full=record_full,
+                record_gates=record_outputs["gates"],
+                record_currents=record_outputs["currents"],
+                record_conductances=record_outputs["conductances"],
+                record_states=record_outputs["states"],
                 lower=lower,
                 diag=diag,
                 upper=upper,
@@ -558,10 +607,14 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             chunk_count=len(chunk_ranges),
         ):
             chunks.append(trace)
+            recording_chunks.append(recording_trace)
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
-    return _concat_trace_chunks(chunks)
+    return _RecordedTrace(
+        Vm=_concat_trace_chunks(chunks),
+        recordings=_concat_recording_chunks(recording_chunks),
+    )
 
 def _run_single_cable_factorized_vstim_batch_observer_chunks(
     *,
@@ -597,23 +650,23 @@ def _run_single_cable_factorized_vstim_batch_observer_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -776,23 +829,23 @@ def _run_single_cable_vstim_batch_observer_chunks(
         nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
     ):
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -954,23 +1007,23 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -1175,23 +1228,23 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
         nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
     ):
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -1330,13 +1383,88 @@ def _initial_single_cable_batch_state(
         nx=runtime.membrane.Nx,
     ):
         membrane_runtime = runtime.membrane
-        Vm = _broadcast_batch_leading(membrane_runtime.Vm0_mV, batch_size)
-        gates = _broadcast_batch_leading(membrane_runtime.gates0, batch_size)
+        Vm = _cached_broadcast_batch_leading(membrane_runtime.Vm0_mV, batch_size)
+        gates = _cached_broadcast_batch_leading(membrane_runtime.gates0, batch_size)
         state = tuple(
-            _broadcast_batch_leading(values, batch_size)
+            _cached_broadcast_batch_leading(values, batch_size)
             for values in membrane_runtime.state0
         )
         return Vm, gates, state
+
+
+def _recording_output_flags(plan: RecordingPlan | None) -> dict[str, bool]:
+    return {
+        "gates": bool(plan is not None and plan.gates),
+        "currents": bool(plan is not None and plan.currents),
+        "conductances": bool(plan is not None and plan.conductances),
+        "states": bool(plan is not None and plan.state_variables),
+    }
+
+
+def _concat_recording_chunks(
+    chunks: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not chunks:
+        return None
+    names = tuple(chunks[0])
+    out: dict[str, Any] = {}
+    for name in names:
+        out[name] = _concat_trace_chunks([chunk[name] for chunk in chunks])
+    return out
+
+
+def _recording_group(
+    values: Any,
+    names: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        name: values[..., index]
+        for index, name in enumerate(names)
+        if index < int(values.shape[-1])
+    }
+
+
+def _recordings_for_plan(
+    plan: RecordingPlan | None,
+    trace: _RecordedTrace,
+    *,
+    observable_names: dict[str, tuple[str, ...]],
+) -> dict[str, Any] | None:
+    if plan is None:
+        return {"Vm": trace.Vm}
+    recordings: dict[str, Any] = {}
+    if plan.voltage:
+        recordings["Vm"] = trace.Vm
+    if trace.recordings is not None:
+        if plan.gates:
+            group = _recording_group(
+                trace.recordings["gates"],
+                observable_names.get("gates", ()),
+            )
+            if group:
+                recordings["gates"] = group
+        if plan.currents:
+            group = _recording_group(
+                trace.recordings["currents"],
+                observable_names.get("currents", ()),
+            )
+            if group:
+                recordings["currents"] = group
+        if plan.conductances:
+            group = _recording_group(
+                trace.recordings["conductances"],
+                observable_names.get("conductances", ()),
+            )
+            if group:
+                recordings["conductances"] = group
+        if plan.state_variables:
+            group = _recording_group(
+                trace.recordings["states"],
+                observable_names.get("states", ()),
+            )
+            if group:
+                recordings["states"] = group
+    return recordings or None
 
 __all__ = [
     "SingleCableVStimBatchKernel",

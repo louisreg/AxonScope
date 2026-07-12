@@ -11,6 +11,7 @@ from axonscope.runtime.jax.types import SolverRuntime
 _BATCH_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _BATCH_STATIC_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _SINGLE_CABLE_FACTORIZED_FORCING_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_BATCHED_STATIC_ARRAY_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _RUNTIME_CACHE_MAX_SIZE = 64
 
 
@@ -50,12 +51,25 @@ def store_single_cable_factorized_forcing(key: tuple[Any, ...], forcing: Any) ->
     _cache_store(_SINGLE_CABLE_FACTORIZED_FORCING_CACHE, key, forcing)
 
 
+def get_batched_static_array(key: tuple[Any, ...]) -> Any | None:
+    """Return a cached batched static kernel array."""
+
+    return _cache_get(_BATCHED_STATIC_ARRAY_CACHE, key)
+
+
+def store_batched_static_array(key: tuple[Any, ...], values: Any) -> None:
+    """Store a batched static kernel array."""
+
+    _cache_store(_BATCHED_STATIC_ARRAY_CACHE, key, values)
+
+
 def clear_batch_runtime_caches() -> None:
     """Clear dynamic and static runtime caches."""
 
     _BATCH_RUNTIME_CACHE.clear()
     _BATCH_STATIC_RUNTIME_CACHE.clear()
     _SINGLE_CABLE_FACTORIZED_FORCING_CACHE.clear()
+    _BATCHED_STATIC_ARRAY_CACHE.clear()
 
 
 def clear_all_runtime_caches() -> None:
@@ -97,8 +111,10 @@ __all__ = [
     "clear_batch_runtime_caches",
     "get_batch_runtime",
     "get_batch_static_runtime",
+    "get_batched_static_array",
     "get_single_cable_factorized_forcing",
     "store_batch_runtime",
     "store_batch_static_runtime",
+    "store_batched_static_array",
     "store_single_cable_factorized_forcing",
 ]

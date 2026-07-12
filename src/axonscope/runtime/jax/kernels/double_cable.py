@@ -9,8 +9,8 @@ import jax
 import jax.numpy as jnp
 
 from axonscope.benchmarking import benchmark_span
+from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
 from axonscope.runtime.jax.inputs.payloads import (
-    FactorizedExtracellularPotentialBatch,
     materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
 )
@@ -48,7 +48,7 @@ from .inputs import (
     _as_factorized_extracellular_potential_batch,
     _as_scalar_or_space_array,
     _as_space_array,
-    _broadcast_batch_leading,
+    _cached_broadcast_batch_leading,
     _normalize_batch_options,
     _resolve_output_recording,
 )
@@ -1217,7 +1217,7 @@ def _initial_double_cable_batch_state(
             batch_size=batch_size,
         )
         state = tuple(
-            _broadcast_batch_leading(values, batch_size)
+            _cached_broadcast_batch_leading(values, batch_size)
             for values in membrane_runtime.state0
         )
         return Vi, Ve, gates, state
