@@ -1564,8 +1564,26 @@ def test_group_runner_routes_benchmark_metadata_through_metadata_module():
     }
 
     assert "axonscope.runtime.jax.benchmark_metadata" in text
+    assert "_record_lowered_input_progress_and_memory" in text
+    assert text.count("record_group_memory_estimate(") == 1
     offenders = sorted(term for term in forbidden_terms if term in text)
     assert offenders == []
+
+
+def test_group_runner_keeps_common_orchestration_helpers():
+    path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
+    text = path.read_text(encoding="utf-8")
+
+    required_helpers = {
+        "_LoweredJaxBatchInputs",
+        "_lower_single_cable_inputs",
+        "_lower_double_cable_inputs",
+        "_emit_kernel_compile_progress",
+        "_record_kernel_output_metadata",
+    }
+    missing = sorted(name for name in required_helpers if name not in text)
+
+    assert missing == []
 
 
 def test_preparation_runtime_batches_remains_host_side_only():

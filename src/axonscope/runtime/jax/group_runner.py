@@ -65,6 +65,14 @@ class _PreparedJaxBatchGroup:
     cohort: Any
 
 
+@dataclass(frozen=True)
+class _LoweredJaxBatchInputs:
+    """Concrete input payloads lowered for one JAX batch kernel."""
+
+    intracellular: Any
+    extracellular: Any
+
+
 def run_jax_batch_group(
     group: DispatchGroup,
     *,
@@ -351,40 +359,81 @@ def _dispatch_batch_kernel_output(
         )
 
 
-def _run_single_cable_batch_group(
-    group: DispatchGroup,
+def _record_lowered_input_progress_and_memory(
     *,
-    tsim_ms: float,
-    dt_ms: float,
-    batch_options: BatchOptions,
-    solver_options: SolverOptions | None,
-    observers: tuple[Any, ...] | None,
-    progress_callback: Any = None,
-    runtime_context: Any | None = None,
-) -> tuple[DispatchRecord, ...]:
-    """Run a homogeneous single-cable group through imposed-field batching."""
+    public_group: DispatchGroup,
+    memory_group: DispatchGroup,
+    runtime: Any,
+    cohort: Any,
+    kernel_options: OutputPlan,
+    lowered_inputs: _LoweredJaxBatchInputs,
+    include_vstim_previous: bool,
+    progress_callback: Any,
+) -> None:
+    """Record shared input-lowering progress and memory metadata."""
 
-    prepared = _prepare_jax_batch_group(
-        group,
-        kernel_group=group,
-        mode="single",
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        solver_options=solver_options,
-        progress_callback=progress_callback,
-        runtime_context=runtime_context,
+    _emit_progress(
+        progress_callback,
+        public_group,
+        "lowering",
+        "inputs",
+        intracellular=lowered_inputs.intracellular.format,
+        extracellular=lowered_inputs.extracellular.format,
+        stimulations=cohort.extracellular_stimulation_count,
     )
-    runtime = prepared.runtime
-    cohort = prepared.cohort
-    kernel_options, observer_plan = _lower_output_plan_for_group(
-        public_group=group,
-        kernel_group=group,
+    record_group_memory_estimate(
+        group=memory_group,
         runtime=runtime,
         cohort=cohort,
-        batch_options=batch_options,
-        observers=observers,
-        progress_callback=progress_callback,
+        kernel_options=kernel_options,
+        intracellular_format=lowered_inputs.intracellular.format,
+        extracellular_format=lowered_inputs.extracellular.format,
+        include_vstim_previous=include_vstim_previous,
     )
+
+
+def _emit_kernel_compile_progress(
+    *,
+    group: DispatchGroup,
+    kernel_options: OutputPlan,
+    progress_callback: Any,
+    **details: Any,
+) -> None:
+    """Emit the common pre-enqueue kernel progress event."""
+
+    _emit_progress(
+        progress_callback,
+        group,
+        "kernel",
+        "compiling JAX kernel if needed",
+        recording=kernel_options.recording.mode,
+        time_chunk_steps=kernel_options.time_chunk_steps,
+        **details,
+    )
+
+
+def _record_kernel_output_metadata(out: Any) -> None:
+    """Record benchmark metadata for retained Vm kernel outputs."""
+
+    if out.Vm is not None:
+        record_benchmark_metadata(
+            **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
+        )
+
+
+def _lower_single_cable_inputs(
+    *,
+    group: DispatchGroup,
+    runtime: Any,
+    cohort: Any,
+    kernel_options: OutputPlan,
+    observer_plan: Any,
+    observers: tuple[Any, ...] | None,
+    tsim_ms: float,
+    dt_ms: float,
+) -> _LoweredJaxBatchInputs:
+    """Lower and record single-cable kernel inputs."""
+
     with benchmark_span(
         "inputs.intracellular",
         group_id=group.group_id,
@@ -424,31 +473,121 @@ def _run_single_cable_batch_group(
             group=group,
             runtime=runtime,
         )
-    _emit_progress(
-        progress_callback,
-        group,
-        "lowering",
-        "inputs",
-        intracellular=intracellular.format,
-        extracellular=extracellular.format,
-        stimulations=cohort.extracellular_stimulation_count,
+    return _LoweredJaxBatchInputs(
+        intracellular=intracellular,
+        extracellular=extracellular,
     )
-    record_group_memory_estimate(
+
+
+def _lower_double_cable_inputs(
+    *,
+    public_group: DispatchGroup,
+    kernel_group: DispatchGroup,
+    runtime: Any,
+    cohort: Any,
+    tsim_ms: float,
+    dt_ms: float,
+) -> _LoweredJaxBatchInputs:
+    """Lower and record double-cable kernel inputs."""
+
+    with benchmark_span(
+        "inputs.intracellular",
+        group_id=public_group.group_id,
+        group_size=public_group.size,
+        nt=runtime.grid.Nt,
+        nx=public_group.nx,
+    ):
+        intracellular = lower_double_cable_intracellular_input(
+            cohort=cohort,
+            runtime=runtime,
+        )
+        record_intracellular_lowering_metadata(
+            intracellular,
+            group=kernel_group,
+            runtime=runtime,
+        )
+    with benchmark_span(
+        "inputs.extracellular",
+        group_id=public_group.group_id,
+        group_size=public_group.size,
+        nt=runtime.grid.Nt,
+        nx=public_group.nx,
+    ):
+        extracellular = lower_double_cable_extracellular_input(
+            cohort=cohort,
+            runtime=runtime,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+        )
+        record_extracellular_lowering_metadata(
+            extracellular,
+            group=kernel_group,
+            runtime=runtime,
+        )
+    return _LoweredJaxBatchInputs(
+        intracellular=intracellular,
+        extracellular=extracellular,
+    )
+
+
+def _run_single_cable_batch_group(
+    group: DispatchGroup,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
+    progress_callback: Any = None,
+    runtime_context: Any | None = None,
+) -> tuple[DispatchRecord, ...]:
+    """Run a homogeneous single-cable group through imposed-field batching."""
+
+    prepared = _prepare_jax_batch_group(
+        group,
+        kernel_group=group,
+        mode="single",
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        solver_options=solver_options,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+    runtime = prepared.runtime
+    cohort = prepared.cohort
+    kernel_options, observer_plan = _lower_output_plan_for_group(
+        public_group=group,
+        kernel_group=group,
+        runtime=runtime,
+        cohort=cohort,
+        batch_options=batch_options,
+        observers=observers,
+        progress_callback=progress_callback,
+    )
+    lowered_inputs = _lower_single_cable_inputs(
         group=group,
         runtime=runtime,
         cohort=cohort,
         kernel_options=kernel_options,
-        intracellular_format=intracellular.format,
-        extracellular_format=extracellular.format,
-        include_vstim_previous=False,
+        observer_plan=observer_plan,
+        observers=observers,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
     )
-    _emit_progress(
-        progress_callback,
-        group,
-        "kernel",
-        "compiling JAX kernel if needed",
-        recording=kernel_options.recording.mode,
-        time_chunk_steps=kernel_options.time_chunk_steps,
+    _record_lowered_input_progress_and_memory(
+        public_group=group,
+        memory_group=group,
+        runtime=runtime,
+        cohort=cohort,
+        kernel_options=kernel_options,
+        lowered_inputs=lowered_inputs,
+        include_vstim_previous=False,
+        progress_callback=progress_callback,
+    )
+    _emit_kernel_compile_progress(
+        group=group,
+        kernel_options=kernel_options,
+        progress_callback=progress_callback,
     )
     with benchmark_span(
         "kernel.enqueue",
@@ -465,16 +604,13 @@ def _run_single_cable_batch_group(
             Cm_uF_cm2=group_cm_uF_cm2(group, runtime),
             has_driven_extracellular=cohort.extracellular_stimulation_count > 0,
         ).run(
-            intracellular_current_density_mid=intracellular.midpoint,
-            extracellular_potential_mid_mV=extracellular.midpoint,
+            intracellular_current_density_mid=lowered_inputs.intracellular.midpoint,
+            extracellular_potential_mid_mV=lowered_inputs.extracellular.midpoint,
             options=kernel_options,
             observers=observer_plan,
             progress_callback=progress_callback,
         )
-        if out.Vm is not None:
-            record_benchmark_metadata(
-                **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
-            )
+        _record_kernel_output_metadata(out)
     out = _wait_for_batch_kernel_output(
         out,
         group=group,
@@ -541,57 +677,23 @@ def _run_double_cable_batch_group(
             "benchmark_observer_state_scope": benchmark_observer_state_scope,
         },
     )
-    with benchmark_span(
-        "inputs.intracellular",
-        group_id=group.group_id,
-        group_size=group.size,
-        nt=runtime.grid.Nt,
-        nx=group.nx,
-    ):
-        intracellular = lower_double_cable_intracellular_input(
-            cohort=cohort,
-            runtime=runtime,
-        )
-        record_intracellular_lowering_metadata(
-            intracellular,
-            group=kernel_group,
-            runtime=runtime,
-        )
-    with benchmark_span(
-        "inputs.extracellular",
-        group_id=group.group_id,
-        group_size=group.size,
-        nt=runtime.grid.Nt,
-        nx=group.nx,
-    ):
-        extracellular = lower_double_cable_extracellular_input(
-            cohort=cohort,
-            runtime=runtime,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-        )
-        record_extracellular_lowering_metadata(
-            extracellular,
-            group=kernel_group,
-            runtime=runtime,
-        )
-    _emit_progress(
-        progress_callback,
-        group,
-        "lowering",
-        "inputs",
-        intracellular=intracellular.format,
-        extracellular=extracellular.format,
-        stimulations=cohort.extracellular_stimulation_count,
+    lowered_inputs = _lower_double_cable_inputs(
+        public_group=group,
+        kernel_group=kernel_group,
+        runtime=runtime,
+        cohort=cohort,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
     )
-    record_group_memory_estimate(
-        group=kernel_group,
+    _record_lowered_input_progress_and_memory(
+        public_group=group,
+        memory_group=kernel_group,
         runtime=runtime,
         cohort=cohort,
         kernel_options=kernel_options,
-        intracellular_format=intracellular.format,
-        extracellular_format=extracellular.format,
+        lowered_inputs=lowered_inputs,
         include_vstim_previous=True,
+        progress_callback=progress_callback,
     )
     record_benchmark_metadata(
         public_group_size=int(group.size),
@@ -607,13 +709,10 @@ def _run_double_cable_batch_group(
             execution_policy_double_cable_block_solver_internal=policy_allow_internal,
             execution_policy_tiled_thomas_block_b=policy_block_b,
         )
-    _emit_progress(
-        progress_callback,
-        group,
-        "kernel",
-        "compiling JAX kernel if needed",
-        recording=kernel_options.recording.mode,
-        time_chunk_steps=kernel_options.time_chunk_steps,
+    _emit_kernel_compile_progress(
+        group=group,
+        kernel_options=kernel_options,
+        progress_callback=progress_callback,
         policy_block_solver=policy_block_solver,
         benchmark_observer_state_scope=benchmark_observer_state_scope,
     )
@@ -632,19 +731,18 @@ def _run_double_cable_batch_group(
             Veinit_mV=float(getattr(representative, "Veinit", 0.0)),
             has_driven_extracellular=cohort.extracellular_stimulation_count > 0,
         ).run(
-            intracellular_current_density_mid=intracellular.midpoint,
-            extracellular_potential_mid_mV=extracellular.midpoint,
-            extracellular_potential_initial_previous_mV=extracellular.initial_previous,
+            intracellular_current_density_mid=lowered_inputs.intracellular.midpoint,
+            extracellular_potential_mid_mV=lowered_inputs.extracellular.midpoint,
+            extracellular_potential_initial_previous_mV=(
+                lowered_inputs.extracellular.initial_previous
+            ),
             options=kernel_options,
             observers=observer_plan,
             progress_callback=progress_callback,
             solver_engine=solver_engine,
             benchmark_observer_state_scope=benchmark_observer_state_scope,
         )
-        if out.Vm is not None:
-            record_benchmark_metadata(
-                **benchmark_array_metadata("Vm", out.Vm, role="kernel_output")
-            )
+        _record_kernel_output_metadata(out)
     with benchmark_span(
         "kernel.trim_batch_output",
         group_id=group.group_id,

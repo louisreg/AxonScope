@@ -69,6 +69,10 @@ specific out of `runtime/jax/`:
 - Public dispatch-record assembly moved from `runtime/jax/batch_results.py` to
   `runtime/result_assembly.py`. The JAX module now keeps only JAX kernel-output
   synchronization, pending VmRaster finalization, and padded kernel-output trim.
+- `runtime/jax/group_runner.py` now has a narrower orchestration shape:
+  single-cable and double-cable input lowering remain cable-specific helpers,
+  while shared progress, memory-estimate metadata, kernel compile progress, and
+  retained Vm output metadata go through common helpers.
 
 Validation:
 
