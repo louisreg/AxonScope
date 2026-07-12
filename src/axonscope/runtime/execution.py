@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
 from axonscope.recording import Recording, RecordingPlan
+from axonscope.runtime.output_contract import (
+    observer_output_label,
+    observers_are_vm_raster_compatible,
+    vm_raster_definitions,
+)
 from axonscope.solvers import BatchOptions
 
 if TYPE_CHECKING:
@@ -104,14 +109,7 @@ def benchmark_observer_output_label(
 ) -> str:
     """Return the runtime observer output route for host-side reports."""
 
-    from axonscope.runtime.jax.benchmark import (
-        benchmark_observer_output_label as jax_benchmark_observer_output_label,
-    )
-
-    return jax_benchmark_observer_output_label(
-        observers,
-        recording_mode=recording_mode,
-    )
+    return observer_output_label(observers, recording_mode=recording_mode)
 
 
 def benchmark_observers_are_vm_raster_compatible(
@@ -119,11 +117,7 @@ def benchmark_observers_are_vm_raster_compatible(
 ) -> bool:
     """Return whether observers can use the compact runtime VmRaster route."""
 
-    from axonscope.runtime.jax.benchmark import (
-        benchmark_observers_are_vm_raster_compatible as jax_vm_raster_compatible,
-    )
-
-    return jax_vm_raster_compatible(observers)
+    return observers_are_vm_raster_compatible(observers)
 
 
 def benchmark_vm_raster_definitions(
@@ -131,11 +125,7 @@ def benchmark_vm_raster_definitions(
 ) -> tuple[Any, ...]:
     """Return observer definitions supported by runtime VmRaster lowering."""
 
-    from axonscope.runtime.jax.benchmark import (
-        benchmark_vm_raster_definitions as jax_benchmark_vm_raster_definitions,
-    )
-
-    return jax_benchmark_vm_raster_definitions(observers)
+    return vm_raster_definitions(observers)
 
 
 def benchmark_plan_input_lowering(

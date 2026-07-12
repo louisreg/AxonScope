@@ -11,11 +11,13 @@ from axonscope.runtime.jax.input_lowering import (
     PlannedInputLowering,
     plan_input_lowering,
 )
-from axonscope.runtime.jax.recording_lowering import (
-    lower_batch_recording_options,
+from axonscope.runtime.output_contract import (
     observer_output_label,
     observers_are_vm_raster_compatible,
     vm_raster_definitions,
+)
+from axonscope.runtime.jax.recording_lowering import (
+    lower_batch_recording_options,
 )
 from axonscope.solvers.options import BatchOptions
 

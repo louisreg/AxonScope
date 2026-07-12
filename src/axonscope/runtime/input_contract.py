@@ -13,6 +13,16 @@ from typing import Any, Literal
 
 
 CableFormulation = Literal["single-cable", "double-cable"]
+IntracellularInputFormat = Literal[
+    "dense",
+    "sparse_current_clamp",
+    "zero_no_intracellular_context",
+]
+ExtracellularInputFormat = Literal[
+    "dense",
+    "factorized_footprint",
+    "zero_no_extracellular_stimulation",
+]
 
 
 class IntracellularLoweringMode(Enum):
@@ -153,8 +163,10 @@ def normalize_cable_formulation(value: str) -> CableFormulation:
 
 __all__ = [
     "CableFormulation",
+    "ExtracellularInputFormat",
     "ExtracellularLoweringCapabilities",
     "ExtracellularLoweringMode",
+    "IntracellularInputFormat",
     "IntracellularLoweringMode",
     "RuntimeInputContract",
     "normalize_cable_formulation",

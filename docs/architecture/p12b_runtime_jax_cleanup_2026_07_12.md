@@ -42,6 +42,36 @@ shape, benchmark vocabulary, and result assembly concepts.
 semantics. It may use JAX-specific containers internally, but benchmark and
 inspection metadata should report the runtime-neutral mode labels.
 
+## Contract Cleanup Pass
+
+The next P12B cleanup pass moved host-side contracts that are not inherently JAX
+specific out of `runtime/jax/`:
+
+- `OutputPlan` moved from `runtime/jax/output_plan.py` to
+  `runtime/output_contract.py`. JAX batch execution still consumes it, but the
+  concept describes output sinks (`vm`, `vm_raster`, `none`) and chunking, not
+  JAX kernels.
+- Intracellular and extracellular input-format type labels moved to
+  `runtime/input_contract.py`; `runtime/jax/input_lowering.py` now owns only
+  the JAX implementation of those labels.
+- Observer-output labels and VmRaster observer compatibility moved to
+  `runtime/output_contract.py`. Public estimate/inspection helpers can now ask
+  `runtime.execution` for those labels without routing through
+  `runtime.jax.benchmark`.
+- Guardrails now assert that `runtime/jax/output_plan.py` stays absent and that
+  input/output labels remain runtime-neutral.
+
+Validation:
+
+```bash
+python -m compileall -q src/axonscope tests/unit
+python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_inspection.py tests/unit/test_performance.py --tb=short
+python -m pytest -q tests/unit/test_dispatcher.py --tb=short
+```
+
+Results: `compileall` passed, guardrails/inspection/performance passed
+`102/102`, and dispatcher passed `56/56`.
+
 ## Benchmark Gate
 
 After this cleanup, run the local CPU sanity gate:

@@ -8,8 +8,11 @@ from typing import Any
 
 import numpy as np
 
-from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
 from axonscope.benchmarking import record_benchmark_metadata
+from axonscope.runtime.output_contract import (
+    observers_are_vm_raster_compatible,
+    vm_raster_definitions,
+)
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
 
@@ -141,42 +144,6 @@ def lower_observers_for_cohort(
         vm_raster_probe_count=0 if plan is None else plan.probe_count,
     )
     return plan
-
-
-def observer_output_label(
-    observers: tuple[Any, ...] | None,
-    *,
-    recording_mode: str,
-) -> str:
-    """Return the public output route selected for observer definitions."""
-
-    if observers is None:
-        return "none"
-    if recording_mode == "none" and observers_are_vm_raster_compatible(observers):
-        return "vm_raster"
-    if recording_mode == "none":
-        return "unsupported_observer_only"
-    return "posthoc_from_recorded_vm"
-
-
-def observers_are_vm_raster_compatible(observers: tuple[Any, ...] | None) -> bool:
-    """Return whether all observer definitions can be lowered to VmRaster."""
-
-    if observers is None:
-        return False
-    return bool(observers) and len(vm_raster_definitions(observers)) == len(observers)
-
-
-def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
-    """Return observer definitions supported by solver-side VmRaster."""
-
-    if observers is None:
-        return ()
-    return tuple(
-        observer
-        for observer in observers
-        if isinstance(observer, (Activation, Latency, ConductionBlock))
-    )
 
 
 def cohort_original_indices(cohort: Any) -> np.ndarray:
@@ -331,8 +298,5 @@ __all__ = [
     "cohort_original_indices",
     "lower_batch_recording_options",
     "lower_observers_for_cohort",
-    "observer_output_label",
-    "observers_are_vm_raster_compatible",
     "row_recording_indices_for_group",
-    "vm_raster_definitions",
 ]

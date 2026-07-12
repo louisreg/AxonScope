@@ -32,7 +32,7 @@ from axonscope.runtime.jax.input_lowering import (
     lower_single_cable_extracellular_input,
     lower_single_cable_intracellular_input,
 )
-from axonscope.runtime.jax.output_plan import OutputPlan
+from axonscope.runtime.output_contract import OutputPlan
 from axonscope.runtime.jax.recording_lowering import (
     lower_batch_recording_options,
     lower_observers_for_cohort,

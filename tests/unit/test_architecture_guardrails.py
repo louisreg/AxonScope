@@ -1811,7 +1811,11 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
 
 
 def test_runtime_input_planning_is_independent_from_observer_output_plan():
-    from axonscope.runtime.input_contract import ExtracellularLoweringMode
+    from axonscope.runtime.input_contract import (
+        ExtracellularInputFormat,
+        ExtracellularLoweringMode,
+        IntracellularInputFormat,
+    )
     from axonscope.runtime.jax.input_lowering import (
         PlannedInputLowering,
         can_plan_compact_double_cable_factorized_rows,
@@ -1828,6 +1832,12 @@ def test_runtime_input_planning_is_independent_from_observer_output_plan():
     ).parameters
     assert get_type_hints(PlannedInputLowering)["extracellular_mode"] == (
         ExtracellularLoweringMode | None
+    )
+    assert get_type_hints(PlannedInputLowering)["intracellular_format"] == (
+        IntracellularInputFormat
+    )
+    assert get_type_hints(PlannedInputLowering)["extracellular_format"] == (
+        ExtracellularInputFormat
     )
 
 
@@ -1853,6 +1863,41 @@ def test_p12_runtime_cleanup_uses_runtime_context_vocabulary():
         if legacy_name in path.read_text(encoding="utf-8")
     ]
     assert offenders == []
+
+
+def test_runtime_output_plan_contract_is_runtime_neutral():
+    assert not (SRC_ROOT / "runtime" / "jax" / "output_plan.py").exists()
+
+    from axonscope.runtime.output_contract import (
+        OutputPlan,
+        observer_output_label,
+        observers_are_vm_raster_compatible,
+        vm_raster_definitions,
+    )
+    from axonscope.solvers.options import BatchOptions
+
+    execution_text = (SRC_ROOT / "runtime" / "execution.py").read_text(
+        encoding="utf-8"
+    )
+    assert "benchmark_observers_are_vm_raster_compatible as jax" not in execution_text
+    assert "benchmark_observer_output_label as jax" not in execution_text
+    assert "benchmark_vm_raster_definitions as jax" not in execution_text
+
+    assert OutputPlan.from_batch_options(
+        BatchOptions.none(),
+        observers=None,
+    ).sink == "none"
+    assert OutputPlan.from_batch_options(
+        BatchOptions.none(),
+        observers=(object(),),
+    ).sink == "vm_raster"
+    assert OutputPlan.from_batch_options(
+        BatchOptions.full(),
+        observers=(object(),),
+    ).sink == "vm"
+    assert observer_output_label(None, recording_mode="none") == "none"
+    assert observers_are_vm_raster_compatible(None) is False
+    assert vm_raster_definitions(None) == ()
 
 
 def test_public_examples_do_not_use_backend_solver_route_labels():

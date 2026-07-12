@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
 from axonscope.runtime.input_contract import (
+    ExtracellularInputFormat,
     ExtracellularLoweringCapabilities,
     ExtracellularLoweringMode,
+    IntracellularInputFormat,
     IntracellularLoweringMode,
     RuntimeInputContract,
 )
@@ -29,17 +31,6 @@ if TYPE_CHECKING:
     from axonscope.preparation.cohort import PreparedCohort
     from axonscope.solvers.options import BatchOptions
 
-
-IntracellularInputFormat = Literal[
-    "dense",
-    "sparse_current_clamp",
-    "zero_no_intracellular_context",
-]
-ExtracellularInputFormat = Literal[
-    "dense",
-    "factorized_footprint",
-    "zero_no_extracellular_stimulation",
-]
 
 JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
     cable="single-cable",
