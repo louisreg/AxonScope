@@ -94,6 +94,15 @@ specific out of `runtime/jax/`:
   padded space/edge/gate arrays, and double-cable extracellular host rows are
   now runtime-neutral helpers. `runtime/jax/runtime_preparation.py` still owns
   JAX materialization into `CableRuntime` and `ExtracellularRuntime`.
+- P12B source-pruning pass:
+  test-only dense/reference Crank-Nicholson solvers moved from
+  `runtime/jax/reference_solvers.py` to `tests/unit/solvers/_reference_solvers.py`;
+  the P11C large-population prototype moved from
+  `runtime/jax/large_population_solver.py` to
+  `benchmark/analysis/large_population_solver.py`; rejected or diagnostic
+  PCR-SoA candidate variants moved from `runtime/jax/common.py` to
+  `benchmark/analysis/double_cable_solver_candidates.py`. `common.py` now keeps
+  the active runtime primitives rather than benchmark-only probes.
 
 Validation:
 
@@ -101,11 +110,18 @@ Validation:
 python -m compileall -q src/axonscope tests/unit
 python -m pytest -q tests/unit/test_architecture_guardrails.py tests/unit/test_inspection.py tests/unit/test_performance.py --tb=short
 python -m pytest -q tests/unit/test_dispatcher.py --tb=short
+python -m pytest -q tests/unit/benchmarking/test_double_cable_solver_candidates.py tests/unit/solvers/test_large_population_solver.py tests/unit/solvers/test_common.py --tb=short
+python -m pytest -q tests/unit/solvers/test_batch.py tests/unit/solvers/test_cranknicholson.py tests/unit/solvers/test_extracellular.py --tb=short
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable single_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_single_cpu
+python benchmark/run.py --script recruitment_curves --preset quick --platform cpu --cable double_cable --recording observer_only --n-axons 64 --nx 89 --precision fp32 --repeats 1 --warmups 1 --memory-trace rss --output benchmark/results/p12b_runtime_jax_prune_double_cpu
 ```
 
 Results: `compileall` passed, guardrails/inspection/performance passed
-`105/105`, dispatcher passed `56/56`, and batch/observer runtime tests passed
-`38/38`.
+`105/105`, dispatcher passed `56/56`, batch/observer runtime tests passed
+`38/38`, source-pruning tests passed `128/128`, and moved-reference solver
+tests passed `56/56`. The local single-cable and double-cable CPU smoke
+benchmarks completed and wrote the two `p12b_runtime_jax_prune_*_cpu`
+artifact directories.
 
 ## Benchmark Gate
 
@@ -331,9 +347,9 @@ Interpretation:
 ## Remaining Cleanup
 
 - Continue auditing `runtime/jax/` for dead or duplicated host-side code.
-- Keep `runtime/jax/reference_solvers.py` private to tests/reference
-  equivalence. Do not promote those dense/reference routes into public examples
-  or stable runtime policy.
+- Keep test-only dense/reference routes under `tests/`, not in
+  `runtime/jax`. Do not promote those dense/reference routes into public
+  examples or stable runtime policy.
 - Keep diagnostic solver routes out of public examples and stable docs.
 - Do not choose a new solver policy in P12B.
 - Do not optimize cold start until the runtime contract and hot path are stable.

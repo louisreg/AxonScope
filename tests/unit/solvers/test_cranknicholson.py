@@ -9,7 +9,7 @@ from axonscope.axons.unmyelinated import HodgkinHuxley
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
-from axonscope.runtime.jax.reference_solvers import (
+from tests.unit.solvers._reference_solvers import (
     CrankNicholson_unoptimized,
 )
 from axonscope.runtime.jax.kernels import SingleCableKernel

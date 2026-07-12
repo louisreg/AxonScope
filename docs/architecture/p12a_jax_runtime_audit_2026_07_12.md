@@ -14,7 +14,6 @@ Do not move them to `axonscope.runtime`:
 - `common.py`
 - `solver_core.py`
 - `jax_triton_double_cable.py`
-- `large_population_solver.py`
 - `kernels.py`
 - `membrane_backend.py`
 - `membrane_layout.py`
@@ -66,6 +65,10 @@ runtime:
 - benchmark/inspection metadata vocabulary.
 
 The first moved contract is `src/axonscope/runtime/input_contract.py`.
+
+P12B later moved the P11C large-population prototype out of
+`src/axonscope/runtime/jax/` and into `benchmark/analysis/`, because it is a
+benchmark/study artifact rather than a production runtime route.
 
 ## Current P12A Cleanup Decisions
 

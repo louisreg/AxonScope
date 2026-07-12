@@ -5,13 +5,13 @@ import pytest
 
 from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+)
+from benchmark.analysis.double_cable_solver_candidates import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
     solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
     solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
-)
-from benchmark.analysis.double_cable_solver_candidates import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric,
 )
 

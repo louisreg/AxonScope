@@ -249,16 +249,16 @@ These routes are useful for comparison but should not be exposed through
 | Candidate | Source | Status | Main evidence |
 | --- | --- | --- | --- |
 | `thomas_batched_scan` | `solve_block_tridiagonal_2x2_scalar_batched(...)` in `common.py` | diagnostic | Poor GPU at `Naxons=512`, but becomes useful at very large `Naxons`; kept as reference for large-population gates. |
-| `large_population_exact_double_cable_jax` | `src/axonscope/runtime/jax/large_population_solver.py` | diagnostic/prototype | Validated layout/bucketing ideas, but mixed timing and not enough for production. CPU route should not move here. |
+| `large_population_exact_double_cable_jax` | `benchmark/analysis/large_population_solver.py` | diagnostic/prototype | Validated layout/bucketing ideas, but mixed timing and not enough for production. CPU route should not move here. Moved out of `runtime/jax` during P12B cleanup. |
 | `jax_triton_tiled_thomas` | `jax_triton_double_cable.py` | rejected as static-unrolled route | Strong warm timing but unacceptable static-range lowering time at realistic `Nx`. Superseded by looped version. |
 | `jax_triton_tiled_thomas_loop` | `jax_triton_double_cable.py` | diagnostic plus integrated candidate source | Strong warm large-population GPU signal; looped XB form is the current integrated benchmark candidate. |
 | `pcr_soa_vmap` | benchmark analysis wrappers | diagnostic | Optimized HLO essentially equivalent to batch-native PCR/SoA; no separate runtime route needed. |
 | `pcr_soa_symmetric_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic | Reduced HLO state and estimated fusion output, but hot solve improved only about `2.6%` at P100 `B=512`. Not enough. |
-| `pcr_soa_nomask_batched` | `common.py` | rejected diagnostic | Lower select count, slower hot runtime. |
-| `pcr_soa_shift_batched` | `common.py` | diagnostic reference | Removed gathers/selects and improved first-run behavior, but hot runtime did not improve. |
-| `pcr_soa_transposed_batched` | `common.py` | rejected diagnostic | Slower hot runtime. |
-| `pcr_soa_padded_batched` | `common.py` | diagnostic reference | Similar hot runtime to baseline within noise; not a clear win. |
-| `pcr_soa_hybrid_batched` | `common.py` | rejected diagnostic | Much larger HLO/fusion surface and much slower. |
+| `pcr_soa_nomask_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Lower select count, slower hot runtime. |
+| `pcr_soa_shift_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic reference | Removed gathers/selects and improved first-run behavior, but hot runtime did not improve. |
+| `pcr_soa_transposed_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Slower hot runtime. |
+| `pcr_soa_padded_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | diagnostic reference | Similar hot runtime to baseline within noise; not a clear win. |
+| `pcr_soa_hybrid_batched` | `benchmark/analysis/double_cable_solver_candidates.py` | rejected diagnostic | Much larger HLO/fusion surface and much slower. |
 | reciprocal inverse rewrite | reverted code, documented in `p11b_reciprocal_inverse_gate_2026_07_07.md` | rejected | Reduced divide count but regressed hot block solve and one-step timing. |
 
 ## Archived Or Historical Solver Families
@@ -357,7 +357,7 @@ src/axonscope/runtime/jax/batch_kernels.py
 
 ```text
 src/axonscope/runtime/jax/jax_triton_double_cable.py
-src/axonscope/runtime/jax/large_population_solver.py
+benchmark/analysis/large_population_solver.py
 ```
 
 ### Benchmark entry points

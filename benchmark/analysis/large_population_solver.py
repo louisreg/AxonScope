@@ -7,6 +7,8 @@ import jax.numpy as jnp
 
 from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+)
+from benchmark.analysis.double_cable_solver_candidates import (
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
 )
 

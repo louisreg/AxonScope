@@ -1088,7 +1088,6 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         "kernels.py",
         "observables.py",
         "observer_runtime.py",
-        "reference_solvers.py",
         "runtime.py",
     }
 
@@ -1096,12 +1095,37 @@ def test_jax_runtime_modules_live_under_backend_boundary():
         assert not (SRC_ROOT / "solvers" / filename).exists()
         assert (SRC_ROOT / "runtime" / "jax" / filename).is_file()
     assert not (SRC_ROOT / "runtime" / "jax" / "experimental.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "reference_solvers.py").exists()
+    assert not (SRC_ROOT / "runtime" / "jax" / "large_population_solver.py").exists()
 
     offenders: list[str] = []
     for path in _python_sources(SRC_ROOT / "solvers"):
         offenders.extend(_jax_import_locations(path))
 
     assert offenders == []
+
+
+def test_rejected_double_cable_solver_candidates_stay_out_of_jax_runtime_core():
+    common_text = (SRC_ROOT / "runtime" / "jax" / "common.py").read_text(encoding="utf-8")
+    benchmark_text = (
+        REPO_ROOT / "benchmark" / "analysis" / "double_cable_solver_candidates.py"
+    ).read_text(encoding="utf-8")
+
+    benchmark_only = {
+        "solve_block_tridiagonal_2x2_pcr_soa_batched_ref",
+        "solve_block_tridiagonal_2x2_pcr_soa_batched_nomask",
+        "solve_block_tridiagonal_2x2_pcr_soa_batched_shift",
+        "solve_block_tridiagonal_2x2_pcr_soa_batched_transposed",
+        "solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched",
+        "solve_block_tridiagonal_2x2_pcr_soa_batched_padded",
+        "double_cable_block_residual_norm",
+        "double_cable_power_bucket",
+        "pad_double_cable_system_to_power_bucket",
+    }
+
+    for name in benchmark_only:
+        assert name not in common_text
+        assert name in benchmark_text
 
 
 def test_jax_runtime_does_not_compile_stateful_legacy_composites():

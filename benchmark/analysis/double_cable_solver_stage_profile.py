@@ -23,11 +23,6 @@ from axonscope.runtime.jax.common import (
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
-    solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
-    solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
-    solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
-    solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
-    solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
     solve_block_tridiagonal_2x2_scalar,
     solve_block_tridiagonal_2x2_scalar_batched,
 )
@@ -35,7 +30,12 @@ from axonscope.runtime.jax.observer_runtime import (
     update_vm_raster_state_batch_from_tables,
 )
 from benchmark.analysis.double_cable_solver_candidates import (
+    solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
     solve_block_tridiagonal_2x2_pcr_soa_batched_symmetric,
+    solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
+    solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
 )
 
 

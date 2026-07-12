@@ -462,7 +462,9 @@ matrix invariant to avoid carrying separate upper-coupling PCR state, and the
 existing low-level PCR/SoA probes `pcr_soa_nomask_batched`,
 `pcr_soa_shift_batched`, `pcr_soa_transposed_batched`,
 `pcr_soa_padded_batched`, and `pcr_soa_hybrid_batched`. Use these as
-measurement candidates only; they are not public solver policies.
+measurement candidates only; they are not public solver policies. Their
+implementations live in `benchmark/analysis/double_cable_solver_candidates.py`,
+not in the production JAX runtime package.
 The fused one-step proxy can also be profiled with selected benchmark-only
 solver probes, for example:
 

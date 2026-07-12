@@ -12,23 +12,25 @@ from axonscope.runtime.jax.common import (
     double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
-    double_cable_block_residual_norm,
     diffusion_operator_coeffs,
-    double_cable_power_bucket,
-    pad_double_cable_system_to_power_bucket,
     solve_double_cable_linear_system_pcr_soa_batched,
     solve_block_tridiagonal_2x2,
     solve_block_tridiagonal_2x2_pcr,
     solve_block_tridiagonal_2x2_pcr_soa,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
+    solve_block_tridiagonal_2x2_scalar_batched,
+    solve_block_tridiagonal_2x2_scalar,
+)
+from benchmark.analysis.double_cable_solver_candidates import (
+    double_cable_block_residual_norm,
+    double_cable_power_bucket,
+    pad_double_cable_system_to_power_bucket,
     solve_block_tridiagonal_2x2_pcr_soa_hybrid_batched,
     solve_block_tridiagonal_2x2_pcr_soa_batched_nomask,
     solve_block_tridiagonal_2x2_pcr_soa_batched_padded,
     solve_block_tridiagonal_2x2_pcr_soa_batched_ref,
     solve_block_tridiagonal_2x2_pcr_soa_batched_shift,
     solve_block_tridiagonal_2x2_pcr_soa_batched_transposed,
-    solve_block_tridiagonal_2x2_scalar_batched,
-    solve_block_tridiagonal_2x2_scalar,
 )
 
 

@@ -15,7 +15,7 @@ from axonscope.stimulation import Stimulus
 from axonscope.solvers.crank_nicholson import (
     CrankNicholson,
 )
-from axonscope.runtime.jax.reference_solvers import (
+from tests.unit.solvers._reference_solvers import (
     CrankNicholsonVStimForcing,
     CrankNicholson_unoptimized,
 )

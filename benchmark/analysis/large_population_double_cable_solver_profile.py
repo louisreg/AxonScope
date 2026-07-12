@@ -21,16 +21,18 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from axonscope.runtime.jax.common import (
-    double_cable_block_residual_norm,
     solve_block_tridiagonal_2x2_pcr_soa_batched,
     solve_block_tridiagonal_2x2_scalar_batched,
+)
+from benchmark.analysis.double_cable_solver_candidates import (
+    double_cable_block_residual_norm,
 )
 from axonscope.runtime.jax.jax_triton_double_cable import (
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_batched,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
     solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_batched,
 )
-from axonscope.runtime.jax.large_population_solver import (
+from benchmark.analysis.large_population_solver import (
     LargePopulationLayoutName,
     block_b_candidates_for_nx_bucket,
     make_large_population_layout_plan,
