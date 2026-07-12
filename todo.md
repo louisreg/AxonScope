@@ -263,6 +263,19 @@ improvements.
   timing regression. Remaining local costs are mostly enqueue/dispatch, cold
   membrane compile, and kernel state/observer preparation; confirm this path on
   GPU before claiming the P12 GPU cold-start target improved.
+  Kaggle P100 RSS rerun on commit `569e8d4` wrote
+  `benchmark/results/kaggle/20260713_002054_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-single-rss-569e8d4`
+  and
+  `benchmark/results/kaggle/20260713_002323_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-double-rss-569e8d4`.
+  Double-cable cold preparation is confirmed on GPU:
+  `runtime.prepare.base_runtime` dropped from 2265.5 ms to 652.4 ms and
+  `runtime.prepare.membrane_init` from 936.2 ms to 4.7 ms versus the previous
+  `aab5384` gate. Single-cable remains on `cable_runtime_source=jax` and shows
+  no meaningful improvement. Warm GPU repeat means are not improved yet
+  (`double-cable curve.simulate` 23.1 ms to 26.6 ms), so keep the next P12 GPU
+  optimization focused on dispatch/enqueue/input/observer overhead. Matching
+  `--memory-trace device` probes were run too, but use them for memory evidence,
+  not timing claims, because device-memory snapshots dominate small warm spans.
 
 ### P3 - Documentation And Examples
 

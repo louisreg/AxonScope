@@ -567,6 +567,67 @@ runtime (`include_area=True`); single-cable keeps the previous JAX cable
 preparation path until a separate benchmark shows that changing it improves
 both cold preparation and kernel timing.
 
+## Kaggle P100 RSS Verification After Host Runtime Prep
+
+The host runtime-preparation patch was verified on Kaggle P100 at commit
+`569e8d4` with the same `Naxons=64`, `Nx=89`, fp32, observer-only,
+`repeats=2`, `warmups=1` smoke settings. Use the RSS runs below for timing
+claims; matching `--memory-trace device` submissions were also run, but their
+`inputs.extracellular` and warm repeat spans are dominated by device-memory
+snapshot overhead.
+
+Artifacts:
+
+- `benchmark/results/kaggle/20260713_002054_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-single-rss-569e8d4/outputs/extracted_single_rss`
+- `benchmark/results/kaggle/20260713_002323_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-double-rss-569e8d4/outputs/extracted_double_rss`
+- Device-memory instrumentation probes:
+  - `benchmark/results/kaggle/20260713_001431_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-single-569e8d4`
+  - `benchmark/results/kaggle/20260713_001707_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-double-569e8d4`
+
+All-phase totals compared with the previous `aab5384` Kaggle P100 gate:
+
+| Cable | Stage | Previous total | Current total | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 3360.2 ms | 3641.5 ms | +8.4% |
+| single-cable | `runtime.prepare` | 1390.7 ms | 1475.0 ms | +6.1% |
+| single-cable | `runtime.prepare.base_runtime` | 1382.8 ms | 1466.0 ms | +6.0% |
+| single-cable | `kernel.enqueue` | 1608.1 ms | 1760.7 ms | +9.5% |
+| double-cable | `curve.simulate` | 9632.3 ms | 7888.2 ms | -18.1% |
+| double-cable | `runtime.prepare` | 2268.6 ms | 656.4 ms | -71.1% |
+| double-cable | `runtime.prepare.base_runtime` | 2265.5 ms | 652.4 ms | -71.2% |
+| double-cable | `runtime.prepare.membrane_init` | 936.2 ms | 4.7 ms | -99.5% |
+| double-cable | `kernel.enqueue` | 7044.9 ms | 6830.2 ms | -3.0% |
+| double-cable | `kernel.dispatch_jax` | 6726.4 ms | 6426.4 ms | -4.5% |
+| double-cable | `kernel.wait` | 33.6 ms | 23.0 ms | -31.5% |
+
+Warm repeat means use only `phase=repeat`, `iteration>0` root simulations and
+their descendants:
+
+| Cable | Stage | Previous mean | Current mean | Delta |
+| --- | --- | ---: | ---: | ---: |
+| single-cable | `curve.simulate` | 27.764 ms | 29.285 ms | +5.5% |
+| single-cable | `kernel.enqueue` | 16.830 ms | 17.470 ms | +3.8% |
+| single-cable | `kernel.dispatch_jax` | 6.393 ms | 6.127 ms | -4.2% |
+| single-cable | `kernel.wait` | 0.029 ms | 0.056 ms | +90.5% |
+| double-cable | `curve.simulate` | 23.077 ms | 26.564 ms | +15.1% |
+| double-cable | `kernel.enqueue` | 11.472 ms | 14.045 ms | +22.4% |
+| double-cable | `kernel.dispatch_jax` | 4.639 ms | 5.808 ms | +25.2% |
+| double-cable | `kernel.wait` | 4.241 ms | 2.678 ms | -36.9% |
+
+Interpretation:
+
+- The accepted GPU signal is cold double-cable preparation: metadata records
+  `membrane_init_source=heterogeneous_model_ir_numpy`,
+  `cable_runtime_source=numpy`, and `extracellular_runtime_source=numpy`, and
+  `runtime.prepare.base_runtime` drops by about 71%.
+- Single-cable correctly remains on `cable_runtime_source=jax`; it does not get
+  the host-cable path and shows only a small smoke-run slowdown.
+- Warm GPU runs are still not improved by this patch. Double-cable warm repeat
+  becomes slightly less solver-bound in this small case because dispatch/enqueue
+  increased while wait decreased. Keep the next P12 optimization focused on
+  warm dispatch/enqueue/input/observer overhead rather than more base-runtime
+  host-array construction.
+
 ## Final P12 GPU Gate Result
 
 The matching Kaggle P100 GPU smoke gate was rerun on commit `aab5384` after the
