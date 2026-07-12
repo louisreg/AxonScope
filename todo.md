@@ -257,12 +257,10 @@ improvements.
   NumPy host-preparation helpers before compact JAX materialization. Local CPU
   double-cable `runtime.prepare.base_runtime` dropped from 1209.0 ms to
   337.5-351.0 ms, and `runtime.prepare` from 1211.6 ms to 341.0-353.9 ms, in
-  `benchmark/results/p12_opt_host_double_only_double_cpu_serial*`. This host
-  cable path is deliberately limited to double-cable for now; single-cable keeps
-  the previous JAX cable preparation until a separate benchmark shows no kernel
-  timing regression. Remaining local costs are mostly enqueue/dispatch, cold
-  membrane compile, and kernel state/observer preparation; confirm this path on
-  GPU before claiming the P12 GPU cold-start target improved.
+  `benchmark/results/p12_opt_host_double_only_double_cpu_serial*`. Remaining
+  local costs are mostly enqueue/dispatch, cold membrane compile, and kernel
+  state/observer preparation; confirm this path on GPU before claiming the P12
+  GPU cold-start target improved.
   Kaggle P100 RSS rerun on commit `569e8d4` wrote
   `benchmark/results/kaggle/20260713_002054_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-single-rss-569e8d4`
   and
@@ -270,12 +268,23 @@ improvements.
   Double-cable cold preparation is confirmed on GPU:
   `runtime.prepare.base_runtime` dropped from 2265.5 ms to 652.4 ms and
   `runtime.prepare.membrane_init` from 936.2 ms to 4.7 ms versus the previous
-  `aab5384` gate. Single-cable remains on `cable_runtime_source=jax` and shows
-  no meaningful improvement. Warm GPU repeat means are not improved yet
+  `aab5384` gate. Warm GPU repeat means are not improved yet
   (`double-cable curve.simulate` 23.1 ms to 26.6 ms), so keep the next P12 GPU
   optimization focused on dispatch/enqueue/input/observer overhead. Matching
   `--memory-trace device` probes were run too, but use them for memory evidence,
   not timing claims, because device-memory snapshots dominate small warm spans.
+  Kaggle P100 1024-axon rerun accepted NumPy cable preparation for single-cable
+  too: commit `1a1183e` changed single-cable from `cable_runtime_source=jax` to
+  `cable_runtime_source=numpy`, and
+  `benchmark/results/kaggle/20260713_003301_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-single-numpy-1a1183e`
+  shows `runtime.prepare.base_runtime` dropping from 1265.9 ms to 699.6 ms
+  versus the JAX baseline
+  `benchmark/results/kaggle/20260713_002938_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-single-jax-24efe36`,
+  while warm `curve.simulate` changes only from 36.35 ms to 37.29 ms. The
+  matching 1024-axon double-cable NumPy run is
+  `benchmark/results/kaggle/20260713_003531_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-double-numpy-1a1183e`;
+  its all-phase time is still dominated by `kernel.enqueue` and
+  `kernel.dispatch_jax`.
 
 ### P3 - Documentation And Examples
 
