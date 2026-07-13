@@ -15,8 +15,8 @@ from axonscope.runtime.jax.recording.observer import (
 from . import double_cable_step as solver_core
 from ..cable_geometry import Array
 from .double_cable_linear import (
-    DoubleCableLinearSystemStaticTerms,
-    DoubleCableLinearSystemStaticTermsXB,
+    prepare_double_cable_linear_system_static_terms,
+    prepare_double_cable_linear_system_static_terms_xb,
 )
 from .inputs import _record_vm_batch
 
@@ -57,8 +57,17 @@ def _run_double_cable_batch_stateful_integrated_scan(
     Ve0_mV: Array,
     gates0: Array,
     state0: tuple[Array, ...],
-    linear_static: DoubleCableLinearSystemStaticTerms,
-    linear_static_xb: DoubleCableLinearSystemStaticTermsXB | None,
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array | None,
     extracellular_potential_initial_previous_mV: Array | None,
@@ -74,6 +83,42 @@ def _run_double_cable_batch_stateful_integrated_scan(
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
 
+    linear_static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=I_background,
+        dt_ms=dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+    )
+    linear_static_xb = (
+        prepare_double_cable_linear_system_static_terms_xb(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        if double_cable_block_solver == "jax_triton_loop_xb"
+        else None
+    )
     area_batch = linear_static.area
     background_abs = linear_static.background_abs
     zero_abs = linear_static.zero_abs
@@ -337,8 +382,17 @@ def _run_double_cable_batch_observer_integrated_scan(
     raster_probe_indices: Array,
     raster_probe_mask: Array,
     raster_thresholds_mV: Array,
-    linear_static: DoubleCableLinearSystemStaticTerms,
-    linear_static_xb: DoubleCableLinearSystemStaticTermsXB | None,
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array | None,
     extracellular_potential_initial_previous_mV: Array | None,
@@ -354,6 +408,42 @@ def _run_double_cable_batch_observer_integrated_scan(
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
 
+    linear_static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=I_background,
+        dt_ms=dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+    )
+    linear_static_xb = (
+        prepare_double_cable_linear_system_static_terms_xb(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        if double_cable_block_solver == "jax_triton_loop_xb"
+        else None
+    )
     area_batch = linear_static.area
     background_abs = linear_static.background_abs
     zero_abs = linear_static.zero_abs
