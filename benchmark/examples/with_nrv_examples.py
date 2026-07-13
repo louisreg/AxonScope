@@ -252,7 +252,16 @@ def _example_config(
         solver_progress=False,
         fem_n_proc=1,
         gmsh_n_core=1,
+        execution_policy=_execution_policy_for_platform(args.platform),
     )
+
+
+def _execution_policy_for_platform(platform: str) -> axs.ExecutionPolicy | None:
+    if platform == "gpu":
+        return axs.ExecutionPolicy(runtime=axs.runtime.jax, device=axs.Device.gpu())
+    if platform == "cpu":
+        return axs.ExecutionPolicy(runtime=axs.runtime.jax, device=axs.Device.cpu())
+    return None
 
 
 def _ensure_nrv_imported() -> None:

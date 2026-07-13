@@ -104,6 +104,10 @@ def _resolve_double_cable_run_solver_settings(
             if normalized_platform in _GPU_PLATFORMS
             else _CPU_DOUBLE_CABLE_BLOCK_SOLVER
         )
+        _guard_double_cable_gpu_route(
+            platform=normalized_platform,
+            block_solver=resolved,
+        )
         return resolved, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     if solver == "auto":
         raise ValueError(
@@ -115,17 +119,32 @@ def _resolve_double_cable_run_solver_settings(
             raise RuntimeError(
                 f"Double-cable GPU solver {solver!r} requires a JAX GPU backend."
             )
+        _guard_double_cable_gpu_route(
+            platform=normalized_platform,
+            block_solver=solver,
+        )
         return solver, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     if solver in _SUPPORTED_DOUBLE_CABLE_BLOCK_SOLVERS:
         if normalized_platform in _GPU_PLATFORMS:
-            raise RuntimeError(
-                "CPU double-cable solver 'thomas' requires a non-GPU JAX backend."
+            _guard_double_cable_gpu_route(
+                platform=normalized_platform,
+                block_solver=solver,
             )
         return solver, _normalize_tiled_thomas_block_b(tiled_thomas_block_b)
     raise ValueError(
         "double_cable_block_solver must be 'thomas' on CPU or the resolved "
         "JAX GPU tiled-Thomas route."
     )
+
+
+def _guard_double_cable_gpu_route(*, platform: str, block_solver: str) -> None:
+    if platform in _GPU_PLATFORMS and block_solver != _GPU_DOUBLE_CABLE_BLOCK_SOLVER:
+        raise RuntimeError(
+            "JAX GPU double-cable execution resolved to the non-GPU route "
+            f"{block_solver!r}; expected {_GPU_DOUBLE_CABLE_BLOCK_SOLVER!r}. "
+            "Pass a GPU ExecutionPolicy and keep public GPU solver policy on "
+            "auto/tiled_thomas."
+        )
 
 def _resolve_double_cable_run_block_solver(
     solver_engine: JaxSolverEngine | None,
@@ -293,7 +312,7 @@ class DoubleCableBatchKernel:
             block_solver, tiled_thomas_block_b = (
                 _resolve_double_cable_run_solver_settings(
                     solver_engine,
-                    platform=jax.default_backend(),
+                    platform=_effective_double_cable_platform(solver_engine),
                 )
             )
         if observers is not None and options.recording.mode == "none":
@@ -361,6 +380,12 @@ class DoubleCableBatchKernel:
             progress_callback=progress_callback,
         )
         return BatchKernelResult(Vm=out, t=grid.t_vec_ms)
+
+
+def _effective_double_cable_platform(solver_engine: JaxSolverEngine | None) -> str:
+    if solver_engine is not None and solver_engine.platform:
+        return str(solver_engine.platform)
+    return str(jax.default_backend())
 
 def _run_double_cable_batch_array_chunks(
     *,

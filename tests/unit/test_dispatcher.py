@@ -2,11 +2,13 @@ import re
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import axonscope as axs
 import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.inputs.extracellular as input_batches
+import axonscope.runtime.jax.kernels.double_cable as double_cable_kernel
 import axonscope.runtime.group_preparation as group_preparation
 import axonscope.runtime.jax.membranes.stacking as membrane_stacking
 from axonscope.runtime.jax.preparation import (
@@ -465,6 +467,34 @@ def test_double_cable_shape_bucketing_is_internal_opt_in(monkeypatch):
     assert kernel_group.nx >= group.nx
     assert kernel_group.items[: group.size] == group.items
     assert kernel_group.items[-1] == group.items[-1]
+
+
+def test_double_cable_gpu_route_rejects_cpu_thomas_solver():
+    engine = SimpleNamespace(
+        double_cable_block_solver="thomas",
+        tiled_thomas_block_b=None,
+    )
+
+    with pytest.raises(RuntimeError, match="non-GPU route"):
+        double_cable_kernel._resolve_double_cable_run_solver_settings(
+            engine,
+            platform="gpu",
+        )
+
+
+def test_double_cable_gpu_route_accepts_tiled_solver():
+    engine = SimpleNamespace(
+        double_cable_block_solver="jax_triton_loop_xb",
+        tiled_thomas_block_b=64,
+    )
+
+    solver, block_b = double_cable_kernel._resolve_double_cable_run_solver_settings(
+        engine,
+        platform="gpu",
+    )
+
+    assert solver == "jax_triton_loop_xb"
+    assert block_b == 64
 
 
 def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeypatch):

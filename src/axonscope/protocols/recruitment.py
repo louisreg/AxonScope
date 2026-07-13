@@ -21,6 +21,7 @@ from axonscope.protocols.sweep import _apply_pool_update, pool_sweep
 from axonscope.protocols.types import PoolUpdate, SimulationCandidate
 from axonscope.protocols.values import _normalize_sweep_values, _require_current_array_uA
 from axonscope.recording import Recording
+from axonscope.runtime import ExecutionPolicy
 from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.solvers import BatchOptions
 from axonscope.utils import units
@@ -36,6 +37,7 @@ def recruitment_sweep(
     criterion: ActivationCriterion,
     recording: Recording | None = None,
     batch_options: BatchOptions | None = None,
+    execution_policy: ExecutionPolicy | None = None,
     progress: bool | str = False,
     solver_progress: bool | str = False,
 ) -> RecruitmentCurve:
@@ -65,6 +67,7 @@ def recruitment_sweep(
             criterion=criterion,
             progress=progress,
             batch_options=batch_options,
+            execution_policy=execution_policy,
             solver_progress=solver_progress,
         )
         return RecruitmentCurve(
@@ -80,6 +83,7 @@ def recruitment_sweep(
         dt=dt,
         recording=recording,
         batch_options=batch_options,
+        execution_policy=execution_policy,
         progress=progress,
         progress_summary=_activation_progress_summary,
         solver_progress=solver_progress,
@@ -100,6 +104,7 @@ def _activation_pool_sweep(
     criterion: ActivationCriterion,
     progress: bool | str = False,
     batch_options: BatchOptions | None = None,
+    execution_policy: ExecutionPolicy | None = None,
     solver_progress: bool | str = False,
 ) -> PoolSweepResult:
     """Sweep activation with solver-side observers instead of stored Vm traces."""
@@ -140,6 +145,7 @@ def _activation_pool_sweep(
                     dt=dt,
                     progress=solver_progress_gate.consume(),
                     batch_options=batch_options,
+                    execution_policy=execution_policy,
                 )
             observation_rows.append(observations)
             progress_display.update(

@@ -45,6 +45,7 @@ class ExampleConfig:
     life_fascicle_id: str = "0"
     fem_n_proc: int | None = None
     gmsh_n_core: int | None = 1
+    execution_policy: axs.ExecutionPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,7 @@ def run_fascicle_recruitment_example(
             batch_options=axs.BatchOptions.none(
                 time_chunk_steps=config.observer_time_chunk_steps
             ),
+            execution_policy=config.execution_policy,
             progress=True,
             solver_progress=config.solver_progress,
         )

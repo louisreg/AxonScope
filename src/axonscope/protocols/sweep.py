@@ -16,6 +16,7 @@ from axonscope.protocols.types import (
 )
 from axonscope.protocols.values import _normalize_sweep_values
 from axonscope.recording import Recording
+from axonscope.runtime import ExecutionPolicy
 from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import BatchOptions
@@ -31,6 +32,7 @@ def pool_sweep(
     dt: Any,
     recording: Recording | None = None,
     batch_options: BatchOptions | None = None,
+    execution_policy: ExecutionPolicy | None = None,
     progress: bool | str = False,
     progress_summary: ProgressSummary | None = None,
     solver_progress: bool | str = False,
@@ -56,6 +58,9 @@ def pool_sweep(
     batch_options:
         Optional solver-side batch execution knobs, forwarded to
         ``AxonSimulation``.
+    execution_policy:
+        Optional typed runtime/device/solver policy forwarded to each
+        ``AxonSimulation`` call.
     progress:
         If true, display a Rich live progress table when Rich is available.
     progress_summary:
@@ -99,6 +104,7 @@ def pool_sweep(
                     dt=dt,
                     recording=recording,
                     batch_options=batch_options,
+                    execution_policy=execution_policy,
                     progress=solver_progress_gate.consume(),
                 )
                 observations = np.asarray([observe(result) for result in results])
@@ -136,6 +142,7 @@ def _run_updated_pool(
     dt: Any,
     recording: Recording | None,
     batch_options: BatchOptions | None,
+    execution_policy: ExecutionPolicy | None,
     progress: bool | str,
 ) -> tuple[Any, ...]:
     if len(values) != len(pool):
@@ -152,6 +159,7 @@ def _run_updated_pool(
         dt=dt,
         recording=recording or Recording.voltage(),
         batch_options=batch_options,
+        execution_policy=execution_policy,
         progress=progress,
     ).run()
     return tuple(pool_result)

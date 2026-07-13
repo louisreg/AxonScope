@@ -11,6 +11,7 @@ from axonscope.analysis.definitions import Activation
 from axonscope.protocols.types import SimulationCandidate
 from axonscope.recording import Recording
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, activation_values_from_vm_raster
+from axonscope.runtime import ExecutionPolicy
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import BatchOptions
 
@@ -21,8 +22,9 @@ def _evaluate_activation_observer_pool(
     criterion: ActivationCriterion,
     duration: Any,
     dt: Any,
-    batch_options: BatchOptions | None,
     progress: bool | str,
+    batch_options: BatchOptions | None,
+    execution_policy: ExecutionPolicy | None = None,
 ) -> np.ndarray:
     """Evaluate activation through compact solver-side observers."""
 
@@ -33,6 +35,7 @@ def _evaluate_activation_observer_pool(
         dt=dt,
         recording=Recording.none(),
         batch_options=batch_options,
+        execution_policy=execution_policy,
         observers=(activation,),
         progress=progress,
     ).run()
