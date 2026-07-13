@@ -582,11 +582,24 @@ These items are intentionally not ordered or scoped into a phase yet.
     functions instead of rebuilding their Model IR expression trees; the
     structural gated/leak backend now exposes model-agnostic batch capabilities
     for gate and membrane terms rather than selecting a named model family.
-  - [ ] Finish making generated runtime modules autonomous for stateful models:
-    generate initial-state, prepare/finalize, diagnostics, and the compact
-    runtime metadata contract, then remove Model IR expression evaluation from
-    cached JAX execution while retaining Model IR for compiler validation,
-    composition, inspection, and NumPy reference behavior.
+  - [ ] **Next important step after the current cold/warm optimization pass:**
+    make each generated runtime module, starting with `jax_model.py`, the
+    autonomous source of every model-specific fact required by that runtime.
+    Generate parameter defaults; names and units; gate, membrane-state,
+    current, observable, and diagnostic metadata; gate-update policy;
+    auxiliary-state definitions and initialization; stateful prepare/finalize
+    functions; recording/diagnostic contracts; runtime hashes/signatures; and
+    the compact metadata needed for result labels and runtime inspection.
+    After a cache hit, JAX execution must load this generated contract without
+    reconstructing `JaxMembraneProgram` from Model IR or evaluating Model IR
+    expressions. Keep Model IR only as a compiler artifact for source
+    validation, optimization, composition, generated-code inspection, and
+    NumPy/reference validation; composition or inspection may consume the IR at
+    compile time, but their runtime-specific output must also be emitted into
+    the generated module. Validate stateless and stateful built-ins, composite
+    membranes, parameter overrides, recording labels, numerical equivalence,
+    cache reuse, and cold/warm performance before removing the JAX Model IR
+    fallback.
   - [x] Capture the production double-cable GPU cold JIT as separate
     trace/lower/compile/first-execution phases on Kaggle, and compare the
     generated-term plus batch-capability route against the previous recruitment
