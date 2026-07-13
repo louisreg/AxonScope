@@ -482,10 +482,13 @@ These items are intentionally not ordered or scoped into a phase yet.
     dense/probe Vm route. Before this fix, naive expanded MRG pools did not
     reproduce sequential activation counts because `current_row_scales` were
     ignored by the double-cable observer path.
-  - [x] Switch `examples/basic/08_recruitment_curve_population.py` to the
-    native amplitude-batched observer-only path. Keep the default
-    `recruitment_sweep` behavior sequential until larger CPU/GPU memory and
-    throughput gates justify changing it.
+  - [x] Keep `examples/basic/08_recruitment_curve_population.py` on the
+    default sequential amplitude path for now. A full native amplitude batch is
+    functionally correct but slower for this example on Kaggle P100 at commit
+    `9c87208`: `20.01/5.51 s` cold/warm versus the prior sequential
+    `5.16/2.73 s`. Warm full-batch overhead is dominated by
+    `dispatch.build_plan` (`2.64 s`) and `protocol.sweep.build_amplitude_pool`
+    (`0.59 s`), while `kernel.wait` stays around `5 ms`.
   - [x] Add configurable amplitude pool chunking for native recruitment
     batching, e.g. `amplitude_batch_size=1`, `10`, `20`, or `None/full`, so
     large sweeps can choose between sequential amplitudes, medium
