@@ -428,7 +428,13 @@ These items are intentionally not ordered or scoped into a phase yet.
   show it helps.
 - [ ] Remove public API surface that is unused or not documented in advanced
   examples.
-- [ ] Check `examples/basic/06`; it seems surprisingly slow.
+- [ ] Validate example performance for `examples/basic/06_activation_velocity.py`,
+  `examples/basic/07_threshold_vs_diameter.py`,
+  `examples/basic/08_recruitment_curve_population.py`, and
+  `examples/with_nrv/01_realistic_fascicle_geometry.py` on CPU and Kaggle GPU.
+  Record cold and warm timings with global performance counters, then add
+  benchmark coverage to identify any remaining bottlenecks before treating
+  these examples as stable perf gates.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models.
 - [ ] Re-check each built-in model against the NRV implementation; some details
   may have been lost during model translation.
