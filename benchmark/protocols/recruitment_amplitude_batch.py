@@ -84,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Capture trace/lower/compile/first-execution for the first production GPU JIT.",
     )
+    parser.add_argument(
+        "--disable-batch-membrane-capability",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
 
@@ -113,6 +118,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         install_production_double_cable_capture(output / "double_cable_jit_phases.json")
+    if args.disable_batch_membrane_capability:
+        from axonscope.runtime.jax.membranes.backend import (
+            GatedLeakStackMembraneBackend,
+        )
+
+        GatedLeakStackMembraneBackend.batch_cn_gate_update = None
+        GatedLeakStackMembraneBackend.batch_membrane_conductance_terms = None
 
     rows: list[dict[str, Any]] = []
     reference_counts: np.ndarray | None = None
