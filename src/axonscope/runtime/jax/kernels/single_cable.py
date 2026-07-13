@@ -378,23 +378,23 @@ def _run_single_cable_vstim_batch_array_chunks(
         nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
     ):
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -511,23 +511,23 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,
@@ -652,23 +652,23 @@ def _run_single_cable_factorized_vstim_batch_observer_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        lower = _as_batched_space_array(
+        lower = _as_cached_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        diag = _as_batched_space_array(
+        diag = _as_cached_batched_space_array(
             "diag", cable.diag, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        upper = _as_batched_space_array(
+        upper = _as_cached_batched_space_array(
             "upper", cable.upper, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
         )
-        cm = _as_batched_scalar_or_space_array(
+        cm = _as_cached_batched_scalar_or_space_array(
             "Cm_uF_cm2",
             Cm_uF_cm2,
             nx=membrane_runtime.Nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        background = _as_batched_space_array(
+        background = _as_cached_batched_space_array(
             "I_background",
             membrane_runtime.background_current,
             nx=membrane_runtime.Nx,

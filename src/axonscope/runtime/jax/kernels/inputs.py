@@ -158,7 +158,9 @@ def _as_sparse_intracellular_current_density_batch(
         raise ValueError(f"{name}.indices must have shape {sparse_shape}, got {indices.shape}.")
     if mask.shape != sparse_shape:
         raise ValueError(f"{name}.mask must have shape {sparse_shape}, got {mask.shape}.")
-    if bool(jnp.any(jnp.where(mask, (indices < 0) | (indices >= nx), False))):
+    if int(indices.shape[1]) > 0 and bool(
+        jnp.any(jnp.where(mask, (indices < 0) | (indices >= nx), False))
+    ):
         raise ValueError(f"{name}.indices contains an out-of-range compartment index.")
     return SparseIntracellularCurrentDensityBatch(
         density_mid=density_mid,
