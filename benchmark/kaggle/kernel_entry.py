@@ -396,10 +396,55 @@ def _write_process_snapshot(path: pathlib.Path) -> None:
 
 
 def _terminate_native_leftovers() -> None:
+    descendants = _current_process_descendants()
+    if descendants:
+        subprocess.run(
+            ["kill", "-TERM", *[str(pid) for pid in descendants]],
+            check=False,
+        )
+        time.sleep(1.0)
+        subprocess.run(
+            ["kill", "-KILL", *[str(pid) for pid in descendants]],
+            check=False,
+        )
     pattern = r"(mpiexec|mpirun|orted|prte|pmix|hydra|nrniv|/special|gmsh)"
     subprocess.run(["pkill", "-TERM", "-f", pattern], check=False)
     time.sleep(1.0)
     subprocess.run(["pkill", "-KILL", "-f", pattern], check=False)
+
+
+def _current_process_descendants() -> list[int]:
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except Exception:
+        return []
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+
+    current = os.getpid()
+    descendants: list[int] = []
+    stack = list(children.get(current, ()))
+    while stack:
+        pid = stack.pop()
+        if pid == current:
+            continue
+        descendants.append(pid)
+        stack.extend(children.get(pid, ()))
+    return sorted(set(descendants), reverse=True)
 
 
 def _write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
