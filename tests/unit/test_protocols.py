@@ -572,6 +572,14 @@ def test_recruitment_sweep_can_batch_observer_amplitudes_into_native_pool(monkey
     assert len(calls[0]) == 6
     assert progress_values == ["plain"]
     assert all(row is not original for row in calls[0] for original in pool)
+    assert [row.axon for row in calls[0]] == [
+        pool[0].axon,
+        pool[1].axon,
+        pool[0].axon,
+        pool[1].axon,
+        pool[0].axon,
+        pool[1].axon,
+    ]
     assert not any(hasattr(row, "tested_current_nA") for row in pool)
     np.testing.assert_allclose(
         [row.tested_current_nA for row in calls[0]],

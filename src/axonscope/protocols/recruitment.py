@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import time
 from typing import Any, Sequence
 
@@ -323,7 +322,7 @@ def _clone_native_pool_row(row: SimulationCandidate) -> SimulationCandidate:
         raise TypeError(
             "batch_amplitudes=True currently requires AxonInstance pool rows."
         )
-    clone = AxonInstance(copy.copy(row.axon))
+    clone = AxonInstance(row.axon)
     clone.intracellular_contexts = list(row.intracellular_contexts)
     clone.extracellular_stimulation = row.extracellular_stimulation
     clone.Veinit = row.Veinit
