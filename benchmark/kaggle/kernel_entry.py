@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime
 from typing import Any
@@ -69,10 +70,12 @@ def main() -> None:
         exit_code = 1
         raise
     finally:
+        _write_process_snapshot(output_dir / "kaggle_processes_before_cleanup.txt")
         archive_base = WORK_DIR / f"axonscope_benchmark_results_{run_id}"
         archive = shutil.make_archive(str(archive_base), "zip", output_dir)
         print(f"AxonScope benchmark results: {output_dir}")
         print(f"AxonScope benchmark archive: {archive}")
+        _terminate_native_leftovers()
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(exit_code)
@@ -372,6 +375,31 @@ def _command_snapshot(command: list[str], *, cwd: pathlib.Path | None = None) ->
 def _run(command: list[str], *, cwd: pathlib.Path | None = None) -> None:
     print("$", " ".join(shlex.quote(str(part)) for part in command), flush=True)
     subprocess.run(command, cwd=cwd, check=True)
+
+
+def _write_process_snapshot(path: pathlib.Path) -> None:
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid,ppid,pgid,stat,comm,args"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except Exception as exc:
+        _write_json(
+            path.with_suffix(".json"),
+            {"type": type(exc).__name__, "message": str(exc)},
+        )
+        return
+    path.write_text((result.stdout or "") + (result.stderr or ""), encoding="utf-8")
+
+
+def _terminate_native_leftovers() -> None:
+    pattern = r"(mpiexec|mpirun|orted|prte|pmix|hydra|nrniv|/special|gmsh)"
+    subprocess.run(["pkill", "-TERM", "-f", pattern], check=False)
+    time.sleep(1.0)
+    subprocess.run(["pkill", "-KILL", "-f", pattern], check=False)
 
 
 def _write_json(path: pathlib.Path, data: dict[str, Any]) -> None:
