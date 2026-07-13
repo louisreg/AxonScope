@@ -15,6 +15,7 @@ from axonscope.runtime.jax.recording.observer import (
 from . import double_cable_step as solver_core
 from ..cable_geometry import Array
 from .double_cable_linear import (
+    batch_double_cable_space,
     prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
 )
@@ -82,23 +83,45 @@ def _run_double_cable_batch_stateful_integrated_scan(
 
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
+    use_factorized_vext = extracellular_footprint_mV_per_A is not None
+    use_xb_solver = double_cable_block_solver == "jax_triton_loop_xb"
 
-    linear_static = prepare_double_cable_linear_system_static_terms(
-        area_cm2=area_cm2,
-        Cm_abs=Cm_abs,
-        Cx_abs=Cx_abs,
-        Gx_abs=Gx_abs,
-        Gax_e=Gax_e,
-        Gax_i=Gax_i,
-        left_i=left_i,
-        right_i=right_i,
-        left_e=left_e,
-        right_e=right_e,
-        I_background=I_background,
-        dt_ms=dt_ms,
-        batch_size=batch_size,
-        nx=nx,
-    )
+    if use_xb_solver and use_factorized_vext:
+        area_batch = batch_double_cable_space(area_cm2, batch_size=batch_size, nx=nx)
+        cx_over_dt = batch_double_cable_space(Cx_abs, batch_size=batch_size, nx=nx) / dt_ms
+        cx_plus_gx = cx_over_dt + batch_double_cable_space(
+            Gx_abs,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        background_abs = (
+            batch_double_cable_space(I_background, batch_size=batch_size, nx=nx)
+            * area_batch
+        )
+        zero_abs = jnp.zeros_like(area_batch)
+        linear_static = None
+    else:
+        linear_static = prepare_double_cable_linear_system_static_terms(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        area_batch = linear_static.area
+        background_abs = linear_static.background_abs
+        zero_abs = linear_static.zero_abs
+        cx_over_dt = linear_static.cx_over_dt
+        cx_plus_gx = linear_static.cx_plus_gx
     linear_static_xb = (
         prepare_double_cable_linear_system_static_terms_xb(
             area_cm2=area_cm2,
@@ -116,12 +139,9 @@ def _run_double_cable_batch_stateful_integrated_scan(
             batch_size=batch_size,
             nx=nx,
         )
-        if double_cable_block_solver == "jax_triton_loop_xb"
+        if use_xb_solver
         else None
     )
-    area_batch = linear_static.area
-    background_abs = linear_static.background_abs
-    zero_abs = linear_static.zero_abs
 
     def batch_space(values: Array) -> Array:
         arr = jnp.asarray(values)
@@ -131,7 +151,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
             return jnp.broadcast_to(arr[None, :], (batch_size, nx))
         return arr
 
-    use_factorized_vext = extracellular_footprint_mV_per_A is not None
     if use_factorized_vext:
         if extracellular_current_mid_A is None:
             raise ValueError("extracellular_current_mid_A is required.")
@@ -176,8 +195,8 @@ def _run_double_cable_batch_stateful_integrated_scan(
             axis=1,
         )
         extracellular_rhs_drive = (
-            linear_static.cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
-            - linear_static.cx_over_dt[:, None, :] * vext_previous_mV
+            cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
+            - cx_over_dt[:, None, :] * vext_previous_mV
         )
 
     if intracellular_current_density_mid is None:
@@ -238,8 +257,8 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 Iinj_abs, current_A, previous_current_A = step_inputs
             extracellular_drive_abs = (
                 (
-                    linear_static.cx_plus_gx * current_to_space(current_A)
-                    - linear_static.cx_over_dt * current_to_space(previous_current_A)
+                    cx_plus_gx * current_to_space(current_A)
+                    - cx_over_dt * current_to_space(previous_current_A)
                 )
                 * footprint_batch
             )
@@ -407,23 +426,45 @@ def _run_double_cable_batch_observer_integrated_scan(
 
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
+    use_factorized_vext = extracellular_footprint_mV_per_A is not None
+    use_xb_solver = double_cable_block_solver == "jax_triton_loop_xb"
 
-    linear_static = prepare_double_cable_linear_system_static_terms(
-        area_cm2=area_cm2,
-        Cm_abs=Cm_abs,
-        Cx_abs=Cx_abs,
-        Gx_abs=Gx_abs,
-        Gax_e=Gax_e,
-        Gax_i=Gax_i,
-        left_i=left_i,
-        right_i=right_i,
-        left_e=left_e,
-        right_e=right_e,
-        I_background=I_background,
-        dt_ms=dt_ms,
-        batch_size=batch_size,
-        nx=nx,
-    )
+    if use_xb_solver and use_factorized_vext:
+        area_batch = batch_double_cable_space(area_cm2, batch_size=batch_size, nx=nx)
+        cx_over_dt = batch_double_cable_space(Cx_abs, batch_size=batch_size, nx=nx) / dt_ms
+        cx_plus_gx = cx_over_dt + batch_double_cable_space(
+            Gx_abs,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        background_abs = (
+            batch_double_cable_space(I_background, batch_size=batch_size, nx=nx)
+            * area_batch
+        )
+        zero_abs = jnp.zeros_like(area_batch)
+        linear_static = None
+    else:
+        linear_static = prepare_double_cable_linear_system_static_terms(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt_ms,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        area_batch = linear_static.area
+        background_abs = linear_static.background_abs
+        zero_abs = linear_static.zero_abs
+        cx_over_dt = linear_static.cx_over_dt
+        cx_plus_gx = linear_static.cx_plus_gx
     linear_static_xb = (
         prepare_double_cable_linear_system_static_terms_xb(
             area_cm2=area_cm2,
@@ -441,12 +482,9 @@ def _run_double_cable_batch_observer_integrated_scan(
             batch_size=batch_size,
             nx=nx,
         )
-        if double_cable_block_solver == "jax_triton_loop_xb"
+        if use_xb_solver
         else None
     )
-    area_batch = linear_static.area
-    background_abs = linear_static.background_abs
-    zero_abs = linear_static.zero_abs
 
     def batch_space(values: Array) -> Array:
         arr = jnp.asarray(values)
@@ -455,7 +493,6 @@ def _run_double_cable_batch_observer_integrated_scan(
         if arr.ndim == 1:
             return jnp.broadcast_to(arr[None, :], (batch_size, nx))
         return arr
-    use_factorized_vext = extracellular_footprint_mV_per_A is not None
     if use_factorized_vext:
         if extracellular_current_mid_A is None:
             raise ValueError("extracellular_current_mid_A is required.")
@@ -497,8 +534,8 @@ def _run_double_cable_batch_observer_integrated_scan(
             axis=1,
         )
         extracellular_rhs_drive = (
-            linear_static.cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
-            - linear_static.cx_over_dt[:, None, :] * vext_previous_mV
+            cx_plus_gx[:, None, :] * extracellular_potential_mid_mV
+            - cx_over_dt[:, None, :] * vext_previous_mV
         )
         step_count = int(extracellular_rhs_drive.shape[1])
 
@@ -560,8 +597,8 @@ def _run_double_cable_batch_observer_integrated_scan(
                 Iinj_abs, current_A, previous_current_A, local_step = step_inputs
             extracellular_drive_abs = (
                 (
-                    linear_static.cx_plus_gx * current_to_space(current_A)
-                    - linear_static.cx_over_dt * current_to_space(previous_current_A)
+                    cx_plus_gx * current_to_space(current_A)
+                    - cx_over_dt * current_to_space(previous_current_A)
                 )
                 * footprint_batch
             )
