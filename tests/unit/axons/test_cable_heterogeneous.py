@@ -12,12 +12,14 @@ from axonscope.runtime.jax.membranes.backend import (
     UniformMembraneBackend,
 )
 from axonscope.runtime.jax.membranes.compile import (
-    build_membrane_backend_from_axon,
+    backend_from_membrane,
+    compile_axon_membrane,
     compile_membrane_model,
 )
 from axonscope.runtime.jax.inputs.intracellular import (
     build_intracellular_current_density_fn,
 )
+from axonscope.runtime.solver_axon import build_solver_axon
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
 
@@ -47,9 +49,15 @@ def _heterogeneous_single_cable_axon(*, L: float, Nx: int, membranes=None, v_ini
     )
 
 
+def _membrane_backend_from_axon(ax):
+    solver_axon = build_solver_axon(ax)
+    membrane = compile_axon_membrane(ax, solver_axon=solver_axon)
+    return backend_from_membrane(membrane, int(solver_axon.n_compartments))
+
+
 def test_uniform_backend_api_from_axon():
     ax = HodgkinHuxley(length=400.0 * axs.um, diameter=0.5 * axs.um, compartments=41)
-    backend = build_membrane_backend_from_axon(ax)
+    backend = _membrane_backend_from_axon(ax)
     V = np.full((ax.n_compartments,), -70.0, dtype=np.float32)
 
     gates = np.asarray(backend.init_gates(V))
@@ -84,7 +92,7 @@ def test_heterogeneous_single_cable_backend_shapes_and_currents():
         v_init=-70.0 * axs.mV,
     )
 
-    backend = build_membrane_backend_from_axon(ax)
+    backend = _membrane_backend_from_axon(ax)
     V = np.full((Nx,), -70.0, dtype=np.float32)
 
     gates = np.asarray(backend.init_gates(V))
@@ -114,7 +122,7 @@ def test_heterogeneous_single_cable_backend_shapes_and_currents():
 
 def test_double_cable_backend_api_from_axon():
     ax = MRG(diameter=10.0 * axs.um, nodes=7)
-    backend = build_membrane_backend_from_axon(ax)
+    backend = _membrane_backend_from_axon(ax)
     V = np.full((ax.n_compartments,), -80.0, dtype=np.float32)
 
     gates = np.asarray(backend.init_gates(V))
@@ -129,8 +137,8 @@ def test_double_cable_backend_api_from_axon():
 def test_double_cable_backend_static_identity_is_structural():
     ax_a = MRG(diameter=10.0 * axs.um, nodes=5)
     ax_b = MRG(diameter=10.0 * axs.um, nodes=5)
-    backend_a = build_membrane_backend_from_axon(ax_a)
-    backend_b = build_membrane_backend_from_axon(ax_b)
+    backend_a = _membrane_backend_from_axon(ax_a)
+    backend_b = _membrane_backend_from_axon(ax_b)
 
     membranes_a = axs.axons.flatten_layout(ax_a.layout).membrane_models
     membranes_b = axs.axons.flatten_layout(ax_b.layout).membrane_models
@@ -166,7 +174,7 @@ def test_heterogeneous_single_cable_backend_type_from_axon():
         for i in range(11)
     ]
     ax = _heterogeneous_single_cable_axon(L=300.0, Nx=11, membranes=membranes)
-    backend = build_membrane_backend_from_axon(ax)
+    backend = _membrane_backend_from_axon(ax)
 
     assert isinstance(backend, HeterogeneousMembraneBackend)
     assert backend.Nx == ax.n_compartments

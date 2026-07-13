@@ -17,7 +17,12 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.benchmarking import benchmark_span, benchmark_wait
-from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
+from axonscope.analysis.definitions import (
+    Activation,
+    ConductionBlock,
+    ConductionVelocity,
+    Latency,
+)
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
 from axonscope.runtime.jax.preparation.caches import (
@@ -93,7 +98,12 @@ def _require_vm_signal(signal: Any) -> None:
 
 
 def _is_vm_raster_definition(definition: Any) -> bool:
-    return isinstance(definition, (Activation, Latency, ConductionBlock))
+    return isinstance(definition, (Activation, Latency, ConductionBlock, ConductionVelocity))
+
+
+def _threshold_mV(definition: Any) -> float:
+    threshold = getattr(definition, "threshold", None)
+    return -20.0 if threshold is None else units.to_mV(threshold)
 
 
 def _normalize_positions_and_indices(
@@ -180,7 +190,7 @@ def build_vm_raster_plan(
             raise TypeError("VmRaster target must be an axonscope PositionSelector.")
 
         names.append(str(definition.name))
-        thresholds.append(units.to_mV(definition.threshold))
+        thresholds.append(_threshold_mV(definition))
         selected_by_row.append(
             [
                 _select_raster_probe_columns(

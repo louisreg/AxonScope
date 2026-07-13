@@ -16,6 +16,16 @@ from axonscope.runtime.jax.recording.observer import (
 from .inputs import _record_vm_row
 
 
+def _record_matrix_row(values: Array, record_indices: Array, *, record_full: bool) -> Array:
+    if record_full:
+        return values
+    return jnp.take(values, record_indices, axis=0)
+
+
+def _empty_recording_matrix(vm: Array) -> Array:
+    return jnp.zeros((vm.shape[0], 0), dtype=vm.dtype)
+
+
 @partial(
     jax.jit,
     static_argnames=(
@@ -24,6 +34,10 @@ from .inputs import _record_vm_row
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "record_gates",
+        "record_currents",
+        "record_conductances",
+        "record_states",
     ),
 )
 def _run_single_cable_vstim_batch_stateful_scan(
@@ -33,6 +47,10 @@ def _run_single_cable_vstim_batch_stateful_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    record_gates: bool,
+    record_currents: bool,
+    record_conductances: bool,
+    record_states: bool,
     lower: Array,
     diag: Array,
     upper: Array,
@@ -48,7 +66,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
     extracellular_potential_mid_mV: Array,
     record_indices: Array,
     dt_ms: Array,
-) -> tuple[Array, Array, tuple[Array, ...], Array]:
+) -> tuple[Array, Array, tuple[Array, ...], Array, dict[str, Array]]:
     """Run one time chunk and return final batch state plus recorded Vm."""
 
     def one_batch(
@@ -119,7 +137,51 @@ def _run_single_cable_vstim_batch_stateful_scan(
                     record_indices_row,
                     record_full=record_full,
                 )
-                return (Vm_new, gates_pred, *extra), output
+                gates_out = (
+                    _record_matrix_row(
+                        membrane.gate_trace_matrix(gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_gates
+                    else _empty_recording_matrix(Vm_new)
+                )
+                currents_out = (
+                    _record_matrix_row(
+                        membrane.ionic_current_trace_matrix(Vm_new, gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_currents
+                    else _empty_recording_matrix(Vm_new)
+                )
+                conductances_out = (
+                    _record_matrix_row(
+                        membrane.conductance_trace_matrix(gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_conductances
+                    else _empty_recording_matrix(Vm_new)
+                )
+                states_out = (
+                    _record_matrix_row(
+                        membrane.membrane_state_trace_matrix(extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_states
+                    else _empty_recording_matrix(Vm_new)
+                )
+                return (Vm_new, gates_pred, *extra), (
+                    output,
+                    {
+                        "gates": gates_out,
+                        "currents": currents_out,
+                        "conductances": conductances_out,
+                        "states": states_out,
+                    },
+                )
 
             gates_new = membrane.final_gate_update(
                 gates_prev=gates,
@@ -152,14 +214,59 @@ def _run_single_cable_vstim_batch_stateful_scan(
                 record_indices_row,
                 record_full=record_full,
             )
-            return (Vm_new, gates_new, *state_new), output
+            gates_out = (
+                _record_matrix_row(
+                    membrane.gate_trace_matrix(gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_gates
+                else _empty_recording_matrix(Vm_new)
+            )
+            currents_out = (
+                _record_matrix_row(
+                    membrane.ionic_current_trace_matrix(Vm_new, gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_currents
+                else _empty_recording_matrix(Vm_new)
+            )
+            conductances_out = (
+                _record_matrix_row(
+                    membrane.conductance_trace_matrix(gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_conductances
+                else _empty_recording_matrix(Vm_new)
+            )
+            states_out = (
+                _record_matrix_row(
+                    membrane.membrane_state_trace_matrix(state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_states
+                else _empty_recording_matrix(Vm_new)
+            )
+            return (Vm_new, gates_new, *state_new), (
+                output,
+                {
+                    "gates": gates_out,
+                    "currents": currents_out,
+                    "conductances": conductances_out,
+                    "states": states_out,
+                },
+            )
 
         final_carry, trace = jax.lax.scan(
             step,
             (Vm0_row, gates0_row, *state0_row),
             (Iinj_mid, vstim_forcing_mid),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[2:]), trace
+        vm_trace, recording_trace = trace
+        return final_carry[0], final_carry[1], tuple(final_carry[2:]), vm_trace, recording_trace
 
     state_axes = tuple(0 for _ in state0)
     record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
@@ -206,6 +313,10 @@ def _run_single_cable_vstim_batch_stateful_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "record_full",
+        "record_gates",
+        "record_currents",
+        "record_conductances",
+        "record_states",
     ),
 )
 def _run_single_cable_factorized_vstim_batch_stateful_scan(
@@ -215,6 +326,10 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     record_full: bool,
+    record_gates: bool,
+    record_currents: bool,
+    record_conductances: bool,
+    record_states: bool,
     lower: Array,
     diag: Array,
     upper: Array,
@@ -231,7 +346,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
     extracellular_forcing_footprint_mV_per_A: Array,
     record_indices: Array,
     dt_ms: Array,
-) -> tuple[Array, Array, tuple[Array, ...], Array]:
+) -> tuple[Array, Array, tuple[Array, ...], Array, dict[str, Array]]:
     """Run one recorded-Vm chunk with factorized extracellular forcing."""
 
     def one_batch(
@@ -303,7 +418,51 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                     record_indices_row,
                     record_full=record_full,
                 )
-                return (Vm_new, gates_pred, *extra), output
+                gates_out = (
+                    _record_matrix_row(
+                        membrane.gate_trace_matrix(gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_gates
+                    else _empty_recording_matrix(Vm_new)
+                )
+                currents_out = (
+                    _record_matrix_row(
+                        membrane.ionic_current_trace_matrix(Vm_new, gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_currents
+                    else _empty_recording_matrix(Vm_new)
+                )
+                conductances_out = (
+                    _record_matrix_row(
+                        membrane.conductance_trace_matrix(gates_pred, extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_conductances
+                    else _empty_recording_matrix(Vm_new)
+                )
+                states_out = (
+                    _record_matrix_row(
+                        membrane.membrane_state_trace_matrix(extra),
+                        record_indices_row,
+                        record_full=record_full,
+                    )
+                    if record_states
+                    else _empty_recording_matrix(Vm_new)
+                )
+                return (Vm_new, gates_pred, *extra), (
+                    output,
+                    {
+                        "gates": gates_out,
+                        "currents": currents_out,
+                        "conductances": conductances_out,
+                        "states": states_out,
+                    },
+                )
 
             gates_new = membrane.final_gate_update(
                 gates_prev=gates,
@@ -336,14 +495,59 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 record_indices_row,
                 record_full=record_full,
             )
-            return (Vm_new, gates_new, *state_new), output
+            gates_out = (
+                _record_matrix_row(
+                    membrane.gate_trace_matrix(gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_gates
+                else _empty_recording_matrix(Vm_new)
+            )
+            currents_out = (
+                _record_matrix_row(
+                    membrane.ionic_current_trace_matrix(Vm_new, gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_currents
+                else _empty_recording_matrix(Vm_new)
+            )
+            conductances_out = (
+                _record_matrix_row(
+                    membrane.conductance_trace_matrix(gates_new, state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_conductances
+                else _empty_recording_matrix(Vm_new)
+            )
+            states_out = (
+                _record_matrix_row(
+                    membrane.membrane_state_trace_matrix(state_new),
+                    record_indices_row,
+                    record_full=record_full,
+                )
+                if record_states
+                else _empty_recording_matrix(Vm_new)
+            )
+            return (Vm_new, gates_new, *state_new), (
+                output,
+                {
+                    "gates": gates_out,
+                    "currents": currents_out,
+                    "conductances": conductances_out,
+                    "states": states_out,
+                },
+            )
 
         final_carry, trace = jax.lax.scan(
             step,
             (Vm0_row, gates0_row, *state0_row),
             (Iinj_mid, jnp.swapaxes(current_mid_row_A, 0, 1)),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[2:]), trace
+        vm_trace, recording_trace = trace
+        return final_carry[0], final_carry[1], tuple(final_carry[2:]), vm_trace, recording_trace
 
     state_axes = tuple(0 for _ in state0)
     record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None

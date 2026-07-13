@@ -441,17 +441,6 @@ def factorized_drive_count_from_rows(rows: Sequence[tuple[Any, ...]]) -> int:
     return int(max_count)
 
 
-def can_plan_compact_double_cable_factorized_rows(
-    rows: Sequence[tuple[Any, ...]],
-) -> bool:
-    """Conservatively predict the current double-cable compact factorized path."""
-
-    return planned_factorized_extracellular_mode_from_rows(rows) in {
-        ExtracellularLoweringMode.SHARED_CURRENT,
-        ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
-    }
-
-
 def planned_factorized_extracellular_mode_from_rows(
     rows: Sequence[tuple[Any, ...]],
 ) -> ExtracellularLoweringMode | None:
@@ -509,7 +498,7 @@ def stimulus_scaled_waveform_signature_and_scale(
     """Return a normalized-waveform signature plus its amplitude scale.
 
     Runtimes may pass a cached ``array_signature`` implementation, but the
-    semantic result is independent from the concrete array backend.
+    semantic result is independent from the concrete array runtime.
     """
 
     if array_signature is None:
@@ -629,7 +618,6 @@ __all__ = [
     "cached_stimulus_current_A",
     "cached_stimulus_scaled_waveform_signature_and_scale",
     "can_factorize_footprint_rows",
-    "can_plan_compact_double_cable_factorized_rows",
     "extracellular_stimulation_count",
     "factorized_drive_count_from_rows",
     "planned_factorized_extracellular_mode_from_rows",

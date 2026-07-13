@@ -129,33 +129,6 @@ def compartment_area_cm2(axon: SolverAxon, dtype_local: jnp.dtype) -> Array:
     return jnp.pi * (diam * dtype_local(1e-4)) * length_cm
 
 
-def extracellular_absolute_arrays(
-    axon: SolverAxon, dtype_local: jnp.dtype
-) -> tuple[Array, Array, Array, Array]:
-    """Return (Cm_abs, Cx_abs, Gx_abs, Gax_e) in (uF, uF, mS, mS-edge)."""
-    area = compartment_area_cm2(axon, dtype_local)
-    cm_uF_cm2 = compartment_cm_uF_cm2(axon, dtype_local)
-    Cm_abs = cm_uF_cm2 * area
-
-    xg = jnp.asarray(axon.xg_S_cm2, dtype=dtype_local)
-    xc = jnp.asarray(axon.xc_uF_cm2, dtype=dtype_local)
-    xraxial = jnp.asarray(axon.xraxial_MOhm_per_cm, dtype=dtype_local)
-    dx_cm = jnp.asarray(axon.dx_cm, dtype=dtype_local)
-
-    Cx_abs = xc * area
-    Gx_abs = (xg * dtype_local(1e3)) * area
-
-    if axon.n_compartments <= 1:
-        Gax_e = jnp.zeros((0,), dtype=dtype_local)
-    else:
-        R_edge_MOhm = (
-            xraxial[:-1] * (dtype_local(0.5) * dx_cm[:-1])
-            + xraxial[1:] * (dtype_local(0.5) * dx_cm[1:])
-        )
-        Gax_e = dtype_local(1e-3) / jnp.maximum(R_edge_MOhm, dtype_local(1e-18))
-    return Cm_abs, Cx_abs, Gx_abs, Gax_e
-
-
 def apply_diffusion_operator(V: Array, lower: Array, diag: Array, upper: Array) -> Array:
     """
     Apply the discrete diffusion operator represented by the tridiagonal rows.

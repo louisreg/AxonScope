@@ -93,7 +93,7 @@ def main() -> None:
         memory_trace=args.memory_trace,
         memory_top_n=args.memory_top_n,
         profile=args.profile,
-        profile_backend="jax" if args.profile else "auto",
+        profile_runtime="jax" if args.profile else "auto",
         jax_device_memory_profile=args.jax_device_memory_profile,
         jax_device_memory_profile_stages=("kernel.wait",),
     ):

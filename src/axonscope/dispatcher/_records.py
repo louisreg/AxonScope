@@ -48,6 +48,7 @@ class DispatchCohortRecord:
     group_id: int
     method: str
     record_indices: tuple[tuple[int, ...] | None, ...]
+    recordings: dict[str, Any] | None = None
     observations: dict[str, Any] | None = None
     final_states: tuple[Any | None, ...] | None = None
     group_size: int = 1

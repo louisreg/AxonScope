@@ -882,7 +882,7 @@ def _observable_output_items(
                 bytes=bytes_value,
                 role="public_output",
                 retained=True,
-                note="batch observable recording not implemented",
+                note="retained dense observable group according to the current recording policy",
             )
         )
     return tuple(item for item in result if item.bytes > 0)

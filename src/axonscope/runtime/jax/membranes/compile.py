@@ -126,22 +126,6 @@ def backend_from_membrane(membrane: Any, nx: int) -> MembraneBackend:
     return backend
 
 
-def build_membrane_backend_from_axon(
-    axon: Axon,
-    *,
-    solver_options: SolverOptions | None = None,
-) -> MembraneBackend:
-    """Build the solver-side membrane backend for an axon description."""
-
-    solver_axon = build_solver_axon(axon)
-    membrane = compile_axon_membrane(
-        axon,
-        solver_axon=solver_axon,
-        solver_options=solver_options,
-    )
-    return backend_from_membrane(membrane, int(solver_axon.n_compartments))
-
-
 def _record_membrane_source_compile_metadata(
     kind: str,
     source_results: tuple[SourceModelCompileResult, ...],

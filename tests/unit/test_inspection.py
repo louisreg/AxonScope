@@ -75,7 +75,7 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     assert report.kernels[0].kernel == "SingleCableVStimBatchKernel"
     assert report.kernels[0].solver.cable == "single_cable"
     assert report.kernels[0].solver.requested == "auto"
-    assert report.kernels[0].solver.backend_route == "jax_tridiagonal"
+    assert report.kernels[0].solver.runtime_route == "jax_tridiagonal"
     assert report.result_assembly[0].record_kind == "dispatch row records"
 
     text = report.format()
@@ -129,7 +129,7 @@ def test_inspection_reports_typed_double_cable_solver_policy():
     assert report.kernels[0].cable_mode == "double"
     assert report.kernels[0].solver.cable == "double_cable"
     assert report.kernels[0].solver.requested == "tiled_thomas"
-    assert report.kernels[0].solver.backend_route == "jax_triton_loop_xb"
+    assert report.kernels[0].solver.runtime_route == "jax_triton_loop_xb"
     assert report.kernels[0].solver.internal is True
     assert report.kernels[0].solver.options == (("block_b", 64),)
 

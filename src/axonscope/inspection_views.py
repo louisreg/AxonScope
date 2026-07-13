@@ -542,7 +542,7 @@ def _bytes_text(value: int) -> str:
 
 
 def _solver_route_text(solver: Any) -> str:
-    route = "auto" if solver.backend_route is None else str(solver.backend_route)
+    route = "auto" if solver.runtime_route is None else str(solver.runtime_route)
     requested = solver.requested
     parts = [route]
     if requested is not None and str(requested) != route:

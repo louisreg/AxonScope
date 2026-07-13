@@ -152,6 +152,152 @@ class RuntimeInputContract:
         return metadata
 
 
+@dataclass(frozen=True)
+class PreparedRuntimeInputSummary:
+    """Runtime-neutral summary for one concrete prepared batch.
+
+    The summary is intentionally primitive and metadata-friendly. It captures the
+    semantic contract a concrete runtime is about to execute without prescribing
+    array classes, JIT behavior, or solver implementation details.
+    """
+
+    cable: CableFormulation
+    batch_size: int
+    nx: int
+    nt: int
+    dtype: str
+    has_padding: bool
+    row_specific_parameters: bool
+    recording_mode: str
+    output_sink: str
+    observer_count: int
+    time_chunk_steps: int | None
+    solver_policy: str
+    intracellular_format: IntracellularInputFormat
+    intracellular_mode: IntracellularLoweringMode
+    extracellular_format: ExtracellularInputFormat
+    extracellular_mode: ExtracellularLoweringMode
+    extracellular_requires_initial_previous: bool
+    extracellular_has_initial_previous: bool
+
+    def validate_against(self, contract: RuntimeInputContract) -> None:
+        """Raise when this prepared batch violates ``contract``."""
+
+        errors = validate_prepared_runtime_input(self, contract)
+        if errors:
+            raise ValueError(
+                "prepared runtime input violates contract: " + "; ".join(errors)
+            )
+
+    def as_metadata(
+        self,
+        *,
+        prefix: str = "prepared_input_contract_",
+    ) -> dict[str, Any]:
+        """Return primitive benchmark/inspection metadata."""
+
+        return {
+            f"{prefix}cable": self.cable,
+            f"{prefix}batch_size": int(self.batch_size),
+            f"{prefix}nx": int(self.nx),
+            f"{prefix}nt": int(self.nt),
+            f"{prefix}dtype": self.dtype,
+            f"{prefix}has_padding": bool(self.has_padding),
+            f"{prefix}row_specific_parameters": bool(self.row_specific_parameters),
+            f"{prefix}recording_mode": self.recording_mode,
+            f"{prefix}output_sink": self.output_sink,
+            f"{prefix}observer_count": int(self.observer_count),
+            f"{prefix}time_chunk_steps": self.time_chunk_steps,
+            f"{prefix}solver_policy": self.solver_policy,
+            f"{prefix}intracellular_format": self.intracellular_format,
+            f"{prefix}intracellular_mode": self.intracellular_mode.value,
+            f"{prefix}extracellular_format": self.extracellular_format,
+            f"{prefix}extracellular_mode": self.extracellular_mode.value,
+            f"{prefix}extracellular_requires_initial_previous": (
+                self.extracellular_requires_initial_previous
+            ),
+            f"{prefix}extracellular_has_initial_previous": (
+                self.extracellular_has_initial_previous
+            ),
+        }
+
+
+def intracellular_mode_from_format(
+    value: IntracellularInputFormat,
+) -> IntracellularLoweringMode:
+    """Return the semantic mode represented by an intracellular format label."""
+
+    if value == "zero_no_intracellular_context":
+        return IntracellularLoweringMode.ZERO
+    if value == "dense":
+        return IntracellularLoweringMode.DENSE
+    if value == "sparse_current_clamp":
+        return IntracellularLoweringMode.SPARSE_CURRENT_CLAMP
+    raise ValueError(f"Unsupported intracellular input format: {value!r}.")
+
+
+def extracellular_mode_from_format(
+    value: ExtracellularInputFormat,
+    *,
+    explicit_mode: ExtracellularLoweringMode | None = None,
+) -> ExtracellularLoweringMode:
+    """Return the semantic mode represented by an extracellular format label."""
+
+    if explicit_mode is not None:
+        if not isinstance(explicit_mode, ExtracellularLoweringMode):
+            raise TypeError("explicit_mode must be an ExtracellularLoweringMode value.")
+        return explicit_mode
+    if value == "zero_no_extracellular_stimulation":
+        return ExtracellularLoweringMode.ZERO
+    if value == "dense":
+        return ExtracellularLoweringMode.DENSE
+    raise ValueError(
+        f"Extracellular format {value!r} needs an explicit semantic lowering mode."
+    )
+
+
+def validate_prepared_runtime_input(
+    summary: PreparedRuntimeInputSummary,
+    contract: RuntimeInputContract,
+) -> tuple[str, ...]:
+    """Return contract violations for one prepared runtime input summary."""
+
+    errors: list[str] = []
+    if normalize_cable_formulation(summary.cable) != contract.cable:
+        errors.append(
+            f"cable {summary.cable!r} does not match contract {contract.cable!r}"
+        )
+    for field_name in ("batch_size", "nx", "nt"):
+        if int(getattr(summary, field_name)) <= 0:
+            errors.append(f"{field_name} must be positive")
+    if not str(summary.dtype).strip():
+        errors.append("dtype must be non-empty")
+    if summary.has_padding and not contract.supports_padding:
+        errors.append("runtime does not support padded batches")
+    if summary.row_specific_parameters and not contract.supports_row_specific_parameters:
+        errors.append("runtime does not support row-specific parameters")
+    if (
+        summary.output_sink == "vm_raster"
+        and not contract.supports_observer_only_vm_raster
+    ):
+        errors.append("runtime does not support observer-only VmRaster output")
+    if not contract.supports_intracellular(summary.intracellular_mode):
+        errors.append(
+            f"intracellular mode {summary.intracellular_mode.value!r} is unsupported"
+        )
+    if not contract.supports_extracellular(summary.extracellular_mode):
+        errors.append(
+            f"extracellular mode {summary.extracellular_mode.value!r} is unsupported"
+        )
+    if (
+        summary.extracellular_requires_initial_previous
+        and summary.extracellular_mode is not ExtracellularLoweringMode.ZERO
+        and not summary.extracellular_has_initial_previous
+    ):
+        errors.append("extracellular mode requires an initial-previous sample")
+    return tuple(errors)
+
+
 def normalize_cable_formulation(value: str) -> CableFormulation:
     """Return the canonical runtime-neutral cable formulation label."""
 
@@ -190,8 +336,12 @@ __all__ = [
     "ExtracellularLoweringMode",
     "IntracellularInputFormat",
     "IntracellularLoweringMode",
+    "PreparedRuntimeInputSummary",
     "RuntimeInputContract",
     "dense_nbytes_for_shape",
     "dense_shape_for_group",
+    "extracellular_mode_from_format",
+    "intracellular_mode_from_format",
     "normalize_cable_formulation",
+    "validate_prepared_runtime_input",
 ]

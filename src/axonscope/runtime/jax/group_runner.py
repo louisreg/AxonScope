@@ -25,8 +25,15 @@ from axonscope.runtime.jax.recording.results import (
     finalize_pending_batch_observation,
     trim_batch_kernel_result,
 )
+from axonscope.runtime.input_contract import (
+    PreparedRuntimeInputSummary,
+    extracellular_mode_from_format,
+    intracellular_mode_from_format,
+)
 from axonscope.runtime.result_assembly import dispatch_results_from_batch
 from axonscope.runtime.jax.inputs.lowering import (
+    JAX_DOUBLE_CABLE_INPUT_CONTRACT,
+    JAX_SINGLE_CABLE_INPUT_CONTRACT,
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,
     lower_single_cable_extracellular_input,
@@ -53,6 +60,7 @@ from axonscope.runtime.jax.preparation.shape_bucketing import (
 from axonscope.runtime.jax.kernels.double_cable import DoubleCableBatchKernel
 from axonscope.runtime.jax.kernels.single_cable import SingleCableVStimBatchKernel
 from axonscope.solvers.options import BatchOptions, SolverOptions
+from axonscope.recording import RecordingPlan
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,7 @@ def run_jax_batch_group(
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None = None,
+    recording_plan: RecordingPlan | None = None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
@@ -94,6 +103,7 @@ def run_jax_batch_group(
             batch_options=batch_options,
             solver_options=solver_options,
             observers=observers,
+            recording_plan=recording_plan,
             progress_callback=progress_callback,
             runtime_context=runtime_context,
         )
@@ -104,6 +114,7 @@ def run_jax_batch_group(
         batch_options=batch_options,
         solver_options=solver_options,
         observers=observers,
+        recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
     )
@@ -302,7 +313,7 @@ def _wait_for_batch_kernel_output(
         progress_callback,
         group,
         "kernel",
-        "solving JAX kernel",
+        "waiting for JAX work",
     )
     with benchmark_span(
         "kernel.wait",
@@ -319,7 +330,7 @@ def _wait_for_batch_kernel_output(
         group=group,
         mode=group.mode,
     )
-    _emit_progress(progress_callback, group, "kernel", "completed JAX kernel")
+    _emit_progress(progress_callback, group, "kernel", "completed JAX work")
     return out
 
 
@@ -351,6 +362,7 @@ def _dispatch_batch_kernel_output(
             group,
             Vm=out.Vm,
             t=out.t,
+            recordings=out.recordings,
             observations=out.observations,
             observer_definitions=observers,
             method=_dispatch_method(group),
@@ -389,6 +401,69 @@ def _record_lowered_input_progress_and_memory(
         intracellular_format=lowered_inputs.intracellular.format,
         extracellular_format=lowered_inputs.extracellular.format,
         include_vstim_previous=include_vstim_previous,
+    )
+
+
+def _record_prepared_runtime_input_contract(
+    *,
+    public_group: DispatchGroup,
+    runtime: Any,
+    kernel_options: OutputPlan,
+    lowered_inputs: _LoweredJaxBatchInputs,
+    observers: tuple[Any, ...] | None,
+    solver_policy: str,
+) -> None:
+    """Validate and record the runtime-neutral contract for one prepared batch."""
+
+    contract = (
+        JAX_DOUBLE_CABLE_INPUT_CONTRACT
+        if public_group.mode == "double"
+        else JAX_SINGLE_CABLE_INPUT_CONTRACT
+    )
+    extracellular_mode = extracellular_mode_from_format(
+        lowered_inputs.extracellular.format,
+        explicit_mode=lowered_inputs.extracellular.mode,
+    )
+    summary = PreparedRuntimeInputSummary(
+        cable="double-cable" if public_group.mode == "double" else "single-cable",
+        batch_size=int(public_group.size),
+        nx=int(runtime.membrane.Nx),
+        nt=int(runtime.grid.Nt),
+        dtype=str(runtime.membrane.dtype),
+        has_padding=bool(public_group.has_padding),
+        row_specific_parameters=not bool(public_group.geometry_shared),
+        recording_mode=kernel_options.recording.mode,
+        output_sink=kernel_options.sink,
+        observer_count=0 if observers is None else len(observers),
+        time_chunk_steps=kernel_options.time_chunk_steps,
+        solver_policy=solver_policy,
+        intracellular_format=lowered_inputs.intracellular.format,
+        intracellular_mode=intracellular_mode_from_format(
+            lowered_inputs.intracellular.format
+        ),
+        extracellular_format=lowered_inputs.extracellular.format,
+        extracellular_mode=extracellular_mode,
+        extracellular_requires_initial_previous=(
+            contract.extracellular.requires_initial_previous
+        ),
+        extracellular_has_initial_previous=_extracellular_has_initial_previous(
+            lowered_inputs.extracellular
+        ),
+    )
+    summary.validate_against(contract)
+    record_benchmark_metadata(
+        **contract.as_metadata(prefix="runtime_input_contract_"),
+        **summary.as_metadata(prefix="prepared_input_contract_"),
+    )
+
+
+def _extracellular_has_initial_previous(extracellular: Any) -> bool:
+    if extracellular.initial_previous is not None:
+        return True
+    factorized = extracellular.factorized
+    return bool(
+        factorized is not None
+        and getattr(factorized, "current_initial_previous_A", None) is not None
     )
 
 
@@ -538,6 +613,7 @@ def _run_single_cable_batch_group(
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
+    recording_plan: RecordingPlan | None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
@@ -584,6 +660,14 @@ def _run_single_cable_batch_group(
         include_vstim_previous=False,
         progress_callback=progress_callback,
     )
+    _record_prepared_runtime_input_contract(
+        public_group=group,
+        runtime=runtime,
+        kernel_options=kernel_options,
+        lowered_inputs=lowered_inputs,
+        observers=observers,
+        solver_policy="jax_single_cable_tridiagonal",
+    )
     _emit_kernel_compile_progress(
         group=group,
         kernel_options=kernel_options,
@@ -608,6 +692,7 @@ def _run_single_cable_batch_group(
             extracellular_potential_mid_mV=lowered_inputs.extracellular.midpoint,
             options=kernel_options,
             observers=observer_plan,
+            recording_plan=recording_plan,
             progress_callback=progress_callback,
         )
         _record_kernel_output_metadata(out)
@@ -634,10 +719,15 @@ def _run_double_cable_batch_group(
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
+    recording_plan: RecordingPlan | None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run a homogeneous double-cable group through full double-cable batching."""
+    if recording_plan is not None and recording_plan.wants_observables:
+        raise NotImplementedError(
+            "dense observable recording is implemented for single-cable batch groups first."
+        )
 
     kernel_group = double_cable_kernel_group(group)
     representative = representative_item(group).simulation
@@ -694,6 +784,14 @@ def _run_double_cable_batch_group(
         lowered_inputs=lowered_inputs,
         include_vstim_previous=True,
         progress_callback=progress_callback,
+    )
+    _record_prepared_runtime_input_contract(
+        public_group=group,
+        runtime=runtime,
+        kernel_options=kernel_options,
+        lowered_inputs=lowered_inputs,
+        observers=observers,
+        solver_policy=str(policy_block_solver or "default"),
     )
     record_benchmark_metadata(
         public_group_size=int(group.size),

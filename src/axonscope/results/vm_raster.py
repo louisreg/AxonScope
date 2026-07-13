@@ -489,6 +489,120 @@ def activation_values_from_vm_raster(raster: Any, activation: Any) -> np.ndarray
         raise RuntimeError("activation observer result is missing from VmRaster output.") from exc
 
 
+def conduction_velocity_values_from_vm_raster(
+    raster: Any,
+    definition: Any,
+) -> np.ndarray:
+    """Estimate conduction velocity from first VmRaster threshold crossings."""
+
+    try:
+        raster_index = vm_raster_definition_index(raster, definition)
+    except KeyError as exc:
+        raise RuntimeError(
+            "conduction-velocity observer result is missing from VmRaster output."
+        ) from exc
+
+    words = np.asarray(getattr(raster, "words"), dtype=np.uint32)
+    if words.ndim != 4:
+        raise ValueError(f"VmRaster words must have shape (B, R, P, W), got {words.shape}.")
+    if int(raster_index) < 0 or int(raster_index) >= words.shape[1]:
+        raise ValueError(f"VmRaster definition index {raster_index} is out of range.")
+
+    row_words = words[:, int(raster_index)]
+    probe_mask = _probe_mask_for_definition(
+        raster,
+        raster_index=raster_index,
+        batch_size=row_words.shape[0],
+        probe_count=row_words.shape[1],
+    )
+    positions = _metadata_for_definition(
+        getattr(raster, "positions_um"),
+        raster_index=raster_index,
+        batch_size=row_words.shape[0],
+        probe_count=row_words.shape[1],
+        fill_value=np.nan,
+    )
+    nt = int(getattr(raster, "nt"))
+    dt_ms = float(getattr(raster, "dt_ms"))
+    values = np.zeros((row_words.shape[0],), dtype=float)
+    for row_index in range(row_words.shape[0]):
+        first_samples = _first_active_samples(row_words[row_index], nt=nt)
+        valid = (
+            probe_mask[row_index]
+            & (first_samples >= 0)
+            & np.isfinite(positions[row_index])
+        )
+        if int(np.count_nonzero(valid)) < 2:
+            continue
+        values[row_index] = _distance_delay_velocity_from_samples(
+            first_samples[valid],
+            positions[row_index, valid],
+            dt_ms=dt_ms,
+        )
+    return values
+
+
+def _first_active_samples(row_words: np.ndarray, *, nt: int) -> np.ndarray:
+    first = np.full((row_words.shape[0],), -1, dtype=np.int64)
+    for probe_index, probe_words in enumerate(row_words):
+        active_words = np.flatnonzero(probe_words != np.uint32(0))
+        if active_words.size == 0:
+            continue
+        word_index = int(active_words[0])
+        word = int(probe_words[word_index])
+        bit_index = (word & -word).bit_length() - 1
+        sample = word_index * 32 + bit_index
+        if sample < int(nt):
+            first[probe_index] = sample
+    return first
+
+
+def _distance_delay_velocity_from_samples(
+    samples: np.ndarray,
+    positions_um: np.ndarray,
+    *,
+    dt_ms: float,
+) -> float:
+    if float(dt_ms) <= 0.0:
+        return 0.0
+    order = np.argsort(samples)
+    ordered_samples = np.asarray(samples, dtype=float)[order]
+    ordered_positions = np.asarray(positions_um, dtype=float)[order]
+    x_start = float(ordered_positions[0])
+    t_start = float(ordered_samples[0]) * float(dt_ms)
+    stop_index = int(np.argmax(np.abs(ordered_positions - x_start)))
+    delay_ms = float(ordered_samples[stop_index]) * float(dt_ms) - t_start
+    if delay_ms <= 0.0:
+        return 0.0
+    distance_um = abs(float(ordered_positions[stop_index]) - x_start)
+    return float(distance_um / delay_ms * 1e-3)
+
+
+def _metadata_for_definition(
+    values: Any,
+    *,
+    raster_index: int,
+    batch_size: int,
+    probe_count: int,
+    fill_value: Any,
+) -> np.ndarray:
+    arr = np.asarray(values)
+    if arr.ndim == 3:
+        selected = arr[:, int(raster_index)]
+    elif arr.ndim == 2:
+        selected = np.broadcast_to(arr[int(raster_index)], (int(batch_size), arr.shape[1]))
+    elif arr.ndim == 1:
+        selected = np.broadcast_to(arr, (int(batch_size), arr.shape[0]))
+    else:
+        selected = np.full((int(batch_size), int(probe_count)), fill_value)
+    if selected.shape[1] == int(probe_count):
+        return np.asarray(selected)
+    out = np.full((int(batch_size), int(probe_count)), fill_value, dtype=arr.dtype)
+    width = min(int(probe_count), int(selected.shape[1]))
+    out[:, :width] = selected[:, :width]
+    return out
+
+
 def _probe_mask_for_definition(
     raster: Any,
     *,
@@ -735,7 +849,8 @@ def _require_vm_raster_definition(definition: Any) -> None:
 def _threshold_mV(definition: Any) -> float:
     from axonscope.utils import units
 
-    return units.to_mV(getattr(definition, "threshold"))
+    threshold = getattr(definition, "threshold", None)
+    return -20.0 if threshold is None else units.to_mV(threshold)
 
 
 def _select_vm_raster_columns(
@@ -778,6 +893,7 @@ __all__ = [
     "VM_RASTER_OBSERVATION_KEY",
     "VmRasterResult",
     "activation_values_from_vm_raster",
+    "conduction_velocity_values_from_vm_raster",
     "unpack_vm_raster_words",
     "vm_raster_any_active",
     "vm_raster_definition_index",

@@ -12,12 +12,12 @@ from axonscope.analytical import PointSourceElectrode
 from axonscope.stimulation import IntracellularContext
 from axonscope.runtime.jax.preparation.base import (
     _membrane_runtime_cache_key,
-    precompute_extracellular_potential_mV,
     prepare_cable_runtime,
     prepare_extracellular_runtime,
     prepare_membrane_runtime,
     prepare_simulation_grid,
     prepare_solver_runtime,
+    sample_extracellular_potential_mV,
 )
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.solver_axon import build_solver_axon
@@ -25,6 +25,7 @@ from axonscope.solvers import SolverOptions
 from axonscope.stimulation import Stimulus
 from axonscope.runtime.jax.inputs.extracellular import (
     CompiledExtracellularStimulations,
+    build_extracellular_potential_fn,
     compile_extracellular_stimulations,
 )
 from axonscope.runtime.jax.inputs.intracellular import (
@@ -412,7 +413,15 @@ def test_precompute_extracellular_potential_matches_axon_method():
     _attach_point_source_stimulation(axon, electrode, stim)
 
     t_ms = np.asarray([0.1, 0.25, 0.5], dtype=float)
-    sampled = np.asarray(precompute_extracellular_potential_mV(axon, t_ms))
+    solver_axon = build_solver_axon(axon)
+    potential = build_extracellular_potential_fn(axon, solver_axon=solver_axon)
+    sampled = np.asarray(
+        sample_extracellular_potential_mV(
+            potential,
+            t_ms,
+            dtype_local=jnp.float32,
+        )
+    )
 
     assert sampled.shape == (3, axon.n_compartments)
     assert np.allclose(sampled[0], np.asarray(axon.extracellular_potential_mV(0.1)))
@@ -448,7 +457,15 @@ def test_extracellular_potential_uses_sampled_point_source_offsets():
     )
     expected_mV = 10e-6 / (4.0 * np.pi * 0.2 * r) * 1e3
 
-    got = np.asarray(precompute_extracellular_potential_mV(axon, np.asarray([0.0])))[0]
+    solver_axon = build_solver_axon(axon)
+    potential = build_extracellular_potential_fn(axon, solver_axon=solver_axon)
+    got = np.asarray(
+        sample_extracellular_potential_mV(
+            potential,
+            np.asarray([0.0]),
+            dtype_local=jnp.float32,
+        )
+    )[0]
 
     assert np.allclose(got, expected_mV, rtol=1e-6, atol=1e-6)
 

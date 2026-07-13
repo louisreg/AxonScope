@@ -1212,12 +1212,43 @@ def _initial_double_cable_batch_state(
             batch_size=batch_size,
         )
         Vi = Vm if float(Veinit_mV) == 0.0 else Vm + Ve
-        gates = _cached_broadcast_batch_leading(membrane_runtime.gates0, batch_size)
+        gates = _as_initial_double_cable_batch_state_array(
+            "gates0",
+            membrane_runtime.gates0,
+            batch_size=batch_size,
+            dtype_local=dtype_local,
+        )
         state = tuple(
-            _cached_broadcast_batch_leading(values, batch_size)
-            for values in membrane_runtime.state0
+            _as_initial_double_cable_batch_state_array(
+                f"state0[{index}]",
+                values,
+                batch_size=batch_size,
+                dtype_local=dtype_local,
+            )
+            for index, values in enumerate(membrane_runtime.state0)
         )
         return Vi, Ve, gates, state
+
+def _as_initial_double_cable_batch_state_array(
+    name: str,
+    values: Array,
+    *,
+    batch_size: int,
+    dtype_local: jnp.dtype,
+) -> Array:
+    arr = jnp.asarray(values, dtype=dtype_local)
+    if arr.ndim >= 3 and int(arr.shape[0]) == int(batch_size):
+        return arr
+    if arr.ndim >= 3 and int(arr.shape[0]) == 1:
+        return jnp.broadcast_to(arr, (int(batch_size), *arr.shape[1:]))
+    if arr.ndim >= 3:
+        raise ValueError(
+            f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}."
+        )
+    return _cached_broadcast_batch_leading(
+        arr,
+        batch_size,
+    )
 
 __all__ = [
     "DoubleCableBatchKernel",

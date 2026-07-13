@@ -12,7 +12,7 @@ from axonscope.solvers.options import BatchOptions, BatchRecording
 
 
 def recording_plan_from_recording(recording: Recording | RecordingPlan) -> RecordingPlan:
-    """Return a backend-neutral plan from a public recording-like value."""
+    """Return a runtime-neutral plan from a public recording-like value."""
 
     if isinstance(recording, RecordingPlan):
         return recording
@@ -24,9 +24,7 @@ def recording_plan_from_recording(recording: Recording | RecordingPlan) -> Recor
 def batch_recording_from_recording_plan(plan: RecordingPlan) -> BatchRecording:
     """Lower a runtime-neutral recording plan to batch recording options."""
 
-    if plan.wants_observables:
-        raise NotImplementedError("pool recording currently supports Vm only.")
-    if not plan.voltage:
+    if not plan.voltage and not plan.wants_observables:
         return BatchRecording.none()
     if plan.positions_um is not None:
         raise NotImplementedError(

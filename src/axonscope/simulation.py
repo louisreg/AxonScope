@@ -304,6 +304,7 @@ def _run_population_simulation(
             batch_options=batch_options,
         )
         record_observables = bool(recording is not None and recording.wants_observables)
+        recording_plan = None if recording is None else recording.to_plan()
 
     context_manager = execution_context(execution_policy, instances=population.instances)
     with benchmark_span("simulation.execution_context.enter"):
@@ -323,6 +324,7 @@ def _run_population_simulation(
                 batch_options=effective_batch_options,
                 observers=observer_defs,
                 record_observables=record_observables,
+                recording_plan=recording_plan,
                 progress=progress,
                 runtime_context=context,
                 dispatch_plan=dispatch_plan,

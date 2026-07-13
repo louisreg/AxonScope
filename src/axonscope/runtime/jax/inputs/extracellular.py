@@ -10,7 +10,7 @@ import hashlib
 from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Sequence, cast
 
 import jax
 import jax.numpy as jnp
@@ -37,8 +37,6 @@ from axonscope.timebase import simulation_step_count
 
 Array = Any
 StimulationBatchRow = ExtracellularStimulation | Sequence[ExtracellularStimulation] | None
-FootprintEngine = Literal["numpy", "jax"]
-
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 _FOOTPRINT_MV_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 _SINGLE_CABLE_FORCING_MV_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
@@ -297,34 +295,6 @@ def build_factorized_vstim_midpoint_batch(
     )
 
 
-def build_vstim_initial_previous_batch(
-    axon: object,
-    stimulations_batch: Sequence[StimulationBatchRow],
-    *,
-    dt_ms: float,
-    x_positions_m: Array | None = None,
-    axon_y_um: Array | None = None,
-    axon_z_um: Array | None = None,
-    dtype_local: jnp.dtype | None = None,
-) -> Array:
-    """Build the ``t=-dt/2`` imposed field required by double-cable batches.
-
-    Returns ``Vstim[B, Nx]`` in millivolts.
-    """
-
-    dtype = _resolve_dtype(axon, dtype_local)
-    samples = build_vstim_batch(
-        axon,
-        stimulations_batch,
-        t_ms=jnp.asarray([-0.5 * dt_ms], dtype=dtype),
-        x_positions_m=x_positions_m,
-        axon_y_um=axon_y_um,
-        axon_z_um=axon_z_um,
-        dtype_local=dtype,
-    )
-    return samples[:, 0, :]
-
-
 def build_vstim_midpoint_and_initial_previous_batch(
     axon: object,
     stimulations_batch: Sequence[StimulationBatchRow],
@@ -357,118 +327,6 @@ def build_vstim_midpoint_and_initial_previous_batch(
         dtype_local=dtype,
     )
     return samples[:, 1:, :], samples[:, 0, :]
-
-
-def build_footprint_vstim_midpoint_batch(
-    *,
-    stimulus: Stimulus,
-    footprint_V_per_A: Array,
-    tsim_ms: float,
-    dt_ms: float,
-    amplitude_scale: float | Array = 1.0,
-    dtype_local: jnp.dtype | None = None,
-    engine: FootprintEngine = "numpy",
-) -> Array:
-    """Build midpoint ``Vstim`` from precomputed electrode footprints.
-
-    ``footprint_V_per_A`` has shape ``(Nx,)`` or ``(B, Nx)`` and is expressed in
-    volts per ampere. The returned array has shape ``(B, Nt, Nx)`` and units of
-    millivolts.
-    """
-
-    dtype = jnp.float32 if dtype_local is None else dtype_local
-    nt = simulation_step_count(tsim_ms, dt_ms)
-    t_mid_ms = (
-        jnp.arange(nt, dtype=dtype) + jnp.asarray(0.5, dtype=dtype)
-    ) * jnp.asarray(dt_ms, dtype=dtype)
-    return build_footprint_vstim_batch(
-        stimulus=stimulus,
-        footprint_V_per_A=footprint_V_per_A,
-        t_ms=t_mid_ms,
-        amplitude_scale=amplitude_scale,
-        dtype_local=dtype,
-        engine=engine,
-    )
-
-
-def build_footprint_vstim_initial_previous_batch(
-    *,
-    stimulus: Stimulus,
-    footprint_V_per_A: Array,
-    dt_ms: float,
-    amplitude_scale: float | Array = 1.0,
-    dtype_local: jnp.dtype | None = None,
-    engine: FootprintEngine = "numpy",
-) -> Array:
-    """Build the previous imposed field from precomputed footprints.
-
-    Returns ``Vstim[B, Nx]`` sampled at ``t=-dt/2`` in millivolts.
-    """
-
-    dtype = jnp.float32 if dtype_local is None else dtype_local
-    samples = build_footprint_vstim_batch(
-        stimulus=stimulus,
-        footprint_V_per_A=footprint_V_per_A,
-        t_ms=jnp.asarray([-0.5 * dt_ms], dtype=dtype),
-        amplitude_scale=amplitude_scale,
-        dtype_local=dtype,
-        engine=engine,
-    )
-    return samples[:, 0, :]
-
-
-def build_footprint_vstim_batch(
-    *,
-    stimulus: Stimulus,
-    footprint_V_per_A: Array,
-    t_ms: Array,
-    amplitude_scale: float | Array = 1.0,
-    dtype_local: jnp.dtype | None = None,
-    engine: FootprintEngine = "numpy",
-) -> Array:
-    """Build ``Vstim[B, Nt, Nx]`` from static footprints and one stimulus.
-
-    The default NumPy path keeps data preparation outside JAX tracing and
-    returns a JAX array for solver consumption. Use ``engine="jax"`` only when
-    JAX-side multiplication is explicitly useful.
-    """
-
-    dtype = jnp.float32 if dtype_local is None else dtype_local
-    if engine == "numpy":
-        return _build_footprint_vstim_batch_numpy(
-            stimulus=stimulus,
-            footprint_V_per_A=footprint_V_per_A,
-            t_ms=t_ms,
-            amplitude_scale=amplitude_scale,
-            dtype_local=dtype,
-        )
-    if engine != "jax":
-        raise ValueError(f"engine must be 'numpy' or 'jax', got {engine!r}.")
-
-    t = jnp.asarray(t_ms, dtype=dtype)
-    if t.ndim != 1:
-        raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
-
-    batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
-    footprint = _as_footprint_batch(
-        "footprint_V_per_A",
-        footprint_V_per_A,
-        batch_size=batch_size,
-        dtype_local=dtype,
-    )
-    scale = _as_batch_vector(
-        "amplitude_scale",
-        amplitude_scale,
-        batch_size=batch_size,
-        dtype_local=dtype,
-    )
-    current_A = jax.vmap(compile_stimulus(stimulus, dtype_local=dtype))(t)
-    return (
-        scale[:, None, None]
-        * current_A[None, :, None]
-        * footprint[:, None, :]
-        * jnp.asarray(1e3, dtype=dtype)
-    )
 
 
 def build_vstim_batch(
@@ -1775,102 +1633,6 @@ def _resolve_axon_transverse_um_numpy(
     return y, z
 
 
-def _build_footprint_vstim_batch_numpy(
-    *,
-    stimulus: Stimulus,
-    footprint_V_per_A: Array,
-    t_ms: Array,
-    amplitude_scale: float | Array,
-    dtype_local: jnp.dtype,
-) -> Array:
-    np_dtype = np.dtype(dtype_local)
-    t = np.asarray(t_ms, dtype=np_dtype)
-    if t.ndim != 1:
-        raise ValueError(f"t_ms must have shape (Nt,), got {t.shape}.")
-
-    batch_size = _infer_footprint_batch_size(footprint_V_per_A, (amplitude_scale,))
-    footprint = _as_footprint_batch_numpy(
-        "footprint_V_per_A",
-        footprint_V_per_A,
-        batch_size=batch_size,
-        dtype_local=np_dtype,
-    )
-    scale = _as_batch_vector_numpy(
-        "amplitude_scale",
-        amplitude_scale,
-        batch_size=batch_size,
-        dtype_local=np_dtype,
-    )
-    current_A = np.asarray(stimulus.evaluate(t, unit="ampere"), dtype=np_dtype)
-    vstim_mV = scale[:, None, None] * current_A[None, :, None] * footprint[:, None, :]
-    vstim_mV = vstim_mV * np.asarray(1e3, dtype=np_dtype)
-    return jnp.asarray(vstim_mV, dtype=dtype_local)
-
-
-def _infer_footprint_batch_size(footprint_V_per_A: Array, params: Sequence[object]) -> int:
-    candidates: list[int] = []
-    footprint_shape, footprint_ndim = _shape_and_ndim(footprint_V_per_A)
-    if footprint_ndim == 2:
-        candidates.append(int(footprint_shape[0]))
-    elif footprint_ndim != 1:
-        raise ValueError(
-            "footprint_V_per_A must have shape (Nx,) or (B, Nx), "
-            f"got {footprint_shape}."
-        )
-
-    for values in params:
-        shape, ndim = _shape_and_ndim(values)
-        if ndim == 1 and shape[0] != 1:
-            candidates.append(int(shape[0]))
-        elif ndim > 1:
-            raise ValueError(f"batched parameter must be scalar or shape (B,), got {shape}.")
-
-    if not candidates:
-        return 1
-    batch_size = candidates[0]
-    if any(candidate != batch_size for candidate in candidates):
-        raise ValueError(f"batched inputs disagree on batch size: {candidates}.")
-    return batch_size
-
-
-def _as_footprint_batch(
-    name: str,
-    values: Array,
-    *,
-    batch_size: int,
-    dtype_local: jnp.dtype,
-) -> Array:
-    arr = jnp.asarray(values, dtype=dtype_local)
-    if arr.ndim == 1:
-        return jnp.broadcast_to(arr[jnp.newaxis, :], (batch_size, arr.shape[0]))
-    if arr.ndim == 2:
-        if arr.shape[0] == batch_size:
-            return arr
-        if arr.shape[0] == 1:
-            return jnp.broadcast_to(arr, (batch_size, arr.shape[1]))
-        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
-    raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
-
-
-def _as_footprint_batch_numpy(
-    name: str,
-    values: Array,
-    *,
-    batch_size: int,
-    dtype_local: np.dtype,
-) -> np.ndarray:
-    arr = np.asarray(values, dtype=dtype_local)
-    if arr.ndim == 1:
-        return np.broadcast_to(arr[None, :], (batch_size, arr.shape[0]))
-    if arr.ndim == 2:
-        if arr.shape[0] == batch_size:
-            return arr
-        if arr.shape[0] == 1:
-            return np.broadcast_to(arr, (batch_size, arr.shape[1]))
-        raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
-    raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
-
-
 def _as_batch_vector(
     name: str,
     values: float | Array,
@@ -1922,14 +1684,9 @@ __all__ = [
     "CompiledExtracellularDrive",
     "CompiledExtracellularStimulation",
     "CompiledExtracellularStimulations",
-    "FootprintEngine",
     "StimulationBatchRow",
     "build_extracellular_potential_fn",
-    "build_footprint_vstim_batch",
-    "build_footprint_vstim_initial_previous_batch",
-    "build_footprint_vstim_midpoint_batch",
     "build_vstim_batch",
-    "build_vstim_initial_previous_batch",
     "build_vstim_midpoint_and_initial_previous_batch",
     "build_vstim_midpoint_batch",
     "compile_extracellular_stimulation",

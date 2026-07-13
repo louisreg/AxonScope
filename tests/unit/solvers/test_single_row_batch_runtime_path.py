@@ -70,15 +70,42 @@ def test_single_row_batch_route_propagates_action_potential():
 
 
 def test_dense_observable_recording_does_not_fall_back_to_scalar_route():
-    with pytest.raises(NotImplementedError, match="Vm only"):
-        _run_public(
-            _hh_axon(21),
-            tsim=2.0,
-            dt=0.01,
-            recording=axs.Recording(
-                voltage=True,
-                gates=True,
-                currents=True,
-                conductances=True,
-            ),
-        )
+    nx = 21
+    nt = simulation_step_count(2.0, 0.01)
+
+    result = _run_public(
+        _hh_axon(nx),
+        tsim=2.0,
+        dt=0.01,
+        recording=axs.Recording(
+            voltage=True,
+            gates=True,
+            currents=True,
+            conductances=True,
+        ),
+    )
+
+    assert result.diagnostics["dispatch_method"] == "batch-single-cable"
+    assert result.diagnostics["dispatch_batch_kind"] != "scalar"
+    assert result.Vm.shape == (nt, nx)
+    assert result.recordings is not None
+    assert set(result.recordings) == {"Vm", "gates", "currents", "conductances"}
+    assert set(result.signal(axs.signals.GATES)) == {
+        "hodgkin_huxley.m",
+        "hodgkin_huxley.h",
+        "hodgkin_huxley.n",
+    }
+    assert set(result.signal(axs.signals.CURRENTS)) == {
+        "I_na",
+        "I_k",
+        "I_l",
+    }
+    assert set(result.signal(axs.signals.CONDUCTANCES)) == {
+        "g_na",
+        "g_k",
+        "g_l",
+    }
+    for group in ("gates", "currents", "conductances"):
+        for values in result.recordings[group].values():
+            assert np.asarray(values).shape == (nt, nx)
+            assert np.all(np.isfinite(np.asarray(values)))

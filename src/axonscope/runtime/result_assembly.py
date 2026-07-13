@@ -26,6 +26,7 @@ def dispatch_results_from_batch(
     *,
     Vm: Any | None,
     t: Any,
+    recordings: dict[str, Any] | None,
     observations: dict[str, Any] | None,
     observer_definitions: tuple[Any, ...] | None,
     method: str,
@@ -60,6 +61,7 @@ def dispatch_results_from_batch(
             method=method,
         ):
             vm_values = None if Vm is None else np.asarray(Vm)
+            recording_values = _materialize_recordings(recordings)
         if vm_values is not None:
             record_benchmark_metadata(
                 **benchmark_array_metadata("Vm_host", vm_values, role="result_output"),
@@ -69,6 +71,7 @@ def dispatch_results_from_batch(
     if _can_keep_cohort_record(
         group,
         vm_values=vm_values,
+        recordings=recording_values,
         observations=observations,
         observer_definitions=observer_definitions,
         row_record_indices=row_record_indices,
@@ -97,6 +100,10 @@ def dispatch_results_from_batch(
                         kernel_record_indices=kernel_record_indices,
                     ),
                     observations=observations,
+                    recordings=_cohort_recordings(
+                        recording_values,
+                        batch_size=group.size,
+                    ),
                     group_size=group.size,
                     batch_kind=group.batch_kind,
                     geometry_shared=group.geometry_shared,
@@ -135,10 +142,13 @@ def dispatch_results_from_batch(
                     row_trim_count += 1
                 else:
                     record_indices = None
-            if row_vm is None:
-                record_indices = None
-
             row_observations = observations
+            row_recordings = _row_recordings(
+                recording_values,
+                row_index=row_index,
+                original_nx=original_nx if kernel_indices is None else None,
+                requested_indices=record_indices if kernel_indices is None else None,
+            )
             observations_are_batched = row_observations is not None
             if row_observations is None and observer_definitions and row_vm is not None:
                 row_observations = _posthoc_observations_for_row(
@@ -162,6 +172,7 @@ def dispatch_results_from_batch(
                     method=method,
                     record_indices=record_indices,
                     observations=row_observations,
+                    recordings=row_recordings,
                     observations_are_batched=observations_are_batched,
                     group_size=group.size,
                     batch_kind=group.batch_kind,
@@ -182,7 +193,7 @@ def trim_observations_batch(
     *,
     batch_size: int,
 ) -> dict[str, Any] | None:
-    """Drop backend-only padded rows from already materialized observations."""
+    """Drop runtime-only padded rows from already materialized observations."""
 
     if observations is None:
         return None
@@ -190,6 +201,42 @@ def trim_observations_batch(
         name: trim_observation_batch(value, batch_size=batch_size)
         for name, value in observations.items()
     }
+
+
+def trim_recordings_batch(
+    recordings: dict[str, Any] | None,
+    *,
+    batch_size: int,
+) -> dict[str, Any] | None:
+    """Drop runtime-only padded rows from batch-shaped recordings."""
+
+    if recordings is None:
+        return None
+    trimmed: dict[str, Any] = {}
+    for name, value in recordings.items():
+        if isinstance(value, dict):
+            trimmed[name] = {
+                subname: np.asarray(subvalue)[:batch_size]
+                for subname, subvalue in value.items()
+            }
+        else:
+            trimmed[name] = np.asarray(value)[:batch_size]
+    return trimmed
+
+
+def _materialize_recordings(recordings: dict[str, Any] | None) -> dict[str, Any] | None:
+    if recordings is None:
+        return None
+    materialized: dict[str, Any] = {}
+    for name, value in recordings.items():
+        if isinstance(value, dict):
+            materialized[name] = {
+                subname: np.asarray(subvalue)
+                for subname, subvalue in value.items()
+            }
+        else:
+            materialized[name] = np.asarray(value)
+    return materialized
 
 
 def trim_observation_batch(value: Any, *, batch_size: int) -> Any:
@@ -228,12 +275,19 @@ def _can_keep_cohort_record(
     group: DispatchGroup,
     *,
     vm_values: np.ndarray | None,
+    recordings: dict[str, Any] | None,
     observations: dict[str, Any] | None,
     observer_definitions: tuple[Any, ...] | None,
     row_record_indices: tuple[tuple[int, ...], ...] | None,
     kernel_record_indices: tuple[int, ...] | None,
 ) -> bool:
     if vm_values is None:
+        if recordings is not None:
+            if row_record_indices is not None:
+                return len(row_record_indices) == group.size
+            if kernel_record_indices is not None:
+                return not group.has_padding
+            return not group.has_padding
         return observations is not None
     if group.size <= 1:
         return False
@@ -244,6 +298,70 @@ def _can_keep_cohort_record(
     if kernel_record_indices is not None:
         return not group.has_padding
     return not group.has_padding
+
+
+def _cohort_recordings(
+    recordings: dict[str, Any] | None,
+    *,
+    batch_size: int,
+) -> tuple[dict[str, Any] | None, ...] | None:
+    if recordings is None:
+        return None
+    return tuple(
+        _row_recordings(
+            recordings,
+            row_index=row_index,
+            original_nx=None,
+            requested_indices=None,
+        )
+        for row_index in range(int(batch_size))
+    )
+
+
+def _row_recordings(
+    recordings: dict[str, Any] | None,
+    *,
+    row_index: int,
+    original_nx: int | None,
+    requested_indices: tuple[int, ...] | None,
+) -> dict[str, Any] | None:
+    if recordings is None:
+        return None
+    row: dict[str, Any] = {}
+    for name, value in recordings.items():
+        if isinstance(value, dict):
+            row[name] = {
+                subname: _slice_recording_array(
+                    subvalue,
+                    row_index=row_index,
+                    original_nx=original_nx,
+                    requested_indices=requested_indices,
+                )
+                for subname, subvalue in value.items()
+            }
+        else:
+            row[name] = _slice_recording_array(
+                value,
+                row_index=row_index,
+                original_nx=original_nx,
+                requested_indices=requested_indices,
+            )
+    return row
+
+
+def _slice_recording_array(
+    value: Any,
+    *,
+    row_index: int,
+    original_nx: int | None,
+    requested_indices: tuple[int, ...] | None,
+) -> np.ndarray:
+    arr = np.asarray(value)[row_index]
+    if arr.ndim >= 2 and original_nx is not None:
+        arr = arr[:, :original_nx]
+        if requested_indices is not None:
+            arr = np.take(arr, np.asarray(requested_indices), axis=1)
+    return arr
 
 
 def _cohort_record_indices(

@@ -18,14 +18,14 @@ def can_use_batch_route(
     """Return whether a dispatch group can use the current batch backend.
 
     A one-row group is still a valid batch of size one. Dense observable
-    recording is rejected until it is implemented on the batch route; it must
-    not select a separate scalar execution path.
+    recording is supported by the retained batch route; it must not select a
+    separate scalar execution path.
     """
 
-    del batch_options, observers
+    del batch_options, observers, record_observables
     if group.mode not in {"single", "double"}:
         return False
-    return not bool(record_observables)
+    return True
 
 
 __all__ = ["can_use_batch_route"]

@@ -240,7 +240,7 @@ class _BenchmarkSessionContext:
             memory_trace=self.options["memory_trace"],
             memory_top_n=int(self.options["memory_top_n"]),
             profile=bool(self.options["profile"]),
-            profile_backend=self.options["profile_backend"],
+            profile_runtime=self.options["profile_runtime"],
             profile_output=self.options["profile_output"],
             profile_create_perfetto=bool(self.options["profile_create_perfetto"]),
             jax_device_memory_profile=bool(self.options["jax_device_memory_profile"]),

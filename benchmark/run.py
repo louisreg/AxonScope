@@ -31,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--memory-top-n", type=int)
     parser.add_argument("--profile", action="store_true", dest="profile", default=None)
     parser.add_argument("--no-profile", action="store_false", dest="profile")
-    parser.add_argument("--profile-backend", choices=("auto", "jax", "none"))
+    parser.add_argument("--profile-runtime", choices=("auto", "jax", "none"))
     parser.add_argument("--profile-output")
     parser.add_argument(
         "--profile-create-perfetto",
@@ -77,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "output",
         "memory_trace",
         "memory_top_n",
-        "profile_backend",
+        "profile_runtime",
         "profile_output",
         "case_filter",
     ):

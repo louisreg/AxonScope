@@ -182,7 +182,7 @@ def test_one_row_population_estimate_uses_pool_recording_width():
     assert estimate.groups[0].route == "batch"
 
 
-def test_single_full_recording_estimate_requires_future_batch_observable_route():
+def test_single_full_recording_estimate_counts_dense_observable_outputs():
     axon = _hh(compartments=5)
     simulation = axs.AxonSimulation(
         axon,
@@ -191,8 +191,21 @@ def test_single_full_recording_estimate_requires_future_batch_observable_route()
         recording=axs.Recording.full(),
     )
 
-    with pytest.raises(NotImplementedError, match="Vm only"):
-        simulation.estimate()
+    estimate = simulation.estimate()
+
+    assert estimate.groups[0].route == "batch"
+    assert estimate.item("outputs.recorded_vm").shape == (1, 2, 5)
+    assert estimate.item("outputs.gates").shape == (1, 2, 5, 3)
+    assert estimate.item("outputs.currents").shape == (1, 2, 5, 3)
+    assert estimate.item("outputs.conductances").shape == (1, 2, 5, 3)
+    with pytest.raises(KeyError):
+        estimate.item("outputs.states")
+    assert estimate.retained_bytes >= (
+        estimate.item("outputs.recorded_vm").bytes
+        + estimate.item("outputs.gates").bytes
+        + estimate.item("outputs.currents").bytes
+        + estimate.item("outputs.conductances").bytes
+    )
 
 
 def test_runtime_device_and_precision_policy_are_typed_public_values():
@@ -324,11 +337,11 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
     assert route.single_cable is not None
     assert route.single_cable.cable == "single_cable"
     assert route.single_cable.requested == "jax_tridiagonal"
-    assert route.single_cable.backend_route == "jax_tridiagonal"
+    assert route.single_cable.runtime_route == "jax_tridiagonal"
     assert route.double_cable is not None
     assert route.double_cable.cable == "double_cable"
     assert route.double_cable.requested == "tiled_thomas"
-    assert route.double_cable.backend_route == "jax_triton_loop_xb"
+    assert route.double_cable.runtime_route == "jax_triton_loop_xb"
     assert route.double_cable.internal is True
     assert route.double_cable.options == (("block_b", 64),)
     assert route.for_cable("single") == route.single_cable

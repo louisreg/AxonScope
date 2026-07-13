@@ -703,6 +703,23 @@ def test_run_pool_reports_scaled_extracellular_waveform_lowering(tmp_path):
     assert metadata["extracellular_capability_supports_scaled_shared_waveform"] is True
     assert metadata["scaled_shared_waveform"] is True
     assert metadata["vstim_current_rows_lowering"] == "scaled_shared_waveform"
+    contract_event = next(
+        event
+        for event in report.events
+        if "prepared_input_contract_extracellular_mode" in event.metadata
+    )
+    contract_metadata = contract_event.metadata
+    assert contract_metadata["runtime_input_contract_cable"] == "single-cable"
+    assert contract_metadata["prepared_input_contract_batch_size"] == 2
+    assert (
+        contract_metadata["prepared_input_contract_intracellular_mode"]
+        == "sparse_current_clamp"
+    )
+    assert (
+        contract_metadata["prepared_input_contract_extracellular_mode"]
+        == "scaled_shared_waveform"
+    )
+    assert contract_metadata["prepared_input_contract_output_sink"] == "vm_raster"
 
 
 def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
@@ -1940,8 +1957,8 @@ def test_pool_dispatch_accepts_plain_progress(capsys):
     assert "batch   g0 1/1  recording plan" in captured.out
     assert "lower   g0 1/1  inputs" in captured.out
     assert "compiling JAX kernel if needed" in captured.out
-    assert "solving JAX kernel" in captured.out
-    assert "completed JAX kernel" in captured.out
+    assert "waiting for JAX work" in captured.out
+    assert "completed JAX work" in captured.out
     assert "result  g0 1/1  assemble batch output" in captured.out
     assert re.search(r"\d{2}:\d{2}:\d{2} .*building dispatch plan", captured.out)
     assert "Simulation run completed:" in captured.out
@@ -1976,7 +1993,7 @@ def test_pool_dispatch_plain_progress_reports_singleton_batch_route(capsys):
     assert "route   g0 1/1  compatible batch route" in captured.out
     assert "(batch" in captured.out
     assert "compiling JAX kernel if needed" in captured.out
-    assert "completed JAX kernel" in captured.out
+    assert "completed JAX work" in captured.out
     assert "assemble batch output" in captured.out
 
 

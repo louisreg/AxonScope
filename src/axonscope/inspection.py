@@ -670,11 +670,11 @@ def _inspect_cable_solver_route(
         if cable_route is not None:
             return cable_route
     platform = _execution_policy_platform(execution_policy)
-    auto_label = "auto(default-backend)" if platform is None else f"auto({platform})"
+    auto_label = "auto(default-runtime)" if platform is None else f"auto({platform})"
     return CableSolverRoute(
         cable=cable,
         requested=auto_label,
-        backend_route=auto_label,
+        runtime_route=auto_label,
     )
 
 

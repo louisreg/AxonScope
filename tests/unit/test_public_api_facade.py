@@ -138,7 +138,7 @@ def test_public_simulate_rejects_partial_final_time_step():
         _run_simulation(axon, duration=0.1 * axs.ms, dt=0.03 * axs.ms)
 
 
-def test_public_recording_full_requires_future_batch_observable_route():
+def test_public_recording_full_returns_named_observable_groups():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -146,13 +146,26 @@ def test_public_recording_full_requires_future_batch_observable_route():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="Vm only"):
-        _run_simulation(
-            axon,
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording.full(),
-        )
+    result = _run_simulation(
+        axon,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.full(),
+    )
+    row = result.single
+
+    assert result.recording_manifest.has(axs.signals.Vm)
+    assert result.recording_manifest.has(axs.signals.GATES)
+    assert result.recording_manifest.has(axs.signals.CURRENTS)
+    assert result.recording_manifest.has(axs.signals.CONDUCTANCES)
+    assert row.recordings is not None
+    assert row.signal(axs.signals.Vm).shape == (2, 11)
+    assert set(row.signal(axs.signals.GATES)) == {
+        "hodgkin_huxley.m",
+        "hodgkin_huxley.h",
+        "hodgkin_huxley.n",
+    }
+    assert result.signal(axs.signals.GATES)["hodgkin_huxley.m"].shape == (1, 2, 11)
 
 
 def test_observer_only_run_returns_compact_observations_without_vm():
@@ -465,7 +478,7 @@ def test_pool_extracellular_only_retained_output_skips_dense_zero_iinj():
     assert group_metadata["memory_estimate_components_nbytes"]["iinj_dense"] == 0
 
 
-def test_public_recording_observable_signals_require_future_batch_route():
+def test_public_recording_observable_signals_use_batch_route():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -473,13 +486,25 @@ def test_public_recording_observable_signals_require_future_batch_route():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="Vm only"):
-        _run_simulation(
-            axon,
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES]),
-        )
+    result = _run_simulation(
+        axon,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording(signals=[axs.signals.Vm, axs.signals.GATES]),
+    )
+    row = result.single
+
+    assert row.diagnostics["dispatch_method"] == "batch-single-cable"
+    assert result.recording_manifest.has(axs.signals.Vm)
+    assert result.recording_manifest.has(axs.signals.GATES)
+    assert row.recordings is not None
+    assert set(row.recordings) == {"Vm", "gates"}
+    assert row.signal(axs.signals.Vm).shape == (2, 11)
+    assert set(row.signal(axs.signals.GATES)) == {
+        "hodgkin_huxley.m",
+        "hodgkin_huxley.h",
+        "hodgkin_huxley.n",
+    }
 
 
 def test_public_signal_descriptors_are_extensible():
@@ -498,7 +523,7 @@ def test_public_signal_descriptors_are_extensible():
     assert custom.id == axs.SignalId("teaching_custom_signal")
 
 
-def test_public_single_recording_requires_voltage_with_observables():
+def test_public_single_recording_can_record_observables_without_voltage():
     axon = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -506,13 +531,26 @@ def test_public_single_recording_requires_voltage_with_observables():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="Vm only"):
-        _run_simulation(
-            axon,
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording.only(axs.signals.GATES),
-        )
+    result = _run_simulation(
+        axon,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.only(axs.signals.GATES),
+    )
+    row = result.single
+
+    assert row.diagnostics["dispatch_method"] == "batch-single-cable"
+    assert result.recording_manifest.has(axs.signals.GATES)
+    assert not result.recording_manifest.has(axs.signals.Vm)
+    assert row.recordings is not None
+    assert set(row.recordings) == {"gates"}
+    assert set(row.signal(axs.signals.GATES)) == {
+        "hodgkin_huxley.m",
+        "hodgkin_huxley.h",
+        "hodgkin_huxley.n",
+    }
+    with pytest.raises(ValueError, match="Vm recording"):
+        _ = row.Vm
 
 
 def test_public_single_recording_spatial_filter_uses_population_lifecycle():
@@ -905,7 +943,7 @@ def test_public_pool_recording_center_maps_to_batch_recording():
     assert fiber_result.record_indices == (5,)
 
 
-def test_public_multi_row_pool_recording_rejects_observable_groups():
+def test_public_multi_row_pool_recording_keeps_named_observable_groups():
     first = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
         diameter=0.5 * axs.um,
@@ -919,21 +957,29 @@ def test_public_multi_row_pool_recording_rejects_observable_groups():
         celsius=6.3 * axs.degC,
     )
 
-    with pytest.raises(NotImplementedError, match="pool recording currently supports Vm only"):
-        _run_simulation(
-            [first, second],
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording.full(),
-        )
+    full = _run_simulation(
+        [first, second],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.full(),
+    )
 
-    with pytest.raises(NotImplementedError, match="pool recording currently supports Vm only"):
-        _run_simulation(
-            [first, second],
-            duration=0.1 * axs.ms,
-            dt=0.05 * axs.ms,
-            recording=axs.Recording.only(axs.signals.GATES),
-        )
+    assert full.recording_manifest.has(axs.signals.Vm)
+    assert full.recording_manifest.has(axs.signals.GATES)
+    assert full.signal(axs.signals.Vm).shape == (2, 2, 11)
+    assert full.signal(axs.signals.GATES)["hodgkin_huxley.m"].shape == (2, 2, 11)
+
+    gates_only = _run_simulation(
+        [first, second],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.only(axs.signals.GATES),
+    )
+
+    assert gates_only.recording_manifest.has(axs.signals.GATES)
+    assert not gates_only.recording_manifest.has(axs.signals.Vm)
+    assert gates_only.signal(axs.signals.GATES)["hodgkin_huxley.m"].shape == (2, 2, 11)
+    assert all(row.recordings is not None and set(row.recordings) == {"gates"} for row in gates_only)
 
 
 def test_public_pool_recording_rejects_unwired_filters():

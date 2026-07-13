@@ -1,4 +1,4 @@
-"""JAX backend support for host-side benchmark, estimate, and inspection tools."""
+"""JAX runtime support for host-side benchmark, estimate, and inspection tools."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def benchmark_plan_input_lowering(
     kernel_options: BatchOptions,
     observers: tuple[Any, ...] | None,
 ) -> PlannedInputLowering:
-    """Return backend input-lowering formats without materializing arrays."""
+    """Return runtime input-lowering formats without materializing arrays."""
 
     return plan_input_lowering(
         group_mode=group_mode,
@@ -37,7 +37,7 @@ def benchmark_membrane_output_names(
     model: Any,
     method_name: str,
 ) -> tuple[str, ...]:
-    """Return membrane output names, compiling the backend model if needed."""
+    """Return membrane output names, compiling the JAX model if needed."""
 
     method = getattr(model, method_name, None)
     if not callable(method):
@@ -75,7 +75,7 @@ class JaxBenchmarkProfile:
         if not self.active:
             return {
                 "enabled": True,
-                "backend": "jax",
+                "runtime": "jax",
                 "output": str(self.output_dir),
                 "stopped": False,
             }
@@ -85,7 +85,7 @@ class JaxBenchmarkProfile:
         self.active = False
         return {
             "enabled": True,
-            "backend": "jax",
+            "runtime": "jax",
             "output": str(self.output_dir),
             "stopped": True,
             "view_hint": f"tensorboard --logdir {self.output_dir}",
@@ -127,7 +127,7 @@ def benchmark_save_device_memory_profile(output_path: str | Path) -> dict[str, A
     jax.profiler.save_device_memory_profile(str(path))
     return {
         "enabled": True,
-        "backend": "jax",
+        "runtime": "jax",
         "path": str(path),
         "format": "pprof",
         "view_hint": f"pprof --web {path}",

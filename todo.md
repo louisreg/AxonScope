@@ -35,6 +35,11 @@ Current state:
 - P11 is closed for the current JAX runtime, benchmark, and solver-policy
   stabilization pass. Deferred runtime, benchmark, and solver-policy work is
   tracked in `docs/architecture/p11_closeout_2026_07_12.md`.
+- P12 is closed for runtime/JAX cleanup, targeted GPU warm/cold optimization,
+  and Graphify-guided runtime dead-code cleanup. Future work keeps broader
+  dense-observable benchmarks, persistent compile caches, specialized
+  double-cable JITs, GPU async scheduling, and larger public speed-claim
+  evidence out of the P12 closeout path.
 - Current solver-policy decisions are tracked in
   `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
   CPU double-cable keeps only Thomas as a production route; GPU double-cable
@@ -85,7 +90,7 @@ improvements.
   local CPU plus Kaggle GPU smoke gate. This validates that the initial
   runtime-contract cleanup still runs on the P11-sensitive single-cable and
   double-cable observer-only paths.
-- [ ] P12B runtime/JAX cleanup:
+- [x] P12B runtime/JAX cleanup:
   use `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md` as the active
   migration note. Homogenize non-solver preparation, recording/observer
   lowering, input semantics, benchmark metadata, and result assembly between
@@ -135,8 +140,11 @@ improvements.
     with explicit signal names, result manifests, memory accounting, focused
     tests, and a runnable public example. Do not reintroduce scalar fallback
     execution for this.
-  - [ ] Add fresh benchmark evidence for dense observable recording after the
-    hotpath benchmark surface for P12B is stable.
+  - [x] Dense observable recording was restored as a public batch-native path,
+    but its dedicated benchmark evidence is deferred out of P12 because the
+    P12 closeout target shifted to observer-only hotpath and cold-start
+    runtime cleanup. Benchmark dense observables when they become an active
+    performance target rather than holding P12 open.
 - [x] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
   host-side code. Delete unused paths, keep solver/kernel-specific code inside
   the JAX runtime, and move semantic-only reusable contracts to
@@ -197,6 +205,42 @@ improvements.
     `runtime/memory_estimates.py`.
   - [x] Benchmarking interface and runtime-specific profiling boundary:
     `runtime/benchmarking.py`.
+- [x] Run a final Graphify-guided runtime cleanup pass before closing P12.
+  Focus on `src/axonscope/runtime/` and `src/axonscope/runtime/jax/`, plus only
+  the direct public boundaries that call into runtime (`simulation.py`,
+  `performance.py`, `inspection.py`, and dispatcher/result assembly) when they
+  expose duplication or dead routes. Inspect runtime high-noise hubs, thin
+  communities, isolated nodes, and parallel modules that look duplicated, then
+  confirm candidates with direct usage search, `vulture`, tests, and examples
+  before deleting or moving code. The 2026-07-13 `graphify cluster-only` refresh
+  wrote `graphify-out/GRAPH_REPORT.md` from commit `8a97deb6` with 8906 nodes,
+  20840 edges, 484 communities, 77 thin communities omitted from the report,
+  and 1077 isolated nodes; filter it down to runtime cleanup evidence, not a
+  repo-wide cleanup pass.
+  First pass: Graphify plus usage search found
+  `runtime/jax/cable_geometry.py::extracellular_absolute_arrays` unused after
+  the host-side `extracellular_runtime_numpy` path took over double-cable
+  absolute-array preparation, so the JAX helper was deleted. `shape_bucketing`,
+  runtime memory snapshots, recording/output lowering, runtime caches, and
+  membrane backend construction remain used or intentionally covered. After the
+  edit, `graphify update` rebuilt `graphify-out/GRAPH_REPORT.md` with 8935
+  nodes, 20942 edges, and 467 communities.
+  Second pass: removed runtime helpers whose only live callers were tests,
+  legacy benchmarks, or replaced dense-preparation paths:
+  `build_membrane_backend_from_axon`,
+  `precompute_extracellular_potential_mV`,
+  `build_vstim_initial_previous_batch`, and the dense direct-footprint Vstim
+  helpers (`build_footprint_vstim_batch`,
+  `build_footprint_vstim_midpoint_batch`,
+  `build_footprint_vstim_initial_previous_batch`, `FootprintEngine`, and their
+  private batch-shape helpers). Tests now use active primitives:
+  `compile_axon_membrane`/`backend_from_membrane`,
+  `build_extracellular_potential_fn` plus
+  `sample_extracellular_potential_mV`, and
+  `build_vstim_midpoint_and_initial_previous_batch`. A follow-up
+  Graphify update rebuilt the runtime map with 8918 nodes, 20864 edges, and
+  466 communities. The final usage scan found zero public runtime definitions
+  whose only remaining callers were tests or legacy benchmarks.
 - [x] Define and enforce the runtime input contract before implementing
   `axs.runtime.numpy`: prepared batches must expose one cable formulation, one
   padded `Nx`, a dtype/time grid, typed per-cable solver policy, recording and
@@ -204,7 +248,7 @@ improvements.
   (`zero`, `shared_current`, `scaled_shared_waveform`, `current_table`,
   `dense`). The JAX runner now validates and records a runtime-neutral prepared
   input summary before kernel enqueue.
-- [ ] Before claiming P12 cleanup has no performance loss, re-run the relevant
+- [x] Before claiming P12 cleanup has no performance loss, re-run the relevant
   P11 hotpath/realistic benchmark slices for single-cable and double-cable,
   CPU/GPU where applicable, with fresh artifact directories and git metadata.
   Fresh local CPU guard rerun on 2026-07-12 wrote
@@ -215,27 +259,34 @@ improvements.
   the performance-loss claim.
   Kaggle P100 GPU rerun on commit `aab5384` wrote
   `benchmark/results/p12_final_gpu_single_aab5384` and
-  `benchmark/results/p12_final_gpu_double_jt_aab5384`. The single-cable cold
-  path improved, but warm single-cable is still dispatch-bound (`kernel.wait`
-  near zero). Double-cable with `jax-triton` is closer to the warm solver-bound
-  target, with dispatch and wait both around 4 ms in repeat runs. Keep this item
-  open until larger P11 hot-path/realistic slices confirm the pattern.
-- [ ] Post-P11 runtime/benchmark backlog:
+  `benchmark/results/p12_final_gpu_double_jt_aab5384`. Later Kaggle P100
+  1024-axon runs and targeted P12 optimization runs confirmed the current
+  closeout state: single-cable cold improved from
+  `benchmark/results/kaggle/20260713_111647_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axsp12-cold-single`
+  to
+  `benchmark/results/kaggle/20260713_113800_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axsp12-cold-single-hostzero`,
+  while warm single-cable remains dispatch-bound and double-cable warm/cold is
+  good enough for P12 after rejected trim-static and batch-size experiments.
+  Broader P11-style benchmark slices remain future evidence for public speed
+  claims, not a blocker for closing P12 runtime cleanup.
+- [x] Post-P11 runtime/benchmark backlog:
   continue only the deferred items tracked in
   `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
   double-cable Triton/tiled-Thomas policy thresholds, shared-waveform/scaled
   extracellular input lowering, adaptive time-chunk policy, GPU dispatch
   scheduling, model/compiler optimizer closeout, dense fallback decisions, and
-  NRV validation only when numerical behavior changes.
-- [ ] Evaluate targeted GPU kernels for remaining non-solver device-side
+  NRV validation only when numerical behavior changes. This backlog is
+  explicitly deferred out of P12.
+- [x] Evaluate targeted GPU kernels for remaining non-solver device-side
   bottlenecks, without turning the whole host/runtime path into Triton:
   first prototype an `extracellular_scaled_shared_waveform` path that writes
   forcing directly in the solver layout, then prototype observer-only
   VmRaster/probe packing that extracts or aggregates on GPU without CPU
   round-trips. Keep this behind the JAX GPU runtime boundary and accept it only
   with before/after stage benchmarks showing that the cost is device-side and
-  not just Python/JIT/transfer overhead.
-- [ ] After the runtime contract, benchmark surface, and hot-path cleanup are
+  not just Python/JIT/transfer overhead. P12 did not identify an obvious small,
+  safe GPU-kernel promotion; keep this as a future optimization track.
+- [x] After the runtime contract, benchmark surface, and hot-path cleanup are
   stable, revisit cold-run optimization separately. Focus on JIT/lowering,
   membrane/runtime preparation caches, pool rebuild costs, and optional
   persistent compilation caches; do not mix cold-start policy decisions into
@@ -284,7 +335,31 @@ improvements.
   matching 1024-axon double-cable NumPy run is
   `benchmark/results/kaggle/20260713_003531_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-double-numpy-1a1183e`;
   its all-phase time is still dominated by `kernel.enqueue` and
-  `kernel.dispatch_jax`.
+  `kernel.dispatch_jax`. Final targeted P12 cold runs then kept the single-cable
+  wins and rejected double-cable trim-static/batch-size tweaks as not worth
+  carrying. Persistent compile caches, larger policy sweeps, and specialized
+  double-cable JITs remain future work.
+
+### P13 - Evaluation Du Time Chunk
+
+- [ ] Evaluate `time_chunk_steps` as a first-class runtime/performance policy
+  instead of a hidden observer-only default.
+- [ ] Benchmark observer-only VmRaster routes across `time_chunk_steps=None`,
+  128, 256, 512, 1024, and full-duration chunks for representative
+  single-cable and double-cable groups; separate cold compile/lowering,
+  warm solve, host enqueue/dispatch, `kernel.wait`, observer finalization, and
+  memory/RSS.
+- [ ] Compare CPU and GPU behavior separately. On GPU, prioritize whether
+  chunking improves memory pressure without making warm runs less solver-bound;
+  on CPU, check whether chunking mostly adds Python/JAX dispatch overhead.
+- [ ] Evaluate dense Vm/full recording separately from VmRaster. Full Vm may
+  still need output/assembly optimizations, but it should not drive the
+  default observer-only chunking policy.
+- [ ] Decide the public/internal policy knobs: keep the default, change the
+  default, expose an execution-policy option, or make the default adaptive from
+  `Nt`, `Nx`, batch size, output sink, and device.
+- [ ] Keep progress logs explicit: report time chunks as time chunks, and
+  reserve wait/synchronization wording for the final JAX/device wait.
 
 ### P3 - Documentation And Examples
 

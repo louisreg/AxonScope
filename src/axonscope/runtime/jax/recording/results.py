@@ -13,7 +13,10 @@ from axonscope.runtime.jax.recording.observer import (
     finalize_vm_raster_state,
     trim_pending_vm_raster_observation,
 )
-from axonscope.runtime.result_assembly import trim_observations_batch
+from axonscope.runtime.result_assembly import (
+    trim_observations_batch,
+    trim_recordings_batch,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class BatchKernelResult:
 
     Vm: Array | None
     t: Array
+    recordings: dict[str, Any] | None = None
     observations: dict[str, object] | None = None
     pending_observation: PendingVmRasterObservation | None = None
 
@@ -38,10 +42,12 @@ def trim_batch_kernel_result(
         "results.trim_padded_batch",
         batch_size=size,
         has_vm=out.Vm is not None,
+        has_recordings=out.recordings is not None,
         has_observations=out.observations is not None,
         has_pending_observation=out.pending_observation is not None,
     ):
         Vm = None if out.Vm is None else out.Vm[:size]
+        recordings = trim_recordings_batch(out.recordings, batch_size=size)
         observations = trim_observations_batch(out.observations, batch_size=size)
         pending = (
             None
@@ -54,6 +60,7 @@ def trim_batch_kernel_result(
     return BatchKernelResult(
         Vm=Vm,
         t=out.t,
+        recordings=recordings,
         observations=observations,
         pending_observation=pending,
     )
@@ -64,6 +71,11 @@ def batch_wait_target(out: BatchKernelResult) -> Any:
 
     if out.Vm is not None:
         return out.Vm
+    if out.recordings:
+        first_recording = next(iter(out.recordings.values()))
+        if isinstance(first_recording, dict):
+            return next(iter(first_recording.values()))
+        return first_recording
     if out.pending_observation is not None:
         return out.pending_observation.state
     if not out.observations:
@@ -108,6 +120,7 @@ def finalize_pending_batch_observation(
     return BatchKernelResult(
         Vm=out.Vm,
         t=out.t,
+        recordings=out.recordings,
         observations=observations,
         pending_observation=None,
     )

@@ -1,4 +1,4 @@
-"""Run a reproducible time-chunk policy sweep for P11B optimization triage."""
+"""Run a reproducible time-chunk policy sweep for runtime optimization triage."""
 
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ from benchmark.workloads.curve_options import PRESETS
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICIES = ("default", "unchunked", "50", "250", "500", "1000")
+DEFAULT_POLICIES = ("default", "unchunked", "128", "256", "512", "1024")
 RECORDING_MODES = ("full_vm", "probe_vm", "observer_only")
+DEFAULT_CABLES = ("single_cable", "double_cable")
 
 SUMMARY_FIELDS = (
     "policy",
@@ -33,6 +34,7 @@ SUMMARY_FIELDS = (
     "script",
     "platform",
     "recording",
+    "cable",
     "n_axons",
     "nx",
     "tsim",
@@ -149,7 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         help=(
             "Comma-separated policies to run. Defaults to "
-            "default,unchunked,50,250,500,1000."
+            "default,unchunked,128,256,512,1024."
         ),
     )
     parser.add_argument(
@@ -170,6 +172,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cable",
+        choices=DEFAULT_CABLES,
+        help=(
+            "Single cable formulation to forward to the curve script. Kept for "
+            "compatibility with older one-cable campaign commands."
+        ),
+    )
+    parser.add_argument(
+        "--cables",
+        action="append",
+        help="Comma-separated cable formulations to sweep: single_cable,double_cable.",
+    )
+    parser.add_argument(
+        "--n-axons",
+        action="append",
+        help=(
+            "Comma-separated Naxon values to sweep. When omitted, the concrete "
+            "curve preset/default is used."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("benchmark/results/p11b_time_chunk_sweep"),
@@ -184,15 +207,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         policies = parse_policies(args.policies)
         recordings = parse_recordings(args.recordings, args.recording)
+        cables = parse_cables(args.cables, args.cable)
+        n_axons_values = parse_n_axons(args.n_axons)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
     args.output.mkdir(parents=True, exist_ok=True)
-    runs = build_runs(args, policies, recordings, extra)
+    runs = build_runs(args, policies, recordings, cables, n_axons_values, extra)
     write_manifest(
         args.output / "time_chunk_sweep_manifest.json",
         args,
         policies,
         recordings,
+        cables,
+        n_axons_values,
         runs,
         extra,
     )
@@ -276,6 +303,46 @@ def parse_recordings(
     return tuple(recordings)
 
 
+def parse_cables(
+    values: Sequence[str] | None,
+    cable: str | None,
+) -> tuple[str, ...]:
+    cables: list[str] = []
+    if cable:
+        cables.append(cable)
+    for value in values or ():
+        for item in str(value).split(","):
+            mode = item.strip().lower()
+            if not mode:
+                continue
+            if mode not in DEFAULT_CABLES:
+                allowed = ", ".join(DEFAULT_CABLES)
+                raise argparse.ArgumentTypeError(
+                    f"cable formulations must be one of: {allowed}."
+                )
+            if mode not in cables:
+                cables.append(mode)
+    return tuple(cables)
+
+
+def parse_n_axons(values: Sequence[str] | None) -> tuple[int, ...]:
+    parsed: list[int] = []
+    for value in values or ():
+        for item in str(value).split(","):
+            text = item.strip()
+            if not text:
+                continue
+            try:
+                count = int(text)
+            except ValueError as exc:
+                raise argparse.ArgumentTypeError("--n-axons values must be integers.") from exc
+            if count < 1:
+                raise argparse.ArgumentTypeError("--n-axons values must be >= 1.")
+            if count not in parsed:
+                parsed.append(count)
+    return tuple(parsed)
+
+
 def normalize_policy(value: object) -> str:
     text = str(value).strip().lower()
     if text in {"", "default"}:
@@ -297,46 +364,79 @@ def build_runs(
     args: argparse.Namespace,
     policies: Sequence[str],
     recordings: Sequence[str],
+    cables: Sequence[str],
+    n_axons_values: Sequence[int],
     extra: Sequence[str],
 ) -> list[dict[str, Any]]:
     runs = []
     script_extra = normalize_script_extra(args.script, extra)
     recording_modes: Sequence[str | None] = tuple(recordings) or (None,)
-    include_recording_dir = len(recording_modes) > 1
+    cable_modes: Sequence[str | None] = tuple(cables) or (None,)
+    n_axons_modes: Sequence[int | None] = tuple(n_axons_values) or (None,)
     for recording in recording_modes:
-        for policy in policies:
-            run_dir = args.output / policy_token(policy)
-            if include_recording_dir:
-                assert recording is not None
-                run_dir = args.output / recording / policy_token(policy)
-            command = [
-                args.python,
-                "benchmark/run.py",
-                "--script",
-                args.script,
-                "--preset",
-                args.preset,
-                "--platform",
-                args.platform,
-                "--output",
-                str(run_dir),
-                "--time-chunk-steps",
-                policy,
-            ]
-            if recording is not None:
-                command.extend(["--recording", recording])
-            if args.resume:
-                command.append("--resume")
-            command.extend(script_extra)
-            runs.append(
-                {
-                    "policy": policy,
-                    "recording": "" if recording is None else recording,
-                    "run_dir": str(run_dir),
-                    "command": command,
-                }
-            )
+        for cable in cable_modes:
+            for n_axons in n_axons_modes:
+                for policy in policies:
+                    run_dir = _run_dir(
+                        args.output,
+                        recording=recording,
+                        cable=cable,
+                        n_axons=n_axons,
+                        policy=policy,
+                    )
+                    command = [
+                        args.python,
+                        "benchmark/run.py",
+                        "--script",
+                        args.script,
+                        "--preset",
+                        args.preset,
+                        "--platform",
+                        args.platform,
+                        "--output",
+                        str(run_dir),
+                        "--time-chunk-steps",
+                        policy,
+                    ]
+                    if recording is not None:
+                        command.extend(["--recording", recording])
+                    if cable is not None:
+                        command.extend(["--cable", cable])
+                    if n_axons is not None:
+                        command.extend(["--n-axons", str(n_axons)])
+                    if args.resume:
+                        command.append("--resume")
+                    command.extend(script_extra)
+                    runs.append(
+                        {
+                            "policy": policy,
+                            "recording": "" if recording is None else recording,
+                            "cable": "" if cable is None else cable,
+                            "n_axons": "" if n_axons is None else n_axons,
+                            "run_dir": str(run_dir),
+                            "command": command,
+                        }
+                    )
     return runs
+
+
+def _run_dir(
+    output: Path,
+    *,
+    recording: str | None,
+    cable: str | None,
+    n_axons: int | None,
+    policy: str,
+) -> Path:
+    parts = []
+    if recording is not None:
+        parts.append(recording)
+    if cable is not None:
+        parts.append(cable)
+    if n_axons is not None:
+        parts.append(f"n{n_axons}")
+    parts.append(policy_token(policy))
+    return output.joinpath(*parts)
 
 
 def normalize_script_extra(script: str, extra: Sequence[str]) -> list[str]:
@@ -373,8 +473,20 @@ def normalize_script_extra(script: str, extra: Sequence[str]) -> list[str]:
 
 def run_label(run: Mapping[str, Any]) -> str:
     recording = str(run.get("recording") or "")
+    cable = str(run.get("cable") or "")
+    n_axons = str(run.get("n_axons") or "")
     policy = str(run.get("policy") or "")
-    return f"{recording}/{policy}" if recording else policy
+    parts = [
+        part
+        for part in (
+            recording,
+            cable,
+            f"n{n_axons}" if n_axons else "",
+            policy,
+        )
+        if part
+    ]
+    return "/".join(parts)
 
 
 def policy_token(policy: str) -> str:
@@ -415,6 +527,7 @@ def summarize_run(
         "script": manifest.get("script", ""),
         "platform": options.get("platform", ""),
         "recording": options.get("recording", recording),
+        "cable": options.get("cable", ""),
         "n_axons": options.get("n_axons", ""),
         "nx": options.get("nx", ""),
         "tsim": options.get("tsim", ""),
@@ -942,8 +1055,8 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     lines = [
         "# Time Chunk Sweep",
         "",
-        "| recording | policy | status | build pool ms | construct ms | curve.simulate ms | analyze ms | prep/chunk ms | dispatch_jax ms | wait ms | combine ms | finalize/to-host ms | result/to-host ms | dispatch count | scope | chunk steps |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| recording | cable | Naxon | policy | status | build pool ms | construct ms | curve.simulate ms | analyze ms | prep/chunk ms | dispatch_jax ms | wait ms | combine ms | finalize/to-host ms | result/to-host ms | dispatch count | scope | chunk steps |",
+        "| --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for row in rows:
         prep_ms = (
@@ -966,8 +1079,10 @@ def write_report(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         result_ms = float(row.get("repeat_results_split_batch_ms") or 0.0)
         result_to_host_ms = float(row.get("repeat_results_materialize_vm_to_host_ms") or 0.0)
         lines.append(
-            "| {recording} | {policy} | {status} | {pool:.3f} | {construct:.3f} | {curve:.3f} | {analyze:.3f} | {prep:.3f} | {dispatch:.3f} | {wait:.3f} | {combine:.3f} | {finalize:.3f}/{finalize_to_host:.3f} | {result:.3f}/{result_to_host:.3f} | {count} | {scope} | {chunks} |".format(
+            "| {recording} | {cable} | {n_axons} | {policy} | {status} | {pool:.3f} | {construct:.3f} | {curve:.3f} | {analyze:.3f} | {prep:.3f} | {dispatch:.3f} | {wait:.3f} | {combine:.3f} | {finalize:.3f}/{finalize_to_host:.3f} | {result:.3f}/{result_to_host:.3f} | {count} | {scope} | {chunks} |".format(
                 recording=row.get("recording", ""),
+                cable=row.get("cable", ""),
+                n_axons=row.get("n_axons", ""),
                 policy=row.get("policy", ""),
                 status=row.get("status", ""),
                 pool=float(row.get("repeat_curve_build_pool_ms") or 0.0),
@@ -995,6 +1110,8 @@ def write_manifest(
     args: argparse.Namespace,
     policies: Sequence[str],
     recordings: Sequence[str],
+    cables: Sequence[str],
+    n_axons_values: Sequence[int],
     runs: Sequence[Mapping[str, Any]],
     extra: Sequence[str],
 ) -> None:
@@ -1006,6 +1123,8 @@ def write_manifest(
         "output": str(args.output),
         "policies": list(policies),
         "recordings": list(recordings),
+        "cables": list(cables),
+        "n_axons": list(n_axons_values),
         "extra_args": list(extra),
         "runs": list(runs),
     }

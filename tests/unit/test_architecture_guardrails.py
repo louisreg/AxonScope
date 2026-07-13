@@ -1542,7 +1542,6 @@ def test_solver_facade_exposes_only_stable_solver_surface():
         "build_solver_axon",
         "compile_axon_membrane",
         "compile_membrane_model",
-        "precompute_extracellular_potential_mV",
         "precompute_intracellular_current_density",
         "prepare_solver_runtime",
     }

@@ -703,6 +703,7 @@ class ConductionVelocity:
     peak_height: Any | None = (-20.0, 70.0)
     min_width: Any | None = 0.1
     spatial_filter: str = "nodes_if_available"
+    target: PositionSelector = ALL
     signal: Signal[Any] = MEMBRANE_VOLTAGE
     name: str = "conduction_velocity"
     algorithm_version: str = "conduction_velocity_v1"
@@ -726,17 +727,25 @@ class ConductionVelocity:
         return _evaluate_rows(self, result, self._evaluate_one, unit="meter / second")
 
     def _evaluate_one(self, row: Any) -> tuple[float, AnalysisStatus, str, None]:
-        _require_membrane_voltage(row, self.signal)
-        value = float(
-            conduction_velocity(
-                row,
-                threshold_mV=self.threshold,
-                min_distance_ms=self.min_distance,
-                peak_height_mV=self.peak_height,
-                min_width_ms=self.min_width,
-                spatial_filter=self.spatial_filter,
+        try:
+            _require_membrane_voltage(row, self.signal)
+        except MissingAnalysisInputError:
+            value = self._evaluate_one_from_vm_raster(row)
+        except ValueError as exc:
+            if not _is_missing_input_error(exc):
+                raise
+            value = self._evaluate_one_from_vm_raster(row)
+        else:
+            value = float(
+                conduction_velocity(
+                    row,
+                    threshold_mV=self.threshold,
+                    min_distance_ms=self.min_distance,
+                    peak_height_mV=self.peak_height,
+                    min_width_ms=self.min_width,
+                    spatial_filter=self.spatial_filter,
+                )
             )
-        )
         if value <= 0.0:
             return (
                 np.nan,
@@ -745,6 +754,26 @@ class ConductionVelocity:
                 None,
             )
         return value, AnalysisStatus.VALID, "", None
+
+    def _evaluate_one_from_vm_raster(self, row: Any) -> float:
+        from axonscope.results.vm_raster import (
+            VM_RASTER_OBSERVATION_KEY,
+            conduction_velocity_values_from_vm_raster,
+        )
+
+        observations = getattr(row, "observations", None)
+        if observations is None or VM_RASTER_OBSERVATION_KEY not in observations:
+            raise _missing(
+                "analysis requires a membrane-voltage recording or VmRaster observation.",
+                signal=self.signal,
+            )
+        values = conduction_velocity_values_from_vm_raster(
+            observations[VM_RASTER_OBSERVATION_KEY],
+            self,
+        )
+        if np.asarray(values).shape != (1,):
+            raise ValueError("row VmRaster observation must contain exactly one batch row.")
+        return float(np.asarray(values, dtype=float)[0])
 
 
 __all__ = [

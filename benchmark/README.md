@@ -193,7 +193,7 @@ with axs.benchmark(
     memory_trace="all",
     memory_top_n=10,
     profile=True,
-    profile_backend="jax",
+    profile_runtime="jax",
     jax_device_memory_profile=True,
 ):
     result = axs.AxonSimulation(...).run()
@@ -212,7 +212,7 @@ session = axs.enable_benchmark(
     print_summary=False,
     memory_trace="rss",
     profile=True,
-    profile_backend="auto",
+    profile_runtime="auto",
 )
 try:
     result = axs.AxonSimulation(...).run()

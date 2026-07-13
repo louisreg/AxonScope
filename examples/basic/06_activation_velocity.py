@@ -73,22 +73,28 @@ def main() -> None:
 
     # Pool execution keeps the public code simple. Compatible rows are batched
     # internally; the user still receives one result view per input axon.
+    # Velocity can be computed from a solver-side VmRaster observer, avoiding a
+    # dense full-Vm recording while still covering all intrinsic positions.
+    velocity = axs.analysis.ConductionVelocity()
     hh_results = axs.AxonSimulation(
         hh_simulations,
         duration=10.0 * axs.ms,
         dt=0.001 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=(velocity,),
         progress="plain",
     ).run()
     mrg_results = axs.AxonSimulation(
         mrg_simulations,
         duration=5.0 * axs.ms,
         dt=0.001 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=(velocity,),
         progress="plain",
     ).run()
 
-    # The structured analysis layer reads recorded Vm, keeps statuses, and
-    # exposes the same text/dataframe/plot surface used by reports.
-    velocity = axs.analysis.ConductionVelocity()
+    # The structured analysis layer reads recorded Vm or VmRaster observations,
+    # keeps statuses, and exposes the same text/dataframe/plot surface used by reports.
     hh_velocity = hh_results.analyze(velocity)
     mrg_velocity = mrg_results.analyze(velocity)
     hh_speeds = hh_velocity.values.astype(float)

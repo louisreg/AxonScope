@@ -31,7 +31,7 @@ class CableSolverRoute:
 
     cable: str
     requested: str | None
-    backend_route: str | None
+    runtime_route: str | None
     internal: bool = False
     options: tuple[tuple[str, Any], ...] = ()
 
@@ -256,6 +256,24 @@ def benchmark_save_device_memory_profile(
     raise ValueError(f"Unsupported benchmark profile runtime: {runtime!r}.")
 
 
+def benchmark_device_memory_snapshot(
+    *,
+    runtime: str = "auto",
+) -> dict[str, Any]:
+    """Return a concrete-runtime device-memory snapshot."""
+
+    resolved = _resolve_benchmark_profile_runtime(runtime)
+    if resolved is None:
+        return {"available": False}
+    if resolved == "jax":
+        from axonscope.runtime.jax.benchmarking.memory import (
+            benchmark_device_memory_snapshot as snapshot,
+        )
+
+        return snapshot()
+    raise ValueError(f"Unsupported benchmark memory runtime: {runtime!r}.")
+
+
 def _resolve_benchmark_profile_runtime(runtime: str) -> str | None:
     normalized = str(runtime).lower()
     if normalized == "none":
@@ -287,12 +305,12 @@ def solver_route_from_execution_policy(
         single_cable=CableSolverRoute(
             cable="single_cable",
             requested=_solver_request_label(solver_policy.single_cable),
-            backend_route=solver_engine.single_cable_solver,
+            runtime_route=solver_engine.single_cable_solver,
         ),
         double_cable=CableSolverRoute(
             cable="double_cable",
             requested=_solver_request_label(solver_policy.double_cable),
-            backend_route=solver_engine.double_cable_block_solver,
+            runtime_route=solver_engine.double_cable_block_solver,
             internal=solver_engine.allow_internal_double_cable_block_solver,
             options=_double_cable_solver_options(
                 solver_policy.double_cable,
@@ -341,6 +359,7 @@ def run_batch_group(
     batch_options: BatchOptions,
     solver_options: Any | None,
     observers: Sequence[Any] | None,
+    recording_plan: RecordingPlan | None = None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ):
@@ -355,6 +374,7 @@ def run_batch_group(
         batch_options=batch_options,
         solver_options=solver_options,
         observers=observers,
+        recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
     )
@@ -368,6 +388,7 @@ __all__ = [
     "benchmark_membrane_output_names",
     "benchmark_observer_output_label",
     "benchmark_observers_are_vm_raster_compatible",
+    "benchmark_device_memory_snapshot",
     "benchmark_plan_input_lowering",
     "benchmark_profile_start",
     "benchmark_profile_stop",

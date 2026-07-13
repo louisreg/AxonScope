@@ -12,10 +12,7 @@ import axonscope.runtime.jax.kernels.single_cable as single_cable_kernels
 from axonscope.analytical import PointSourceElectrode
 from axonscope.runtime.jax.inputs.extracellular import (
     build_factorized_vstim_midpoint_batch,
-    build_footprint_vstim_initial_previous_batch,
-    build_footprint_vstim_midpoint_batch,
     build_vstim_batch,
-    build_vstim_initial_previous_batch,
     build_vstim_midpoint_and_initial_previous_batch,
     build_vstim_midpoint_batch,
 )
@@ -421,11 +418,11 @@ def test_combined_vstim_builder_matches_separate_double_cable_inputs():
         tsim_ms=tsim,
         dt_ms=dt,
     )
-    separate_previous = build_vstim_initial_previous_batch(
+    separate_previous = build_vstim_batch(
         axon,
         [stimulations, stimulations],
-        dt_ms=dt,
-    )
+        t_ms=jnp.asarray([-0.5 * dt]),
+    )[:, 0, :]
     combined_mid, combined_previous = build_vstim_midpoint_and_initial_previous_batch(
         axon,
         [stimulations, stimulations],
@@ -937,56 +934,6 @@ def test_single_cable_factorized_recorded_vm_avoids_dense_vstim_materialization(
     )
 
 
-def test_build_footprint_vstim_batch_matches_generic_stimulation_builder():
-    axon = hh_extracellular_axon()
-    base_stimulation = axon.extracellular_stimulations[0]
-    drive = base_stimulation.drives[0]
-    tsim = 1.2
-    dt = 0.01
-    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
-    shifted_x_m = base_x_m + 25e-6
-    x_positions_m = np.stack([base_x_m, shifted_x_m])
-    footprint = np.stack(
-        [
-            drive_footprint_for_positions(drive, base_x_m),
-            drive_footprint_for_positions(drive, shifted_x_m),
-        ]
-    )
-
-    generic = build_vstim_midpoint_batch(
-        axon,
-        [
-            base_stimulation,
-            scale_extracellular_stimulations((base_stimulation,), 0.5),
-        ],
-        tsim_ms=tsim,
-        dt_ms=dt,
-        x_positions_m=x_positions_m,
-    )
-    from_footprint = build_footprint_vstim_midpoint_batch(
-        stimulus=drive.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=jnp.asarray([1.0, 0.5]),
-        tsim_ms=tsim,
-        dt_ms=dt,
-    )
-    previous = build_footprint_vstim_initial_previous_batch(
-        stimulus=drive.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=jnp.asarray([1.0, 0.5]),
-        dt_ms=dt,
-    )
-
-    assert from_footprint.shape == generic.shape
-    assert previous.shape == (2, axon.n_compartments)
-    np.testing.assert_allclose(
-        np.asarray(from_footprint),
-        np.asarray(generic),
-        atol=1e-6,
-        rtol=1e-6,
-    )
-
-
 def test_double_cable_batch_matches_single_row_batch_runs():
     axon = hh_extracellular_axon()
     tsim = 0.8
@@ -1005,10 +952,10 @@ def test_double_cable_batch_matches_single_row_batch_runs():
         base_stimulations,
         scale_extracellular_stimulations(base_stimulations, 0.5),
     ]
-    vext_mid = build_vstim_midpoint_batch(axon, stimulation_batch, tsim_ms=tsim, dt_ms=dt)
-    vext_previous = build_vstim_initial_previous_batch(
+    vext_mid, vext_previous = build_vstim_midpoint_and_initial_previous_batch(
         axon,
         stimulation_batch,
+        tsim_ms=tsim,
         dt_ms=dt,
     )
 
@@ -1068,10 +1015,10 @@ def test_double_cable_batch_absent_intracellular_matches_explicit_zero_input():
         base_stimulations,
         scale_extracellular_stimulations(base_stimulations, 0.5),
     ]
-    vext_mid = build_vstim_midpoint_batch(axon, stimulation_batch, tsim_ms=tsim, dt_ms=dt)
-    vext_previous = build_vstim_initial_previous_batch(
+    vext_mid, vext_previous = build_vstim_midpoint_and_initial_previous_batch(
         axon,
         stimulation_batch,
+        tsim_ms=tsim,
         dt_ms=dt,
     )
     zero_iinj = jnp.zeros(
@@ -1120,10 +1067,10 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
         base_stimulations,
         scale_extracellular_stimulations(base_stimulations, 0.5),
     ]
-    vext_mid = build_vstim_midpoint_batch(axon, stimulation_batch, tsim_ms=tsim, dt_ms=dt)
-    vext_previous = build_vstim_initial_previous_batch(
+    vext_mid, vext_previous = build_vstim_midpoint_and_initial_previous_batch(
         axon,
         stimulation_batch,
+        tsim_ms=tsim,
         dt_ms=dt,
     )
     activation = axs.analysis.Activation(
@@ -1177,15 +1124,10 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     )
     base_stimulations = tuple(axon.extracellular_stimulations)
     stimulation_batch = [base_stimulations, base_stimulations]
-    dense_mid = build_vstim_midpoint_batch(
+    dense_mid, dense_previous = build_vstim_midpoint_and_initial_previous_batch(
         axon,
         stimulation_batch,
         tsim_ms=tsim,
-        dt_ms=dt,
-    )
-    dense_previous = build_vstim_initial_previous_batch(
-        axon,
-        stimulation_batch,
         dt_ms=dt,
     )
     factorized = build_factorized_vstim_midpoint_batch(
@@ -1268,27 +1210,15 @@ def test_double_cable_materialized_chunks_match_full_batch():
         precompute_intracellular=True,
         precompute_extracellular=False,
     )
-    base_stimulation = axon.extracellular_stimulations[0]
-    drive = base_stimulation.drives[0]
-    base_x_m = np.asarray(axon.layout.position_values(unit="micrometer"), dtype=float) * 1e-6
-    footprint = np.stack(
-        [
-            drive_footprint_for_positions(drive, base_x_m),
-            drive_footprint_for_positions(drive, base_x_m),
-        ]
-    )
-    amplitude_scale = jnp.asarray([1.0, 0.5])
-    vext_mid = build_footprint_vstim_midpoint_batch(
-        stimulus=drive.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=amplitude_scale,
+    base_stimulations = tuple(axon.extracellular_stimulations)
+    stimulation_batch = [
+        base_stimulations,
+        scale_extracellular_stimulations(base_stimulations, 0.5),
+    ]
+    vext_mid, vext_previous = build_vstim_midpoint_and_initial_previous_batch(
+        axon,
+        stimulation_batch,
         tsim_ms=tsim,
-        dt_ms=dt,
-    )
-    vext_previous = build_footprint_vstim_initial_previous_batch(
-        stimulus=drive.stimulus,
-        footprint_V_per_A=footprint,
-        amplitude_scale=amplitude_scale,
         dt_ms=dt,
     )
     kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))

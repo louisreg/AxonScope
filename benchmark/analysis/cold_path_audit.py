@@ -227,7 +227,7 @@ def read_context(run_dir: Path) -> RunContext:
         script=str(manifest.get("script") or environment.get("benchmark_script") or ""),
         git_commit=str(git.get("short_commit") or git.get("commit") or ""),
         git_dirty=str(git.get("dirty") if git.get("dirty") is not None else ""),
-        platform=str(options.get("platform") or environment.get("compute_backend") or ""),
+        platform=str(options.get("platform") or environment.get("compute_runtime") or ""),
         device_class=str(environment.get("compute_device_class") or ""),
         device_models=";".join(str(item) for item in _sequence(environment.get("compute_device_models"))),
         host_os=str(environment.get("host_os") or ""),

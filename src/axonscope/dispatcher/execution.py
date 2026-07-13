@@ -6,6 +6,7 @@ from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.runtime.execution import run_batch_group
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
+from axonscope.recording import RecordingPlan
 from axonscope.dispatcher.plan import (
     DispatchGroup,
     DispatchPlan,
@@ -34,6 +35,7 @@ def run_pool(
     batch_options: BatchOptions | None = None,
     observers: Sequence[Any] | None = None,
     record_observables: bool = False,
+    recording_plan: RecordingPlan | None = None,
     progress: ProgressOption = False,
     runtime_context: Any | None = None,
     dispatch_plan: DispatchPlan | None = None,
@@ -73,6 +75,7 @@ def run_pool(
             batch_options=batch_options,
             observers=tuple(observers) if observers is not None else None,
             record_observables=bool(record_observables),
+            recording_plan=recording_plan,
             progress=progress,
             runtime_context=runtime_context,
             dispatch_plan=dispatch_plan,
@@ -88,6 +91,7 @@ def _run_pool_checked(
     batch_options: BatchOptions | None,
     observers: tuple[Any, ...] | None,
     record_observables: bool,
+    recording_plan: RecordingPlan | None,
     progress: ProgressOption,
     runtime_context: Any | None,
     dispatch_plan: DispatchPlan | None,
@@ -136,6 +140,7 @@ def _run_pool_checked(
                         batch_options=resolved_batch_options,
                         solver_options=solver_options,
                         observers=observers,
+                        recording_plan=recording_plan,
                         progress_callback=progress_reporter.kernel_callback(group),
                         runtime_context=runtime_context,
                     )
@@ -205,7 +210,7 @@ def _batch_rejection_reason(
     """Return a readable reason why a group cannot use batch execution."""
 
     if record_observables:
-        return "dense observable recording is not implemented on the batch route yet."
+        return "dense observable recording is unavailable for this batch group."
     if group.mode not in {"single", "double"}:
         return f"unsupported batch mode {group.mode!r}"
     return "batch route unavailable"
@@ -219,6 +224,7 @@ def _run_batch_group(
     batch_options: BatchOptions,
     solver_options: SolverOptions | None,
     observers: tuple[Any, ...] | None,
+    recording_plan: RecordingPlan | None,
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
@@ -231,6 +237,7 @@ def _run_batch_group(
         batch_options=batch_options,
         solver_options=solver_options,
         observers=observers,
+        recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
     )

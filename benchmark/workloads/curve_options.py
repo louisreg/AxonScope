@@ -23,7 +23,7 @@ class CurvePreset:
     memory_trace: str
     memory_top_n: int
     profile: bool
-    profile_backend: str
+    profile_runtime: str
     profile_create_perfetto: bool
     jax_device_memory_profile: bool
     max_iterations: int
@@ -44,7 +44,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=2,
@@ -63,7 +63,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=6,
@@ -82,7 +82,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=10,
@@ -101,7 +101,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=16,
@@ -120,7 +120,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=2,
@@ -139,7 +139,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="all",
         memory_top_n=5,
         profile=True,
-        profile_backend="jax",
+        profile_runtime="jax",
         profile_create_perfetto=True,
         jax_device_memory_profile=True,
         max_iterations=1,
@@ -158,7 +158,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=16,
@@ -177,7 +177,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=0,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=2,
@@ -196,7 +196,7 @@ PRESETS: dict[str, CurvePreset] = {
         memory_trace="rss",
         memory_top_n=5,
         profile=False,
-        profile_backend="auto",
+        profile_runtime="auto",
         profile_create_perfetto=False,
         jax_device_memory_profile=False,
         max_iterations=10,
@@ -271,7 +271,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
     parser.add_argument("--memory-top-n", type=int)
     parser.add_argument("--profile", action="store_true", dest="profile", default=None)
     parser.add_argument("--no-profile", action="store_false", dest="profile")
-    parser.add_argument("--profile-backend", choices=("auto", "jax", "none"))
+    parser.add_argument("--profile-runtime", choices=("auto", "jax", "none"))
     parser.add_argument("--profile-output")
     parser.add_argument(
         "--profile-create-perfetto",
@@ -344,7 +344,7 @@ def build_parser(script_name: str, *, description: str) -> argparse.ArgumentPars
             "memory_trace": preset.memory_trace,
             "memory_top_n": preset.memory_top_n,
             "profile": preset.profile,
-            "profile_backend": preset.profile_backend,
+            "profile_runtime": preset.profile_runtime,
             "profile_create_perfetto": preset.profile_create_perfetto,
             "jax_device_memory_profile": preset.jax_device_memory_profile,
             "max_iterations": preset.max_iterations,
@@ -383,7 +383,7 @@ def resolved_options(args: argparse.Namespace) -> dict[str, Any]:
         "memory_trace": args.memory_trace or preset.memory_trace,
         "memory_top_n": args.memory_top_n if args.memory_top_n is not None else preset.memory_top_n,
         "profile": preset.profile if args.profile is None else bool(args.profile),
-        "profile_backend": args.profile_backend or preset.profile_backend,
+        "profile_runtime": args.profile_runtime or preset.profile_runtime,
         "profile_output": args.profile_output,
         "profile_create_perfetto": (
             preset.profile_create_perfetto

@@ -52,7 +52,7 @@ def test_session_records_nested_events_and_writes_files(tmp_path):
     assert first_event["name"] == "inputs.intracellular"
     metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["compute_device_class"] in {"cpu", "gpu", "tpu", "unknown"}
-    assert "compute_backend" in metadata
+    assert "compute_runtime" in metadata
     assert "compute_device_models" in metadata
     assert "host_os" in metadata
     assert "host_ram_total_gb" in metadata
@@ -221,7 +221,7 @@ def test_enable_benchmark_accepts_profile_metadata(tmp_path):
         print_summary=False,
         save=False,
         profile=True,
-        profile_backend="none",
+        profile_runtime="none",
         profile_create_perfetto=True,
     )
     try:
@@ -231,7 +231,7 @@ def test_enable_benchmark_accepts_profile_metadata(tmp_path):
 
     assert profile == {
         "enabled": True,
-        "backend": "none",
+        "runtime": "none",
         "output": str(tmp_path / "profiles" / "run"),
         "create_perfetto_trace": True,
         "create_perfetto_link": False,
@@ -239,14 +239,14 @@ def test_enable_benchmark_accepts_profile_metadata(tmp_path):
     }
 
 
-def test_enable_benchmark_rejects_unsupported_profile_backend(tmp_path):
-    with pytest.raises(ValueError, match="profile_backend"):
+def test_enable_benchmark_rejects_unsupported_profile_runtime(tmp_path):
+    with pytest.raises(ValueError, match="profile_runtime"):
         enable_benchmark(
             tmp_path,
             print_summary=False,
             save=False,
             profile=True,
-            profile_backend="other",
+            profile_runtime="other",
         )
 
 

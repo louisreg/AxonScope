@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
+from axonscope.analysis.definitions import (
+    Activation,
+    ConductionBlock,
+    ConductionVelocity,
+    Latency,
+)
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
 OutputSink = Literal["vm", "none", "vm_raster"]
@@ -86,7 +91,7 @@ def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
     return tuple(
         observer
         for observer in observers
-        if isinstance(observer, (Activation, Latency, ConductionBlock))
+        if isinstance(observer, (Activation, Latency, ConductionBlock, ConductionVelocity))
     )
 
 

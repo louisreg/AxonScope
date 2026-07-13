@@ -49,7 +49,7 @@ class Device:
 
     @classmethod
     def auto(cls) -> "Device":
-        """Let AxonScope or the backend choose a device."""
+        """Let AxonScope or the concrete runtime choose a device."""
 
         return cls("auto")
 

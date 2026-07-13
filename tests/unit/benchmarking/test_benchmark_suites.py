@@ -119,7 +119,7 @@ def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path
                 "--output",
                 str(tmp_path),
                 "--profile",
-                "--profile-backend",
+                "--profile-runtime",
                 "jax",
                 "--profile-create-perfetto",
                 "--jax-device-memory-profile",
@@ -137,7 +137,7 @@ def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path
     assert rows[0]["script"] == "recruitment_curves"
     assert rows[0]["platform"] == "gpu"
     assert rows[0]["profile"] == "True"
-    assert rows[0]["profile_backend"] == "jax"
+    assert rows[0]["profile_runtime"] == "jax"
     assert rows[0]["profile_create_perfetto"] == "True"
     assert rows[0]["jax_device_memory_profile"] == "True"
 

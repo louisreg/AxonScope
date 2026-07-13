@@ -33,7 +33,7 @@ def test_benchmark_options_configure_enable_disable_style(tmp_path: Path):
         save=True,
         memory_trace="rss",
         profile=True,
-        profile_backend="none",
+        profile_runtime="none",
     )
 
     session = enable_benchmark(tmp_path, options=options)
@@ -45,12 +45,12 @@ def test_benchmark_options_configure_enable_disable_style(tmp_path: Path):
 
     assert report is not None
     assert session.config.profile is True
-    assert session.config.profile_backend == "none"
+    assert session.config.profile_runtime == "none"
     assert report.events[0].name == "example.stage"
     assert report.events[0].metadata["case"] == "smoke"
     assert report.events[0].metadata["note"] == "ok"
     assert report.metadata["profile"]["enabled"] is True
-    assert report.metadata["profile"]["backend"] == "none"
+    assert report.metadata["profile"]["runtime"] == "none"
     assert report.metadata["profile"]["active"] is False
     assert (tmp_path / "events.jsonl").is_file()
     assert (tmp_path / "summary.csv").is_file()

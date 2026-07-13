@@ -38,7 +38,7 @@ class BenchmarkOptions:
     memory_trace: str = "off"
     memory_top_n: int = 0
     profile: bool = False
-    profile_backend: str = "auto"
+    profile_runtime: str = "auto"
     profile_output: Path | None = None
     profile_create_perfetto: bool = False
     profile_create_perfetto_link: bool = False
@@ -59,7 +59,7 @@ class BenchmarkConfig:
     memory_trace: str = "off"
     memory_top_n: int = 0
     profile: bool = False
-    profile_backend: str = "auto"
+    profile_runtime: str = "auto"
     profile_output: Path | None = None
     profile_create_perfetto: bool = False
     profile_create_perfetto_link: bool = False
@@ -291,24 +291,24 @@ class BenchmarkSession:
         profile_output = self.config.profile_output or self.config.output_dir / "profiles" / "run"
         self.metadata["profile"] = {
             "enabled": True,
-            "backend": self.config.profile_backend,
+            "runtime": self.config.profile_runtime,
             "output": str(profile_output),
             "create_perfetto_trace": self.config.profile_create_perfetto,
             "create_perfetto_link": self.config.profile_create_perfetto_link,
             "active": False,
         }
-        if self.config.profile_backend == "none":
+        if self.config.profile_runtime == "none":
             return
         try:
             from axonscope.runtime.execution import benchmark_profile_start
 
             self._profile_handle = benchmark_profile_start(
-                self.config.profile_backend,
+                self.config.profile_runtime,
                 profile_output,
                 create_perfetto_link=self.config.profile_create_perfetto_link,
                 create_perfetto_trace=self.config.profile_create_perfetto,
             )
-        except Exception as exc:  # pragma: no cover - backend-dependent.
+        except Exception as exc:  # pragma: no cover - runtime-dependent.
             self.metadata["profile"]["error"] = f"{type(exc).__name__}: {exc}"
             return
         self.metadata["profile"]["active"] = self._profile_handle is not None
@@ -323,7 +323,7 @@ class BenchmarkSession:
             from axonscope.runtime.execution import benchmark_profile_stop
 
             stopped = benchmark_profile_stop(self._profile_handle)
-        except Exception as exc:  # pragma: no cover - backend-dependent.
+        except Exception as exc:  # pragma: no cover - runtime-dependent.
             stopped = {"stop_error": f"{type(exc).__name__}: {exc}"}
         profile = self.metadata.setdefault("profile", {})
         if isinstance(profile, dict):
@@ -363,7 +363,7 @@ class BenchmarkSession:
             from axonscope.runtime.execution import benchmark_save_device_memory_profile
 
             metadata = benchmark_save_device_memory_profile(path, runtime="jax")
-        except Exception as exc:  # pragma: no cover - backend-dependent.
+        except Exception as exc:  # pragma: no cover - runtime-dependent.
             metadata = {"enabled": True, "error": f"{type(exc).__name__}: {exc}"}
         metadata.setdefault("stage", name)
         return _json_safe_dict(metadata)
@@ -382,7 +382,7 @@ def enable_benchmark(
     memory_trace: str = "off",
     memory_top_n: int = 0,
     profile: bool | None = None,
-    profile_backend: str | None = None,
+    profile_runtime: str | None = None,
     profile_output: str | Path | None = None,
     profile_create_perfetto: bool | None = None,
     profile_create_perfetto_link: bool | None = None,
@@ -400,7 +400,7 @@ def enable_benchmark(
         memory_trace = options.memory_trace
         memory_top_n = options.memory_top_n
         profile = options.profile if profile is None else profile
-        profile_backend = profile_backend or options.profile_backend
+        profile_runtime = profile_runtime or options.profile_runtime
         profile_output = profile_output or options.profile_output
         profile_create_perfetto = (
             options.profile_create_perfetto
@@ -426,9 +426,9 @@ def enable_benchmark(
         raise ValueError("memory_top_n must be >= 0.")
 
     resolved_profile = bool(profile) if profile is not None else False
-    resolved_profile_backend = str(profile_backend or "auto").lower()
-    if resolved_profile_backend not in {"auto", "jax", "none"}:
-        raise ValueError("profile_backend must be one of: auto, jax, none.")
+    resolved_profile_runtime = str(profile_runtime or "auto").lower()
+    if resolved_profile_runtime not in {"auto", "jax", "none"}:
+        raise ValueError("profile_runtime must be one of: auto, jax, none.")
     profile_stages = _normalize_profile_stages(jax_device_memory_profile_stages)
     output = Path(output_dir)
     if save:
@@ -444,7 +444,7 @@ def enable_benchmark(
         memory_trace=memory_trace,
         memory_top_n=int(memory_top_n),
         profile=resolved_profile,
-        profile_backend=resolved_profile_backend,
+        profile_runtime=resolved_profile_runtime,
         profile_output=Path(profile_output) if profile_output is not None else None,
         profile_create_perfetto=bool(profile_create_perfetto)
         if profile_create_perfetto is not None
@@ -693,7 +693,7 @@ def _collect_metadata(output_dir: Path, config: BenchmarkConfig) -> dict[str, An
         "jax_device_memory_profile_stages": list(config.jax_device_memory_profile_stages),
         "profile": {
             "enabled": config.profile,
-            "backend": config.profile_backend,
+            "runtime": config.profile_runtime,
             "output": str(config.profile_output) if config.profile_output else None,
             "active": False,
         },
@@ -732,7 +732,7 @@ def _environment_metadata(environment: Mapping[str, Any]) -> dict[str, Any]:
         for device in _sequence(gpu_info.get("devices"))
         if isinstance(device, Mapping) and device.get("name") is not None
     ]
-    backend = jax_info.get("default_backend")
+    compute_runtime = jax_info.get("default_backend")
     return {
         "environment": environment,
         "os": os_info,
@@ -742,8 +742,11 @@ def _environment_metadata(environment: Mapping[str, Any]) -> dict[str, Any]:
         "packages": _mapping(environment.get("packages")),
         "environment_variables": _mapping(environment.get("environment_variables")),
         "jax_details": jax_info,
-        "compute_backend": backend,
-        "compute_device_class": _device_class(str(backend) if backend else None, platforms),
+        "compute_runtime": compute_runtime,
+        "compute_device_class": _device_class(
+            str(compute_runtime) if compute_runtime else None,
+            platforms,
+        ),
         "compute_device_platforms": platforms,
         "compute_device_models": device_models,
         "host_os": os_info.get("platform"),
@@ -754,8 +757,8 @@ def _environment_metadata(environment: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _device_class(backend: str | None, platforms: Sequence[str]) -> str:
-    labels = {backend.lower()} if backend else set()
+def _device_class(runtime: str | None, platforms: Sequence[str]) -> str:
+    labels = {runtime.lower()} if runtime else set()
     labels.update(platform.lower() for platform in platforms)
     if labels & {"gpu", "cuda", "rocm"}:
         return "gpu"
@@ -859,108 +862,9 @@ def _tracemalloc_top(start: Any, end: Any, *, limit: int) -> list[dict[str, Any]
 
 
 def _device_memory_snapshot() -> dict[str, Any]:
-    jax_devices = _jax_device_snapshot()
-    nvidia_smi = _nvidia_smi_snapshot()
-    snapshot = {"jax_devices": jax_devices, "nvidia_smi": nvidia_smi}
-    snapshot.update(_device_totals(jax_devices, nvidia_smi))
-    return snapshot
+    from axonscope.runtime.execution import benchmark_device_memory_snapshot
 
-
-def _jax_device_snapshot() -> list[dict[str, Any]]:
-    try:
-        import jax
-
-        devices = jax.devices()
-    except Exception as exc:
-        return [{"available": False, "error": f"{type(exc).__name__}: {exc}"}]
-    rows = []
-    for device in devices:
-        row = {
-            "repr": str(device),
-            "platform": getattr(device, "platform", None),
-            "id": getattr(device, "id", None),
-            "device_kind": getattr(device, "device_kind", None),
-        }
-        stats = getattr(device, "memory_stats", None)
-        if callable(stats):
-            try:
-                row["memory_stats"] = _json_safe_dict(dict(stats() or {}))
-            except Exception as exc:
-                row["memory_stats_error"] = f"{type(exc).__name__}: {exc}"
-        rows.append(row)
-    return rows
-
-
-def _nvidia_smi_snapshot() -> dict[str, Any]:
-    cmd = [
-        "nvidia-smi",
-        "--query-gpu=index,name,memory.total,memory.used,memory.free",
-        "--format=csv,noheader,nounits",
-    ]
-    try:
-        output = subprocess.check_output(
-            cmd,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
-        ).strip()
-    except Exception:
-        return {"available": False, "source": "nvidia-smi"}
-    devices = []
-    for line in output.splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) != 5:
-            continue
-        index, name, total, used, free = parts
-        devices.append(
-            {
-                "index": _number_or_none(index),
-                "name": name,
-                "memory_total_mib": _number_or_none(total),
-                "memory_used_mib": _number_or_none(used),
-                "memory_free_mib": _number_or_none(free),
-            }
-        )
-    return {"available": bool(devices), "source": "nvidia-smi", "devices": devices}
-
-
-def _device_totals(
-    jax_devices: Sequence[Mapping[str, Any]],
-    nvidia_smi: Mapping[str, Any],
-) -> dict[str, Any]:
-    return {
-        "device_bytes_in_use": _sum_jax_stat(jax_devices, ("bytes_in_use", "bytes_used", "used_bytes")),
-        "device_peak_bytes_in_use": _sum_jax_stat(jax_devices, ("peak_bytes_in_use", "peak_bytes")),
-        "nvidia_smi_memory_used_mib": _sum_smi(nvidia_smi, "memory_used_mib"),
-        "nvidia_smi_memory_total_mib": _sum_smi(nvidia_smi, "memory_total_mib"),
-    }
-
-
-def _sum_jax_stat(devices: Sequence[Mapping[str, Any]], keys: Sequence[str]) -> int | None:
-    total = 0
-    found = False
-    for device in devices:
-        stats = _mapping(device.get("memory_stats"))
-        for key in keys:
-            value = _number_or_none(stats.get(key))
-            if value is not None:
-                total += int(value)
-                found = True
-                break
-    return total if found else None
-
-
-def _sum_smi(snapshot: Mapping[str, Any], key: str) -> float | None:
-    total = 0.0
-    found = False
-    for device in _sequence(snapshot.get("devices")):
-        if not isinstance(device, Mapping):
-            continue
-        value = _number_or_none(device.get(key))
-        if value is not None:
-            total += float(value)
-            found = True
-    return total if found else None
+    return benchmark_device_memory_snapshot(runtime="auto")
 
 
 def _device_delta(start: Mapping[str, Any], end: Mapping[str, Any]) -> dict[str, Any]:

@@ -453,7 +453,7 @@ class DispatchProgress:
                     group_count=len(self.plan.groups),
                     rows=int(group.size),
                     nx=int(group.nx),
-                    message="solving chunks",
+                    message="solving time chunks",
                     completed=done,
                     total=total,
                 )
@@ -512,7 +512,7 @@ class DispatchProgress:
     def _render_plain_event(self, event: ProgressEvent) -> None:
         if (
             event.stage == "kernel"
-            and event.message == "solving chunks"
+            and event.message == "solving time chunks"
             and event.completed is not None
             and event.total is not None
         ):

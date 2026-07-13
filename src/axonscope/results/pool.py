@@ -247,6 +247,7 @@ def _cohort_from_dispatch_cohort(
         record_indices=tuple(result.record_indices),
         recording=recording,
         observations=result.observations,
+        recordings=result.recordings,
         final_states=tuple(final_states),
     )
 
@@ -266,15 +267,15 @@ class RecordingManifest:
         *,
         policy: Recording | None = None,
     ) -> RecordingManifest:
-        """Build the current Vm-only manifest from dense result cohorts."""
+        """Build the recording manifest from dense result cohorts."""
 
         requested = policy.signals if policy is not None else (MEMBRANE_VOLTAGE,)
         vm_cohort_indices = tuple(
             index for index, cohort in enumerate(cohorts) if cohort.Vm is not None
         )
-        available: tuple[RecordedSignal, ...] = ()
+        available_items: list[RecordedSignal] = []
         if vm_cohort_indices:
-            available = (
+            available_items.append(
                 RecordedSignal(
                     signal=MEMBRANE_VOLTAGE,
                     result_key=MEMBRANE_VOLTAGE.result_key,
@@ -288,11 +289,52 @@ class RecordingManifest:
                         str(np.asarray(cohorts[index].Vm).dtype)
                         for index in vm_cohort_indices
                     ),
-                ),
+                )
             )
+        if policy is not None:
+            for signal in policy.signals:
+                if signal.result_key == MEMBRANE_VOLTAGE.result_key:
+                    continue
+                signal_cohorts = tuple(
+                    index
+                    for index, cohort in enumerate(cohorts)
+                    if cohort.recordings is not None
+                    and any(
+                        recordings is not None and signal.result_key in recordings
+                        for recordings in cohort.recordings
+                    )
+                )
+                if not signal_cohorts:
+                    continue
+                shapes: list[tuple[int, ...]] = []
+                dtypes: list[str] = []
+                for index in signal_cohorts:
+                    cohort = cohorts[index]
+                    assert cohort.recordings is not None
+                    first = next(
+                        recordings[signal.result_key]
+                        for recordings in cohort.recordings
+                        if recordings is not None and signal.result_key in recordings
+                    )
+                    if isinstance(first, dict):
+                        first_value = next(iter(first.values()))
+                    else:
+                        first_value = first
+                    shapes.append(tuple(np.asarray(first_value).shape))
+                    dtypes.append(str(np.asarray(first_value).dtype))
+                available_items.append(
+                    RecordedSignal(
+                        signal=signal,
+                        result_key=signal.result_key,
+                        unit=signal.unit,
+                        cohort_indices=signal_cohorts,
+                        cohort_shapes=tuple(shapes),
+                        cohort_dtypes=tuple(dtypes),
+                    )
+                )
         return cls(
             requested_signals=tuple(requested),
-            available=available,
+            available=tuple(available_items),
             policy=policy,
         )
 
@@ -444,12 +486,7 @@ class AxonResultView(SingleAxonResultMixin):
         recordings = self.recordings
         if recordings is None or descriptor.result_key not in recordings:
             raise KeyError(f"signal {descriptor.id!s} is not available in this result.")
-        value = recordings[descriptor.result_key]
-        if isinstance(value, dict):
-            raise TypeError(
-                f"recordings[{descriptor.result_key!r}] is a grouped recording, not an array."
-            )
-        return value
+        return recordings[descriptor.result_key]
 
 
 class AxonSimulationResult(Sequence[AxonResultView]):
@@ -676,9 +713,31 @@ class AxonSimulationResult(Sequence[AxonResultView]):
 
         entry = self.recording_manifest.signal(signal)
         if entry.result_key != "Vm":
-            raise KeyError(
-                f"pool results currently contain Vm only, not {entry.result_key!r}."
-            )
+            values = [view.signal(signal) for view in self]
+            if isinstance(values[0], dict):
+                keys = tuple(values[0])
+                if any(not isinstance(value, dict) or tuple(value) != keys for value in values):
+                    raise ValueError(
+                        "grouped signal is heterogeneous across result rows; "
+                        "use per-axon views instead."
+                    )
+                stacked: dict[str, ResultArray] = {}
+                for key in keys:
+                    arrays = [np.asarray(value[key]) for value in values]
+                    shapes = {array.shape for array in arrays}
+                    if len(shapes) != 1:
+                        raise ValueError(
+                            "grouped signal is heterogeneous across result rows; "
+                            "use per-axon views instead."
+                        )
+                    stacked[key] = np.stack(arrays, axis=0)
+                return stacked
+            shapes = {value.shape for value in values}
+            if len(shapes) != 1:
+                raise ValueError(
+                    "signal is heterogeneous across result rows; use per-axon views instead."
+                )
+            return np.stack(values, axis=0)
         values = [np.asarray(view.Vm) for view in self]
         shapes = {value.shape for value in values}
         if len(shapes) != 1:

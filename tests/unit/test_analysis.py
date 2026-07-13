@@ -221,6 +221,52 @@ def test_spike_count_and_velocity_use_structured_undetermined_status():
     assert no_velocity.status is axs.analysis.AnalysisStatus.UNDETERMINED
 
 
+def test_conduction_velocity_can_decode_vm_raster_observation():
+    velocity = axs.analysis.ConductionVelocity(threshold=0.0 * axs.mV)
+    raster = axs.VmRasterResult(
+        words=np.asarray([[[[1 << 20], [1 << 28]]]], dtype=np.uint32),
+        nt=64,
+        dt_ms=0.5,
+        definitions=(velocity,),
+        names=(velocity.name,),
+        probe_indices=np.asarray([[0, 1]], dtype=np.int32),
+        probe_mask=np.asarray([[True, True]], dtype=bool),
+        original_indices=np.asarray([[0, 1]], dtype=np.int32),
+        positions_um=np.asarray([[0.0, 1000.0]], dtype=float),
+        thresholds_mV=np.asarray([0.0], dtype=float),
+    )
+    cohort = _ResultBlock(
+        input_indices=(0,),
+        axons=(_DummyAxon([0.0, 1000.0]),),
+        simulations=(None,),
+        Vm=None,
+        t=np.arange(64, dtype=float) * 0.5,
+        diagnostics=({},),
+        record_indices=(None,),
+        observations={axs.VM_RASTER_OBSERVATION_KEY: raster},
+    )
+    result = AxonSimulationResult((cohort,), size=1)
+
+    decoded = axs.results.conduction_velocity_values_from_vm_raster(raster, velocity)
+    analyzed = result.analyze(velocity)
+
+    np.testing.assert_allclose(decoded, [0.25])
+    assert analyzed.status is axs.analysis.AnalysisStatus.VALID
+    np.testing.assert_allclose(analyzed.values, [0.25])
+
+
+def test_conduction_velocity_is_vm_raster_compatible_observer():
+    from axonscope.runtime.output_contract import (
+        observers_are_vm_raster_compatible,
+        vm_raster_definitions,
+    )
+
+    velocity = axs.analysis.ConductionVelocity()
+
+    assert observers_are_vm_raster_compatible((velocity,))
+    assert vm_raster_definitions((velocity,)) == (velocity,)
+
+
 def test_activation_online_observer_cross_validates_posthoc_result():
     result = _fake_result()
     definition = axs.analysis.Activation(
