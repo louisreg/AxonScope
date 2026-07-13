@@ -155,7 +155,7 @@ dispatch_results = run_pool(
 
 Observer-only pool runs (`Recording.none()` plus compatible solver-side
 threshold observers, or `BatchOptions.none()`) use a stable default chunk size of
-`axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps, currently `128`. The default
+`axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS` time steps, currently `512`. The default
 is aligned with the packed VmRaster word layout while longer duration sweeps reuse a
 stable JAX kernel shape. The backend keeps the solver loop chunked but writes
 observer hits into one preallocated full-duration packed VmRaster state, so the

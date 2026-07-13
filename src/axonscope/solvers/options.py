@@ -6,7 +6,7 @@ from typing import Literal, Sequence
 import numpy as np
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128
+DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 512
 
 
 @dataclass(frozen=True)
@@ -180,9 +180,9 @@ class BatchOptions:
     ) -> "BatchOptions":
         """Record no Vm trace, typically for solver-side observer runs.
 
-        Observer-only runs default to a stable, VmRaster word-aligned time chunk
-        to reduce first-call JAX recompilation across duration sweeps while the
-        runtime writes into one full-duration packed VmRaster state. Pass
+        Observer-only runs default to a stable time chunk large enough to avoid
+        excessive dispatch overhead on long public workflows while still
+        keeping duration sweeps reasonably reusable. Pass
         ``time_chunk_steps=None`` explicitly to force one unchunked scan.
         """
 
