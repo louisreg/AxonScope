@@ -21,6 +21,7 @@ from axonscope.runtime.jax.inputs.extracellular import (
 )
 from axonscope.runtime.jax.inputs.intracellular import (
     build_sparse_intracellular_current_density_batch,
+    build_zero_sparse_intracellular_current_density_batch,
 )
 from axonscope.preparation.runtime_batches import (
     scale_extracellular_stimulations,
@@ -75,6 +76,34 @@ def test_batch_recording_resolves_common_policies():
         BatchRecording.indices([5]).indices_for(5)
     assert BatchOptions.center().recording.mode == "center"
     assert not hasattr(BatchOptions.center(), "double_cable_block_solver")
+
+
+def test_zero_sparse_intracellular_payload_is_cached_by_static_shape():
+    first = build_zero_sparse_intracellular_current_density_batch(
+        batch_size=3,
+        step_count=7,
+        target_nx=11,
+        dtype_local=jnp.float32,
+    )
+    second = build_zero_sparse_intracellular_current_density_batch(
+        batch_size=3,
+        step_count=7,
+        target_nx=11,
+        dtype_local=jnp.float32,
+    )
+    changed = build_zero_sparse_intracellular_current_density_batch(
+        batch_size=3,
+        step_count=8,
+        target_nx=11,
+        dtype_local=jnp.float32,
+    )
+
+    assert second is first
+    assert changed is not first
+    assert first.density_mid.shape == (3, 7, 0)
+    assert first.indices.shape == (3, 0)
+    assert first.mask.shape == (3, 0)
+    assert first.max_sparse_entries == 0
 
 
 def test_batch_options_none_defaults_to_observer_chunking():

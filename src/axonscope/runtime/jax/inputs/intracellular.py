@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -23,6 +24,11 @@ from axonscope.stimulation import (
 
 Array = Any
 AxonLike = Axon | AxonInstance
+_ZERO_SPARSE_INTRACELLULAR_CACHE_MAX = 32
+_ZERO_SPARSE_INTRACELLULAR_CACHE: OrderedDict[
+    tuple[int, int, int, str, str],
+    SparseIntracellularCurrentDensityBatch,
+] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -209,12 +215,29 @@ def build_zero_sparse_intracellular_current_density_batch(
     rows = int(batch_size)
     steps = int(step_count)
     nx = int(target_nx)
-    return SparseIntracellularCurrentDensityBatch(
+    dtype = np.dtype(dtype_local)
+    cache_key = (rows, steps, nx, dtype.str, _default_jax_device_key())
+    cached = _ZERO_SPARSE_INTRACELLULAR_CACHE.get(cache_key)
+    if cached is not None:
+        _ZERO_SPARSE_INTRACELLULAR_CACHE.move_to_end(cache_key)
+        return cached
+    batch = SparseIntracellularCurrentDensityBatch(
         density_mid=jnp.zeros((rows, steps, 0), dtype=dtype_local),
         indices=jnp.zeros((rows, 0), dtype=jnp.int32),
         mask=jnp.zeros((rows, 0), dtype=bool),
         target_nx=nx,
     )
+    _ZERO_SPARSE_INTRACELLULAR_CACHE[cache_key] = batch
+    if len(_ZERO_SPARSE_INTRACELLULAR_CACHE) > _ZERO_SPARSE_INTRACELLULAR_CACHE_MAX:
+        _ZERO_SPARSE_INTRACELLULAR_CACHE.popitem(last=False)
+    return batch
+
+
+def _default_jax_device_key() -> str:
+    try:
+        return str(jax.devices()[0])
+    except Exception:
+        return "unknown"
 
 
 def _can_build_intracellular_rows_from_clamps(axons: Sequence[AxonLike]) -> bool:
