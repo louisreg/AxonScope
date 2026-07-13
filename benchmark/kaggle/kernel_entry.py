@@ -43,6 +43,7 @@ def main() -> None:
     run_id = str(config.get("run_id") or _default_run_id(config))
     output_dir = WORK_DIR / "benchmark" / "results" / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    exit_code = 0
     try:
         _write_json(output_dir / "kaggle_config_effective.json", config)
         _clone_repo(config)
@@ -64,12 +65,17 @@ def main() -> None:
                 "message": str(exc),
             },
         )
+        traceback.print_exc()
+        exit_code = 1
         raise
     finally:
         archive_base = WORK_DIR / f"axonscope_benchmark_results_{run_id}"
         archive = shutil.make_archive(str(archive_base), "zip", output_dir)
         print(f"AxonScope benchmark results: {output_dir}")
         print(f"AxonScope benchmark archive: {archive}")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(exit_code)
 
 
 def _load_config() -> dict[str, Any]:
@@ -379,13 +385,4 @@ def _safe_token(value: object) -> str:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except BaseException:
-        traceback.print_exc()
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(1)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(0)
+    main()
