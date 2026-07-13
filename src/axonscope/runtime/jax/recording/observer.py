@@ -20,6 +20,10 @@ from axonscope.benchmarking import benchmark_span, benchmark_wait
 from axonscope.analysis.definitions import Activation, ConductionBlock, Latency
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
+from axonscope.runtime.jax.preparation.caches import (
+    get_batched_static_array,
+    store_batched_static_array,
+)
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 from axonscope.utils import units
 
@@ -286,7 +290,34 @@ def init_vm_raster_state(
         int(plan.probe_count),
         int(word_count),
     )
-    return jnp.zeros(shape, dtype=jnp.uint32)
+    key = (
+        "vm_raster_state_zeros_v1",
+        shape,
+        _current_jax_device_key(),
+    )
+    cached = get_batched_static_array(key)
+    if cached is not None:
+        return cached
+    out = jnp.zeros(shape, dtype=jnp.uint32)
+    store_batched_static_array(key, out)
+    return out
+
+
+def _current_jax_device_key() -> tuple[Any, ...]:
+    device = getattr(jax.config, "jax_default_device", None)
+    if device is None:
+        try:
+            devices = jax.devices(jax.default_backend())
+        except Exception:
+            devices = ()
+        device = devices[0] if devices else None
+    if device is None:
+        return ("backend", jax.default_backend())
+    return (
+        "device",
+        getattr(device, "platform", None),
+        getattr(device, "id", None),
+    )
 
 
 def combine_vm_raster_chunk_states(
