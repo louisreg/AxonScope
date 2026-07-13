@@ -185,7 +185,7 @@ def _run_one(
     failed = False
     error = ""
     try:
-        with _plot_safe_context(), _maybe_quiet(args.quiet, stdout_buffer, stderr_buffer):
+        with _plot_safe_context():
             with axs.benchmark(
                 run_dir,
                 print_summary=False,
@@ -206,7 +206,9 @@ def _run_one(
                 jax_device_memory_profile_stages=tuple(args.jax_device_memory_profile_stage),
             ):
                 with benchmark_span("example.run", example=spec.key, phase=phase, repeat=repeat):
-                    module.main(_example_config(module, args, amplitudes))
+                    _ensure_nrv_imported()
+                    with _maybe_quiet(args.quiet, stdout_buffer, stderr_buffer):
+                        module.main(_example_config(module, args, amplitudes))
     except BaseException as exc:
         failed = True
         error = f"{type(exc).__name__}: {exc}"
@@ -246,6 +248,12 @@ def _example_config(
         fem_n_proc=1,
         gmsh_n_core=1,
     )
+
+
+def _ensure_nrv_imported() -> None:
+    # NRV enables faulthandler during import and expects stderr to expose a real
+    # file descriptor, so import it before redirecting stdout/stderr to buffers.
+    import nrv  # noqa: F401
 
 
 def _row_from_run_dir(run_dir: Path) -> dict[str, Any]:
