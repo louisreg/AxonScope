@@ -56,6 +56,7 @@ from .single_cable_scans import (
     _run_single_cable_factorized_vstim_batch_observer_scan,
     _run_single_cable_factorized_vstim_batch_sparse_observer_scan,
     _run_single_cable_factorized_vstim_batch_stateful_scan,
+    _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan,
     _run_single_cable_vstim_batch_observer_scan,
     _run_single_cable_vstim_batch_stateful_scan,
     _run_single_cable_zero_vstim_batch_sparse_observer_scan,
@@ -989,6 +990,12 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
     dtype_local = membrane_runtime.dtype
     dt = jnp.asarray(grid.dt_ms, dtype=dtype_local)
     batch_size = extracellular_potential_mid_mV.batch_size
+    shared_rank1_current = (
+        extracellular_potential_mid_mV.shared_current
+        and extracellular_potential_mid_mV.drive_count == 1
+    )
+    has_sparse_iinj = intracellular_current_density_mid.max_sparse_entries > 0
+    current_layout = "shared_rank1" if shared_rank1_current else "batched"
     with benchmark_span(
         "kernel.prepare_arrays",
         mode="single",
@@ -999,11 +1006,16 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         nx=membrane_runtime.Nx,
         nt=grid.Nt,
         time_chunk_steps=time_chunk_steps,
+        current_layout=current_layout,
     ):
-        current_rows_mid_A = _factorized_current_mid_rows(
-            extracellular_potential_mid_mV,
-            dtype_local=dtype_local,
-            batch_size=batch_size,
+        current_rows_mid_A = (
+            None
+            if shared_rank1_current
+            else _factorized_current_mid_rows(
+                extracellular_potential_mid_mV,
+                dtype_local=dtype_local,
+                batch_size=batch_size,
+            )
         )
         lower = _as_batched_space_array(
             "lower", cable.lower, nx=membrane_runtime.Nx, dtype_local=dtype_local, batch_size=batch_size
@@ -1092,10 +1104,15 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
         variant="factorized_sparse_vstim",
         output="observer_only",
         group_size=batch_size,
-        current_rank=getattr(current_rows_mid_A, "ndim", None),
+        current_layout=current_layout,
+        current_rank=1 if shared_rank1_current else getattr(current_rows_mid_A, "ndim", None),
     ):
         current_mid_A = jnp.asarray(
-            current_rows_mid_A,
+            (
+                extracellular_potential_mid_mV.current_mid_A
+                if shared_rank1_current
+                else current_rows_mid_A
+            ),
             dtype=dtype_local,
         )
     forcing_footprint_mV_per_A = _single_cable_factorized_forcing_footprint_for_batch(
@@ -1119,6 +1136,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
+            current_layout=current_layout,
         ):
             observer_state0 = (
                 observer_chunk_state_template
@@ -1127,7 +1145,11 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             )
             assert observer_state0 is not None
             iinj_values_chunk = intracellular_current_density_mid.density_mid[:, start:stop]
-            current_chunk = current_mid_A[:, :, start:stop]
+            current_chunk = (
+                current_mid_A[start:stop]
+                if shared_rank1_current
+                else current_mid_A[:, :, start:stop]
+            )
         with benchmark_span(
             "kernel.dispatch_jax",
             mode="single",
@@ -1139,8 +1161,9 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
+            current_layout=current_layout,
         ):
-            Vm, gates, state, observer_state = _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
+            common_kwargs = dict(
                 backend=membrane_runtime.backend,
                 membrane=membrane_runtime.membrane,
                 has_driven_extracellular=has_driven_extracellular,
@@ -1168,6 +1191,19 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
                 ),
                 dt_ms=dt,
             )
+            if shared_rank1_current:
+                Vm, gates, state, observer_state = (
+                    _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
+                        has_sparse_iinj=has_sparse_iinj,
+                        **common_kwargs,
+                    )
+                )
+            else:
+                Vm, gates, state, observer_state = (
+                    _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
+                        **common_kwargs,
+                    )
+                )
         with benchmark_span(
             "kernel.chunk_bookkeeping",
             mode="single",

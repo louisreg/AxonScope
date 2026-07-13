@@ -483,7 +483,7 @@ def test_build_vstim_batch_uses_sampled_stimulation_offsets():
     assert float(np.max(np.abs(np.asarray(vext_batch[0] - vext_batch[1])))) > 0.0
 
 
-def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
+def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster(monkeypatch):
     axon = hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -512,6 +512,8 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
     )
 
     assert factorized is not None
+    assert factorized.shared_current is True
+    assert factorized.drive_count == 1
     materialized = materialize_factorized_extracellular_potential_batch(factorized)
     np.testing.assert_allclose(
         np.asarray(materialized),
@@ -575,12 +577,28 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster():
         options=BatchOptions.none(),
         observers=observer,
     )
+    compact_scan_called = False
+    original_compact_scan = (
+        single_cable_kernels._run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan
+    )
+
+    def wrapped_compact_scan(**kwargs):
+        nonlocal compact_scan_called
+        compact_scan_called = True
+        return original_compact_scan(**kwargs)
+
+    monkeypatch.setattr(
+        single_cable_kernels,
+        "_run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan",
+        wrapped_compact_scan,
+    )
     factorized_out = kernel.run(
         extracellular_potential_mid_mV=factorized,
         intracellular_current_density_mid=sparse_iinj,
         options=BatchOptions.none(),
         observers=observer,
     )
+    assert compact_scan_called
     factorized_chunked = kernel.run(
         extracellular_potential_mid_mV=factorized,
         intracellular_current_density_mid=sparse_iinj,
