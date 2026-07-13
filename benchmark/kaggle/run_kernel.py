@@ -246,6 +246,12 @@ def prepare_kernel_package(
     package_dir.mkdir(parents=True, exist_ok=True)
     run_id = make_run_id(args)
     require_gpu = bool(not args.no_require_gpu and args.platform == "gpu")
+    pip_packages = list(args.pip_package or ())
+    requested_pip_names = {
+        str(package).split("==", 1)[0] for package in pip_packages
+    }
+    if require_gpu and "triton" not in requested_pip_names:
+        pip_packages.append("triton")
     config = {
         "campaign": args.campaign,
         "repo_url": args.repo_url,
@@ -259,7 +265,7 @@ def prepare_kernel_package(
         "jax_cuda_extra": args.jax_cuda_extra,
         "apt_packages": list(args.apt_package or ()),
         "nrv_conda_env": bool(args.nrv_conda_env),
-        "pip_packages": list(args.pip_package or ()),
+        "pip_packages": pip_packages,
     }
     metadata: dict[str, Any] = {
         "id": f"{args.username}/{args.slug}",
