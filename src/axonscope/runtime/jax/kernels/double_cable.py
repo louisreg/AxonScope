@@ -547,7 +547,6 @@ def _run_double_cable_batch_array_chunks(
                     extracellular_current_mid_A=current_chunk,
                     extracellular_current_initial_previous_A=factorized_previous_current_A,
                     extracellular_footprint_mV_per_A=factorized_footprint_mV_per_A,
-                    row_indices=jnp.arange(batch_size, dtype=jnp.int32),
                     record_indices=record_indices,
                     dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
                 )
@@ -1086,7 +1085,6 @@ def _run_double_cable_batch_observer_chunks(
                     intracellular_current_density_mid=iinj_chunk,
                     extracellular_potential_mid_mV=vext_chunk,
                     extracellular_potential_initial_previous_mV=previous,
-                    row_indices=jnp.arange(batch_size, dtype=jnp.int32),
                     time_start_index=time_start_index,
                     dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
                     extracellular_current_mid_A=current_chunk,
