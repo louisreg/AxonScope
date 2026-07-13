@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+import axonscope.dispatcher.execution as dispatcher_execution
 import axonscope.simulation as simulation_module
 import axonscope.runtime.jax.group_runner as group_runner
 import axonscope.runtime.jax.inputs.extracellular as input_batches
@@ -35,6 +36,7 @@ from axonscope.runtime.jax.inputs.intracellular import (
     build_sparse_intracellular_current_density_batch,
 )
 from axonscope.dispatcher import build_dispatch_plan, run_pool
+from axonscope.dispatcher.execution import DispatchSchedulingOptions
 from axonscope.dispatcher._records import DispatchCohortRecord
 from axonscope.preparation.runtime_batches import (
     extracellular_stimulation_rows,
@@ -267,6 +269,64 @@ def test_pool_dispatch_batches_incompatible_singleton_groups():
         "batch-single-cable",
     ]
     assert [axon_result.Vm.shape for axon_result in result] == [(2, 1), (2, 1)]
+
+
+def test_run_pool_async_scheduler_enqueues_groups_before_waiting(monkeypatch):
+    axons = [
+        _hh_axon(nx=11, amp_nA=0.4, y_um=20.0, z_um=30.0),
+        _hh_axon(nx=13, amp_nA=0.2, y_um=60.0, z_um=10.0),
+    ]
+    plan = build_dispatch_plan(axons)
+    assert len(plan.groups) == 2
+
+    events: list[tuple[str, int]] = []
+
+    def fake_enqueue(group, **kwargs):
+        events.append(("enqueue", int(group.group_id)))
+        return SimpleNamespace(group=group)
+
+    def fake_finalize(pending):
+        group = pending.group
+        events.append(("finalize", int(group.group_id)))
+        return (
+            DispatchCohortRecord(
+                indices=group.pool_indices,
+                axons=tuple(item.simulation.axon for item in group.items),
+                simulations=tuple(item.simulation for item in group.items),
+                Vm=None,
+                t=np.asarray([0.0]),
+                group_id=group.group_id,
+                method="batch-single-cable",
+                record_indices=tuple(None for _ in group.items),
+                group_size=group.size,
+                batch_kind=group.batch_kind,
+                geometry_shared=group.geometry_shared,
+                has_padding=group.has_padding,
+            ),
+        )
+
+    monkeypatch.setattr(dispatcher_execution, "enqueue_batch_group", fake_enqueue)
+    monkeypatch.setattr(dispatcher_execution, "finalize_batch_group", fake_finalize)
+
+    result = run_pool(
+        axons,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        batch_options=BatchOptions.full(),
+        dispatch_plan=plan,
+        scheduling_options=DispatchSchedulingOptions(
+            async_groups=True,
+            max_pending_groups=2,
+        ),
+    )
+
+    assert [record.indices for record in result] == [(0,), (1,)]
+    assert events == [
+        ("enqueue", 0),
+        ("enqueue", 1),
+        ("finalize", 0),
+        ("finalize", 1),
+    ]
 
 
 def test_pool_dispatch_batches_compatible_double_cable_axons():

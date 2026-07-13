@@ -9,6 +9,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmark.curves import recruitment_curves, threshold_curves
+from benchmark.dispatcher import group_scheduling
 from benchmark.examples import basic_examples, with_nrv_examples
 from benchmark.protocols import recruitment_amplitude_batch
 from benchmark.workloads.curve_options import PRESETS
@@ -16,6 +17,7 @@ from benchmark.workloads.curve_options import PRESETS
 
 SCRIPTS = {
     "basic_examples": basic_examples,
+    "dispatcher_group_scheduling": group_scheduling,
     "with_nrv_examples": with_nrv_examples,
     "threshold_curves": threshold_curves,
     "recruitment_curves": recruitment_curves,

@@ -81,6 +81,18 @@ class _LoweredJaxBatchInputs:
     extracellular: Any
 
 
+@dataclass(frozen=True)
+class PendingJaxBatchGroup:
+    """Device work enqueued for one dispatcher group, awaiting synchronization."""
+
+    group: DispatchGroup
+    output: Any
+    batch_options: BatchOptions
+    kernel_options: OutputPlan
+    observers: tuple[Any, ...] | None
+    progress_callback: Any
+
+
 def run_jax_batch_group(
     group: DispatchGroup,
     *,
@@ -117,6 +129,64 @@ def run_jax_batch_group(
         recording_plan=recording_plan,
         progress_callback=progress_callback,
         runtime_context=runtime_context,
+    )
+
+
+def enqueue_jax_batch_group(
+    group: DispatchGroup,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None = None,
+    recording_plan: RecordingPlan | None = None,
+    progress_callback: Any = None,
+    runtime_context: Any | None = None,
+) -> PendingJaxBatchGroup:
+    """Prepare and enqueue one JAX batch group without waiting for device work."""
+
+    if group.mode == "double":
+        return _enqueue_double_cable_batch_group(
+            group,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            batch_options=batch_options,
+            solver_options=solver_options,
+            observers=observers,
+            recording_plan=recording_plan,
+            progress_callback=progress_callback,
+            runtime_context=runtime_context,
+        )
+    return _enqueue_single_cable_batch_group(
+        group,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        batch_options=batch_options,
+        solver_options=solver_options,
+        observers=observers,
+        recording_plan=recording_plan,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+
+
+def finalize_jax_batch_group(pending: PendingJaxBatchGroup) -> tuple[DispatchRecord, ...]:
+    """Synchronize and assemble one previously enqueued JAX batch group."""
+
+    group = pending.group
+    out = _wait_for_batch_kernel_output(
+        pending.output,
+        group=group,
+        progress_callback=pending.progress_callback,
+    )
+    return _dispatch_batch_kernel_output(
+        out,
+        group=group,
+        batch_options=pending.batch_options,
+        kernel_options=pending.kernel_options,
+        observers=pending.observers,
+        progress_callback=pending.progress_callback,
     )
 
 
@@ -617,7 +687,35 @@ def _run_single_cable_batch_group(
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
-    """Run a homogeneous single-cable group through imposed-field batching."""
+    """Synchronously run a homogeneous single-cable group."""
+
+    pending = _enqueue_single_cable_batch_group(
+        group,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        batch_options=batch_options,
+        solver_options=solver_options,
+        observers=observers,
+        recording_plan=recording_plan,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+    return finalize_jax_batch_group(pending)
+
+
+def _enqueue_single_cable_batch_group(
+    group: DispatchGroup,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
+    recording_plan: RecordingPlan | None,
+    progress_callback: Any = None,
+    runtime_context: Any | None = None,
+) -> PendingJaxBatchGroup:
+    """Enqueue a homogeneous single-cable group through imposed-field batching."""
 
     prepared = _prepare_jax_batch_group(
         group,
@@ -696,14 +794,9 @@ def _run_single_cable_batch_group(
             progress_callback=progress_callback,
         )
         _record_kernel_output_metadata(out)
-    out = _wait_for_batch_kernel_output(
-        out,
+    return PendingJaxBatchGroup(
         group=group,
-        progress_callback=progress_callback,
-    )
-    return _dispatch_batch_kernel_output(
-        out,
-        group=group,
+        output=out,
         batch_options=batch_options,
         kernel_options=kernel_options,
         observers=observers,
@@ -723,7 +816,35 @@ def _run_double_cable_batch_group(
     progress_callback: Any = None,
     runtime_context: Any | None = None,
 ) -> tuple[DispatchRecord, ...]:
-    """Run a homogeneous double-cable group through full double-cable batching."""
+    """Synchronously run a homogeneous double-cable group."""
+
+    pending = _enqueue_double_cable_batch_group(
+        group,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        batch_options=batch_options,
+        solver_options=solver_options,
+        observers=observers,
+        recording_plan=recording_plan,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+    return finalize_jax_batch_group(pending)
+
+
+def _enqueue_double_cable_batch_group(
+    group: DispatchGroup,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: SolverOptions | None,
+    observers: tuple[Any, ...] | None,
+    recording_plan: RecordingPlan | None,
+    progress_callback: Any = None,
+    runtime_context: Any | None = None,
+) -> PendingJaxBatchGroup:
+    """Enqueue a homogeneous double-cable group through full double-cable batching."""
     if recording_plan is not None and recording_plan.wants_observables:
         raise NotImplementedError(
             "dense observable recording is implemented for single-cable batch groups first."
@@ -849,14 +970,9 @@ def _run_double_cable_batch_group(
         recording_mode=kernel_options.recording.mode,
     ):
         out = trim_batch_kernel_result(out, batch_size=group.size)
-    out = _wait_for_batch_kernel_output(
-        out,
+    return PendingJaxBatchGroup(
         group=group,
-        progress_callback=progress_callback,
-    )
-    return _dispatch_batch_kernel_output(
-        out,
-        group=group,
+        output=out,
         batch_options=batch_options,
         kernel_options=kernel_options,
         observers=observers,
@@ -864,4 +980,9 @@ def _run_double_cable_batch_group(
     )
 
 
-__all__ = ["run_jax_batch_group"]
+__all__ = [
+    "PendingJaxBatchGroup",
+    "enqueue_jax_batch_group",
+    "finalize_jax_batch_group",
+    "run_jax_batch_group",
+]

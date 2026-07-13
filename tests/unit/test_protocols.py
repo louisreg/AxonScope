@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import axonscope as axs
+import axonscope.protocols.recruitment as recruitment_protocols
 from axonscope.protocols import observer_path as observer_protocols
 from axonscope.protocols import sweep as sweep_protocols
 from axonscope.protocols import threshold as threshold_protocols
@@ -648,6 +649,38 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
         curve.activated,
         [[False, False], [True, False], [True, True]],
     )
+
+
+def test_recruitment_batch_planning_is_separate_from_execution():
+    pool = tuple(
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=100.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        )
+        for _ in range(2)
+    )
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    plan = recruitment_protocols._plan_native_amplitude_batches(
+        pool,
+        update=update,
+        values=tuple(np.asarray([0.0, 1.0, 2.0]) * axs.nA),
+        amplitude_batch_size=2,
+    )
+
+    assert plan.source_pool_size == 2
+    assert [len(batch.values) for batch in plan.batches] == [2, 1]
+    assert [len(batch.pool) for batch in plan.batches] == [4, 2]
+    np.testing.assert_allclose(
+        [row.tested_current_nA for batch in plan.batches for row in batch.pool],
+        [0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+    )
+    assert not any(hasattr(row, "tested_current_nA") for row in pool)
 
 
 def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatch):

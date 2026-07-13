@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as np
@@ -27,6 +28,18 @@ from axonscope.runtime import ExecutionPolicy
 from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.solvers import BatchOptions
 from axonscope.utils import units
+
+
+@dataclass(frozen=True)
+class _NativeAmplitudeBatch:
+    values: tuple[Any, ...]
+    pool: tuple[SimulationCandidate, ...]
+
+
+@dataclass(frozen=True)
+class _NativeAmplitudeBatchPlan:
+    source_pool_size: int
+    batches: tuple[_NativeAmplitudeBatch, ...]
 
 
 def recruitment_sweep(
@@ -223,35 +236,65 @@ def _activation_pool_sweep_batched_amplitudes(
     solver_progress: bool | str = False,
     amplitude_batch_size: int | None = None,
 ) -> PoolSweepResult:
-    """Evaluate all amplitudes in one native expanded observer-only pool."""
+    """Evaluate native amplitude batches with the current sequential executor."""
 
     _validate_batched_amplitude_pool(pool)
-    chunk_size = _normalize_amplitude_batch_size(amplitude_batch_size, len(values))
+    plan = _plan_native_amplitude_batches(
+        pool,
+        update=update,
+        values=values,
+        amplitude_batch_size=amplitude_batch_size,
+    )
+    return _execute_activation_observer_batch_plan(
+        plan,
+        all_values=values,
+        duration=duration,
+        dt=dt,
+        criterion=criterion,
+        progress=progress,
+        batch_options=batch_options,
+        execution_policy=execution_policy,
+        solver_progress=solver_progress,
+    )
+
+
+def _execute_activation_observer_batch_plan(
+    plan: _NativeAmplitudeBatchPlan,
+    *,
+    all_values: tuple[Any, ...],
+    duration: Any,
+    dt: Any,
+    criterion: ActivationCriterion,
+    progress: bool | str = False,
+    batch_options: BatchOptions | None = None,
+    execution_policy: ExecutionPolicy | None = None,
+    solver_progress: bool | str = False,
+) -> PoolSweepResult:
+    """Execute a planned set of native amplitude batches sequentially."""
+
     progress_display = _SweepProgress(progress)
     solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
+    completed_value_count = 0
     try:
         progress_display.begin(
             label="Pool sweep",
             current_index=0,
-            values=values,
+            values=all_values,
             completed_rows=observation_rows,
             progress_summary=_activation_progress_summary,
         )
-        for chunk_start in range(0, len(values), chunk_size):
-            chunk_values = values[chunk_start : chunk_start + chunk_size]
+        for batch_index, batch in enumerate(plan.batches):
             started_s = time.perf_counter()
             with benchmark_span(
                 "protocol.sweep.batched_values",
-                value_count=len(chunk_values),
-                pool_size=len(pool),
-                expanded_pool_size=len(chunk_values) * len(pool),
-                amplitude_batch_size=chunk_size,
-                chunk_start=chunk_start,
+                batch_index=batch_index,
+                value_count=len(batch.values),
+                pool_size=plan.source_pool_size,
+                expanded_pool_size=len(batch.pool),
             ):
-                expanded_pool = _build_native_amplitude_pool(pool, update, chunk_values)
                 flat_observations = _evaluate_activation_observer_pool(
-                    expanded_pool,
+                    batch.pool,
                     criterion=criterion,
                     duration=duration,
                     dt=dt,
@@ -262,27 +305,53 @@ def _activation_pool_sweep_batched_amplitudes(
             elapsed_s = time.perf_counter() - started_s
             progress_display.note_batched_solver(
                 elapsed_s=elapsed_s,
-                value_count=len(chunk_values),
+                value_count=len(batch.values),
             )
             observations = np.asarray(flat_observations, dtype=bool).reshape(
-                (len(chunk_values), len(pool))
+                (len(batch.values), plan.source_pool_size)
             )
             for chunk_offset, row in enumerate(observations):
                 observation_rows.append(row)
                 progress_display.update(
                     label="Pool sweep",
-                    current_index=chunk_start + chunk_offset,
-                    values=values,
+                    current_index=completed_value_count + chunk_offset,
+                    values=all_values,
                     completed_rows=observation_rows,
                     progress_summary=_activation_progress_summary,
-                    elapsed_s=elapsed_s / max(len(chunk_values), 1),
+                    elapsed_s=elapsed_s / max(len(batch.values), 1),
                 )
+            completed_value_count += len(batch.values)
     finally:
         progress_display.close()
 
     return PoolSweepResult(
-        values=values,
+        values=all_values,
         observations=np.asarray(observation_rows, dtype=bool),
+    )
+
+
+def _plan_native_amplitude_batches(
+    pool: tuple[SimulationCandidate, ...],
+    *,
+    update: PoolUpdate,
+    values: tuple[Any, ...],
+    amplitude_batch_size: int | None,
+) -> _NativeAmplitudeBatchPlan:
+    """Build native amplitude batches without deciding how to schedule them."""
+
+    chunk_size = _normalize_amplitude_batch_size(amplitude_batch_size, len(values))
+    batches: list[_NativeAmplitudeBatch] = []
+    for chunk_start in range(0, len(values), chunk_size):
+        chunk_values = values[chunk_start : chunk_start + chunk_size]
+        batches.append(
+            _NativeAmplitudeBatch(
+                values=chunk_values,
+                pool=_build_native_amplitude_pool(pool, update, chunk_values),
+            )
+        )
+    return _NativeAmplitudeBatchPlan(
+        source_pool_size=len(pool),
+        batches=tuple(batches),
     )
 
 

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
-from axonscope.runtime.execution import run_batch_group
+from axonscope.runtime.execution import (
+    enqueue_batch_group,
+    finalize_batch_group,
+    run_batch_group,
+)
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.recording import RecordingPlan
 from axonscope.dispatcher.plan import (
@@ -26,6 +31,18 @@ from axonscope.solvers import BatchOptions, SolverOptions
 from axonscope.utils import units
 
 
+@dataclass(frozen=True)
+class DispatchSchedulingOptions:
+    """Internal dispatch scheduling knobs for evidence-gated benchmarking."""
+
+    async_groups: bool = False
+    max_pending_groups: int = 4
+
+    def __post_init__(self) -> None:
+        if int(self.max_pending_groups) < 1:
+            raise ValueError("max_pending_groups must be >= 1.")
+
+
 def run_pool(
     axons: Sequence[Axon | AxonInstance],
     *,
@@ -39,6 +56,7 @@ def run_pool(
     progress: ProgressOption = False,
     runtime_context: Any | None = None,
     dispatch_plan: DispatchPlan | None = None,
+    scheduling_options: DispatchSchedulingOptions | None = None,
 ) -> tuple[DispatchRecord, ...]:
     """Run an axon pool and return raw dispatch records.
 
@@ -79,6 +97,7 @@ def run_pool(
             progress=progress,
             runtime_context=runtime_context,
             dispatch_plan=dispatch_plan,
+            scheduling_options=scheduling_options,
         )
 
 
@@ -95,8 +114,13 @@ def _run_pool_checked(
     progress: ProgressOption,
     runtime_context: Any | None,
     dispatch_plan: DispatchPlan | None,
+    scheduling_options: DispatchSchedulingOptions | None,
 ) -> tuple[DispatchRecord, ...]:
     resolved_batch_options = BatchOptions.full() if batch_options is None else batch_options
+    resolved_scheduling = _resolve_dispatch_scheduling(
+        runtime_context,
+        scheduling_options=scheduling_options,
+    )
     emit_initial_progress(progress, rows=len(axons), message="building dispatch plan")
     if dispatch_plan is None:
         plan = build_dispatch_plan(axons)
@@ -109,6 +133,20 @@ def _run_pool_checked(
     results: list[DispatchRecord] = []
     seen_indices: set[int] = set()
     with DispatchProgress(progress, plan) as progress_reporter:
+        if resolved_scheduling.async_groups:
+            return _run_pool_async_groups(
+                plan,
+                tsim_ms=tsim_ms,
+                dt_ms=dt_ms,
+                solver_options=solver_options,
+                batch_options=resolved_batch_options,
+                observers=observers,
+                record_observables=record_observables,
+                recording_plan=recording_plan,
+                progress_reporter=progress_reporter,
+                runtime_context=runtime_context,
+                scheduling_options=resolved_scheduling,
+            )
         for group in plan.groups:
             with benchmark_span(
                 "dispatch.group.total",
@@ -174,6 +212,204 @@ def _run_pool_checked(
     if any(index < 0 or index >= len(plan.items) for index in seen_indices):
         raise RuntimeError("pool dispatch did not produce all axon results.")
     return tuple(results)
+
+
+def _resolve_dispatch_scheduling(
+    runtime_context: Any | None,
+    *,
+    scheduling_options: DispatchSchedulingOptions | None,
+) -> DispatchSchedulingOptions:
+    if scheduling_options is not None:
+        return scheduling_options
+    context_options = (
+        None
+        if runtime_context is None
+        else getattr(runtime_context, "dispatch_scheduling", None)
+    )
+    if context_options is None:
+        return DispatchSchedulingOptions()
+    if not isinstance(context_options, DispatchSchedulingOptions):
+        raise TypeError(
+            "runtime_context.dispatch_scheduling must be a DispatchSchedulingOptions value."
+        )
+    return context_options
+
+
+def _run_pool_async_groups(
+    plan: DispatchPlan,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    solver_options: SolverOptions | None,
+    batch_options: BatchOptions,
+    observers: tuple[Any, ...] | None,
+    record_observables: bool,
+    recording_plan: RecordingPlan | None,
+    progress_reporter: DispatchProgress,
+    runtime_context: Any | None,
+    scheduling_options: DispatchSchedulingOptions,
+) -> tuple[DispatchRecord, ...]:
+    """Run compatible groups by enqueueing several JAX calls before waiting."""
+
+    results: list[DispatchRecord] = []
+    seen_indices: set[int] = set()
+    pending: list[Any] = []
+    pending_groups: list[DispatchGroup] = []
+    flush_count = 0
+    pending_max = 0
+    record_benchmark_metadata(
+        dispatch_async_groups=True,
+        dispatch_async_max_pending_groups=int(scheduling_options.max_pending_groups),
+    )
+    for group in plan.groups:
+        with benchmark_span(
+            "dispatch.group.total",
+            group_id=group.group_id,
+            group_size=group.size,
+            mode=group.mode,
+            batch_kind=group.batch_kind,
+            nx=group.nx,
+            geometry_shared=group.geometry_shared,
+            has_padding=group.has_padding,
+            dispatch_schedule="async_enqueue",
+        ):
+            progress_reporter.start_group(group)
+            can_batch = _can_run_batch_group(
+                group,
+                batch_options=batch_options,
+                observers=observers,
+                record_observables=record_observables,
+            )
+            if not can_batch:
+                group_results, flush_count = _flush_pending_batch_groups(
+                    pending,
+                    pending_groups,
+                    flush_count=flush_count,
+                    progress_reporter=progress_reporter,
+                )
+                _store_dispatch_results(
+                    group_results,
+                    results=results,
+                    seen_indices=seen_indices,
+                )
+                reason = _batch_rejection_reason(
+                    group,
+                    record_observables=record_observables,
+                )
+                progress_reporter.route_group(
+                    group,
+                    route="unsupported",
+                    reason=reason,
+                )
+                raise NotImplementedError(reason)
+            progress_reporter.route_group(
+                group,
+                route=_dispatch_method(group),
+                reason="compatible batch route",
+            )
+            pending.append(
+                enqueue_batch_group(
+                    group,
+                    tsim_ms=tsim_ms,
+                    dt_ms=dt_ms,
+                    batch_options=batch_options,
+                    solver_options=solver_options,
+                    observers=observers,
+                    recording_plan=recording_plan,
+                    progress_callback=progress_reporter.kernel_callback(group),
+                    runtime_context=runtime_context,
+                )
+            )
+            pending_groups.append(group)
+            pending_max = max(pending_max, len(pending))
+        if len(pending) >= int(scheduling_options.max_pending_groups):
+            group_results, flush_count = _flush_pending_batch_groups(
+                pending,
+                pending_groups,
+                flush_count=flush_count,
+                progress_reporter=progress_reporter,
+            )
+            _store_dispatch_results(
+                group_results,
+                results=results,
+                seen_indices=seen_indices,
+            )
+
+    group_results, flush_count = _flush_pending_batch_groups(
+        pending,
+        pending_groups,
+        flush_count=flush_count,
+        progress_reporter=progress_reporter,
+    )
+    _store_dispatch_results(
+        group_results,
+        results=results,
+        seen_indices=seen_indices,
+    )
+    record_benchmark_metadata(
+        dispatch_async_flush_count=int(flush_count),
+        dispatch_async_pending_max=int(pending_max),
+    )
+    _validate_dispatch_results(results, seen_indices=seen_indices, plan=plan)
+    return tuple(results)
+
+
+def _flush_pending_batch_groups(
+    pending: list[Any],
+    pending_groups: list[DispatchGroup],
+    *,
+    flush_count: int,
+    progress_reporter: DispatchProgress,
+) -> tuple[tuple[DispatchRecord, ...], int]:
+    if not pending:
+        return (), flush_count
+    group_count = len(pending)
+    row_count = sum(group.size for group in pending_groups)
+    out: list[DispatchRecord] = []
+    with benchmark_span(
+        "dispatch.async_flush",
+        group_count=group_count,
+        row_count=row_count,
+        flush_index=flush_count,
+    ):
+        for pending_group, group in zip(pending, pending_groups, strict=True):
+            out.extend(finalize_batch_group(pending_group))
+            progress_reporter.finish_group(group)
+    pending.clear()
+    pending_groups.clear()
+    return tuple(out), flush_count + 1
+
+
+def _store_dispatch_results(
+    group_results: tuple[DispatchRecord, ...],
+    *,
+    results: list[DispatchRecord],
+    seen_indices: set[int],
+) -> None:
+    for result in group_results:
+        indices = (
+            result.indices
+            if isinstance(result, DispatchCohortRecord)
+            else (result.index,)
+        )
+        for index in indices:
+            if index in seen_indices:
+                raise RuntimeError(f"duplicate dispatch result for pool index {index}.")
+            seen_indices.add(index)
+        results.append(result)
+
+
+def _validate_dispatch_results(
+    results: list[DispatchRecord],
+    *,
+    seen_indices: set[int],
+    plan: DispatchPlan,
+) -> None:
+    if len(seen_indices) != len(plan.items):
+        missing = sorted(set(range(len(plan.items))) - seen_indices)
+        raise RuntimeError(f"pool dispatch did not produce all axon results: {missing}.")
+    if any(index < 0 or index >= len(plan.items) for index in seen_indices):
+        raise RuntimeError("pool dispatch did not produce all axon results.")
 
 
 def _can_run_batch_group(
@@ -244,5 +480,6 @@ def _run_batch_group(
 
 
 __all__ = [
+    "DispatchSchedulingOptions",
     "run_pool",
 ]

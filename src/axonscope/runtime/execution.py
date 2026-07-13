@@ -365,9 +365,7 @@ def run_batch_group(
 ):
     """Execute a prepared dispatch group through the active concrete runtime."""
 
-    from axonscope.runtime.jax.group_runner import run_jax_batch_group
-
-    return run_jax_batch_group(
+    pending = enqueue_batch_group(
         group,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
@@ -378,6 +376,44 @@ def run_batch_group(
         progress_callback=progress_callback,
         runtime_context=runtime_context,
     )
+    return finalize_batch_group(pending)
+
+
+def enqueue_batch_group(
+    group: Any,
+    *,
+    tsim_ms: float,
+    dt_ms: float,
+    batch_options: BatchOptions,
+    solver_options: Any | None,
+    observers: Sequence[Any] | None,
+    recording_plan: RecordingPlan | None = None,
+    progress_callback: Any = None,
+    runtime_context: Any | None = None,
+):
+    """Prepare and enqueue a batch group through the active concrete runtime."""
+
+    from axonscope.runtime.jax.group_runner import enqueue_jax_batch_group
+
+    return enqueue_jax_batch_group(
+        group,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        batch_options=batch_options,
+        solver_options=solver_options,
+        observers=observers,
+        recording_plan=recording_plan,
+        progress_callback=progress_callback,
+        runtime_context=runtime_context,
+    )
+
+
+def finalize_batch_group(pending: Any):
+    """Synchronize and assemble one pending concrete-runtime batch group."""
+
+    from axonscope.runtime.jax.group_runner import finalize_jax_batch_group
+
+    return finalize_jax_batch_group(pending)
 
 
 __all__ = [
@@ -396,7 +432,9 @@ __all__ = [
     "benchmark_save_device_memory_profile",
     "benchmark_trace_annotation",
     "benchmark_vm_raster_definitions",
+    "enqueue_batch_group",
     "execution_context",
+    "finalize_batch_group",
     "run_batch_group",
     "RuntimeSolverRoute",
     "solver_route_from_execution_policy",
