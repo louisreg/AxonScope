@@ -250,8 +250,10 @@ def prepare_kernel_package(
     requested_pip_names = {
         str(package).split("==", 1)[0] for package in pip_packages
     }
-    if require_gpu and "triton" not in requested_pip_names:
-        pip_packages.append("triton")
+    if require_gpu:
+        for package in ("triton", "jax-triton"):
+            if package not in requested_pip_names:
+                pip_packages.append(package)
     config = {
         "campaign": args.campaign,
         "repo_url": args.repo_url,
