@@ -71,6 +71,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array | None,
     extracellular_potential_initial_previous_mV: Array | None,
+    row_indices: Array,
     record_indices: Array,
     dt_ms: Array,
     extracellular_current_mid_A: Array | None = None,
@@ -81,7 +82,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
 
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
-    row_indices = jnp.arange(batch_size, dtype=jnp.int32)
 
     linear_static = prepare_double_cable_linear_system_static_terms(
         area_cm2=area_cm2,
@@ -396,6 +396,7 @@ def _run_double_cable_batch_observer_integrated_scan(
     intracellular_current_density_mid: Array | None,
     extracellular_potential_mid_mV: Array | None,
     extracellular_potential_initial_previous_mV: Array | None,
+    row_indices: Array,
     time_start_index: Array,
     dt_ms: Array,
     extracellular_current_mid_A: Array | None = None,
@@ -406,7 +407,6 @@ def _run_double_cable_batch_observer_integrated_scan(
 
     batch_size = int(Vi0_mV.shape[0])
     nx = int(Vi0_mV.shape[1])
-    row_indices = jnp.arange(batch_size, dtype=jnp.int32)
 
     linear_static = prepare_double_cable_linear_system_static_terms(
         area_cm2=area_cm2,
