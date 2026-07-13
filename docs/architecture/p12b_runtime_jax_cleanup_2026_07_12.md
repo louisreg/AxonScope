@@ -858,3 +858,45 @@ Interpretation:
 - Keep diagnostic solver routes out of public examples and stable docs.
 - Do not choose a new solver policy in P12B.
 - Do not optimize cold start until the runtime contract and hot path are stable.
+
+## Post-Close Triton Cold-Start Extension
+
+After the runtime contract and retained GPU hot path stabilized, the final P12
+extension reduced the production double-cable cold path without changing solver
+policy. Commits `40ccc47`, `a3ff29e`, and `4f70a5a` reuse static linear terms,
+fuse both Thomas passes into one Triton custom call, and reuse output buffers as
+internal workspaces. The `input_output_aliases` experiment in `dabf920` was
+numerically correct but made three-repeat warm `simulation.run_pool` about
+`29%` slower, so `d40d21e` restored the no-alias six-buffer variant.
+
+Commit `cd97bfd` adds a runtime-owned persistent cache for the supported
+`jax-triton 0.3.1` lowering. It stores the compressed `TritonKernelCall`, which
+contains the compiled PTX, under `.axonscope_cache/runtime/jax/triton`. The
+versioned manifest keys source, launch signature, target compute capability,
+and compiler/runtime package versions and validates the artifact checksum.
+Unknown jax-triton versions retain upstream lowering instead of using the
+private cache adapter.
+
+The P100 replay artifact is:
+
+`benchmark/results/kaggle/20260714_010800_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-triton-cache-cd97bfd`
+
+It launches the same full 200-axon by 8-amplitude recruitment workload in two
+fresh Python processes sharing only the compiled-kernel cache:
+
+| Phase | Cache miss | Cache hit | Change |
+| --- | ---: | ---: | ---: |
+| trace | 1.054 s | 0.411 s | -61.0% |
+| lower | 3.962 s | 0.063 s | -98.4% |
+| XLA compile | 0.940 s | 1.019 s | +8.5% |
+| first execution | 0.148 s | 0.057 s | -61.7% |
+| instrumented cold JIT | 6.104 s | 1.551 s | -74.6% |
+| end-to-end wall | 12.075 s | 7.186 s | -40.5% |
+
+The direct cache effect is the `3.899 s` removed from lowering; trace and first
+execution differences can include process/filesystem/driver warm-up. Both
+processes produced activation counts `6 18 41 65 82 101 126 135`. The separate
+dense validation passed with `1.439e-7` maximum absolute error. The production
+cache entry targets P100 compute capability 6.0, `[Nx=22, B=800]`, JAX/JAXlib
+`0.10.2`, jax-triton `0.3.1`, and Triton `3.6.0`; its compressed artifact is
+`13,376` bytes.

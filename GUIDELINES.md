@@ -933,9 +933,20 @@ Current boundary:
 - JAX runtime preparation, stimulation compilation, batch kernels, low-level
   numerical helper kernels, observer packing, and backend input containers live
   under `axonscope.runtime.jax`;
+- backend-owned compiled-kernel caches live under
+  `.axonscope_cache/runtime/<backend>/` and remain internal runtime machinery;
 - `ExecutionPolicy` resolves JAX device/runtime in the backend layer;
 - `solvers/` retains only solver-facing contracts; executable solver routes
   live under concrete runtimes.
+
+Persistent compiled-kernel artifacts must be content-addressed by every input
+that can change generated device code or its launch contract. This includes the
+kernel source, shapes and dtypes, compile metaparameters, precision, target
+platform and compute capability, and compiler/runtime package versions.
+Artifacts require a versioned manifest and checksum; unreadable, mismatched, or
+unsupported artifacts are cache misses, never compatibility fallbacks. A cache
+adapter that mirrors private compiler APIs must enable only explicitly reviewed
+package versions and otherwise delegate to the package's normal lowering path.
 
 ## 8.3 Public Solver Surface
 

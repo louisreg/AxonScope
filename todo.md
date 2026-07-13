@@ -12,7 +12,7 @@ This file is intentionally compact. The full pre-cleanup ledger was archived in
 
 ## Snapshot
 
-Updated on 2026-07-12 during P12B runtime/JAX cleanup.
+Updated on 2026-07-14 during the P12 GPU cold/warm optimization closeout.
 
 Current state:
 
@@ -36,10 +36,11 @@ Current state:
   stabilization pass. Deferred runtime, benchmark, and solver-policy work is
   tracked in `docs/architecture/p11_closeout_2026_07_12.md`.
 - P12 is closed for runtime/JAX cleanup, targeted GPU warm/cold optimization,
-  and Graphify-guided runtime dead-code cleanup. Future work keeps broader
-  dense-observable benchmarks, persistent compile caches, specialized
-  double-cable JITs, GPU async scheduling, and larger public speed-claim
-  evidence out of the P12 closeout path.
+  and Graphify-guided runtime dead-code cleanup. A final cold-start extension
+  now persists the supported double-cable Triton compiled call. Future work
+  keeps broader dense-observable benchmarks, generalized compile-cache policy,
+  GPU async scheduling, and larger public speed-claim evidence out of the P12
+  closeout path.
 - Current solver-policy decisions are tracked in
   `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
   CPU double-cable keeps only Thomas as a production route; GPU double-cable
@@ -80,7 +81,7 @@ Final P12 performance objective: make warm GPU runs as solver-bound as possible,
 especially by reducing JAX/Python dispatch, input lowering, observer packing,
 and host/device transfer overheads around the solver. In parallel, reduce
 cold-run latency as much as possible through preparation, membrane/runtime
-caching, compilation/lowering reuse, and eventually persistent caches. Keep
+caching, compilation/lowering reuse, and targeted persistent caches. Keep
 benchmark evidence separated between warm solver-bound claims and cold-start
 improvements.
 
@@ -612,6 +613,31 @@ These items are intentionally not ordered or scoped into a phase yet.
     capability-based batch path: it cut measured JIT time by 28%, retained
     activation counts `6 18 41 65 82 101 126 135`, and left warm recruitment
     effectively flat (`1.238 s` batch-native versus `1.227 s` row-wise).
+  - [x] Finish the retained double-cable Triton kernel pass without changing
+    the runtime organization. Commits `40ccc47`, `a3ff29e`, and `4f70a5a`
+    reuse scan-static linear terms, fuse forward/backward Thomas passes into
+    one custom call, and reuse two outputs as internal Thomas workspaces. Dense
+    P100 validation retained `1.439e-7` maximum absolute error and one StableHLO
+    custom call. The retained three-repeat no-alias artifact
+    `benchmark/results/kaggle/20260714_004954_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-triton-noalias-warm-4f70a5a`
+    measured about `440.0 ms` warm `simulation.run_pool`, `82.8 ms`
+    `kernel.dispatch_jax`, and `28.8 ms` `kernel.wait`. The official
+    input/output-alias experiment in `dabf920` was rejected and reverted by
+    `d40d21e`: its matching artifact increased those spans to about
+    `569.3/113.5/10.0 ms`, moving work into dispatch despite the lower wait.
+  - [x] Persist the supported double-cable Triton TTIR-to-PTX result under
+    `.axonscope_cache/runtime/jax/triton`. Commit `cd97bfd` stores the compressed
+    `TritonKernelCall` with a checksum and a content key covering source,
+    shapes/dtypes, grid, metaparameters, compute capability, and JAX/JAXlib/
+    jax-triton/Triton versions; unsupported jax-triton versions use the normal
+    upstream lowering. The fresh-process P100 replay
+    `benchmark/results/kaggle/20260714_010800_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-triton-cache-cd97bfd`
+    recorded a real miss then hit for the same `[Nx=22, B=800]` call. Lowering
+    fell from `3.962` to `0.063 s` (`62.5x`), instrumented cold JIT from `6.104`
+    to `1.551 s` (`3.94x`), and full wall time from `12.075` to `7.186 s`.
+    Recruitment counts stayed `6 18 41 65 82 101 126 135`; the independent
+    dense solve passed at `1.439e-7` maximum absolute error. The reusable cache
+    artifact is only `13,376` bytes for this signature.
   - [x] Test async JAX scheduling across independent dispatcher groups. Commit
     `0bf9984` added an internal enqueue/finalize scheduler and the
     `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
