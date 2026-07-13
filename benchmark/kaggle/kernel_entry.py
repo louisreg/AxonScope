@@ -34,9 +34,10 @@ SENSITIVE_ENV_MARKERS = (
 )
 
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
+SCRATCH_DIR = pathlib.Path(os.environ.get("AXONSCOPE_KAGGLE_SCRATCH_DIR", "/tmp/axonscope_kaggle"))
 CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
 PYTHON_EXECUTABLE = pathlib.Path(sys.executable)
-os.environ.setdefault("MAMBA_ROOT_PREFIX", str(WORK_DIR / "micromamba_root"))
+os.environ.setdefault("MAMBA_ROOT_PREFIX", str(SCRATCH_DIR / "micromamba_root"))
 
 
 def main() -> None:
@@ -208,8 +209,9 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
 
 def _install_nrv_stack() -> pathlib.Path:
     micromamba = _install_micromamba()
-    env_dir = WORK_DIR / "axonscope_nrv_env"
-    env_yaml = WORK_DIR / "nrv_linux.yaml"
+    env_dir = SCRATCH_DIR / "axonscope_nrv_env"
+    env_yaml = SCRATCH_DIR / "nrv_linux.yaml"
+    SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
     _run(
         [
             "curl",
@@ -251,13 +253,14 @@ def _install_nrv_stack() -> pathlib.Path:
 
 
 def _install_micromamba() -> pathlib.Path:
-    micromamba = WORK_DIR / "micromamba" / "bin" / "micromamba"
+    micromamba_root = SCRATCH_DIR / "micromamba"
+    micromamba = micromamba_root / "bin" / "micromamba"
     if micromamba.exists():
         return micromamba
     micromamba.parent.mkdir(parents=True, exist_ok=True)
     command = (
         f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest "
-        f"| tar -xj -C {shlex.quote(str(WORK_DIR / 'micromamba'))} bin/micromamba"
+        f"| tar -xj -C {shlex.quote(str(micromamba_root))} bin/micromamba"
     )
     _run(["bash", "-lc", command], cwd=CHECKOUT_DIR)
     return micromamba
