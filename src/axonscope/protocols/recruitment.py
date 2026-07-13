@@ -21,6 +21,7 @@ from axonscope.protocols.sweep import _apply_pool_update, pool_sweep
 from axonscope.protocols.types import PoolUpdate, SimulationCandidate
 from axonscope.protocols.values import _normalize_sweep_values, _require_current_array_uA
 from axonscope.recording import Recording
+from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.solvers import BatchOptions
 from axonscope.utils import units
 
@@ -116,9 +117,6 @@ def _activation_pool_sweep(
     observation_rows: list[np.ndarray] = []
     try:
         for index, value in enumerate(value_tuple):
-            updated_pool = tuple(
-                _apply_pool_update(row, update, value) for row in base_pool
-            )
             progress_display.begin(
                 label="Pool sweep",
                 current_index=index,
@@ -126,14 +124,23 @@ def _activation_pool_sweep(
                 completed_rows=observation_rows,
                 progress_summary=_activation_progress_summary,
             )
-            observations = _evaluate_activation_observer_pool(
-                updated_pool,
-                criterion=criterion,
-                duration=duration,
-                dt=dt,
-                progress=solver_progress_gate.consume(),
-                batch_options=batch_options,
-            )
+            with benchmark_span(
+                "protocol.sweep.value",
+                index=index,
+                value=str(value),
+                pool_size=len(base_pool),
+            ):
+                updated_pool = tuple(
+                    _apply_pool_update(row, update, value) for row in base_pool
+                )
+                observations = _evaluate_activation_observer_pool(
+                    updated_pool,
+                    criterion=criterion,
+                    duration=duration,
+                    dt=dt,
+                    progress=solver_progress_gate.consume(),
+                    batch_options=batch_options,
+                )
             observation_rows.append(observations)
             progress_display.update(
                 label="Pool sweep",
