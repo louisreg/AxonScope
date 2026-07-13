@@ -268,17 +268,40 @@ def _install_micromamba() -> pathlib.Path:
 
 def _configure_conda_env_environment(env_dir: pathlib.Path) -> None:
     env_bin = env_dir / "bin"
+    env_lib = env_dir / "lib"
     os.environ["CONDA_PREFIX"] = str(env_dir)
     os.environ["PATH"] = os.pathsep.join(
         [str(env_bin), os.environ.get("PATH", "")]
     )
     # JAX CUDA pip wheels expect to find NVIDIA libraries from their wheel
-    # locations. Prepending the conda env lib directory can hide cuSPARSE/cuDNN
-    # and make JAX fall back to CPU even on a GPU machine.
-    os.environ.pop("LD_LIBRARY_PATH", None)
+    # locations. Prepending the conda env lib directory can hide cuSPARSE/cuDNN,
+    # but Kaggle still needs the host NVIDIA driver paths for libcuda.so.
+    ld_paths = _nrv_safe_ld_library_paths(env_lib)
+    if ld_paths:
+        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(ld_paths)
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
     print(f"Using NRV conda env: {env_dir}")
     print(f"PATH starts with: {env_bin}")
-    print("LD_LIBRARY_PATH cleared for JAX CUDA wheel discovery")
+    print(f"LD_LIBRARY_PATH for JAX CUDA: {os.environ.get('LD_LIBRARY_PATH', '')}")
+
+
+def _nrv_safe_ld_library_paths(env_lib: pathlib.Path) -> list[str]:
+    existing = [
+        path
+        for path in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
+        if path
+    ]
+    blocked = {str(env_lib.resolve()), str(env_lib)}
+    paths = [path for path in existing if path not in blocked]
+    for candidate in (
+        pathlib.Path("/usr/local/nvidia/lib64"),
+        pathlib.Path("/usr/local/nvidia/lib"),
+    ):
+        text = str(candidate)
+        if candidate.exists() and text not in paths:
+            paths.append(text)
+    return paths
 
 
 def _verify_gpu_if_requested(config: dict[str, Any]) -> None:
