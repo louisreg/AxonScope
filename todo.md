@@ -537,12 +537,22 @@ These items are intentionally not ordered or scoped into a phase yet.
     from `78.52` to `4.57 ms` and from `566.79` to `17.43 ms`; `observer.plan`
     dropped from `15.15` to `1.97 ms` and from `76.23` to `2.43 ms`. Every
     policy retained activation counts `6 18 41 65 82 101 126 135`.
-  - [ ] Continue native recruitment batching optimization only if this path is
-    selected as a public/default policy. Remaining obvious costs are
-    `protocol.sweep.build_amplitude_pool` around `0.56-0.58 s` on Kaggle P100,
-    repeated native plan construction plus `runtime.prepare` signature work
-    for `amplitude_batch_size=1`, and host-side population construction in the
-    benchmark harness.
+  - [x] Reuse native amplitude work pools across equal-sized chunks. Commit
+    `19c1b5f` keeps one resettable pool per chunk size, so each amplitude still
+    starts from the source-row state while stable row identities let the
+    dispatcher and runtime caches hit. Kaggle P100 artifact
+    `benchmark/results/kaggle/20260713_224541_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-work-pool-19c1b5f`
+    reduced warm `amplitude_batch_size=1` wall time from `5.72` to `2.52 s`
+    versus the spatial-cache-only run and from `6.85 s` versus the original
+    native baseline. `dispatch.build_plan` fell from `3096.88` to `481.06 ms`,
+    `runtime.prepare` from `499.62` to `59.70 ms`, and
+    `simulation.run_pool` from `923.16` to `421.70 ms`; the trace records one
+    dispatch-plan miss followed by seven hits. All policies retained activation
+    counts `6 18 41 65 82 101 126 135`. Remaining generic protocol cost is
+    mostly the required user update work (`63.20 ms` initial pool plus
+    `441.81 ms` refreshes for 1600 row-amplitude updates), while the benchmark
+    harness itself spends about `0.94 s` constructing the population outside
+    `recruitment_sweep`.
   - [x] Test async JAX scheduling across independent dispatcher groups. Commit
     `0bf9984` added an internal enqueue/finalize scheduler and the
     `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
