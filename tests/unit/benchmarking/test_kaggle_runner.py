@@ -29,6 +29,10 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
                 "observer_only",
                 "--memory-trace",
                 "all",
+                "--apt-package",
+                "libglu1-mesa",
+                "--pip-package",
+                "nrv-py",
             ]
         )
         == 0
@@ -52,6 +56,8 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     assert config["preset"] == "gpu_smoke"
     assert config["platform"] == "gpu"
     assert config["require_gpu"] is True
+    assert config["apt_packages"] == ["libglu1-mesa"]
+    assert config["pip_packages"] == ["nrv-py"]
     assert config["benchmark_args"] == [
         "--case-filter",
         "observer_only",

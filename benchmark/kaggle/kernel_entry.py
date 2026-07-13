@@ -107,6 +107,14 @@ def _clone_repo(config: dict[str, Any]) -> None:
 def _install_repo(config: dict[str, Any]) -> None:
     python = sys.executable
     install_target = str(config.get("install_target", ".[benchmark]"))
+    apt_packages = [
+        str(package)
+        for package in config.get("apt_packages", ())
+        if str(package).strip()
+    ]
+    if apt_packages:
+        _run(["apt-get", "update"])
+        _run(["apt-get", "install", "-y", *apt_packages])
     _run([python, "-m", "pip", "install", "-U", "pip"])
     _run([python, "-m", "pip", "install", "-e", install_target], cwd=CHECKOUT_DIR)
     cuda_extra = str(config.get("jax_cuda_extra") or "").strip()

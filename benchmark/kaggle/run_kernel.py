@@ -145,6 +145,15 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         ),
     )
     parser.add_argument(
+        "--apt-package",
+        action="append",
+        default=[],
+        help=(
+            "Extra apt package installed inside the Kaggle kernel before Python "
+            "dependencies. Repeat for several packages."
+        ),
+    )
+    parser.add_argument(
         "--output-file-pattern",
         default=".*axonscope_benchmark_results.*",
         help="Regex passed to `kaggle kernels output --file-pattern`.",
@@ -240,6 +249,7 @@ def prepare_kernel_package(
         "run_id": run_id,
         "require_gpu": require_gpu,
         "jax_cuda_extra": args.jax_cuda_extra,
+        "apt_packages": list(args.apt_package or ()),
         "pip_packages": list(args.pip_package or ()),
     }
     metadata: dict[str, Any] = {
