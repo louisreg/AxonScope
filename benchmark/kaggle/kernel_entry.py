@@ -268,30 +268,55 @@ def _install_micromamba() -> pathlib.Path:
 
 def _configure_conda_env_environment(env_dir: pathlib.Path) -> None:
     env_bin = env_dir / "bin"
-    env_lib = env_dir / "lib"
     os.environ["CONDA_PREFIX"] = str(env_dir)
     os.environ["PATH"] = os.pathsep.join(
         [str(env_bin), os.environ.get("PATH", "")]
     )
-    existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [str(env_lib), *([existing_ld] if existing_ld else [])]
-    )
+    # JAX CUDA pip wheels expect to find NVIDIA libraries from their wheel
+    # locations. Prepending the conda env lib directory can hide cuSPARSE/cuDNN
+    # and make JAX fall back to CPU even on a GPU machine.
+    os.environ.pop("LD_LIBRARY_PATH", None)
     print(f"Using NRV conda env: {env_dir}")
     print(f"PATH starts with: {env_bin}")
-    print(f"LD_LIBRARY_PATH starts with: {env_lib}")
+    print("LD_LIBRARY_PATH cleared for JAX CUDA wheel discovery")
 
 
 def _verify_gpu_if_requested(config: dict[str, Any]) -> None:
     if not bool(config.get("require_gpu", False)):
         return
-    try:
-        import jax
-    except Exception as exc:
-        raise RuntimeError(f"JAX import failed while checking GPU availability: {exc}") from exc
-    platforms = {str(getattr(device, "platform", "")).lower() for device in jax.devices()}
+    code = (
+        "import json, jax; "
+        "devices=jax.devices(); "
+        "print(json.dumps({"
+        "'default_backend': jax.default_backend(), "
+        "'devices': [{'platform': getattr(d, 'platform', None), "
+        "'device_kind': getattr(d, 'device_kind', None), "
+        "'repr': str(d)} for d in devices]}))"
+    )
+    result = subprocess.run(
+        [str(PYTHON_EXECUTABLE), "-c", code],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    if result.stdout.strip():
+        print(result.stdout.strip(), flush=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "JAX GPU check failed in benchmark Python "
+            f"{PYTHON_EXECUTABLE}: {result.stderr.strip()}"
+        )
+    payload = json.loads(result.stdout)
+    platforms = {
+        str(device.get("platform", "")).lower()
+        for device in payload.get("devices", ())
+    }
     if not (platforms & {"gpu", "cuda", "rocm"}):
-        raise RuntimeError(f"GPU was required, but visible JAX platforms are {sorted(platforms)}")
+        raise RuntimeError(
+            f"GPU was required in {PYTHON_EXECUTABLE}, but visible JAX "
+            f"platforms are {sorted(platforms)}"
+        )
 
 
 def _hardware_metadata(config: dict[str, Any]) -> dict[str, Any]:
@@ -312,24 +337,39 @@ def _hardware_metadata(config: dict[str, Any]) -> dict[str, Any]:
             "--format=csv,noheader,nounits",
         ]
     )
-    try:
-        import jax
-
-        metadata["jax"] = {
-            "default_backend": jax.default_backend(),
-            "devices": [
-                {
-                    "repr": str(device),
-                    "platform": getattr(device, "platform", None),
-                    "id": getattr(device, "id", None),
-                    "device_kind": getattr(device, "device_kind", None),
-                }
-                for device in jax.devices()
-            ],
-        }
-    except Exception as exc:
-        metadata["jax_error"] = f"{type(exc).__name__}: {exc}"
+    metadata["jax"] = _jax_metadata_for_python(PYTHON_EXECUTABLE)
     return metadata
+
+
+def _jax_metadata_for_python(python: pathlib.Path) -> dict[str, Any]:
+    code = (
+        "import json, jax; "
+        "print(json.dumps({"
+        "'default_backend': jax.default_backend(), "
+        "'devices': [{'repr': str(d), "
+        "'platform': getattr(d, 'platform', None), "
+        "'id': getattr(d, 'id', None), "
+        "'device_kind': getattr(d, 'device_kind', None)} "
+        "for d in jax.devices()]}))"
+    )
+    result = subprocess.run(
+        [str(python), "-c", code],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return {
+            "python": str(python),
+            "available": False,
+            "stderr": result.stderr.strip(),
+            "stdout": result.stdout.strip(),
+        }
+    payload = json.loads(result.stdout)
+    payload["python"] = str(python)
+    payload["available"] = True
+    return payload
 
 
 def _environment_snapshot() -> dict[str, str]:
