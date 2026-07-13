@@ -1349,6 +1349,60 @@ def test_batch_runtime_cache_reuses_equivalent_rebuilt_pool():
     assert runtime_cache_events == ["miss", "hit"]
 
 
+def test_batch_runtime_cache_ignores_zero_to_nonzero_stimulus_shape_change():
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    zero = stimulation.replace_drive(
+        drive.id,
+        stimulus=Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=0.0,
+        ),
+    )
+    axon.add_extracellular_stimulation(stimulation=zero, replace=True)
+
+    runtime_caches.clear_batch_runtime_caches()
+    axs.enable_benchmark(
+        "/tmp/axonscope-runtime-cache-zero-nonzero-test",
+        print_summary=False,
+        save=False,
+    )
+    try:
+        run_pool(
+            [axon],
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        updated = zero.replace_drive(
+            drive.id,
+            stimulus=Stimulus.pulse(
+                start=0.0 * axs.ms,
+                duration=0.05 * axs.ms,
+                amplitude=20e-6,
+            ),
+        )
+        axon.add_extracellular_stimulation(stimulation=updated, replace=True)
+        run_pool(
+            [axon],
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.center(),
+        )
+        report = axs.disable_benchmark(print_summary=False, save=False)
+    finally:
+        axs.disable_benchmark(print_summary=False, save=False)
+
+    assert report is not None
+    runtime_events = [event for event in report.events if event.name == "runtime.prepare"]
+    runtime_cache_events = [
+        event.metadata.get("batch_runtime_cache") for event in runtime_events
+    ]
+    assert runtime_cache_events == ["miss", "hit"]
+
+
 def test_batch_static_runtime_cache_reuses_equivalent_pool_with_new_time_grid():
     def make_pool():
         return [

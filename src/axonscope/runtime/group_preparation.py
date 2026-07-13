@@ -216,15 +216,15 @@ def _build_group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
     rows_digest = _digest_group_items(
         group.items,
         include_identity=False,
+        include_runtime_state=True,
     )
     return (
-        "dispatch_group_runtime_v3",
+        "dispatch_group_runtime_v4",
         group.mode,
         int(group.nx),
         bool(group.geometry_shared),
         bool(group.has_padding),
         int(group.size),
-        _digest_signature_value(group.signature, cache={}),
         rows_digest,
     )
 
@@ -233,6 +233,7 @@ def _digest_group_items(
     items: tuple[DispatchItem, ...],
     *,
     include_identity: bool,
+    include_runtime_state: bool = False,
 ) -> str:
     token_cache: dict[int, str] = {}
     hasher = hashlib.blake2b(digest_size=16)
@@ -245,6 +246,11 @@ def _digest_group_items(
         hasher.update(b"\0")
         hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
         hasher.update(b"\0")
+        if include_runtime_state:
+            simulation = item.simulation
+            _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
+            _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
+            _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
     return hasher.hexdigest()
 
 
@@ -260,6 +266,11 @@ def _digest_signature_value(value: Any, cache: dict[int, str]) -> str:
 
 def _update_digest_int(hasher: Any, value: int) -> None:
     hasher.update(int(value).to_bytes(8, byteorder="little", signed=False))
+
+
+def _update_digest_float(hasher: Any, value: float) -> None:
+    hasher.update(repr(float(value)).encode("ascii"))
+    hasher.update(b"\0")
 
 
 def _cached_group_signature(
