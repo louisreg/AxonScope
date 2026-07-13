@@ -222,9 +222,9 @@ def build_zero_sparse_intracellular_current_density_batch(
         _ZERO_SPARSE_INTRACELLULAR_CACHE.move_to_end(cache_key)
         return cached
     batch = SparseIntracellularCurrentDensityBatch(
-        density_mid=jnp.zeros((rows, steps, 0), dtype=dtype_local),
-        indices=jnp.zeros((rows, 0), dtype=jnp.int32),
-        mask=jnp.zeros((rows, 0), dtype=bool),
+        density_mid=np.zeros((rows, steps, 0), dtype=dtype),
+        indices=np.zeros((rows, 0), dtype=np.int32),
+        mask=np.zeros((rows, 0), dtype=bool),
         target_nx=nx,
     )
     _ZERO_SPARSE_INTRACELLULAR_CACHE[cache_key] = batch
