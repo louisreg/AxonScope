@@ -262,6 +262,21 @@ def test_double_cable_linear_system_xb_assembly_matches_batch_first():
         batch_size=batch_size,
         nx=n,
     )
+    for name in (
+        "area",
+        "cm_over_dt",
+        "cx_over_dt",
+        "cx_plus_gx",
+        "a00_static",
+        "a11_static",
+        "background_abs",
+        "zero_abs",
+    ):
+        np.testing.assert_allclose(
+            np.asarray(double_cable_space_from_xb(getattr(static_xb, name))),
+            np.asarray(getattr(static, name)),
+            rtol=1e-6,
+        )
     values = {
         "Vi": -70.0 + 0.2 * batch + 0.1 * x,
         "Ve": 0.5 * batch - 0.05 * x,

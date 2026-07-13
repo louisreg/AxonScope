@@ -184,7 +184,6 @@ def solve_double_cable_batch_step(
     backend: Any,
     row_indices: Array,
     area_batch: Array,
-    linear_static: Any,
     linear_static_xb: Any | None,
     batch_size: int,
     nx: int,
