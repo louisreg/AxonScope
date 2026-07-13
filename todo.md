@@ -553,6 +553,25 @@ These items are intentionally not ordered or scoped into a phase yet.
     `441.81 ms` refreshes for 1600 row-amplitude updates), while the benchmark
     harness itself spends about `0.94 s` constructing the population outside
     `recruitment_sweep`.
+  - [x] Reduce true first-process recruitment cold preparation without changing
+    solver paths. Commit `cb418ae` initializes structural gated/leak stack gates
+    through the existing NumPy Model IR interpreter instead of triggering an
+    eager JAX gate initialization; commit `f7ea77b` memoizes membrane signatures
+    by object identity while one dispatch plan is built. Local CPU cold wall
+    fell from `8.04 s` to `6.17 s`, with `runtime.prepare.stack_membrane`
+    dropping from `912.10` to `69.20 ms` after the first change and profiled
+    first-plan construction dropping from `0.77` to `0.29 s` after the second.
+    Kaggle P100 artifact
+    `benchmark/results/kaggle/20260713_231018_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-cold-signatures-f7ea77b`
+    improved sequential cold `recruitment_sweep` from `10.38` to `9.74 s`
+    despite run-to-run double-cable JIT variance, with `runtime.prepare`
+    `1.79 s` to `0.95 s` and `dispatch.build_plan` `377.04` to `141.19 ms`.
+    Sequential warm improved from `2.50` to `2.20 s` wall and from `1.47` to
+    `1.17 s` inside `recruitment_sweep`; activation counts remained
+    `6 18 41 65 82 101 126 135`. A local two-process probe also showed a JAX
+    persistent-cache hit reducing cold wall from `6.53` to `4.75 s`, but keep
+    persistent cache location, invalidation, and retention as a separate policy
+    decision rather than enabling it implicitly.
   - [x] Test async JAX scheduling across independent dispatcher groups. Commit
     `0bf9984` added an internal enqueue/finalize scheduler and the
     `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
