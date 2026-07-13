@@ -1627,6 +1627,24 @@ def test_prepared_cohort_cache_refreshes_replaced_stimulus_rows():
     assert second_peak > first_peak
 
 
+def test_prepared_cohort_cache_reuses_spatial_rows_for_equivalent_new_pool():
+    first_axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    second_axon = _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0)
+    first_group = build_dispatch_plan([first_axon]).groups[0]
+    second_group = build_dispatch_plan([second_axon]).groups[0]
+
+    group_preparation.clear_prepared_cohort_cache()
+    first = group_preparation.prepared_cohort_for_group(first_group)
+    second = group_preparation.prepared_cohort_for_group(second_group)
+
+    assert second is not first
+    assert second.axons == (second_axon,)
+    assert second.solver_axons == (second_group.items[0].solver_axon,)
+    assert second.stimulations == (second_axon.extracellular_stimulations,)
+    assert second.x_positions_m is first.x_positions_m
+    assert second.spatial_cache_token is first.spatial_cache_token
+
+
 def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]

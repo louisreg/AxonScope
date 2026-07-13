@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -32,6 +32,11 @@ class PreparedCohort:
     x_positions_m: np.ndarray
     axon_y_um: np.ndarray
     axon_z_um: np.ndarray
+    spatial_cache_token: object = field(
+        default_factory=object,
+        repr=False,
+        compare=False,
+    )
 
     @classmethod
     def from_dispatch_group(cls, group: Any) -> "PreparedCohort":

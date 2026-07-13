@@ -164,18 +164,23 @@ def _with_current_stimulation_rows(
     group: DispatchGroup,
 ) -> PreparedCohort:
     axons = tuple(item.simulation for item in group.items)
+    solver_axons = tuple(item.solver_axon for item in group.items)
     stimulations = extracellular_stimulation_rows(axons)
     representative = representative_item(group).simulation
     if (
-        _same_objects(cohort.axons, axons)
+        int(cohort.group_id) == int(group.group_id)
+        and _same_objects(cohort.axons, axons)
+        and _same_objects(cohort.solver_axons, solver_axons)
         and _same_stimulation_rows(cohort.stimulations, stimulations)
         and cohort.representative is representative
     ):
         return cohort
     return replace(
         cohort,
+        group_id=int(group.group_id),
         representative=representative,
         axons=axons,
+        solver_axons=solver_axons,
         stimulations=stimulations,
     )
 
@@ -196,30 +201,22 @@ def _same_stimulation_rows(
 
 
 def _build_group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
-    rows_digest = _digest_group_items(
-        group.items,
-        include_identity=True,
-    )
+    rows_digest = _digest_group_spatial_items(group.items)
     return (
-        "dispatch_group_v3",
+        "dispatch_group_spatial_v4",
         group.mode,
         int(group.nx),
         bool(group.geometry_shared),
         bool(group.has_padding),
         int(group.size),
-        _digest_signature_value(group.signature, cache={}),
         rows_digest,
     )
 
 
 def _build_group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
-    rows_digest = _digest_group_items(
-        group.items,
-        include_identity=False,
-        include_runtime_state=True,
-    )
+    rows_digest = _digest_group_runtime_items(group.items)
     return (
-        "dispatch_group_runtime_v4",
+        "dispatch_group_runtime_v5",
         group.mode,
         int(group.nx),
         bool(group.geometry_shared),
@@ -229,28 +226,27 @@ def _build_group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
     )
 
 
-def _digest_group_items(
-    items: tuple[DispatchItem, ...],
-    *,
-    include_identity: bool,
-    include_runtime_state: bool = False,
-) -> str:
+def _digest_group_spatial_items(items: tuple[DispatchItem, ...]) -> str:
     token_cache: dict[int, str] = {}
     hasher = hashlib.blake2b(digest_size=16)
     for item in items:
-        _update_digest_int(hasher, int(item.index))
-        if include_identity:
-            _update_digest_int(hasher, id(item.simulation))
-            _update_digest_int(hasher, id(item.solver_axon))
+        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def _digest_group_runtime_items(items: tuple[DispatchItem, ...]) -> str:
+    token_cache: dict[int, str] = {}
+    hasher = hashlib.blake2b(digest_size=16)
+    for item in items:
         hasher.update(_digest_signature_value(item.membrane_signature, token_cache).encode())
         hasher.update(b"\0")
         hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
         hasher.update(b"\0")
-        if include_runtime_state:
-            simulation = item.simulation
-            _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
-            _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
-            _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
+        simulation = item.simulation
+        _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
+        _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
+        _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
     return hasher.hexdigest()
 
 
@@ -262,10 +258,6 @@ def _digest_signature_value(value: Any, cache: dict[int, str]) -> str:
     digest = hashlib.blake2b(repr(value).encode("utf-8"), digest_size=16).hexdigest()
     cache[cache_key] = digest
     return digest
-
-
-def _update_digest_int(hasher: Any, value: int) -> None:
-    hasher.update(int(value).to_bytes(8, byteorder="little", signed=False))
 
 
 def _update_digest_float(hasher: Any, value: float) -> None:

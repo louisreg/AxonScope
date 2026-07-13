@@ -48,7 +48,7 @@ def test_vm_raster_plan_lowers_shared_probe_tables():
     assert plan.probe_mask_host.flags.writeable is False
 
 
-def test_vm_raster_plan_cache_survives_stimulation_replacement():
+def test_vm_raster_plan_cache_survives_stimulation_replacement(monkeypatch):
     recording_lowering._VM_RASTER_PLAN_CACHE.clear()
     recording_lowering._VM_RASTER_PLAN_IDENTITY_CACHE.clear()
     axons = (object(), object())
@@ -56,6 +56,7 @@ def test_vm_raster_plan_cache_survives_stimulation_replacement():
         SimpleNamespace(n_compartments=3),
         SimpleNamespace(n_compartments=3),
     )
+    spatial_cache_token = object()
     cohort = SimpleNamespace(
         group_id=0,
         mode="single",
@@ -75,6 +76,7 @@ def test_vm_raster_plan_cache_survives_stimulation_replacement():
         ),
         axon_y_um=np.asarray([0.0, 10.0], dtype=float),
         axon_z_um=np.asarray([50.0, 60.0], dtype=float),
+        spatial_cache_token=spatial_cache_token,
     )
     observers = (
         axs.analysis.Activation(
@@ -96,6 +98,12 @@ def test_vm_raster_plan_cache_survives_stimulation_replacement():
             "stimulations": ((object(),), (object(),)),
         }
     )
+    refreshed.spatial_cache_token = spatial_cache_token
+
+    def fail_digest(_values):
+        raise AssertionError("spatially unchanged cohort should use the identity cache")
+
+    monkeypatch.setattr(recording_lowering, "_array_shape_dtype_digest", fail_digest)
     second = recording_lowering.lower_observers_for_cohort(
         observers,
         cohort=refreshed,

@@ -34,10 +34,11 @@ def lower_observers_for_cohort(
         cohort=cohort,
         dtype=dtype,
     )
+    spatial_token = _cohort_spatial_cache_token(cohort)
     cached = _identity_cache_get(
         _VM_RASTER_PLAN_IDENTITY_CACHE,
         identity_key,
-        cohort,
+        spatial_token,
     )
     if cached is not None:
         record_benchmark_metadata(
@@ -56,7 +57,7 @@ def lower_observers_for_cohort(
         _identity_cache_store(
             _VM_RASTER_PLAN_IDENTITY_CACHE,
             identity_key,
-            cohort,
+            spatial_token,
             cached,
         )
         record_benchmark_metadata(
@@ -78,7 +79,7 @@ def lower_observers_for_cohort(
     _identity_cache_store(
         _VM_RASTER_PLAN_IDENTITY_CACHE,
         identity_key,
-        cohort,
+        spatial_token,
         plan,
     )
     record_benchmark_metadata(
@@ -112,10 +113,16 @@ def _vm_raster_plan_identity_cache_key(
 ) -> tuple[Any, ...]:
     return (
         "vm_raster_plan_identity_v1",
-        id(cohort),
+        id(_cohort_spatial_cache_token(cohort)),
         str(np.dtype(dtype)),
         tuple(observer_definition_signature(observer) for observer in observers),
     )
+
+
+def _cohort_spatial_cache_token(cohort: Any) -> Any:
+    """Return identity shared by cohort refreshes with unchanged spatial rows."""
+
+    return getattr(cohort, "spatial_cache_token", cohort)
 
 
 def _prepared_cohort_signature(cohort: Any) -> tuple[Any, ...]:
@@ -166,13 +173,13 @@ def _cache_store(
 def _identity_cache_get(
     cache: OrderedDict[tuple[Any, ...], tuple[Any, Any]],
     key: tuple[Any, ...],
-    cohort: Any,
+    spatial_token: Any,
 ) -> Any | None:
     entry = cache.get(key)
     if entry is None:
         return None
-    cached_cohort, value = entry
-    if cached_cohort is not cohort:
+    cached_token, value = entry
+    if cached_token is not spatial_token:
         cache.pop(key, None)
         return None
     cache.move_to_end(key)
@@ -182,10 +189,10 @@ def _identity_cache_get(
 def _identity_cache_store(
     cache: OrderedDict[tuple[Any, ...], tuple[Any, Any]],
     key: tuple[Any, ...],
-    cohort: Any,
+    spatial_token: Any,
     value: Any,
 ) -> None:
-    cache[key] = (cohort, value)
+    cache[key] = (spatial_token, value)
     cache.move_to_end(key)
     while len(cache) > _RECORDING_LOWERING_CACHE_MAX_SIZE:
         cache.popitem(last=False)
