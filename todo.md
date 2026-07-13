@@ -422,6 +422,30 @@ These items are intentionally not ordered or scoped into a phase yet.
 - [ ] Revisit the caching strategy: generate artifacts only for the requested
   runtime, keep cache state clean, and decide whether built-in models should be
   built on first call and/or at package install time.
+- [ ] Revisit double-cable Triton input/output aliasing together with a serious
+  dispatch/copy optimization pass. The retained three-repeat warm medians are
+  `run_pool=437.5 ms`, `dispatch_jax=82.7 ms`, and `wait=28.7 ms` without
+  aliases versus `565.5/113.5/9.75 ms` with aliases. The wait reduction is
+  substantial, but `dispatch+wait` and end-to-end time currently regress.
+  Profile XLA buffer assignment/copy insertion and Nsight device activity;
+  sweep larger `Nx`, batch sizes, and solver-heavy durations; test alias
+  subsets, truly ephemeral custom-call operands, and outer-JIT donation where
+  ownership permits it. Retain aliasing only if total `run_pool` and
+  `dispatch_jax + wait` improve with identical numerical results, rather than
+  accepting a synchronization-boundary shift as solver speedup.
+- [ ] Evaluate JAX's native persistent compilation cache for non-Triton JAX
+  routes, then enable it under `.axonscope_cache/runtime/jax/xla` only if fresh
+  evidence is positive. Cover single-cable CPU/GPU, CPU double-cable Thomas,
+  and any future pure-JAX GPU fallback; also test whether it usefully layers on
+  top of the Triton compiled-call cache for the complete XLA executable.
+  Configure the cache before the first JAX compilation and benchmark a true
+  miss followed by a hit in separate processes, splitting trace, lower, XLA
+  compile, first execution, and end-to-end cold time. Decide minimum compile
+  time/entry size, maximum size/LRU retention, explicit clean/disable behavior,
+  trusted-local-directory policy, cache diagnostics, and Kaggle/HPC sharing.
+  Prefer JAX's version/device/HLO-keyed executable cache over an AxonScope
+  reimplementation, while retaining AxonScope-owned policy and benchmark
+  guards around its location and lifecycle.
 - [ ] After CPU/GPU optimization work is complete, run a broad cleanup pass to
   remove unused code and verify contracts. Treat `runtime/jax` as the first
   completed target, and use Graphify to guide the wider pass.
