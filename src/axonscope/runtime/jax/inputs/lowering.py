@@ -134,14 +134,26 @@ def lower_single_cable_intracellular_input(
     from axonscope.runtime.jax.inputs.intracellular import (
         build_intracellular_current_density_batch,
         build_sparse_intracellular_current_density_batch,
+        build_zero_sparse_intracellular_current_density_batch,
     )
 
+    has_contexts = has_intracellular_contexts(cohort.axons)
     if should_use_sparse_intracellular_batch(
         group_mode=group.mode,
         axons=cohort.axons,
         kernel_options=kernel_options,
         observers=observers,
     ):
+        if not has_contexts:
+            return LoweredIntracellularInput(
+                format="sparse_current_clamp",
+                midpoint=build_zero_sparse_intracellular_current_density_batch(
+                    batch_size=group.size,
+                    step_count=runtime.grid.Nt,
+                    target_nx=cohort.nx,
+                    dtype_local=runtime.membrane.dtype,
+                ),
+            )
         return LoweredIntracellularInput(
             format="sparse_current_clamp",
             midpoint=build_sparse_intracellular_current_density_batch(
@@ -151,7 +163,7 @@ def lower_single_cable_intracellular_input(
                 target_nx=cohort.nx,
             ),
         )
-    if not has_intracellular_contexts(cohort.axons):
+    if not has_contexts:
         return LoweredIntracellularInput(
             format="zero_no_intracellular_context",
             midpoint=None,

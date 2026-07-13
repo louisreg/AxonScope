@@ -197,6 +197,26 @@ def build_sparse_intracellular_current_density_batch(
     )
 
 
+def build_zero_sparse_intracellular_current_density_batch(
+    *,
+    batch_size: int,
+    step_count: int,
+    target_nx: int,
+    dtype_local: jnp.dtype,
+) -> SparseIntracellularCurrentDensityBatch:
+    """Build an empty sparse current-density payload for no-clamp cohorts."""
+
+    rows = int(batch_size)
+    steps = int(step_count)
+    nx = int(target_nx)
+    return SparseIntracellularCurrentDensityBatch(
+        density_mid=jnp.zeros((rows, steps, 0), dtype=dtype_local),
+        indices=jnp.zeros((rows, 0), dtype=jnp.int32),
+        mask=jnp.zeros((rows, 0), dtype=bool),
+        target_nx=nx,
+    )
+
+
 def _can_build_intracellular_rows_from_clamps(axons: Sequence[AxonLike]) -> bool:
     for axon in axons:
         for context in getattr(axon, "intracellular_contexts", ()):
@@ -514,6 +534,7 @@ __all__ = [
     "build_intracellular_current_density_batch",
     "build_intracellular_current_density_fn",
     "build_sparse_intracellular_current_density_batch",
+    "build_zero_sparse_intracellular_current_density_batch",
     "can_build_sparse_intracellular_current_density_batch",
     "compile_intracellular_contexts",
     "compartment_surface_area_cm2",
