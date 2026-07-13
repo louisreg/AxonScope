@@ -41,14 +41,15 @@ from .factorized import (
 )
 from .inputs import (
     _as_batched_edge_array,
-    _as_batched_row_array,
     _as_batched_space_array,
     _as_batched_time_space_array,
+    _as_cached_batched_space_array,
     _as_edge_array,
     _as_factorized_extracellular_potential_batch,
     _as_scalar_or_space_array,
     _as_space_array,
     _cached_broadcast_batch_leading,
+    _cached_constant_batched_space_array,
     _normalize_batch_options,
     _resolve_output_recording,
 )
@@ -1196,26 +1197,22 @@ def _initial_double_cable_batch_state(
         membrane_runtime = runtime.membrane
         dtype_local = membrane_runtime.dtype
         nx = membrane_runtime.Nx
-        Ve = jnp.full(
-            (batch_size, nx),
-            jnp.asarray(Veinit_mV, dtype=dtype_local),
-            dtype=dtype_local,
+        Ve = _cached_constant_batched_space_array(
+            "double_cable_Veinit_mV",
+            Veinit_mV,
+            nx=nx,
+            dtype_local=dtype_local,
+            batch_size=batch_size,
         )
-        Vm = _as_batched_space_array(
+        Vm = _as_cached_batched_space_array(
             "Vm0_mV",
             membrane_runtime.Vm0_mV,
             nx=nx,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        Vi = Vm + Ve
-        gates = _as_batched_row_array(
-            "gates0",
-            membrane_runtime.gates0,
-            row_shape=(nx, membrane_runtime.backend.n_gates_max),
-            dtype_local=dtype_local,
-            batch_size=batch_size,
-        )
+        Vi = Vm if float(Veinit_mV) == 0.0 else Vm + Ve
+        gates = _cached_broadcast_batch_leading(membrane_runtime.gates0, batch_size)
         state = tuple(
             _cached_broadcast_batch_leading(values, batch_size)
             for values in membrane_runtime.state0

@@ -38,6 +38,34 @@ def _cached_broadcast_batch_leading(values: Array, batch_size: int) -> Array:
     store_batched_static_array(key, out)
     return out
 
+def _cached_constant_batched_space_array(
+    name: str,
+    value: float,
+    *,
+    nx: int,
+    dtype_local: jnp.dtype,
+    batch_size: int,
+) -> Array:
+    key = (
+        "constant_batched_space_v1",
+        name,
+        float(value),
+        int(nx),
+        str(jnp.dtype(dtype_local)),
+        int(batch_size),
+        _current_jax_device_key(),
+    )
+    cached = get_batched_static_array(key)
+    if cached is not None:
+        return cached
+    out = jnp.full(
+        (int(batch_size), int(nx)),
+        jnp.asarray(value, dtype=dtype_local),
+        dtype=dtype_local,
+    )
+    store_batched_static_array(key, out)
+    return out
+
 def _cached_single_cable_tridiagonal_coefficients(
     *,
     lower: Array,
@@ -605,6 +633,7 @@ __all__ = [
     "_as_sparse_intracellular_current_density_batch",
     "_broadcast_batch_leading",
     "_cached_broadcast_batch_leading",
+    "_cached_constant_batched_space_array",
     "_cached_single_cable_tridiagonal_coefficients",
     "_normalize_batch_options",
     "_record_vm_batch",
