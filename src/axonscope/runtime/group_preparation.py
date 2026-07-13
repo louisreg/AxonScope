@@ -134,7 +134,10 @@ def prepared_cohort_for_current_group(group: DispatchGroup) -> PreparedCohort:
     cached = _get_prepared_cohort_identity(group)
     if cached is not None:
         record_benchmark_metadata(prepared_cohort_identity_cache="hit")
-        return cached
+        refreshed = _with_current_stimulation_rows(cached, group)
+        if refreshed is not cached:
+            _store_prepared_cohort_identity(group, refreshed)
+        return refreshed
 
     cohort = prepared_cohort_for_group(group)
     _store_prepared_cohort_identity(group, cohort)

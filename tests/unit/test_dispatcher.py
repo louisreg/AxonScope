@@ -377,6 +377,31 @@ def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
     assert second is first
 
 
+def test_dispatch_plan_cache_survives_amplitude_only_stimulus_replacement(monkeypatch):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    first = dispatch_plan_module.build_dispatch_plan([axon])
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    updated = stimulation.replace_drive(
+        drive.id,
+        stimulus=Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=20e-6,
+        ),
+    )
+    axon.add_extracellular_stimulation(stimulation=updated, replace=True)
+
+    def fail_solver_rebuild(_simulation):
+        raise AssertionError("amplitude-only stimulus replacement should reuse the plan")
+
+    monkeypatch.setattr(dispatch_plan_module, "build_solver_axon", fail_solver_rebuild)
+
+    second = dispatch_plan_module.build_dispatch_plan([axon])
+
+    assert second is first
+
+
 def test_axon_simulation_reuses_cached_dispatch_plan(monkeypatch):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
@@ -1392,6 +1417,33 @@ def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
         if event.name == "inputs.positions"
     ]
     assert identity_statuses == ["miss", "hit"]
+
+
+def test_current_group_prepared_cohort_cache_refreshes_replaced_stimulus():
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    group = build_dispatch_plan([axon]).groups[0]
+
+    group_preparation.clear_prepared_cohort_cache()
+    first = group_preparation.prepared_cohort_for_current_group(group)
+
+    stimulation = axon.extracellular_stimulations[0]
+    drive = stimulation.drives[0]
+    updated = stimulation.replace_drive(
+        drive.id,
+        stimulus=Stimulus.pulse(
+            start=0.0 * axs.ms,
+            duration=0.05 * axs.ms,
+            amplitude=20e-6,
+        ),
+    )
+    axon.add_extracellular_stimulation(stimulation=updated, replace=True)
+
+    second = group_preparation.prepared_cohort_for_current_group(group)
+
+    assert second is not first
+    assert second.stimulations == ((updated,),)
+    assert first.stimulations[0][0] is stimulation
+    assert second.stimulations[0][0] is updated
 
 
 def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
