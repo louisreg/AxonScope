@@ -6,7 +6,7 @@ from typing import Literal, Sequence
 import numpy as np
 
 BatchRecordingMode = Literal["full", "center", "probes", "indices", "none"]
-DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 256
+DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128
 
 
 @dataclass(frozen=True)

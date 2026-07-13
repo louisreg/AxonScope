@@ -363,15 +363,15 @@ improvements.
   `jax-triton` was missing. The corrected double-cable GPU rerun with
   `jax-triton` is in
   `benchmark/results/kaggle/20260713_132533_time_chunk_sweep_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p13-time-chunk-gpu-double-jt-8d092fc`.
-  Early read: `512` is not a clear win; `128`/`256`/default are usually close,
-  and `256` is often the safest GPU double-cable policy, but the final default
-  decision should wait for a denser/longer VmRaster workload if needed.
+  Decision: keep the observer/VmRaster default simple and use `128` everywhere.
+  The measured effect is globally weak, `512` is not a clear win, and `128`
+  gives a conservative bounded chunk without adding a meaningful warm overhead.
 - [ ] Evaluate dense Vm/full recording separately from VmRaster. Full Vm may
   still need output/assembly optimizations, but it should not drive the
   default observer-only chunking policy.
-- [ ] Decide the public/internal policy knobs: keep the default, change the
-  default, expose an execution-policy option, or make the default adaptive from
-  `Nt`, `Nx`, batch size, output sink, and device.
+- [x] Decide the public/internal policy knobs: keep the default simple as
+  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` for observer/VmRaster routes. Do
+  not expose a new public execution-policy option or adaptive default yet.
 - [ ] Keep progress logs explicit: report time chunks as time chunks, and
   reserve wait/synchronization wording for the final JAX/device wait.
 

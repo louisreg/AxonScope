@@ -276,10 +276,10 @@ There are two solver option containers and one runtime policy surface:
   instead of raw string public solver names.
 
 `BatchOptions.none()` is the compact observer-only batch policy. It defaults to
-`DEFAULT_OBSERVER_TIME_CHUNK_STEPS` so duration sweeps reuse a stable JAX kernel
-chunk shape while writing observer hits into one preallocated full-duration
-packed VmRaster state. The default is chosen to align with packed VmRaster words
-and avoid post-chunk raster recombination on short runs. Passing
+`DEFAULT_OBSERVER_TIME_CHUNK_STEPS`, currently `128`, so duration sweeps reuse a
+stable JAX kernel chunk shape while writing observer hits into one preallocated
+full-duration packed VmRaster state. The default is chosen to align with packed
+VmRaster words and avoid post-chunk raster recombination on short runs. Passing
 `time_chunk_steps=None` explicitly keeps the unchunked single-scan behavior.
 
 The current typed public choices are:

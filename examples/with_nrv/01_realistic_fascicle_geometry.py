@@ -38,7 +38,7 @@ class ExampleConfig:
     dt_ms: float = 0.001
     stimulus_start_ms: float = 0.1
     pulse_duration_ms: float = 0.1
-    observer_time_chunk_steps: int | None = 1000
+    observer_time_chunk_steps: int | None = axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS
     solver_progress: bool | str = False
     recruitment_amplitudes_uA: tuple[float, ...] = tuple(
         float(value) for value in np.linspace(0.0, 300.0, 21)
