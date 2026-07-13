@@ -69,4 +69,5 @@ def test_production_double_cable_capture_splits_jax_cold_phases(tmp_path, monkey
     assert payload["compile_s"] >= 0.0
     assert payload["first_execution_s"] >= 0.0
     assert payload["stablehlo_bytes"] > 0
+    assert payload["stablehlo_custom_calls"] >= 0
     assert payload["dynamic"]["Vi0_mV"][0]["shape"] == [2, 3]

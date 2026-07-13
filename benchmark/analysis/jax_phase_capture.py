@@ -71,6 +71,7 @@ def install_production_double_cable_capture(output_path: Path) -> None:
             "total_cold_s": trace_s + lower_s + compile_s + first_execution_s,
             "stablehlo_bytes": len(stablehlo.encode("utf-8")),
             "stablehlo_lines": stablehlo.count("\n") + 1,
+            "stablehlo_custom_calls": stablehlo.count("stablehlo.custom_call"),
             "static": {
                 name: _json_scalar(kwargs[name])
                 for name in sorted(_DOUBLE_CABLE_STATIC_ARGS)

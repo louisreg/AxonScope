@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Capture trace/lower/compile/first-execution for the first production GPU JIT.",
     )
     parser.add_argument(
+        "--validate-double-cable-kernel",
+        action="store_true",
+        help="Validate the active Triton solver against dense NumPy solves after timing.",
+    )
+    parser.add_argument(
         "--disable-batch-membrane-capability",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -146,6 +151,14 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_progress(row))
 
     _write_report(output, rows)
+    if args.validate_double_cable_kernel:
+        from benchmark.analysis.jax_triton_validation import (
+            validate_double_cable_tiled_thomas,
+        )
+
+        validate_double_cable_tiled_thomas(
+            output / "double_cable_kernel_validation.json"
+        )
     return 0
 
 

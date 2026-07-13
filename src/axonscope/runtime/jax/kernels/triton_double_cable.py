@@ -23,7 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - common local CPU/dev path.
 if triton is not None and tl is not None:
 
     @triton.jit
-    def _tiled_block_thomas_forward_loop_kernel(
+    def _tiled_block_thomas_fused_loop_kernel(
         a00,
         a01,
         a10,
@@ -38,6 +38,8 @@ if triton is not None and tl is not None:
         c11,
         d0,
         d1,
+        out0,
+        out1,
         N: tl.constexpr,
         B: tl.constexpr,
         BLOCK_B: tl.constexpr,
@@ -156,30 +158,10 @@ if triton is not None and tl is not None:
         tl.store(d0 + offset, dp0, mask=mask)
         tl.store(d1 + offset, dp1, mask=mask)
 
-    @triton.jit
-    def _tiled_block_thomas_backward_loop_kernel(
-        c00,
-        c01,
-        c10,
-        c11,
-        d0,
-        d1,
-        out0,
-        out1,
-        N: tl.constexpr,
-        B: tl.constexpr,
-        BLOCK_B: tl.constexpr,
-    ):
-        tile = tl.program_id(0)
-        lanes = tl.arange(0, BLOCK_B)
-        batch = tile * BLOCK_B + lanes
-        mask = batch < B
-        last = (N - 1) * B + batch
-
-        x0 = tl.load(d0 + last, mask=mask, other=0.0)
-        x1 = tl.load(d1 + last, mask=mask, other=0.0)
-        tl.store(out0 + last, x0, mask=mask)
-        tl.store(out1 + last, x1, mask=mask)
+        x0 = dp0
+        x1 = dp1
+        tl.store(out0 + offset, x0, mask=mask)
+        tl.store(out1 + offset, x1, mask=mask)
 
         for rev in tl.range(0, N - 1):
             x = N - 2 - rev
@@ -196,8 +178,7 @@ if triton is not None and tl is not None:
             tl.store(out1 + offset, x1, mask=mask)
 
 else:
-    _tiled_block_thomas_forward_loop_kernel = None
-    _tiled_block_thomas_backward_loop_kernel = None
+    _tiled_block_thomas_fused_loop_kernel = None
 
 
 def jax_triton_thomas_dependency_skip_reason() -> str | None:
@@ -263,7 +244,7 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
 
     work_shape = jax.ShapeDtypeStruct(rhs0.shape, rhs0.dtype)
     grid = ((batch_size + int(block_b) - 1) // int(block_b),)
-    c00, c01, c10, c11, d0, d1 = jt.triton_call(
+    *_, out0, out1 = jt.triton_call(
         a00,
         a01,
         a10,
@@ -272,8 +253,8 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
         off1,
         rhs0,
         rhs1,
-        kernel=_tiled_block_thomas_forward_loop_kernel,
-        out_shape=(work_shape, work_shape, work_shape, work_shape, work_shape, work_shape),
+        kernel=_tiled_block_thomas_fused_loop_kernel,
+        out_shape=(work_shape,) * 8,
         grid=grid,
         N=nx,
         B=batch_size,
@@ -281,22 +262,7 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
         num_warps=_num_warps_for_block_b(int(block_b)),
         num_stages=1,
     )
-    return jt.triton_call(
-        c00,
-        c01,
-        c10,
-        c11,
-        d0,
-        d1,
-        kernel=_tiled_block_thomas_backward_loop_kernel,
-        out_shape=(work_shape, work_shape),
-        grid=grid,
-        N=nx,
-        B=batch_size,
-        BLOCK_B=int(block_b),
-        num_warps=_num_warps_for_block_b(int(block_b)),
-        num_stages=1,
-    )
+    return out0, out1
 
 
 def _check_rhs_pair_xb(rhs0: Any, rhs1: Any) -> None:
