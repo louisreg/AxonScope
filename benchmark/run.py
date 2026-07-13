@@ -10,6 +10,7 @@ if __package__ in {None, ""}:
 
 from benchmark.curves import recruitment_curves, threshold_curves
 from benchmark.examples import basic_examples, with_nrv_examples
+from benchmark.protocols import recruitment_amplitude_batch
 from benchmark.workloads.curve_options import PRESETS
 
 
@@ -18,6 +19,7 @@ SCRIPTS = {
     "with_nrv_examples": with_nrv_examples,
     "threshold_curves": threshold_curves,
     "recruitment_curves": recruitment_curves,
+    "recruitment_amplitude_batch": recruitment_amplitude_batch,
 }
 
 
