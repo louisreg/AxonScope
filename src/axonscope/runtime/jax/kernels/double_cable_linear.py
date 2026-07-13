@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+import jax
 import jax.numpy as jnp
+
+from axonscope.runtime.jax.preparation.caches import (
+    get_batched_static_array,
+    store_batched_static_array,
+)
 
 from ..cable_geometry import Array
 
@@ -223,6 +229,112 @@ def prepare_double_cable_linear_system_static_terms_xb(
         off_e=-double_cable_edge_to_xb(Gax_e, batch_size=batch_size, nx=nx),
         background_abs=background * area,
         zero_abs=jnp.zeros_like(area),
+    )
+
+
+def cached_prepare_double_cable_linear_system_static_terms(
+    *,
+    area_cm2: Array,
+    Cm_abs: Array,
+    Cx_abs: Array,
+    Gx_abs: Array,
+    Gax_e: Array,
+    Gax_i: Array,
+    left_i: Array,
+    right_i: Array,
+    left_e: Array,
+    right_e: Array,
+    I_background: Array,
+    dt_ms: float,
+    batch_size: int,
+    nx: int,
+    include_xb: bool,
+) -> tuple[DoubleCableLinearSystemStaticTerms, DoubleCableLinearSystemStaticTermsXB | None]:
+    """Return cached static double-cable linear terms for warm batch dispatch."""
+
+    dtype = jnp.asarray(Cm_abs).dtype
+    key = (
+        "double_cable_linear_static_terms_v1",
+        id(area_cm2),
+        id(Cm_abs),
+        id(Cx_abs),
+        id(Gx_abs),
+        id(Gax_e),
+        id(Gax_i),
+        id(left_i),
+        id(right_i),
+        id(left_e),
+        id(right_e),
+        id(I_background),
+        tuple(int(dim) for dim in jnp.asarray(area_cm2).shape),
+        tuple(int(dim) for dim in jnp.asarray(Gax_i).shape),
+        str(dtype),
+        float(dt_ms),
+        int(batch_size),
+        int(nx),
+        bool(include_xb),
+        _current_jax_device_key(),
+    )
+    cached = get_batched_static_array(key)
+    if cached is not None:
+        return cached
+
+    dt = jnp.asarray(dt_ms, dtype=dtype)
+    linear_static = prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=I_background,
+        dt_ms=dt,
+        batch_size=batch_size,
+        nx=nx,
+    )
+    linear_static_xb = (
+        prepare_double_cable_linear_system_static_terms_xb(
+            area_cm2=area_cm2,
+            Cm_abs=Cm_abs,
+            Cx_abs=Cx_abs,
+            Gx_abs=Gx_abs,
+            Gax_e=Gax_e,
+            Gax_i=Gax_i,
+            left_i=left_i,
+            right_i=right_i,
+            left_e=left_e,
+            right_e=right_e,
+            I_background=I_background,
+            dt_ms=dt,
+            batch_size=batch_size,
+            nx=nx,
+        )
+        if include_xb
+        else None
+    )
+    out = (linear_static, linear_static_xb)
+    store_batched_static_array(key, out)
+    return out
+
+
+def _current_jax_device_key() -> tuple[Any, ...]:
+    device = getattr(jax.config, "jax_default_device", None)
+    if device is None:
+        try:
+            devices = jax.devices(jax.default_backend())
+        except Exception:
+            devices = ()
+        device = devices[0] if devices else None
+    if device is None:
+        return ("backend", jax.default_backend())
+    return (
+        "device",
+        getattr(device, "platform", None),
+        getattr(device, "id", None),
     )
 
 

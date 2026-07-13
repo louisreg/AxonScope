@@ -56,6 +56,7 @@ from .double_cable_cpu import (
     _run_double_cable_batch_observer_scan,
     _run_double_cable_batch_stateful_scan,
 )
+from .double_cable_linear import cached_prepare_double_cable_linear_system_static_terms
 from .double_cable_gpu import (
     _run_double_cable_batch_observer_integrated_scan,
     _run_double_cable_batch_stateful_integrated_scan,
@@ -456,6 +457,23 @@ def _run_double_cable_batch_array_chunks(
         time_chunk_steps=time_chunk_steps,
         factorized_vext=factorized_vext,
     )
+    linear_static, linear_static_xb = cached_prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=background,
+        dt_ms=grid.dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+        include_xb=kernel_block_solver == "jax_triton_loop_xb",
+    )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
     previous = extracellular_potential_initial_previous_mV
     chunks = []
@@ -529,17 +547,8 @@ def _run_double_cable_batch_array_chunks(
                     Ve0_mV=Ve,
                     gates0=gates,
                     state0=state,
-                    area_cm2=area_cm2,
-                    Cm_abs=Cm_abs,
-                    Cx_abs=Cx_abs,
-                    Gx_abs=Gx_abs,
-                    Gax_e=Gax_e,
-                    Gax_i=Gax_i,
-                    left_i=left_i,
-                    right_i=right_i,
-                    left_e=left_e,
-                    right_e=right_e,
-                    I_background=background,
+                    linear_static=linear_static,
+                    linear_static_xb=linear_static_xb,
                     intracellular_current_density_mid=iinj_chunk,
                     extracellular_potential_mid_mV=vext_chunk,
                     extracellular_potential_initial_previous_mV=previous,
@@ -911,6 +920,23 @@ def _run_double_cable_batch_observer_chunks(
         factorized_vext=factorized_vext is not None,
         observer="vm_raster",
     )
+    linear_static, linear_static_xb = cached_prepare_double_cable_linear_system_static_terms(
+        area_cm2=area_cm2,
+        Cm_abs=Cm_abs,
+        Cx_abs=Cx_abs,
+        Gx_abs=Gx_abs,
+        Gax_e=Gax_e,
+        Gax_i=Gax_i,
+        left_i=left_i,
+        right_i=right_i,
+        left_e=left_e,
+        right_e=right_e,
+        I_background=background,
+        dt_ms=grid.dt_ms,
+        batch_size=batch_size,
+        nx=nx,
+        include_xb=kernel_block_solver == "jax_triton_loop_xb",
+    )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
     raster_probe_indices, raster_probe_mask = _vm_raster_probe_tables_for_kernel(
         observers,
@@ -1071,17 +1097,8 @@ def _run_double_cable_batch_observer_chunks(
                     raster_probe_indices=raster_probe_indices,
                     raster_probe_mask=raster_probe_mask,
                     raster_thresholds_mV=observers.thresholds_mV,
-                    area_cm2=area_cm2,
-                    Cm_abs=Cm_abs,
-                    Cx_abs=Cx_abs,
-                    Gx_abs=Gx_abs,
-                    Gax_e=Gax_e,
-                    Gax_i=Gax_i,
-                    left_i=left_i,
-                    right_i=right_i,
-                    left_e=left_e,
-                    right_e=right_e,
-                    I_background=background,
+                    linear_static=linear_static,
+                    linear_static_xb=linear_static_xb,
                     intracellular_current_density_mid=iinj_chunk,
                     extracellular_potential_mid_mV=vext_chunk,
                     extracellular_potential_initial_previous_mV=previous,
