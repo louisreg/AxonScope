@@ -40,12 +40,13 @@ def _build_test_phase_pool(options, amplitudes, *, curve_context):
     )
 
 
-def test_benchmark_launcher_lists_two_curve_scripts_and_presets(capsys):
-    assert set(SCRIPTS) == {"threshold_curves", "recruitment_curves"}
+def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
+    assert set(SCRIPTS) == {"basic_examples", "threshold_curves", "recruitment_curves"}
 
     assert run_benchmark(["--list"]) == 0
 
     out = capsys.readouterr().out
+    assert "basic_examples" in out
     assert "threshold_curves" in out
     assert "recruitment_curves" in out
     assert "quick" in out
@@ -105,6 +106,33 @@ def test_threshold_dry_run_writes_common_case_options(tmp_path: Path, capsys):
     assert rows[0]["amplitude_min"] == "1.0"
     assert rows[0]["amplitude_max"] == "50.0"
     assert rows[0]["stimulation"] == "monophasic"
+
+
+def test_basic_examples_dry_run_writes_case_table(tmp_path: Path, capsys):
+    assert (
+        run_benchmark(
+            [
+                "--script",
+                "basic_examples",
+                "--preset",
+                "quick",
+                "--platform",
+                "cpu",
+                "--dry-run",
+                "--output",
+                str(tmp_path),
+                "--examples",
+                "06,08",
+            ]
+        )
+        == 0
+    )
+
+    assert "dry-run: basic_examples" in capsys.readouterr().out
+    rows = list(csv.DictReader((tmp_path / "cases.csv").open()))
+    assert [row["example"] for row in rows] == ["06", "08"]
+    assert rows[0]["label"] == "activation_velocity"
+    assert rows[1]["label"] == "recruitment_curve_population"
 
 
 def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path, capsys):

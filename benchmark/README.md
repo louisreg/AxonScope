@@ -19,8 +19,10 @@ python benchmark/run.py --script threshold_curves --preset quick --platform cpu 
 python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platform gpu --dry-run
 python benchmark/run.py --script threshold_curves --preset quick --platform cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu
+python benchmark/run.py --script basic_examples --preset quick --platform cpu --examples 06,07,08
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --cpu
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100
+python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script basic_examples --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100 -- --examples 06,07,08
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_trace_smoke --platform gpu --machine-shape NvidiaTeslaP100
 ```
 
@@ -45,6 +47,14 @@ recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
 Real execution writes timing, memory, environment, raw activation rows, and
 curve summaries. Block thresholds and NRV execution are intentionally left as
 future benchmark/baseline work until their adapter contracts are defined.
+
+`basic_examples` is an executable-docs perf gate for
+`examples/basic/06_activation_velocity.py`,
+`examples/basic/07_threshold_vs_diameter.py`, and
+`examples/basic/08_recruitment_curve_population.py`. It wraps the examples
+without changing their public workflow, records one cold run plus optional
+warmups/repeats, and writes `runs.csv`, per-run benchmark traces, and
+`report.md`.
 
 Use `--time-chunk-steps default` or omit the option to keep AxonScope's
 recording-specific default; for observer-only runs this currently means the
