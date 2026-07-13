@@ -560,6 +560,15 @@ These items are intentionally not ordered or scoped into a phase yet.
     axons were `606.6 ms` sync versus `611.5 ms` async. Keep synchronous group
     execution as the default; revisit async only for workloads with several
     independent solver-heavy groups and measured device idle time.
+  - [ ] Benchmark async scheduling specifically when heterogeneous workloads
+    force several independent dispatch groups. Cover incompatible membrane
+    models, cable formulations/Nx shapes, and genuinely different stimulus
+    temporal signatures (amplitude-only scaling may remain in one factorized
+    group). Sweep 2/4/8 groups and light versus solver-heavy durations on CPU
+    and Kaggle GPU; compare sync/async warm and cold totals, enqueue/flush/wait,
+    peak memory, device idle time, deterministic result ordering, and numerical
+    equivalence. Keep async opt-in unless it gives a clear end-to-end gain for
+    these forced multi-group cases without excessive pending-device memory.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models.
 - [ ] Re-check each built-in model against the NRV implementation; some details
   may have been lost during model translation.
