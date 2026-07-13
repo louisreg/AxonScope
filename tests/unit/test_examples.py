@@ -24,6 +24,7 @@ def _example_paths() -> tuple[Path, ...]:
             path
             for path in directory.rglob("*.py")
             if "__pycache__" not in path.parts
+            and not path.name.startswith("_")
         )
     return tuple(sorted(paths))
 

@@ -1,17 +1,11 @@
-"""Run AxonScope on a realistic NRV histology-contour nerve.
-
-Run:
-    python examples/with_nrv/01_realistic_fascicle_geometry.py
-
-NRV owns the external geometry, fiber placement, and LIFE/FEM footprint
-sampling. AxonScope receives intrinsic axon layouts plus sampled
-`ExtracellularFootprint` objects, then runs the recruitment sweep.
-"""
+"""Shared NRV geometry-to-AxonScope recruitment example runner."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -52,32 +46,36 @@ class ExampleConfig:
     gmsh_n_core: int | None = 1
 
 
-def main(config: ExampleConfig | None = None) -> None:
-    if config is None:
-        config = ExampleConfig()
+@dataclass(frozen=True)
+class NrvGeometry:
+    """NRV-owned nerve geometry plus contours for the AxonScope plot."""
+
+    nerve: Any
+    nerve_contour: np.ndarray
+    fascicle_contours: tuple[np.ndarray, ...]
+    life_fascicle_id: str
+
+
+GeometryBuilder = Callable[[Any, ExampleConfig], NrvGeometry]
+
+
+def run_fascicle_recruitment_example(
+    *,
+    config: ExampleConfig,
+    build_geometry: GeometryBuilder,
+    geometry_label: str,
+) -> None:
     console = Console(width=110)
 
     import nrv
 
-    console.print("[bold]1. Build NRV geometry from cv2 histology contours[/bold]")
+    console.print(f"[bold]1. Build NRV {geometry_label} geometry[/bold]")
     middle_amplitude_uA = config.recruitment_amplitudes_uA[
         len(config.recruitment_amplitudes_uA) // 2
     ]
-    nerve_contour, fascicle_contours = _load_histology_contours(
-        nrv,
-        nerve_diameter_um=config.nerve_diameter_um,
-        fascicle_vertices=config.fascicle_vertices,
-    )
-    nerve = nrv.nerve(
-        diameter=_nrv_numeric(config.nerve_diameter_um),
-        length=_nrv_numeric(config.nerve_length_um),
-    )
-    for fascicle_id, contour in enumerate(fascicle_contours):
-        fascicle = nrv.fascicle(ID=fascicle_id)
-        fascicle.set_geometry(
-            geometry=nrv.create_cshape(vertices=np.asarray(contour, dtype=float))
-        )
-        nerve.add_fascicle(fascicle)
+    geometry = build_geometry(nrv, config)
+    nerve = geometry.nerve
+
     for fascicle in nerve.fascicles.values():
         fascicle.fill(
             n_ax=config.axons_per_fascicle,
@@ -86,9 +84,9 @@ def main(config: ExampleConfig | None = None) -> None:
             with_node_shift=True,
         )
 
-    fascicle_key: object = config.life_fascicle_id
+    fascicle_key: object = geometry.life_fascicle_id
     if fascicle_key not in nerve.fascicles:
-        fascicle_key = int(config.life_fascicle_id)
+        fascicle_key = int(geometry.life_fascicle_id)
     life_y_um, life_z_um = nerve.fascicles[fascicle_key].center
     life_x_offset_um = (config.nerve_length_um - config.life_length_um) / 2.0
     extra_stim = nrv.FEM_stimulation(
@@ -184,7 +182,7 @@ def main(config: ExampleConfig | None = None) -> None:
         unit=axs.uA,
         include_total=False,
     )
-    ax.set_title("AxonScope recruitment on NRV-generated fibers")
+    ax.set_title(f"AxonScope recruitment on NRV {geometry_label} fibers")
 
     snapshot_index = len(curve.amplitudes_uA) // 2
     snapshot_amplitude_uA = float(curve.amplitudes_uA[snapshot_index])
@@ -195,14 +193,14 @@ def main(config: ExampleConfig | None = None) -> None:
     )
     ax_snapshot.add_patch(
         Polygon(
-            nerve_contour,
+            geometry.nerve_contour,
             closed=True,
             fill=False,
             linewidth=1.4,
             color="0.25",
         )
     )
-    for contour in fascicle_contours:
+    for contour in geometry.fascicle_contours:
         ax_snapshot.add_patch(
             Polygon(
                 contour,
@@ -219,11 +217,7 @@ def main(config: ExampleConfig | None = None) -> None:
         for row in footprints.rows
     ]
     fiber_colors = [
-        (
-            "#2868b0"
-            if row.kind == "mrg"
-            else "#d97627"
-        )
+        ("#2868b0" if row.kind == "mrg" else "#d97627")
         if bool(is_active)
         else "0.78"
         for row, is_active in zip(footprints.rows, snapshot_active, strict=True)
@@ -248,12 +242,12 @@ def main(config: ExampleConfig | None = None) -> None:
     ax_snapshot.set_aspect("equal", adjustable="box")
     margin_um = config.nerve_diameter_um * 0.08
     ax_snapshot.set_xlim(
-        float(np.min(nerve_contour[:, 0])) - margin_um,
-        float(np.max(nerve_contour[:, 0])) + margin_um,
+        float(np.min(geometry.nerve_contour[:, 0])) - margin_um,
+        float(np.max(geometry.nerve_contour[:, 0])) + margin_um,
     )
     ax_snapshot.set_ylim(
-        float(np.min(nerve_contour[:, 1])) - margin_um,
-        float(np.max(nerve_contour[:, 1])) + margin_um,
+        float(np.min(geometry.nerve_contour[:, 1])) - margin_um,
+        float(np.max(geometry.nerve_contour[:, 1])) + margin_um,
     )
     ax_snapshot.set_xlabel("y [um]")
     ax_snapshot.set_ylabel("z [um]")
@@ -274,11 +268,28 @@ def main(config: ExampleConfig | None = None) -> None:
     plt.show()
 
 
-def _fascicle_sort_key(fascicle_id: str) -> tuple[int, int | str]:
-    try:
-        return (0, int(fascicle_id))
-    except ValueError:
-        return (1, str(fascicle_id))
+def build_realistic_histology_geometry(nrv_module: Any, config: ExampleConfig) -> NrvGeometry:
+    nerve_contour, fascicle_contours = _load_histology_contours(
+        nrv_module,
+        nerve_diameter_um=config.nerve_diameter_um,
+        fascicle_vertices=config.fascicle_vertices,
+    )
+    nerve = nrv_module.nerve(
+        diameter=_nrv_numeric(config.nerve_diameter_um),
+        length=_nrv_numeric(config.nerve_length_um),
+    )
+    for fascicle_id, contour in enumerate(fascicle_contours):
+        fascicle = nrv_module.fascicle(ID=fascicle_id)
+        fascicle.set_geometry(
+            geometry=nrv_module.create_cshape(vertices=np.asarray(contour, dtype=float))
+        )
+        nerve.add_fascicle(fascicle)
+    return NrvGeometry(
+        nerve=nerve,
+        nerve_contour=nerve_contour,
+        fascicle_contours=tuple(fascicle_contours),
+        life_fascicle_id=config.life_fascicle_id,
+    )
 
 
 def _nrv_numeric(value: float) -> int | float:
@@ -359,7 +370,3 @@ def _undersample_cv2_contour(contour: object, *, vertices: int) -> np.ndarray:
     indices[-1] -= 1
     points = points[indices]
     return np.asarray(points, dtype=float)
-
-
-if __name__ == "__main__":
-    main()
