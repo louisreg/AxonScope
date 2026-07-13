@@ -273,9 +273,9 @@ def _configure_conda_env_environment(env_dir: pathlib.Path) -> None:
     os.environ["PATH"] = os.pathsep.join(
         [str(env_bin), os.environ.get("PATH", "")]
     )
-    # JAX CUDA pip wheels expect to find NVIDIA libraries from their wheel
-    # locations. Prepending the conda env lib directory can hide cuSPARSE/cuDNN,
-    # but Kaggle still needs the host NVIDIA driver paths for libcuda.so.
+    # Keep conda libraries visible for NRV/mpi4py, but do not expose Kaggle's
+    # CUDA toolkit libraries to JAX CUDA pip wheels. The wheels provide CUDA
+    # runtime libraries themselves; Kaggle only needs to provide libcuda.so.
     ld_paths = _nrv_safe_ld_library_paths(env_lib)
     if ld_paths:
         os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(ld_paths)
@@ -292,12 +292,17 @@ def _nrv_safe_ld_library_paths(env_lib: pathlib.Path) -> list[str]:
         for path in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
         if path
     ]
-    blocked = {str(env_lib.resolve()), str(env_lib)}
     paths = [
+        str(env_lib),
+        str(env_lib.resolve()),
+        str(env_lib / "openmpi"),
+        str(env_lib.resolve() / "openmpi"),
+    ]
+    paths.extend(
         path
         for path in existing
-        if path not in blocked and "/cuda" not in path.lower()
-    ]
+        if "/cuda" not in path.lower() and path not in paths
+    )
     for candidate in (
         pathlib.Path("/usr/local/nvidia/lib64"),
         pathlib.Path("/usr/local/nvidia/lib"),
