@@ -46,6 +46,7 @@ class ExampleConfig:
     fem_n_proc: int | None = None
     gmsh_n_core: int | None = 1
     execution_policy: axs.ExecutionPolicy | None = None
+    random_seed: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ def run_fascicle_recruitment_example(
     config: ExampleConfig,
     build_geometry: GeometryBuilder,
     geometry_label: str,
-) -> None:
+):
     console = Console(width=110)
 
     import nrv
@@ -78,6 +79,7 @@ def run_fascicle_recruitment_example(
     geometry = build_geometry(nrv, config)
     nerve = geometry.nerve
 
+    np.random.seed(int(config.random_seed))
     for fascicle in nerve.fascicles.values():
         fascicle.fill(
             n_ax=config.axons_per_fascicle,
@@ -277,6 +279,7 @@ def run_fascicle_recruitment_example(
         frameon=True,
     )
     plt.show()
+    return curve
 
 
 def build_realistic_histology_geometry(nrv_module: Any, config: ExampleConfig) -> NrvGeometry:

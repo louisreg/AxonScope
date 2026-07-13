@@ -24,10 +24,10 @@ from _fascicle_recruitment_common import (  # noqa: E402
 )
 
 
-def main(config: ExampleConfig | None = None) -> None:
+def main(config: ExampleConfig | None = None):
     if config is None:
         config = ExampleConfig()
-    run_fascicle_recruitment_example(
+    return run_fascicle_recruitment_example(
         config=config,
         build_geometry=build_realistic_histology_geometry,
         geometry_label="histology-contour",

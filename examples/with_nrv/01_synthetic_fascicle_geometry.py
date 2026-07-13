@@ -30,7 +30,7 @@ from _fascicle_recruitment_common import (  # noqa: E402
 )
 
 
-def main(config: ExampleConfig | None = None) -> None:
+def main(config: ExampleConfig | None = None):
     if config is None:
         config = ExampleConfig(
             nerve_diameter_um=500.0,
@@ -46,7 +46,7 @@ def main(config: ExampleConfig | None = None) -> None:
             delta_trace_um=5.0,
             life_fascicle_id="2",
         )
-    run_fascicle_recruitment_example(
+    return run_fascicle_recruitment_example(
         config=config,
         build_geometry=build_synthetic_tutorial_geometry,
         geometry_label="synthetic tutorial",

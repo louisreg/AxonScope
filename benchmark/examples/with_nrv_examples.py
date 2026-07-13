@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--amplitudes-uA", default="0,150,300")
     parser.add_argument("--duration-ms", type=float, default=0.5)
     parser.add_argument("--dt-ms", type=float, default=0.01)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
     parser.add_argument("--memory-top-n", type=int)
@@ -215,7 +216,8 @@ def _run_one(
                 with benchmark_span("example.run", example=spec.key, phase=phase, repeat=repeat):
                     _ensure_nrv_imported()
                     with _maybe_quiet(args.quiet, stdout_buffer, stderr_buffer):
-                        module.main(_example_config(module, args, amplitudes))
+                        result = module.main(_example_config(module, args, amplitudes))
+                    _write_recruitment_result(run_dir / "recruitment_result.json", result)
     except BaseException as exc:
         failed = True
         error = f"{type(exc).__name__}: {exc}"
@@ -251,6 +253,7 @@ def _example_config(
         duration_ms=args.duration_ms,
         dt_ms=args.dt_ms,
         recruitment_amplitudes_uA=amplitudes,
+        random_seed=int(args.seed),
         solver_progress=False,
         fem_n_proc=1,
         gmsh_n_core=1,
@@ -304,6 +307,37 @@ def _write_runs(output: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def _write_recruitment_result(path: Path, result: Any) -> None:
+    if result is None:
+        return
+    activated = getattr(result, "activated", None)
+    amplitudes_uA = getattr(result, "amplitudes_uA", None)
+    if activated is None or amplitudes_uA is None:
+        return
+    import numpy as np
+
+    activated_array = np.asarray(activated, dtype=bool)
+    amplitudes_array = np.asarray(amplitudes_uA, dtype=float)
+    payload = {
+        "amplitudes_uA": amplitudes_array.tolist(),
+        "activated": activated_array.astype(int).tolist(),
+        "count": np.sum(activated_array, axis=1).astype(int).tolist(),
+        "fraction": (
+            np.mean(activated_array, axis=1).astype(float).tolist()
+            if activated_array.shape[1]
+            else [0.0 for _ in range(activated_array.shape[0])]
+        ),
+        "first_activation_uA": np.asarray(
+            getattr(result, "first_activation_uA"), dtype=float
+        ).tolist(),
+        "row_labels": [str(value) for value in getattr(result, "row_labels", ())],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
 def _write_cases(
     output: Path,
     args: argparse.Namespace,
@@ -323,6 +357,7 @@ def _write_cases(
                 "amplitudes_uA",
                 "duration_ms",
                 "dt_ms",
+                "seed",
             ),
         )
         writer.writeheader()
@@ -338,6 +373,7 @@ def _write_cases(
                     "amplitudes_uA": ",".join(str(value) for value in amplitudes),
                     "duration_ms": args.duration_ms,
                     "dt_ms": args.dt_ms,
+                    "seed": int(args.seed),
                 }
             )
 
@@ -359,6 +395,7 @@ def _write_manifest(
         "amplitudes_uA": amplitudes,
         "duration_ms": args.duration_ms,
         "dt_ms": args.dt_ms,
+        "seed": int(args.seed),
         "memory_trace": args.memory_trace or "rss",
         "output": str(output),
     }
