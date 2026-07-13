@@ -16,6 +16,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from typing import Any
 
@@ -378,4 +379,13 @@ def _safe_token(value: object) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
