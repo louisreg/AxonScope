@@ -5,6 +5,7 @@ import importlib.util
 from dataclasses import replace
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ import axonscope as axs
 from axonscope import membranes
 from axonscope.benchmarking import benchmark_span
 from axonscope.runtime.jax.membranes.backend import (
+    GatedLeakStackMembraneBackend,
     HeterogeneousMembraneBackend,
     UniformMembraneBackend,
 )
@@ -417,6 +419,59 @@ def test_jax_membrane_program_uses_generated_gate_and_membrane_terms(tmp_path):
     finally:
         module.gate_terms = original_gate_terms
         module.membrane_terms = original_membrane_terms
+
+
+def test_generated_hh_supports_model_agnostic_gated_leak_batch_capability(tmp_path):
+    compiled = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    membrane = JaxMembraneProgram.from_model_ir(
+        compiled.model,
+        generated_module=compiled.cache.loaded_modules["jax"],
+    )
+    nx = 5
+    backend = GatedLeakStackMembraneBackend(
+        gated_model=membrane,
+        target_nx=nx,
+        dtype=jnp.float32,
+        gated_gate_count=3,
+        gated_channel_count=3,
+    )
+    voltage = jnp.asarray(
+        [[-75.0, -70.0, -65.0, -60.0, -55.0]] * 2,
+        dtype=jnp.float32,
+    )
+    gated = jax.vmap(membrane.init_gates)(voltage)
+    leak_g = jnp.full((2, nx, 1), 0.1, dtype=jnp.float32)
+    leak_ge = jnp.full((2, nx, 1), -6.5, dtype=jnp.float32)
+    gated_mask = jnp.asarray([0.0, 1.0, 0.0, 1.0, 0.0], dtype=jnp.float32)
+    gated_mask = jnp.broadcast_to(gated_mask.reshape((1, nx, 1)), (2, nx, 1))
+    gates = jnp.concatenate([gated, leak_g, leak_ge, gated_mask], axis=-1)
+
+    expected = jax.vmap(
+        lambda row, vm: backend.cn_gate_update_for_row(
+            0,
+            g_prev=row,
+            V_mV=vm,
+            dt=0.005,
+        )
+    )(gates, voltage)
+    actual = backend.batch_cn_gate_update(
+        g_prev=gates,
+        V_mV=voltage,
+        dt=0.005,
+    )
+    expected_gm, expected_ge = jax.vmap(
+        lambda row: backend.membrane_conductance_terms_for_row(0, row)
+    )(actual)
+    actual_gm, actual_ge = backend.batch_membrane_conductance_terms(actual)
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(actual_gm, expected_gm, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
 
 
 def test_source_parameter_defaults_must_include_units_for_dimensioned_values(tmp_path):

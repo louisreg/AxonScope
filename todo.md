@@ -587,10 +587,18 @@ These items are intentionally not ordered or scoped into a phase yet.
     runtime metadata contract, then remove Model IR expression evaluation from
     cached JAX execution while retaining Model IR for compiler validation,
     composition, inspection, and NumPy reference behavior.
-  - [ ] Capture the production double-cable GPU cold JIT as separate
+  - [x] Capture the production double-cable GPU cold JIT as separate
     trace/lower/compile/first-execution phases on Kaggle, and compare the
     generated-term plus batch-capability route against the previous recruitment
-    baseline before retaining any further kernel specialization.
+    baseline before retaining any further kernel specialization. P100 artifact
+    `benchmark/results/kaggle/20260713_235628_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-model-codegen-eaa292a`
+    measured `1.093/3.874/0.884/0.171 s`, respectively (`6.022 s` total), so
+    lowering is 64% of the production cold JIT. The controlled row-wise artifact
+    `benchmark/results/kaggle/20260714_000106_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-model-codegen-row-ad0ff51`
+    measured `1.614/5.797/0.711/0.280 s` (`8.402 s` total). Keep the
+    capability-based batch path: it cut measured JIT time by 28%, retained
+    activation counts `6 18 41 65 82 101 126 135`, and left warm recruitment
+    effectively flat (`1.238 s` batch-native versus `1.227 s` row-wise).
   - [x] Test async JAX scheduling across independent dispatcher groups. Commit
     `0bf9984` added an internal enqueue/finalize scheduler and the
     `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
