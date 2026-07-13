@@ -36,8 +36,6 @@ if triton is not None and tl is not None:
         c01,
         c10,
         c11,
-        d0,
-        d1,
         out0,
         out1,
         N: tl.constexpr,
@@ -74,8 +72,8 @@ if triton is not None and tl is not None:
         tl.store(c01 + offset, cp01, mask=mask)
         tl.store(c10 + offset, cp10, mask=mask)
         tl.store(c11 + offset, cp11, mask=mask)
-        tl.store(d0 + offset, dp0, mask=mask)
-        tl.store(d1 + offset, dp1, mask=mask)
+        tl.store(out0 + offset, dp0, mask=mask)
+        tl.store(out1 + offset, dp1, mask=mask)
 
         prev_c00 = cp00
         prev_c01 = cp01
@@ -117,8 +115,8 @@ if triton is not None and tl is not None:
                 tl.store(c01 + offset, cp01, mask=mask)
                 tl.store(c10 + offset, cp10, mask=mask)
                 tl.store(c11 + offset, cp11, mask=mask)
-                tl.store(d0 + offset, dp0, mask=mask)
-                tl.store(d1 + offset, dp1, mask=mask)
+                tl.store(out0 + offset, dp0, mask=mask)
+                tl.store(out1 + offset, dp1, mask=mask)
                 prev_c00 = cp00
                 prev_c01 = cp01
                 prev_c10 = cp10
@@ -155,13 +153,11 @@ if triton is not None and tl is not None:
         tl.store(c01 + offset, cp01, mask=mask)
         tl.store(c10 + offset, cp10, mask=mask)
         tl.store(c11 + offset, cp11, mask=mask)
-        tl.store(d0 + offset, dp0, mask=mask)
-        tl.store(d1 + offset, dp1, mask=mask)
+        tl.store(out0 + offset, dp0, mask=mask)
+        tl.store(out1 + offset, dp1, mask=mask)
 
         x0 = dp0
         x1 = dp1
-        tl.store(out0 + offset, x0, mask=mask)
-        tl.store(out1 + offset, x1, mask=mask)
 
         for rev in tl.range(0, N - 1):
             x = N - 2 - rev
@@ -172,8 +168,8 @@ if triton is not None and tl is not None:
             cp11 = tl.load(c11 + offset, mask=mask, other=0.0)
             next_x0 = x0
             next_x1 = x1
-            x0 = tl.load(d0 + offset, mask=mask, other=0.0) - cp00 * next_x0 - cp01 * next_x1
-            x1 = tl.load(d1 + offset, mask=mask, other=0.0) - cp10 * next_x0 - cp11 * next_x1
+            x0 = tl.load(out0 + offset, mask=mask, other=0.0) - cp00 * next_x0 - cp01 * next_x1
+            x1 = tl.load(out1 + offset, mask=mask, other=0.0) - cp10 * next_x0 - cp11 * next_x1
             tl.store(out0 + offset, x0, mask=mask)
             tl.store(out1 + offset, x1, mask=mask)
 
@@ -254,7 +250,7 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
         rhs0,
         rhs1,
         kernel=_tiled_block_thomas_fused_loop_kernel,
-        out_shape=(work_shape,) * 8,
+        out_shape=(work_shape,) * 6,
         grid=grid,
         N=nx,
         B=batch_size,
