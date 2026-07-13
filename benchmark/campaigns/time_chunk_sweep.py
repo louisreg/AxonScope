@@ -253,6 +253,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_dir,
                 policy=str(run["policy"]),
                 recording=str(run.get("recording") or ""),
+                cable=str(run.get("cable") or ""),
+                n_axons=run.get("n_axons") or "",
                 status=status,
                 returncode=result.returncode,
             )
@@ -510,6 +512,8 @@ def summarize_run(
     *,
     policy: str,
     recording: str = "",
+    cable: str = "",
+    n_axons: object = "",
     status: str = "passed",
     returncode: int = 0,
 ) -> dict[str, Any]:
@@ -527,8 +531,8 @@ def summarize_run(
         "script": manifest.get("script", ""),
         "platform": options.get("platform", ""),
         "recording": options.get("recording", recording),
-        "cable": options.get("cable", ""),
-        "n_axons": options.get("n_axons", ""),
+        "cable": options.get("cable", cable),
+        "n_axons": options.get("n_axons", n_axons),
         "nx": options.get("nx", ""),
         "tsim": options.get("tsim", ""),
         "dt": options.get("dt", ""),
