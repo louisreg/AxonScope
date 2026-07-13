@@ -25,7 +25,7 @@ def main() -> None:
     # synthetic population with the same workflow.
     rng = np.random.default_rng(7)
 
-    fibers_per_family = 50
+    fibers_per_family = 100
     circle_radius = 125.0 * axs.um
     fiber_length = 1500.0 * axs.um
     stim_start = 0.20 * axs.ms
