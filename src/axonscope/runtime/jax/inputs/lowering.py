@@ -242,6 +242,8 @@ def lower_single_cable_extracellular_input(
         axon_y_um=cohort.axon_y_um,
         axon_z_um=cohort.axon_z_um,
         dtype_local=runtime.membrane.dtype,
+        single_cable_lower=runtime.cable.lower,
+        single_cable_upper=runtime.cable.upper,
     )
     if factorized is not None:
         return LoweredExtracellularInput(

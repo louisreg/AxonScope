@@ -41,6 +41,7 @@ FootprintEngine = Literal["numpy", "jax"]
 
 _FOOTPRINT_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 _FOOTPRINT_MV_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
+_SINGLE_CABLE_FORCING_MV_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
 _FOOTPRINT_JAX_CACHE: OrderedDict[tuple[Any, ...], Array] = OrderedDict()
 _FOOTPRINT_JAX_CACHE_MAX_SIZE = 32
 
@@ -246,6 +247,8 @@ def build_factorized_vstim_midpoint_batch(
     axon_z_um: Array | None = None,
     dtype_local: jnp.dtype | None = None,
     include_initial_previous: bool = False,
+    single_cable_lower: Array | None = None,
+    single_cable_upper: Array | None = None,
 ) -> FactorizedExtracellularPotentialBatch | None:
     """Build a factorized midpoint ``Vstim`` batch when stimulations allow it.
 
@@ -289,6 +292,8 @@ def build_factorized_vstim_midpoint_batch(
         axon_z_um=z_rows_np,
         np_dtype=np_dtype,
         dtype_local=dtype,
+        single_cable_lower=single_cable_lower,
+        single_cable_upper=single_cable_upper,
     )
 
 
@@ -689,6 +694,8 @@ def _try_build_factorized_footprint_vstim_batch(
     axon_z_um: np.ndarray,
     np_dtype: np.dtype[Any],
     dtype_local: jnp.dtype,
+    single_cable_lower: Array | None = None,
+    single_cable_upper: Array | None = None,
 ) -> FactorizedExtracellularPotentialBatch | None:
     with benchmark_span("inputs.extracellular.normalize_rows"):
         rows_tuple = _normalize_stimulation_rows(rows)
@@ -940,9 +947,46 @@ def _try_build_factorized_footprint_vstim_batch(
     current_scales_nbytes = (
         0 if current_row_scales is None else int(current_row_scales.nbytes)
     )
+    forcing_footprint_mV_per_A = None
+    forcing_nbytes = 0
+    forcing_cache_status = "disabled"
+    if single_cable_lower is not None and single_cable_upper is not None:
+        with benchmark_span("inputs.extracellular.single_cable_forcing_cache"):
+            forcing_cache_key = _single_cable_forcing_footprint_cache_key(
+                footprint_mV_cache_key,
+                single_cable_lower,
+                single_cable_upper,
+                np_dtype=np_dtype,
+            )
+            forcing_footprint_mV_per_A = _SINGLE_CABLE_FORCING_MV_CACHE.get(
+                forcing_cache_key
+            )
+            forcing_cache_status = (
+                "hit" if forcing_footprint_mV_per_A is not None else "miss"
+            )
+        if forcing_footprint_mV_per_A is None:
+            with benchmark_span("inputs.extracellular.single_cable_forcing_compute"):
+                forcing_footprint_mV_per_A = (
+                    _compute_single_cable_forcing_footprint_numpy(
+                        footprint_mV_per_A,
+                        lower=single_cable_lower,
+                        upper=single_cable_upper,
+                        np_dtype=np_dtype,
+                    )
+                )
+                forcing_footprint_mV_per_A.setflags(write=False)
+                _SINGLE_CABLE_FORCING_MV_CACHE[forcing_cache_key] = (
+                    forcing_footprint_mV_per_A
+                )
+    forcing_nbytes = (
+        0
+        if forcing_footprint_mV_per_A is None
+        else int(forcing_footprint_mV_per_A.nbytes)
+    )
     factorized_nbytes = (
         int(current_A.nbytes)
         + int(footprint_mV_per_A.nbytes)
+        + forcing_nbytes
         + previous_nbytes
         + current_indices_nbytes
         + current_scales_nbytes
@@ -958,6 +1002,8 @@ def _try_build_factorized_footprint_vstim_batch(
         vstim_factorized_current_indices_nbytes=current_indices_nbytes,
         vstim_factorized_current_scales_nbytes=current_scales_nbytes,
         vstim_factorized_footprint_nbytes=int(footprint_mV_per_A.nbytes),
+        vstim_single_cable_forcing_footprint_cache=forcing_cache_status,
+        vstim_single_cable_forcing_footprint_nbytes=forcing_nbytes,
         vstim_factorized_total_nbytes=factorized_nbytes,
         vstim_dense_equivalent_nbytes=dense_equivalent_nbytes,
         shared_current=bool(shared_current),
@@ -1003,14 +1049,130 @@ def _try_build_factorized_footprint_vstim_batch(
             if current_row_scales is None
             else jnp.asarray(current_row_scales, dtype=dtype_local)
         )
+    with benchmark_span("inputs.extracellular.single_cable_forcing_to_device"):
+        forcing_footprint_device = (
+            None
+            if forcing_footprint_mV_per_A is None
+            else jnp.asarray(forcing_footprint_mV_per_A, dtype=dtype_local)
+        )
     return FactorizedExtracellularPotentialBatch(
         current_mid_A=current_mid_A,
         footprint_mV_per_A=footprint_jax,
         target_nx=int(x_rows.shape[1]),
         current_initial_previous_A=current_initial_previous_device,
         static_footprint_key=footprint_cache_key,
+        single_cable_forcing_footprint_mV_per_A=forcing_footprint_device,
         current_row_indices=current_row_indices_device,
         current_row_scales=current_row_scales_device,
+    )
+
+
+def _single_cable_forcing_footprint_cache_key(
+    footprint_mV_cache_key: tuple[Any, ...],
+    lower: Array,
+    upper: Array,
+    *,
+    np_dtype: np.dtype[Any],
+) -> tuple[Any, ...]:
+    lower_np = np.asarray(lower, dtype=np_dtype)
+    upper_np = np.asarray(upper, dtype=np_dtype)
+    return (
+        "single_cable_forcing_footprint_mV_per_A_v1",
+        footprint_mV_cache_key,
+        _array_content_key(lower_np),
+        _array_content_key(upper_np),
+        str(np_dtype),
+    )
+
+
+def _compute_single_cable_forcing_footprint_numpy(
+    footprint_mV_per_A: np.ndarray,
+    *,
+    lower: Array,
+    upper: Array,
+    np_dtype: np.dtype[Any],
+) -> np.ndarray:
+    footprint = np.asarray(footprint_mV_per_A, dtype=np_dtype)
+    lower_rows = _as_single_cable_operator_rows_numpy(
+        lower,
+        batch_size=int(footprint.shape[0]),
+        nx=int(footprint.shape[-1]),
+        np_dtype=np_dtype,
+    )
+    upper_rows = _as_single_cable_operator_rows_numpy(
+        upper,
+        batch_size=int(footprint.shape[0]),
+        nx=int(footprint.shape[-1]),
+        np_dtype=np_dtype,
+    )
+    if footprint.ndim == 3:
+        batch_size, drive_count, nx = footprint.shape
+        flattened = footprint.reshape((batch_size * drive_count, nx))
+        lower_rows = np.broadcast_to(
+            lower_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        upper_rows = np.broadcast_to(
+            upper_rows[:, None, :],
+            (batch_size, drive_count, nx),
+        ).reshape((batch_size * drive_count, nx))
+        forcing = _compute_single_cable_forcing_footprint_numpy(
+            flattened,
+            lower=lower_rows,
+            upper=upper_rows,
+            np_dtype=np_dtype,
+        )
+        return forcing.reshape((batch_size, drive_count, nx))
+    if footprint.ndim != 2:
+        raise ValueError(
+            "factorized single-cable footprints must have shape (B, Nx) or (B, K, Nx), "
+            f"got {footprint.shape}."
+        )
+    nx = int(footprint.shape[1])
+    if nx < 2:
+        return np.zeros_like(footprint)
+    forcing = np.empty_like(footprint)
+    forcing[:, :1] = upper_rows[:, :1] * (footprint[:, 1:2] - footprint[:, :1])
+    forcing[:, -1:] = lower_rows[:, -1:] * (footprint[:, -2:-1] - footprint[:, -1:])
+    if nx > 2:
+        forcing[:, 1:-1] = (
+            lower_rows[:, 1:-1] * (footprint[:, :-2] - footprint[:, 1:-1])
+            + upper_rows[:, 1:-1] * (footprint[:, 2:] - footprint[:, 1:-1])
+        )
+    return forcing
+
+
+def _as_single_cable_operator_rows_numpy(
+    values: Array,
+    *,
+    batch_size: int,
+    nx: int,
+    np_dtype: np.dtype[Any],
+) -> np.ndarray:
+    arr = np.asarray(values, dtype=np_dtype)
+    if arr.ndim == 1:
+        if arr.shape != (nx,):
+            raise ValueError(
+                f"single-cable operator must have shape (Nx,)=({nx},) or (B, Nx), "
+                f"got {arr.shape}."
+            )
+        return np.broadcast_to(arr[None, :], (batch_size, nx))
+    if arr.ndim == 2:
+        if arr.shape[1:] != (nx,):
+            raise ValueError(
+                f"single-cable operator must have trailing shape (Nx,)=({nx},), "
+                f"got {arr.shape}."
+            )
+        if arr.shape[0] == batch_size:
+            return arr
+        if arr.shape[0] == 1:
+            return np.broadcast_to(arr, (batch_size, nx))
+        raise ValueError(
+            f"single-cable operator batch size must be 1 or {batch_size}, "
+            f"got {arr.shape[0]}."
+        )
+    raise ValueError(
+        f"single-cable operator must have shape (Nx,) or (B, Nx), got {arr.shape}."
     )
 
 
