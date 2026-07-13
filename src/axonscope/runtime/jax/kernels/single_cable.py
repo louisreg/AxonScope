@@ -48,6 +48,7 @@ from .inputs import (
     _as_factorized_extracellular_potential_batch,
     _as_sparse_intracellular_current_density_batch,
     _cached_broadcast_batch_leading,
+    _cached_single_cable_tridiagonal_coefficients,
     _normalize_batch_options,
     _resolve_output_recording,
 )
@@ -1042,6 +1043,13 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
+        dl, d_static, du = _cached_single_cable_tridiagonal_coefficients(
+            lower=lower,
+            diag=diag,
+            upper=upper,
+            dt=dt,
+            dt_ms=grid.dt_ms,
+        )
     Vm, gates, state = _initial_single_cable_batch_state(runtime, batch_size)
     with benchmark_span(
         "kernel.prepare_observer_tables",
@@ -1170,9 +1178,9 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
                 membrane=membrane_runtime.membrane,
                 has_driven_extracellular=has_driven_extracellular,
                 stateless_vm_only=stateless_vm_only,
-                dl=-dt * lower,
-                d_static=jnp.ones_like(diag) - dt * diag,
-                du=-dt * upper,
+                dl=dl,
+                d_static=d_static,
+                du=du,
                 Cm_uF_cm2=cm,
                 I_background=background,
                 Vm0_mV=Vm,

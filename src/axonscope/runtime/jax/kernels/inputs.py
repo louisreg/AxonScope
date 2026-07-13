@@ -38,6 +38,39 @@ def _cached_broadcast_batch_leading(values: Array, batch_size: int) -> Array:
     store_batched_static_array(key, out)
     return out
 
+def _cached_single_cable_tridiagonal_coefficients(
+    *,
+    lower: Array,
+    diag: Array,
+    upper: Array,
+    dt: Array,
+    dt_ms: float,
+) -> tuple[Array, Array, Array]:
+    """Return cached Crank-Nicolson tridiagonal coefficients."""
+
+    diag_arr = jnp.asarray(diag)
+    key = (
+        "single_cable_tridiagonal_coefficients_v1",
+        id(lower),
+        id(diag),
+        id(upper),
+        tuple(int(dim) for dim in diag_arr.shape),
+        str(diag_arr.dtype),
+        float(dt_ms),
+        _current_jax_device_key(),
+    )
+    cached = get_batched_static_array(key)
+    if cached is not None:
+        return cached
+    dt_arr = jnp.asarray(dt, dtype=diag_arr.dtype)
+    coeffs = (
+        -dt_arr * lower,
+        jnp.ones_like(diag_arr) - dt_arr * diag_arr,
+        -dt_arr * upper,
+    )
+    store_batched_static_array(key, coeffs)
+    return coeffs
+
 def _normalize_batch_options(options: BatchOptions | None) -> BatchOptions:
     return BatchOptions.full() if options is None else options
 
@@ -572,6 +605,7 @@ __all__ = [
     "_as_sparse_intracellular_current_density_batch",
     "_broadcast_batch_leading",
     "_cached_broadcast_batch_leading",
+    "_cached_single_cable_tridiagonal_coefficients",
     "_normalize_batch_options",
     "_record_vm_batch",
     "_record_vm_row",
