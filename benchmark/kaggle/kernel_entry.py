@@ -293,7 +293,11 @@ def _nrv_safe_ld_library_paths(env_lib: pathlib.Path) -> list[str]:
         if path
     ]
     blocked = {str(env_lib.resolve()), str(env_lib)}
-    paths = [path for path in existing if path not in blocked]
+    paths = [
+        path
+        for path in existing
+        if path not in blocked and "/cuda" not in path.lower()
+    ]
     for candidate in (
         pathlib.Path("/usr/local/nvidia/lib64"),
         pathlib.Path("/usr/local/nvidia/lib"),
@@ -322,9 +326,12 @@ def _verify_gpu_if_requested(config: dict[str, Any]) -> None:
         capture_output=True,
         check=False,
         timeout=60,
+        env={**os.environ, "JAX_PLATFORMS": "cuda,cpu"},
     )
     if result.stdout.strip():
         print(result.stdout.strip(), flush=True)
+    if result.stderr.strip():
+        print(result.stderr.strip(), file=sys.stderr, flush=True)
     if result.returncode != 0:
         raise RuntimeError(
             "JAX GPU check failed in benchmark Python "
