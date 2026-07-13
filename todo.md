@@ -489,15 +489,48 @@ These items are intentionally not ordered or scoped into a phase yet.
     `5.16/2.73 s`. Warm full-batch overhead is dominated by
     `dispatch.build_plan` (`2.64 s`) and `protocol.sweep.build_amplitude_pool`
     (`0.59 s`), while `kernel.wait` stays around `5 ms`.
+    Follow-up at commit `a572742` fixed the main `dispatch.build_plan` cost by
+    sharing immutable/source axon objects across native amplitude clones instead
+    of shallow-copying each axon. The example remains sequential until the
+    public default policy is decided.
   - [x] Add configurable amplitude pool chunking for native recruitment
     batching, e.g. `amplitude_batch_size=1`, `10`, `20`, or `None/full`, so
     large sweeps can choose between sequential amplitudes, medium
     `fibers x amplitude_chunk` pools, and fully expanded
     `fibers x all_amplitudes` pools.
-  - [ ] Benchmark native amplitude chunk sizes on CPU and Kaggle GPU for
+  - [x] Benchmark native amplitude chunk sizes on CPU and Kaggle GPU for
     single-cable and double-cable pools. Report cold/warm timings, compile
     overhead, `kernel.dispatch_jax`, enqueue, wait, result assembly, peak
     memory, and activation-count equivalence against the sequential path.
+    Added `benchmark/run.py --script recruitment_amplitude_batch` at commit
+    `63cc687`, based on the mixed single/double-cable population from
+    `examples/basic/08`. Baseline local CPU artifact
+    `benchmark/results/recruitment_amplitude_batch_local_cpu_baseline_20260713`
+    showed warm sequential `4.01 s`, `1` `7.85 s`, `10` `7.42 s`, `20`
+    `7.29 s`, and full `7.36 s`; native chunks were dominated by
+    `dispatch.build_plan` around `2.65-3.25 s`. Baseline Kaggle P100 artifact
+    `benchmark/results/kaggle/20260713_212454_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-recruitment-amplitude-batch-gpu-63cc687`
+    showed warm sequential `2.61 s`, `1` `5.95 s`, `10` `5.66 s`, `20`
+    `5.62 s`, and full `5.75 s`, with native chunks again dominated by
+    `dispatch.build_plan` around `2.80-2.93 s`.
+  - [x] Optimize the first native amplitude-batching bottleneck. Commit
+    `a572742` changed native amplitude clones to reuse the source axon object
+    while keeping each `AxonInstance` separate and mutable only through its
+    stimulation. Local CPU artifact
+    `benchmark/results/recruitment_amplitude_batch_local_cpu_shared_axon_20260713`
+    improved warm timings to sequential `4.11 s`, `10` `4.43 s`, `20`
+    `4.41 s`, and full `4.22 s`; `amplitude_batch_size=1` stays slow at
+    `7.80 s` because it still builds eight separate native pools/plans. Kaggle
+    P100 artifact
+    `benchmark/results/kaggle/20260713_213206_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-recruitment-amplitude-batch-gpu-a572742`
+    improved warm timings to sequential `3.14 s`, `10` `2.58 s`, `20`
+    `2.57 s`, and full `2.56 s`; all policies matched activation counts
+    `6 18 41 65 82 101 126 135`.
+  - [ ] Continue native recruitment batching optimization only if this path is
+    selected as a public/default policy. Remaining obvious costs are
+    `protocol.sweep.build_amplitude_pool` around `0.56-0.58 s` on Kaggle P100,
+    repeated native plan construction for `amplitude_batch_size=1`, and
+    host-side population construction in the benchmark harness.
   - [ ] After chunk-size benchmarks, test whether async scheduling across
     amplitude chunks improves throughput. Keep it opt-in unless measured
     CPU/GPU gains are clear and result ordering/error handling stay simple.
