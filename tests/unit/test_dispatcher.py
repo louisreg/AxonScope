@@ -612,6 +612,28 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
     )
 
 
+def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
+    from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
+
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    monkeypatch.setattr(
+        JaxMembraneProgram,
+        "init_gates",
+        lambda self, values: pytest.fail("stacking must initialize Model IR gates on host"),
+    )
+    group = build_dispatch_plan([_mrg_axon(diameter_um=10.0, amp_nA=0.1)]).groups[0]
+
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=group.items[0].solver_axon.dtype,
+        solver_options=None,
+    )
+
+    assert fast_stack is not None
+    assert fast_stack.gates0_rows.shape[0] == 1
+
+
 def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monkeypatch):
     from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 

@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
+from axonscope.model_ir.interpreter import NumpyModelInterpreter
 from axonscope.runtime.jax.membranes.backend import (
     GatedLeakStackMembraneBackend,
     HeterogeneousMembraneBackend,
@@ -16,6 +17,7 @@ from axonscope.runtime.jax.membranes.backend import (
     membrane_static_signature,
 )
 from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.jax.types import MembraneRuntime
 from axonscope.solvers.options import SolverOptions
 
@@ -282,12 +284,18 @@ def _encode_gated_leak_group_row(
     encoded_width = int(gated_gate_count) + 3
     gates = np.zeros((int(target_nx), encoded_width), dtype=np_dtype)
     vm0 = float(getattr(item.simulation, "v_init", 0.0))
-    row_gated_gates = np.asarray(
-        gated_model.init_gates(
-            jnp.asarray([vm0], dtype=dtype_local),
-        )[0],
-        dtype=np_dtype,
-    )
+    if isinstance(gated_model, JaxMembraneProgram):
+        row_gated_gates = NumpyModelInterpreter(
+            gated_model.model_ir,
+            dtype=np_dtype,
+        ).init_gates(np.asarray([vm0], dtype=np_dtype))[0]
+    else:
+        row_gated_gates = np.asarray(
+            gated_model.init_gates(
+                jnp.asarray([vm0], dtype=dtype_local),
+            )[0],
+            dtype=np_dtype,
+        )
     for compartment_index, member in enumerate(members):
         if member.role == "gated":
             gates[compartment_index, :gated_gate_count] = row_gated_gates
