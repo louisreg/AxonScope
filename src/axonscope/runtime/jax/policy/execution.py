@@ -28,6 +28,7 @@ from axonscope.runtime import (
     numpy as runtime_numpy,
 )
 from axonscope.runtime.policy import RuntimeKind
+from axonscope.runtime.jax.compilation_cache import configure_jax_compilation_cache
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,16 @@ def jax_execution_context(
     instances: Sequence[AxonInstance],
 ) -> Iterator[JaxExecutionContext]:
     """Apply a public execution policy to the JAX runtime for one run."""
+
+    cache_policy = configure_jax_compilation_cache()
+    record_benchmark_metadata(
+        jax_compilation_cache_enabled=cache_policy.enabled,
+        jax_compilation_cache_directory=(
+            str(cache_policy.directory) if cache_policy.directory is not None else None
+        ),
+        jax_compilation_cache_min_compile_time_s=cache_policy.min_compile_time_s,
+        jax_compilation_cache_max_size_bytes=cache_policy.max_size_bytes,
+    )
 
     if policy is None:
         yield JaxExecutionContext(policy=None, device=None, platform=None)

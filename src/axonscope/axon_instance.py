@@ -16,6 +16,33 @@ from axonscope.stimulation import (
 from axonscope.utils import units
 
 
+_EXTRACELLULAR_TOPOLOGY_REVISION = 0
+_SIMULATION_STRUCTURE_REVISION = 0
+
+
+def extracellular_topology_revision() -> int:
+    """Return the process-wide revision for attached stimulation objects."""
+
+    return _EXTRACELLULAR_TOPOLOGY_REVISION
+
+
+def simulation_structure_revision() -> int:
+    """Return the process-wide revision for dispatch-relevant instance state."""
+
+    return _SIMULATION_STRUCTURE_REVISION
+
+
+def _bump_simulation_structure_revision() -> None:
+    global _SIMULATION_STRUCTURE_REVISION
+    _SIMULATION_STRUCTURE_REVISION += 1
+
+
+def _bump_extracellular_topology_revision() -> None:
+    global _EXTRACELLULAR_TOPOLOGY_REVISION
+    _EXTRACELLULAR_TOPOLOGY_REVISION += 1
+    _bump_simulation_structure_revision()
+
+
 class AxonInstance:
     """One concrete occurrence of a descriptive axon.
 
@@ -72,7 +99,10 @@ class AxonInstance:
     def use_extracellular(self, value: bool) -> None:
         """Force-enable or force-disable extracellular solver handling."""
 
-        self._use_extracellular_override = bool(value)
+        resolved = bool(value)
+        if self._use_extracellular_override != resolved:
+            self._use_extracellular_override = resolved
+            _bump_extracellular_topology_revision()
 
     def add_intracellular_context(
         self,
@@ -93,6 +123,7 @@ class AxonInstance:
                 "context must be an axonscope.stimulation.IntracellularContext."
             )
         self.intracellular_contexts.append(context)
+        _bump_simulation_structure_revision()
 
     def add_current_clamp(
         self,
@@ -113,7 +144,9 @@ class AxonInstance:
     def clear_intracellular_contexts(self) -> None:
         """Remove all intracellular stimulation contexts."""
 
-        self.intracellular_contexts.clear()
+        if self.intracellular_contexts:
+            self.intracellular_contexts.clear()
+            _bump_simulation_structure_revision()
 
     def add_extracellular_stimulation(
         self,
@@ -140,9 +173,12 @@ class AxonInstance:
                 "Use ExtracellularStimulation([...]) for multiple drives, "
                 "or pass replace=True."
             )
-        self.extracellular_stimulation = stimulation
-        if enable:
+        if self.extracellular_stimulation is not stimulation:
+            self.extracellular_stimulation = stimulation
+            _bump_extracellular_topology_revision()
+        if enable and self._use_extracellular_override is not True:
             self._use_extracellular_override = True
+            _bump_extracellular_topology_revision()
 
     @property
     def extracellular_stimulations(self) -> tuple[ExtracellularStimulation, ...]:
@@ -155,8 +191,15 @@ class AxonInstance:
     def clear_extracellular_stimulation(self) -> None:
         """Remove the extracellular stimulation."""
 
-        self.extracellular_stimulation = None
-        self._use_extracellular_override = None
+        changed = False
+        if self.extracellular_stimulation is not None:
+            self.extracellular_stimulation = None
+            changed = True
+        if self._use_extracellular_override is not None:
+            self._use_extracellular_override = None
+            changed = True
+        if changed:
+            _bump_extracellular_topology_revision()
 
     def _validate_layer_array(self, value: Any, name: str, unit: str) -> np.ndarray:
         arr = units.to_array(value, unit, dtype=self.dtype)
@@ -195,6 +238,16 @@ class AxonInstance:
             Initial extracellular potential in millivolts.
         """
 
+        changed = any(
+            value is not None
+            for value in (
+                xraxial_MOhm_per_cm,
+                xg_S_per_cm2,
+                xc_uF_per_cm2,
+                use_extracellular,
+                Veinit,
+            )
+        )
         if xraxial_MOhm_per_cm is not None:
             self._xraxial_override = self._validate_layer_array(
                 xraxial_MOhm_per_cm,
@@ -217,6 +270,8 @@ class AxonInstance:
             self._use_extracellular_override = bool(use_extracellular)
         if Veinit is not None:
             self.Veinit = units.to_mV(Veinit)
+        if changed:
+            _bump_extracellular_topology_revision()
 
     def extracellular_potential_mV(self, t_ms: Any) -> np.ndarray:
         """Return imposed extracellular potential in mV at time `t_ms`.

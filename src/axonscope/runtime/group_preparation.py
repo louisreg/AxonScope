@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 from axonscope.benchmarking import record_benchmark_metadata
+from axonscope.axon_instance import extracellular_topology_revision
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.preparation.cohort import PreparedCohort
 from axonscope.preparation.runtime_batches import extracellular_stimulation_rows
@@ -29,7 +30,7 @@ _GROUP_RUNTIME_SIGNATURE_CACHE: OrderedDict[
 _PREPARED_COHORT_CACHE: OrderedDict[tuple[Any, ...], PreparedCohort] = OrderedDict()
 _PREPARED_COHORT_IDENTITY_CACHE: OrderedDict[
     int,
-    tuple[weakref.ReferenceType[Any], PreparedCohort],
+    tuple[weakref.ReferenceType[Any], int, PreparedCohort],
 ] = OrderedDict()
 
 
@@ -133,10 +134,20 @@ def prepared_cohort_for_current_group(group: DispatchGroup) -> PreparedCohort:
 
     cached = _get_prepared_cohort_identity(group)
     if cached is not None:
-        record_benchmark_metadata(prepared_cohort_identity_cache="hit")
-        refreshed = _with_current_stimulation_rows(cached, group)
-        if refreshed is not cached:
-            _store_prepared_cohort_identity(group, refreshed)
+        cached_revision, cohort = cached
+        current_revision = extracellular_topology_revision()
+        if cached_revision == current_revision:
+            record_benchmark_metadata(
+                prepared_cohort_identity_cache="hit",
+                prepared_cohort_topology_check="unchanged",
+            )
+            return cohort
+        refreshed = _with_current_stimulation_rows(cohort, group)
+        _store_prepared_cohort_identity(group, refreshed)
+        record_benchmark_metadata(
+            prepared_cohort_identity_cache="hit",
+            prepared_cohort_topology_check="refreshed",
+        )
         return refreshed
 
     cohort = prepared_cohort_for_group(group)
@@ -291,21 +302,27 @@ def _cached_group_signature(
     return signature
 
 
-def _get_prepared_cohort_identity(group: Any) -> PreparedCohort | None:
+def _get_prepared_cohort_identity(
+    group: Any,
+) -> tuple[int, PreparedCohort] | None:
     cache_key = id(group)
     cached = _PREPARED_COHORT_IDENTITY_CACHE.get(cache_key)
     if cached is None:
         return None
-    ref, cohort = cached
+    ref, revision, cohort = cached
     if ref() is group:
         _PREPARED_COHORT_IDENTITY_CACHE.move_to_end(cache_key)
-        return cohort
+        return revision, cohort
     _PREPARED_COHORT_IDENTITY_CACHE.pop(cache_key, None)
     return None
 
 
 def _store_prepared_cohort_identity(group: Any, cohort: PreparedCohort) -> None:
-    _PREPARED_COHORT_IDENTITY_CACHE[id(group)] = (weakref.ref(group), cohort)
+    _PREPARED_COHORT_IDENTITY_CACHE[id(group)] = (
+        weakref.ref(group),
+        extracellular_topology_revision(),
+        cohort,
+    )
     _PREPARED_COHORT_IDENTITY_CACHE.move_to_end(id(group))
     while len(_PREPARED_COHORT_IDENTITY_CACHE) > _PREPARED_COHORT_CACHE_MAX_SIZE:
         _PREPARED_COHORT_IDENTITY_CACHE.popitem(last=False)

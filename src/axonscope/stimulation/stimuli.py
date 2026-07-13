@@ -9,7 +9,7 @@ provided and normalized later by the consuming clamp or electrode.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
@@ -21,10 +21,31 @@ ArrayLike = Any
 UnitLike = Any
 
 
+_STIMULUS_STRUCTURE_REVISION = 0
+
+
+def stimulus_structure_revision() -> int:
+    """Return the process-wide revision for runtime-mutated waveform shapes."""
+
+    return _STIMULUS_STRUCTURE_REVISION
+
+
+def _bump_stimulus_structure_revision() -> None:
+    global _STIMULUS_STRUCTURE_REVISION
+    _STIMULUS_STRUCTURE_REVISION += 1
+
+
 def _readonly_float_array(values: Any) -> np.ndarray:
     arr = np.array(values, dtype=float, copy=True, order="C")
     arr.setflags(write=False)
     return arr
+
+
+def _is_zero_value(value: Any) -> bool:
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _coerce_amplitudes(values: Any, unit: UnitLike | None) -> tuple[np.ndarray, str | None]:
@@ -75,6 +96,11 @@ class Stimulus:
     y: np.ndarray
     mode: Literal["hold", "linear"] = "hold"
     y_unit: str | None = None
+    _scale_shape: tuple[Any, ...] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self):
         """Validate, sort, deduplicate, and normalize the sample arrays."""
@@ -112,6 +138,36 @@ class Stimulus:
         object.__setattr__(self, "y", y)
         object.__setattr__(self, "y_unit", y_unit)
 
+    def _replace_runtime_waveform(self, source: "Stimulus") -> None:
+        """Replace samples in a reusable runtime handle and track shape changes."""
+
+        previous_shape = self._runtime_shape_token()
+        object.__setattr__(self, "t", source.t)
+        object.__setattr__(self, "y", source.y)
+        object.__setattr__(self, "mode", source.mode)
+        object.__setattr__(self, "y_unit", source.y_unit)
+        object.__setattr__(self, "_scale_shape", source._scale_shape)
+        if self._runtime_shape_token() != previous_shape:
+            _bump_stimulus_structure_revision()
+
+    def _runtime_shape_token(self) -> tuple[Any, ...]:
+        if self._scale_shape is not None:
+            amplitude_shape: tuple[Any, ...] = ("scaled", self._scale_shape)
+        else:
+            y = np.asarray(self.y, dtype=float)
+            nonzero = np.flatnonzero(y)
+            if nonzero.size:
+                normalized = y / y[int(nonzero[0])]
+                amplitude_shape = ("samples", tuple(float(value) for value in normalized))
+            else:
+                amplitude_shape = ("samples", tuple(float(value) for value in y))
+        return (
+            tuple(float(value) for value in self.t),
+            amplitude_shape,
+            self.mode,
+            self.y_unit,
+        )
+
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
@@ -138,7 +194,12 @@ class Stimulus:
         """
 
         start = 0.0 if start is None else units.require_time_ms(start, name="start")
-        return cls(t=np.asarray([start]), y=np.asarray([value], dtype=object), y_unit=unit)
+        return cls(
+            t=np.asarray([start]),
+            y=np.asarray([value], dtype=object),
+            y_unit=unit,
+            _scale_shape=("constant",),
+        )
 
     @classmethod
     def pulse(
@@ -157,11 +218,13 @@ class Stimulus:
 
         start = units.require_time_ms(start, name="start")
         duration = units.require_time_ms(duration, name="duration")
+        scale_shape = ("pulse",) if _is_zero_value(baseline) else None
         return cls(
             t=np.asarray([0.0, start, start + duration]),
             y=np.asarray([baseline, amplitude, baseline], dtype=object),
             mode="hold",
             y_unit=unit,
+            _scale_shape=scale_shape,
         )
 
     @classmethod
@@ -199,11 +262,16 @@ class Stimulus:
         baseline = amplitudes[2]
         cath = -abs(cathodic_amplitude)
 
-        if anodic_amplitude is None:
+        balanced = anodic_amplitude is None
+        if balanced:
             anodic_amplitude = abs(cathodic_amplitude)
 
         anod = abs(anodic_amplitude)
-        anodic_duration = abs(cath * cathodic_duration / anod) if anod != 0 else 0.0
+        anodic_duration = (
+            abs(cath * cathodic_duration / anod)
+            if anod != 0
+            else cathodic_duration
+        )
 
         if anodic_first:
             a1, d1 = anod, anodic_duration
@@ -222,6 +290,9 @@ class Stimulus:
             y=np.asarray([baseline, a1, baseline, a2, baseline]),
             mode="hold",
             y_unit=inferred_unit,
+            _scale_shape=("balanced_biphasic", bool(anodic_first))
+            if balanced and float(baseline) == 0.0
+            else None,
         )
 
     @classmethod
@@ -328,13 +399,31 @@ class Stimulus:
         if unit_label is None:
             if self.y_unit is None:
                 return self
-            return Stimulus(self.t, self.y, self.mode, y_unit=None)
+            return Stimulus(
+                self.t,
+                self.y,
+                self.mode,
+                y_unit=None,
+                _scale_shape=self._scale_shape,
+            )
         if self.y_unit == unit_label:
             return self
         if self.y_unit is None:
-            return Stimulus(self.t, self.y, self.mode, y_unit=unit_label)
+            return Stimulus(
+                self.t,
+                self.y,
+                self.mode,
+                y_unit=unit_label,
+                _scale_shape=self._scale_shape,
+            )
         y = units.to_array(units.Q_(self.y, self.y_unit), unit_label)
-        return Stimulus(self.t, y, self.mode, y_unit=unit_label)
+        return Stimulus(
+            self.t,
+            y,
+            self.mode,
+            y_unit=unit_label,
+            _scale_shape=self._scale_shape,
+        )
 
     def evaluate(self, t: ArrayLike, *, unit: UnitLike | None = None) -> np.ndarray | float:
         """Evaluate the stimulus on a time grid.

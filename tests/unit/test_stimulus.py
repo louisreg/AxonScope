@@ -8,6 +8,7 @@ from axonscope.stimulation import (
     IntracellularContext,
     IntracellularCurrentClamp,
 )
+from axonscope.stimulation.stimuli import stimulus_structure_revision
 from axonscope.runtime.jax.inputs.stimulus import compile_stimulus
 
 
@@ -64,6 +65,52 @@ def test_biphasic_stimulus():
 
     # anodic second phase
     assert vals[2] > 0.0
+
+
+def test_zero_balanced_biphasic_keeps_declared_phase_timing():
+    zero = Stimulus.biphasic(
+        start=1.0 * axs.ms,
+        cathodic_amplitude=0.0,
+        cathodic_duration=0.2 * axs.ms,
+        interphase=0.1 * axs.ms,
+    )
+    driven = Stimulus.biphasic(
+        start=1.0 * axs.ms,
+        cathodic_amplitude=10.0,
+        cathodic_duration=0.2 * axs.ms,
+        interphase=0.1 * axs.ms,
+    )
+
+    np.testing.assert_allclose(zero.t, driven.t)
+    np.testing.assert_allclose(zero.y, 0.0)
+    assert zero._scale_shape == driven._scale_shape
+
+
+def test_runtime_waveform_replacement_tracks_shape_not_amplitude():
+    target = Stimulus.biphasic(
+        start=1.0 * axs.ms,
+        cathodic_amplitude=1.0,
+        cathodic_duration=0.2 * axs.ms,
+    )
+    scaled = Stimulus.biphasic(
+        start=1.0 * axs.ms,
+        cathodic_amplitude=20.0,
+        cathodic_duration=0.2 * axs.ms,
+    )
+    shifted = Stimulus.biphasic(
+        start=1.1 * axs.ms,
+        cathodic_amplitude=20.0,
+        cathodic_duration=0.2 * axs.ms,
+    )
+    initial_revision = stimulus_structure_revision()
+
+    target._replace_runtime_waveform(scaled)
+    assert stimulus_structure_revision() == initial_revision
+
+    target._replace_runtime_waveform(shifted)
+    assert stimulus_structure_revision() == initial_revision + 1
+    assert not target.t.flags.writeable
+    assert not target.y.flags.writeable
 
 
 def test_ramp_linear():

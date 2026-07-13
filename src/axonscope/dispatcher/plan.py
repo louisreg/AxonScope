@@ -537,7 +537,7 @@ def _stimulus_temporal_signature(
         "stimulus_waveform_shape",
         type(stimulus),
         _array_signature(getattr(stimulus, "t", ())),
-        _stimulus_y_shape_signature(getattr(stimulus, "y", ())),
+        _stimulus_y_shape_signature(stimulus),
         getattr(stimulus, "mode", None),
         getattr(stimulus, "y_unit", None),
     )
@@ -545,9 +545,13 @@ def _stimulus_temporal_signature(
     return signature
 
 
-def _stimulus_y_shape_signature(values: Any) -> tuple[Any, ...]:
+def _stimulus_y_shape_signature(stimulus: Any) -> tuple[Any, ...]:
     """Return an amplitude-scale-invariant waveform signature when possible."""
 
+    declared = getattr(stimulus, "_scale_shape", None)
+    if declared is not None:
+        return ("declared", tuple(declared))
+    values = getattr(stimulus, "y", ())
     try:
         y = np.asarray(values, dtype=float)
     except (TypeError, ValueError):

@@ -1093,10 +1093,7 @@ def _point_source_stimulation_from_footprint(
 
 
 def _copy_stimulus_state(*, target: Any, source: Any) -> None:
-    object.__setattr__(target, "t", np.asarray(source.t, dtype=float))
-    object.__setattr__(target, "y", np.asarray(source.y, dtype=float))
-    object.__setattr__(target, "mode", source.mode)
-    object.__setattr__(target, "y_unit", source.y_unit)
+    target._replace_runtime_waveform(source)
 
 
 def _single_cable_axon(options: dict[str, Any], diameter_um: float) -> tuple[Any, str, float]:

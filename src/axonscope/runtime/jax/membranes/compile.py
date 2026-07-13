@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from axonscope.axons.axon import Axon
-from axonscope.benchmarking import record_benchmark_metadata
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.membranes.compiler import lower_membrane_model_with_sources
 from axonscope.membranes.model import ensure_membrane_model
 from axonscope.model_ir.source import SourceModelCompileResult
@@ -41,26 +41,28 @@ def compile_membrane_model(
     _resolve_solver_options(solver_options)
     model = ensure_membrane_model(model)
 
-    try:
-        lowered = lower_membrane_model_with_sources(
-            model,
-            load_generated_modules=("jax",),
-            generated_targets=("jax",),
-        )
-    except ValueError as exc:
-        raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
+    with benchmark_span("runtime.prepare.membrane_compile.source_lowering"):
+        try:
+            lowered = lower_membrane_model_with_sources(
+                model,
+                load_generated_modules=("jax",),
+                generated_targets=("jax",),
+            )
+        except ValueError as exc:
+            raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
     _record_membrane_source_compile_metadata(model.kind, lowered.source_results)
-    return cast(
-        JaxMembraneProgram,
-        JaxMembraneProgram.from_model_ir(
-            lowered.model,
-            dtype_local=model.dtype,
-            generated_module=_single_generated_module(
-                lowered.source_results,
-                target="jax",
+    with benchmark_span("runtime.prepare.membrane_compile.program_build"):
+        return cast(
+            JaxMembraneProgram,
+            JaxMembraneProgram.from_model_ir(
+                lowered.model,
+                dtype_local=model.dtype,
+                generated_module=_single_generated_module(
+                    lowered.source_results,
+                    target="jax",
+                ),
             ),
-        ),
-    )
+        )
 
 
 def compile_axon_membrane(

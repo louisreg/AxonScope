@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Sequence, TypeAlias
 
 import numpy as np
 
-from axonscope.axon_instance import AxonInstance
+from axonscope.axon_instance import AxonInstance, simulation_structure_revision
 from axonscope.dispatcher.plan import (
     DispatchPlan,
     build_dispatch_plan,
@@ -26,6 +26,7 @@ from axonscope.population import AxonPopulation
 from axonscope.recording import Recording
 from axonscope.results import AxonSimulationResult
 from axonscope.solvers import BatchOptions, SolverOptions
+from axonscope.stimulation.stimuli import stimulus_structure_revision
 
 if TYPE_CHECKING:
     from axonscope.dispatcher._records import DispatchRecord
@@ -89,6 +90,7 @@ class AxonSimulation:
         self.progress = progress
         self._dispatch_plan_cache_key: tuple[Any, ...] | None = None
         self._dispatch_plan_cache: DispatchPlan | None = None
+        self._dispatch_plan_revision: tuple[int, int] | None = None
 
     @property
     def is_single(self) -> bool:
@@ -159,8 +161,17 @@ class AxonSimulation:
         )
 
     def _dispatch_plan_for_run(self) -> DispatchPlan:
+        revision = (
+            simulation_structure_revision(),
+            stimulus_structure_revision(),
+        )
+        if self._dispatch_plan_revision == revision and self._dispatch_plan_cache is not None:
+            record_benchmark_metadata(axon_simulation_dispatch_plan_cache="identity-hit")
+            return self._dispatch_plan_cache
+
         key = dispatch_plan_identity_key(self.population.instances)
         if self._dispatch_plan_cache_key == key and self._dispatch_plan_cache is not None:
+            self._dispatch_plan_revision = revision
             record_benchmark_metadata(axon_simulation_dispatch_plan_cache="hit")
             return self._dispatch_plan_cache
 
@@ -168,6 +179,7 @@ class AxonSimulation:
         plan = build_dispatch_plan(self.population.instances)
         self._dispatch_plan_cache_key = key
         self._dispatch_plan_cache = plan
+        self._dispatch_plan_revision = revision
         return plan
 
 

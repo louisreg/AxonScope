@@ -57,6 +57,25 @@ from axonscope.runtime.jax.preparation.base import (
 from axonscope.stimulation import Stimulus
 
 
+def test_balanced_biphasic_temporal_signature_ignores_amplitude_scale():
+    zero = axs.Stimulus.biphasic(
+        start=0.1 * axs.ms,
+        cathodic_amplitude=0.0,
+        cathodic_duration=0.05 * axs.ms,
+        interphase=0.01 * axs.ms,
+    )
+    driven = axs.Stimulus.biphasic(
+        start=0.1 * axs.ms,
+        cathodic_amplitude=20e-6,
+        cathodic_duration=0.05 * axs.ms,
+        interphase=0.01 * axs.ms,
+    )
+
+    assert dispatch_plan_module._stimulus_temporal_signature(zero, {}) == (
+        dispatch_plan_module._stimulus_temporal_signature(driven, {})
+    )
+
+
 def _run_simulation(axons, **kwargs):
     return axs.AxonSimulation(axons, **kwargs).run()
 
@@ -493,6 +512,23 @@ def test_axon_simulation_reuses_cached_dispatch_plan(monkeypatch):
     second = simulation._dispatch_plan_for_run()
 
     assert second is first
+
+
+def test_axon_simulation_stable_plan_hit_skips_identity_rebuild(monkeypatch):
+    simulation = axs.AxonSimulation(
+        [_passive_double_cable_axon(amp_nA=0.1)],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+    )
+    first = simulation._dispatch_plan_for_run()
+
+    def fail_identity_rebuild(_axons):
+        raise AssertionError("unchanged simulation should use the O(1) plan hit")
+
+    monkeypatch.setattr(simulation_module, "dispatch_plan_identity_key", fail_identity_rebuild)
+
+    assert simulation._dispatch_plan_for_run() is first
 
 
 def test_dispatch_plan_parameter_batches_mrg_diameter_sweep():
