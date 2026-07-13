@@ -342,14 +342,14 @@ improvements.
 
 ### P13 - Evaluation Du Time Chunk
 
-- [ ] Evaluate `time_chunk_steps` as a first-class runtime/performance policy
+- [x] Evaluate `time_chunk_steps` as a first-class runtime/performance policy
   instead of a hidden observer-only default.
-- [ ] Benchmark observer-only VmRaster routes across `time_chunk_steps=None`,
+- [x] Benchmark observer-only VmRaster routes across `time_chunk_steps=None`,
   128, 256, 512, 1024, and full-duration chunks for representative
   single-cable and double-cable groups; separate cold compile/lowering,
   warm solve, host enqueue/dispatch, `kernel.wait`, observer finalization, and
   memory/RSS.
-- [ ] Compare CPU and GPU behavior separately. On GPU, prioritize whether
+- [x] Compare CPU and GPU behavior separately. On GPU, prioritize whether
   chunking improves memory pressure without making warm runs less solver-bound;
   on CPU, check whether chunking mostly adds Python/JAX dispatch overhead.
   Initial P13 matrix on 2026-07-13 covered observer-only single/double cable
@@ -372,8 +372,11 @@ improvements.
 - [x] Decide the public/internal policy knobs: keep the default simple as
   `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` for observer/VmRaster routes. Do
   not expose a new public execution-policy option or adaptive default yet.
-- [ ] Keep progress logs explicit: report time chunks as time chunks, and
+- [x] Keep progress logs explicit: report time chunks as time chunks, and
   reserve wait/synchronization wording for the final JAX/device wait.
+  Verified on 2026-07-13: dispatcher progress uses `solving time chunks` for
+  chunk callbacks, while final synchronization remains `waiting for JAX work`
+  and benchmark timing keeps `kernel.wait` as the explicit device wait span.
 
 ### P3 - Documentation And Examples
 
@@ -428,13 +431,73 @@ These items are intentionally not ordered or scoped into a phase yet.
   show it helps.
 - [ ] Remove public API surface that is unused or not documented in advanced
   examples.
-- [ ] Validate example performance for `examples/basic/06_activation_velocity.py`,
+- [x] Validate example performance for `examples/basic/06_activation_velocity.py`,
   `examples/basic/07_threshold_vs_diameter.py`,
   `examples/basic/08_recruitment_curve_population.py`, and
-  `examples/with_nrv/01_realistic_fascicle_geometry.py` on CPU and Kaggle GPU.
+  `examples/with_nrv/01_synthetic_fascicle_geometry.py` on CPU and Kaggle GPU.
   Record cold and warm timings with global performance counters, then add
   benchmark coverage to identify any remaining bottlenecks before treating
   these examples as stable perf gates.
+  - [x] Close the `with_nrv/01_synthetic_fascicle_geometry.py` full-population
+    validation slice. On 2026-07-13, commit `0f5860f` added deterministic NRV
+    seeding plus `recruitment_result.json` export. Full example-01 runs used
+    100 axons per fascicle, 193 AxonScope axons, 21 amplitudes, `duration=3 ms`,
+    `dt=0.001 ms`, and `vm_raster/full`. Artifacts:
+    `benchmark/results/with_nrv_examples_local_cpu_fullpop_seed0_20260713`,
+    `benchmark/results/kaggle/20260713_193414_with_nrv_examples_quick_cpu_cpu_axonscope-with-nrv-01-cpu-fullpop-seed0-0f5860f`,
+    and
+    `benchmark/results/kaggle/20260713_192746_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-with-nrv-01-gpu-fullpop-seed0-0f5860f`.
+    CPU routes stayed on double-cable `thomas`; GPU used double-cable
+    `jax_triton_loop_xb`. Local CPU versus Kaggle P100 GPU ratios were
+    `6.4x` for `protocol.recruitment_sweep`, `7.5x` for `simulation.run_pool`,
+    and `9.3x` for post-compile per-amplitude values. Kaggle CPU versus Kaggle
+    P100 GPU ratios were `12.1x`, `14.3x`, and `17.8x`, respectively. Final
+    recruitment at 300 uA matched at `120/193`; CPU/GPU differed only by a few
+    near-threshold activation decisions, so strict cross-backend checks should
+    allow one amplitude step around threshold crossings.
+  - [x] Close the `examples/basic/06`, `07`, and `08` validation slice. On
+    2026-07-13, local CPU artifact
+    `benchmark/results/basic_examples_local_cpu_validate_20260713` and Kaggle
+    P100 GPU artifact
+    `benchmark/results/kaggle/20260713_203352_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-gpu-7f9b781`
+    ran `benchmark/examples/basic_examples.py --examples 06,07,08 --warmups 0
+    --repeats 1`. Cold/warm wall timings were: `06` CPU `27.12/20.86 s`,
+    GPU `15.60/3.14 s` (`1.7x/6.6x`); `07` CPU `16.63/9.82 s`, GPU
+    `9.92/4.65 s` (`1.7x/2.1x`); `08` CPU `6.78/4.12 s`, GPU `5.16/2.73 s`
+    (`1.3x/1.5x`). GPU `kernel.wait` is already tiny for `06` and `08`, so
+    remaining bottlenecks are mostly JAX/Python dispatch, enqueue, result
+    assembly, and example/protocol overhead rather than raw solver time.
+- [x] Check whether `recruitment_sweep` can batch amplitude values into one
+  expanded compatible run when the pool, model shapes, footprints, and stimulus
+  timing are shared. Use `examples/basic/08_recruitment_curve_population.py` as
+  the first benchmark target; compare against the current sequential
+  per-amplitude observer-only path.
+  - [x] Add a native-pool opt-in for observer-only recruitment via
+    `batch_amplitudes=True`. It builds an expanded value-major
+    `amplitude x axon` AxonScope pool without `deepcopy`, keeps original rows
+    unmutated, and validates against the sequential path on real single-cable
+    and double-cable/MRG point-source probes.
+  - [x] Fix double-cable observer-only compact factorized Vext so row-specific
+    waveform scales are applied in the VmRaster path, matching the existing
+    dense/probe Vm route. Before this fix, naive expanded MRG pools did not
+    reproduce sequential activation counts because `current_row_scales` were
+    ignored by the double-cable observer path.
+  - [x] Switch `examples/basic/08_recruitment_curve_population.py` to the
+    native amplitude-batched observer-only path. Keep the default
+    `recruitment_sweep` behavior sequential until larger CPU/GPU memory and
+    throughput gates justify changing it.
+  - [x] Add configurable amplitude pool chunking for native recruitment
+    batching, e.g. `amplitude_batch_size=1`, `10`, `20`, or `None/full`, so
+    large sweeps can choose between sequential amplitudes, medium
+    `fibers x amplitude_chunk` pools, and fully expanded
+    `fibers x all_amplitudes` pools.
+  - [ ] Benchmark native amplitude chunk sizes on CPU and Kaggle GPU for
+    single-cable and double-cable pools. Report cold/warm timings, compile
+    overhead, `kernel.dispatch_jax`, enqueue, wait, result assembly, peak
+    memory, and activation-count equivalence against the sequential path.
+  - [ ] After chunk-size benchmarks, test whether async scheduling across
+    amplitude chunks improves throughput. Keep it opt-in unless measured
+    CPU/GPU gains are clear and result ordering/error handling stay simple.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models.
 - [ ] Re-check each built-in model against the NRV implementation; some details
   may have been lost during model translation.

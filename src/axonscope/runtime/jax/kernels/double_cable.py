@@ -966,13 +966,29 @@ def _run_double_cable_batch_observer_chunks(
                 else None
             ),
         ):
-            previous_current_A = jnp.asarray(
-                factorized_vext.current_initial_previous_A,
-                dtype=dtype_local,
+            current_rows_mid_A = _factorized_current_mid_rows(
+                factorized_vext,
+                dtype_local=dtype_local,
+                batch_size=batch_size,
             )
-            factorized_current_mid_A = jnp.asarray(
-                factorized_vext.current_mid_A,
-                dtype=dtype_local,
+            if (
+                factorized_vext.shared_current
+                and factorized_vext.current_row_scales is None
+            ):
+                factorized_current_mid_A = jnp.asarray(
+                    factorized_vext.current_mid_A,
+                    dtype=dtype_local,
+                )
+            else:
+                if int(current_rows_mid_A.shape[1]) != 1:
+                    raise ValueError(
+                        "double-cable compact factorized Vext requires one current row."
+                    )
+                factorized_current_mid_A = current_rows_mid_A[:, 0, :]
+            previous_current_A = _factorized_current_initial_previous_rows(
+                factorized_vext,
+                dtype_local=dtype_local,
+                batch_size=batch_size,
             )
             factorized_footprint_mV_per_A = jnp.asarray(
                 factorized_vext.footprint_mV_per_A,

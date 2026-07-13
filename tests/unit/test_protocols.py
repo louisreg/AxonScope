@@ -522,6 +522,172 @@ def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypat
     )
 
 
+def test_recruitment_sweep_can_batch_observer_amplitudes_into_native_pool(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = tuple(
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=100.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        )
+        for _ in range(2)
+    )
+    calls = []
+    progress_values: list[bool | str] = []
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulation_runner(updated_pool, **kwargs):
+        updated_pool = tuple(updated_pool)
+        calls.append(updated_pool)
+        progress_values.append(kwargs.get("progress", False))
+        return _observer_only_pool_result(
+            row.tested_current_nA >= (0.5 if index % 2 == 0 else 1.5)
+            for index, row in enumerate(updated_pool)
+        )
+
+    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+        batch_options=axs.BatchOptions.none(time_chunk_steps=123),
+        solver_progress="plain",
+        batch_amplitudes=True,
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 6
+    assert progress_values == ["plain"]
+    assert all(row is not original for row in calls[0] for original in pool)
+    assert not any(hasattr(row, "tested_current_nA") for row in pool)
+    np.testing.assert_allclose(
+        [row.tested_current_nA for row in calls[0]],
+        [0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+    )
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [True, False], [True, True]],
+    )
+
+
+def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = tuple(
+        axs.AxonInstance(
+            axs.axons.HodgkinHuxley(
+                length=100.0 * axs.um,
+                diameter=0.5 * axs.um,
+                compartments=3,
+            )
+        )
+        for _ in range(2)
+    )
+    calls = []
+    progress_values: list[bool | str] = []
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulation_runner(updated_pool, **kwargs):
+        updated_pool = tuple(updated_pool)
+        calls.append(updated_pool)
+        progress_values.append(kwargs.get("progress", False))
+        return _observer_only_pool_result(
+            row.tested_current_nA >= (0.5 if index % 2 == 0 else 1.5)
+            for index, row in enumerate(updated_pool)
+        )
+
+    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+        solver_progress="plain",
+        batch_amplitudes=True,
+        amplitude_batch_size=2,
+    )
+
+    assert len(calls) == 2
+    assert [len(call) for call in calls] == [4, 2]
+    assert progress_values == ["plain", False]
+    np.testing.assert_allclose(
+        [row.tested_current_nA for call in calls for row in call],
+        [0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+    )
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [True, False], [True, True]],
+    )
+
+
+def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatch):
+    criterion = axs.analysis.ActivationCriterion(
+        threshold=0.0 * axs.mV,
+        blanking=0.5 * axs.ms,
+        target=axs.positions.DISTAL,
+    )
+    pool = (
+        axs.AxonInstance(
+            axs.axons.MRG(
+                diameter=7.3 * axs.um,
+                nodes=4,
+                length=1500.0 * axs.um,
+                compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            )
+        ),
+    )
+    calls = []
+
+    def update(row, tested_current):
+        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+
+    def fake_simulation_runner(updated_pool, **kwargs):
+        updated_pool = tuple(updated_pool)
+        calls.append(updated_pool)
+        return _observer_only_pool_result(
+            row.tested_current_nA >= 0.5 for row in updated_pool
+        )
+
+    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=update,
+        values=np.asarray([0.0, 1.0]) * axs.nA,
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+        criterion=criterion,
+        recording=axs.Recording.none(),
+        batch_amplitudes=True,
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 2
+    np.testing.assert_array_equal(curve.activated, [[False], [True]])
+
+
 def test_activation_observer_pool_result_uses_cohort_vector_path():
     result = axs.AxonSimulationResult(
         (

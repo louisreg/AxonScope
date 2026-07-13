@@ -175,6 +175,7 @@ def main() -> None:
         dt=0.025 * axs.ms,
         criterion=criterion,
         recording=axs.Recording.none(),
+        batch_amplitudes=True,
         progress=True,
         solver_progress="plain",
     )

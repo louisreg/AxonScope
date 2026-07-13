@@ -1013,6 +1013,94 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert components["vstim_previous"] < 2 * 11 * 8
 
 
+def test_double_cable_observer_applies_factorized_row_current_scales():
+    rng = np.random.default_rng(7)
+    length = 1500.0 * axs.um
+    stim_start = 0.20 * axs.ms
+    pulse_width = 0.10 * axs.ms
+    electrode = PointSourceElectrode(
+        x=length / 2.0,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+        min_distance=5.0 * axs.um,
+    )
+    zero_stimulus = Stimulus.pulse(
+        start=stim_start,
+        duration=pulse_width,
+        amplitude=0.0 * axs.uA,
+    )
+    y_positions = rng.uniform(20.0, 80.0, 2) * axs.um
+    amplitudes = np.asarray([10.0, 80.0]) * axs.uA
+
+    def build_base_pool():
+        rows = []
+        for y_position in y_positions:
+            axon = axs.axons.MRG(
+                diameter=10.0 * axs.um,
+                nodes=4,
+                length=length,
+                compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            )
+            stimulation = axs.analytical.point_source_stimulation(
+                electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
+                stimulus=zero_stimulus,
+                sigma=0.3 * axs.S_per_m,
+                axon_y=y_position,
+            )
+            row = axs.AxonInstance(axon)
+            row.add_extracellular_stimulation(stimulation=stimulation)
+            rows.append(row)
+        return tuple(rows)
+
+    def update(row, amplitude):
+        stimulation = row.extracellular_stimulation
+        drive = stimulation.drives[0]
+        row.add_extracellular_stimulation(
+            stimulation=stimulation.replace_drive(
+                drive.id,
+                stimulus=Stimulus.pulse(
+                    start=stim_start,
+                    duration=pulse_width,
+                    amplitude=-amplitude,
+                ),
+            ),
+            replace=True,
+        )
+
+    activation = axs.analysis.Activation(
+        threshold=0.0 * axs.mV,
+        blanking=stim_start,
+        target=axs.positions.ALL,
+    )
+    expanded = axs.protocols.recruitment._build_native_amplitude_pool(
+        build_base_pool(),
+        update,
+        tuple(amplitudes),
+    )
+    observer_result = axs.AxonSimulation(
+        expanded,
+        duration=2.0 * axs.ms,
+        dt=0.025 * axs.ms,
+        recording=axs.Recording.none(),
+        batch_options=BatchOptions.none(),
+        observers=(activation,),
+    ).run()
+    voltage_result = axs.AxonSimulation(
+        expanded,
+        duration=2.0 * axs.ms,
+        dt=0.025 * axs.ms,
+        recording=axs.Recording.voltage(),
+    ).run()
+
+    observer_raster = observer_result.observations[axs.VM_RASTER_OBSERVATION_KEY]
+    voltage_raster = axs.VmRasterResult.from_result(voltage_result, activation)
+    np.testing.assert_array_equal(
+        observer_raster.any_active(activation, blanking=activation.blanking),
+        voltage_raster.any_active(activation, blanking=activation.blanking),
+    )
+
+
 def test_run_pool_double_cable_probe_prefers_scaled_factorized_vstim(tmp_path):
     electrode = PointSourceElectrode(
         x=50.0 * axs.um,

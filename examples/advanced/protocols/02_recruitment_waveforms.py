@@ -5,8 +5,8 @@ Run:
 
 This example focuses on recruitment protocols only. The axon pool is fixed; the
 protocol sweeps current magnitude for several temporal waveform families.
-`recruitment_sweep(...)` evaluates the sampled values sequentially, and each
-value runs the whole pool through the normal batch dispatcher.
+`recruitment_sweep(...)` evaluates the sampled values sequentially by default,
+and each value runs the whole pool through the normal batch dispatcher.
 """
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ def main() -> None:
 
     print("=== Recruitment batching policy ===")
     print("values are sampled sequentially; the pool is batched for each value")
+    print("observer-only sweeps may opt into batch_amplitudes/amplitude_batch_size")
     print(f"recording: {recording_policy.to_plan().spatial.value}")
     print(f"time_chunk_steps: {batch_options.time_chunk_steps}")
     print(
