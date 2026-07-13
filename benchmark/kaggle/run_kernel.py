@@ -154,6 +154,14 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         ),
     )
     parser.add_argument(
+        "--nrv-conda-env",
+        action="store_true",
+        help=(
+            "Create NRV's official micromamba environment in the Kaggle kernel "
+            "and run the benchmark from that Python interpreter."
+        ),
+    )
+    parser.add_argument(
         "--output-file-pattern",
         default=".*axonscope_benchmark_results.*",
         help="Regex passed to `kaggle kernels output --file-pattern`.",
@@ -250,6 +258,7 @@ def prepare_kernel_package(
         "require_gpu": require_gpu,
         "jax_cuda_extra": args.jax_cuda_extra,
         "apt_packages": list(args.apt_package or ()),
+        "nrv_conda_env": bool(args.nrv_conda_env),
         "pip_packages": list(args.pip_package or ()),
     }
     metadata: dict[str, Any] = {

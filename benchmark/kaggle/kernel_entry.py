@@ -33,6 +33,8 @@ SENSITIVE_ENV_MARKERS = (
 
 WORK_DIR = pathlib.Path(os.environ.get("KAGGLE_WORKING_DIR", "/kaggle/working"))
 CHECKOUT_DIR = pathlib.Path(os.environ.get("AXONSCOPE_CHECKOUT_DIR", "/tmp/AxonScope"))
+PYTHON_EXECUTABLE = pathlib.Path(sys.executable)
+os.environ.setdefault("MAMBA_ROOT_PREFIX", str(WORK_DIR / "micromamba_root"))
 
 
 def main() -> None:
@@ -105,7 +107,10 @@ def _clone_repo(config: dict[str, Any]) -> None:
 
 
 def _install_repo(config: dict[str, Any]) -> None:
-    python = sys.executable
+    global PYTHON_EXECUTABLE
+    if bool(config.get("nrv_conda_env", False)):
+        PYTHON_EXECUTABLE = _install_nrv_stack()
+    python = str(PYTHON_EXECUTABLE)
     install_target = str(config.get("install_target", ".[benchmark]"))
     apt_packages = [
         str(package)
@@ -130,10 +135,11 @@ def _install_repo(config: dict[str, Any]) -> None:
 
 
 def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list[str]:
+    python = str(PYTHON_EXECUTABLE)
     campaign = str(config.get("campaign") or "").strip()
     if campaign == "time_chunk_sweep":
         command = [
-            sys.executable,
+            python,
             "benchmark/campaigns/time_chunk_sweep.py",
             "--script",
             str(config["script"]),
@@ -148,7 +154,7 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
         return command
     if campaign == "double_cable_solver_policy":
         command = [
-            sys.executable,
+            python,
             "benchmark/campaigns/double_cable_solver_policy.py",
             "--preset",
             str(config["preset"]),
@@ -161,7 +167,7 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
         return command
     if campaign == "single_cable_solver_policy":
         command = [
-            sys.executable,
+            python,
             "benchmark/campaigns/single_cable_solver_policy.py",
             "--preset",
             str(config["preset"]),
@@ -175,7 +181,7 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
     if campaign:
         raise RuntimeError(f"Unsupported benchmark campaign: {campaign!r}")
     command = [
-        sys.executable,
+        python,
         "benchmark/run.py",
         "--script",
         str(config["script"]),
@@ -188,6 +194,79 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
     ]
     command.extend(str(value) for value in config.get("benchmark_args", ()))
     return command
+
+
+def _install_nrv_stack() -> pathlib.Path:
+    micromamba = _install_micromamba()
+    env_dir = WORK_DIR / "axonscope_nrv_env"
+    env_yaml = WORK_DIR / "nrv_linux.yaml"
+    _run(
+        [
+            "curl",
+            "-L",
+            "-o",
+            str(env_yaml),
+            "https://raw.githubusercontent.com/nrv-framework/NRV/refs/heads/master/conda/nrv_linux.yaml",
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    _run(
+        [
+            str(micromamba),
+            "create",
+            "-y",
+            "-p",
+            str(env_dir),
+            "-f",
+            str(env_yaml),
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    env_yaml.unlink(missing_ok=True)
+    _configure_conda_env_environment(env_dir)
+    env_python = env_dir / "bin" / "python"
+    _run([str(env_python), "-m", "pip", "install", "-U", "pip"])
+    _run(
+        [
+            str(env_python),
+            "-m",
+            "pip",
+            "install",
+            "nrv-py",
+            "opencv-python-headless",
+        ],
+        cwd=CHECKOUT_DIR,
+    )
+    return env_python
+
+
+def _install_micromamba() -> pathlib.Path:
+    micromamba = WORK_DIR / "micromamba" / "bin" / "micromamba"
+    if micromamba.exists():
+        return micromamba
+    micromamba.parent.mkdir(parents=True, exist_ok=True)
+    command = (
+        f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest "
+        f"| tar -xj -C {shlex.quote(str(WORK_DIR / 'micromamba'))} bin/micromamba"
+    )
+    _run(["bash", "-lc", command], cwd=CHECKOUT_DIR)
+    return micromamba
+
+
+def _configure_conda_env_environment(env_dir: pathlib.Path) -> None:
+    env_bin = env_dir / "bin"
+    env_lib = env_dir / "lib"
+    os.environ["CONDA_PREFIX"] = str(env_dir)
+    os.environ["PATH"] = os.pathsep.join(
+        [str(env_bin), os.environ.get("PATH", "")]
+    )
+    existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+        [str(env_lib), *([existing_ld] if existing_ld else [])]
+    )
+    print(f"Using NRV conda env: {env_dir}")
+    print(f"PATH starts with: {env_bin}")
+    print(f"LD_LIBRARY_PATH starts with: {env_lib}")
 
 
 def _verify_gpu_if_requested(config: dict[str, Any]) -> None:

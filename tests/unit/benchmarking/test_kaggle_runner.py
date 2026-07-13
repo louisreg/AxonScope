@@ -33,6 +33,7 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
                 "libglu1-mesa",
                 "--pip-package",
                 "nrv-py",
+                "--nrv-conda-env",
             ]
         )
         == 0
@@ -57,6 +58,7 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     assert config["platform"] == "gpu"
     assert config["require_gpu"] is True
     assert config["apt_packages"] == ["libglu1-mesa"]
+    assert config["nrv_conda_env"] is True
     assert config["pip_packages"] == ["nrv-py"]
     assert config["benchmark_args"] == [
         "--case-filter",
