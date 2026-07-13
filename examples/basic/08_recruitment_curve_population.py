@@ -174,7 +174,7 @@ def main() -> None:
         duration=4.0 * axs.ms,
         dt=0.025 * axs.ms,
         criterion=criterion,
-        recording=axs.Recording.voltage(),
+        recording=axs.Recording.none(),
         progress=True,
         solver_progress="plain",
     )
