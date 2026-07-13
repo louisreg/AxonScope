@@ -352,6 +352,20 @@ improvements.
 - [ ] Compare CPU and GPU behavior separately. On GPU, prioritize whether
   chunking improves memory pressure without making warm runs less solver-bound;
   on CPU, check whether chunking mostly adds Python/JAX dispatch overhead.
+  Initial P13 matrix on 2026-07-13 covered observer-only single/double cable
+  with `Naxon={1,64,1024}` and policies
+  `default,unchunked,128,256,512,1024`. Local CPU results are in
+  `benchmark/results/p13_time_chunk_cpu_matrix`. Kaggle CPU results are in
+  `benchmark/results/kaggle/20260713_131927_time_chunk_sweep_quick_cpu_cpu_axonscope-p13-time-chunk-cpu-a6a1404`.
+  Kaggle GPU single-cable results are in
+  `benchmark/results/kaggle/20260713_131849_time_chunk_sweep_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p13-time-chunk-gpu-a6a1404`;
+  the first combined GPU run intentionally failed for double-cable because
+  `jax-triton` was missing. The corrected double-cable GPU rerun with
+  `jax-triton` is in
+  `benchmark/results/kaggle/20260713_132533_time_chunk_sweep_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p13-time-chunk-gpu-double-jt-8d092fc`.
+  Early read: `512` is not a clear win; `128`/`256`/default are usually close,
+  and `256` is often the safest GPU double-cable policy, but the final default
+  decision should wait for a denser/longer VmRaster workload if needed.
 - [ ] Evaluate dense Vm/full recording separately from VmRaster. Full Vm may
   still need output/assembly optimizations, but it should not drive the
   default observer-only chunking policy.
