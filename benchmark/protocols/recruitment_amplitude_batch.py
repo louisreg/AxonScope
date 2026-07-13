@@ -31,6 +31,7 @@ INTERESTING_STAGES = (
     "protocol.sweep.value",
     "protocol.sweep.batched_values",
     "protocol.sweep.build_amplitude_pool",
+    "protocol.sweep.refresh_amplitude_pool",
     "simulation.run_pool",
     "dispatch.build_plan",
     "runtime.prepare",
@@ -451,17 +452,24 @@ def _write_report(output: Path, rows: list[dict[str, Any]]) -> None:
     lines = [
         "# Recruitment Amplitude Batch Benchmark",
         "",
-        "| policy | phase | wall ms | build plan ms | build pool ms | run pool ms | dispatch_jax ms | wait ms | counts match |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| policy | phase | wall ms | build plan ms | build pool ms | "
+        "refresh pool ms | run pool ms | dispatch_jax ms | wait ms | counts match |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {policy} | {phase} | {wall} | {build_plan} | {build_pool} | {run_pool} | {dispatch} | {wait} | {match} |".format(
+            (
+                "| {policy} | {phase} | {wall} | {build_plan} | {build_pool} | "
+                "{refresh_pool} | {run_pool} | {dispatch} | {wait} | {match} |"
+            ).format(
                 policy=row["policy"],
                 phase=row["phase"],
                 wall=_fmt(row.get("wall_ms", "")),
                 build_plan=_fmt(row.get("dispatch.build_plan_ms", "")),
                 build_pool=_fmt(row.get("protocol.sweep.build_amplitude_pool_ms", "")),
+                refresh_pool=_fmt(
+                    row.get("protocol.sweep.refresh_amplitude_pool_ms", "")
+                ),
                 run_pool=_fmt(row.get("simulation.run_pool_ms", "")),
                 dispatch=_fmt(row.get("kernel.dispatch_jax_ms", "")),
                 wait=_fmt(row.get("kernel.wait_ms", "")),
@@ -477,6 +485,8 @@ def _format_progress(row: dict[str, Any]) -> str:
         f"wall={float(row['wall_ms']):.1f} ms "
         f"build_plan={_fmt(row.get('dispatch.build_plan_ms', ''))} ms "
         f"build_pool={_fmt(row.get('protocol.sweep.build_amplitude_pool_ms', ''))} ms "
+        "refresh_pool="
+        f"{_fmt(row.get('protocol.sweep.refresh_amplitude_pool_ms', ''))} ms "
         f"wait={_fmt(row.get('kernel.wait_ms', ''))} ms"
     )
 

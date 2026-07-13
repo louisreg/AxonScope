@@ -33,11 +33,12 @@ from axonscope.utils import units
 @dataclass(frozen=True)
 class _NativeAmplitudeBatch:
     values: tuple[Any, ...]
-    pool: tuple[SimulationCandidate, ...]
 
 
 @dataclass(frozen=True)
 class _NativeAmplitudeBatchPlan:
+    source_pool: tuple[SimulationCandidate, ...]
+    update: PoolUpdate
     source_pool_size: int
     batches: tuple[_NativeAmplitudeBatch, ...]
 
@@ -275,6 +276,7 @@ def _execute_activation_observer_batch_plan(
     progress_display = _SweepProgress(progress)
     solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
+    work_pools: dict[int, tuple[SimulationCandidate, ...]] = {}
     completed_value_count = 0
     try:
         progress_display.begin(
@@ -285,16 +287,32 @@ def _execute_activation_observer_batch_plan(
             progress_summary=_activation_progress_summary,
         )
         for batch_index, batch in enumerate(plan.batches):
+            value_count = len(batch.values)
+            work_pool = work_pools.get(value_count)
+            if work_pool is None:
+                work_pool = _build_native_amplitude_pool(
+                    plan.source_pool,
+                    plan.update,
+                    batch.values,
+                )
+            else:
+                work_pool = _refresh_native_amplitude_pool(
+                    work_pool,
+                    source_pool=plan.source_pool,
+                    update=plan.update,
+                    values=batch.values,
+                )
+            work_pools[value_count] = work_pool
             started_s = time.perf_counter()
             with benchmark_span(
                 "protocol.sweep.batched_values",
                 batch_index=batch_index,
-                value_count=len(batch.values),
+                value_count=value_count,
                 pool_size=plan.source_pool_size,
-                expanded_pool_size=len(batch.pool),
+                expanded_pool_size=len(work_pool),
             ):
                 flat_observations = _evaluate_activation_observer_pool(
-                    batch.pool,
+                    work_pool,
                     criterion=criterion,
                     duration=duration,
                     dt=dt,
@@ -305,10 +323,10 @@ def _execute_activation_observer_batch_plan(
             elapsed_s = time.perf_counter() - started_s
             progress_display.note_batched_solver(
                 elapsed_s=elapsed_s,
-                value_count=len(batch.values),
+                value_count=value_count,
             )
             observations = np.asarray(flat_observations, dtype=bool).reshape(
-                (len(batch.values), plan.source_pool_size)
+                (value_count, plan.source_pool_size)
             )
             for chunk_offset, row in enumerate(observations):
                 observation_rows.append(row)
@@ -318,9 +336,9 @@ def _execute_activation_observer_batch_plan(
                     values=all_values,
                     completed_rows=observation_rows,
                     progress_summary=_activation_progress_summary,
-                    elapsed_s=elapsed_s / max(len(batch.values), 1),
+                    elapsed_s=elapsed_s / max(value_count, 1),
                 )
-            completed_value_count += len(batch.values)
+            completed_value_count += value_count
     finally:
         progress_display.close()
 
@@ -346,10 +364,11 @@ def _plan_native_amplitude_batches(
         batches.append(
             _NativeAmplitudeBatch(
                 values=chunk_values,
-                pool=_build_native_amplitude_pool(pool, update, chunk_values),
             )
         )
     return _NativeAmplitudeBatchPlan(
+        source_pool=pool,
+        update=update,
         source_pool_size=len(pool),
         batches=tuple(batches),
     )
@@ -374,6 +393,44 @@ def _build_native_amplitude_pool(
     return tuple(rows)
 
 
+def _refresh_native_amplitude_pool(
+    work_pool: tuple[SimulationCandidate, ...],
+    *,
+    source_pool: tuple[SimulationCandidate, ...],
+    update: PoolUpdate,
+    values: tuple[Any, ...],
+) -> tuple[SimulationCandidate, ...]:
+    """Reset and update a stable native pool for another amplitude chunk."""
+
+    expected_size = len(source_pool) * len(values)
+    if len(work_pool) != expected_size:
+        raise ValueError(
+            "native amplitude work pool has the wrong size; "
+            f"expected {expected_size}, got {len(work_pool)}."
+        )
+
+    refreshed: list[SimulationCandidate] = []
+    with benchmark_span(
+        "protocol.sweep.refresh_amplitude_pool",
+        value_count=len(values),
+        pool_size=len(source_pool),
+        expanded_pool_size=expected_size,
+    ):
+        for value_index, value in enumerate(values):
+            row_start = value_index * len(source_pool)
+            for row_index, source_row in enumerate(source_pool):
+                work_row = work_pool[row_start + row_index]
+                reusable_row = _reset_native_pool_row(work_row, source_row)
+                refreshed.append(_apply_pool_update(reusable_row, update, value))
+
+    if all(
+        refreshed_row is work_row
+        for refreshed_row, work_row in zip(refreshed, work_pool, strict=True)
+    ):
+        return work_pool
+    return tuple(refreshed)
+
+
 def _normalize_amplitude_batch_size(
     amplitude_batch_size: int | None,
     value_count: int,
@@ -391,15 +448,35 @@ def _clone_native_pool_row(row: SimulationCandidate) -> SimulationCandidate:
         raise TypeError(
             "batch_amplitudes=True currently requires AxonInstance pool rows."
         )
-    clone = AxonInstance(row.axon)
-    clone.intracellular_contexts = list(row.intracellular_contexts)
-    clone.extracellular_stimulation = row.extracellular_stimulation
-    clone.Veinit = row.Veinit
-    clone._use_extracellular_override = row._use_extracellular_override
-    clone._xraxial_override = _copy_optional_array(row._xraxial_override)
-    clone._xg_override = _copy_optional_array(row._xg_override)
-    clone._xc_override = _copy_optional_array(row._xc_override)
-    return clone
+    return _reset_native_pool_row(AxonInstance(row.axon), row)
+
+
+def _reset_native_pool_row(
+    work_row: SimulationCandidate,
+    source_row: SimulationCandidate,
+) -> AxonInstance:
+    if not isinstance(source_row, AxonInstance):
+        raise TypeError(
+            "batch_amplitudes=True currently requires AxonInstance pool rows."
+        )
+    if (
+        not isinstance(work_row, AxonInstance)
+        or work_row.axon is not source_row.axon
+    ):
+        work_row = AxonInstance(source_row.axon)
+
+    # Remove state left by the previous update, then recreate exactly the same
+    # baseline that a fresh native clone would have received.
+    work_row.__dict__.clear()
+    work_row.axon = source_row.axon
+    work_row.intracellular_contexts = list(source_row.intracellular_contexts)
+    work_row.extracellular_stimulation = source_row.extracellular_stimulation
+    work_row.Veinit = source_row.Veinit
+    work_row._use_extracellular_override = source_row._use_extracellular_override
+    work_row._xraxial_override = _copy_optional_array(source_row._xraxial_override)
+    work_row._xg_override = _copy_optional_array(source_row._xg_override)
+    work_row._xc_override = _copy_optional_array(source_row._xc_override)
+    return work_row
 
 
 def _validate_batched_amplitude_pool(pool: tuple[SimulationCandidate, ...]) -> None:
