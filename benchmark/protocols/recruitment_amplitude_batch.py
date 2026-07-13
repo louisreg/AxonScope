@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -90,10 +91,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate the active Triton solver against dense NumPy solves after timing.",
     )
     parser.add_argument(
+        "--triton-cache-replay",
+        action="store_true",
+        help=(
+            "Run two fresh GPU processes against one persistent Triton kernel cache "
+            "and compare cache-miss/cache-hit lowering."
+        ),
+    )
+    parser.add_argument(
         "--disable-batch-membrane-capability",
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--cold-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
 
@@ -116,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         _write_cases(output, args, policies)
         print(f"dry-run: recruitment_amplitude_batch -> {output}")
         return 0
+    if args.triton_cache_replay:
+        return _run_triton_cache_replay(args, output)
 
     if args.capture_double_cable_jit_phases:
         from benchmark.analysis.jax_phase_capture import (
@@ -134,8 +146,9 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     reference_counts: np.ndarray | None = None
     phase_plan = [("cold", 0)]
-    phase_plan.extend(("warmup", index) for index in range(args.warmups))
-    phase_plan.extend(("warm", index) for index in range(args.repeats))
+    if not args.cold_only:
+        phase_plan.extend(("warmup", index) for index in range(args.warmups))
+        phase_plan.extend(("warm", index) for index in range(args.repeats))
 
     for policy in policies:
         for phase, repeat in phase_plan:
@@ -160,6 +173,190 @@ def main(argv: list[str] | None = None) -> int:
             output / "double_cable_kernel_validation.json"
         )
     return 0
+
+
+def _run_triton_cache_replay(args: argparse.Namespace, output: Path) -> int:
+    if args.platform != "gpu":
+        raise SystemExit("--triton-cache-replay requires --platform gpu.")
+
+    cache_root = output / "triton_kernel_cache"
+    if cache_root.exists() and any(cache_root.iterdir()):
+        raise SystemExit(
+            "--triton-cache-replay requires a fresh output directory; "
+            f"cache artifacts already exist under {cache_root}."
+        )
+
+    records: list[dict[str, Any]] = []
+    for index, (label, expected_status) in enumerate(
+        (("cache_miss", "miss"), ("cache_hit", "hit"))
+    ):
+        child_output = output / label
+        command = _triton_cache_child_command(
+            args,
+            child_output,
+            validate=args.validate_double_cable_kernel and index == 1,
+        )
+        environment = os.environ.copy()
+        environment["AXONSCOPE_TRITON_KERNEL_CACHE"] = str(cache_root)
+        environment["MPLCONFIGDIR"] = str(child_output / ".matplotlib")
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=environment,
+            check=False,
+        )
+        if completed.returncode:
+            raise RuntimeError(
+                f"Triton cache replay child {label!r} failed with exit code "
+                f"{completed.returncode}."
+            )
+        record = _read_triton_cache_child(child_output, label=label)
+        actual_status = record["triton_kernel_cache"]["status"]
+        if actual_status != expected_status:
+            raise RuntimeError(
+                f"Triton cache replay expected {expected_status!r} for {label!r}, "
+                f"got {actual_status!r}."
+            )
+        records.append(record)
+
+    counts_match = records[0]["activation_counts"] == records[1]["activation_counts"]
+    if not counts_match:
+        raise RuntimeError("Triton cache replay changed recruitment activation counts.")
+
+    miss = records[0]
+    hit = records[1]
+    payload = {
+        "cache_root": str(cache_root),
+        "activation_counts_match": counts_match,
+        "lower_saved_s": miss["lower_s"] - hit["lower_s"],
+        "lower_speedup": _ratio(miss["lower_s"], hit["lower_s"]),
+        "total_cold_saved_s": miss["total_cold_s"] - hit["total_cold_s"],
+        "total_cold_speedup": _ratio(
+            miss["total_cold_s"],
+            hit["total_cold_s"],
+        ),
+        "processes": records,
+    }
+    (output / "triton_cache_replay.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _write_triton_cache_replay_report(output, payload)
+    print(
+        "triton cache replay: "
+        f"lower {miss['lower_s']:.3f}s -> {hit['lower_s']:.3f}s; "
+        f"cold {miss['total_cold_s']:.3f}s -> {hit['total_cold_s']:.3f}s"
+    )
+    return 0
+
+
+def _triton_cache_child_command(
+    args: argparse.Namespace,
+    output: Path,
+    *,
+    validate: bool,
+) -> list[str]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--preset",
+        str(args.preset),
+        "--platform",
+        "gpu",
+        "--policies",
+        "full",
+        "--fibers-per-family",
+        str(args.fibers_per_family),
+        "--seed",
+        str(args.seed),
+        "--duration-ms",
+        str(args.duration_ms),
+        "--dt-ms",
+        str(args.dt_ms),
+        "--repeats",
+        "1",
+        "--warmups",
+        "0",
+        "--output",
+        str(output),
+        "--memory-trace",
+        "off",
+        "--capture-double-cable-jit-phases",
+        "--cold-only",
+    ]
+    if args.disable_batch_membrane_capability:
+        command.append("--disable-batch-membrane-capability")
+    if validate:
+        command.append("--validate-double-cable-kernel")
+    return command
+
+
+def _read_triton_cache_child(output: Path, *, label: str) -> dict[str, Any]:
+    phase_path = output / "double_cable_jit_phases.json"
+    phase = json.loads(phase_path.read_text(encoding="utf-8"))
+    cache_event = phase.get("triton_kernel_cache")
+    if not isinstance(cache_event, dict):
+        raise RuntimeError(f"Triton cache replay child {label!r} recorded no event.")
+
+    with (output / "runs.csv").open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if len(rows) != 1:
+        raise RuntimeError(
+            f"Triton cache replay child {label!r} produced {len(rows)} runs, "
+            "expected one cold run."
+        )
+    row = rows[0]
+    return {
+        "label": label,
+        "activation_counts": row["activation_counts"],
+        "wall_ms": float(row["wall_ms"]),
+        "trace_s": float(phase["trace_s"]),
+        "lower_s": float(phase["lower_s"]),
+        "compile_s": float(phase["compile_s"]),
+        "first_execution_s": float(phase["first_execution_s"]),
+        "total_cold_s": float(phase["total_cold_s"]),
+        "stablehlo_bytes": int(phase["stablehlo_bytes"]),
+        "stablehlo_lines": int(phase["stablehlo_lines"]),
+        "stablehlo_custom_calls": int(phase["stablehlo_custom_calls"]),
+        "triton_kernel_cache": cache_event,
+    }
+
+
+def _write_triton_cache_replay_report(
+    output: Path,
+    payload: dict[str, Any],
+) -> None:
+    lines = [
+        "# Triton Persistent Cache Replay",
+        "",
+        "| process | cache | trace s | lower s | compile s | first exec s | cold s | wall ms |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for record in payload["processes"]:
+        lines.append(
+            "| {label} | {status} | {trace_s:.4f} | {lower_s:.4f} | "
+            "{compile_s:.4f} | {first_execution_s:.4f} | {total_cold_s:.4f} | "
+            "{wall_ms:.1f} |".format(
+                status=record["triton_kernel_cache"]["status"],
+                **record,
+            )
+        )
+    lines.extend(
+        [
+            "",
+            f"Activation counts match: {payload['activation_counts_match']}",
+            f"Lowering speedup: {payload['lower_speedup']:.3f}x",
+            f"Cold-phase speedup: {payload['total_cold_speedup']:.3f}x",
+        ]
+    )
+    (output / "triton_cache_replay.md").write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _ratio(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator > 0.0 else float("inf")
 
 
 def _run_one(
@@ -477,6 +674,10 @@ def _write_manifest(
         "dt_ms": args.dt_ms,
         "repeats": args.repeats,
         "warmups": args.warmups,
+        "cold_only": args.cold_only,
+        "capture_double_cable_jit_phases": args.capture_double_cable_jit_phases,
+        "validate_double_cable_kernel": args.validate_double_cable_kernel,
+        "triton_cache_replay": args.triton_cache_replay,
         "memory_trace": args.memory_trace,
         "output": str(output),
     }

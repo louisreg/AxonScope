@@ -9,8 +9,13 @@ cost seen during P11C.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+from pathlib import Path
 from typing import Any
+
+
+_KERNEL_SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 try:  # pragma: no cover - exercised on CUDA benchmark workers.
     import triton
@@ -220,7 +225,8 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
 
     import jax
     import jax.numpy as jnp
-    import jax_triton as jt
+
+    from .triton_call_cache import cached_triton_call
 
     rhs0 = jnp.asarray(rhs0)
     rhs1 = jnp.asarray(rhs1)
@@ -240,7 +246,7 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
 
     work_shape = jax.ShapeDtypeStruct(rhs0.shape, rhs0.dtype)
     grid = ((batch_size + int(block_b) - 1) // int(block_b),)
-    *_, out0, out1 = jt.triton_call(
+    *_, out0, out1 = cached_triton_call(
         a00,
         a01,
         a10,
@@ -250,8 +256,10 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
         rhs0,
         rhs1,
         kernel=_tiled_block_thomas_fused_loop_kernel,
+        source_hash=_KERNEL_SOURCE_HASH,
         out_shape=(work_shape,) * 6,
         grid=grid,
+        name="axonscope_double_cable_tiled_thomas",
         N=nx,
         B=batch_size,
         BLOCK_B=int(block_b),

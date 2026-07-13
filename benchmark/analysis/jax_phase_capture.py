@@ -44,6 +44,11 @@ def install_production_double_cable_capture(output_path: Path) -> None:
         lowered = traced.lower()
         lower_s = time.perf_counter() - lower_start
         stablehlo = lowered.as_text()
+        from axonscope.runtime.jax.kernels.triton_call_cache import (
+            last_triton_kernel_cache_event,
+        )
+
+        triton_kernel_cache = last_triton_kernel_cache_event()
 
         compile_start = time.perf_counter()
         executable = lowered.compile()
@@ -72,6 +77,7 @@ def install_production_double_cable_capture(output_path: Path) -> None:
             "stablehlo_bytes": len(stablehlo.encode("utf-8")),
             "stablehlo_lines": stablehlo.count("\n") + 1,
             "stablehlo_custom_calls": stablehlo.count("stablehlo.custom_call"),
+            "triton_kernel_cache": triton_kernel_cache,
             "static": {
                 name: _json_scalar(kwargs[name])
                 for name in sorted(_DOUBLE_CABLE_STATIC_ARGS)
