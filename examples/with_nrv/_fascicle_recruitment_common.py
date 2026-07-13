@@ -14,6 +14,7 @@ from matplotlib.patches import Circle, Patch, Polygon
 from rich.console import Console
 
 import axonscope as axs
+from axonscope.benchmarking import benchmark_span
 from axonscope.integrations import nrv as axs_nrv
 
 
@@ -117,27 +118,30 @@ def run_fascicle_recruitment_example(
     if config.gmsh_n_core is not None:
         nerve.extra_stim.model.mesh.n_core = int(config.gmsh_n_core)
 
-    axons = axs_nrv.population_from_nrv(
-        nerve,
-        nerve_length_um=config.nerve_length_um,
-        include_unmyelinated=config.include_unmyelinated,
-        unmyelinated_compartments=config.unmyelinated_compartments,
-    )
+    with benchmark_span("nrv_bridge.population_from_nrv"):
+        axons = axs_nrv.population_from_nrv(
+            nerve,
+            nerve_length_um=config.nerve_length_um,
+            include_unmyelinated=config.include_unmyelinated,
+            unmyelinated_compartments=config.unmyelinated_compartments,
+        )
     console.print(
         f"NRV generated {len(nerve.fascicles)} fascicles and {len(axons)} AxonScope axons."
     )
 
     console.print("[bold]2. Sample NRV LIFE/FEM footprints on AxonScope axons[/bold]")
-    footprints = axs_nrv.footprints_from_nrv(nerve, axons)
-    pool = footprints.stimulated_population(
-        electrode_index=0,
-        stimulus=_life_pulse(
-            current=0.0 * axs.uA,
-            start_ms=config.stimulus_start_ms,
-            pulse_duration_ms=config.pulse_duration_ms,
-        ),
-        drive_id_prefix="nrv_life",
-    )
+    with benchmark_span("nrv_bridge.footprints_from_nrv"):
+        footprints = axs_nrv.footprints_from_nrv(nerve, axons)
+    with benchmark_span("nrv_bridge.stimulated_population"):
+        pool = footprints.stimulated_population(
+            electrode_index=0,
+            stimulus=_life_pulse(
+                current=0.0 * axs.uA,
+                start_ms=config.stimulus_start_ms,
+                pulse_duration_ms=config.pulse_duration_ms,
+            ),
+            drive_id_prefix="nrv_life",
+        )
 
     def update_life_current(simulation: axs.AxonInstance, current: object) -> None:
         if simulation.extracellular_stimulation is None:
@@ -158,20 +162,25 @@ def run_fascicle_recruitment_example(
         blanking=config.stimulus_start_ms * axs.ms,
         target=axs.positions.ALL,
     )
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update_life_current,
-        values=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
-        duration=config.duration_ms * axs.ms,
-        dt=config.dt_ms * axs.ms,
-        criterion=activation,
-        recording=axs.Recording.none(),
-        batch_options=axs.BatchOptions.none(
-            time_chunk_steps=config.observer_time_chunk_steps
-        ),
-        progress=True,
-        solver_progress=config.solver_progress,
-    )
+    with benchmark_span(
+        "protocol.recruitment_sweep",
+        amplitude_count=len(config.recruitment_amplitudes_uA),
+        axon_count=len(pool),
+    ):
+        curve = axs.protocols.recruitment_sweep(
+            pool,
+            update=update_life_current,
+            values=np.asarray(config.recruitment_amplitudes_uA, dtype=float) * axs.uA,
+            duration=config.duration_ms * axs.ms,
+            dt=config.dt_ms * axs.ms,
+            criterion=activation,
+            recording=axs.Recording.none(),
+            batch_options=axs.BatchOptions.none(
+                time_chunk_steps=config.observer_time_chunk_steps
+            ),
+            progress=True,
+            solver_progress=config.solver_progress,
+        )
 
     fig, ax = plt.subplots(figsize=(7.0, 4.5), constrained_layout=True)
     row_fascicles = np.asarray([row.fascicle_id for row in footprints.rows], dtype=object)

@@ -27,6 +27,11 @@ DEFAULT_OUTPUT = REPO_ROOT / "benchmark" / "results" / "with_nrv_examples"
 
 INTERESTING_STAGES = (
     "example.run",
+    "nrv_bridge.population_from_nrv",
+    "nrv_bridge.footprints_from_nrv",
+    "nrv_bridge.stimulated_population",
+    "protocol.recruitment_sweep",
+    "protocol.sweep.value",
     "simulation.setup",
     "simulation.run_pool",
     "dispatch.build_plan",

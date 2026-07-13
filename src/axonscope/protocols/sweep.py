@@ -16,6 +16,7 @@ from axonscope.protocols.types import (
 )
 from axonscope.protocols.values import _normalize_sweep_values
 from axonscope.recording import Recording
+from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import BatchOptions
 
@@ -84,17 +85,23 @@ def pool_sweep(
                 completed_rows=observation_rows,
                 progress_summary=progress_summary,
             )
-            results = _run_updated_pool(
-                base_pool,
-                update,
-                tuple(value for _ in base_pool),
-                duration=duration,
-                dt=dt,
-                recording=recording,
-                batch_options=batch_options,
-                progress=solver_progress_gate.consume(),
-            )
-            observations = np.asarray([observe(result) for result in results])
+            with benchmark_span(
+                "protocol.sweep.value",
+                index=index,
+                value=str(value),
+                pool_size=len(base_pool),
+            ):
+                results = _run_updated_pool(
+                    base_pool,
+                    update,
+                    tuple(value for _ in base_pool),
+                    duration=duration,
+                    dt=dt,
+                    recording=recording,
+                    batch_options=batch_options,
+                    progress=solver_progress_gate.consume(),
+                )
+                observations = np.asarray([observe(result) for result in results])
             observation_rows.append(observations)
             progress_display.update(
                 label="Pool sweep",
