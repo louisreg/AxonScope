@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--examples", default="01,02")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmups", type=int, default=0)
+    parser.add_argument("--cold-only", action="store_true")
     parser.add_argument("--axons-per-fascicle", type=int, default=6)
     parser.add_argument("--amplitudes-uA", default="0,150,300")
     parser.add_argument("--duration-ms", type=float, default=0.5)
@@ -118,8 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     for spec in specs:
         module = _load_example(spec)
         phase_plan = [("cold", 0)]
-        phase_plan.extend(("warmup", index) for index in range(args.warmups))
-        phase_plan.extend(("warm", index) for index in range(args.repeats))
+        if not args.cold_only:
+            phase_plan.extend(("warmup", index) for index in range(args.warmups))
+            phase_plan.extend(("warm", index) for index in range(args.repeats))
         for phase, repeat in phase_plan:
             row = _run_one(
                 module,
