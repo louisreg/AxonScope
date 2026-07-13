@@ -270,6 +270,8 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
     items: list[DispatchItem] = []
     solver_cache: dict[tuple[Any, ...], SolverAxon] = {}
     metadata_cache: dict[tuple[Any, ...], _SolverDispatchMetadata] = {}
+    model_signature_cache: dict[int, Any] = {}
+    model_structure_cache: dict[int, Any] = {}
     stimulus_signature_cache: dict[int, tuple[Any, ...]] = {}
     for index, axon in enumerate(axons):
         simulation = as_axon_instance(axon)
@@ -280,7 +282,11 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
             solver_cache[cache_key] = solver_axon
         metadata = metadata_cache.get(cache_key)
         if metadata is None:
-            metadata = _solver_dispatch_metadata(solver_axon)
+            metadata = _solver_dispatch_metadata(
+                solver_axon,
+                model_signature_cache=model_signature_cache,
+                model_structure_cache=model_structure_cache,
+            )
             metadata_cache[cache_key] = metadata
         items.append(
             _make_dispatch_item(
@@ -314,10 +320,21 @@ def _optional_array_signature(values: Any | None) -> tuple[tuple[int, ...], str,
     return _array_signature(values)
 
 
-def _solver_dispatch_metadata(solver_axon: SolverAxon) -> _SolverDispatchMetadata:
+def _solver_dispatch_metadata(
+    solver_axon: SolverAxon,
+    *,
+    model_signature_cache: dict[int, Any],
+    model_structure_cache: dict[int, Any],
+) -> _SolverDispatchMetadata:
     mode = _resolve_mode(solver_axon)
-    membrane_signature = _axon_membrane_signature(solver_axon)
-    membrane_structure_sequence = _axon_membrane_structure_sequence(solver_axon)
+    membrane_signature = _axon_membrane_signature(
+        solver_axon,
+        model_signature_cache=model_signature_cache,
+    )
+    membrane_structure_sequence = _axon_membrane_structure_sequence(
+        solver_axon,
+        model_structure_cache=model_structure_cache,
+    )
     cable_signature = _axon_cable_signature(solver_axon)
     membrane_group_signature = (
         _unique_membrane_structures(membrane_structure_sequence)
@@ -385,26 +402,41 @@ def _unique_membrane_structures(signatures: Iterable[Any]) -> tuple[Any, ...]:
     return tuple(sorted(set(signatures), key=repr))
 
 
-def _model_structure_signature(model: Any) -> Any:
+def _model_structure_signature(model: Any, cache: dict[int, Any]) -> Any:
     """Return a structural membrane signature that ignores numeric parameters."""
 
+    cache_key = id(model)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     kind = getattr(model, "kind", None)
     if kind is not None:
         component_structures = tuple(
-            _model_structure_signature(component)
+            _model_structure_signature(component, cache)
             for component in getattr(model, "components", ())
         )
-        return ("membrane", kind, component_structures)
-    implementation = getattr(model, "_implementation", None)
-    if implementation is not None:
-        return _model_structure_signature(implementation)
-    return (model.__class__.__module__, model.__class__.__qualname__)
+        signature = ("membrane", kind, component_structures)
+    else:
+        implementation = getattr(model, "_implementation", None)
+        if implementation is not None:
+            signature = _model_structure_signature(implementation, cache)
+        else:
+            signature = (model.__class__.__module__, model.__class__.__qualname__)
+    cache[cache_key] = signature
+    return signature
 
 
-def _axon_membrane_structure_sequence(axon: SolverAxon) -> Any:
+def _axon_membrane_structure_sequence(
+    axon: SolverAxon,
+    *,
+    model_structure_cache: dict[int, Any],
+) -> Any:
     """Return per-compartment membrane structures without parameter values."""
 
-    return tuple(_model_structure_signature(model) for model in axon.membrane_models)
+    return tuple(
+        _model_structure_signature(model, model_structure_cache)
+        for model in axon.membrane_models
+    )
 
 
 def _group_has_shared_geometry(items: Sequence[DispatchItem]) -> bool:
@@ -423,10 +455,22 @@ def _model_signature(model: Any) -> Any:
     return repr(model)
 
 
-def _axon_membrane_signature(axon: SolverAxon) -> Any:
+def _axon_membrane_signature(
+    axon: SolverAxon,
+    *,
+    model_signature_cache: dict[int, Any],
+) -> Any:
     """Return the membrane component of an axon compatibility signature."""
 
-    return tuple(_model_signature(model) for model in axon.membrane_models)
+    signatures = []
+    for model in axon.membrane_models:
+        cache_key = id(model)
+        signature = model_signature_cache.get(cache_key)
+        if signature is None:
+            signature = _model_signature(model)
+            model_signature_cache[cache_key] = signature
+        signatures.append(signature)
+    return tuple(signatures)
 
 
 def _axon_cable_signature(axon: SolverAxon) -> Any:

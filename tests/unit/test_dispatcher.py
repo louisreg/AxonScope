@@ -634,6 +634,31 @@ def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
     assert fast_stack.gates0_rows.shape[0] == 1
 
 
+def test_dispatch_normalization_computes_each_model_signature_once(monkeypatch):
+    calls: dict[int, int] = {}
+    original = dispatch_plan_module._model_signature
+
+    def counted(model):
+        calls[id(model)] = calls.get(id(model), 0) + 1
+        return original(model)
+
+    monkeypatch.setattr(dispatch_plan_module, "_model_signature", counted)
+    simulations = tuple(
+        _mrg_axon(diameter_um=diameter_um, amp_nA=0.1)
+        for diameter_um in (7.3, 10.0, 12.8)
+    )
+
+    items = dispatch_plan_module._normalize_dispatch_items(simulations)
+
+    model_ids = {
+        id(model)
+        for item in items
+        for model in item.solver_axon.membrane_models
+    }
+    assert set(calls) == model_ids
+    assert all(count == 1 for count in calls.values())
+
+
 def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monkeypatch):
     from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 
