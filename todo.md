@@ -526,14 +526,30 @@ These items are intentionally not ordered or scoped into a phase yet.
     improved warm timings to sequential `3.14 s`, `10` `2.58 s`, `20`
     `2.57 s`, and full `2.56 s`; all policies matched activation counts
     `6 18 41 65 82 101 126 135`.
+  - [x] Reuse spatial cohort preparation and VmRaster plans across equivalent
+    groups and amplitude-only cohort refreshes. Commit `73cf2ea` separates the
+    immutable spatial cache token from current axon, solver-axon, and
+    stimulation rows. Kaggle P100 artifact
+    `benchmark/results/kaggle/20260713_223515_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-spatial-cache-73cf2ea`
+    reduced warm `simulation.run_pool` from `768.95` to `441.87 ms` for the
+    sequential policy and from `1624.02` to `923.16 ms` for
+    `amplitude_batch_size=1`. Corresponding `inputs.positions` totals dropped
+    from `78.52` to `4.57 ms` and from `566.79` to `17.43 ms`; `observer.plan`
+    dropped from `15.15` to `1.97 ms` and from `76.23` to `2.43 ms`. Every
+    policy retained activation counts `6 18 41 65 82 101 126 135`.
   - [ ] Continue native recruitment batching optimization only if this path is
     selected as a public/default policy. Remaining obvious costs are
     `protocol.sweep.build_amplitude_pool` around `0.56-0.58 s` on Kaggle P100,
-    repeated native plan construction for `amplitude_batch_size=1`, and
-    host-side population construction in the benchmark harness.
-  - [ ] After chunk-size benchmarks, test whether async scheduling across
-    amplitude chunks improves throughput. Keep it opt-in unless measured
-    CPU/GPU gains are clear and result ordering/error handling stay simple.
+    repeated native plan construction plus `runtime.prepare` signature work
+    for `amplitude_batch_size=1`, and host-side population construction in the
+    benchmark harness.
+  - [x] Test async JAX scheduling across independent dispatcher groups. Commit
+    `0bf9984` added an internal enqueue/finalize scheduler and the
+    `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
+    gain: 256 axons were `198.7 ms` sync versus `213.8 ms` async, and 1024
+    axons were `606.6 ms` sync versus `611.5 ms` async. Keep synchronous group
+    execution as the default; revisit async only for workloads with several
+    independent solver-heavy groups and measured device idle time.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models.
 - [ ] Re-check each built-in model against the NRV implementation; some details
   may have been lost during model translation.
