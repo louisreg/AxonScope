@@ -257,8 +257,6 @@ def solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
         BLOCK_B=int(block_b),
         num_warps=_num_warps_for_block_b(int(block_b)),
         num_stages=1,
-        # These assembled step-local inputs are dead after the solve.
-        input_output_aliases={0: 0, 3: 3, 6: 4, 7: 5},
     )
     return out0, out1
 
