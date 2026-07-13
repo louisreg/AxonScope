@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -121,6 +121,7 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
         for current in model.currents
     )
     step = model.step_program
+    semantic_model = _without_codegen_cache_metadata(model)
     return MembraneProgram(
         model=model,
         name=model.name,
@@ -143,8 +144,21 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
             dict(model.metadata.get("source_provenance", {}))
         ),
         codegen_cache=MappingProxyType(dict(model.metadata.get("codegen_cache", {}))),
-        structural_hash=_structural_hash(model),
-        parameterized_hash=_parameterized_hash(model),
+        structural_hash=_structural_hash(semantic_model),
+        parameterized_hash=_parameterized_hash(semantic_model),
+    )
+
+
+def _without_codegen_cache_metadata(model: ModelIR) -> ModelIR:
+    if "codegen_cache" not in model.metadata:
+        return model
+    return replace(
+        model,
+        metadata={
+            key: value
+            for key, value in model.metadata.items()
+            if key != "codegen_cache"
+        },
     )
 
 

@@ -24,6 +24,9 @@ def batch_gate_update(
 ) -> Array:
     """Update membrane gates for one batched voltage state."""
 
+    batch_update = getattr(backend, "batch_cn_gate_update", None)
+    if callable(batch_update):
+        return batch_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
     row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
     if callable(row_gate_update):
         return jax.vmap(
@@ -74,6 +77,9 @@ def batch_membrane_conductance_terms(
 ) -> tuple[Array, Array]:
     """Evaluate membrane conductance terms for one batched gate state."""
 
+    batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
+    if callable(batch_terms):
+        return batch_terms(gates)
     row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
     if callable(row_terms):
         return jax.vmap(

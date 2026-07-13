@@ -1,6 +1,8 @@
 import re
 from types import SimpleNamespace
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -610,6 +612,52 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
         fast_stack.background_rows[0],
         fast_stack.background_rows[2],
     )
+
+
+def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    axons = [
+        _mrg_axon(diameter_um=7.3, amp_nA=0.1),
+        _mrg_axon(diameter_um=10.0, amp_nA=0.2),
+    ]
+    group = build_dispatch_plan(axons).groups[0]
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=group.items[0].solver_axon.dtype,
+        solver_options=None,
+    )
+
+    assert fast_stack is not None
+    backend = fast_stack.backend
+    gates = jnp.asarray(fast_stack.gates0_rows)
+    voltage = jnp.asarray(
+        np.linspace(-82.0, -68.0, gates.shape[0] * gates.shape[1]).reshape(
+            gates.shape[:2]
+        ),
+        dtype=gates.dtype,
+    )
+    expected_gates = jax.vmap(
+        lambda row, vm: backend.cn_gate_update_for_row(
+            0,
+            g_prev=row,
+            V_mV=vm,
+            dt=0.005,
+        )
+    )(gates, voltage)
+    actual_gates = backend.batch_cn_gate_update(
+        g_prev=gates,
+        V_mV=voltage,
+        dt=0.005,
+    )
+    expected_gm, expected_ge = jax.vmap(
+        lambda row: backend.membrane_conductance_terms_for_row(0, row)
+    )(actual_gates)
+    actual_gm, actual_ge = backend.batch_membrane_conductance_terms(actual_gates)
+
+    np.testing.assert_allclose(actual_gates, expected_gates, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(actual_gm, expected_gm, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
 
 
 def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):

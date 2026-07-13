@@ -140,8 +140,7 @@ class JaxMembraneProgram:
         gates = jnp.asarray(g_prev, dtype=self.dtype)
         if gates.shape[-1] == 0:
             return gates
-        alpha, beta = self.rate_constants(V_mV)
-        q10 = self.lowering.q10_factors(V_mV)
+        alpha, beta, q10 = self.lowering.gate_terms(V_mV)
         alpha = q10 * alpha
         beta = q10 * beta
         sum_ab = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))

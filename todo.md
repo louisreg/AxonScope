@@ -572,6 +572,25 @@ These items are intentionally not ordered or scoped into a phase yet.
     persistent-cache hit reducing cold wall from `6.53` to `4.75 s`, but keep
     persistent cache location, invalidation, and retention as a separate policy
     decision rather than enabling it implicitly.
+  - [x] Make source-model runtime code generation lazy per model and runtime
+    target. Source compiler v15 keeps one content-addressed model directory,
+    lets JAX request only `jax_model.py`, and can add `numpy_model.py` later
+    without rewriting the existing JAX artifact. Runtime program hashes no
+    longer depend on which cache targets happen to be present.
+  - [x] Move stateless source-model gate rates, Q10 factors, conductances, and
+    reversal terms into generated `jax_model.py` functions. JAX consumes those
+    functions instead of rebuilding their Model IR expression trees; the
+    structural gated/leak backend now exposes model-agnostic batch capabilities
+    for gate and membrane terms rather than selecting a named model family.
+  - [ ] Finish making generated runtime modules autonomous for stateful models:
+    generate initial-state, prepare/finalize, diagnostics, and the compact
+    runtime metadata contract, then remove Model IR expression evaluation from
+    cached JAX execution while retaining Model IR for compiler validation,
+    composition, inspection, and NumPy reference behavior.
+  - [ ] Capture the production double-cable GPU cold JIT as separate
+    trace/lower/compile/first-execution phases on Kaggle, and compare the
+    generated-term plus batch-capability route against the previous recruitment
+    baseline before retaining any further kernel specialization.
   - [x] Test async JAX scheduling across independent dispatcher groups. Commit
     `0bf9984` added an internal enqueue/finalize scheduler and the
     `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no

@@ -103,6 +103,7 @@ def lower_membrane_model_with_sources(
     model: MembraneModel,
     *,
     load_generated_modules: tuple[str, ...] = (),
+    generated_targets: tuple[str, ...] = ("jax", "numpy"),
 ) -> MembraneLoweringResult:
     """Compile a membrane descriptor and retain source/cache compile details."""
 
@@ -115,6 +116,7 @@ def lower_membrane_model_with_sources(
                 lowered = lower_membrane_model_with_sources(
                     component,
                     load_generated_modules=load_generated_modules,
+                    generated_targets=generated_targets,
                 )
             except (TypeError, ValueError) as exc:
                 raise ValueError(
@@ -141,6 +143,7 @@ def lower_membrane_model_with_sources(
         model_class_name=model.source_class,
         parameter_defaults=_float_parameter_defaults(model.params),
         load_generated_modules=load_generated_modules,
+        generated_targets=generated_targets,
     )
     return MembraneLoweringResult(model=compiled.model, source_results=(compiled,))
 

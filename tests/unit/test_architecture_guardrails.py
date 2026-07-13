@@ -1349,6 +1349,21 @@ def test_jax_runtime_preparation_stacks_membranes_by_capabilities_not_model_name
     assert sorted(term for term in forbidden if term in text) == []
 
 
+def test_double_cable_batch_membrane_specialization_is_capability_based():
+    backend_text = (
+        SRC_ROOT / "runtime" / "jax" / "membranes" / "backend.py"
+    ).read_text(encoding="utf-8")
+    step_text = (
+        SRC_ROOT / "runtime" / "jax" / "kernels" / "double_cable_step.py"
+    ).read_text(encoding="utf-8")
+    specialized_text = backend_text + step_text
+
+    assert "batch_cn_gate_update" in specialized_text
+    assert "batch_membrane_conductance_terms" in specialized_text
+    for model_name in ("MRG", "AxNode", "HodgkinHuxley", "Passive"):
+        assert model_name not in step_text
+
+
 def test_jax_runtime_preparation_does_not_own_membrane_stacking_details():
     preparation_text = (
         SRC_ROOT / "runtime" / "jax" / "preparation" / "stacking.py"

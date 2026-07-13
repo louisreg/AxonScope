@@ -47,6 +47,12 @@ Current focus after the P9 closeout:
   equations in ordinary Python source, not intermediate representations or
   builder DSLs. Model IR is internal compiler vocabulary and must not become
   required user knowledge.
+- treat Model IR as a compiler representation, not the long-term numerical
+  runtime source. Runtime-specific generated modules are content-addressed per
+  model and target, generated lazily, and own every model-specific numerical
+  function consumed by that runtime. A cached runtime artifact must be reusable
+  without regenerating an already valid target file; Model IR may remain beside
+  it for validation, inspection, composition, and reference execution.
 - keep built-in membrane model truth in `src/axonscope/membranes/models/`: each
   model file owns its equations, unit-bearing defaults, public aliases, and
   derived parameter logic. Public constructors, `model_ir`, solvers, and

@@ -524,6 +524,28 @@ class GatedLeakStackMembraneBackend:
         )
         return jnp.concatenate([gated_gates, g_prev[:, self.gated_gate_count :]], axis=1)
 
+    def batch_cn_gate_update(
+        self,
+        *,
+        g_prev: jnp.ndarray,
+        V_mV: jnp.ndarray,
+        dt: float,
+    ) -> jnp.ndarray:
+        """Update every compatible row through one flattened membrane call."""
+
+        batch_shape = g_prev.shape[:-1]
+        gated_gates = self.gated_model.cn_gate_update(
+            g_prev=g_prev[..., : self.gated_gate_count].reshape(
+                (-1, self.gated_gate_count)
+            ),
+            V_mV=V_mV.reshape((-1,)),
+            dt=dt,
+        ).reshape((*batch_shape, self.gated_gate_count))
+        return jnp.concatenate(
+            [gated_gates, g_prev[..., self.gated_gate_count :]],
+            axis=-1,
+        )
+
     def currents_for_row(
         self,
         row_index,
@@ -552,6 +574,28 @@ class GatedLeakStackMembraneBackend:
         )
         leak_gm = gates[:, self._leak_g_col]
         leak_ge = gates[:, self._leak_ge_col]
+        return (
+            gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
+            gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
+        )
+
+    def batch_membrane_conductance_terms(
+        self,
+        gates: jnp.ndarray,
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Evaluate every compatible row through one flattened membrane call."""
+
+        batch_shape = gates.shape[:-1]
+        gated_gm, gated_ge = self.gated_model.membrane_conductance_terms(
+            gates[..., : self.gated_gate_count].reshape(
+                (-1, self.gated_gate_count)
+            )
+        )
+        gated_gm = gated_gm.reshape(batch_shape)
+        gated_ge = gated_ge.reshape(batch_shape)
+        gated_mask = gates[..., self._gated_mask_col]
+        leak_gm = gates[..., self._leak_g_col]
+        leak_ge = gates[..., self._leak_ge_col]
         return (
             gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
             gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,

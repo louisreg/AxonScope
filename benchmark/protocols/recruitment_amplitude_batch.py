@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--memory-top-n", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--capture-double-cable-jit-phases",
+        action="store_true",
+        help="Capture trace/lower/compile/first-execution for the first production GPU JIT.",
+    )
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
 
@@ -101,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
         _write_cases(output, args, policies)
         print(f"dry-run: recruitment_amplitude_batch -> {output}")
         return 0
+
+    if args.capture_double_cable_jit_phases:
+        from benchmark.analysis.jax_phase_capture import (
+            install_production_double_cable_capture,
+        )
+
+        install_production_double_cable_capture(output / "double_cable_jit_phases.json")
 
     rows: list[dict[str, Any]] = []
     reference_counts: np.ndarray | None = None

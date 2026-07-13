@@ -85,6 +85,18 @@ class JaxModelIRLowering:
         self.generated_output_index = {
             name: index for index, name in enumerate(self.generated_output_names)
         }
+        self.generated_gate_arg_names = _generated_names(
+            generated_module, "GATE_ARG_NAMES"
+        )
+        self.generated_gate_output_names = _generated_names(
+            generated_module, "GATE_OUTPUT_NAMES"
+        )
+        self.generated_membrane_arg_names = _generated_names(
+            generated_module, "MEMBRANE_ARG_NAMES"
+        )
+        self.generated_membrane_output_names = _generated_names(
+            generated_module, "MEMBRANE_OUTPUT_NAMES"
+        )
         self.source_current_output_names = _source_output_names(model, "currents")
 
     @property
@@ -93,6 +105,22 @@ class JaxModelIRLowering:
             self.generated_module is not None
             and bool(self.generated_arg_names)
             and bool(self.generated_output_names)
+        )
+
+    @property
+    def generated_gate_terms_available(self) -> bool:
+        return (
+            self.generated_module is not None
+            and callable(getattr(self.generated_module, "gate_terms", None))
+            and len(self.generated_gate_output_names) == 3 * len(self.model.gates)
+        )
+
+    @property
+    def generated_membrane_terms_available(self) -> bool:
+        return (
+            self.generated_module is not None
+            and callable(getattr(self.generated_module, "membrane_terms", None))
+            and len(self.generated_membrane_output_names) == 2 * len(self.model.currents)
         )
 
     def with_parameters(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -107,25 +135,8 @@ class JaxModelIRLowering:
         *,
         parameters: dict[str, Any] | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        V = jnp.atleast_1d(jnp.asarray(V_mV, dtype=self.dtype))
-        env = self._base_env(V, parameters=parameters)
-        alpha = [
-            _as_node_vector(
-                evaluate_expression_jax(gate.alpha, env, dtype=self.dtype),
-                V.shape[0],
-                self.dtype,
-            )
-            for gate in self.model.gates
-        ]
-        beta = [
-            _as_node_vector(
-                evaluate_expression_jax(gate.beta, env, dtype=self.dtype),
-                V.shape[0],
-                self.dtype,
-            )
-            for gate in self.model.gates
-        ]
-        return _stack_columns(alpha, V.shape[0], self.dtype), _stack_columns(beta, V.shape[0], self.dtype)
+        alpha, beta, _ = self.gate_terms(V_mV, parameters=parameters)
+        return alpha, beta
 
     def q10_factors(
         self,
@@ -133,21 +144,63 @@ class JaxModelIRLowering:
         *,
         parameters: dict[str, Any] | None = None,
     ) -> jnp.ndarray:
+        _, _, q10 = self.gate_terms(V_mV, parameters=parameters)
+        return q10
+
+    def gate_terms(
+        self,
+        V_mV: Any,
+        *,
+        parameters: dict[str, Any] | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         V = jnp.atleast_1d(jnp.asarray(V_mV, dtype=self.dtype))
         env = self._base_env(V, parameters=parameters)
+        generated = self._generated_term_outputs(
+            function_name="gate_terms",
+            arg_names=self.generated_gate_arg_names,
+            output_names=self.generated_gate_output_names,
+            env=env,
+            node_count=V.shape[0],
+        )
+        if generated is not None:
+            return (
+                _stack_columns(list(generated[0::3]), V.shape[0], self.dtype),
+                _stack_columns(list(generated[1::3]), V.shape[0], self.dtype),
+                _stack_columns(list(generated[2::3]), V.shape[0], self.dtype),
+            )
+
+        alpha = []
+        beta = []
         factors = []
         for gate in self.model.gates:
-            if gate.q10 is None:
-                factors.append(jnp.ones((V.shape[0],), dtype=self.dtype))
-            else:
-                factors.append(
-                    _as_node_vector(
-                        evaluate_expression_jax(gate.q10, env, dtype=self.dtype),
-                        V.shape[0],
-                        self.dtype,
-                    )
+            alpha.append(
+                _as_node_vector(
+                    evaluate_expression_jax(gate.alpha, env, dtype=self.dtype),
+                    V.shape[0],
+                    self.dtype,
                 )
-        return _stack_columns(factors, V.shape[0], self.dtype)
+            )
+            beta.append(
+                _as_node_vector(
+                    evaluate_expression_jax(gate.beta, env, dtype=self.dtype),
+                    V.shape[0],
+                    self.dtype,
+                )
+            )
+            factors.append(
+                jnp.ones((V.shape[0],), dtype=self.dtype)
+                if gate.q10 is None
+                else _as_node_vector(
+                    evaluate_expression_jax(gate.q10, env, dtype=self.dtype),
+                    V.shape[0],
+                    self.dtype,
+                )
+            )
+        return (
+            _stack_columns(alpha, V.shape[0], self.dtype),
+            _stack_columns(beta, V.shape[0], self.dtype),
+            _stack_columns(factors, V.shape[0], self.dtype),
+        )
 
     def init_gates(
         self,
@@ -196,8 +249,7 @@ class JaxModelIRLowering:
         V = jnp.atleast_1d(jnp.asarray(V_mV, dtype=self.dtype))
         if gates.shape[-1] == 0:
             return gates
-        alpha, beta = self.rate_constants(V, parameters=parameters)
-        q10 = self.q10_factors(V, parameters=parameters)
+        alpha, beta, q10 = self.gate_terms(V, parameters=parameters)
         alpha = q10 * alpha
         beta = q10 * beta
         sum_ab = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))
@@ -282,6 +334,17 @@ class JaxModelIRLowering:
         gates_arr = jnp.asarray(gates, dtype=self.dtype)
         node_count = int(gates_arr.shape[0]) if gates_arr.ndim else 1
         env = self._state_env(gates_arr, state=state, parameters=parameters)
+        generated = self._generated_term_outputs(
+            function_name="membrane_terms",
+            arg_names=self.generated_membrane_arg_names,
+            output_names=self.generated_membrane_output_names,
+            env=env,
+            node_count=node_count,
+        )
+        if generated is not None:
+            g = _stack_columns(list(generated[0::2]), node_count, self.dtype)
+            e = _stack_columns(list(generated[1::2]), node_count, self.dtype)
+            return jnp.sum(g, axis=1), jnp.sum(g * e, axis=1)
         conductances = []
         reversals = []
         for current in self.model.currents:
@@ -302,6 +365,29 @@ class JaxModelIRLowering:
         g = _stack_columns(conductances, node_count, self.dtype)
         e = _stack_columns(reversals, node_count, self.dtype)
         return jnp.sum(g, axis=1), jnp.sum(g * e, axis=1)
+
+    def _generated_term_outputs(
+        self,
+        *,
+        function_name: str,
+        arg_names: tuple[str, ...],
+        output_names: tuple[str, ...],
+        env: dict[str, Any],
+        node_count: int,
+    ) -> tuple[jnp.ndarray, ...] | None:
+        if self.generated_module is None or any(name not in env for name in arg_names):
+            return None
+        function = getattr(self.generated_module, function_name, None)
+        if not callable(function) or not output_names:
+            return None
+        raw = function(*(env[name] for name in arg_names))
+        values = raw if isinstance(raw, tuple) else (raw,)
+        if len(values) != len(output_names):
+            return None
+        return tuple(
+            _as_node_vector(value, node_count, self.dtype)
+            for value in values
+        )
 
     def prepare_membrane_step(
         self,

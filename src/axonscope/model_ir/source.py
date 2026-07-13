@@ -41,7 +41,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v14"
+SOURCE_COMPILER_VERSION = "source_codegen.v15"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -142,6 +142,7 @@ def compile_model_source_file(
     parameter_defaults: dict[str, float] | None = None,
     cache_root: str | os.PathLike[str] | None = None,
     load_generated_modules: tuple[str, ...] = (),
+    generated_targets: tuple[str, ...] = ("jax", "numpy"),
 ) -> SourceModelCompileResult:
     """Compile one standalone plain-Python membrane source file.
 
@@ -151,6 +152,9 @@ def compile_model_source_file(
     identity.
     """
 
+    generated_targets = _normalize_codegen_targets(
+        (*generated_targets, *load_generated_modules)
+    )
     source_path = Path(path).resolve()
     source_text = source_path.read_text(encoding="utf-8")
     source_text_hash = _source_text_hash(source_text)
@@ -162,6 +166,7 @@ def compile_model_source_file(
         parameter_defaults=parameter_defaults or {},
         cache_root=cache_root,
         load_generated_modules=load_generated_modules,
+        generated_targets=generated_targets,
     )
     if cached is not None:
         return cached
@@ -196,6 +201,7 @@ def compile_model_source_file(
         source_hash=source_hash,
         cache_root=cache_root,
         load_generated_modules=load_generated_modules,
+        generated_targets=generated_targets,
     )
     _write_source_cache_index(
         source_path=source_path,
@@ -1946,7 +1952,12 @@ def _with_codegen_cache_metadata(model: ModelIR, cache: GeneratedCodeCache) -> M
         "files": tuple(path.name for path in cache.generated_files),
         "key": cache.key,
         "manifest": cache.manifest_path.name,
-        "targets": ("jax", "numpy"),
+        "targets": tuple(
+            target
+            for target in ("jax", "numpy")
+            if _generated_module_file_name(target)
+            in {path.name for path in cache.generated_files}
+        ),
     }
     return assert_valid_model_ir(replace(model, metadata=metadata))
 
@@ -2380,6 +2391,7 @@ def _try_load_compiled_source_cache(
     parameter_defaults: dict[str, float],
     cache_root: str | os.PathLike[str] | None,
     load_generated_modules: tuple[str, ...],
+    generated_targets: tuple[str, ...],
 ) -> SourceModelCompileResult | None:
     root = _cache_root(cache_root)
     index_path = _source_cache_index_path(
@@ -2407,7 +2419,7 @@ def _try_load_compiled_source_cache(
     if not isinstance(cache_key, str) or not cache_key:
         return None
     directory = root / cache_key
-    generated_files = _generated_cache_files(directory)
+    generated_files = _generated_cache_files(directory, targets=generated_targets)
     manifest_path = directory / "manifest.json"
     cache_hit, cache_reason = _cache_manifest_status(
         manifest_path,
@@ -2464,6 +2476,7 @@ def _ensure_generated_cache(
     source_hash: str,
     cache_root: str | os.PathLike[str] | None,
     load_generated_modules: tuple[str, ...],
+    generated_targets: tuple[str, ...],
 ) -> GeneratedCodeCache:
     key_payload = {
         "compiler": SOURCE_COMPILER_VERSION,
@@ -2482,7 +2495,7 @@ def _ensure_generated_cache(
     root = _cache_root(cache_root)
     directory = root / key
     manifest_path = directory / "manifest.json"
-    generated_files = _generated_cache_files(directory)
+    generated_files = _generated_cache_files(directory, targets=generated_targets)
     cache_hit, cache_reason = _cache_manifest_status(
         manifest_path,
         key=key,
@@ -2503,42 +2516,43 @@ def _ensure_generated_cache(
             ),
         )
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "source_snapshot.py").write_text(source_text, encoding="utf-8")
+    snapshot_path = directory / "source_snapshot.py"
+    if not snapshot_path.is_file():
+        snapshot_path.write_text(source_text, encoding="utf-8")
     graph_json = canonical_json(model, include_dynamic_values=True)
-    (directory / "graph.json").write_text(graph_json + "\n", encoding="utf-8")
-    (directory / "optimized_graph.json").write_text(
-        graph_json + "\n",
-        encoding="utf-8",
+    for graph_name in ("graph.json", "optimized_graph.json"):
+        graph_path = directory / graph_name
+        if not graph_path.is_file():
+            graph_path.write_text(graph_json + "\n", encoding="utf-8")
+    for target in generated_targets:
+        generated_path = directory / _generated_module_file_name(target)
+        if generated_path.is_file():
+            continue
+        generated_path.write_text(
+            _generated_module_source(
+                model,
+                metadata,
+                assignments=assignments,
+                target=target,
+                key=key,
+                source_hash=source_hash,
+            ),
+            encoding="utf-8",
+        )
+    existing_targets = _manifest_targets(manifest_path)
+    manifest_targets = _normalize_codegen_targets(
+        (*existing_targets, *generated_targets)
     )
-    (directory / "jax_model.py").write_text(
-        _generated_module_source(
-            metadata,
-            assignments=assignments,
-            target="jax",
-            key=key,
-            source_hash=source_hash,
-        ),
-        encoding="utf-8",
-    )
-    (directory / "numpy_model.py").write_text(
-        _generated_module_source(
-            metadata,
-            assignments=assignments,
-            target="numpy",
-            key=key,
-            source_hash=source_hash,
-        ),
-        encoding="utf-8",
-    )
+    manifest_files = _generated_cache_files(directory, targets=manifest_targets)
     manifest = {
         "cache_key": key,
         "compiler": SOURCE_COMPILER_VERSION,
         "contract": SOURCE_CONTRACT_VERSION,
-        "files": [path.name for path in generated_files],
+        "files": [path.name for path in manifest_files],
         "source_hash": source_hash,
         "source_path": str(source_path),
         "source_text_hash": source_text_hash,
-        "targets": ["jax", "numpy"],
+        "targets": list(manifest_targets),
     }
     manifest_path.write_text(
         json.dumps(manifest, sort_keys=True, indent=2) + "\n",
@@ -2568,14 +2582,38 @@ def _cache_root(cache_root: str | os.PathLike[str] | None) -> Path:
     return (Path.cwd() / ".axonscope_cache" / "model_codegen").resolve()
 
 
-def _generated_cache_files(directory: Path) -> tuple[Path, ...]:
+def _generated_cache_files(
+    directory: Path,
+    *,
+    targets: tuple[str, ...],
+) -> tuple[Path, ...]:
     return (
         directory / "source_snapshot.py",
         directory / "graph.json",
         directory / "optimized_graph.json",
-        directory / "jax_model.py",
-        directory / "numpy_model.py",
+        *(directory / _generated_module_file_name(target) for target in targets),
     )
+
+
+def _normalize_codegen_targets(targets: tuple[str, ...]) -> tuple[str, ...]:
+    unique = tuple(dict.fromkeys(str(target) for target in targets))
+    unknown = tuple(target for target in unique if target not in {"jax", "numpy"})
+    if unknown:
+        raise ValueError(f"Unknown generated model target(s): {unknown!r}.")
+    return tuple(target for target in ("jax", "numpy") if target in unique)
+
+
+def _manifest_targets(manifest_path: Path) -> tuple[str, ...]:
+    if not manifest_path.is_file():
+        return ()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    values = manifest.get("targets", ())
+    if not isinstance(values, list | tuple):
+        return ()
+    return _normalize_codegen_targets(tuple(str(value) for value in values))
 
 
 def _source_text_hash(source_text: str) -> str:
@@ -2771,6 +2809,7 @@ def _cache_manifest_status(
 
 
 def _generated_module_source(
+    model: ModelIR,
     metadata: dict[str, Any],
     *,
     assignments: dict[str, Expression],
@@ -2796,17 +2835,104 @@ def _generated_module_source(
     ]
     body_lines.append("return " + ", ".join(output_names))
     body = "\n".join("    " + line for line in body_lines)
+    gate_outputs = tuple(
+        item
+        for gate in model.gates
+        for item in (
+            (f"alpha:{gate.state}", gate.alpha),
+            (f"beta:{gate.state}", gate.beta),
+            (
+                f"q10:{gate.state}",
+                gate.q10 if gate.q10 is not None else literal(1.0),
+            ),
+        )
+    )
+    membrane_outputs = tuple(
+        item
+        for index, current in enumerate(model.currents)
+        for item in (
+            (f"conductance:{index}:{current.name}", current.conductance),
+            (f"reversal:{index}:{current.name}", current.reversal),
+        )
+    )
+    gate_source = _generated_term_function_source(
+        "gate_terms",
+        metadata=metadata,
+        outputs=gate_outputs,
+    )
+    membrane_source = _generated_term_function_source(
+        "membrane_terms",
+        metadata=metadata,
+        outputs=membrane_outputs,
+    )
+    gate_arg_names = _expression_arg_names(
+        metadata,
+        tuple(expression for _, expression in gate_outputs),
+    )
+    membrane_arg_names = _expression_arg_names(
+        metadata,
+        tuple(expression for _, expression in membrane_outputs),
+    )
     return (
         "# Generated by AxonScope. Do not edit by hand.\n"
         f"ARG_NAMES = {arg_names!r}\n"
         f"CACHE_KEY = {key!r}\n"
+        f"GATE_ARG_NAMES = {gate_arg_names!r}\n"
+        f"GATE_OUTPUT_NAMES = {tuple(name for name, _ in gate_outputs)!r}\n"
+        f"MEMBRANE_ARG_NAMES = {membrane_arg_names!r}\n"
+        f"MEMBRANE_OUTPUT_NAMES = {tuple(name for name, _ in membrane_outputs)!r}\n"
         f"OUTPUT_NAMES = {output_names!r}\n"
         f"SOURCE_HASH = {source_hash!r}\n"
         f"TARGET = {target_spec.target!r}\n"
         f"{target_spec.import_line}\n\n"
         f"{target_spec.intrinsic_prelude}"
+        f"{gate_source}\n"
+        f"{membrane_source}\n"
         f"def model_step({args}):\n"
         f"{body}\n"
+    )
+
+
+def _generated_term_function_source(
+    function_name: str,
+    *,
+    metadata: dict[str, Any],
+    outputs: tuple[tuple[str, Expression], ...],
+) -> str:
+    expressions = tuple(expression for _, expression in outputs)
+    arg_names = _expression_arg_names(metadata, expressions)
+    if not expressions:
+        return f"def {function_name}():\n    return ()\n"
+
+    unique_expressions: list[Expression] = []
+    output_locals: list[str] = []
+    body_lines: list[str] = []
+    for expression in expressions:
+        try:
+            index = unique_expressions.index(expression)
+        except ValueError:
+            index = len(unique_expressions)
+            unique_expressions.append(expression)
+            body_lines.append(f"_term_{index} = {_expression_source(expression)}")
+        output_locals.append(f"_term_{index}")
+    body_lines.append("return " + ", ".join(output_locals))
+    body = "\n".join("    " + line for line in body_lines)
+    return f"def {function_name}({', '.join(arg_names)}):\n{body}\n"
+
+
+def _expression_arg_names(
+    metadata: dict[str, Any],
+    expressions: tuple[Expression, ...],
+) -> tuple[str, ...]:
+    base = tuple(
+        name
+        for section in ("inputs", "states", "parameters")
+        for name in metadata.get(section, {})
+    )
+    used = set().union(*(_expression_symbols(expression) for expression in expressions))
+    return (
+        tuple(name for name in base if name in used)
+        + tuple(name for name in STEP_SPECIAL_SYMBOL_UNITS if name in used)
     )
 
 

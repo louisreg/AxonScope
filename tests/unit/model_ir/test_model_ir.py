@@ -281,6 +281,46 @@ def test_source_codegen_cache_hit_loads_graph_without_ast_parse(tmp_path, monkey
     assert structural_hash(second.model) == structural_hash(first.model)
 
 
+def test_source_codegen_adds_runtime_targets_without_rewriting_cached_artifacts(tmp_path):
+    first = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    jax_path = first.cache.directory / "jax_model.py"
+    numpy_path = first.cache.directory / "numpy_model.py"
+    jax_stat = jax_path.stat()
+    jax_text = jax_path.read_text(encoding="utf-8")
+
+    assert jax_path.is_file()
+    assert not numpy_path.exists()
+    assert first.model.metadata["codegen_cache"]["targets"] == ("jax",)
+
+    second = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("numpy",),
+        load_generated_modules=("numpy",),
+    )
+
+    assert second.cache.key == first.cache.key
+    assert numpy_path.is_file()
+    assert jax_path.read_text(encoding="utf-8") == jax_text
+    assert jax_path.stat().st_mtime_ns == jax_stat.st_mtime_ns
+    assert second.cache.loaded_modules["numpy"].TARGET == "numpy"
+
+    third = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    assert third.cache.cache_hit is True
+    assert third.cache.key == first.cache.key
+    assert third.cache.loaded_modules["jax"] is first.cache.loaded_modules["jax"]
+
+
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):
     compiled = compile_model_source_file(PASSIVE_SOURCE, cache_root=tmp_path)
 
@@ -335,6 +375,48 @@ def test_jax_membrane_program_uses_generated_model_step_for_currents(tmp_path):
         )
     finally:
         module.model_step = original_model_step
+
+
+def test_jax_membrane_program_uses_generated_gate_and_membrane_terms(tmp_path):
+    compiled = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        load_generated_modules=("jax",),
+    )
+    module = compiled.cache.loaded_modules["jax"]
+    original_gate_terms = module.gate_terms
+    original_membrane_terms = module.membrane_terms
+
+    def fake_gate_terms(Vm, celsius):
+        _ = celsius
+        return tuple(jnp.full_like(Vm, value) for value in range(1, 10))
+
+    def fake_membrane_terms(m, h, n, gnabar, gkbar, gl, el, ena, ek):
+        _ = m, h, n, gnabar, gkbar, gl, el, ena, ek
+        return 1.0, 10.0, 2.0, 20.0, 3.0, 30.0
+
+    module.gate_terms = fake_gate_terms
+    module.membrane_terms = fake_membrane_terms
+    try:
+        membrane = JaxMembraneProgram.from_model_ir(
+            compiled.model,
+            generated_module=module,
+        )
+        V = jnp.asarray([-80.0, -40.0], dtype=jnp.float32)
+        gates = jnp.ones((2, 3), dtype=jnp.float32)
+
+        assert membrane.lowering.generated_gate_terms_available
+        assert membrane.lowering.generated_membrane_terms_available
+        alpha, beta, q10 = membrane.lowering.gate_terms(V)
+        np.testing.assert_allclose(np.asarray(alpha), [[1.0, 4.0, 7.0]] * 2)
+        np.testing.assert_allclose(np.asarray(beta), [[2.0, 5.0, 8.0]] * 2)
+        np.testing.assert_allclose(np.asarray(q10), [[3.0, 6.0, 9.0]] * 2)
+        gm, ge = membrane.membrane_conductance_terms(gates)
+        np.testing.assert_allclose(np.asarray(gm), [6.0, 6.0])
+        np.testing.assert_allclose(np.asarray(ge), [140.0, 140.0])
+    finally:
+        module.gate_terms = original_gate_terms
+        module.membrane_terms = original_membrane_terms
 
 
 def test_source_parameter_defaults_must_include_units_for_dimensioned_values(tmp_path):

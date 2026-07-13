@@ -45,6 +45,7 @@ def compile_membrane_model(
         lowered = lower_membrane_model_with_sources(
             model,
             load_generated_modules=("jax",),
+            generated_targets=("jax",),
         )
     except ValueError as exc:
         raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
