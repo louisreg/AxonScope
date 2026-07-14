@@ -24,7 +24,10 @@ from axonscope.preparation.runtime_batches import (
     scale_extracellular_stimulations,
 )
 from axonscope.runtime.jax.cable_geometry import apply_diffusion_operator
-from axonscope.runtime.jax.kernels.chunking import _normalize_time_chunk_steps
+from axonscope.runtime.jax.kernels.chunking import (
+    _normalize_time_chunk_steps,
+    _pad_time_chunk,
+)
 from axonscope.runtime.jax.kernels.double_cable import (
     DoubleCableBatchKernel,
     _resolve_double_cable_kernel_block_solver,
@@ -74,6 +77,16 @@ def test_batch_recording_resolves_common_policies():
         BatchRecording.indices([5]).indices_for(5)
     assert BatchOptions.center().recording.mode == "center"
     assert not hasattr(BatchOptions.center(), "double_cable_block_solver")
+
+
+def test_final_time_chunk_padding_preserves_prefix_and_policy():
+    values = jnp.asarray([[1.0, 2.0, 3.0]])
+
+    edge = _pad_time_chunk(values, target_steps=5, time_axis=1, edge=True)
+    zero = _pad_time_chunk(values, target_steps=5, time_axis=1, edge=False)
+
+    np.testing.assert_array_equal(np.asarray(edge), [[1.0, 2.0, 3.0, 3.0, 3.0]])
+    np.testing.assert_array_equal(np.asarray(zero), [[1.0, 2.0, 3.0, 0.0, 0.0]])
 
 
 def test_zero_sparse_intracellular_payload_is_cached_by_static_shape():

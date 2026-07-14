@@ -313,6 +313,18 @@ def init_vm_raster_state(
     return out
 
 
+def trim_vm_raster_state(state: VmRasterState, *, nt: int) -> VmRasterState:
+    """Trim packed observer storage and clear bits beyond the real duration."""
+
+    word_count = (int(nt) + 31) // 32
+    trimmed = jnp.asarray(state)[..., :word_count]
+    tail_bits = int(nt) & 31
+    if tail_bits and word_count:
+        tail_mask = jnp.asarray((1 << tail_bits) - 1, dtype=jnp.uint32)
+        trimmed = trimmed.at[..., -1].set(trimmed[..., -1] & tail_mask)
+    return trimmed
+
+
 def _current_jax_device_key() -> tuple[Any, ...]:
     device = getattr(jax.config, "jax_default_device", None)
     if device is None:
@@ -568,6 +580,7 @@ __all__ = [
     "combine_vm_raster_chunk_states",
     "finalize_vm_raster_state",
     "init_vm_raster_state",
+    "trim_vm_raster_state",
     "trim_pending_vm_raster_observation",
     "update_vm_raster_state_batch_from_tables",
     "update_vm_raster_state_scalar_from_tables",

@@ -124,6 +124,26 @@ def _time_chunks(nt: int, time_chunk_steps: int | None):
     for start in range(0, nt, chunk_steps):
         yield start, min(start + chunk_steps, nt)
 
+
+def _pad_time_chunk(
+    values: Array | None,
+    *,
+    target_steps: int,
+    time_axis: int,
+    edge: bool,
+) -> Array | None:
+    """Pad a final time chunk to an already-compiled static shape."""
+
+    if values is None:
+        return None
+    arr = jnp.asarray(values)
+    missing = int(target_steps) - int(arr.shape[time_axis])
+    if missing <= 0:
+        return arr
+    widths = [(0, 0)] * arr.ndim
+    widths[time_axis] = (0, missing)
+    return jnp.pad(arr, widths, mode="edge" if edge else "constant")
+
 def _concat_trace_chunks(chunks: list[Array]) -> Array:
     with benchmark_span(
         "kernel.concat_trace_chunks",
@@ -141,6 +161,7 @@ __all__ = [
     "_concat_trace_chunks",
     "_init_local_vm_raster_chunk_template",
     "_normalize_time_chunk_steps",
+    "_pad_time_chunk",
     "_resolve_vm_raster_observer_state_scope",
     "_time_chunks",
     "_vm_raster_probe_tables_for_kernel",

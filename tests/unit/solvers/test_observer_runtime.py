@@ -14,8 +14,19 @@ from axonscope.runtime.jax.recording.observer import (
     combine_vm_raster_chunk_states,
     finalize_vm_raster_state,
     init_vm_raster_state,
+    trim_vm_raster_state,
     update_vm_raster_state_batch_from_tables,
 )
+
+
+def test_vm_raster_trim_clears_padded_tail_bits():
+    state = np.full((1, 1, 1, 3), np.uint32(0xFFFFFFFF), dtype=np.uint32)
+
+    trimmed = trim_vm_raster_state(state, nt=35)
+
+    assert trimmed.shape == (1, 1, 1, 2)
+    assert int(np.asarray(trimmed)[0, 0, 0, 0]) == 0xFFFFFFFF
+    assert int(np.asarray(trimmed)[0, 0, 0, 1]) == 0b111
 
 
 def test_vm_raster_plan_lowers_shared_probe_tables():

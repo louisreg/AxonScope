@@ -20,6 +20,7 @@ from axonscope.runtime.jax.recording.observer import (
     VmRasterPlan,
     VmRasterState,
     init_vm_raster_state,
+    trim_vm_raster_state,
 )
 from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
 from axonscope.runtime.jax.types import SolverRuntime
@@ -30,6 +31,7 @@ from .chunking import (
     _concat_trace_chunks,
     _init_local_vm_raster_chunk_template,
     _normalize_time_chunk_steps,
+    _pad_time_chunk,
     _resolve_vm_raster_observer_state_scope,
     _time_chunks,
     _vm_raster_probe_tables_for_kernel,
@@ -996,6 +998,21 @@ def _run_double_cable_batch_observer_chunks(
             )
 
     chunk_ranges = tuple(_time_chunks(grid.Nt, time_chunk_steps))
+    fixed_gpu_chunk_steps = (
+        int(time_chunk_steps)
+        if time_chunk_steps is not None
+        and _use_batch_native_double_cable_integrated_solver(
+            kernel_block_solver,
+            batch_size=batch_size,
+        )
+        else None
+    )
+    observer_storage_nt = (
+        ((int(grid.Nt) + fixed_gpu_chunk_steps - 1) // fixed_gpu_chunk_steps)
+        * fixed_gpu_chunk_steps
+        if fixed_gpu_chunk_steps is not None
+        else int(grid.Nt)
+    )
     resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
         observer_state_scope,
         time_chunk_steps=time_chunk_steps,
@@ -1026,12 +1043,18 @@ def _run_double_cable_batch_observer_chunks(
             observer_state = init_vm_raster_state(
                 observers,
                 batch_size=batch_size,
-                nt=grid.Nt,
+                nt=observer_storage_nt,
             )
     observer_chunk_states: list[VmRasterState] = []
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
+        valid_chunk_steps = stop - start
+        compiled_chunk_steps = (
+            fixed_gpu_chunk_steps
+            if fixed_gpu_chunk_steps is not None
+            else valid_chunk_steps
+        )
         with benchmark_span(
             "kernel.chunk_setup",
             mode="double",
@@ -1041,7 +1064,9 @@ def _run_double_cable_batch_observer_chunks(
             factorized_vext=factorized_vext is not None,
             group_size=batch_size,
             time_chunk_steps=time_chunk_steps,
-            chunk_steps=stop - start,
+            chunk_steps=compiled_chunk_steps,
+            valid_chunk_steps=valid_chunk_steps,
+            padded_final_chunk=compiled_chunk_steps != valid_chunk_steps,
             chunk_index=chunk_index,
             chunk_count=len(chunk_ranges),
             observer_state_scope="chunk" if local_observer_chunks else "full",
@@ -1074,6 +1099,29 @@ def _run_double_cable_batch_observer_chunks(
                 if intracellular_current_density_mid is None
                 else intracellular_current_density_mid[:, start:stop]
             )
+            if compiled_chunk_steps != valid_chunk_steps:
+                vext_chunk = _pad_time_chunk(
+                    vext_chunk,
+                    target_steps=compiled_chunk_steps,
+                    time_axis=1,
+                    edge=True,
+                )
+                current_chunk = _pad_time_chunk(
+                    current_chunk,
+                    target_steps=compiled_chunk_steps,
+                    time_axis=(
+                        0
+                        if current_chunk is not None and current_chunk.ndim == 1
+                        else 1
+                    ),
+                    edge=True,
+                )
+                iinj_chunk = _pad_time_chunk(
+                    iinj_chunk,
+                    target_steps=compiled_chunk_steps,
+                    time_axis=1,
+                    edge=False,
+                )
             assert observer_state0 is not None
             time_start_index = jnp.asarray(
                 0 if local_observer_chunks else start,
@@ -1091,7 +1139,9 @@ def _run_double_cable_batch_observer_chunks(
                 factorized_vext=factorized_vext is not None,
                 group_size=batch_size,
                 time_chunk_steps=time_chunk_steps,
-                chunk_steps=stop - start,
+                chunk_steps=compiled_chunk_steps,
+                valid_chunk_steps=valid_chunk_steps,
+                padded_final_chunk=compiled_chunk_steps != valid_chunk_steps,
                 chunk_index=chunk_index,
                 chunk_count=len(chunk_ranges),
                 observer_state_scope="chunk" if local_observer_chunks else "full",
@@ -1143,7 +1193,9 @@ def _run_double_cable_batch_observer_chunks(
                 factorized_vext=factorized_vext is not None,
                 group_size=batch_size,
                 time_chunk_steps=time_chunk_steps,
-                chunk_steps=stop - start,
+                chunk_steps=compiled_chunk_steps,
+                valid_chunk_steps=valid_chunk_steps,
+                padded_final_chunk=compiled_chunk_steps != valid_chunk_steps,
                 chunk_index=chunk_index,
                 chunk_count=len(chunk_ranges),
                 observer_state_scope="chunk" if local_observer_chunks else "full",
@@ -1207,7 +1259,7 @@ def _run_double_cable_batch_observer_chunks(
             if local_observer_chunks:
                 observer_chunk_states.append(observer_state)
                 observer_chunk_starts.append(start)
-                observer_chunk_lengths.append(stop - start)
+                observer_chunk_lengths.append(valid_chunk_steps)
             if progress_callback is not None:
                 progress_callback(chunk_index, len(chunk_ranges))
 
@@ -1222,7 +1274,7 @@ def _run_double_cable_batch_observer_chunks(
             time_chunk_steps=time_chunk_steps,
         )
     assert observer_state is not None
-    return observer_state
+    return trim_vm_raster_state(observer_state, nt=grid.Nt)
 
 def _initial_double_cable_batch_state(
     runtime: SolverRuntime,
