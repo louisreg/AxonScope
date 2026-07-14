@@ -624,11 +624,22 @@ These items are intentionally not ordered or scoped into a phase yet.
     `runtime.prepare` (`2.62 s` in this run), especially model-agnostic
     membrane row construction; address that through the autonomous generated
     runtime-module contract below, not MRG/passive special cases.
-  - [ ] Reduce the remaining full-population `runtime.prepare` cost without a
+  - [x] Reduce the remaining full-population `runtime.prepare` cost without a
     model-family special case. Avoid constructing JAX programs for generic
     stateless one-current leak members when the gated/leak stack only needs
     host-side `(g, gE)` row data; validate exact activation equivalence and the
     `runtime.prepare.stack_membrane` delta on the full NRV example-01 P100 run.
+    Commit `a19da1a` now derives those rows through the generic NumPy Model IR
+    interpreter while retaining JAX compilation for active membrane members.
+    Kaggle P100 artifact
+    `benchmark/results/kaggle/20260714_141909_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-host-leak-a19da1a`
+    reduced `runtime.prepare` from `2.616` to `1.983 s` (-24.2%) and
+    `runtime.prepare.stack_membrane` from `1.096` to `0.512 s` (-53.3%). JAX
+    membrane program builds fell from 81 to 5; `simulation.run_pool` fell from
+    `15.900` to `15.082 s` and the sweep from `19.926` to `18.538 s`. The full
+    recruitment result is byte-identical to the reference artifact, including
+    activation counts `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111
+    112 112 114 120`.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
