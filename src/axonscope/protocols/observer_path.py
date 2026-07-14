@@ -28,8 +28,32 @@ def _evaluate_activation_observer_pool(
 ) -> np.ndarray:
     """Evaluate activation through compact solver-side observers."""
 
+    simulation, activation = _build_activation_observer_simulation(
+        pool,
+        criterion=criterion,
+        duration=duration,
+        dt=dt,
+        progress=progress,
+        batch_options=batch_options,
+        execution_policy=execution_policy,
+    )
+    return _evaluate_activation_observer_simulation(simulation, activation)
+
+
+def _build_activation_observer_simulation(
+    pool: tuple[SimulationCandidate, ...],
+    *,
+    criterion: ActivationCriterion,
+    duration: Any,
+    dt: Any,
+    progress: bool | str,
+    batch_options: BatchOptions | None,
+    execution_policy: ExecutionPolicy | None = None,
+) -> tuple[AxonSimulation, Activation]:
+    """Build a reusable observer-only simulation for one stable pool shape."""
+
     activation = _activation_observer_definition(criterion)
-    pool_result = AxonSimulation(
+    simulation = AxonSimulation(
         axons=pool,  # type: ignore[arg-type]
         duration=duration,
         dt=dt,
@@ -38,7 +62,17 @@ def _evaluate_activation_observer_pool(
         execution_policy=execution_policy,
         observers=(activation,),
         progress=progress,
-    ).run()
+    )
+    return simulation, activation
+
+
+def _evaluate_activation_observer_simulation(
+    simulation: AxonSimulation,
+    activation: Activation,
+) -> np.ndarray:
+    """Run a reusable observer simulation and decode its compact result."""
+
+    pool_result = simulation.run()
     return _activation_observations_from_pool_result(pool_result, activation)
 
 
@@ -149,7 +183,9 @@ def _activation_observer_definition(criterion: ActivationCriterion) -> Activatio
 
 __all__ = [
     "_activation_observations_from_pool_result",
+    "_build_activation_observer_simulation",
     "_can_use_activation_observer",
     "_can_use_threshold_observer",
     "_evaluate_activation_observer_pool",
+    "_evaluate_activation_observer_simulation",
 ]

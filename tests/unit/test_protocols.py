@@ -698,12 +698,27 @@ def test_recruitment_sweep_reuses_work_pool_for_equal_sized_chunks(monkeypatch):
         ),
     )
     pool_ids = []
+    simulation_ids = []
+    simulation_constructions = []
     seen_previous_markers = []
 
     def update(row, tested_current):
         seen_previous_markers.append(hasattr(row, "previous_marker"))
         row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
         row.previous_marker = row.tested_current_nA
+
+    class FakeAxonSimulation:
+        def __init__(self, axons, **_kwargs):
+            self.axons = axons
+            simulation_constructions.append(self)
+
+        def run(self):
+            simulation_ids.append(id(self))
+            updated_pool = tuple(self.axons)
+            pool_ids.append(tuple(id(row) for row in updated_pool))
+            return _observer_only_pool_result(
+                row.tested_current_nA >= 0.5 for row in updated_pool
+            )
 
     def fake_simulation_runner(updated_pool, **_kwargs):
         updated_pool = tuple(updated_pool)
@@ -713,6 +728,7 @@ def test_recruitment_sweep_reuses_work_pool_for_equal_sized_chunks(monkeypatch):
         )
 
     _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+    monkeypatch.setattr(observer_protocols, "AxonSimulation", FakeAxonSimulation)
 
     curve = axs.protocols.recruitment_sweep(
         pool,
@@ -727,6 +743,8 @@ def test_recruitment_sweep_reuses_work_pool_for_equal_sized_chunks(monkeypatch):
     )
 
     assert pool_ids[0] == pool_ids[1] == pool_ids[2]
+    assert len(simulation_constructions) == 1
+    assert simulation_ids[0] == simulation_ids[1] == simulation_ids[2]
     assert seen_previous_markers == [False, False, False]
     np.testing.assert_array_equal(curve.activated, [[False], [True], [True]])
 

@@ -11,8 +11,10 @@ import numpy as np
 from axonscope.analysis import ActivationCriterion
 from axonscope.axon_instance import AxonInstance
 from axonscope.protocols.observer_path import (
+    _build_activation_observer_simulation,
     _can_use_activation_observer,
     _evaluate_activation_observer_pool,
+    _evaluate_activation_observer_simulation,
 )
 from axonscope.protocols.progress import (
     _OneShotProgress,
@@ -277,6 +279,7 @@ def _execute_activation_observer_batch_plan(
     solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
     work_pools: dict[int, tuple[SimulationCandidate, ...]] = {}
+    work_simulations: dict[int, tuple[Any, Any]] = {}
     completed_value_count = 0
     try:
         progress_display.begin(
@@ -303,6 +306,18 @@ def _execute_activation_observer_batch_plan(
                     values=batch.values,
                 )
             work_pools[value_count] = work_pool
+            reusable = work_simulations.get(value_count)
+            if reusable is None:
+                reusable = _build_activation_observer_simulation(
+                    work_pool,
+                    criterion=criterion,
+                    duration=duration,
+                    dt=dt,
+                    progress=solver_progress_gate.consume(),
+                    batch_options=batch_options,
+                    execution_policy=execution_policy,
+                )
+                work_simulations[value_count] = reusable
             started_s = time.perf_counter()
             with benchmark_span(
                 "protocol.sweep.batched_values",
@@ -311,14 +326,8 @@ def _execute_activation_observer_batch_plan(
                 pool_size=plan.source_pool_size,
                 expanded_pool_size=len(work_pool),
             ):
-                flat_observations = _evaluate_activation_observer_pool(
-                    work_pool,
-                    criterion=criterion,
-                    duration=duration,
-                    dt=dt,
-                    progress=solver_progress_gate.consume(),
-                    batch_options=batch_options,
-                    execution_policy=execution_policy,
+                flat_observations = _evaluate_activation_observer_simulation(
+                    *reusable,
                 )
             elapsed_s = time.perf_counter() - started_s
             progress_display.note_batched_solver(
