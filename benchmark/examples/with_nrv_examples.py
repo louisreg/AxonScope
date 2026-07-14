@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--duration-ms", type=float, default=0.5)
     parser.add_argument("--dt-ms", type=float, default=0.01)
+    parser.add_argument(
+        "--observer-time-chunk-steps",
+        type=_parse_observer_time_chunk_steps,
+        default=axs.DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
+        help="Observer scan chunk size, or 'none' for one scan over the full duration.",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--memory-trace", choices=("off", "rss", "tracemalloc", "device", "all"))
@@ -200,6 +206,23 @@ def _parse_amplitude_batch_policy(value: str) -> AmplitudeBatchPolicy:
     return AmplitudeBatchPolicy(normalized, True, chunk_size)
 
 
+def _parse_observer_time_chunk_steps(value: str) -> int | None:
+    normalized = str(value).strip().lower()
+    if normalized in {"none", "full", "unchunked"}:
+        return None
+    try:
+        chunk_steps = int(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "observer time chunk steps must be a positive integer or 'none'."
+        ) from exc
+    if chunk_steps < 1:
+        raise argparse.ArgumentTypeError(
+            "observer time chunk steps must be >= 1."
+        )
+    return chunk_steps
+
+
 def _load_example(spec: ExampleSpec):
     module_name = f"_axonscope_with_nrv_example_{spec.key}_{spec.label}"
     spec_obj = importlib.util.spec_from_file_location(module_name, spec.path)
@@ -304,6 +327,7 @@ def _example_config(
         axons_per_fascicle=args.axons_per_fascicle,
         duration_ms=args.duration_ms,
         dt_ms=args.dt_ms,
+        observer_time_chunk_steps=args.observer_time_chunk_steps,
         recruitment_amplitudes_uA=amplitudes,
         random_seed=int(args.seed),
         solver_progress=False,
@@ -413,6 +437,7 @@ def _write_cases(
                 "amplitudes_uA",
                 "duration_ms",
                 "dt_ms",
+                "observer_time_chunk_steps",
                 "seed",
                 "amplitude_batch_policy",
             ),
@@ -430,6 +455,7 @@ def _write_cases(
                     "amplitudes_uA": ",".join(str(value) for value in amplitudes),
                     "duration_ms": args.duration_ms,
                     "dt_ms": args.dt_ms,
+                    "observer_time_chunk_steps": args.observer_time_chunk_steps,
                     "seed": int(args.seed),
                     "amplitude_batch_policy": amplitude_batch_policy.label,
                 }
@@ -454,6 +480,7 @@ def _write_manifest(
         "amplitudes_uA": amplitudes,
         "duration_ms": args.duration_ms,
         "dt_ms": args.dt_ms,
+        "observer_time_chunk_steps": args.observer_time_chunk_steps,
         "seed": int(args.seed),
         "amplitude_batch_policy": amplitude_batch_policy.label,
         "memory_trace": args.memory_trace or "rss",
