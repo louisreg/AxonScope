@@ -72,25 +72,6 @@ def record_extracellular_lowering_metadata(
 ) -> None:
     """Record benchmark metadata for the selected extracellular input format."""
 
-    with benchmark_span(
-        "inputs.extracellular.metadata",
-        extracellular_format=lowered.format,
-    ):
-        _record_extracellular_lowering_metadata(
-            lowered,
-            group=group,
-            runtime=runtime,
-        )
-
-
-def _record_extracellular_lowering_metadata(
-    lowered: LoweredExtracellularInput,
-    *,
-    group: DispatchGroup,
-    runtime: SolverRuntime,
-) -> None:
-    """Implement extracellular metadata collection inside its timing span."""
-
     if lowered.format == "zero_no_extracellular_stimulation":
         dtype = np.dtype(runtime.membrane.dtype)
         skipped_shape = dense_shape_for_group(group=group, runtime=runtime)

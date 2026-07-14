@@ -112,6 +112,9 @@ def _double_cable_factorized_vext_can_stay_compact(
         return bool(previous_is_scalar)
     if batch.current_row_scales is not None:
         return bool(previous_is_scalar)
+    if batch.current_row_indices is not None:
+        previous_shape = tuple(int(dim) for dim in getattr(previous, "shape", ()))
+        return previous_is_scalar or len(previous_shape) == 1
     return False
 
 def _single_cable_factorized_forcing_footprint_for_batch(

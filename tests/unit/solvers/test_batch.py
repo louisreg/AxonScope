@@ -43,6 +43,7 @@ from axonscope.solvers import (
     DEFAULT_OBSERVER_TIME_CHUNK_STEPS,
 )
 from axonscope.runtime.jax.inputs.payloads import (
+    materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
     materialize_sparse_intracellular_current_density_batch,
 )
@@ -1178,6 +1179,83 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     np.testing.assert_array_equal(
         np.asarray(chunked_observations[VM_RASTER_OBSERVATION_KEY].words),
         np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
+def test_double_cable_indexed_current_table_matches_dense_thomas():
+    axon = hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_stimulations = tuple(axon.extracellular_stimulations)
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        [base_stimulations] * 3,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+    base_current = jnp.asarray(factorized.current_mid_A)
+    base_previous = jnp.asarray(factorized.current_initial_previous_A)
+    indexed = replace(
+        factorized,
+        current_mid_A=jnp.stack((base_current, 0.5 * base_current), axis=0),
+        current_initial_previous_A=jnp.stack(
+            (base_previous, 0.5 * base_previous),
+            axis=0,
+        ),
+        current_row_indices=jnp.asarray((0, 1, 0), dtype=jnp.int32),
+    )
+    dense_mid = materialize_factorized_extracellular_potential_batch(indexed)
+    dense_previous = materialize_factorized_extracellular_potential_initial_previous(
+        indexed
+    )
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=indexed,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+    chunked = kernel.run(
+        extracellular_potential_mid_mV=indexed,
+        options=BatchOptions.none(time_chunk_steps=17),
+        observers=observer,
+    )
+
+    expected = np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words)
+    np.testing.assert_array_equal(
+        np.asarray(kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY].words),
+        expected,
+    )
+    np.testing.assert_array_equal(
+        np.asarray(kernel_observations(chunked)[VM_RASTER_OBSERVATION_KEY].words),
+        expected,
     )
 
 

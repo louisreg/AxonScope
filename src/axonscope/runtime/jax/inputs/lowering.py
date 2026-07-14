@@ -43,7 +43,7 @@ JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES = ExtracellularLoweringCapabilities(
     supports_zero=True,
     supports_shared_current=True,
     supports_scaled_shared_waveform=True,
-    supports_current_table=False,
+    supports_current_table=True,
     supports_dense_fallback=True,
     requires_initial_previous=True,
 )
@@ -387,6 +387,7 @@ def plan_input_lowering(
     elif group_mode == "double" and factorized_mode in {
         ExtracellularLoweringMode.SHARED_CURRENT,
         ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM,
+        ExtracellularLoweringMode.CURRENT_TABLE,
     }:
         extracellular_format = "factorized_footprint"
         extracellular_mode = factorized_mode
@@ -451,6 +452,11 @@ def supports_compact_double_cable_factorized(
         return bool(previous_is_scalar)
     if factorized.current_row_scales is not None:
         return bool(previous_is_scalar)
+    if factorized.current_row_indices is not None:
+        previous_shape = tuple(
+            int(dim) for dim in getattr(previous, "shape", ())
+        )
+        return previous_is_scalar or len(previous_shape) == 1
     return False
 
 

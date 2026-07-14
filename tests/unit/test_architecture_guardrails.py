@@ -2168,7 +2168,7 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     )
     violations = validate_prepared_runtime_input(invalid, double)
     assert "intracellular mode 'sparse_current_clamp' is unsupported" in violations
-    assert "extracellular mode 'current_table' is unsupported" in violations
+    assert "extracellular mode requires an initial-previous sample" in violations
 
 
 def test_runtime_input_planning_is_independent_from_observer_output_plan():
