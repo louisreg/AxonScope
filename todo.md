@@ -577,6 +577,21 @@ These items are intentionally not ordered or scoped into a phase yet.
     showed warm sequential `2.61 s`, `1` `5.95 s`, `10` `5.66 s`, `20`
     `5.62 s`, and full `5.75 s`, with native chunks again dominated by
     `dispatch.build_plan` around `2.80-2.93 s`.
+  - [x] Validate native amplitude chunking on the full 193-fiber
+    `with_nrv/01` P100 workload at commit `ad53586`, with independent kernels
+    for `sequential/1/5/10/20/full`. `simulation.run_pool` was respectively
+    `24.783/24.821/25.749/25.870/29.420/25.719 s`; all policies reproduced the
+    exact recruitment counts
+    `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111 112 112 114 120`.
+    Native batching therefore does not improve this complete cold sweep yet.
+    Settled size-5 batches reached about `351 ms/amplitude` versus
+    `881 ms/amplitude` sequential, but the first compiled shape and the
+    one-amplitude remainder erased that gain. Larger pools moved the dominant
+    cost into `inputs.extracellular`: `0.328 s` sequential versus
+    `2.792/4.499/9.954/11.933 s` for `5/10/20/full`. Before reconsidering the
+    default, lower shared footprint/current inputs once per unique source
+    cohort and broadcast/project amplitudes on device, then choose chunk sizes
+    that avoid a separately compiled remainder shape.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
