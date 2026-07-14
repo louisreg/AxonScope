@@ -9,6 +9,7 @@ footprints, stimulation objects, and compact comparison rows.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Literal, Mapping, Sequence
 
 import numpy as np
@@ -22,6 +23,7 @@ from axonscope.axons import (
     mrg_like_nodes_from_length,
 )
 from axonscope.axons.templates import mrg_like_node_spacing
+from axonscope.benchmarking import benchmark_span
 from axonscope.identifiers import DriveId
 from axonscope.population import AxonPopulation
 from axonscope.stimulation import (
@@ -34,6 +36,18 @@ from axonscope.utils.units import Q_, ureg
 
 
 FiberKind = Literal["hh", "rattay", "mrg"]
+
+
+def _nrv_bridge_stage(name: str):
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            with benchmark_span(name):
+                return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 @dataclass(frozen=True)
@@ -171,6 +185,7 @@ class NRVFootprints:
         electrode_index = int(index)
         return tuple(row_footprints[electrode_index] for row_footprints in self.footprints)
 
+    @_nrv_bridge_stage("nrv_bridge.stimulated_population")
     def stimulated_population(
         self,
         *,
@@ -311,6 +326,7 @@ def _nrv_fiber_is_simulated(fascicle: Any, fiber_index: int) -> bool:
     return True
 
 
+@_nrv_bridge_stage("nrv_bridge.population_from_nrv")
 def population_from_nrv(
     nrv_population: Any,
     *,
@@ -349,6 +365,7 @@ def population_from_nrv(
     )
 
 
+@_nrv_bridge_stage("nrv_bridge.footprints_from_nrv")
 def footprints_from_nrv(
     nrv_geometry: Any,
     axons: NRVAxonPopulation | AxonPopulation | Sequence[AxonInstance],

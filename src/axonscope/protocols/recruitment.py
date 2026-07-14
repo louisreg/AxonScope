@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Sequence
 
 import numpy as np
@@ -32,6 +33,15 @@ from axonscope.solvers import BatchOptions
 from axonscope.utils import units
 
 
+def _recruitment_stage(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with benchmark_span("protocol.recruitment_sweep"):
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
 @dataclass(frozen=True)
 class _NativeAmplitudeBatch:
     values: tuple[Any, ...]
@@ -45,6 +55,7 @@ class _NativeAmplitudeBatchPlan:
     batches: tuple[_NativeAmplitudeBatch, ...]
 
 
+@_recruitment_stage
 def recruitment_sweep(
     pool: Sequence[SimulationCandidate],
     *,
