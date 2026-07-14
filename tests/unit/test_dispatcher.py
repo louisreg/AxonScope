@@ -2069,20 +2069,38 @@ def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path)
     assert metadata["vstim_temporal_previous_cache_misses"] == 1
 
 
+@pytest.mark.parametrize(
+    "amplitudes",
+    [
+        (10e-6, 5e-6, 10e-6, 5e-6),
+        (0.0, 10e-6, 5e-6, 0.0),
+    ],
+)
 def test_factorized_vstim_lowers_scaled_waveforms_as_row_scales(
     tmp_path,
+    amplitudes,
 ):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     stimulation = axon.extracellular_stimulations[0]
     drive = stimulation.drives[0]
     rows = []
-    for amplitude in (10e-6, 5e-6, 10e-6, 5e-6):
+    for amplitude in amplitudes:
         stimulus = Stimulus.pulse(
             start=0.0 * axs.ms,
             duration=0.05 * axs.ms,
             amplitude=amplitude,
         ).as_unit("ampere")
         rows.append((stimulation.replace_drive(drive.id, stimulus=stimulus),))
+
+    from axonscope.runtime.input_contract import ExtracellularLoweringMode
+    from axonscope.runtime.input_planning import (
+        planned_factorized_extracellular_mode_from_rows,
+    )
+
+    assert (
+        planned_factorized_extracellular_mode_from_rows(rows)
+        is ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
+    )
 
     axs.enable_benchmark(tmp_path, print_summary=False, save=False)
     try:
@@ -2106,7 +2124,7 @@ def test_factorized_vstim_lowers_scaled_waveforms_as_row_scales(
     assert batch.current_row_indices is None
     np.testing.assert_allclose(
         np.asarray(batch.current_row_scales),
-        np.asarray([10e-6, 5e-6, 10e-6, 5e-6], dtype=np.float32),
+        np.asarray(amplitudes, dtype=np.float32),
         rtol=1e-6,
         atol=1e-12,
     )

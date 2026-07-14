@@ -208,22 +208,27 @@ def build_scaled_shared_waveform_rows(
     base_stimuli: list[Any] = []
     base_scales: list[float] = []
     for drive_index in range(drive_count):
-        first_stimulus = drive_rows[0][drive_index][2]
-        first = cached_stimulus_scaled_waveform_signature_and_scale(first_stimulus)
-        if first is None:
+        stimuli = [row[drive_index][2] for row in drive_rows]
+        candidates = [
+            cached_stimulus_scaled_waveform_signature_and_scale(stimulus)
+            for stimulus in stimuli
+        ]
+        if any(candidate is None for candidate in candidates):
             return None
-        first_signature, first_scale = first
-        base_stimuli.append(first_stimulus)
-        base_scales.append(first_scale)
-        row_scales[0, drive_index] = np.asarray(first_scale, dtype=np_dtype)
-        for row_index, row in enumerate(drive_rows[1:], start=1):
-            candidate = cached_stimulus_scaled_waveform_signature_and_scale(
-                row[drive_index][2]
-            )
-            if candidate is None:
-                return None
-            signature, scale = candidate
-            if signature != first_signature:
+        resolved = [candidate for candidate in candidates if candidate is not None]
+        base_index = next(
+            (
+                index
+                for index, (_signature, scale) in enumerate(resolved)
+                if scale != 0.0
+            ),
+            0,
+        )
+        base_signature, base_scale = resolved[base_index]
+        base_stimuli.append(stimuli[base_index])
+        base_scales.append(base_scale)
+        for row_index, (signature, scale) in enumerate(resolved):
+            if scale != 0.0 and signature != base_signature:
                 return None
             row_scales[row_index, drive_index] = np.asarray(scale, dtype=np_dtype)
 
@@ -474,10 +479,14 @@ def planned_factorized_extracellular_mode_from_rows(
     ]
     if any(item is None for item in scaled):
         return ExtracellularLoweringMode.CURRENT_TABLE
-    first_signature, first_scale = scaled[0]  # type: ignore[index]
-    if not all(item[0] == first_signature for item in scaled[1:] if item is not None):
+    resolved = [item for item in scaled if item is not None]
+    nonzero = [item for item in resolved if item[1] != 0.0]
+    if not nonzero:
+        return ExtracellularLoweringMode.SHARED_CURRENT
+    base_signature, first_scale = nonzero[0]
+    if not all(item[0] == base_signature for item in nonzero[1:]):
         return ExtracellularLoweringMode.CURRENT_TABLE
-    if all(item is not None and item[1] == first_scale for item in scaled[1:]):
+    if all(item[1] == first_scale for item in resolved):
         return ExtracellularLoweringMode.SHARED_CURRENT
     return ExtracellularLoweringMode.SCALED_SHARED_WAVEFORM
 
