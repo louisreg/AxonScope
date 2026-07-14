@@ -674,11 +674,13 @@ These items are intentionally not ordered or scoped into a phase yet.
       may absorb deferred device work. P100 artifact
       `benchmark/results/kaggle/20260714_155356_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-cmdbuf-batch2-4c18037`
       used `FUSION,WHILE,CUSTOM_CALL` and retained byte-identical results. It
-      improved cold `simulation.run_pool` from `9.251` to `8.476 s`, but warm
-      double-cable batches remained effectively flat (`~552.1` versus
-      `~549.7 ms`). Do not enable this globally as a claimed warm optimization;
-      the remaining route still needs a genuinely persistent/fused temporal
-      lowering generated from the membrane runtime contract.
+      measured cold `simulation.run_pool=8.476 s`, but the later no-command-
+      buffer run below reproduced `8.434 s`; this is cold compile variance, not
+      an attributable gain. Warm double-cable batches also remained effectively
+      flat (`~552.1` versus `~549.7 ms`). Do not enable this globally as a
+      claimed optimization; the remaining route still needs a genuinely
+      persistent/fused temporal lowering generated from the membrane runtime
+      contract.
     - [x] Reuse one `AxonSimulation` per native amplitude chunk shape and prefer
       the largest explicit amplitude pool that fits the workload memory budget.
       Commit `c70615f` preserves the simulation dispatch plan while only
@@ -692,6 +694,11 @@ These items are intentionally not ordered or scoped into a phase yet.
       retained a byte-identical result and reduced `recruitment_sweep` from
       `10.079` to `7.815 s`, `simulation.run_pool` from `9.251` to `7.157 s`,
       and `kernel.dispatch_jax` from `5.918` to `4.283 s` versus batch-size 2.
+      The matching final batch-size-2 P100 artifact
+      `benchmark/results/kaggle/20260714_160554_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-reuse-batch2-96ee157`
+      records one `dispatch.build_plan` instead of four, then three explicit
+      `AxonSimulation` plan-cache hits; amplitude-pool refresh fell from `253.0`
+      to `161.7 ms`, and the recruitment output remained byte-identical.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
