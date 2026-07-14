@@ -154,6 +154,16 @@ def parse_args(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
         ),
     )
     parser.add_argument(
+        "--benchmark-env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help=(
+            "Environment variable applied only to the benchmark subprocess. "
+            "Repeat for several variables."
+        ),
+    )
+    parser.add_argument(
         "--nrv-conda-env",
         action="store_true",
         help=(
@@ -268,6 +278,7 @@ def prepare_kernel_package(
         "apt_packages": list(args.apt_package or ()),
         "nrv_conda_env": bool(args.nrv_conda_env),
         "pip_packages": pip_packages,
+        "benchmark_env": parse_environment_assignments(args.benchmark_env),
     }
     metadata: dict[str, Any] = {
         "id": f"{args.username}/{args.slug}",
@@ -303,6 +314,18 @@ def prepare_kernel_package(
         },
     )
     return package_dir
+
+
+def parse_environment_assignments(values: list[str]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for assignment in values:
+        name, separator, value = str(assignment).partition("=")
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise SystemExit(
+                f"Invalid --benchmark-env assignment {assignment!r}; expected NAME=VALUE."
+            )
+        environment[name] = value
+    return environment
 
 
 def render_kernel_entry(config: dict[str, Any]) -> str:

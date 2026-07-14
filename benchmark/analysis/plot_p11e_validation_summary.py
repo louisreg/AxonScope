@@ -69,7 +69,7 @@ RECORDING_LABEL = {
 STAGE_GROUPS = (
     ("runtime_prepare_ms", "runtime prepare", "#4c78a8"),
     ("inputs_extracellular_ms", "extracellular", "#f58518"),
-    ("kernel_dispatch_jax_ms", "dispatch/JAX", "#54a24b"),
+    ("kernel_dispatch_jax_ms", "JAX call/deferred device", "#54a24b"),
     ("kernel_wait_ms", "kernel wait", "#e45756"),
     ("kernel_finalize_observer_ms", "finalize obs.", "#ff9da6"),
     ("results_assemble_rows_ms", "assemble rows", "#b279a2"),

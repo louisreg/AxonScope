@@ -525,6 +525,9 @@ def _run_double_cable_batch_array_chunks(
             )
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="double",
             variant=kernel_block_solver,
             output="full_vm" if record_full else "probe_vm",
@@ -1133,6 +1136,9 @@ def _run_double_cable_batch_observer_chunks(
         ):
             with benchmark_span(
                 "kernel.dispatch_jax",
+                timing_role="jax_call_may_execute_deferred_device_work",
+                device_synchronization=False,
+                explicit_wait_span="kernel.wait",
                 mode="double",
                 observer="vm_raster",
                 variant=kernel_block_solver,
@@ -1187,6 +1193,9 @@ def _run_double_cable_batch_observer_chunks(
         else:
             with benchmark_span(
                 "kernel.dispatch_jax",
+                timing_role="jax_call_may_execute_deferred_device_work",
+                device_synchronization=False,
+                explicit_wait_span="kernel.wait",
                 mode="double",
                 observer="vm_raster",
                 variant=kernel_block_solver,

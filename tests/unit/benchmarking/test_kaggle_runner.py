@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from benchmark.kaggle.kernel_entry import _redact_env_value
+from benchmark.kaggle.kernel_entry import _benchmark_environment, _redact_env_value
 from benchmark.kaggle.run_kernel import main as run_kaggle
 
 
@@ -34,6 +34,8 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
                 "--pip-package",
                 "nrv-py",
                 "--nrv-conda-env",
+                "--benchmark-env",
+                "XLA_FLAGS=--xla_gpu_enable_command_buffer=FUSION,WHILE,CUSTOM_CALL",
             ]
         )
         == 0
@@ -59,7 +61,10 @@ def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):
     assert config["require_gpu"] is True
     assert config["apt_packages"] == ["libglu1-mesa"]
     assert config["nrv_conda_env"] is True
-    assert config["pip_packages"] == ["nrv-py"]
+    assert config["pip_packages"] == ["nrv-py", "triton", "jax-triton"]
+    assert config["benchmark_env"] == {
+        "XLA_FLAGS": "--xla_gpu_enable_command_buffer=FUSION,WHILE,CUSTOM_CALL"
+    }
     assert config["benchmark_args"] == [
         "--case-filter",
         "observer_only",
@@ -380,3 +385,14 @@ def test_kaggle_hardware_metadata_redacts_sensitive_environment_values():
     assert _redact_env_value("KAGGLE_DATA_PROXY_TOKEN", "secret-token") == "<redacted:12 chars>"
     assert _redact_env_value("KAGGLE_API_V1_TOKEN", "/etc/secrets/kaggle/api-v1-token") == "<redacted:32 chars>"
     assert _redact_env_value("CUDA_VERSION", "12.8.1") == "12.8.1"
+
+
+def test_kaggle_benchmark_environment_overrides_only_requested_values(monkeypatch):
+    monkeypatch.setenv("UNCHANGED_VALUE", "base")
+
+    environment = _benchmark_environment(
+        {"benchmark_env": {"XLA_FLAGS": "--xla_gpu_enable_command_buffer=WHILE"}}
+    )
+
+    assert environment["UNCHANGED_VALUE"] == "base"
+    assert environment["XLA_FLAGS"] == "--xla_gpu_enable_command_buffer=WHILE"

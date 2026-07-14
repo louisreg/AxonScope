@@ -56,9 +56,17 @@ def main() -> None:
         command = _benchmark_command(config, output_dir)
         _write_json(
             output_dir / "kaggle_command.json",
-            {"command": command, "cwd": str(CHECKOUT_DIR)},
+            {
+                "command": command,
+                "cwd": str(CHECKOUT_DIR),
+                "benchmark_env": config.get("benchmark_env", {}),
+            },
         )
-        _run(command, cwd=CHECKOUT_DIR)
+        _run(
+            command,
+            cwd=CHECKOUT_DIR,
+            env=_benchmark_environment(config),
+        )
     except BaseException as exc:
         _write_json(
             output_dir / "kaggle_failure.json",
@@ -205,6 +213,17 @@ def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list
     ]
     command.extend(str(value) for value in config.get("benchmark_args", ()))
     return command
+
+
+def _benchmark_environment(config: dict[str, Any]) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.update(
+        {
+            str(name): str(value)
+            for name, value in dict(config.get("benchmark_env", {})).items()
+        }
+    )
+    return environment
 
 
 def _install_nrv_stack() -> pathlib.Path:
@@ -450,9 +469,14 @@ def _command_snapshot(command: list[str], *, cwd: pathlib.Path | None = None) ->
     }
 
 
-def _run(command: list[str], *, cwd: pathlib.Path | None = None) -> None:
+def _run(
+    command: list[str],
+    *,
+    cwd: pathlib.Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
     print("$", " ".join(shlex.quote(str(part)) for part in command), flush=True)
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
 def _write_process_snapshot(path: pathlib.Path) -> None:

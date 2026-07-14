@@ -1313,6 +1313,12 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert dispatch_metadata["mode"] == "double"
     assert dispatch_metadata["observer"] == "vm_raster"
     assert dispatch_metadata["factorized_vext"] is True
+    assert (
+        dispatch_metadata["timing_role"]
+        == "jax_call_may_execute_deferred_device_work"
+    )
+    assert dispatch_metadata["device_synchronization"] is False
+    assert dispatch_metadata["explicit_wait_span"] == "kernel.wait"
 
     finalize_events = [
         event for event in report.events if event.name == "kernel.finalize_observer"

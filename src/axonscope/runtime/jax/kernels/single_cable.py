@@ -422,6 +422,9 @@ def _run_single_cable_vstim_batch_array_chunks(
             vext_chunk = extracellular_potential_mid_mV[:, start:stop]
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             variant="dense_vstim",
             output="full_vm" if record_full else "probe_vm",
@@ -563,6 +566,9 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
             current_chunk = current_rows_mid_A[:, :, start:stop]
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             variant="factorized_vstim",
             output="full_vm" if record_full else "probe_vm",
@@ -736,6 +742,9 @@ def _run_single_cable_factorized_vstim_batch_observer_chunks(
             current_chunk = current_rows_mid_A[:, :, start:stop]
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             observer="vm_raster",
             variant="factorized_vstim",
@@ -907,6 +916,9 @@ def _run_single_cable_vstim_batch_observer_chunks(
             vext_chunk = extracellular_potential_mid_mV[:, start:stop]
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             observer="vm_raster",
             variant="dense_vstim",
@@ -1162,6 +1174,9 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
             )
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             observer="vm_raster",
             variant="factorized_sparse_vstim",
@@ -1347,6 +1362,9 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
             iinj_values_chunk = intracellular_current_density_mid.density_mid[:, start:stop]
         with benchmark_span(
             "kernel.dispatch_jax",
+            timing_role="jax_call_may_execute_deferred_device_work",
+            device_synchronization=False,
+            explicit_wait_span="kernel.wait",
             mode="single",
             observer="vm_raster",
             variant="zero_sparse_vstim",

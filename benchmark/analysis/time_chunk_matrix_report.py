@@ -29,7 +29,7 @@ STAGE_SPECS = (
     ("observer tables", "observer_tables_s", "#54A24B"),
     ("materialize inputs", "materialize_inputs_s", "#B279A2"),
     ("chunk setup", "chunk_setup_s", "#F58518"),
-    ("dispatch_jax", "dispatch_s", "#4C78A8"),
+    ("JAX call/deferred device", "dispatch_s", "#4C78A8"),
     ("wait/sync", "wait_s", "#E15759"),
     ("chunk bookkeeping", "chunk_bookkeeping_s", "#FF9DA6"),
     ("concat trace", "concat_trace_s", "#9D755D"),
