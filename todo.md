@@ -592,6 +592,38 @@ These items are intentionally not ordered or scoped into a phase yet.
     default, lower shared footprint/current inputs once per unique source
     cohort and broadcast/project amplitudes on device, then choose chunk sizes
     that avoid a separately compiled remainder shape.
+  - [x] Remove the hidden full-population double-cable dense fallback exposed
+    by that benchmark. The apparent `inputs.extracellular` growth was not
+    footprint construction: the rank-1 unique-current payload was only
+    `1.50 MB`, but `CURRENT_TABLE` was rejected after lowering and expanded to
+    a `3.74 GB` `[B,Nt,Nx]` tensor. Commit `3991ff4` aligns the double-cable
+    capability contract with the already implemented indexed-current kernel
+    helpers and adds dense-equivalence coverage. On the full 193-fiber P100
+    workload,
+    `benchmark/results/kaggle/20260714_130947_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-compact-current-full-3991ff4`
+    reduced double-cable `inputs.extracellular` from `10.705 s` to `74.0 ms`,
+    `simulation.run_pool` from `24.700 s` to `15.126 s`, and
+    `protocol.recruitment_sweep` from `27.696 s` to `18.762 s`. The full curve
+    retained exact counts
+    `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111 112 112 114 120`.
+    Size-10 chunking remained slower at `24.541 s` for the sweep because it
+    paid three batch shapes, including a separately compiled one-amplitude
+    remainder. Keep `full` as the preferred policy for this workload when
+    memory allows.
+  - [x] Treat an all-zero stimulus as a wildcard while recognizing scaled
+    shared waveforms. Commit `eb94f05` chooses the first nonzero waveform as
+    the base, so a recruitment curve beginning at `0 uA` no longer falls into
+    indexed-current lowering solely because the zero row has no recoverable
+    normalized shape. The final P100 artifact
+    `benchmark/results/kaggle/20260714_133659_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-scaled-zero-full-eb94f05`
+    used `factorized_footprint/scaled_shared_waveform` for both cable groups,
+    reduced the double-cable temporal current from `252 KB` to `12 KB`, and
+    retained the exact activation curve. Its `15.900 s` `simulation.run_pool`
+    was within cold-JIT variation of the indexed result rather than a further
+    demonstrated speedup. Remaining cold non-solver preparation is now mainly
+    `runtime.prepare` (`2.62 s` in this run), especially model-agnostic
+    membrane row construction; address that through the autonomous generated
+    runtime-module contract below, not MRG/passive special cases.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
