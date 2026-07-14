@@ -658,6 +658,40 @@ These items are intentionally not ordered or scoped into a phase yet.
     found no meaningful warm sensitivity to `BLOCK_B=8/16/32/64`
     (`238-243 ms/amplitude`), so do not add an adaptive tile-width policy for
     this problem.
+    - [x] Reuse the regular GPU observer chunk shape for a partial final chunk.
+      Commit `4bcc371` pads only the final Triton/VmRaster chunk and masks the
+      padded observer tail. P100 artifact
+      `benchmark/results/kaggle/20260714_154849_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-fixedchunk-batch2-4bcc371`
+      retained a byte-identical recruitment result while reducing
+      `recruitment_sweep` from `10.488` to `10.079 s` and
+      `simulation.run_pool` from `9.744` to `9.251 s` versus the matching
+      batch-size-2 baseline. Warm batches stayed around `0.68-0.72 s`, as
+      expected: this removes a cold compile shape rather than the temporal
+      launch cost.
+    - [x] Test model-agnostic XLA command buffers before designing a custom
+      temporal kernel. Commit `4c18037` adds benchmark-subprocess environment
+      control and explicitly labels `kernel.dispatch_jax` as a JAX call that
+      may absorb deferred device work. P100 artifact
+      `benchmark/results/kaggle/20260714_155356_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-cmdbuf-batch2-4c18037`
+      used `FUSION,WHILE,CUSTOM_CALL` and retained byte-identical results. It
+      improved cold `simulation.run_pool` from `9.251` to `8.476 s`, but warm
+      double-cable batches remained effectively flat (`~552.1` versus
+      `~549.7 ms`). Do not enable this globally as a claimed warm optimization;
+      the remaining route still needs a genuinely persistent/fused temporal
+      lowering generated from the membrane runtime contract.
+    - [x] Reuse one `AxonSimulation` per native amplitude chunk shape and prefer
+      the largest explicit amplitude pool that fits the workload memory budget.
+      Commit `c70615f` preserves the simulation dispatch plan while only
+      refreshing amplitude-dependent row state. The local CPU smoke at
+      `benchmark/results/recruitment_amplitude_batch/p12_steps1_4_cpu_20260714`
+      records one plan miss then seven `AxonSimulation` cache hits for
+      batch-size 1; its full-pool warm `simulation.run_pool` was `52.1 ms`
+      versus `122.8 ms` across the eight one-amplitude runs, with identical
+      activation counts. P100 full-pool artifact
+      `benchmark/results/kaggle/20260714_155724_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-full-reuse-c70615f`
+      retained a byte-identical result and reduced `recruitment_sweep` from
+      `10.079` to `7.815 s`, `simulation.run_pool` from `9.251` to `7.157 s`,
+      and `kernel.dispatch_jax` from `5.918` to `4.283 s` versus batch-size 2.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
