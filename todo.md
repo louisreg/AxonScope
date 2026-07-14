@@ -446,6 +446,18 @@ These items are intentionally not ordered or scoped into a phase yet.
   Prefer JAX's version/device/HLO-keyed executable cache over an AxonScope
   reimplementation, while retaining AxonScope-owned policy and benchmark
   guards around its location and lifecycle.
+  The official JAX cache key covers non-optimized HLO, jaxlib version,
+  relevant XLA flags, device count/topology (GPU model), compression, and an
+  optional custom hook. Runtime values with unchanged abstract shapes/static
+  arguments therefore reuse the same executable; a changed HLO/shape/static
+  argument produces another complete executable rather than incrementally
+  recompiling only one subgraph. Evaluate
+  `jax_persistent_cache_min_entry_size_bytes=-1` and compare the default
+  per-fusion autotune cache with `jax_persistent_cache_enable_xla_caches=all`
+  and `xla_gpu_kernel_cache_file`, including whether the latter usefully
+  persists GPU kernel/PTX work around the Triton custom call. Enable
+  `jax_explain_cache_misses` in diagnostic benchmark runs and keep the cache in
+  a trusted local/shared directory only.
 - [ ] After CPU/GPU optimization work is complete, run a broad cleanup pass to
   remove unused code and verify contracts. Treat `runtime/jax` as the first
   completed target, and use Graphify to guide the wider pass.
@@ -492,6 +504,25 @@ These items are intentionally not ordered or scoped into a phase yet.
     (`1.3x/1.5x`). GPU `kernel.wait` is already tiny for `06` and `08`, so
     remaining bottlenecks are mostly JAX/Python dispatch, enqueue, result
     assembly, and example/protocol overhead rather than raw solver time.
+  - [x] Revalidate these example gates after the final P12 warm-path cache
+    changes at commits `0b76cf7` and `222c504`. Artifacts:
+    `benchmark/results/basic_examples_local_cpu_post_p12_20260714`,
+    `benchmark/results/kaggle/20260714_114908_basic_examples_quick_cpu_cpu_axonscope-basic-06-07-08-post-p12-cpu`,
+    `benchmark/results/kaggle/20260714_021129_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-post-p12-gpu`,
+    `benchmark/results/with_nrv_examples_local_cpu_post_p12_fullpop_clean_20260714`,
+    and
+    `benchmark/results/kaggle/20260714_115613_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-with-nrv-01-post-p12-fullpop-gpu`.
+    Kaggle CPU/P100 wall speedups for the committed `06/07/08` examples were
+    cold `1.73x/1.67x/1.27x` and warm `6.59x/2.27x/1.44x`. The current
+    uncommitted `08` timestep (`dt=0.005 ms`) was validated separately through
+    benchmark-only commit `fd09837`: CPU/GPU warm wall was `7.52/2.96 s`
+    (`2.53x`), and both routes produced counts
+    `6 20 47 67 86 107 130 135`. Full-population `with_nrv/01` improved versus
+    the prior artifacts: local CPU/GPU `protocol.recruitment_sweep` became
+    `204.66/27.81 s` (`7.36x`) and `simulation.run_pool` `201.92/24.78 s`
+    (`8.15x`); median post-compile amplitude time was approximately
+    `9.59/0.986 s` (`9.73x`). Final recruitment matched at `120/193`; three
+    intermediate amplitudes differed by one near-threshold axon.
 - [x] Check whether `recruitment_sweep` can batch amplitude values into one
   expanded compatible run when the pool, model shapes, footprints, and stimulus
   timing are shared. Use `examples/basic/08_recruitment_curve_population.py` as
@@ -523,6 +554,14 @@ These items are intentionally not ordered or scoped into a phase yet.
     large sweeps can choose between sequential amplitudes, medium
     `fibers x amplitude_chunk` pools, and fully expanded
     `fibers x all_amplitudes` pools.
+  - [ ] Finalize and analyze compact observer results once per native amplitude
+    batch instead of constructing one public `AxonSimulationResult` and
+    decoding VmRaster activity after every amplitude. Keep packed/device-local
+    outputs until the batch completes, then preserve value ordering, progress
+    rows, failure attribution, summary-only retention, and the
+    `amplitude_batch_size=1` behavior. Benchmark result-finalization time,
+    device-to-host transfers, peak device/host memory, and end-to-end CPU/GPU
+    time for sizes `1/10/20/full` before making it the default.
   - [x] Benchmark native amplitude chunk sizes on CPU and Kaggle GPU for
     single-cable and double-cable pools. Report cold/warm timings, compile
     overhead, `kernel.dispatch_jax`, enqueue, wait, result assembly, peak
