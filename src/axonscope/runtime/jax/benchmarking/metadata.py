@@ -19,6 +19,7 @@ from axonscope.runtime.jax.inputs.lowering import (
 from axonscope.runtime.jax.types import SolverRuntime
 from axonscope.benchmarking import (
     benchmark_array_metadata,
+    benchmark_span,
     record_benchmark_metadata,
 )
 from axonscope.dispatcher.plan import DispatchGroup
@@ -71,6 +72,25 @@ def record_extracellular_lowering_metadata(
 ) -> None:
     """Record benchmark metadata for the selected extracellular input format."""
 
+    with benchmark_span(
+        "inputs.extracellular.metadata",
+        extracellular_format=lowered.format,
+    ):
+        _record_extracellular_lowering_metadata(
+            lowered,
+            group=group,
+            runtime=runtime,
+        )
+
+
+def _record_extracellular_lowering_metadata(
+    lowered: LoweredExtracellularInput,
+    *,
+    group: DispatchGroup,
+    runtime: SolverRuntime,
+) -> None:
+    """Implement extracellular metadata collection inside its timing span."""
+
     if lowered.format == "zero_no_extracellular_stimulation":
         dtype = np.dtype(runtime.membrane.dtype)
         skipped_shape = dense_shape_for_group(group=group, runtime=runtime)
@@ -95,12 +115,12 @@ def record_extracellular_lowering_metadata(
             shared_current=factorized.shared_current,
             scaled_shared_waveform=factorized.scaled_shared_waveform,
             dense_vstim_avoided=True,
-            **benchmark_array_metadata(
+            **_extracellular_array_metadata(
                 "vstim_current_mid_A",
                 factorized.current_mid_A,
                 role="kernel_input",
             ),
-            **benchmark_array_metadata(
+            **_extracellular_array_metadata(
                 "vstim_footprint_mV_per_A",
                 factorized.footprint_mV_per_A,
                 role="kernel_input",
@@ -108,7 +128,7 @@ def record_extracellular_lowering_metadata(
         )
         if factorized.current_initial_previous_A is not None:
             record_benchmark_metadata(
-                **benchmark_array_metadata(
+                **_extracellular_array_metadata(
                     "vstim_current_initial_previous_A",
                     factorized.current_initial_previous_A,
                     role="kernel_input",
@@ -116,7 +136,7 @@ def record_extracellular_lowering_metadata(
             )
         if factorized.current_row_scales is not None:
             record_benchmark_metadata(
-                **benchmark_array_metadata(
+                **_extracellular_array_metadata(
                     "vstim_current_row_scales",
                     factorized.current_row_scales,
                     role="kernel_input",
@@ -144,6 +164,16 @@ def record_extracellular_lowering_metadata(
         if lowered.dense_fallback_reason is not None:
             metadata["dense_fallback_reason"] = lowered.dense_fallback_reason
         record_benchmark_metadata(**metadata)
+
+
+def _extracellular_array_metadata(
+    name: str,
+    array: Any,
+    *,
+    role: str,
+) -> dict[str, Any]:
+    with benchmark_span("inputs.extracellular.metadata.array", array_name=name):
+        return benchmark_array_metadata(name, array, role=role)
 
 
 def _extracellular_contract_metadata(

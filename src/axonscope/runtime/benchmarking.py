@@ -919,6 +919,18 @@ def _array_metadata(array: Any, *, role: str | None, config: BenchmarkConfig) ->
 
 
 def _array_device(array: Any) -> str | None:
+    sharding = getattr(array, "sharding", None)
+    if sharding is not None:
+        try:
+            values = getattr(sharding, "device_set", None)
+        except Exception:
+            values = None
+        if values:
+            return ",".join(sorted(str(device) for device in values))
+        # A JAX array exposing sharding already carries its placement metadata.
+        # Avoid older convenience accessors here: some backends synchronize
+        # pending device work while resolving them.
+        return None
     devices = getattr(array, "devices", None)
     if callable(devices):
         try:

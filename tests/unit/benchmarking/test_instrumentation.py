@@ -65,6 +65,19 @@ def test_session_records_nested_events_and_writes_files(tmp_path):
     assert benchmark_report(print_report=False) is None
 
 
+def test_array_device_uses_sharding_without_calling_devices():
+    class FakeSharding:
+        device_set = {"gpu:0"}
+
+    class FakeArray:
+        sharding = FakeSharding()
+
+        def devices(self):
+            raise AssertionError("devices() must not be called for a sharded array")
+
+    assert instrumentation._array_device(FakeArray()) == "gpu:0"
+
+
 def test_memory_trace_records_rss_and_tracemalloc_summary(tmp_path):
     enable_benchmark(
         tmp_path,

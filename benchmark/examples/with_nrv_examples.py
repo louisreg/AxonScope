@@ -102,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jax-device-memory-profile", action="store_true", default=None)
     parser.add_argument("--no-jax-device-memory-profile", action="store_false", dest="jax_device_memory_profile")
     parser.add_argument("--jax-device-memory-profile-stage", action="append", default=[])
+    parser.add_argument(
+        "--record-shapes",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Record array shape/device metadata in benchmark events.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
@@ -231,7 +237,7 @@ def _run_one(
                 print_summary=False,
                 save=True,
                 sync_device=True,
-                record_shapes=True,
+                record_shapes=args.record_shapes,
                 memory_trace=args.memory_trace or "rss",
                 memory_top_n=0 if args.memory_top_n is None else args.memory_top_n,
                 profile=bool(args.profile) if args.profile is not None else False,
