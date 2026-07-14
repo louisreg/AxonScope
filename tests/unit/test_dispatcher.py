@@ -607,6 +607,62 @@ def test_double_cable_gpu_route_accepts_tiled_solver():
     assert block_b == 64
 
 
+@pytest.mark.parametrize("mode", ["single", "double"])
+def test_gpu_observer_route_rejects_dense_extracellular_fallback(mode):
+    lowered_inputs = SimpleNamespace(
+        extracellular=SimpleNamespace(
+            format="dense",
+            dense_fallback_reason=f"unsupported_{mode}_factorized_mode",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="expected the factorized footprint route"):
+        group_runner._guard_gpu_observer_extracellular_route(
+            runtime_context=SimpleNamespace(platform="gpu", solver_engine=None),
+            observer_plan=object(),
+            kernel_options=SimpleNamespace(
+                recording=SimpleNamespace(mode="none")
+            ),
+            extracellular_stimulation_count=1,
+            lowered_inputs=lowered_inputs,
+        )
+
+
+def test_cpu_and_recorded_vm_routes_keep_explicit_dense_extracellular_support():
+    lowered_inputs = SimpleNamespace(
+        extracellular=SimpleNamespace(
+            format="dense",
+            dense_fallback_reason="unsupported_factorized_mode",
+        )
+    )
+
+    for platform, observer_plan, recording_mode in (
+        ("cpu", object(), "none"),
+        ("gpu", None, "full"),
+        ("gpu", object(), "full"),
+    ):
+        group_runner._guard_gpu_observer_extracellular_route(
+            runtime_context=SimpleNamespace(platform=platform, solver_engine=None),
+            observer_plan=observer_plan,
+            kernel_options=SimpleNamespace(
+                recording=SimpleNamespace(mode=recording_mode)
+            ),
+            extracellular_stimulation_count=1,
+            lowered_inputs=lowered_inputs,
+        )
+
+
+def test_jax_group_runner_rejects_unknown_cable_mode():
+    with pytest.raises(ValueError, match="expected 'single' or 'double'"):
+        group_runner.enqueue_jax_batch_group(
+            SimpleNamespace(mode="legacy"),
+            tsim_ms=0.1,
+            dt_ms=0.05,
+            batch_options=BatchOptions.none(),
+            solver_options=None,
+        )
+
+
 def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeypatch):
     monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
     axons = [_mrg_axon(diameter_um=10.0, amp_nA=0.1)]
@@ -660,6 +716,67 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
         fast_stack.background_rows[0],
         fast_stack.background_rows[2],
     )
+
+
+def test_gated_leak_stack_extracts_stateless_leaks_without_jax_program_build(
+    monkeypatch,
+):
+    monkeypatch.delenv("AXONSCOPE_EXPERIMENTAL_DOUBLE_CABLE_SHAPE_BUCKETING", raising=False)
+    group = build_dispatch_plan(
+        [
+            _mrg_axon(diameter_um=7.3, amp_nA=0.1),
+            _mrg_axon(diameter_um=10.0, amp_nA=0.2),
+        ]
+    ).groups[0]
+    original = membrane_stacking.compile_membrane_model
+    compiled_kinds: list[str] = []
+
+    def counted(model, **kwargs):
+        compiled_kinds.append(str(model.kind))
+        return original(model, **kwargs)
+
+    monkeypatch.setattr(membrane_stacking, "compile_membrane_model", counted)
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
+        group,
+        target_nx=group.nx,
+        dtype_local=group.items[0].solver_axon.dtype,
+        solver_options=None,
+    )
+
+    assert fast_stack is not None
+    assert fast_stack.host_leak_model_count > 0
+    assert fast_stack.jax_compiled_model_count == len(set(compiled_kinds))
+    assert "passive" not in compiled_kinds
+
+
+def test_host_stateless_leak_encoding_matches_compiled_program():
+    group = build_dispatch_plan(
+        [_mrg_axon(diameter_um=10.0, amp_nA=0.1)]
+    ).groups[0]
+    passive_models = {
+        model._static_signature(): model
+        for model in group.items[0].solver_axon.membrane_models
+        if model.kind == "passive"
+    }
+
+    assert passive_models
+    for model in passive_models.values():
+        host = membrane_stacking._try_host_stateless_leak_member(
+            model,
+            dtype=np.dtype(np.float32),
+        )
+        compiled = membrane_stacking._gated_leak_member(
+            membrane_stacking.membrane_backend_model(
+                membrane_stacking.compile_membrane_model(model)
+            ),
+            dtype=np.dtype(np.float32),
+        )
+
+        assert host is not None
+        assert compiled is not None
+        assert host.role == compiled.role == "leak"
+        assert host.leak_g == pytest.approx(compiled.leak_g, rel=1e-6)
+        assert host.leak_ge == pytest.approx(compiled.leak_ge, rel=1e-6)
 
 
 def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):

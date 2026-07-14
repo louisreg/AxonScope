@@ -163,7 +163,7 @@ def test_double_cable_kernel_solver_dispatch_requires_concrete_routes():
             diagnostic_double_cable_solver_engine("dense"),
             platform="gpu",
         )
-    with pytest.raises(RuntimeError, match="requires a non-GPU"):
+    with pytest.raises(RuntimeError, match="non-GPU route"):
         _resolve_double_cable_run_block_solver(
             diagnostic_double_cable_solver_engine("thomas"),
             platform="gpu",

@@ -107,8 +107,10 @@ AxonSimulation.run()
   -> run_pool(...)
   -> build_dispatch_plan(...)
   -> _run_batch_group(...)
-  -> runtime/jax/group_runner._run_single_cable_batch_group(...)
-     or runtime/jax/group_runner._run_double_cable_batch_group(...)
+  -> runtime.execution.enqueue_batch_group(...)
+  -> runtime/jax/group_runner.enqueue_jax_batch_group(...)
+  -> runtime.execution.finalize_batch_group(...)
+  -> runtime/jax/group_runner.finalize_jax_batch_group(...)
   -> SingleCableVStimBatchKernel or DoubleCableBatchKernel with B=1
   -> AxonSimulationResult at the public boundary
 ```
@@ -135,8 +137,8 @@ instead of falling back to a second execution route.
 
 ### Single-Cable Batch Route
 
-Compatible single-cable groups enter
-`runtime/jax/group_runner._run_single_cable_batch_group(...)`.
+Compatible single-cable groups enter the single-cable branch of
+`runtime/jax/group_runner.enqueue_jax_batch_group(...)`.
 
 Preparation and lowering happen in this order:
 
@@ -164,8 +166,8 @@ route uses dense midpoint `Vstim`.
 
 ### Double-Cable Batch Route
 
-Compatible double-cable groups enter
-`runtime/jax/group_runner._run_double_cable_batch_group(...)`.
+Compatible double-cable groups enter the double-cable branch of
+`runtime/jax/group_runner.enqueue_jax_batch_group(...)`.
 
 Preparation and lowering happen in this order:
 

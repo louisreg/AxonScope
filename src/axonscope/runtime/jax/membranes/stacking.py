@@ -8,8 +8,12 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 
+from axonscope.benchmarking import benchmark_span
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
+from axonscope.membranes.compiler import lower_membrane_model_with_sources
+from axonscope.membranes.model import ensure_membrane_model
 from axonscope.model_ir.interpreter import NumpyModelInterpreter
+from axonscope.model_ir.program import membrane_program_from_model_ir
 from axonscope.runtime.jax.membranes.backend import (
     GatedLeakStackMembraneBackend,
     HeterogeneousMembraneBackend,
@@ -33,6 +37,8 @@ class GatedLeakMembraneStack:
     source: str
     unique_rows: int = 0
     cache_hits: int = 0
+    host_leak_model_count: int = 0
+    jax_compiled_model_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,8 @@ def try_stack_gated_leak_membrane_from_group(
     gates_rows: list[np.ndarray] = []
     background_rows: list[np.ndarray] = []
     compiled_by_signature: dict[tuple[Any, ...], Any] = {}
+    member_by_signature: dict[tuple[Any, ...], _GatedLeakMember | None] = {}
+    host_leak_signatures: set[tuple[Any, ...]] = set()
     encoded_row_cache: dict[tuple[Any, ...], _EncodedGatedLeakRow] = {}
     row_cache_hits = 0
 
@@ -95,6 +103,8 @@ def try_stack_gated_leak_membrane_from_group(
                 np_dtype=np_dtype,
                 solver_options=solver_options,
                 compiled_by_signature=compiled_by_signature,
+                member_by_signature=member_by_signature,
+                host_leak_signatures=host_leak_signatures,
             )
             if encoded is None:
                 return None
@@ -132,6 +142,8 @@ def try_stack_gated_leak_membrane_from_group(
         source="solver_axon_membrane_models",
         unique_rows=len(encoded_row_cache),
         cache_hits=row_cache_hits,
+        host_leak_model_count=len(host_leak_signatures),
+        jax_compiled_model_count=len(compiled_by_signature),
     )
 
 
@@ -241,6 +253,8 @@ def _encode_gated_leak_group_row(
     np_dtype: np.dtype,
     solver_options: SolverOptions | None,
     compiled_by_signature: dict[tuple[Any, ...], Any],
+    member_by_signature: dict[tuple[Any, ...], _GatedLeakMember | None],
+    host_leak_signatures: set[tuple[Any, ...]],
 ) -> _EncodedGatedLeakRow | None:
     solver_axon = item.solver_axon
     row_nx = int(solver_axon.n_compartments)
@@ -255,19 +269,32 @@ def _encode_gated_leak_group_row(
     members: list[_GatedLeakMember] = []
     for model in membrane_models:
         signature = membrane_static_signature(model)
-        compiled = compiled_by_signature.get(signature)
-        if compiled is None:
-            compiled = compile_membrane_model(model, solver_options=solver_options)
-            compiled_by_signature[signature] = compiled
-        executable = membrane_backend_model(compiled)
-        member = _gated_leak_member(executable, dtype=np_dtype)
+        if signature in member_by_signature:
+            member = member_by_signature[signature]
+        else:
+            member = _try_host_stateless_leak_member(model, dtype=np_dtype)
+            if member is not None:
+                host_leak_signatures.add(signature)
+            else:
+                compiled = compiled_by_signature.get(signature)
+                if compiled is None:
+                    compiled = compile_membrane_model(
+                        model,
+                        solver_options=solver_options,
+                    )
+                    compiled_by_signature[signature] = compiled
+                executable = membrane_backend_model(compiled)
+                member = _gated_leak_member(executable, dtype=np_dtype)
+            member_by_signature[signature] = member
         if member is None:
             return None
         if member.role == "gated":
-            executable_signature = membrane_static_signature(executable)
+            if member.model is None:
+                return None
+            executable_signature = membrane_static_signature(member.model)
             if gated_signature is None:
                 gated_signature = executable_signature
-                gated_model = executable
+                gated_model = member.model
             elif executable_signature != gated_signature:
                 return None
             gated_count += 1
@@ -311,6 +338,54 @@ def _encode_gated_leak_group_row(
         gated_signature=gated_signature,
         gated_count=gated_count,
         leak_count=leak_count,
+    )
+
+
+def _try_host_stateless_leak_member(
+    model: Any,
+    *,
+    dtype: np.dtype,
+) -> _GatedLeakMember | None:
+    """Encode a generic stateless one-current leak without building JAX state."""
+
+    descriptor = ensure_membrane_model(model)
+    with benchmark_span(
+        "runtime.prepare.membrane_host_leak",
+        membrane_kind=descriptor.kind,
+    ):
+        try:
+            lowered = lower_membrane_model_with_sources(
+                descriptor,
+                load_generated_modules=(),
+                generated_targets=(),
+            )
+        except (TypeError, ValueError):
+            return None
+        model_ir = lowered.model
+        program = membrane_program_from_model_ir(model_ir)
+        if (
+            model_ir.gates
+            or program.membrane_states
+            or model_ir.step_program is not None
+            or program.final_gate_update_mode == "post_solve_voltage"
+            or len(model_ir.currents) != 1
+        ):
+            return None
+        interpreter = NumpyModelInterpreter(model_ir, dtype=dtype)
+        try:
+            g, ge = interpreter.membrane_conductance_terms(
+                np.zeros((1, 0), dtype=dtype)
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        g_value = dtype.type(np.asarray(g, dtype=dtype).reshape(-1)[0])
+        ge_value = dtype.type(np.asarray(ge, dtype=dtype).reshape(-1)[0])
+    if not np.isfinite(g_value) or not np.isfinite(ge_value):
+        return None
+    return _GatedLeakMember(
+        role="leak",
+        leak_g=float(g_value),
+        leak_ge=float(ge_value),
     )
 
 

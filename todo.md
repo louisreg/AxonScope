@@ -624,6 +624,11 @@ These items are intentionally not ordered or scoped into a phase yet.
     `runtime.prepare` (`2.62 s` in this run), especially model-agnostic
     membrane row construction; address that through the autonomous generated
     runtime-module contract below, not MRG/passive special cases.
+  - [ ] Reduce the remaining full-population `runtime.prepare` cost without a
+    model-family special case. Avoid constructing JAX programs for generic
+    stateless one-current leak members when the gated/leak stack only needs
+    host-side `(g, gE)` row data; validate exact activation equivalence and the
+    `runtime.prepare.stack_membrane` delta on the full NRV example-01 P100 run.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its

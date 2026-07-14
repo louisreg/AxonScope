@@ -93,45 +93,6 @@ class PendingJaxBatchGroup:
     progress_callback: Any
 
 
-def run_jax_batch_group(
-    group: DispatchGroup,
-    *,
-    tsim_ms: float,
-    dt_ms: float,
-    batch_options: BatchOptions,
-    solver_options: SolverOptions | None,
-    observers: tuple[Any, ...] | None = None,
-    recording_plan: RecordingPlan | None = None,
-    progress_callback: Any = None,
-    runtime_context: Any | None = None,
-) -> tuple[DispatchRecord, ...]:
-    """Execute one compatible group through the JAX batch backend."""
-
-    if group.mode == "double":
-        return _run_double_cable_batch_group(
-            group,
-            tsim_ms=tsim_ms,
-            dt_ms=dt_ms,
-            batch_options=batch_options,
-            solver_options=solver_options,
-            observers=observers,
-            recording_plan=recording_plan,
-            progress_callback=progress_callback,
-            runtime_context=runtime_context,
-        )
-    return _run_single_cable_batch_group(
-        group,
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        batch_options=batch_options,
-        solver_options=solver_options,
-        observers=observers,
-        recording_plan=recording_plan,
-        progress_callback=progress_callback,
-        runtime_context=runtime_context,
-    )
-
-
 def enqueue_jax_batch_group(
     group: DispatchGroup,
     *,
@@ -157,6 +118,11 @@ def enqueue_jax_batch_group(
             recording_plan=recording_plan,
             progress_callback=progress_callback,
             runtime_context=runtime_context,
+        )
+    if group.mode != "single":
+        raise ValueError(
+            f"Unsupported JAX dispatch group mode {group.mode!r}; "
+            "expected 'single' or 'double'."
         )
     return _enqueue_single_cable_batch_group(
         group,
@@ -313,6 +279,59 @@ def _runtime_context_solver_engine(runtime_context: Any | None) -> Any | None:
     if runtime_context is None:
         return None
     return getattr(runtime_context, "solver_engine", None)
+
+
+def _guard_gpu_observer_extracellular_route(
+    *,
+    runtime_context: Any | None,
+    observer_plan: Any,
+    kernel_options: OutputPlan,
+    extracellular_stimulation_count: int,
+    lowered_inputs: _LoweredJaxBatchInputs,
+) -> None:
+    """Reject dense Vext fallback on the compact GPU observer route."""
+
+    platform = getattr(runtime_context, "platform", None)
+    if platform is None:
+        solver_engine = _runtime_context_solver_engine(runtime_context)
+        platform = getattr(solver_engine, "platform", None)
+    if str(platform).lower() not in {"cuda", "gpu", "metal", "rocm"}:
+        return
+    if (
+        observer_plan is None
+        or kernel_options.recording.mode != "none"
+        or extracellular_stimulation_count == 0
+    ):
+        return
+    if lowered_inputs.extracellular.format != "factorized_footprint":
+        reason = lowered_inputs.extracellular.dense_fallback_reason or "unknown"
+        raise RuntimeError(
+            "JAX GPU observer-only execution resolved to dense extracellular "
+            f"input ({reason}); expected the factorized footprint route. "
+            "Split unsupported stimulation rows or use an explicitly recorded "
+            "Vm workflow."
+        )
+
+
+def _requires_factorized_gpu_observer_route(
+    *,
+    runtime_context: Any | None,
+    observer_plan: Any,
+    kernel_options: OutputPlan,
+    extracellular_stimulation_count: int,
+) -> bool:
+    """Return whether dense Vext is forbidden before input materialization."""
+
+    platform = getattr(runtime_context, "platform", None)
+    if platform is None:
+        solver_engine = _runtime_context_solver_engine(runtime_context)
+        platform = getattr(solver_engine, "platform", None)
+    return bool(
+        str(platform).lower() in {"cuda", "gpu", "metal", "rocm"}
+        and observer_plan is not None
+        and kernel_options.recording.mode == "none"
+        and extracellular_stimulation_count > 0
+    )
 
 
 def _lower_output_plan_for_group(
@@ -576,6 +595,7 @@ def _lower_single_cable_inputs(
     observers: tuple[Any, ...] | None,
     tsim_ms: float,
     dt_ms: float,
+    require_factorized_extracellular: bool,
 ) -> _LoweredJaxBatchInputs:
     """Lower and record single-cable kernel inputs."""
 
@@ -612,6 +632,7 @@ def _lower_single_cable_inputs(
             dt_ms=dt_ms,
             intracellular=intracellular,
             observer_plan=observer_plan,
+            require_factorized=require_factorized_extracellular,
         )
         record_extracellular_lowering_metadata(
             extracellular,
@@ -632,6 +653,7 @@ def _lower_double_cable_inputs(
     cohort: Any,
     tsim_ms: float,
     dt_ms: float,
+    require_factorized_extracellular: bool,
 ) -> _LoweredJaxBatchInputs:
     """Lower and record double-cable kernel inputs."""
 
@@ -663,6 +685,7 @@ def _lower_double_cable_inputs(
             runtime=runtime,
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
+            require_factorized=require_factorized_extracellular,
         )
         record_extracellular_lowering_metadata(
             extracellular,
@@ -673,34 +696,6 @@ def _lower_double_cable_inputs(
         intracellular=intracellular,
         extracellular=extracellular,
     )
-
-
-def _run_single_cable_batch_group(
-    group: DispatchGroup,
-    *,
-    tsim_ms: float,
-    dt_ms: float,
-    batch_options: BatchOptions,
-    solver_options: SolverOptions | None,
-    observers: tuple[Any, ...] | None,
-    recording_plan: RecordingPlan | None,
-    progress_callback: Any = None,
-    runtime_context: Any | None = None,
-) -> tuple[DispatchRecord, ...]:
-    """Synchronously run a homogeneous single-cable group."""
-
-    pending = _enqueue_single_cable_batch_group(
-        group,
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        batch_options=batch_options,
-        solver_options=solver_options,
-        observers=observers,
-        recording_plan=recording_plan,
-        progress_callback=progress_callback,
-        runtime_context=runtime_context,
-    )
-    return finalize_jax_batch_group(pending)
 
 
 def _enqueue_single_cable_batch_group(
@@ -747,6 +742,19 @@ def _enqueue_single_cable_batch_group(
         observers=observers,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
+        require_factorized_extracellular=_requires_factorized_gpu_observer_route(
+            runtime_context=runtime_context,
+            observer_plan=observer_plan,
+            kernel_options=kernel_options,
+            extracellular_stimulation_count=cohort.extracellular_stimulation_count,
+        ),
+    )
+    _guard_gpu_observer_extracellular_route(
+        runtime_context=runtime_context,
+        observer_plan=observer_plan,
+        kernel_options=kernel_options,
+        extracellular_stimulation_count=cohort.extracellular_stimulation_count,
+        lowered_inputs=lowered_inputs,
     )
     _record_lowered_input_progress_and_memory(
         public_group=group,
@@ -802,34 +810,6 @@ def _enqueue_single_cable_batch_group(
         observers=observers,
         progress_callback=progress_callback,
     )
-
-
-def _run_double_cable_batch_group(
-    group: DispatchGroup,
-    *,
-    tsim_ms: float,
-    dt_ms: float,
-    batch_options: BatchOptions,
-    solver_options: SolverOptions | None,
-    observers: tuple[Any, ...] | None,
-    recording_plan: RecordingPlan | None,
-    progress_callback: Any = None,
-    runtime_context: Any | None = None,
-) -> tuple[DispatchRecord, ...]:
-    """Synchronously run a homogeneous double-cable group."""
-
-    pending = _enqueue_double_cable_batch_group(
-        group,
-        tsim_ms=tsim_ms,
-        dt_ms=dt_ms,
-        batch_options=batch_options,
-        solver_options=solver_options,
-        observers=observers,
-        recording_plan=recording_plan,
-        progress_callback=progress_callback,
-        runtime_context=runtime_context,
-    )
-    return finalize_jax_batch_group(pending)
 
 
 def _enqueue_double_cable_batch_group(
@@ -895,6 +875,19 @@ def _enqueue_double_cable_batch_group(
         cohort=cohort,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
+        require_factorized_extracellular=_requires_factorized_gpu_observer_route(
+            runtime_context=runtime_context,
+            observer_plan=observer_plan,
+            kernel_options=kernel_options,
+            extracellular_stimulation_count=cohort.extracellular_stimulation_count,
+        ),
+    )
+    _guard_gpu_observer_extracellular_route(
+        runtime_context=runtime_context,
+        observer_plan=observer_plan,
+        kernel_options=kernel_options,
+        extracellular_stimulation_count=cohort.extracellular_stimulation_count,
+        lowered_inputs=lowered_inputs,
     )
     _record_lowered_input_progress_and_memory(
         public_group=group,
@@ -984,5 +977,4 @@ __all__ = [
     "PendingJaxBatchGroup",
     "enqueue_jax_batch_group",
     "finalize_jax_batch_group",
-    "run_jax_batch_group",
 ]

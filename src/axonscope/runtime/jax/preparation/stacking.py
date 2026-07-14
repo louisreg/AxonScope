@@ -262,6 +262,12 @@ def _stack_membrane_runtime(
             membrane_stack_leak_compartments=int(gated_leak_stack.leak_count),
             membrane_stack_unique_rows=int(gated_leak_stack.unique_rows),
             membrane_stack_cache_hits=int(gated_leak_stack.cache_hits),
+            membrane_stack_host_leak_models=int(
+                gated_leak_stack.host_leak_model_count
+            ),
+            membrane_stack_jax_compiled_models=int(
+                gated_leak_stack.jax_compiled_model_count
+            ),
         )
         return replace(
             runtime.membrane,

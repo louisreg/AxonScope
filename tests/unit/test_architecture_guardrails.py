@@ -1604,6 +1604,42 @@ def test_dispatcher_execution_does_not_import_concrete_jax_backend():
     assert offenders == []
 
 
+def test_batch_kernels_have_one_production_orchestration_owner():
+    allowed_path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
+    kernel_modules = {
+        "axonscope.runtime.jax.kernels.single_cable",
+        "axonscope.runtime.jax.kernels.double_cable",
+    }
+    offenders: list[str] = []
+
+    for path in _python_sources(SRC_ROOT):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module not in kernel_modules:
+                continue
+            imported = {alias.name for alias in node.names}
+            if imported & {"SingleCableVStimBatchKernel", "DoubleCableBatchKernel"}:
+                if path != allowed_path:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    assert offenders == []
+
+
+def test_jax_group_runner_exposes_only_enqueue_finalize_execution_route():
+    import axonscope.runtime.jax.group_runner as group_runner
+
+    assert set(group_runner.__all__) == {
+        "PendingJaxBatchGroup",
+        "enqueue_jax_batch_group",
+        "finalize_jax_batch_group",
+    }
+    assert not hasattr(group_runner, "run_jax_batch_group")
+    assert not hasattr(group_runner, "_run_single_cable_batch_group")
+    assert not hasattr(group_runner, "_run_double_cable_batch_group")
+
+
 def test_group_runner_routes_input_lowering_through_lowering_module():
     path = SRC_ROOT / "runtime" / "jax" / "group_runner.py"
     text = path.read_text(encoding="utf-8")
@@ -2513,8 +2549,8 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "### VmRaster, Dense/Factorized Vext, And Results",
         "build_dispatch_plan",
         "_run_batch_group",
-        "_run_single_cable_batch_group",
-        "_run_double_cable_batch_group",
+        "enqueue_jax_batch_group",
+        "finalize_jax_batch_group",
         "build_sparse_intracellular_current_density_batch",
         "build_intracellular_current_density_batch",
         "build_factorized_vstim_midpoint_batch",

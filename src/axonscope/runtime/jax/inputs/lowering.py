@@ -214,6 +214,7 @@ def lower_single_cable_extracellular_input(
     dt_ms: float,
     intracellular: LoweredIntracellularInput,
     observer_plan: Any | None,
+    require_factorized: bool = False,
 ) -> LoweredExtracellularInput:
     """Lower single-cable extracellular inputs to zero, factorized, or dense."""
 
@@ -260,6 +261,11 @@ def lower_single_cable_extracellular_input(
             "footprint/drive inputs, record Vm explicitly, or split the "
             "unsupported stimulation into a separate workflow."
         )
+    if require_factorized:
+        raise RuntimeError(
+            "JAX GPU observer-only execution resolved to unsupported single-cable "
+            "factorized extracellular rows; dense materialization is disabled."
+        )
 
     return LoweredExtracellularInput(
         format="dense",
@@ -285,6 +291,7 @@ def lower_double_cable_extracellular_input(
     runtime: SolverRuntime,
     tsim_ms: float,
     dt_ms: float,
+    require_factorized: bool = False,
 ) -> LoweredExtracellularInput:
     """Lower double-cable extracellular inputs.
 
@@ -318,6 +325,12 @@ def lower_double_cable_extracellular_input(
             midpoint=factorized,
             mode=_factorized_extracellular_mode(factorized),
             capabilities=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
+        )
+
+    if require_factorized:
+        raise RuntimeError(
+            "JAX GPU observer-only execution resolved to unsupported double-cable "
+            "factorized extracellular rows; dense materialization is disabled."
         )
 
     midpoint, initial_previous = build_vstim_midpoint_and_initial_previous_batch(
