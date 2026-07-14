@@ -51,6 +51,13 @@ class ExampleSpec:
     label: str
 
 
+@dataclass(frozen=True, slots=True)
+class AmplitudeBatchPolicy:
+    label: str
+    batch_amplitudes: bool
+    amplitude_batch_size: int | None
+
+
 EXAMPLES = {
     "01": ExampleSpec(
         key="01",
@@ -75,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cold-only", action="store_true")
     parser.add_argument("--axons-per-fascicle", type=int, default=6)
     parser.add_argument("--amplitudes-uA", default="0,150,300")
+    parser.add_argument(
+        "--amplitude-batch-policy",
+        default="sequential",
+        help="Recruitment amplitude policy: sequential, a positive chunk size, or full.",
+    )
     parser.add_argument("--duration-ms", type=float, default=0.5)
     parser.add_argument("--dt-ms", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=0)
@@ -99,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     specs = _parse_examples(args.examples)
     amplitudes = _parse_amplitudes(args.amplitudes_uA)
+    amplitude_batch_policy = _parse_amplitude_batch_policy(args.amplitude_batch_policy)
     if args.repeats < 1:
         raise SystemExit("--repeats must be >= 1.")
     if args.warmups < 0:
@@ -109,10 +122,10 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(output / ".matplotlib"))
-    _write_manifest(output, args, specs, amplitudes)
+    _write_manifest(output, args, specs, amplitudes, amplitude_batch_policy)
 
     if args.dry_run:
-        _write_cases(output, args, specs, amplitudes)
+        _write_cases(output, args, specs, amplitudes, amplitude_batch_policy)
         print(f"dry-run: with_nrv_examples -> {output}")
         return 0
 
@@ -131,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
                 repeat=repeat,
                 args=args,
                 amplitudes=amplitudes,
+                amplitude_batch_policy=amplitude_batch_policy,
                 output=output,
             )
             rows.append(row)
@@ -163,6 +177,23 @@ def _parse_amplitudes(value: str) -> tuple[float, ...]:
     return amplitudes
 
 
+def _parse_amplitude_batch_policy(value: str) -> AmplitudeBatchPolicy:
+    normalized = str(value).strip().lower()
+    if normalized == "sequential":
+        return AmplitudeBatchPolicy("sequential", False, None)
+    if normalized == "full":
+        return AmplitudeBatchPolicy("full", True, None)
+    try:
+        chunk_size = int(normalized)
+    except ValueError as exc:
+        raise SystemExit(
+            "--amplitude-batch-policy must be sequential, full, or a positive integer."
+        ) from exc
+    if chunk_size < 1:
+        raise SystemExit("--amplitude-batch-policy integer must be >= 1.")
+    return AmplitudeBatchPolicy(normalized, True, chunk_size)
+
+
 def _load_example(spec: ExampleSpec):
     module_name = f"_axonscope_with_nrv_example_{spec.key}_{spec.label}"
     spec_obj = importlib.util.spec_from_file_location(module_name, spec.path)
@@ -184,9 +215,10 @@ def _run_one(
     repeat: int,
     args: argparse.Namespace,
     amplitudes: tuple[float, ...],
+    amplitude_batch_policy: AmplitudeBatchPolicy,
     output: Path,
 ) -> dict[str, Any]:
-    run_dir = output / spec.key / f"{phase}_{repeat:02d}"
+    run_dir = output / spec.key / amplitude_batch_policy.label / f"{phase}_{repeat:02d}"
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     start = time.perf_counter_ns()
@@ -216,7 +248,14 @@ def _run_one(
                 with benchmark_span("example.run", example=spec.key, phase=phase, repeat=repeat):
                     _ensure_nrv_imported()
                     with _maybe_quiet(args.quiet, stdout_buffer, stderr_buffer):
-                        result = module.main(_example_config(module, args, amplitudes))
+                        result = module.main(
+                            _example_config(
+                                module,
+                                args,
+                                amplitudes,
+                                amplitude_batch_policy,
+                            )
+                        )
                     _write_recruitment_result(run_dir / "recruitment_result.json", result)
     except BaseException as exc:
         failed = True
@@ -225,12 +264,18 @@ def _run_one(
     finally:
         end = time.perf_counter_ns()
         row = _row_from_run_dir(run_dir)
+        _write_run_pool_detail(
+            run_dir,
+            amplitudes=amplitudes,
+            amplitude_batch_policy=amplitude_batch_policy,
+        )
         row.update(
             {
                 "example": spec.key,
                 "label": spec.label,
                 "phase": phase,
                 "repeat": repeat,
+                "amplitude_batch_policy": amplitude_batch_policy.label,
                 "wall_ms": (end - start) / 1_000_000.0,
                 "failed": failed,
                 "error": error,
@@ -247,6 +292,7 @@ def _example_config(
     module: Any,
     args: argparse.Namespace,
     amplitudes: tuple[float, ...],
+    amplitude_batch_policy: AmplitudeBatchPolicy,
 ) -> Any:
     return module.ExampleConfig(
         axons_per_fascicle=args.axons_per_fascicle,
@@ -258,6 +304,8 @@ def _example_config(
         fem_n_proc=1,
         gmsh_n_core=1,
         execution_policy=_execution_policy_for_platform(args.platform),
+        batch_amplitudes=amplitude_batch_policy.batch_amplitudes,
+        amplitude_batch_size=amplitude_batch_policy.amplitude_batch_size,
     )
 
 
@@ -294,6 +342,7 @@ def _write_runs(output: Path, rows: list[dict[str, Any]]) -> None:
         "label",
         "phase",
         "repeat",
+        "amplitude_batch_policy",
         "wall_ms",
         *[f"{stage}_ms" for stage in INTERESTING_STAGES],
         "failed",
@@ -343,6 +392,7 @@ def _write_cases(
     args: argparse.Namespace,
     specs: list[ExampleSpec],
     amplitudes: tuple[float, ...],
+    amplitude_batch_policy: AmplitudeBatchPolicy,
 ) -> None:
     with (output / "cases.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
@@ -358,6 +408,7 @@ def _write_cases(
                 "duration_ms",
                 "dt_ms",
                 "seed",
+                "amplitude_batch_policy",
             ),
         )
         writer.writeheader()
@@ -374,6 +425,7 @@ def _write_cases(
                     "duration_ms": args.duration_ms,
                     "dt_ms": args.dt_ms,
                     "seed": int(args.seed),
+                    "amplitude_batch_policy": amplitude_batch_policy.label,
                 }
             )
 
@@ -383,6 +435,7 @@ def _write_manifest(
     args: argparse.Namespace,
     specs: list[ExampleSpec],
     amplitudes: tuple[float, ...],
+    amplitude_batch_policy: AmplitudeBatchPolicy,
 ) -> None:
     payload = {
         "script": "with_nrv_examples",
@@ -396,6 +449,7 @@ def _write_manifest(
         "duration_ms": args.duration_ms,
         "dt_ms": args.dt_ms,
         "seed": int(args.seed),
+        "amplitude_batch_policy": amplitude_batch_policy.label,
         "memory_trace": args.memory_trace or "rss",
         "output": str(output),
     }
@@ -408,14 +462,15 @@ def _write_report(output: Path, rows: list[dict[str, Any]]) -> None:
     lines = [
         "# With NRV Example Benchmark",
         "",
-        "| example | phase | repeat | wall ms | kernel.wait ms | results.to_public ms |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        "| example | policy | phase | repeat | wall ms | kernel.wait ms | results.to_public ms |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         lines.append(
-            "| {example} {label} | {phase} | {repeat} | {wall_ms:.3f} | {wait} | {public} |".format(
+            "| {example} {label} | {policy} | {phase} | {repeat} | {wall_ms:.3f} | {wait} | {public} |".format(
                 example=row["example"],
                 label=row["label"],
+                policy=row["amplitude_batch_policy"],
                 phase=row["phase"],
                 repeat=row["repeat"],
                 wall_ms=float(row["wall_ms"]),
@@ -435,6 +490,7 @@ def _fmt_cell(value: Any) -> str:
 def _format_progress(row: dict[str, Any]) -> str:
     return (
         f"{row['example']} {row['phase']}#{row['repeat']}: "
+        f"policy={row['amplitude_batch_policy']} "
         f"wall={float(row['wall_ms']):.1f} ms "
         f"kernel.wait={_fmt_cell(row.get('kernel.wait_ms', '')) or 'n/a'} ms"
     )
@@ -443,6 +499,154 @@ def _format_progress(row: dict[str, Any]) -> str:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+_RUN_POOL_DETAIL_STAGES = (
+    "dispatch.build_plan",
+    "runtime.prepare",
+    "inputs.positions",
+    "inputs.extracellular",
+    "kernel.enqueue",
+    "kernel.dispatch_jax",
+    "kernel.wait",
+    "kernel.finalize_observer",
+    "results.split_batch",
+    "results.to_public",
+)
+
+
+def _write_run_pool_detail(
+    run_dir: Path,
+    *,
+    amplitudes: tuple[float, ...],
+    amplitude_batch_policy: AmplitudeBatchPolicy,
+) -> None:
+    events_path = run_dir / "events.jsonl"
+    if not events_path.exists():
+        return
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    by_id = {int(event["event_id"]): event for event in events}
+    run_pool_events = [event for event in events if event.get("name") == "simulation.run_pool"]
+    rows: list[dict[str, Any]] = []
+    completed_value_count = 0
+    for unit_index, run_pool_event in enumerate(run_pool_events):
+        descendants = [
+            event
+            for event in events
+            if _is_descendant(event, int(run_pool_event["event_id"]), by_id)
+        ]
+        if amplitude_batch_policy.batch_amplitudes:
+            batch_span = _nearest_ancestor_named(
+                run_pool_event,
+                "protocol.sweep.batched_values",
+                by_id,
+            )
+            value_count = int((batch_span or {}).get("metadata", {}).get("value_count", 0))
+            unit_amplitudes = amplitudes[
+                completed_value_count : completed_value_count + value_count
+            ]
+        else:
+            value_count = 1
+            unit_amplitudes = amplitudes[unit_index : unit_index + 1]
+
+        run_pool_ms = float(run_pool_event.get("duration_ms", 0.0))
+        all_wait_ms = _sum_stage(descendants, "kernel.wait")
+        base = {
+            "unit_index": unit_index,
+            "amplitude_count": value_count,
+            "amplitudes_uA": " ".join(f"{value:g}" for value in unit_amplitudes),
+            "run_pool_ms": run_pool_ms,
+            "kernel_wait_ms": all_wait_ms,
+            "kernel_wait_pct_run_pool": _percent(all_wait_ms, run_pool_ms),
+        }
+        for mode in ("all", "double", "single"):
+            mode_events = descendants if mode == "all" else [
+                event for event in descendants if _event_mode(event, by_id) == mode
+            ]
+            row = dict(base)
+            row["mode"] = mode
+            group_ms = (
+                run_pool_ms
+                if mode == "all"
+                else _sum_stage(mode_events, "dispatch.group.total")
+            )
+            row["group_ms"] = group_ms
+            for stage in _RUN_POOL_DETAIL_STAGES:
+                row[f"{stage}_ms"] = _sum_stage(mode_events, stage)
+            wait_ms = float(row["kernel.wait_ms"])
+            row["kernel_wait_pct_group"] = _percent(wait_ms, group_ms)
+            rows.append(row)
+        completed_value_count += value_count
+
+    if not rows:
+        return
+    fieldnames = list(rows[0])
+    with (run_dir / "run_pool_detail.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _is_descendant(
+    event: dict[str, Any],
+    ancestor_id: int,
+    by_id: dict[int, dict[str, Any]],
+) -> bool:
+    parent_id = event.get("parent_event_id")
+    while parent_id is not None:
+        if int(parent_id) == ancestor_id:
+            return True
+        parent = by_id.get(int(parent_id))
+        if parent is None:
+            return False
+        parent_id = parent.get("parent_event_id")
+    return False
+
+
+def _nearest_ancestor_named(
+    event: dict[str, Any],
+    name: str,
+    by_id: dict[int, dict[str, Any]],
+) -> dict[str, Any] | None:
+    parent_id = event.get("parent_event_id")
+    while parent_id is not None:
+        parent = by_id.get(int(parent_id))
+        if parent is None:
+            return None
+        if parent.get("name") == name:
+            return parent
+        parent_id = parent.get("parent_event_id")
+    return None
+
+
+def _event_mode(
+    event: dict[str, Any],
+    by_id: dict[int, dict[str, Any]],
+) -> str | None:
+    current: dict[str, Any] | None = event
+    while current is not None:
+        mode = current.get("metadata", {}).get("mode")
+        if mode in {"single", "double"}:
+            return str(mode)
+        parent_id = current.get("parent_event_id")
+        current = None if parent_id is None else by_id.get(int(parent_id))
+    return None
+
+
+def _sum_stage(events: list[dict[str, Any]], name: str) -> float:
+    return sum(
+        float(event.get("duration_ms", 0.0))
+        for event in events
+        if event.get("name") == name
+    )
+
+
+def _percent(value: float, total: float) -> float:
+    return 0.0 if total <= 0.0 else 100.0 * value / total
 
 
 @contextlib.contextmanager

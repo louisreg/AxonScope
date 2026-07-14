@@ -47,6 +47,8 @@ class ExampleConfig:
     gmsh_n_core: int | None = 1
     execution_policy: axs.ExecutionPolicy | None = None
     random_seed: int = 0
+    batch_amplitudes: bool = False
+    amplitude_batch_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,8 @@ def run_fascicle_recruitment_example(
             execution_policy=config.execution_policy,
             progress=True,
             solver_progress=config.solver_progress,
+            batch_amplitudes=config.batch_amplitudes,
+            amplitude_batch_size=config.amplitude_batch_size,
         )
 
     fig, ax = plt.subplots(figsize=(7.0, 4.5), constrained_layout=True)

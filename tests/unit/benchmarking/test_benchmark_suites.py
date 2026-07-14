@@ -164,6 +164,8 @@ def test_with_nrv_examples_dry_run_writes_case_table(tmp_path: Path, capsys):
                 "3",
                 "--amplitudes-uA",
                 "0,300",
+                "--amplitude-batch-policy",
+                "10",
             ]
         )
         == 0
@@ -175,6 +177,7 @@ def test_with_nrv_examples_dry_run_writes_case_table(tmp_path: Path, capsys):
     assert rows[0]["label"] == "synthetic_fascicle_geometry"
     assert rows[0]["axons_per_fascicle"] == "3"
     assert rows[0]["amplitudes_uA"] == "0.0,300.0"
+    assert rows[0]["amplitude_batch_policy"] == "10"
 
 
 def test_recruitment_dry_run_supports_gpu_profile_and_case_filter(tmp_path: Path, capsys):
