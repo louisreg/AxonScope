@@ -640,6 +640,24 @@ These items are intentionally not ordered or scoped into a phase yet.
     recruitment result is byte-identical to the reference artifact, including
     activation counts `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111
     112 112 114 120`.
+  - [ ] Reduce GPU double-cable execution time now attributed to
+    `kernel.dispatch_jax`. The repeated-amplitude P100 trace
+    `benchmark/results/kaggle/20260714_143224_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-host-leak-batch2-a19da1a`
+    confirms that JIT compilation and `runtime.prepare` are reused after the
+    first batch, but the active `jax_triton_loop_xb` route still invokes one
+    Triton block solve per time step. A matching unchunked run at
+    `benchmark/results/kaggle/20260714_144642_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-unchunked-batch2-5ac6334`
+    improved cold `run_pool` from `7.708` to `5.295 s` while warm batches only
+    moved from `0.679` to `0.662 s`, proving that Python time chunks are not the
+    warm bottleneck. First remove the cold second-shape compile by padding the
+    final chunk or selecting an unchunked observer scan when appropriate; then
+    benchmark a model-agnostic persistent/fused temporal GPU route that performs
+    multiple membrane-plus-block-solve steps per device invocation. The
+    real-shape `B=36, Nx=234, Nt=3000` P100 matrix at
+    `benchmark/results/kaggle/20260714_145540_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-double-realshape-blockb-5ac6334`
+    found no meaningful warm sensitivity to `BLOCK_B=8/16/32/64`
+    (`238-243 ms/amplitude`), so do not add an adaptive tile-width policy for
+    this problem.
   - [x] Optimize the first native amplitude-batching bottleneck. Commit
     `a572742` changed native amplitude clones to reuse the source axon object
     while keeping each `AxonInstance` separate and mutable only through its
