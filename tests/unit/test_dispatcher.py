@@ -443,6 +443,18 @@ def test_dispatch_plan_groups_shifted_mrg_double_cable_rows():
     assert plan.groups[0].batch_kind == "parameter-double-cable"
 
 
+def test_dispatch_group_reuses_static_cohort_metadata():
+    plan = dispatch_plan_module.build_dispatch_plan(
+        [_passive_double_cable_axon(amp_nA=0.1 + 0.01 * index) for index in range(3)]
+    )
+    group = plan.groups[0]
+
+    assert group.pool_indices is group.pool_indices
+    assert group.axons is group.axons
+    assert group.simulations is group.simulations
+    assert group.empty_record_indices is group.empty_record_indices
+
+
 def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
     axons = [
         _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)

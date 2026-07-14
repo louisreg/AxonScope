@@ -194,6 +194,13 @@ def _run_pool_checked(
                     )
                     raise NotImplementedError(reason)
                 progress_reporter.finish_group(group)
+            if _is_complete_single_cohort_result(
+                plan,
+                group=group,
+                group_results=group_results,
+            ):
+                record_benchmark_metadata(dispatch_result_validation="cohort-identity")
+                return group_results
             for result in group_results:
                 indices = (
                     result.indices
@@ -212,6 +219,27 @@ def _run_pool_checked(
     if any(index < 0 or index >= len(plan.items) for index in seen_indices):
         raise RuntimeError("pool dispatch did not produce all axon results.")
     return tuple(results)
+
+
+def _is_complete_single_cohort_result(
+    plan: DispatchPlan,
+    *,
+    group: DispatchGroup,
+    group_results: tuple[DispatchRecord, ...],
+) -> bool:
+    """Recognize a complete internal cohort result without scanning its rows."""
+
+    if len(plan.groups) != 1 or len(group_results) != 1:
+        return False
+    result = group_results[0]
+    return (
+        isinstance(result, DispatchCohortRecord)
+        and result.group_id == group.group_id
+        and result.group_size == group.size
+        and result.indices is group.pool_indices
+        and result.axons is group.axons
+        and result.simulations is group.simulations
+    )
 
 
 def _resolve_dispatch_scheduling(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections import OrderedDict
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any, Iterable, Literal, Sequence
 
 import numpy as np
@@ -40,11 +41,29 @@ class DispatchGroup:
     nx: int
     geometry_shared: bool = True
 
-    @property
+    @cached_property
     def pool_indices(self) -> tuple[int, ...]:
         """Input-order indices represented by this group."""
 
         return tuple(item.index for item in self.items)
+
+    @cached_property
+    def axons(self) -> tuple[Axon, ...]:
+        """Descriptive axons represented by this group."""
+
+        return tuple(item.simulation.axon for item in self.items)
+
+    @cached_property
+    def simulations(self) -> tuple[AxonInstance, ...]:
+        """Executable axon instances represented by this group."""
+
+        return tuple(item.simulation for item in self.items)
+
+    @cached_property
+    def empty_record_indices(self) -> tuple[None, ...]:
+        """Shared no-recording row metadata for compact cohort results."""
+
+        return (None,) * len(self.items)
 
     @property
     def size(self) -> int:
@@ -52,14 +71,14 @@ class DispatchGroup:
 
         return len(self.items)
 
-    @property
+    @cached_property
     def batch_kind(self) -> str:
         """Return the intended batch route for this group."""
 
         prefix = "strict" if self.geometry_shared else "parameter"
         return f"{prefix}-{self.mode}-cable"
 
-    @property
+    @cached_property
     def has_padding(self) -> bool:
         """Whether rows in this group require spatial padding to share one shape."""
 

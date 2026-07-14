@@ -87,9 +87,9 @@ def dispatch_results_from_batch(
         ):
             return (
                 DispatchCohortRecord(
-                    indices=tuple(item.index for item in group.items),
-                    axons=tuple(item.simulation.axon for item in group.items),
-                    simulations=tuple(item.simulation for item in group.items),
+                    indices=group.pool_indices,
+                    axons=group.axons,
+                    simulations=group.simulations,
                     Vm=vm_values,
                     t=t,
                     group_id=group.group_id,
@@ -376,7 +376,7 @@ def _cohort_record_indices(
         return row_record_indices
     if kernel_record_indices is not None:
         return tuple(kernel_record_indices for _ in group.items)
-    return tuple(None for _ in group.items)
+    return group.empty_record_indices
 
 
 def _posthoc_observations_for_row(
