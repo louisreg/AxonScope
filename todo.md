@@ -379,6 +379,75 @@ improvements.
   chunk callbacks, while final synchronization remains `waiting for JAX work`
   and benchmark timing keeps `kernel.wait` as the explicit device wait span.
 
+### P14 - JAX Temporal Solver And Dispatch Optimization
+
+Primary objective: reduce `kernel.dispatch_jax + kernel.wait` and total
+`simulation.run_pool` time on the canonical single-cable and double-cable GPU
+routes. Treat `kernel.dispatch_jax` as part of solver execution: it contains the
+jitted temporal scan, membrane dynamics, system assembly, solver calls, and
+VmRaster updates, not merely Python launch overhead. Do not accept a timing
+shift from `kernel.wait` into `kernel.dispatch_jax`, or the reverse, as a
+performance gain.
+
+- [ ] Establish a reproducible GPU baseline derived from the
+  `examples/with_nrv/01_synthetic_fascicle_geometry.py` AxonScope workload but
+  independent of NRV setup time. Cover single-cable and double-cable,
+  `Naxon={196,1024}`, representative `Nx`/`Nt`, VmRaster, first-amplitude cold
+  execution, subsequent warm amplitudes, and
+  `amplitude_batch_size={1,2,full}`. Record `simulation.run_pool`,
+  `kernel.enqueue`, `kernel.dispatch_jax`, `kernel.wait`, throughput in
+  axon-timesteps/s, memory, executable/cache identity, and numerical outputs.
+- [ ] Decompose the jitted temporal program with JAX/HLO inspection and Nsight
+  device traces. Measure membrane gate/current/conductance evaluation,
+  factorized stimulation, linear-system assembly, tridiagonal or Triton solve,
+  VmRaster update, materialized temporaries/copies, and the number and duration
+  of JAX kernels and Triton custom calls. Keep this instrumentation in
+  benchmark tooling rather than production runtime APIs.
+- [ ] Hoist run-invariant work out of the dispatched temporal executable where
+  evidence shows it is still executed on every call. Evaluate prepared static
+  cable terms, area/background arrays, `cx_plus_gx`, `cx_over_dt`, previous
+  current rows, scan layouts/transposes, and static observer tables. Keep the
+  prepared representation internal, typed, reusable across amplitudes, and
+  membrane-model agnostic.
+- [ ] Optimize the existing single-cable program before introducing a new
+  solver route. Compare `vmap(scan(step))` with `scan(vmap(step))`, inspect the
+  lowering of `jax.lax.linalg.tridiagonal_solve`, and remove only HLO-confirmed
+  intermediate materializations or kernel boundaries. Preserve the canonical
+  factorized-stimulation and strict VmRaster paths.
+- [ ] Optimize the existing double-cable program in two stages. First fuse
+  linear-system assembly and the tiled-Thomas Triton solve so the custom call
+  consumes compact physical/runtime inputs instead of fully materialized
+  system arrays. Then prototype temporal blocking with `K={2,4,8,16}` steps
+  per device call, selecting by total runtime, memory/register pressure, and
+  compile cost rather than assuming a full-duration persistent kernel is best.
+- [ ] Revisit double-cable Triton input/output aliasing only as part of the
+  dispatch/copy optimization pass. The retained three-repeat warm medians are
+  `run_pool=437.5 ms`, `dispatch_jax=82.7 ms`, and `wait=28.7 ms` without
+  aliases versus `565.5/113.5/9.75 ms` with aliases. Profile XLA buffer
+  assignment and copy insertion; test alias subsets, truly ephemeral custom
+  call operands, outer-JIT donation, larger `Nx`, and solver-heavy durations.
+  Retain aliasing only if both total `run_pool` and
+  `kernel.dispatch_jax + kernel.wait` improve with identical results.
+- [ ] Treat generated membrane/JAX model code as a conditional optimization,
+  not the starting point. Promote it only if profiles show material warm costs
+  from membrane gathers, branches, generic row dispatch, or repeated
+  intermediates, or if temporal Triton fusion requires generated membrane
+  operations. Any JAX/Triton lowering must be generated from the canonical
+  membrane contract and remain model agnostic; do not hard-code MRG or another
+  built-in model in the solver. Generated-source and persistent executable
+  caches may improve cold start, but do not count them as warm dispatch gains.
+- [ ] Validate each promoted optimization against CPU references and the prior
+  GPU route. Require matching activation/recruitment outputs, defined Vm
+  tolerances, no unintended GPU fallback, and coverage of single/double cable,
+  stateless/stateful membrane execution, factorized stimulation, and VmRaster.
+  Finish with local CPU and Kaggle GPU runs for `examples/basic/06`, `07`,
+  `08`, and `examples/with_nrv/01`, reporting cold and warm CPU/GPU ratios.
+- [ ] Accept an optimization only when fresh repeated evidence improves
+  `kernel.dispatch_jax + kernel.wait` and end-to-end `simulation.run_pool`
+  without a disproportionate cold-start or memory regression. Prefer at least
+  a 10-15% repeatable gain before carrying a materially more complex kernel
+  path.
+
 ### P3 - Documentation And Examples
 
 - [x] README rewritten after post-P7 stabilization.
@@ -422,17 +491,6 @@ These items are intentionally not ordered or scoped into a phase yet.
 - [ ] Revisit the caching strategy: generate artifacts only for the requested
   runtime, keep cache state clean, and decide whether built-in models should be
   built on first call and/or at package install time.
-- [ ] Revisit double-cable Triton input/output aliasing together with a serious
-  dispatch/copy optimization pass. The retained three-repeat warm medians are
-  `run_pool=437.5 ms`, `dispatch_jax=82.7 ms`, and `wait=28.7 ms` without
-  aliases versus `565.5/113.5/9.75 ms` with aliases. The wait reduction is
-  substantial, but `dispatch+wait` and end-to-end time currently regress.
-  Profile XLA buffer assignment/copy insertion and Nsight device activity;
-  sweep larger `Nx`, batch sizes, and solver-heavy durations; test alias
-  subsets, truly ephemeral custom-call operands, and outer-JIT donation where
-  ownership permits it. Retain aliasing only if total `run_pool` and
-  `dispatch_jax + wait` improve with identical numerical results, rather than
-  accepting a synchronization-boundary shift as solver speedup.
 - [ ] Evaluate JAX's native persistent compilation cache for non-Triton JAX
   routes, then enable it under `.axonscope_cache/runtime/jax/xla` only if fresh
   evidence is positive. Cover single-cable CPU/GPU, CPU double-cable Thomas,

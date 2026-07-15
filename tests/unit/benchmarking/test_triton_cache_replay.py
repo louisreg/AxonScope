@@ -24,6 +24,7 @@ def test_triton_cache_replay_uses_two_fresh_processes(
             str(tmp_path),
         ]
     )
+    recruitment_amplitude_batch._resolve_workload_args(args)
     calls: list[tuple[list[str], dict[str, str]]] = []
 
     def fake_run(command, *, cwd, env, check):

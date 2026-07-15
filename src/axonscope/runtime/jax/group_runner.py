@@ -868,6 +868,12 @@ def _enqueue_double_cable_batch_group(
             "benchmark_observer_state_scope": benchmark_observer_state_scope,
         },
     )
+    require_factorized_extracellular = _requires_factorized_gpu_observer_route(
+        runtime_context=runtime_context,
+        observer_plan=observer_plan,
+        kernel_options=kernel_options,
+        extracellular_stimulation_count=cohort.extracellular_stimulation_count,
+    )
     lowered_inputs = _lower_double_cable_inputs(
         public_group=group,
         kernel_group=kernel_group,
@@ -875,12 +881,7 @@ def _enqueue_double_cable_batch_group(
         cohort=cohort,
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
-        require_factorized_extracellular=_requires_factorized_gpu_observer_route(
-            runtime_context=runtime_context,
-            observer_plan=observer_plan,
-            kernel_options=kernel_options,
-            extracellular_stimulation_count=cohort.extracellular_stimulation_count,
-        ),
+        require_factorized_extracellular=require_factorized_extracellular,
     )
     _guard_gpu_observer_extracellular_route(
         runtime_context=runtime_context,
@@ -953,6 +954,7 @@ def _enqueue_double_cable_batch_group(
             progress_callback=progress_callback,
             solver_engine=solver_engine,
             benchmark_observer_state_scope=benchmark_observer_state_scope,
+            require_compact_factorized_extracellular=require_factorized_extracellular,
         )
         _record_kernel_output_metadata(out)
     with benchmark_span(

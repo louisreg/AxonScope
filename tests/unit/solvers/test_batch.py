@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import pytest
 
 import axonscope as axs
+import axonscope.runtime.jax.kernels.double_cable as double_cable_kernels
 import axonscope.runtime.jax.kernels.single_cable as single_cable_kernels
 from axonscope.analytical import PointSourceElectrode
 from axonscope.runtime.jax.inputs.extracellular import (
@@ -1171,6 +1172,14 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
         options=BatchOptions.none(),
         observers=observer,
     )
+    with pytest.raises(RuntimeError, match="compact factorized extracellular payload"):
+        kernel.run(
+            extracellular_potential_mid_mV=dense_mid,
+            extracellular_potential_initial_previous_mV=dense_previous,
+            options=BatchOptions.none(),
+            observers=observer,
+            require_compact_factorized_extracellular=True,
+        )
     compact = kernel.run(
         extracellular_potential_mid_mV=factorized,
         options=BatchOptions.none(),
@@ -1195,7 +1204,7 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     )
 
 
-def test_double_cable_indexed_current_table_matches_dense_thomas():
+def test_double_cable_indexed_current_table_matches_dense_thomas(monkeypatch):
     axon = hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
     dt = 0.01
@@ -1250,15 +1259,32 @@ def test_double_cable_indexed_current_table_matches_dense_thomas():
         options=BatchOptions.none(),
         observers=observer,
     )
+
+    def fail_materialization(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("compact indexed input must not be materialized")
+
+    monkeypatch.setattr(
+        double_cable_kernels,
+        "materialize_factorized_extracellular_potential_batch",
+        fail_materialization,
+    )
+    monkeypatch.setattr(
+        double_cable_kernels,
+        "materialize_factorized_extracellular_potential_initial_previous",
+        fail_materialization,
+    )
     compact = kernel.run(
         extracellular_potential_mid_mV=indexed,
         options=BatchOptions.none(),
         observers=observer,
+        require_compact_factorized_extracellular=True,
     )
     chunked = kernel.run(
         extracellular_potential_mid_mV=indexed,
         options=BatchOptions.none(time_chunk_steps=17),
         observers=observer,
+        require_compact_factorized_extracellular=True,
     )
 
     expected = np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words)

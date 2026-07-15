@@ -20,6 +20,7 @@ python benchmark/run.py --script recruitment_curves --preset gpu_smoke --platfor
 python benchmark/run.py --script threshold_curves --preset quick --platform cpu
 python benchmark/run.py --script recruitment_curves --preset quick --platform cpu
 python benchmark/run.py --script basic_examples --preset quick --platform cpu --examples 06,07,08
+python benchmark/run.py --script with_nrv_examples --preset quick --platform cpu --examples 01,02
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --cpu
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script threshold_curves --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100
 python benchmark/kaggle/run_kernel.py --username YOUR_KAGGLE_USERNAME --script basic_examples --preset gpu_smoke --platform gpu --machine-shape NvidiaTeslaP100 -- --examples 06,07,08
@@ -55,6 +56,35 @@ future benchmark/baseline work until their adapter contracts are defined.
 without changing their public workflow, records one cold run plus optional
 warmups/repeats, and writes `runs.csv`, per-run benchmark traces, and
 `report.md`.
+
+`with_nrv_examples` is the matching executable-docs gate for
+`examples/with_nrv/01_synthetic_fascicle_geometry.py` and
+`examples/with_nrv/02_realistic_fascicle_geometry.py`. It preserves the public
+NRV-to-AxonScope handoff path but uses smoke-scale defaults unless explicitly
+overridden, because NRV/FEM setup dominates the wall time.
+
+`recruitment_amplitude_batch` also provides the NRV-independent P14 temporal
+solver baseline. The `p14_realistic` workload keeps the AxonScope dimensions
+of `with_nrv/01` (196 axons, 5 mm cables, 3 ms at 1 us, and 21 amplitudes from
+0 to 300 uA) while replacing NRV geometry/FEM setup with deterministic
+analytical footprints. Run single- and double-cable populations separately so
+their compilation and execution costs remain attributable:
+
+```bash
+python benchmark/run.py \
+  --script recruitment_amplitude_batch \
+  --platform cpu \
+  --workload p14_realistic \
+  --cable double \
+  --policies 1,2,full \
+  --output benchmark/results/p14_double_cpu
+```
+
+Each run writes aggregate timings to `runs.csv` and one row per amplitude
+batch and cable mode to `run_pool_detail.csv`, including
+`kernel.dispatch_jax`, `kernel.wait`, their combined solver time, and solver
+percentages. Add `--profile` only for a dedicated trace run; profiling is off
+for timing baselines.
 
 Use `--time-chunk-steps default` or omit the option to keep AxonScope's
 recording-specific default; for observer-only runs this currently means the

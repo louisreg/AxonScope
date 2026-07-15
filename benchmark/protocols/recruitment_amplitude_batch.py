@@ -19,12 +19,14 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import axonscope as axs
+from benchmark.analysis.run_pool_detail import write_run_pool_detail
 from axonscope.benchmarking import benchmark_span
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = REPO_ROOT / "benchmark" / "results" / "recruitment_amplitude_batch"
 DEFAULT_AMPLITUDES_UA = (5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 120.0, 160.0)
+P14_REALISTIC_AMPLITUDES_UA = tuple(float(value) for value in np.linspace(0.0, 300.0, 21))
 
 INTERESTING_STAGES = (
     "benchmark.build_population",
@@ -65,11 +67,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", default="quick")
     parser.add_argument("--platform", choices=("cpu", "gpu", "nrv"), default="cpu")
+    parser.add_argument(
+        "--workload",
+        choices=("legacy", "p14_realistic"),
+        default="legacy",
+    )
+    parser.add_argument(
+        "--cable",
+        choices=("single", "double", "mixed"),
+        default="mixed",
+    )
     parser.add_argument("--policies", default="sequential,1,10,20,full")
     parser.add_argument("--fibers-per-family", type=int, default=100)
+    parser.add_argument(
+        "--axon-count",
+        type=int,
+        help="Total axon count; defaults to 196 for p14_realistic.",
+    )
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--duration-ms", type=float, default=4.0)
-    parser.add_argument("--dt-ms", type=float, default=0.025)
+    parser.add_argument("--duration-ms", type=float)
+    parser.add_argument("--dt-ms", type=float)
+    parser.add_argument(
+        "--amplitudes-uA",
+        help="Comma-separated recruitment amplitudes in microamperes.",
+    )
+    parser.add_argument("--time-chunk-steps", type=int, default=128)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -104,18 +126,61 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--cold-only", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--profile-create-perfetto", action="store_true")
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
 
 
+def _resolve_workload_args(args: argparse.Namespace) -> None:
+    realistic = args.workload == "p14_realistic"
+    if args.duration_ms is None:
+        args.duration_ms = 3.0 if realistic else 4.0
+    if args.dt_ms is None:
+        args.dt_ms = 0.001 if realistic else 0.025
+    if args.axon_count is None:
+        if realistic:
+            args.axon_count = 196
+        elif args.cable == "mixed":
+            args.axon_count = 2 * int(args.fibers_per_family)
+        else:
+            args.axon_count = int(args.fibers_per_family)
+    args.amplitudes = _parse_amplitudes(
+        args.amplitudes_uA,
+        default=(P14_REALISTIC_AMPLITUDES_UA if realistic else DEFAULT_AMPLITUDES_UA),
+    )
+
+
+def _parse_amplitudes(
+    value: str | None,
+    *,
+    default: tuple[float, ...],
+) -> tuple[float, ...]:
+    if value is None:
+        return default
+    amplitudes = tuple(float(token.strip()) for token in value.split(",") if token.strip())
+    if not amplitudes:
+        raise SystemExit("--amplitudes-uA selected no amplitudes.")
+    return amplitudes
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _resolve_workload_args(args)
     if args.repeats < 1:
         raise SystemExit("--repeats must be >= 1.")
     if args.warmups < 0:
         raise SystemExit("--warmups must be >= 0.")
     if args.fibers_per_family < 1:
         raise SystemExit("--fibers-per-family must be >= 1.")
+    if args.axon_count < 1:
+        raise SystemExit("--axon-count must be >= 1.")
+    if args.time_chunk_steps < 1:
+        raise SystemExit("--time-chunk-steps must be >= 1.")
+    if args.duration_ms <= 0.0:
+        raise SystemExit("--duration-ms must be > 0.")
+    if args.dt_ms <= 0.0:
+        raise SystemExit("--dt-ms must be > 0.")
 
     policies = _parse_policies(args.policies)
     output = Path(args.output)
@@ -263,16 +328,26 @@ def _triton_cache_child_command(
         str(args.preset),
         "--platform",
         "gpu",
+        "--workload",
+        str(args.workload),
+        "--cable",
+        str(args.cable),
         "--policies",
         "full",
         "--fibers-per-family",
         str(args.fibers_per_family),
+        "--axon-count",
+        str(args.axon_count),
         "--seed",
         str(args.seed),
         "--duration-ms",
         str(args.duration_ms),
         "--dt-ms",
         str(args.dt_ms),
+        "--amplitudes-uA",
+        ",".join(str(value) for value in args.amplitudes),
+        "--time-chunk-steps",
+        str(args.time_chunk_steps),
         "--repeats",
         "1",
         "--warmups",
@@ -372,6 +447,7 @@ def _run_one(
     failed = False
     error = ""
     counts = np.asarray([], dtype=int)
+    n_axons = 0
     try:
         with axs.benchmark(
             run_dir,
@@ -381,9 +457,9 @@ def _run_one(
             record_shapes=True,
             memory_trace=args.memory_trace,
             memory_top_n=args.memory_top_n,
-            profile=False,
-            profile_runtime="auto",
-            profile_create_perfetto=False,
+            profile=bool(args.profile),
+            profile_runtime="jax" if args.profile else "auto",
+            profile_create_perfetto=bool(args.profile_create_perfetto),
             jax_device_memory_profile=False,
         ):
             with benchmark_span(
@@ -394,6 +470,7 @@ def _run_one(
                 fibers_per_family=args.fibers_per_family,
             ):
                 pool, update, current_steps, criterion = _build_workload(args)
+                n_axons = len(pool)
             execution_policy = _execution_policy(args.platform)
             with benchmark_span(
                 "benchmark.recruitment_sweep",
@@ -411,6 +488,9 @@ def _run_one(
                     dt=float(args.dt_ms) * axs.ms,
                     criterion=criterion,
                     recording=axs.Recording.none(),
+                    batch_options=axs.BatchOptions.none(
+                        time_chunk_steps=int(args.time_chunk_steps)
+                    ),
                     batch_amplitudes=policy.batch_amplitudes,
                     amplitude_batch_size=policy.amplitude_batch_size,
                     execution_policy=execution_policy,
@@ -418,6 +498,11 @@ def _run_one(
                     solver_progress=False,
                 )
             counts = np.asarray(curve.activated, dtype=bool).sum(axis=1)
+        write_run_pool_detail(
+            run_dir,
+            amplitudes=args.amplitudes,
+            batch_amplitudes=policy.batch_amplitudes,
+        )
     except BaseException as exc:
         failed = True
         error = f"{type(exc).__name__}: {exc}"
@@ -438,8 +523,10 @@ def _run_one(
                 "repeat": repeat,
                 "platform": args.platform,
                 "fibers_per_family": args.fibers_per_family,
-                "n_axons": args.fibers_per_family * 2,
-                "amplitude_count": len(DEFAULT_AMPLITUDES_UA),
+                "workload": args.workload,
+                "cable": args.cable,
+                "n_axons": n_axons or args.axon_count,
+                "amplitude_count": len(args.amplitudes),
                 "wall_ms": (end - start) / 1_000_000.0,
                 "failed": failed,
                 "error": error,
@@ -455,13 +542,14 @@ def _build_workload(args: argparse.Namespace) -> tuple[
     axs.analysis.ActivationCriterion,
 ]:
     rng = np.random.default_rng(int(args.seed))
-    fibers_per_family = int(args.fibers_per_family)
-    circle_radius = 125.0 * axs.um
-    fiber_length = 1500.0 * axs.um
+    single_count, double_count = _cable_counts(args.cable, int(args.axon_count))
+    realistic = args.workload == "p14_realistic"
+    circle_radius = (250.0 if realistic else 125.0) * axs.um
+    fiber_length = (5_000.0 if realistic else 1_500.0) * axs.um
     stim_start = 0.20 * axs.ms
     pulse_width = 0.10 * axs.ms
     sigma = 0.3 * axs.S_per_m
-    current_steps = np.asarray(DEFAULT_AMPLITUDES_UA, dtype=float) * axs.uA
+    current_steps = np.asarray(args.amplitudes, dtype=float) * axs.uA
 
     electrode = axs.analytical.PointSourceElectrode(
         x=fiber_length / 2.0,
@@ -476,19 +564,19 @@ def _build_workload(args: argparse.Namespace) -> tuple[
     )
 
     radius_um = circle_radius.to(axs.um).magnitude
-    unmyelinated_angles = rng.uniform(0.0, 2.0 * np.pi, fibers_per_family)
-    unmyelinated_radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, fibers_per_family))
+    unmyelinated_angles = rng.uniform(0.0, 2.0 * np.pi, single_count)
+    unmyelinated_radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, single_count))
     unmyelinated_y = unmyelinated_radii * np.cos(unmyelinated_angles) * axs.um
     unmyelinated_z = unmyelinated_radii * np.sin(unmyelinated_angles) * axs.um
 
-    myelinated_angles = rng.uniform(0.0, 2.0 * np.pi, fibers_per_family)
-    myelinated_radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, fibers_per_family))
+    myelinated_angles = rng.uniform(0.0, 2.0 * np.pi, double_count)
+    myelinated_radii = radius_um * np.sqrt(rng.uniform(0.0, 1.0, double_count))
     myelinated_y = myelinated_radii * np.cos(myelinated_angles) * axs.um
     myelinated_z = myelinated_radii * np.sin(myelinated_angles) * axs.um
 
-    unmyelinated_diameters = rng.uniform(0.4, 1.2, fibers_per_family) * axs.um
+    unmyelinated_diameters = rng.uniform(0.4, 1.2, single_count) * axs.um
     myelinated_diameters = (
-        rng.choice(np.asarray([7.3, 10.0, 12.8]), size=fibers_per_family)
+        rng.choice(np.asarray([7.3, 10.0, 12.8]), size=double_count)
         * axs.um
     )
 
@@ -502,7 +590,7 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         axon = axs.axons.RattayAberham(
             length=fiber_length,
             diameter=diameter,
-            compartments=61,
+            compartments=(200 if realistic else 61),
             celsius=37.0 * axs.degC,
         )
         extracellular = axs.analytical.point_source_stimulation(
@@ -523,12 +611,23 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         myelinated_z,
         strict=True,
     ):
-        axon = axs.axons.MRG(
-            diameter=diameter,
-            nodes=4,
-            length=fiber_length,
-            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
-        )
+        if realistic:
+            nodes = max(
+                2,
+                axs.axons.mrg_like_nodes_from_length(diameter, fiber_length),
+            )
+            axon = axs.axons.MRG(
+                diameter=diameter,
+                nodes=nodes,
+                length=fiber_length,
+            )
+        else:
+            axon = axs.axons.MRG(
+                diameter=diameter,
+                nodes=4,
+                length=fiber_length,
+                compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            )
         extracellular = axs.analytical.point_source_stimulation(
             electrode,
             axon.layout.position_values(unit=axs.um) * axs.um,
@@ -565,6 +664,15 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         )
 
     return tuple(pool), update_point_source_current, current_steps, criterion
+
+
+def _cable_counts(cable: str, axon_count: int) -> tuple[int, int]:
+    if cable == "single":
+        return axon_count, 0
+    if cable == "double":
+        return 0, axon_count
+    single_count = axon_count // 2
+    return single_count, axon_count - single_count
 
 
 def _execution_policy(platform: str) -> axs.ExecutionPolicy:
@@ -618,6 +726,8 @@ def _write_runs(output: Path, rows: list[dict[str, Any]]) -> None:
         "phase",
         "repeat",
         "platform",
+        "workload",
+        "cable",
         "fibers_per_family",
         "n_axons",
         "amplitude_count",
@@ -642,7 +752,16 @@ def _write_cases(
     with (output / "cases.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=("script", "preset", "platform", "policy", "n_axons"),
+            fieldnames=(
+                "script",
+                "preset",
+                "platform",
+                "workload",
+                "cable",
+                "policy",
+                "n_axons",
+                "amplitude_count",
+            ),
         )
         writer.writeheader()
         for policy in policies:
@@ -651,8 +770,11 @@ def _write_cases(
                     "script": "recruitment_amplitude_batch",
                     "preset": args.preset,
                     "platform": args.platform,
+                    "workload": args.workload,
+                    "cable": args.cable,
                     "policy": policy.label,
-                    "n_axons": args.fibers_per_family * 2,
+                    "n_axons": args.axon_count,
+                    "amplitude_count": len(args.amplitudes),
                 }
             )
 
@@ -666,12 +788,15 @@ def _write_manifest(
         "script": "recruitment_amplitude_batch",
         "preset": args.preset,
         "platform": args.platform,
+        "workload": args.workload,
+        "cable": args.cable,
         "policies": [policy.label for policy in policies],
         "fibers_per_family": args.fibers_per_family,
-        "n_axons": args.fibers_per_family * 2,
-        "amplitudes_uA": list(DEFAULT_AMPLITUDES_UA),
+        "n_axons": args.axon_count,
+        "amplitudes_uA": list(args.amplitudes),
         "duration_ms": args.duration_ms,
         "dt_ms": args.dt_ms,
+        "time_chunk_steps": args.time_chunk_steps,
         "repeats": args.repeats,
         "warmups": args.warmups,
         "cold_only": args.cold_only,
@@ -679,6 +804,8 @@ def _write_manifest(
         "validate_double_cable_kernel": args.validate_double_cable_kernel,
         "triton_cache_replay": args.triton_cache_replay,
         "memory_trace": args.memory_trace,
+        "profile": bool(args.profile),
+        "profile_create_perfetto": bool(args.profile_create_perfetto),
         "output": str(output),
     }
     with (output / "manifest.json").open("w", encoding="utf-8") as handle:
@@ -690,16 +817,17 @@ def _write_report(output: Path, rows: list[dict[str, Any]]) -> None:
     lines = [
         "# Recruitment Amplitude Batch Benchmark",
         "",
-        "| policy | phase | wall ms | build plan ms | build pool ms | "
+        "| cable | policy | phase | wall ms | build plan ms | build pool ms | "
         "refresh pool ms | run pool ms | dispatch_jax ms | wait ms | counts match |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in rows:
         lines.append(
             (
-                "| {policy} | {phase} | {wall} | {build_plan} | {build_pool} | "
+                "| {cable} | {policy} | {phase} | {wall} | {build_plan} | {build_pool} | "
                 "{refresh_pool} | {run_pool} | {dispatch} | {wait} | {match} |"
             ).format(
+                cable=row["cable"],
                 policy=row["policy"],
                 phase=row["phase"],
                 wall=_fmt(row.get("wall_ms", "")),
@@ -719,7 +847,8 @@ def _write_report(output: Path, rows: list[dict[str, Any]]) -> None:
 
 def _format_progress(row: dict[str, Any]) -> str:
     return (
-        f"{row['policy']} {row['phase']}#{row['repeat']}: "
+        f"{row['workload']} {row['cable']} {row['policy']} "
+        f"{row['phase']}#{row['repeat']}: "
         f"wall={float(row['wall_ms']):.1f} ms "
         f"build_plan={_fmt(row.get('dispatch.build_plan_ms', ''))} ms "
         f"build_pool={_fmt(row.get('protocol.sweep.build_amplitude_pool_ms', ''))} ms "

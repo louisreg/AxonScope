@@ -101,22 +101,6 @@ def _factorized_current_initial_previous_rows(
         return jnp.take(previous_arr, row_indices, axis=0)
     return previous_arr
 
-def _double_cable_factorized_vext_can_stay_compact(
-    batch: FactorizedExtracellularPotentialBatch,
-) -> bool:
-    previous = batch.current_initial_previous_A
-    if previous is None or batch.drive_count != 1:
-        return False
-    previous_is_scalar = jnp.asarray(previous).ndim == 0
-    if batch.shared_current:
-        return bool(previous_is_scalar)
-    if batch.current_row_scales is not None:
-        return bool(previous_is_scalar)
-    if batch.current_row_indices is not None:
-        previous_shape = tuple(int(dim) for dim in getattr(previous, "shape", ()))
-        return previous_is_scalar or len(previous_shape) == 1
-    return False
-
 def _single_cable_factorized_forcing_footprint_for_batch(
     batch: FactorizedExtracellularPotentialBatch,
     *,
@@ -243,7 +227,6 @@ def _compute_single_cable_factorized_forcing_footprint(
 
 __all__ = [
     "_compute_single_cable_factorized_forcing_footprint",
-    "_double_cable_factorized_vext_can_stay_compact",
     "_factorized_current_initial_previous_rows",
     "_factorized_current_mid_rows",
     "_single_cable_factorized_forcing_footprint_for_batch",

@@ -10,6 +10,9 @@ import jax.numpy as jnp
 
 from axonscope.benchmarking import benchmark_span
 from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
+from axonscope.runtime.jax.inputs.lowering import (
+    supports_compact_double_cable_factorized,
+)
 from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_initial_previous,
     materialize_factorized_extracellular_potential_batch,
@@ -37,7 +40,6 @@ from .chunking import (
     _vm_raster_probe_tables_for_kernel,
 )
 from .factorized import (
-    _double_cable_factorized_vext_can_stay_compact,
     _factorized_current_initial_previous_rows,
     _factorized_current_mid_rows,
 )
@@ -191,6 +193,7 @@ class DoubleCableBatchKernel:
         progress_callback: Callable[[int, int], None] | None = None,
         solver_engine: JaxSolverEngine | None = None,
         benchmark_observer_state_scope: str | None = None,
+        require_compact_factorized_extracellular: bool = False,
     ) -> BatchKernelResult:
         runtime = self.runtime
         extracellular = runtime.extracellular
@@ -226,11 +229,17 @@ class DoubleCableBatchKernel:
                     nx=nx,
                     dtype_local=dtype_local,
                 )
-                if _double_cable_factorized_vext_can_stay_compact(factorized_source):
+                if supports_compact_double_cable_factorized(factorized_source):
                     factorized_vext = factorized_source
                     vext_batch = None
                     batch_size = factorized_vext.batch_size
                 else:
+                    if require_compact_factorized_extracellular:
+                        raise RuntimeError(
+                            "JAX GPU observer-only double-cable execution cannot "
+                            "materialize an unsupported factorized extracellular "
+                            "payload; split it into compatible dispatch groups."
+                        )
                     with benchmark_span(
                         "kernel.materialize_inputs",
                         mode="double",
@@ -241,6 +250,11 @@ class DoubleCableBatchKernel:
                         )
                     batch_size = factorized_source.batch_size
             else:
+                if require_compact_factorized_extracellular:
+                    raise RuntimeError(
+                        "JAX GPU observer-only double-cable execution requires a "
+                        "compact factorized extracellular payload."
+                    )
                 vext_batch = _as_batched_time_space_array(
                     "extracellular_potential_mid_mV",
                     vext_mid,
@@ -863,50 +877,10 @@ def _run_double_cable_batch_observer_chunks(
         else None
     )
     if factorized_vext is not None:
-        if factorized_vext.current_initial_previous_A is None:
+        if not supports_compact_double_cable_factorized(factorized_vext):
             raise ValueError(
-                "factorized double-cable observer batches require "
-                "current_initial_previous_A."
-            )
-        previous_current = jnp.asarray(factorized_vext.current_initial_previous_A)
-        previous_shape_ok = previous_current.ndim == 0 or previous_current.shape == (
-            factorized_vext.batch_size,
-        )
-        if not previous_shape_ok:
-            with benchmark_span(
-                "kernel.materialize_inputs",
-                mode="double",
-                input="factorized_vext",
-                group_size=factorized_vext.batch_size,
-            ):
-                dense_vext = materialize_factorized_extracellular_potential_batch(
-                    factorized_vext
-                )
-            with benchmark_span(
-                "kernel.materialize_inputs",
-                mode="double",
-                input="factorized_vext_previous",
-                group_size=factorized_vext.batch_size,
-            ):
-                dense_previous = (
-                    materialize_factorized_extracellular_potential_initial_previous(
-                        factorized_vext
-                    )
-                )
-            return _run_double_cable_batch_observer_chunks(
-                runtime=runtime,
-                Veinit_mV=Veinit_mV,
-                observers=observers,
-                has_driven_extracellular=has_driven_extracellular,
-                stateless_vm_only=stateless_vm_only,
-                double_cable_block_solver=double_cable_block_solver,
-                tiled_thomas_block_b=tiled_thomas_block_b,
-                intracellular_current_density_mid=intracellular_current_density_mid,
-                extracellular_potential_mid_mV=dense_vext,
-                extracellular_potential_initial_previous_mV=dense_previous,
-                time_chunk_steps=time_chunk_steps,
-                observer_state_scope=observer_state_scope,
-                progress_callback=progress_callback,
+                "factorized double-cable observer batches require a compact "
+                "single-drive payload."
             )
         batch_size = factorized_vext.batch_size
     else:

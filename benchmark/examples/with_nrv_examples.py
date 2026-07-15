@@ -19,6 +19,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import axonscope as axs
+from benchmark.analysis.run_pool_detail import write_run_pool_detail
 from axonscope.benchmarking import benchmark_span
 
 
@@ -293,10 +294,10 @@ def _run_one(
     finally:
         end = time.perf_counter_ns()
         row = _row_from_run_dir(run_dir)
-        _write_run_pool_detail(
+        write_run_pool_detail(
             run_dir,
             amplitudes=amplitudes,
-            amplitude_batch_policy=amplitude_batch_policy,
+            batch_amplitudes=amplitude_batch_policy.batch_amplitudes,
         )
         row.update(
             {
@@ -532,154 +533,6 @@ def _format_progress(row: dict[str, Any]) -> str:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
-
-_RUN_POOL_DETAIL_STAGES = (
-    "dispatch.build_plan",
-    "runtime.prepare",
-    "inputs.positions",
-    "inputs.extracellular",
-    "kernel.enqueue",
-    "kernel.dispatch_jax",
-    "kernel.wait",
-    "kernel.finalize_observer",
-    "results.split_batch",
-    "results.to_public",
-)
-
-
-def _write_run_pool_detail(
-    run_dir: Path,
-    *,
-    amplitudes: tuple[float, ...],
-    amplitude_batch_policy: AmplitudeBatchPolicy,
-) -> None:
-    events_path = run_dir / "events.jsonl"
-    if not events_path.exists():
-        return
-    events = [
-        json.loads(line)
-        for line in events_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    by_id = {int(event["event_id"]): event for event in events}
-    run_pool_events = [event for event in events if event.get("name") == "simulation.run_pool"]
-    rows: list[dict[str, Any]] = []
-    completed_value_count = 0
-    for unit_index, run_pool_event in enumerate(run_pool_events):
-        descendants = [
-            event
-            for event in events
-            if _is_descendant(event, int(run_pool_event["event_id"]), by_id)
-        ]
-        if amplitude_batch_policy.batch_amplitudes:
-            batch_span = _nearest_ancestor_named(
-                run_pool_event,
-                "protocol.sweep.batched_values",
-                by_id,
-            )
-            value_count = int((batch_span or {}).get("metadata", {}).get("value_count", 0))
-            unit_amplitudes = amplitudes[
-                completed_value_count : completed_value_count + value_count
-            ]
-        else:
-            value_count = 1
-            unit_amplitudes = amplitudes[unit_index : unit_index + 1]
-
-        run_pool_ms = float(run_pool_event.get("duration_ms", 0.0))
-        all_wait_ms = _sum_stage(descendants, "kernel.wait")
-        base = {
-            "unit_index": unit_index,
-            "amplitude_count": value_count,
-            "amplitudes_uA": " ".join(f"{value:g}" for value in unit_amplitudes),
-            "run_pool_ms": run_pool_ms,
-            "kernel_wait_ms": all_wait_ms,
-            "kernel_wait_pct_run_pool": _percent(all_wait_ms, run_pool_ms),
-        }
-        for mode in ("all", "double", "single"):
-            mode_events = descendants if mode == "all" else [
-                event for event in descendants if _event_mode(event, by_id) == mode
-            ]
-            row = dict(base)
-            row["mode"] = mode
-            group_ms = (
-                run_pool_ms
-                if mode == "all"
-                else _sum_stage(mode_events, "dispatch.group.total")
-            )
-            row["group_ms"] = group_ms
-            for stage in _RUN_POOL_DETAIL_STAGES:
-                row[f"{stage}_ms"] = _sum_stage(mode_events, stage)
-            wait_ms = float(row["kernel.wait_ms"])
-            row["kernel_wait_pct_group"] = _percent(wait_ms, group_ms)
-            rows.append(row)
-        completed_value_count += value_count
-
-    if not rows:
-        return
-    fieldnames = list(rows[0])
-    with (run_dir / "run_pool_detail.csv").open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _is_descendant(
-    event: dict[str, Any],
-    ancestor_id: int,
-    by_id: dict[int, dict[str, Any]],
-) -> bool:
-    parent_id = event.get("parent_event_id")
-    while parent_id is not None:
-        if int(parent_id) == ancestor_id:
-            return True
-        parent = by_id.get(int(parent_id))
-        if parent is None:
-            return False
-        parent_id = parent.get("parent_event_id")
-    return False
-
-
-def _nearest_ancestor_named(
-    event: dict[str, Any],
-    name: str,
-    by_id: dict[int, dict[str, Any]],
-) -> dict[str, Any] | None:
-    parent_id = event.get("parent_event_id")
-    while parent_id is not None:
-        parent = by_id.get(int(parent_id))
-        if parent is None:
-            return None
-        if parent.get("name") == name:
-            return parent
-        parent_id = parent.get("parent_event_id")
-    return None
-
-
-def _event_mode(
-    event: dict[str, Any],
-    by_id: dict[int, dict[str, Any]],
-) -> str | None:
-    current: dict[str, Any] | None = event
-    while current is not None:
-        mode = current.get("metadata", {}).get("mode")
-        if mode in {"single", "double"}:
-            return str(mode)
-        parent_id = current.get("parent_event_id")
-        current = None if parent_id is None else by_id.get(int(parent_id))
-    return None
-
-
-def _sum_stage(events: list[dict[str, Any]], name: str) -> float:
-    return sum(
-        float(event.get("duration_ms", 0.0))
-        for event in events
-        if event.get("name") == name
-    )
-
-
-def _percent(value: float, total: float) -> float:
-    return 0.0 if total <= 0.0 else 100.0 * value / total
 
 
 @contextlib.contextmanager
