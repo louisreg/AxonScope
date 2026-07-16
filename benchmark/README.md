@@ -259,46 +259,48 @@ to JAX 0.11.0, is rejected as incomparable evidence.
 
 The P14E solver-bound scaling matrix uses five amplitudes
 `0,75,150,225,300 uA`, full amplitude batching, `3 ms` at `1 us`, two drives,
-and `Naxon={196,1024,4096}` separately for each cable formulation. Local CPU
-artifacts are under `results/p14e_solver_bound_cpu_local_20260716`; matching
+and `Naxon={196,1024,4096}` separately for each cable formulation. The corrected
 P100 artifacts end in
-`axs-p14e-solver-bound-{single,double}-{196,1024,4096}-p100-fae6750`.
-Warm results are:
+`axs-p14e-source-reuse-{single,double}-{196,1024,4096}-p100-f46bbec`. They
+construct one source population per policy and reuse that exact object for
+cold and warm execution:
 
-| cable | Naxon | CPU run_pool | P100 run_pool | P100 solver share | speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| single | 196 | 17.796 s | 1.032 s | 92.7% | 17.2x |
-| single | 1024 | 125.468 s | 5.056 s | 92.0% | 24.8x |
-| single | 4096 | 546.119 s | 19.391 s | 93.0% | 28.2x |
-| double | 196 | 14.064 s | 0.664 s | 94.2% | 21.2x |
-| double | 1024 | 93.229 s | 2.737 s | 93.6% | 34.1x |
-| double | 4096 | 467.803 s | 10.219 s | 93.6% | 45.8x |
+| cable | Naxon | source build | cold run_pool | one-shot cold | warm run_pool | solver share |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| single | 196 | 0.303 s | 3.784 s | 4.345 s | 0.988 s | 97.0% |
+| single | 1024 | 1.221 s | 8.786 s | 10.504 s | 4.774 s | 97.4% |
+| single | 4096 | 5.648 s | 26.832 s | 33.852 s | 18.706 s | 96.3% |
+| double | 196 | 0.376 s | 8.225 s | 8.830 s | 0.649 s | 96.2% |
+| double | 1024 | 1.708 s | 10.731 s | 12.770 s | 2.666 s | 95.8% |
+| double | 4096 | 6.912 s | 18.188 s | 25.791 s | 9.971 s | 95.8% |
 
-Solver share is the non-overlapping `(kernel.enqueue + kernel.wait) /
-simulation.run_pool`; `dispatch_jax` is nested in enqueue. Local CPU warm
-solver share is `99.6-99.8%`. Cold P100 run-pool speedups are lower but scale
-with population: `5.0/14.4/21.0x` for single cable and `1.9/9.1/22.3x` for
-double cable. The P100 routes are the factorized single-cable JAX tridiagonal
+`one-shot cold` includes reusable source construction; `cold run_pool` and
+`warm run_pool` do not. Solver share is the non-overlapping
+`(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is
+nested in enqueue. Compared with the matching local CPU matrix, warm P100
+run-pool speedups are about `18.0/26.3/29.2x` for single cable and
+`21.7/35.0/46.9x` for double cable. Local CPU warm solver share is
+`99.6-99.9%`. The P100 routes are the factorized single-cable JAX tridiagonal
 solver and guarded double-cable `jax_triton_loop_xb`; local double cable uses
 Thomas.
 
-This establishes that `run_pool` is solver-bound, but the original campaign
-also exposed a benchmark-semantic issue: every cold/warm phase rebuilt the
-source population. At N=4096 that repeated work cost `8.37 s` single and
-`6.63 s` double and reduced complete-wall P100 solver share to `55-60%`.
-The campaign now constructs one source workload per batch policy, profiles it
-under `source_population/`, and passes the same object to cold, warmup, and
-warm phases. `wall_ms` is phase execution only,
-`source_population_build_ms` is the separately measured reusable source cost,
-and `one_shot_wall_ms` adds source construction to cold execution. Realistic
-single-cable populations now also use basic 08's canonical finite-diameter
-templates; a local N=4096 source probe contains 63 templates and takes
-`5.20 s`, versus `11.35 s` in the earlier local warm phase (`2.18x`). The
-earlier P100 source cost is not mixed into this local A/B. Activation counts in
-the earlier matrix match in every comparison except single N=1024 at 225 uA,
-where local JAX 0.10.1 returns `325/1024` and P100 JAX 0.10.2 returns
-`326/1024`. Treat a fresh corrected-semantics P100 run, that boundary row, and
-memory acceptance as open P14E validation.
+The corrected local single-N=1024 boundary artifact is
+`results/p14e_source_reuse_single_1024_cpu_local_20260716`. Cold and warm both
+return `0 85 197 325 433`; P100 cold and warm both return
+`0 85 197 326 433`. The one-fiber difference at 225 uA is a cross-backend
+near-threshold boundary within the documented tolerance, while every
+same-backend cold/warm comparison is exact. Full native amplitude batching is
+one solver execution over the numeric axis, so there is deliberately no
+separate Python-call timing for each amplitude.
+
+N=4096 memory diagnostics are separate from timing baselines. Artifacts ending
+in `axs-p14e-device-memory-{single,double}-4096-p100-f46bbec` report actual
+peak JAX bytes in use of `5.84 GB` single and `2.63 GB` double. Matching
+`axs-p14e-rss-{single,double}-4096-p100-f46bbec` artifacts report peak host RSS
+of `1.87/1.93 GiB`. The `12475 MiB` process allocation visible through
+`nvidia-smi` is JAX's default GPU preallocation, not active benchmark state.
+Do not use `--memory-trace all` for this large workload: Python tracemalloc
+makes it impractically slow. Collect `device` and `rss` diagnostics separately.
 
 `kernel.dispatch_jax` is nested inside `kernel.enqueue`; do not add the two
 when reading the CSV. `kernel_solver_ms` is the non-overlapping

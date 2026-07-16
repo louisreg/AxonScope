@@ -7,31 +7,33 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-16 after the realistic P14D dispatch-plan optimization.
+Updated on 2026-07-16 after the corrected P14E CPU/P100 acceptance matrix.
 
-- P7, P11, P12, and the VmRaster part of P13 are closed.
+- P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
+  closed. The remaining P14B architecture items are retained as non-blocking
+  convergence work rather than silently discarded.
 - The production runtime is JAX. CPU double-cable uses Thomas; GPU
   double-cable uses the Triton tiled-Thomas route; single-cable uses the JAX
   tridiagonal route.
 - VmRaster is currently the only strict solver-side observer route. It is
   correct, but its full temporal state makes large recruitment batches
   memory-bound and prevents clean measurement of solver performance.
-- The current recruitment amplitude path is functionally native but still
-  expands `Namplitude x Naxon` Python objects. It is not the target design.
+- Recruitment now keeps one source population and a native numerical amplitude
+  axis; it no longer expands `Namplitude x Naxon` Python objects. Large sweeps
+  remain constrained by VmRaster state until P15 adds compact event observers.
 - Work proceeds in dependency order:
-  1. P14 population, amplitude-axis, and preparation scalability.
-  2. P15 compact activation, spike, and propagation observers.
-  3. P16 low-level JAX temporal solver and dispatch optimization.
-  4. P17 autonomous generated membrane runtime contracts.
-  5. P18 membrane-model completion and validation.
-  6. P19 pre-v1 cleanup and public-surface convergence.
+  1. P15 compact activation, spike, and propagation observers.
+  2. P16 low-level JAX temporal solver and dispatch optimization.
+  3. P17 autonomous generated membrane runtime contracts.
+  4. P18 membrane-model completion and validation.
+  5. P19 pre-v1 cleanup and public-surface convergence.
 
-Latest fast validation recorded by the 2026-07-02 audit:
+Latest fast validation recorded by the P14 checkpoint:
 
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-587 passed, 1 skipped in 424.89s
+700 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -588,40 +590,44 @@ solver speedup.
 
 #### P14E - Acceptance gate
 
-- [ ] Re-run local CPU and Kaggle GPU at `Naxon={196,1024,4096}` for both cable
+- [x] Re-run local CPU and Kaggle GPU at `Naxon={196,1024,4096}` for both cable
   formulations. Report population construction, amplitude-plan construction,
   first and later amplitude times, `run_pool`, preparation, dispatch, wait,
   host/device memory, and numerical outputs.
-  - The five-amplitude full-batch timing matrix is complete under
-    `benchmark/results/p14e_solver_bound_cpu_local_20260716` and the six P100
-    artifacts ending in `axs-p14e-solver-bound-{single,double}-{196,1024,4096}-p100-fae6750`.
-    Warm `simulation.run_pool` is strongly solver-bound: `99.6-99.8%` on the
-    local CPU and `92.0-94.2%` on P100 when solver time is measured as the
-    non-overlapping `kernel.enqueue + kernel.wait` interval. P100 warm run-pool
-    speedups rise from `17.2x` to `28.2x` for single cable and from `21.2x` to
-    `45.8x` for double cable between 196 and 4096 axons.
-  - The original matrix reconstructed the source population in every phase,
-    reducing complete-wall P100 solver share to `55-60%`. The campaign now
-    builds and profiles one source workload per batch policy, reuses that exact
-    object for cold/warm phases, reports phase-only `wall_ms`, and retains
-    `one_shot_wall_ms` for source-plus-cold cost. The canonical finite-diameter
-    rule used by basic 08 is also applied to realistic single cable: N=4096 now
-    uses 63 shared Rattay-Aberham templates and local source construction falls
-    from `11.35 s` to `5.20 s` (`2.18x`). The earlier `8.37 s` measurement was
-    on P100 and is not used for this local A/B. A fresh P100 acceptance run with
-    these corrected semantics remains required.
-  - CPU double cable used Thomas, P100 double cable used the guarded
-    `jax_triton_loop_xb` route, and both cable formulations retained factorized
-    extracellular inputs. Counts match across devices in 11 of 12 phase/case
-    pairs. Single cable at N=1024 differs by one activation at 225 uA
-    (`325/1024` on local JAX 0.10.1 versus `326/1024` on P100 JAX 0.10.2), so
-    exact numerical acceptance and the requested memory run remain open.
-- [ ] Require exact source-pool immutability and matching activation curves.
+  - The corrected five-amplitude P100 matrix is recorded in the six artifacts
+    ending in `axs-p14e-source-reuse-{single,double}-{196,1024,4096}-p100-f46bbec`.
+    One source population is built per policy and reused unchanged by cold and
+    warm phases. Warm `simulation.run_pool` is `0.988/4.774/18.706 s` for
+    single cable and `0.649/2.666/9.971 s` for double cable at
+    `Naxon=196/1024/4096`; the non-overlapping `kernel.enqueue + kernel.wait`
+    share is `95.8-97.4%`. Full native amplitude batching intentionally has no
+    separate Python call or timing for each amplitude.
+  - Reusable P100 source construction is `0.303/1.221/5.648 s` single and
+    `0.376/1.708/6.912 s` double. Cold phase-only run-pool is
+    `3.784/8.786/26.832 s` single and `8.225/10.731/18.188 s` double;
+    `one_shot_wall_ms` separately preserves source-plus-cold user cost.
+  - Separate N=4096 diagnostics report actual peak JAX device bytes of
+    `5.84 GB` single and `2.63 GB` double, plus peak host RSS of
+    `1.87/1.93 GiB`. The `12475 MiB` shown by `nvidia-smi` is JAX allocator
+    preallocation, not live workload state. `memory-trace=all` is rejected at
+    this scale because Python tracemalloc makes the run impractically slow;
+    device and RSS traces are collected independently.
+  - CPU double cable uses Thomas, P100 double cable uses the guarded
+    `jax_triton_loop_xb` route, and both cable formulations retain factorized
+    extracellular inputs. The corrected local single-N=1024 boundary run
+    returns `0 85 197 325 433`, versus `0 85 197 326 433` on P100. This one
+    near-threshold fiber at 225 uA is within the documented cross-backend
+    tolerance; all same-backend cold/warm outputs match exactly.
+- [x] Require exact source-pool immutability and matching activation curves.
   Cross-backend near-threshold comparisons may use the already documented
   one-amplitude-step tolerance, but same-backend A/B results must match.
-- [ ] Exit P14 only when Python population/preparation work no longer scales as
+- [x] Exit P14 only when Python population/preparation work no longer scales as
   `Namplitude x Naxon` and the first-amplitude structural preparation is no
-  longer a material fraction of a warm sweep.
+  longer a material fraction of a warm sweep. The native numeric axis now
+  carries amplitudes without cloned Python rows. At N=4096, warm
+  `runtime.prepare` is `171 ms` single and `29 ms` double, while reusable
+  build-plan work is `52/226 ms`; together they remain below 3% of warm
+  `simulation.run_pool` in both formulations.
 
 ### P15 - Compact Activation, Spike, And Propagation Observers
 
