@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 from collections import OrderedDict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Sequence, cast
 
 import jax
@@ -247,6 +247,7 @@ def build_factorized_vstim_midpoint_batch(
     include_initial_previous: bool = False,
     single_cable_lower: Array | None = None,
     single_cable_upper: Array | None = None,
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> FactorizedExtracellularPotentialBatch | None:
     """Build a factorized midpoint ``Vstim`` batch when stimulations allow it.
 
@@ -292,6 +293,213 @@ def build_factorized_vstim_midpoint_batch(
         dtype_local=dtype,
         single_cable_lower=single_cable_lower,
         single_cable_upper=single_cable_upper,
+        numeric_axis_shape=numeric_axis_shape,
+    )
+
+
+def with_extracellular_waveform_axis(
+    payload: FactorizedExtracellularPotentialBatch,
+    axis_input: Any,
+    *,
+    source_size: int,
+    tsim_ms: float,
+    dt_ms: float,
+    dtype_local: Any,
+    include_initial_previous: bool,
+) -> FactorizedExtracellularPotentialBatch:
+    """Replace factorized currents with an amplitude-major waveform table."""
+
+    waveform_tuple = tuple(axis_input.waveforms)
+    axis_size = len(waveform_tuple)
+    if axis_size < 1:
+        raise ValueError("waveform axis must contain at least one waveform.")
+    source_count = int(source_size)
+    if source_count < 1:
+        raise ValueError("waveform source size must be >= 1.")
+    if int(axis_input.source_size) != source_count:
+        raise ValueError(
+            "waveform-axis source rows do not match the dispatch group: "
+            f"got {axis_input.source_size}, expected {source_count}."
+        )
+    footprint_shape = tuple(int(value) for value in payload.footprint_mV_per_A.shape)
+    if len(footprint_shape) not in {2, 3}:
+        raise ValueError(
+            "compact waveform-axis lowering requires rank-1 or rank-K footprints."
+        )
+    logical_size = axis_size * source_count
+    batch_size = footprint_shape[0]
+    if batch_size < logical_size:
+        raise ValueError(
+            "waveform-axis runtime batch is smaller than its logical axis: "
+            f"got {batch_size}, expected at least {logical_size}."
+        )
+
+    np_dtype = np.dtype(dtype_local)
+    nt = simulation_step_count(tsim_ms, dt_ms)
+    t_mid_ms = (
+        np.arange(nt, dtype=np_dtype) + np.asarray(0.5, dtype=np_dtype)
+    ) * np.asarray(dt_ms, dtype=np_dtype)
+    temporal_mid_cache: dict[Any, np.ndarray] = {}
+    temporal_mid_hits = 0
+    temporal_mid_misses = 0
+    selected_current_rows: list[np.ndarray] = []
+    for waveform in waveform_tuple:
+        values, cache_hit = _cached_stimulus_current_A(
+            temporal_mid_cache,
+            waveform,
+            t_mid_ms,
+            np_dtype=np_dtype,
+        )
+        selected_current_rows.append(values)
+        temporal_mid_hits += int(cache_hit)
+        temporal_mid_misses += int(not cache_hit)
+    selected_current_mid_A = np.stack(selected_current_rows, axis=0)
+    row_indices = None
+    if len(footprint_shape) == 2:
+        if int(axis_input.drive_count) != 1:
+            raise ValueError(
+                "rank-1 footprint payload cannot lower a multi-drive numeric axis."
+            )
+        current_mid_A = selected_current_mid_A
+        row_indices = np.repeat(np.arange(axis_size, dtype=np.int32), source_count)
+        if batch_size > logical_size:
+            row_indices = np.concatenate(
+                [
+                    row_indices,
+                    np.full(
+                        (batch_size - logical_size,),
+                        axis_size - 1,
+                        dtype=np.int32,
+                    ),
+                ]
+            )
+    else:
+        drive_count = int(footprint_shape[1])
+        if int(axis_input.drive_count) != drive_count:
+            raise ValueError(
+                "waveform-axis drive count does not match factorized footprints: "
+                f"got {axis_input.drive_count}, expected {drive_count}."
+            )
+        selected_indices = np.asarray(axis_input.selected_drive_indices, dtype=np.intp)
+        unique_pattern_rows: list[tuple[Any, ...]] = []
+        pattern_to_index: dict[tuple[Any, ...], int] = {}
+        logical_row_indices = np.empty((logical_size,), dtype=np.int32)
+        logical_index = 0
+        for selected_waveform in waveform_tuple:
+            for source_index, source_row in enumerate(axis_input.source_drive_waveforms):
+                pattern_row = list(source_row)
+                pattern_row[int(selected_indices[source_index])] = selected_waveform
+                pattern_tuple = tuple(pattern_row)
+                pattern_key = tuple(
+                    _stimulus_temporal_cache_key(waveform)
+                    for waveform in pattern_tuple
+                )
+                pattern_index = pattern_to_index.get(pattern_key)
+                if pattern_index is None:
+                    pattern_index = len(unique_pattern_rows)
+                    pattern_to_index[pattern_key] = pattern_index
+                    unique_pattern_rows.append(pattern_tuple)
+                logical_row_indices[logical_index] = pattern_index
+                logical_index += 1
+
+        unique_current_rows: list[np.ndarray] = []
+        for pattern_row in unique_pattern_rows:
+            drive_values: list[np.ndarray] = []
+            for waveform in pattern_row:
+                values, cache_hit = _cached_stimulus_current_A(
+                    temporal_mid_cache,
+                    waveform,
+                    t_mid_ms,
+                    np_dtype=np_dtype,
+                )
+                drive_values.append(values)
+                temporal_mid_hits += int(cache_hit)
+                temporal_mid_misses += int(not cache_hit)
+            unique_current_rows.append(np.stack(drive_values, axis=0))
+        unique_current_mid_A = np.stack(unique_current_rows, axis=0)
+        unique_pattern_count = len(unique_pattern_rows)
+        if unique_pattern_count == 1:
+            current_mid_A = unique_current_mid_A[0]
+        else:
+            current_mid_A = unique_current_mid_A
+            row_indices = logical_row_indices
+        if batch_size > logical_size:
+            padding_count = batch_size - logical_size
+            if row_indices is None:
+                row_indices = np.zeros((logical_size,), dtype=np.int32)
+                current_mid_A = unique_current_mid_A
+            row_indices = np.concatenate(
+                [
+                    row_indices,
+                    np.full((padding_count,), int(row_indices[-1]), dtype=np.int32),
+                ],
+            )
+
+    previous_A = None
+    if include_initial_previous:
+        t_previous_ms = np.asarray([-0.5 * dt_ms], dtype=np_dtype)
+        if len(footprint_shape) == 2:
+            temporal_previous_cache: dict[Any, np.ndarray] = {}
+            previous_A = np.asarray(
+                [
+                    _cached_stimulus_current_A(
+                        temporal_previous_cache,
+                        waveform,
+                        t_previous_ms,
+                        np_dtype=np_dtype,
+                    )[0].reshape(-1)[0]
+                    for waveform in waveform_tuple
+                ],
+                dtype=np_dtype,
+            )
+        else:
+            temporal_previous_cache: dict[Any, np.ndarray] = {}
+            unique_previous_rows: list[np.ndarray] = []
+            for pattern_row in unique_pattern_rows:
+                previous_values: list[Any] = []
+                for waveform in pattern_row:
+                    values, _cache_hit = _cached_stimulus_current_A(
+                        temporal_previous_cache,
+                        waveform,
+                        t_previous_ms,
+                        np_dtype=np_dtype,
+                    )
+                    previous_values.append(values.reshape(-1)[0])
+                unique_previous_rows.append(
+                    np.asarray(previous_values, dtype=np_dtype)
+                )
+            unique_previous_A = np.stack(unique_previous_rows, axis=0)
+            previous_A = (
+                unique_previous_A[0]
+                if len(unique_pattern_rows) == 1 and row_indices is None
+                else unique_previous_A
+            )
+    record_benchmark_metadata(
+        extracellular_waveform_axis_size=axis_size,
+        extracellular_waveform_source_size=source_count,
+        extracellular_waveform_logical_batch_size=logical_size,
+        extracellular_waveform_kernel_batch_size=batch_size,
+        extracellular_waveform_drive_count=int(axis_input.drive_count),
+        extracellular_waveform_unique_pattern_count=(
+            axis_size if len(footprint_shape) == 2 else len(unique_pattern_rows)
+        ),
+        extracellular_waveform_temporal_mid_cache_hits=temporal_mid_hits,
+        extracellular_waveform_temporal_mid_cache_misses=temporal_mid_misses,
+        extracellular_waveform_current_nbytes=int(np.asarray(current_mid_A).nbytes),
+        extracellular_waveform_row_indices_nbytes=(
+            0 if row_indices is None else int(row_indices.nbytes)
+        ),
+    )
+    return replace(
+        payload,
+        current_mid_A=jnp.asarray(current_mid_A, dtype=dtype_local),
+        current_initial_previous_A=(
+            None if previous_A is None else jnp.asarray(previous_A, dtype=dtype_local)
+        ),
+        current_row_indices=(
+            None if row_indices is None else jnp.asarray(row_indices, dtype=jnp.int32)
+        ),
+        current_row_scales=None,
     )
 
 
@@ -554,6 +762,7 @@ def _try_build_factorized_footprint_vstim_batch(
     dtype_local: jnp.dtype,
     single_cable_lower: Array | None = None,
     single_cable_upper: Array | None = None,
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> FactorizedExtracellularPotentialBatch | None:
     with benchmark_span("inputs.extracellular.normalize_rows"):
         rows_tuple = _normalize_stimulation_rows(rows)
@@ -596,6 +805,7 @@ def _try_build_factorized_footprint_vstim_batch(
                 axon_y_um=axon_y_um,
                 axon_z_um=axon_z_um,
                 np_dtype=np_dtype,
+                numeric_axis_shape=numeric_axis_shape,
             )
         with benchmark_span("inputs.extracellular.footprint_cache"):
             footprint_V_per_A = _FOOTPRINT_CACHE.get(footprint_cache_key)
@@ -606,6 +816,7 @@ def _try_build_factorized_footprint_vstim_batch(
                     max_drive_count=max_drive_count,
                     x_rows=x_rows,
                     np_dtype=np_dtype,
+                    numeric_axis_shape=numeric_axis_shape,
                 )
             _FOOTPRINT_CACHE[footprint_cache_key] = footprint_V_per_A
             footprint_cache_status = "miss"
@@ -675,7 +886,20 @@ def _try_build_factorized_footprint_vstim_batch(
     current_row_indices = None
     current_row_scales = None
 
-    if has_shared_rank1_stimulus:
+    if numeric_axis_shape is not None:
+        current_A = np.zeros(
+            (1,) if max_drive_count == 1 else (max_drive_count, 1),
+            dtype=np_dtype,
+        )
+        current_initial_previous_A = None
+        if t_initial_previous_ms is not None:
+            current_initial_previous_A = np.zeros(
+                () if max_drive_count == 1 else (max_drive_count,),
+                dtype=np_dtype,
+            )
+        shared_current = True
+        current_rows_lowering = "deferred_numeric_axis"
+    elif has_shared_rank1_stimulus:
         with benchmark_span("inputs.extracellular.current_shared_rank1"):
             stimulus = drive_rows[0][0][2]
             current_A = np.asarray(
@@ -1144,18 +1368,38 @@ def _compute_factorized_footprint_rows(
     max_drive_count: int,
     x_rows: np.ndarray,
     np_dtype: np.dtype[Any],
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> np.ndarray:
+    source_size, axis_size, logical_size = _numeric_axis_expansion(
+        len(drive_rows),
+        numeric_axis_shape,
+    )
+    compute_rows = drive_rows if source_size is None else drive_rows[:source_size]
+    compute_x_rows = x_rows if source_size is None else x_rows[:source_size]
     footprint = np.zeros(
-        (len(drive_rows), int(max_drive_count), int(x_rows.shape[1])),
+        (len(compute_rows), int(max_drive_count), int(x_rows.shape[1])),
         dtype=np_dtype,
     )
-    for row_index, row in enumerate(drive_rows):
+    for row_index, row in enumerate(compute_rows):
         for drive_index, (_stimulation, drive, _stimulus) in enumerate(row):
             footprint[row_index, drive_index] = _drive_footprint_for_positions(
                 drive,
-                x_rows[row_index],
+                compute_x_rows[row_index],
                 np_dtype=np_dtype,
             )
+    if source_size is not None and axis_size is not None:
+        footprint = np.tile(footprint, (axis_size, 1, 1))
+        padding_count = len(drive_rows) - logical_size
+        if padding_count:
+            footprint = np.concatenate(
+                [footprint, np.repeat(footprint[-1:], padding_count, axis=0)],
+                axis=0,
+            )
+        record_benchmark_metadata(
+            vstim_footprint_source_rows=source_size,
+            vstim_footprint_expanded_rows=len(drive_rows),
+            vstim_footprint_axis_size=axis_size,
+        )
     return footprint
 
 
@@ -1167,24 +1411,53 @@ def _factorized_footprint_rows_cache_key(
     axon_y_um: np.ndarray,
     axon_z_um: np.ndarray,
     np_dtype: np.dtype[Any],
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> tuple[Any, ...]:
+    source_size, axis_size, _logical_size = _numeric_axis_expansion(
+        len(drive_rows),
+        numeric_axis_shape,
+    )
+    key_drive_rows = drive_rows if source_size is None else drive_rows[:source_size]
+    key_x_rows = x_rows if source_size is None else x_rows[:source_size]
+    key_y_rows = axon_y_um if source_size is None else axon_y_um[:source_size]
+    key_z_rows = axon_z_um if source_size is None else axon_z_um[:source_size]
     rows_digest = _digest_cache_rows(
         tuple(
             _drive_static_footprint_key(drive)
             for _stimulation, drive, _stimulus in row
         )
-        for row in drive_rows
+        for row in key_drive_rows
     )
     return (
-        "factorized_footprint_rows_v2",
+        "factorized_footprint_rows_v3",
         str(np_dtype),
         int(max_drive_count),
         len(drive_rows),
+        source_size,
+        axis_size,
         rows_digest,
-        _array_content_key(x_rows),
-        _array_content_key(axon_y_um),
-        _array_content_key(axon_z_um),
+        _array_content_key(key_x_rows),
+        _array_content_key(key_y_rows),
+        _array_content_key(key_z_rows),
     )
+
+
+def _numeric_axis_expansion(
+    row_count: int,
+    numeric_axis_shape: tuple[int, int] | None,
+) -> tuple[int | None, int | None, int]:
+    if numeric_axis_shape is None:
+        return None, None, int(row_count)
+    source_size, axis_size = (int(value) for value in numeric_axis_shape)
+    if source_size < 1 or axis_size < 1:
+        raise ValueError("numeric-axis source and axis sizes must be positive.")
+    logical_size = source_size * axis_size
+    if logical_size > int(row_count):
+        raise ValueError(
+            "numeric-axis footprint expansion exceeds the runtime batch: "
+            f"got {logical_size} logical rows for {row_count} runtime rows."
+        )
+    return source_size, axis_size, logical_size
 
 
 def _compatible_footprint_rows(
@@ -1265,17 +1538,13 @@ def _drive_static_footprint_key(drive: Any) -> tuple[Any, ...]:
     footprint = getattr(drive, "footprint", None)
     if footprint is None:
         return ("drive_identity", id(drive))
-    drive_id = getattr(drive, "id", None)
-    interpolation = getattr(footprint, "interpolation", None)
-    source_id = getattr(footprint, "source_id", None)
-    reference = getattr(footprint, "reference", None)
     return (
         "static_footprint_v1",
-        drive_id,
+        getattr(drive, "id", None),
         id(footprint),
-        interpolation,
-        source_id,
-        reference,
+        getattr(footprint, "interpolation", None),
+        getattr(footprint, "source_id", None),
+        getattr(footprint, "reference", None),
     )
 
 
@@ -1691,4 +1960,5 @@ __all__ = [
     "build_vstim_midpoint_batch",
     "compile_extracellular_stimulation",
     "compile_extracellular_stimulations",
+    "with_extracellular_waveform_axis",
 ]

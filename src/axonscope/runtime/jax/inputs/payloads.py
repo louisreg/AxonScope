@@ -78,6 +78,9 @@ def materialize_factorized_extracellular_potential_batch(
             "multi-drive factorized Vstim requires current_mid_A shape (S, Nt) "
             "or (B, S, Nt)."
         )
+    if batch.current_row_indices is not None:
+        row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+        current_mid_A = jnp.take(current_mid_A, row_indices, axis=0)
     return jnp.sum(current_mid_A[:, :, :, None] * footprint[:, :, None, :], axis=1)
 
 
@@ -123,6 +126,9 @@ def materialize_factorized_extracellular_potential_initial_previous(
             "rank-K factorized previous Vstim requires current_initial_previous_A "
             "shape (S,) or (B, S)."
         )
+    if batch.current_row_indices is not None:
+        row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+        current_previous_A = jnp.take(current_previous_A, row_indices, axis=0)
     return jnp.sum(current_previous_A[:, :, None] * footprint, axis=1)
 
 

@@ -33,6 +33,14 @@ class Axon:
     state is explicit.
     """
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_template_frozen", False):
+            raise AttributeError(
+                "Axon descriptions are immutable templates; create a new Axon "
+                "or keep run-specific state on AxonInstance."
+            )
+        object.__setattr__(self, name, value)
+
     def __init__(
         self,
         *,
@@ -76,6 +84,7 @@ class Axon:
         )
         self.v_init = units.require_voltage_mV(v_init, name="v_init")
         self.temperature = units.require_temperature_degC(temperature, name="temperature")
+        self._template_frozen = True
 
     @property
     def layout(self) -> Layout:

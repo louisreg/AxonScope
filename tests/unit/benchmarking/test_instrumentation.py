@@ -245,11 +245,65 @@ def test_enable_benchmark_accepts_profile_metadata(tmp_path):
     assert profile == {
         "enabled": True,
         "runtime": "none",
+        "span": None,
         "output": str(tmp_path / "profiles" / "run"),
         "create_perfetto_trace": True,
         "create_perfetto_link": False,
         "active": False,
     }
+
+
+def test_named_profile_captures_only_first_matching_span(tmp_path, monkeypatch):
+    calls: list[tuple[str, object]] = []
+    handle = object()
+
+    monkeypatch.setattr(
+        "axonscope.runtime.execution.benchmark_profile_start",
+        lambda runtime, output, **options: calls.append(("start", str(output))) or handle,
+    )
+    monkeypatch.setattr(
+        "axonscope.runtime.execution.benchmark_profile_stop",
+        lambda received: calls.append(("stop", received)) or {"stopped": True},
+    )
+
+    session = enable_benchmark(
+        tmp_path,
+        print_summary=False,
+        save=False,
+        profile=True,
+        profile_runtime="jax",
+        profile_span="simulation.run_pool",
+    )
+    try:
+        assert calls == []
+        with benchmark_span("dispatch.build_plan"):
+            pass
+        assert calls == []
+        with benchmark_span("simulation.run_pool"):
+            assert calls == [("start", str(tmp_path / "profiles" / "run"))]
+        with benchmark_span("simulation.run_pool"):
+            pass
+    finally:
+        report = disable_benchmark(print_summary=False, save=False)
+
+    assert calls == [
+        ("start", str(tmp_path / "profiles" / "run")),
+        ("stop", handle),
+    ]
+    assert report is not None
+    assert report.metadata["profile"]["span"] == "simulation.run_pool"
+    assert report.metadata["profile"]["stopped"] is True
+
+
+def test_enable_benchmark_rejects_empty_profile_span(tmp_path):
+    with pytest.raises(ValueError, match="profile_span"):
+        enable_benchmark(
+            tmp_path,
+            print_summary=False,
+            save=False,
+            profile=True,
+            profile_span=" ",
+        )
 
 
 def test_enable_benchmark_rejects_unsupported_profile_runtime(tmp_path):

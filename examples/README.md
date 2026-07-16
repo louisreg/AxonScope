@@ -75,6 +75,8 @@ still runnable examples, but they explain the moving parts more explicitly.
   statuses, reports, and population denominators.
 - `recording_analysis/05_vmraster_observer_only.py`: run trace-free VmRaster
   observer-only simulations with `Recording.none()`.
+- `recording_analysis/06_dense_observable_recording.py`: record dense gates,
+  currents, and conductances through batch-native result manifests.
 
 ### Protocols
 
@@ -107,10 +109,13 @@ re-implementing fiber-table extraction, LIFE/FEM footprint sampling, or NRV
 recruitment decoding. NRV geometry, population, electrode, and FEM setup remain
 explicit NRV code in the example or benchmark, not package integration code.
 
-- `01_realistic_fascicle_geometry.py`: build one realistic NRV nerve
-  from the bundled histology contour image with `cv2`, sample NRV's LIFE/FEM
-  footprint into AxonScope stimulation objects, run an AxonScope recruitment
-  sweep, and plot recruitment plus activated fibers on the nerve cross-section.
+- `01_synthetic_fascicle_geometry.py`: build the synthetic two-fascicle NRV
+  tutorial geometry, sample NRV's LIFE/FEM footprint into AxonScope stimulation
+  objects, run an AxonScope recruitment sweep, and plot recruitment plus
+  activated fibers on the nerve cross-section.
+- `02_realistic_fascicle_geometry.py`: build one realistic NRV nerve from the
+  bundled histology contour image with `cv2`, then run the same NRV-to-AxonScope
+  footprint handoff and recruitment workflow as the synthetic example.
   NRV validation lives under `tests/nrv`; future NRV timing comparisons belong
   in `benchmark/baselines/` and the P11 curve scripts once the adapter contract
   is defined.

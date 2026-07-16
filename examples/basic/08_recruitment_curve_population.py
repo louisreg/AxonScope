@@ -66,13 +66,11 @@ def main() -> None:
 
     # Pick model-compatible diameters. The unmyelinated family uses a continuous
     # range; the MRG family uses a small set of valid template diameters.
-    unmyelinated_diameters = (
+    unmyelinated_diameter_um = axs.axons.round_axon_diameter_values_um(
         rng.uniform(0.4, 1.2, fibers_per_family)
-        * axs.um
     )
-    myelinated_diameters = (
+    myelinated_diameter_um = axs.axons.round_axon_diameter_values_um(
         rng.choice(np.asarray([7.3, 10.0, 12.8]), size=fibers_per_family)
-        * axs.um
     )
 
     # Build the population row by row. The sampled y/z coordinates stay in this
@@ -81,20 +79,28 @@ def main() -> None:
     pool: list[axs.AxonInstance] = []
     families: list[str] = []
     diameter_values_um: list[float] = []
+    unmyelinated_templates: dict[float, tuple[axs.axons.Axon, Any]] = {}
+    myelinated_templates: dict[float, tuple[axs.axons.Axon, Any]] = {}
 
-    for diameter, y, z in zip(
-        unmyelinated_diameters,
+    for diameter_um, y, z in zip(
+        unmyelinated_diameter_um,
         unmyelinated_y,
         unmyelinated_z,
         strict=True,
     ):
-        axon = axs.axons.RattayAberham(
-            length=fiber_length,
-            diameter=diameter,
-            compartments=61,
-            celsius=37.0 * axs.degC,
-        )
-        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        diameter_key = float(diameter_um)
+        template = unmyelinated_templates.get(diameter_key)
+        if template is None:
+            axon = axs.axons.RattayAberham(
+                length=fiber_length,
+                diameter=diameter_key * axs.um,
+                compartments=61,
+                celsius=37.0 * axs.degC,
+            )
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            template = (axon, positions)
+            unmyelinated_templates[diameter_key] = template
+        axon, positions = template
         extracellular = axs.analytical.point_source_stimulation(
             electrode,
             positions,
@@ -107,21 +113,27 @@ def main() -> None:
         sim.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(sim)
         families.append("unmyelinated")
-        diameter_values_um.append(float(diameter.to(axs.um).magnitude))
+        diameter_values_um.append(diameter_key)
 
-    for diameter, y, z in zip(
-        myelinated_diameters,
+    for diameter_um, y, z in zip(
+        myelinated_diameter_um,
         myelinated_y,
         myelinated_z,
         strict=True,
     ):
-        axon = axs.axons.MRG(
-            diameter=diameter,
-            nodes=4,
-            length=fiber_length,
-            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
-        )
-        positions = axon.layout.position_values(unit=axs.um) * axs.um
+        diameter_key = float(diameter_um)
+        template = myelinated_templates.get(diameter_key)
+        if template is None:
+            axon = axs.axons.MRG(
+                diameter=diameter_key * axs.um,
+                nodes=4,
+                length=fiber_length,
+                compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            )
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            template = (axon, positions)
+            myelinated_templates[diameter_key] = template
+        axon, positions = template
         extracellular = axs.analytical.point_source_stimulation(
             electrode,
             positions,
@@ -134,10 +146,11 @@ def main() -> None:
         sim.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(sim)
         families.append("myelinated")
-        diameter_values_um.append(float(diameter.to(axs.um).magnitude))
+        diameter_values_um.append(diameter_key)
 
     families_arr = np.asarray(families, dtype=object)
     diameter_um = np.asarray(diameter_values_um, dtype=float)
+    population = axs.AxonPopulation(pool)
 
     # Recruitment is a row-wise activation test repeated for each current.
     # `target=ALL` means any recorded position may count as activation.
@@ -147,28 +160,16 @@ def main() -> None:
         target=axs.positions.ALL,
     )
 
-    # The protocol callback mutates only the stimulus amplitude. That is what
-    # lets the protocol reuse the same population while scanning currents.
-    def update_point_source_current(
-        sim: axs.AxonInstance,
-        current_magnitude: Any,
-    ) -> None:
-        stimulation = sim.extracellular_stimulation
-        if stimulation is None:
-            raise ValueError("simulation has no extracellular stimulation to update.")
-        drive = stimulation.drives[0]
-        updated = stimulation.replace_drive(
-            drive.id,
-            stimulus=axs.Stimulus.pulse(
+    update_point_source_current = axs.protocols.ExtracellularWaveformUpdate(
+        lambda current_magnitude: axs.Stimulus.pulse(
                 start=stim_start,
                 duration=pulse_width,
                 amplitude=-current_magnitude,
-            ),
         )
-        sim.add_extracellular_stimulation(stimulation=updated, replace=True)
+    )
 
     curve = axs.protocols.recruitment_sweep(
-        tuple(pool),
+        population,
         update=update_point_source_current,
         values=current_steps,
         duration=4.0 * axs.ms,

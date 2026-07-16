@@ -1204,6 +1204,94 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     )
 
 
+def test_double_cable_multi_drive_factorized_observer_matches_dense_thomas():
+    axon = hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    first = axon.extracellular_stimulations[0].drives[0]
+    second_stimulation = axs.analytical.point_source_stimulation(
+        PointSourceElectrode(
+            x=250.0 * axs.um,
+            y=150.0 * axs.um,
+            z=50.0 * axs.um,
+        ),
+        axon.layout.position_values(unit=axs.um) * axs.um,
+        stimulus=Stimulus.pulse(
+            start=0.35 * axs.ms,
+            duration=0.04 * axs.ms,
+            amplitude=-12.0 * axs.uA,
+        ),
+        sigma=0.3 * axs.S_per_m,
+    )
+    second_source = second_stimulation.drives[0]
+    multi_drive = axs.ExtracellularStimulation(
+        (
+            first,
+            axs.ExtracellularDrive(
+                id=axs.DriveId("second_point_source"),
+                footprint=second_source.footprint,
+                stimulus=second_source.stimulus,
+            ),
+        )
+    )
+    stimulation_batch = [(multi_drive,), (multi_drive,)]
+    dense_mid, dense_previous = build_vstim_midpoint_and_initial_previous_batch(
+        axon,
+        stimulation_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+    )
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        stimulation_batch,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+    assert factorized.drive_count == 2
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(time_chunk_steps=17),
+        observers=observer,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=factorized,
+        options=BatchOptions.none(time_chunk_steps=17),
+        observers=observer,
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(
+            kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY].words
+        ),
+        np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words),
+    )
+
+
 def test_double_cable_indexed_current_table_matches_dense_thomas(monkeypatch):
     axon = hh_extracellular_axon(current_clamp=False)
     tsim = 0.4
@@ -1296,6 +1384,111 @@ def test_double_cable_indexed_current_table_matches_dense_thomas(monkeypatch):
         np.asarray(kernel_observations(chunked)[VM_RASTER_OBSERVATION_KEY].words),
         expected,
     )
+
+
+def test_double_cable_indexed_multi_drive_table_matches_dense_thomas(monkeypatch):
+    axon = hh_extracellular_axon(current_clamp=False)
+    tsim = 0.4
+    dt = 0.01
+    runtime = prepare_solver_runtime(
+        axon,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_extracellular=True,
+        include_area=True,
+        precompute_intracellular=False,
+        precompute_extracellular=False,
+    )
+    base_stimulations = tuple(axon.extracellular_stimulations)
+    factorized = build_factorized_vstim_midpoint_batch(
+        axon,
+        [base_stimulations] * 3,
+        tsim_ms=tsim,
+        dt_ms=dt,
+        include_initial_previous=True,
+    )
+    assert factorized is not None
+    base_current = jnp.asarray(factorized.current_mid_A)
+    base_previous = jnp.asarray(factorized.current_initial_previous_A)
+    base_footprint = jnp.asarray(factorized.footprint_mV_per_A)
+    indexed = replace(
+        factorized,
+        current_mid_A=jnp.stack(
+            (
+                jnp.stack((base_current, 0.25 * base_current), axis=0),
+                jnp.stack((0.5 * base_current, -0.5 * base_current), axis=0),
+            ),
+            axis=0,
+        ),
+        current_initial_previous_A=jnp.stack(
+            (
+                jnp.stack((base_previous, 0.25 * base_previous)),
+                jnp.stack((0.5 * base_previous, -0.5 * base_previous)),
+            ),
+            axis=0,
+        ),
+        footprint_mV_per_A=jnp.stack(
+            (base_footprint, 0.5 * base_footprint),
+            axis=1,
+        ),
+        current_row_indices=jnp.asarray((0, 1, 0), dtype=jnp.int32),
+        single_cable_forcing_footprint_mV_per_A=None,
+    )
+    dense_mid = materialize_factorized_extracellular_potential_batch(indexed)
+    dense_previous = materialize_factorized_extracellular_potential_initial_previous(
+        indexed
+    )
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observer = build_vm_raster_plan(
+        (activation,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert observer is not None
+    kernel = DoubleCableBatchKernel(runtime=runtime, Veinit_mV=float(axon.Veinit))
+    dense = kernel.run(
+        extracellular_potential_mid_mV=dense_mid,
+        extracellular_potential_initial_previous_mV=dense_previous,
+        options=BatchOptions.none(),
+        observers=observer,
+    )
+
+    def fail_materialization(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("compact indexed input must not be materialized")
+
+    monkeypatch.setattr(
+        double_cable_kernels,
+        "materialize_factorized_extracellular_potential_batch",
+        fail_materialization,
+    )
+    monkeypatch.setattr(
+        double_cable_kernels,
+        "materialize_factorized_extracellular_potential_initial_previous",
+        fail_materialization,
+    )
+    compact = kernel.run(
+        extracellular_potential_mid_mV=indexed,
+        options=BatchOptions.none(),
+        observers=observer,
+        require_compact_factorized_extracellular=True,
+    )
+    chunked = kernel.run(
+        extracellular_potential_mid_mV=indexed,
+        options=BatchOptions.none(time_chunk_steps=17),
+        observers=observer,
+        require_compact_factorized_extracellular=True,
+    )
+
+    expected = np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words)
+    for result in (compact, chunked):
+        np.testing.assert_array_equal(
+            np.asarray(kernel_observations(result)[VM_RASTER_OBSERVATION_KEY].words),
+            expected,
+        )
 
 
 def test_double_cable_batch_requires_extracellular_runtime():

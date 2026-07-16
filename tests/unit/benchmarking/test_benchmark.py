@@ -34,6 +34,7 @@ def test_benchmark_options_configure_enable_disable_style(tmp_path: Path):
         memory_trace="rss",
         profile=True,
         profile_runtime="none",
+        profile_span="example.stage",
     )
 
     session = enable_benchmark(tmp_path, options=options)
@@ -46,6 +47,7 @@ def test_benchmark_options_configure_enable_disable_style(tmp_path: Path):
     assert report is not None
     assert session.config.profile is True
     assert session.config.profile_runtime == "none"
+    assert session.config.profile_span == "example.stage"
     assert report.events[0].name == "example.stage"
     assert report.events[0].metadata["case"] == "smoke"
     assert report.events[0].metadata["note"] == "ok"

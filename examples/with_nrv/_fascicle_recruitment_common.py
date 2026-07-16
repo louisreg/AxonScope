@@ -144,18 +144,14 @@ def run_fascicle_recruitment_example(
         drive_id_prefix="nrv_life",
     )
 
-    def update_life_current(simulation: axs.AxonInstance, current: object) -> None:
-        if simulation.extracellular_stimulation is None:
-            raise ValueError("simulation has no extracellular stimulation.")
-        updated = simulation.extracellular_stimulation.replace_drive(
-            axs.DriveId("nrv_life_0"),
-            stimulus=_life_pulse(
+    update_life_current = axs.protocols.ExtracellularWaveformUpdate(
+        lambda current: _life_pulse(
                 current=current,
                 start_ms=config.stimulus_start_ms,
                 pulse_duration_ms=config.pulse_duration_ms,
-            ),
-        )
-        simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
+        ),
+        drive_id=axs.DriveId("nrv_life_0"),
+    )
 
     console.print("[bold]3. Run AxonScope recruitment sweep[/bold]")
     activation = axs.analysis.ActivationCriterion(

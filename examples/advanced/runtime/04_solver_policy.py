@@ -66,7 +66,7 @@ def main() -> None:
         print(f"  precision: {policy.precision.solver_dtype}")
         print(f"  kernel: {kernel.kernel}")
         print(f"  solver request: {kernel.solver.requested}")
-        print(f"  solver route: {kernel.solver.backend_route}")
+        print(f"  solver route: {kernel.solver.runtime_route}")
 
 
 if __name__ == "__main__":

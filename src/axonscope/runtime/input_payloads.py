@@ -77,8 +77,9 @@ class FactorizedExtracellularPotentialBatch:
     ``Vstim[B, Nt, Nx] = sum_S current_mid_A * footprint_mV_per_A``.
     ``current_row_scales`` stores the row amplitude payload for scaled shared
     waveforms as ``(B,)`` or ``(B, S)``.
-    ``current_row_indices`` can compress repeated row-specific rank-1 currents
-    as ``current_mid_A[U, Nt]`` plus row indices ``[B]``.
+    ``current_row_indices`` can compress repeated row-specific currents as
+    ``current_mid_A[U, Nt]`` or ``current_mid_A[U, S, Nt]`` plus row indices
+    ``[B]``.
     """
 
     current_mid_A: Array
@@ -146,10 +147,18 @@ class FactorizedExtracellularPotentialBatch:
                         f"got {scales_shape} for footprint shape {footprint_shape}."
                     )
         if self.current_row_indices is not None:
-            if len(footprint_shape) != 2 or len(current_shape) != 2:
+            valid_indexed_layout = (
+                len(footprint_shape) == 2
+                and len(current_shape) == 2
+            ) or (
+                len(footprint_shape) == 3
+                and len(current_shape) == 3
+                and current_shape[1] == drive_count
+            )
+            if not valid_indexed_layout:
                 raise ValueError(
-                    "current_row_indices require rank-1 current_mid_A shape "
-                    "(U, Nt) and footprint_mV_per_A shape (B, Nx)."
+                    "current_row_indices require current_mid_A shape (U, Nt) "
+                    "or (U, S, Nt) matching rank-1 or rank-S footprints."
                 )
             if current_shape[0] < 1:
                 raise ValueError("compressed current_mid_A must contain at least one pattern.")
@@ -169,7 +178,11 @@ class FactorizedExtracellularPotentialBatch:
                     "shared multi-drive current_mid_A must have shape (S, Nt); "
                     f"got {current_shape} and {footprint_shape}."
                 )
-        if len(current_shape) == 3 and current_shape[:2] != (batch_size, drive_count):
+        if (
+            len(current_shape) == 3
+            and self.current_row_indices is None
+            and current_shape[:2] != (batch_size, drive_count)
+        ):
             raise ValueError(
                 "current_mid_A batch/drive axes must match footprint_mV_per_A, "
                 f"got {current_shape} and {footprint_shape}."
@@ -178,7 +191,11 @@ class FactorizedExtracellularPotentialBatch:
             if self.current_row_scales is not None:
                 valid_previous_shapes = {()} if len(footprint_shape) == 2 else {(drive_count,)}
             elif self.current_row_indices is not None:
-                valid_previous_shapes = {(current_shape[0],), (batch_size,)}
+                valid_previous_shapes = (
+                    {(current_shape[0],)}
+                    if len(footprint_shape) == 2
+                    else {(current_shape[0], drive_count)}
+                )
             elif len(footprint_shape) == 3:
                 if len(current_shape) == 2:
                     valid_previous_shapes = {(drive_count,)}
@@ -190,7 +207,8 @@ class FactorizedExtracellularPotentialBatch:
                 raise ValueError(
                     "current_initial_previous_A must match the selected current "
                     "layout: scalar/(B,) for rank-1, (S,) for shared/scaled "
-                    "multi-drive, or (B, S) for row-specific multi-drive; "
+                    "multi-drive, or (U, S)/(B, S) for indexed/row-specific "
+                    "multi-drive; "
                     f"got {previous_shape} for footprint shape {footprint_shape}."
                 )
         footprint_width = footprint_shape[-1]

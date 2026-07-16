@@ -311,6 +311,13 @@ temperature, and biophysical parameters.
 It does not own simulation duration, backend selection, recording, world
 geometry, electrode geometry, compiled arrays, or results.
 
+`Axon`, `Layout`, sections, and membrane models are Python authoring and
+inspection descriptions, not the population execution representation. Runtime
+preparation lowers them once into typed numerical tables, unique parameter rows,
+indices, masks, and contiguous arrays. Population cost should scale with unique
+descriptions and numerical array size, not with repeated construction of Python
+objects for every axon, amplitude, section occurrence, or compartment.
+
 ## 3.3 AxonInstance
 
 `AxonInstance` is one concrete occurrence of an `Axon`. It may contain an id,
@@ -324,7 +331,10 @@ extracellular footprint generation logic.
 
 `AxonPopulation` normalizes one or many public axon inputs while preserving
 input order. Homogeneous and heterogeneous storage are internal optimization
-details; public semantics are the same.
+details; public semantics are the same. Its canonical descriptive view is a
+first-occurrence table of immutable axon templates plus one template index per
+population row. Per-row `AxonInstance` stimulation and overrides remain
+distinct even when rows share one template.
 
 ## 3.5 AxonSimulation
 
@@ -642,6 +652,12 @@ recruitment. When only stimulus samples change, AxonScope should reuse axon
 preparation, footprints, spatial operators, dispatch groups, probe plans, and
 compiled executables whenever signatures remain compatible.
 
+Typed waveform sweeps describe a complete waveform factory per sampled value,
+not necessarily one scalar multiplier. Proportional monophasic or balanced
+waveforms may lower to `scaled_shared_waveform`; independently varying phases,
+offsets, timings, or arbitrary samples must preserve their full waveform and
+select/rebuild the compatible temporal plan when its shape signature changes.
+
 ---
 
 # 6. Recording, Results, And Analyses
@@ -805,6 +821,12 @@ Planning determines normalized instances, compatible cohorts, footprint and
 drive structures, recording requirements, analysis requirements, expected
 shapes, memory estimates, and candidate runtimes.
 
+Planning also owns versioned structural cohort signatures. Compatible numeric
+axes and backend shape padding derive those signatures compositionally;
+runtime preparation must not re-hash every source row before a cache lookup.
+Rebuilding a plan after a relevant structural change is the invalidation
+boundary.
+
 Planning must not create device arrays, compile code, import concrete kernels,
 or execute solvers.
 
@@ -915,6 +937,27 @@ Forbidden dependencies:
 Public/descriptive layers should pass typed runtime requests and public
 simulation definitions downward. Backend-specific modules own JAX imports,
 device resolution, array placement, and kernel lowering.
+
+The canonical materialization pipeline is:
+
+```text
+immutable Python descriptions
+        -> backend-neutral NumPy lowering
+        -> backend array placement/lowering
+        -> execution
+```
+
+The NumPy stage is host-side materialization, not the future `axs.runtime.numpy`
+solver. It should produce compact structure-of-arrays representations, unique
+parameter tables plus row/compartment indices, masks, and stable signatures.
+The JAX stage consumes those numerical contracts and owns `jax.Array` creation,
+device transfer, compilation, and kernels.
+
+Lowering and runtime code must dispatch by typed capabilities, structure, shape,
+and parameter signatures. It must not select optimized execution paths from
+concrete authoring class names such as `MRG`, `RattayAberham`, or a particular
+membrane family. A concrete model may be a benchmark and validation case, but
+not a second production path.
 
 Current boundary:
 

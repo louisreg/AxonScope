@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, TypeAlias
+from typing import Any, Callable, Literal, Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from axonscope.analysis import ActivationCriterion
 from axonscope.analysis.definitions import Activation, ConductionBlock
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
+from axonscope.dispatcher.numeric_axis import NumericAxisInput
 
 
 SimulationCandidate: TypeAlias = Axon | AxonInstance
@@ -18,6 +19,28 @@ SimulationFactory: TypeAlias = Callable[[Any], SimulationCandidate]
 
 PoolUpdate: TypeAlias = Callable[[SimulationCandidate, Any], SimulationCandidate | None]
 """Callable that updates or replaces one pool row for a tested value."""
+
+
+@runtime_checkable
+class NumericAxisUpdate(Protocol):
+    """Typed update that preserves one static execution contract."""
+
+    def __call__(
+        self,
+        row: SimulationCandidate,
+        value: Any,
+    ) -> SimulationCandidate | None: ...
+
+    def prepare_numeric_axis(
+        self,
+        pool: tuple[SimulationCandidate, ...],
+    ) -> "NumericAxisInputBuilder": ...
+
+
+class NumericAxisInputBuilder(Protocol):
+    """Prepared immutable source contract for dynamic numeric-axis values."""
+
+    def numeric_axis_input(self, values: tuple[Any, ...]) -> NumericAxisInput: ...
 
 PoolObserver: TypeAlias = Callable[[Any], Any]
 """Callable that extracts one observed value from one per-axon result view."""
@@ -38,6 +61,8 @@ ThresholdCriterion: TypeAlias = ActivationCriterion | Activation | ConductionBlo
 __all__ = [
     "PoolObserver",
     "PoolUpdate",
+    "NumericAxisUpdate",
+    "NumericAxisInputBuilder",
     "ProgressSummary",
     "SimulationCandidate",
     "SimulationFactory",

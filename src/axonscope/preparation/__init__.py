@@ -1,5 +1,7 @@
 """Preparation-layer helpers used to split planning from runtime lowering."""
 
+from axonscope.preparation.axon_rows import MaterializedAxonRows
+from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.preparation.signatures import (
     ArraySignature,
     DriveSignature,
@@ -18,6 +20,8 @@ __all__ = [
     "DriveSignature",
     "ExtracellularStimulationSignature",
     "FootprintSignature",
+    "MaterializedAxonRows",
+    "MembraneRowPlan",
     "StimulusSignature",
     "array_signature",
     "drive_signature",

@@ -12,20 +12,19 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup
+from axonscope.preparation.axon_rows import MaterializedAxonRows
+from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.runtime.host_preparation import (
-    EXTRACELLULAR_EDGE_FIELDS,
-    EXTRACELLULAR_SPACE_FIELDS,
-    ExtracellularRuntimeArrays,
+    cable_runtime_rows_numpy,
     compartment_area_cm2_numpy,
     diffusion_operator_coeffs_numpy,
-    extracellular_runtime_numpy,
+    extracellular_runtime_rows_numpy,
     pad_gate_array_numpy,
     pad_space_array_numpy,
 )
 from axonscope.runtime.jax.membranes.backend import RowIndexedMembraneBackend
 from axonscope.runtime.jax.membranes.stacking import (
     try_stack_gated_leak_membrane_from_group,
-    try_stack_gated_leak_membrane_from_runtime_rows,
 )
 from axonscope.runtime.jax.preparation.base import prepare_membrane_runtime
 from axonscope.runtime.jax.types import (
@@ -40,72 +39,57 @@ from axonscope.solvers.options import SolverOptions
 _GROUP_CM_CACHE_MAX_SIZE = 128
 _GROUP_CM_CACHE: OrderedDict[
     tuple[int, int, str],
-    tuple[weakref.ReferenceType[DispatchGroup], jnp.ndarray],
+    tuple[weakref.ReferenceType[MaterializedAxonRows], jnp.ndarray],
 ] = OrderedDict()
 
 
 def stack_extracellular_runtime(
-    group: DispatchGroup,
+    materialized_axons: MaterializedAxonRows,
     *,
     dtype_local: jnp.dtype,
 ) -> ExtracellularRuntime:
     """Stack double-cable extracellular arrays using host-side row preparation."""
 
     np_dtype = np.dtype(dtype_local)
-    batch_size = len(group.items)
-    target_nx = int(group.nx)
-    target_edges = max(target_nx - 1, 0)
-    space_rows = np.empty(
-        (len(EXTRACELLULAR_SPACE_FIELDS), batch_size, target_nx),
+    template_rows = extracellular_runtime_rows_numpy(
+        materialized_axons,
         dtype=np_dtype,
     )
-    edge_rows = np.empty(
-        (len(EXTRACELLULAR_EDGE_FIELDS), batch_size, target_edges),
-        dtype=np_dtype,
-    )
-    row_cache: dict[tuple[Any, ...], ExtracellularRuntimeArrays] = {}
-
-    for row_index, item in enumerate(group.items):
-        cache_key = (
-            item.cable_signature,
-            int(item.solver_axon.n_compartments),
-            target_nx,
-            np_dtype.str,
+    population_rows = {
+        field: jnp.asarray(
+            materialized_axons.gather_space(getattr(template_rows, field)),
+            dtype=dtype_local,
         )
-        row = row_cache.get(cache_key)
-        if row is None:
-            row = extracellular_runtime_numpy(
-                item.solver_axon,
-                dtype=np_dtype,
-                target_nx=target_nx,
-            )
-            row_cache[cache_key] = row
-        for field_index, field_name in enumerate(EXTRACELLULAR_SPACE_FIELDS):
-            space_rows[field_index, row_index] = getattr(row, field_name)
-        for field_index, field_name in enumerate(EXTRACELLULAR_EDGE_FIELDS):
-            edge_rows[field_index, row_index] = getattr(row, field_name)
-
-    space = jnp.asarray(space_rows, dtype=dtype_local)
-    edge = jnp.asarray(edge_rows, dtype=dtype_local)
+        for field in (
+            "Cm_abs",
+            "Cx_abs",
+            "Gx_abs",
+            "Gax_e",
+            "Gax_i",
+            "left_i",
+            "right_i",
+            "left_e",
+            "right_e",
+        )
+    }
     record_benchmark_metadata(
-        extracellular_stack_rows=batch_size,
-        extracellular_stack_unique_rows=len(row_cache),
-        extracellular_stack_cache_hits=batch_size - len(row_cache),
+        extracellular_stack_rows=materialized_axons.size,
+        extracellular_stack_unique_rows=materialized_axons.template_count,
+        extracellular_stack_cache_hits=(
+            materialized_axons.size - materialized_axons.template_count
+        ),
+        extracellular_stack_lowering="vectorized_template_rows",
     )
     return ExtracellularRuntime(
-        Cm_abs=space[0],
-        Cx_abs=space[1],
-        Gx_abs=space[2],
-        Gax_e=edge[0],
-        Gax_i=edge[1],
-        left_i=space[3],
-        right_i=space[4],
-        left_e=space[5],
-        right_e=space[6],
+        **population_rows,
     )
 
 
-def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray:
+def group_cm_uF_cm2(
+    group: DispatchGroup,
+    runtime: SolverRuntime,
+    materialized_axons: MaterializedAxonRows,
+) -> jnp.ndarray:
     """Return shared or row-specific membrane capacitance density arrays."""
 
     dtype_local = runtime.membrane.dtype
@@ -119,28 +103,24 @@ def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray
         if group.geometry_shared:
             record_benchmark_metadata(group_cm_cache="shared")
             return jnp.asarray(runtime.axon.Cm_uF_cm2, dtype=dtype_local)
-        cache_key = (id(group), id(runtime), str(dtype_local))
+        cache_key = (id(materialized_axons), id(runtime), str(dtype_local))
         cached = _GROUP_CM_CACHE.get(cache_key)
         if cached is not None:
             ref, values = cached
-            if ref() is group:
+            if ref() is materialized_axons:
                 _GROUP_CM_CACHE.move_to_end(cache_key)
                 record_benchmark_metadata(group_cm_cache="hit")
                 return values
             _GROUP_CM_CACHE.pop(cache_key, None)
 
         np_dtype = np.dtype(dtype_local)
-        host_values = np.stack(
-            [
-                np.asarray(item.solver_axon.Cm_uF_cm2, dtype=np_dtype)
-                for item in group.items
-            ],
-            axis=0,
+        host_values = materialized_axons.gather_space(
+            np.asarray(materialized_axons.Cm_uF_cm2, dtype=np_dtype)
         )
         host_values = np.ascontiguousarray(host_values)
         host_values.setflags(write=False)
         values = jnp.asarray(host_values, dtype=dtype_local)
-        _GROUP_CM_CACHE[cache_key] = (weakref.ref(group), values)
+        _GROUP_CM_CACHE[cache_key] = (weakref.ref(materialized_axons), values)
         _GROUP_CM_CACHE.move_to_end(cache_key)
         while len(_GROUP_CM_CACHE) > _GROUP_CM_CACHE_MAX_SIZE:
             _GROUP_CM_CACHE.popitem(last=False)
@@ -155,6 +135,7 @@ def group_cm_uF_cm2(group: DispatchGroup, runtime: SolverRuntime) -> jnp.ndarray
 def _with_batched_single_cable_runtime(
     runtime: SolverRuntime,
     group: DispatchGroup,
+    materialized_axons: MaterializedAxonRows,
 ) -> SolverRuntime:
     """Return `runtime` with cable arrays stacked over the batch axis."""
 
@@ -166,7 +147,7 @@ def _with_batched_single_cable_runtime(
         nx=group.nx,
     ):
         cable = _stack_cable_runtime(
-            group,
+            materialized_axons,
             dtype_local=runtime.membrane.dtype,
             include_area=False,
         )
@@ -179,6 +160,8 @@ def _with_batched_single_cable_runtime(
 def _with_batched_double_cable_runtime(
     runtime: SolverRuntime,
     group: DispatchGroup,
+    materialized_axons: MaterializedAxonRows,
+    membrane_rows: MembraneRowPlan,
     *,
     solver_options: SolverOptions | None,
 ) -> SolverRuntime:
@@ -193,7 +176,7 @@ def _with_batched_double_cable_runtime(
         nx=group.nx,
     ):
         cable = _stack_cable_runtime(
-            group,
+            materialized_axons,
             dtype_local=dtype_local,
             include_area=True,
         )
@@ -204,7 +187,10 @@ def _with_batched_double_cable_runtime(
         mode=group.mode,
         nx=group.nx,
     ):
-        extracellular = stack_extracellular_runtime(group, dtype_local=dtype_local)
+        extracellular = stack_extracellular_runtime(
+            materialized_axons,
+            dtype_local=dtype_local,
+        )
     with benchmark_span(
         "runtime.prepare.stack_membrane",
         group_id=group.group_id,
@@ -215,6 +201,7 @@ def _with_batched_double_cable_runtime(
         membrane = _stack_membrane_runtime(
             runtime,
             group,
+            membrane_rows,
             dtype_local=dtype_local,
             solver_options=solver_options,
         )
@@ -224,6 +211,7 @@ def _with_batched_double_cable_runtime(
 def _stack_membrane_runtime(
     runtime: SolverRuntime,
     group: DispatchGroup,
+    membrane_rows: MembraneRowPlan,
     *,
     dtype_local: jnp.dtype,
     solver_options: SolverOptions | None,
@@ -231,27 +219,27 @@ def _stack_membrane_runtime(
     """Stack row-specific membrane initial states and row-selectable backends."""
 
     np_dtype = np.dtype(dtype_local)
-    vm0_rows = np.stack(
-        [
-            pad_space_array_numpy(
-                np.full(
-                    (int(item.solver_axon.n_compartments),),
-                    float(getattr(item.simulation, "v_init", 0.0)),
-                    dtype=np_dtype,
-                ),
-                target_nx=group.nx,
-                mode="edge",
-            )
-            for item in group.items
-        ],
-        axis=0,
-    )
-    gated_leak_stack = try_stack_gated_leak_membrane_from_group(
-        group,
-        target_nx=group.nx,
-        dtype_local=dtype_local,
-        solver_options=solver_options,
-    )
+    with benchmark_span("runtime.prepare.membrane_vm0_rows"):
+        unique_vm0 = np.asarray(
+            [signature[2] for signature in membrane_rows.signatures],
+            dtype=np_dtype,
+        )
+        row_vm0 = unique_vm0[membrane_rows.row_parameter_indices]
+        vm0_rows = np.ascontiguousarray(
+            np.broadcast_to(row_vm0[:, None], (membrane_rows.size, group.nx))
+        )
+    with benchmark_span("runtime.prepare.membrane_encode_rows"):
+        gated_leak_stack = try_stack_gated_leak_membrane_from_group(
+            group,
+            membrane_rows,
+            target_nx=group.nx,
+            dtype_local=dtype_local,
+            solver_options=solver_options,
+            compiled_models_by_signature=_compiled_membrane_models_by_signature(
+                runtime,
+                group,
+            ),
+        )
     if gated_leak_stack is not None:
         record_benchmark_metadata(
             membrane_stack_host_side=True,
@@ -269,18 +257,25 @@ def _stack_membrane_runtime(
                 gated_leak_stack.jax_compiled_model_count
             ),
         )
+        with benchmark_span("runtime.prepare.membrane_device_arrays"):
+            vm0_device = jnp.asarray(vm0_rows, dtype=dtype_local)
+            gates0_device = jnp.asarray(
+                gated_leak_stack.gates0_rows,
+                dtype=dtype_local,
+            )
+            background_device = jnp.asarray(
+                gated_leak_stack.background_rows,
+                dtype=dtype_local,
+            )
         return replace(
             runtime.membrane,
             backend=gated_leak_stack.backend,
             membrane=gated_leak_stack.membrane_static,
             Nx=group.nx,
-            Vm0_mV=jnp.asarray(vm0_rows, dtype=dtype_local),
-            gates0=jnp.asarray(gated_leak_stack.gates0_rows, dtype=dtype_local),
+            Vm0_mV=vm0_device,
+            gates0=gates0_device,
             state0=(),
-            background_current=jnp.asarray(
-                gated_leak_stack.background_rows,
-                dtype=dtype_local,
-            ),
+            background_current=background_device,
         )
     representative_index = next(
         (
@@ -310,73 +305,46 @@ def _stack_membrane_runtime(
             "parameter-batched double-cable membranes currently require membrane "
             "models with the stateless Vm-only fast path."
         )
-    gated_leak_stack = try_stack_gated_leak_membrane_from_runtime_rows(
-        rows,
+    row_backend = RowIndexedMembraneBackend.from_backends(
+        tuple(row.backend for row in rows),
         target_nx=group.nx,
-        dtype_local=dtype_local,
     )
-    row_backend: Any
-    if gated_leak_stack is None:
-        row_backend = RowIndexedMembraneBackend.from_backends(
-            tuple(row.backend for row in rows),
-            target_nx=group.nx,
-        )
-        gates0_rows = np.stack(
-            [
-                pad_gate_array_numpy(
-                    np.asarray(row.gates0, dtype=np_dtype),
-                    target_nx=group.nx,
-                    target_gates=row_backend.n_gates_max,
-                )
-                for row in rows
-            ],
-            axis=0,
-        )
-        background_rows = np.stack(
-            [
-                pad_space_array_numpy(
-                    np.asarray(row.background_current, dtype=np_dtype),
-                    target_nx=group.nx,
-                    mode="zero",
-                )
-                for row in rows
-            ],
-            axis=0,
-        )
-        membrane_static = runtime.membrane.membrane
-        row_backend_kind = "row_indexed"
-        row_backend_branches = len(rows)
-        stack_gated_count = 0
-        stack_leak_count = 0
-        stack_source = "row_membrane_runtime"
-    else:
-        row_backend = gated_leak_stack.backend
-        gates0_rows = gated_leak_stack.gates0_rows
-        background_rows = gated_leak_stack.background_rows
-        membrane_static = gated_leak_stack.membrane_static
-        stack_gated_count = gated_leak_stack.gated_count
-        stack_leak_count = gated_leak_stack.leak_count
-        row_backend_kind = "gated_leak_stack"
-        row_backend_branches = 1
-        stack_source = gated_leak_stack.source
+    gates0_rows = np.stack(
+        [
+            pad_gate_array_numpy(
+                np.asarray(row.gates0, dtype=np_dtype),
+                target_nx=group.nx,
+                target_gates=row_backend.n_gates_max,
+            )
+            for row in rows
+        ],
+        axis=0,
+    )
+    background_rows = np.stack(
+        [
+            pad_space_array_numpy(
+                np.asarray(row.background_current, dtype=np_dtype),
+                target_nx=group.nx,
+                mode="zero",
+            )
+            for row in rows
+        ],
+        axis=0,
+    )
     record_benchmark_metadata(
         membrane_stack_host_side=True,
-        membrane_stack_source=stack_source,
-        membrane_row_backend=row_backend_kind,
-        membrane_row_backend_branches=int(row_backend_branches),
-        membrane_stack_gated_compartments=int(stack_gated_count),
-        membrane_stack_leak_compartments=int(stack_leak_count),
-        membrane_stack_unique_rows=int(gated_leak_stack.unique_rows)
-        if gated_leak_stack is not None
-        else 0,
-        membrane_stack_cache_hits=int(gated_leak_stack.cache_hits)
-        if gated_leak_stack is not None
-        else 0,
+        membrane_stack_source="row_membrane_runtime",
+        membrane_row_backend="row_indexed",
+        membrane_row_backend_branches=len(rows),
+        membrane_stack_gated_compartments=0,
+        membrane_stack_leak_compartments=0,
+        membrane_stack_unique_rows=0,
+        membrane_stack_cache_hits=0,
     )
     return replace(
         runtime.membrane,
         backend=row_backend,
-        membrane=membrane_static,
+        membrane=runtime.membrane.membrane,
         Nx=group.nx,
         Vm0_mV=jnp.asarray(vm0_rows, dtype=dtype_local),
         gates0=jnp.asarray(gates0_rows, dtype=dtype_local),
@@ -385,47 +353,79 @@ def _stack_membrane_runtime(
     )
 
 
-def _stack_cable_runtime(
+def _compiled_membrane_models_by_signature(
+    runtime: SolverRuntime,
     group: DispatchGroup,
+) -> dict[tuple[Any, ...], Any]:
+    """Index representative compiled models by descriptive signature."""
+
+    representative = next(
+        (
+            item
+            for item in group.items
+            if item.solver_axon is runtime.axon
+        ),
+        None,
+    )
+    if representative is None:
+        return {}
+    backend = runtime.membrane.backend
+    compiled_models = getattr(backend, "membrane_models", None)
+    if compiled_models is None:
+        uniform_model = getattr(backend, "ion_channel", None)
+        if uniform_model is None:
+            return {}
+        compiled_models = (uniform_model,) * len(representative.membrane_signature)
+    if len(compiled_models) != len(representative.membrane_signature):
+        return {}
+    return {
+        signature: compiled
+        for signature, compiled in zip(
+            representative.membrane_signature,
+            compiled_models,
+            strict=True,
+        )
+    }
+
+
+def _stack_cable_runtime(
+    materialized_axons: MaterializedAxonRows,
     *,
     dtype_local: jnp.dtype,
     include_area: bool,
 ) -> CableRuntime:
     """Stack row-specific cable arrays into one batched runtime."""
 
-    np_dtype = np.dtype(dtype_local)
-    lower_rows: list[np.ndarray] = []
-    diag_rows: list[np.ndarray] = []
-    upper_rows: list[np.ndarray] = []
-    area_rows: list[np.ndarray] = []
-    for item in group.items:
-        lower, diag, upper = diffusion_operator_coeffs_numpy(
-            item.solver_axon,
-            dtype=np_dtype,
-        )
-        lower_rows.append(
-            pad_space_array_numpy(lower, target_nx=group.nx, mode="zero")
-        )
-        diag_rows.append(
-            pad_space_array_numpy(diag, target_nx=group.nx, mode="zero")
-        )
-        upper_rows.append(
-            pad_space_array_numpy(upper, target_nx=group.nx, mode="zero")
-        )
-        area_rows.append(
-            pad_space_array_numpy(
-                compartment_area_cm2_numpy(item.solver_axon, dtype=np_dtype)
-                if include_area
-                else np.zeros((item.solver_axon.n_compartments,), dtype=np_dtype),
-                target_nx=group.nx,
-                mode="edge",
-            )
-        )
+    template_rows = cable_runtime_rows_numpy(
+        materialized_axons,
+        dtype=np.dtype(dtype_local),
+        include_area=include_area,
+    )
+    record_benchmark_metadata(
+        cable_stack_rows=materialized_axons.size,
+        cable_stack_unique_rows=materialized_axons.template_count,
+        cable_stack_cache_hits=(
+            materialized_axons.size - materialized_axons.template_count
+        ),
+        cable_stack_lowering="vectorized_template_rows",
+    )
     return CableRuntime(
-        lower=jnp.asarray(np.stack(lower_rows, axis=0), dtype=dtype_local),
-        diag=jnp.asarray(np.stack(diag_rows, axis=0), dtype=dtype_local),
-        upper=jnp.asarray(np.stack(upper_rows, axis=0), dtype=dtype_local),
-        area_cm2=jnp.asarray(np.stack(area_rows, axis=0), dtype=dtype_local),
+        lower=jnp.asarray(
+            materialized_axons.gather_space(template_rows.lower),
+            dtype=dtype_local,
+        ),
+        diag=jnp.asarray(
+            materialized_axons.gather_space(template_rows.diag),
+            dtype=dtype_local,
+        ),
+        upper=jnp.asarray(
+            materialized_axons.gather_space(template_rows.upper),
+            dtype=dtype_local,
+        ),
+        area_cm2=jnp.asarray(
+            materialized_axons.gather_space(template_rows.area_cm2),
+            dtype=dtype_local,
+        ),
     )
 
 

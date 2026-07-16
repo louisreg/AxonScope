@@ -76,6 +76,28 @@ _SUPPORTED_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({_CPU_DOUBLE_CABLE_BLOCK_SOLVE
 _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({_GPU_DOUBLE_CABLE_BLOCK_SOLVER})
 _DEFAULT_TRITON_TILED_THOMAS_BLOCK_B = 32
 
+
+def _slice_factorized_current_time(current: Array, start: int, stop: int) -> Array:
+    values = jnp.asarray(current)
+    if values.ndim == 1:
+        return values[start:stop]
+    if values.ndim == 2:
+        return values[:, start:stop]
+    if values.ndim == 3:
+        return values[:, :, start:stop]
+    raise ValueError("factorized current must have one, two, or three dimensions.")
+
+
+def _last_factorized_current(current: Array) -> Array:
+    values = jnp.asarray(current)
+    if values.ndim == 1:
+        return values[-1]
+    if values.ndim == 2:
+        return values[:, -1]
+    if values.ndim == 3:
+        return values[:, :, -1]
+    raise ValueError("factorized current must have one, two, or three dimensions.")
+
 def _resolve_double_cable_kernel_block_solver(
     solver: str,
     *,
@@ -438,18 +460,15 @@ def _run_double_cable_batch_array_chunks(
             nx=nx,
             dtype_local=dtype_local,
         )
-        if factorized_batch.drive_count != 1:
-            raise ValueError("double-cable compact factorized Vext requires one drive.")
         batch_size = factorized_batch.batch_size
         current_rows_mid_A = _factorized_current_mid_rows(
             factorized_batch,
             dtype_local=dtype_local,
             batch_size=batch_size,
         )
-        if int(current_rows_mid_A.shape[1]) != 1:
-            raise ValueError("double-cable compact factorized Vext requires one current row.")
         if (
-            factorized_batch.shared_current
+            factorized_batch.drive_count == 1
+            and factorized_batch.shared_current
             and factorized_batch.current_row_scales is None
         ):
             factorized_current_mid_A = jnp.asarray(
@@ -457,7 +476,11 @@ def _run_double_cable_batch_array_chunks(
                 dtype=dtype_local,
             )
         else:
-            factorized_current_mid_A = current_rows_mid_A[:, 0, :]
+            factorized_current_mid_A = (
+                current_rows_mid_A[:, 0, :]
+                if factorized_batch.drive_count == 1
+                else current_rows_mid_A
+            )
         factorized_previous_current_A = _factorized_current_initial_previous_rows(
             factorized_batch,
             dtype_local=dtype_local,
@@ -524,10 +547,10 @@ def _run_double_cable_batch_array_chunks(
             if factorized_vext:
                 vext_chunk = None
                 assert factorized_current_mid_A is not None
-                current_chunk = (
-                    factorized_current_mid_A[start:stop]
-                    if jnp.asarray(factorized_current_mid_A).ndim == 1
-                    else factorized_current_mid_A[:, start:stop]
+                current_chunk = _slice_factorized_current_time(
+                    factorized_current_mid_A,
+                    start,
+                    stop,
                 )
             else:
                 vext_chunk = cast(Any, extracellular_potential_mid_mV)[:, start:stop]
@@ -639,10 +662,8 @@ def _run_double_cable_batch_array_chunks(
         ):
             if factorized_vext:
                 assert current_chunk is not None
-                factorized_previous_current_A = (
-                    current_chunk[-1]
-                    if jnp.asarray(current_chunk).ndim == 1
-                    else current_chunk[:, -1]
+                factorized_previous_current_A = _last_factorized_current(
+                    current_chunk
                 )
             else:
                 assert vext_chunk is not None
@@ -951,7 +972,8 @@ def _run_double_cable_batch_observer_chunks(
                 batch_size=batch_size,
             )
             if (
-                factorized_vext.shared_current
+                factorized_vext.drive_count == 1
+                and factorized_vext.shared_current
                 and factorized_vext.current_row_scales is None
             ):
                 factorized_current_mid_A = jnp.asarray(
@@ -959,11 +981,11 @@ def _run_double_cable_batch_observer_chunks(
                     dtype=dtype_local,
                 )
             else:
-                if int(current_rows_mid_A.shape[1]) != 1:
-                    raise ValueError(
-                        "double-cable compact factorized Vext requires one current row."
-                    )
-                factorized_current_mid_A = current_rows_mid_A[:, 0, :]
+                factorized_current_mid_A = (
+                    current_rows_mid_A[:, 0, :]
+                    if factorized_vext.drive_count == 1
+                    else current_rows_mid_A
+                )
             previous_current_A = _factorized_current_initial_previous_rows(
                 factorized_vext,
                 dtype_local=dtype_local,
@@ -1066,10 +1088,10 @@ def _run_double_cable_batch_observer_chunks(
             else:
                 assert factorized_current_mid_A is not None
                 vext_chunk = None
-                current_chunk = (
-                    factorized_current_mid_A[start:stop]
-                    if factorized_current_mid_A.ndim == 1
-                    else factorized_current_mid_A[:, start:stop]
+                current_chunk = _slice_factorized_current_time(
+                    factorized_current_mid_A,
+                    start,
+                    stop,
                 )
             iinj_chunk = (
                 None
@@ -1086,11 +1108,7 @@ def _run_double_cable_batch_observer_chunks(
                 current_chunk = _pad_time_chunk(
                     current_chunk,
                     target_steps=compiled_chunk_steps,
-                    time_axis=(
-                        0
-                        if current_chunk is not None and current_chunk.ndim == 1
-                        else 1
-                    ),
+                    time_axis=(0 if current_chunk is None else current_chunk.ndim - 1),
                     edge=True,
                 )
                 iinj_chunk = _pad_time_chunk(
@@ -1234,11 +1252,7 @@ def _run_double_cable_batch_observer_chunks(
                 previous = cast(Any, vext_chunk)[:, -1]
             else:
                 assert current_chunk is not None
-                previous_current_A = (
-                    current_chunk[-1]
-                    if current_chunk.ndim == 1
-                    else current_chunk[:, -1]
-                )
+                previous_current_A = _last_factorized_current(current_chunk)
             if local_observer_chunks:
                 observer_chunk_states.append(observer_state)
                 observer_chunk_starts.append(start)

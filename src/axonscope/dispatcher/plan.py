@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import pickle
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Any, Iterable, Literal, Sequence
 
@@ -11,6 +12,7 @@ import numpy as np
 from axonscope.axon_instance import AxonInstance, as_axon_instance
 from axonscope.axons.axon import Axon
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
+from axonscope.dispatcher.numeric_axis import NumericAxisInput
 from axonscope.runtime.solver_axon import SolverAxon, build_solver_axon
 
 
@@ -30,6 +32,71 @@ class DispatchItem:
     cable_signature: tuple[Any, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class DispatchGroupStructure:
+    """Versioned content signature for one planned group row layout."""
+
+    schema_version: int
+    spatial_rows: tuple[Any, ...]
+    runtime_rows: tuple[Any, ...]
+
+    @classmethod
+    def from_items(cls, items: tuple[DispatchItem, ...]) -> "DispatchGroupStructure":
+        if not items:
+            raise ValueError("dispatch group structure requires at least one item.")
+        return cls(
+            schema_version=1,
+            spatial_rows=(
+                "dispatch_spatial_rows_v1",
+                len(items),
+                _digest_group_spatial_items(items),
+            ),
+            runtime_rows=(
+                "dispatch_runtime_rows_v1",
+                len(items),
+                _digest_group_runtime_items(items),
+            ),
+        )
+
+    def repeated(self, count: int) -> "DispatchGroupStructure":
+        repeats = int(count)
+        if repeats < 1:
+            raise ValueError("dispatch group row repeat count must be positive.")
+        if repeats == 1:
+            return self
+        return DispatchGroupStructure(
+            schema_version=self.schema_version,
+            spatial_rows=("dispatch_repeat_rows_v1", self.spatial_rows, repeats),
+            runtime_rows=("dispatch_repeat_rows_v1", self.runtime_rows, repeats),
+        )
+
+    def padded_with_last(
+        self,
+        item: DispatchItem,
+        count: int,
+    ) -> "DispatchGroupStructure":
+        padding = int(count)
+        if padding < 0:
+            raise ValueError("dispatch group row padding must be non-negative.")
+        if padding == 0:
+            return self
+        return DispatchGroupStructure(
+            schema_version=self.schema_version,
+            spatial_rows=(
+                "dispatch_pad_last_v1",
+                self.spatial_rows,
+                _digest_spatial_item(item),
+                padding,
+            ),
+            runtime_rows=(
+                "dispatch_pad_last_v1",
+                self.runtime_rows,
+                _digest_runtime_item(item),
+                padding,
+            ),
+        )
+
+
 @dataclass(frozen=True)
 class DispatchGroup:
     """A compatibility group selected by the dispatcher."""
@@ -39,7 +106,10 @@ class DispatchGroup:
     signature: tuple[Any, ...]
     mode: _CableMode
     nx: int
+    structure: DispatchGroupStructure
     geometry_shared: bool = True
+    numeric_axis: NumericAxisInput | None = None
+    numeric_axis_source_size: int | None = None
 
     @cached_property
     def pool_indices(self) -> tuple[int, ...]:
@@ -96,6 +166,67 @@ class DispatchPlan:
     groups: tuple[DispatchGroup, ...]
 
 
+def expand_dispatch_plan_for_numeric_axis(
+    plan: DispatchPlan,
+    axis_input: NumericAxisInput,
+) -> DispatchPlan:
+    """Expand only dispatch indices/references for a numeric execution axis.
+
+    Axon, stimulation, membrane, and solver descriptions remain shared. The
+    concrete runtime lowers these logical rows into numerical batch arrays.
+    """
+
+    axis_size = int(axis_input.size)
+    if axis_size < 1:
+        raise ValueError("numeric axis must contain at least one value.")
+    source_size = len(plan.items)
+    declared_source_size = getattr(axis_input, "source_size", source_size)
+    if int(declared_source_size) != source_size:
+        raise ValueError(
+            "numeric-axis source size does not match the dispatch plan: "
+            f"got {declared_source_size}, expected {source_size}."
+        )
+    expanded_items: list[DispatchItem] = []
+    expanded_groups: list[DispatchGroup] = []
+    for group in plan.groups:
+        select_sources = getattr(axis_input, "for_source_indices", None)
+        group_axis_input = (
+            select_sources(group.pool_indices)
+            if callable(select_sources)
+            else axis_input
+        )
+        group_items = tuple(
+            replace(
+                item,
+                index=axis_index * source_size + item.index,
+            )
+            for axis_index in range(axis_size)
+            for item in group.items
+        )
+        expanded_items.extend(group_items)
+        expanded_groups.append(
+            DispatchGroup(
+                group_id=group.group_id,
+                items=group_items,
+                signature=(
+                    group.signature,
+                    "numeric_axis_v1",
+                    group_axis_input.dispatch_signature,
+                ),
+                mode=group.mode,
+                nx=group.nx,
+                structure=group.structure.repeated(axis_size),
+                geometry_shared=group.geometry_shared,
+                numeric_axis=group_axis_input,
+                numeric_axis_source_size=group.size,
+            )
+        )
+    return DispatchPlan(
+        items=tuple(sorted(expanded_items, key=lambda item: item.index)),
+        groups=tuple(expanded_groups),
+    )
+
+
 @dataclass
 class _PendingDispatchGroup:
     """Mutable grouping state used while building a dispatch plan."""
@@ -124,6 +255,15 @@ class _SolverDispatchMetadata:
     cable_signature: tuple[Any, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedDispatchRow:
+    """Stable row signatures shared by cache lookup and normalization."""
+
+    simulation: AxonInstance
+    solver_axon_cache_key: tuple[Any, ...]
+    stimulation_temporal_signature: tuple[Any, ...]
+
+
 _DISPATCH_PLAN_CACHE: OrderedDict[tuple[Any, ...], DispatchPlan] = OrderedDict()
 _DISPATCH_PLAN_CACHE_MAX_SIZE = 64
 
@@ -133,7 +273,9 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
 
     simulations = tuple(as_axon_instance(axon) for axon in axons)
     with benchmark_span("dispatch.build_plan", pool_size=len(simulations)):
-        cache_key = _dispatch_plan_cache_key(simulations)
+        with benchmark_span("dispatch.build_plan.cache_key"):
+            prepared_rows = _prepare_dispatch_rows(simulations)
+            cache_key = _dispatch_plan_cache_key(prepared_rows)
         cached = _DISPATCH_PLAN_CACHE.get(cache_key)
         if cached is not None:
             _DISPATCH_PLAN_CACHE.move_to_end(cache_key)
@@ -148,40 +290,51 @@ def build_dispatch_plan(axons: Sequence[Axon | AxonInstance]) -> DispatchPlan:
             return cached
 
         record_benchmark_metadata(dispatch_plan_cache="miss")
-        items = _normalize_dispatch_items(simulations)
-        groups_by_signature: dict[tuple[Any, ...], list[_PendingDispatchGroup]] = {}
-        for item in items:
-            signature = item.signature
-            compatible_groups = groups_by_signature.setdefault(signature, [])
-            target_group: _PendingDispatchGroup | None = None
-            if item.mode == "single":
-                target_group = compatible_groups[0] if compatible_groups else None
-            else:
-                for group in compatible_groups:
-                    if group.can_accept(item):
-                        target_group = group
-                        break
-            if target_group is None:
-                target_group = _PendingDispatchGroup.from_item(item)
-                compatible_groups.append(target_group)
-            else:
-                target_group.append(item)
+        with benchmark_span("dispatch.build_plan.normalize_items"):
+            items = _normalize_dispatch_items(prepared_rows)
+        with benchmark_span("dispatch.build_plan.group_items"):
+            groups_by_signature: dict[
+                tuple[Any, ...], list[_PendingDispatchGroup]
+            ] = {}
+            for item in items:
+                signature = item.signature
+                compatible_groups = groups_by_signature.setdefault(signature, [])
+                target_group: _PendingDispatchGroup | None = None
+                if item.mode == "single":
+                    target_group = compatible_groups[0] if compatible_groups else None
+                else:
+                    for group in compatible_groups:
+                        if group.can_accept(item):
+                            target_group = group
+                            break
+                if target_group is None:
+                    target_group = _PendingDispatchGroup.from_item(item)
+                    compatible_groups.append(target_group)
+                else:
+                    target_group.append(item)
 
-        groups_list: list[DispatchGroup] = []
-        for signature, signature_groups in groups_by_signature.items():
-            for pending_group in signature_groups:
-                group_items = pending_group.items
-                groups_list.append(
-                    DispatchGroup(
-                        group_id=len(groups_list),
-                        items=tuple(group_items),
-                        signature=signature,
-                        mode=group_items[0].mode,
-                        nx=max(int(item.solver_axon.n_compartments) for item in group_items),
-                        geometry_shared=_group_has_shared_geometry(group_items),
+        with benchmark_span("dispatch.build_plan.materialize_groups"):
+            groups_list: list[DispatchGroup] = []
+            for signature, signature_groups in groups_by_signature.items():
+                for pending_group in signature_groups:
+                    group_items = pending_group.items
+                    groups_list.append(
+                        DispatchGroup(
+                            group_id=len(groups_list),
+                            items=tuple(group_items),
+                            signature=signature,
+                            mode=group_items[0].mode,
+                            nx=max(
+                                int(item.solver_axon.n_compartments)
+                                for item in group_items
+                            ),
+                            structure=DispatchGroupStructure.from_items(
+                                tuple(group_items)
+                            ),
+                            geometry_shared=_group_has_shared_geometry(group_items),
+                        )
                     )
-                )
-        groups = tuple(groups_list)
+            groups = tuple(groups_list)
         record_benchmark_metadata(
             item_count=len(items),
             group_count=len(groups),
@@ -220,7 +373,7 @@ def dispatch_plan_identity_key(
 
 
 def _dispatch_plan_cache_key(
-    simulations: Sequence[AxonInstance],
+    prepared_rows: Sequence[_PreparedDispatchRow],
 ) -> tuple[Any, ...]:
     """Return the stable execution-layout key for a pool.
 
@@ -230,31 +383,43 @@ def _dispatch_plan_cache_key(
     objects or rebuild simulation rows.
     """
 
-    stimulus_signature_cache: dict[int, tuple[Any, ...]] = {}
     return (
         "dispatch_plan_v2",
         tuple(
-            _dispatch_plan_row_cache_key(
-                simulation,
-                stimulus_signature_cache=stimulus_signature_cache,
-            )
-            for simulation in simulations
+            _dispatch_plan_row_cache_key(prepared_row)
+            for prepared_row in prepared_rows
         ),
     )
 
 
 def _dispatch_plan_row_cache_key(
-    simulation: AxonInstance,
-    *,
-    stimulus_signature_cache: dict[int, tuple[Any, ...]],
+    prepared_row: _PreparedDispatchRow,
 ) -> tuple[Any, ...]:
+    simulation = prepared_row.simulation
     return (
         id(simulation),
-        _solver_axon_cache_key(simulation),
-        _stimulation_temporal_signature(simulation, stimulus_signature_cache),
+        prepared_row.solver_axon_cache_key,
+        prepared_row.stimulation_temporal_signature,
         float(getattr(simulation, "v_init", 0.0)),
         float(getattr(simulation, "Veinit", 0.0)),
         float(getattr(simulation, "temperature", 0.0)),
+    )
+
+
+def _prepare_dispatch_rows(
+    simulations: Sequence[AxonInstance],
+) -> tuple[_PreparedDispatchRow, ...]:
+    stimulus_signature_cache: dict[int, tuple[Any, ...]] = {}
+    return tuple(
+        _PreparedDispatchRow(
+            simulation=simulation,
+            solver_axon_cache_key=_solver_axon_cache_key(simulation),
+            stimulation_temporal_signature=_stimulation_temporal_signature(
+                simulation,
+                stimulus_signature_cache,
+            ),
+        )
+        for simulation in simulations
     )
 
 
@@ -283,7 +448,9 @@ def _store_dispatch_plan_cache(key: tuple[Any, ...], plan: DispatchPlan) -> None
         _DISPATCH_PLAN_CACHE.popitem(last=False)
 
 
-def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[DispatchItem, ...]:
+def _normalize_dispatch_items(
+    prepared_rows: Sequence[_PreparedDispatchRow],
+) -> tuple[DispatchItem, ...]:
     """Validate public pool items and preserve input order."""
 
     items: list[DispatchItem] = []
@@ -291,10 +458,9 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
     metadata_cache: dict[tuple[Any, ...], _SolverDispatchMetadata] = {}
     model_signature_cache: dict[int, Any] = {}
     model_structure_cache: dict[int, Any] = {}
-    stimulus_signature_cache: dict[int, tuple[Any, ...]] = {}
-    for index, axon in enumerate(axons):
-        simulation = as_axon_instance(axon)
-        cache_key = _solver_axon_cache_key(simulation)
+    for index, prepared_row in enumerate(prepared_rows):
+        simulation = prepared_row.simulation
+        cache_key = prepared_row.solver_axon_cache_key
         solver_axon = solver_cache.get(cache_key)
         if solver_axon is None:
             solver_axon = build_solver_axon(simulation)
@@ -313,9 +479,8 @@ def _normalize_dispatch_items(axons: Sequence[Axon | AxonInstance]) -> tuple[Dis
                 simulation=simulation,
                 solver_axon=solver_axon,
                 metadata=metadata,
-                stimulation_temporal_signature=_stimulation_temporal_signature(
-                    simulation,
-                    stimulus_signature_cache,
+                stimulation_temporal_signature=(
+                    prepared_row.stimulation_temporal_signature
                 ),
             )
         )
@@ -515,6 +680,67 @@ def _array_signature(values: Any) -> tuple[tuple[int, ...], str, str]:
     return arr.shape, arr.dtype.str, digest
 
 
+def _digest_group_spatial_items(items: tuple[DispatchItem, ...]) -> str:
+    token_cache: dict[int, str] = {}
+    hasher = hashlib.blake2b(digest_size=16)
+    for item in items:
+        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
+def _digest_group_runtime_items(items: tuple[DispatchItem, ...]) -> str:
+    token_cache: dict[int, str] = {}
+    hasher = hashlib.blake2b(digest_size=16)
+    for item in items:
+        hasher.update(_digest_signature_value(item.membrane_signature, token_cache).encode())
+        hasher.update(b"\0")
+        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
+        hasher.update(b"\0")
+        simulation = item.simulation
+        _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
+        _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
+        _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
+    return hasher.hexdigest()
+
+
+def _digest_spatial_item(item: DispatchItem) -> str:
+    return _digest_signature_value(item.cable_signature, {})
+
+
+def _digest_runtime_item(item: DispatchItem) -> str:
+    hasher = hashlib.blake2b(digest_size=16)
+    token_cache: dict[int, str] = {}
+    hasher.update(_digest_signature_value(item.membrane_signature, token_cache).encode())
+    hasher.update(b"\0")
+    hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
+    hasher.update(b"\0")
+    simulation = item.simulation
+    _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
+    _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
+    _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
+    return hasher.hexdigest()
+
+
+def _digest_signature_value(value: Any, cache: dict[int, str]) -> str:
+    cache_key = id(value)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        payload = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+    except (pickle.PickleError, TypeError, AttributeError):
+        payload = repr(value).encode("utf-8")
+    digest = hashlib.blake2b(payload, digest_size=16).hexdigest()
+    cache[cache_key] = digest
+    return digest
+
+
+def _update_digest_float(hasher: Any, value: float) -> None:
+    hasher.update(repr(float(value)).encode("ascii"))
+    hasher.update(b"\0")
+
+
 def _stimulation_temporal_signature(
     simulation: AxonInstance,
     stimulus_signature_cache: dict[int, tuple[Any, ...]],
@@ -592,4 +818,5 @@ __all__ = [
     "DispatchPlan",
     "build_dispatch_plan",
     "dispatch_plan_identity_key",
+    "expand_dispatch_plan_for_numeric_axis",
 ]

@@ -25,6 +25,65 @@ _GPU_DOUBLE_CABLE_BLOCK_SOLVER = "jax_triton_loop_xb"
 _INTERNAL_DOUBLE_CABLE_BLOCK_SOLVERS = frozenset({_GPU_DOUBLE_CABLE_BLOCK_SOLVER})
 
 
+def _factorized_current_previous_batch(
+    current_mid_A: Array,
+    current_initial_previous_A: Array,
+    *,
+    batch_size: int,
+) -> Array:
+    current = jnp.asarray(current_mid_A)
+    initial = jnp.asarray(current_initial_previous_A)
+    if current.ndim == 1:
+        return jnp.concatenate([initial.reshape((1,)), current[:-1]], axis=0)
+    if current.ndim == 2:
+        initial_rows = (
+            jnp.broadcast_to(initial, (batch_size,)) if initial.ndim == 0 else initial
+        )
+        return jnp.concatenate(
+            [initial_rows.reshape((batch_size, 1)), current[:, :-1]],
+            axis=1,
+        )
+    if current.ndim == 3:
+        drive_count = int(current.shape[1])
+        initial_rows = (
+            jnp.broadcast_to(initial[None, :], (batch_size, drive_count))
+            if initial.ndim == 1
+            else initial
+        )
+        return jnp.concatenate(
+            [initial_rows.reshape((batch_size, drive_count, 1)), current[:, :, :-1]],
+            axis=2,
+        )
+    raise ValueError(
+        "extracellular_current_mid_A must have shape (Nt,), (B, Nt), or (B, S, Nt)."
+    )
+
+
+def _factorized_extracellular_drive_batch(
+    *,
+    cx_plus_gx_batch: Array,
+    cx_over_dt_batch: Array,
+    current_A: Array,
+    previous_current_A: Array,
+    footprint_batch: Array,
+) -> Array:
+    footprint = jnp.asarray(footprint_batch)
+    current = jnp.asarray(current_A)
+    previous = jnp.asarray(previous_current_A)
+    if footprint.ndim == 2:
+        current_space = current if current.ndim == 0 else current[:, None]
+        previous_space = previous if previous.ndim == 0 else previous[:, None]
+        return (
+            cx_plus_gx_batch * current_space
+            - cx_over_dt_batch * previous_space
+        ) * footprint
+    per_drive = (
+        cx_plus_gx_batch[:, None, :] * current[:, :, None]
+        - cx_over_dt_batch[:, None, :] * previous[:, :, None]
+    ) * footprint
+    return jnp.sum(per_drive, axis=1)
+
+
 def _use_batch_native_double_cable_integrated_solver(
     solver: str,
     *,
@@ -127,29 +186,11 @@ def _run_double_cable_batch_stateful_integrated_scan(
         footprint_batch = batch_space(extracellular_footprint_mV_per_A)
         current_mid_A = jnp.asarray(extracellular_current_mid_A)
         current_initial_previous_A = jnp.asarray(extracellular_current_initial_previous_A)
-        if current_mid_A.ndim == 1:
-            current_previous_A = jnp.concatenate(
-                [
-                    current_initial_previous_A.reshape((1,)),
-                    current_mid_A[:-1],
-                ],
-                axis=0,
-            )
-        elif current_mid_A.ndim == 2:
-            initial_previous = (
-                jnp.broadcast_to(current_initial_previous_A, (batch_size,))
-                if current_initial_previous_A.ndim == 0
-                else current_initial_previous_A
-            )
-            current_previous_A = jnp.concatenate(
-                [
-                    initial_previous.reshape((batch_size, 1)),
-                    current_mid_A[:, :-1],
-                ],
-                axis=1,
-            )
-        else:
-            raise ValueError("extracellular_current_mid_A must have shape (Nt,) or (B, Nt).")
+        current_previous_A = _factorized_current_previous_batch(
+            current_mid_A,
+            current_initial_previous_A,
+            batch_size=batch_size,
+        )
     else:
         if extracellular_potential_mid_mV is None:
             raise ValueError("extracellular_potential_mid_mV is required.")
@@ -211,10 +252,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
         tiled_thomas_block_b=tiled_thomas_block_b,
     )
 
-    def current_to_space(value: Array) -> Array:
-        value = jnp.asarray(value)
-        return value if value.ndim == 0 else value[:, None]
-
     def step(carry, step_inputs):
         if use_factorized_vext:
             if intracellular_current_abs_mid is None:
@@ -222,12 +259,12 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 Iinj_abs = jnp.zeros_like(area_batch)
             else:
                 Iinj_abs, current_A, previous_current_A = step_inputs
-            extracellular_drive_abs = (
-                (
-                    cx_plus_gx_batch * current_to_space(current_A)
-                    - cx_over_dt_batch * current_to_space(previous_current_A)
-                )
-                * footprint_batch
+            extracellular_drive_abs = _factorized_extracellular_drive_batch(
+                cx_plus_gx_batch=cx_plus_gx_batch,
+                cx_over_dt_batch=cx_over_dt_batch,
+                current_A=current_A,
+                previous_current_A=previous_current_A,
+                footprint_batch=footprint_batch,
             )
         else:
             if intracellular_current_abs_mid is None:
@@ -303,12 +340,12 @@ def _run_double_cable_batch_stateful_integrated_scan(
         current_scan_A = (
             current_mid_A
             if current_mid_A.ndim == 1
-            else jnp.swapaxes(current_mid_A, 0, 1)
+            else jnp.moveaxis(current_mid_A, -1, 0)
         )
         previous_scan_A = (
             current_previous_A
             if current_previous_A.ndim == 1
-            else jnp.swapaxes(current_previous_A, 0, 1)
+            else jnp.moveaxis(current_previous_A, -1, 0)
         )
         scan_inputs = (
             (current_scan_A, previous_scan_A)
@@ -437,26 +474,12 @@ def _run_double_cable_batch_observer_integrated_scan(
         footprint_batch = batch_space(extracellular_footprint_mV_per_A)
         current_mid_A = jnp.asarray(extracellular_current_mid_A)
         current_initial_previous_A = jnp.asarray(extracellular_current_initial_previous_A)
-        if current_mid_A.ndim == 1:
-            current_previous_A = jnp.concatenate(
-                [
-                    current_initial_previous_A.reshape((1,)),
-                    current_mid_A[:-1],
-                ],
-                axis=0,
-            )
-            step_count = int(current_mid_A.shape[0])
-        elif current_mid_A.ndim == 2:
-            current_previous_A = jnp.concatenate(
-                [
-                    current_initial_previous_A.reshape((batch_size, 1)),
-                    current_mid_A[:, :-1],
-                ],
-                axis=1,
-            )
-            step_count = int(current_mid_A.shape[1])
-        else:
-            raise ValueError("extracellular_current_mid_A must have shape (Nt,) or (B, Nt).")
+        current_previous_A = _factorized_current_previous_batch(
+            current_mid_A,
+            current_initial_previous_A,
+            batch_size=batch_size,
+        )
+        step_count = int(current_mid_A.shape[-1])
     else:
         if extracellular_potential_mid_mV is None:
             raise ValueError("extracellular_potential_mid_mV is required.")
@@ -519,10 +542,6 @@ def _run_double_cable_batch_observer_integrated_scan(
         tiled_thomas_block_b=tiled_thomas_block_b,
     )
 
-    def current_to_space(value: Array) -> Array:
-        value = jnp.asarray(value)
-        return value if value.ndim == 0 else value[:, None]
-
     def step(carry, step_inputs):
         if use_factorized_vext:
             if intracellular_current_abs_mid is None:
@@ -530,12 +549,12 @@ def _run_double_cable_batch_observer_integrated_scan(
                 Iinj_abs = jnp.zeros_like(area_batch)
             else:
                 Iinj_abs, current_A, previous_current_A, local_step = step_inputs
-            extracellular_drive_abs = (
-                (
-                    cx_plus_gx_batch * current_to_space(current_A)
-                    - cx_over_dt_batch * current_to_space(previous_current_A)
-                )
-                * footprint_batch
+            extracellular_drive_abs = _factorized_extracellular_drive_batch(
+                cx_plus_gx_batch=cx_plus_gx_batch,
+                cx_over_dt_batch=cx_over_dt_batch,
+                current_A=current_A,
+                previous_current_A=previous_current_A,
+                footprint_batch=footprint_batch,
             )
         else:
             if intracellular_current_abs_mid is None:
@@ -618,12 +637,12 @@ def _run_double_cable_batch_observer_integrated_scan(
         current_scan_A = (
             current_mid_A
             if current_mid_A.ndim == 1
-            else jnp.swapaxes(current_mid_A, 0, 1)
+            else jnp.moveaxis(current_mid_A, -1, 0)
         )
         previous_scan_A = (
             current_previous_A
             if current_previous_A.ndim == 1
-            else jnp.swapaxes(current_previous_A, 0, 1)
+            else jnp.moveaxis(current_previous_A, -1, 0)
         )
         scan_inputs = (
             (current_scan_A, previous_scan_A, local_steps)

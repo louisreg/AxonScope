@@ -178,6 +178,14 @@ class Layout:
     Per-compartment arrays are derived later by `flatten_layout`.
     """
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_template_frozen", False):
+            raise AttributeError(
+                "Layout descriptions are immutable; use with_x_shift() or build "
+                "a new Layout."
+            )
+        object.__setattr__(self, name, value)
+
     def __init__(
         self,
         elements: Sequence[LayoutElement],
@@ -224,6 +232,8 @@ class Layout:
                 )
             if not np.all(np.diff(x_centers_um.astype(float)) > 0.0):
                 raise ValueError("x_centers must be strictly increasing.")
+            x_centers_um = np.array(x_centers_um, copy=True)
+            x_centers_um.setflags(write=False)
             control_length_um = _center_control_length_sum_um(x_centers_um)
             if frozen[0].compartments != int(x_centers_um.shape[0]) or not np.isclose(
                 frozen[0].length_um,
@@ -252,6 +262,8 @@ class Layout:
                 name="total_length",
             )
         )
+        self._flattened_cache = None
+        self._template_frozen = True
 
     @classmethod
     def single_uniform(

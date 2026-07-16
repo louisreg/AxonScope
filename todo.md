@@ -1,54 +1,32 @@
 # AxonScope TODO
 
-Living execution plan for AxonScope cleanup, benchmark evidence, validation,
-documentation, and next runtime phases.
-
-`GUIDELINES.md` is the architecture reference. `AGENTS.md` is the agent working
-guide. Source, tests, runnable examples, and fresh benchmark reports remain the
-implementation truth.
-
-This file is intentionally compact. The full pre-cleanup ledger was archived in
-`docs/architecture/todo_archive_before_cleanup_2026_07_12.md`.
+Living execution plan for AxonScope. `GUIDELINES.md` owns architecture and
+product boundaries; source, tests, runnable examples, and fresh benchmark
+artifacts own current behavior. Historical detail before the 2026-07-12
+cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`.
 
 ## Snapshot
 
-Updated on 2026-07-14 during the P12 GPU cold/warm optimization closeout.
+Updated on 2026-07-16 after the realistic P14D dispatch-plan optimization.
 
-Current state:
+- P7, P11, P12, and the VmRaster part of P13 are closed.
+- The production runtime is JAX. CPU double-cable uses Thomas; GPU
+  double-cable uses the Triton tiled-Thomas route; single-cable uses the JAX
+  tridiagonal route.
+- VmRaster is currently the only strict solver-side observer route. It is
+  correct, but its full temporal state makes large recruitment batches
+  memory-bound and prevents clean measurement of solver performance.
+- The current recruitment amplitude path is functionally native but still
+  expands `Namplitude x Naxon` Python objects. It is not the target design.
+- Work proceeds in dependency order:
+  1. P14 population, amplitude-axis, and preparation scalability.
+  2. P15 compact activation, spike, and propagation observers.
+  3. P16 low-level JAX temporal solver and dispatch optimization.
+  4. P17 autonomous generated membrane runtime contracts.
+  5. P18 membrane-model completion and validation.
+  6. P19 pre-v1 cleanup and public-surface convergence.
 
-- P7 is closed: public membrane authoring is class-based through
-  `axs.membranes.Model`; built-ins live under
-  `src/axonscope/membranes/models/`.
-- Historical `channel_models`, `icm`, `model_ir/models`, and
-  `model_ir/builtins.py` paths are removed and must stay absent.
-- Model IR remains internal compiler/runtime vocabulary. Users write membrane
-  models, equations, parameters, gates, currents, and observables.
-- `axs.runtime.numpy` is reserved for a future real NumPy/SciPy reference
-  runtime. It must not become a JAX-backed compatibility path.
-- Solver-side observer-only execution is the strict VmRaster path under
-  `observations["vm_raster"]`; activation, latency, velocity, threshold, and
-  recruitment summaries remain post-processing.
-- `PeakVoltage` remains post-hoc on recorded Vm unless a dedicated benchmarked
-  solver-side design is accepted.
-- P3 is paused after current-docs cleanup. Tutorials/Sphinx/docstrings remain
-  open.
-- P11 is closed for the current JAX runtime, benchmark, and solver-policy
-  stabilization pass. Deferred runtime, benchmark, and solver-policy work is
-  tracked in `docs/architecture/p11_closeout_2026_07_12.md`.
-- P12 is closed for runtime/JAX cleanup, targeted GPU warm/cold optimization,
-  and Graphify-guided runtime dead-code cleanup. A final cold-start extension
-  now persists the supported double-cable Triton compiled call. Future work
-  keeps broader dense-observable benchmarks, generalized compile-cache policy,
-  GPU async scheduling, and larger public speed-claim evidence out of the P12
-  closeout path.
-- Current solver-policy decisions are tracked in
-  `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`:
-  CPU double-cable keeps only Thomas as a production route; GPU double-cable
-  currently resolves `auto` through the Triton/tiled-Thomas route while the
-  full policy matrix remains the benchmark gate; single-cable stays on the JAX
-  tridiagonal route for now.
-
-Fresh local validation from the 2026-07-02 audit:
+Latest fast validation recorded by the 2026-07-02 audit:
 
 ```text
 python -m compileall -q src tests/unit
@@ -58,927 +36,871 @@ pytest -q tests/unit --tb=short
 
 ## Non-Negotiables
 
-- AxonScope is pre-release with one active user. Prefer clean deletion and
-  direct convergence over retrocompatibility, shims, aliases, or deprecated
-  wrappers.
-- One concept, one public name, one execution path, one canonical public result
-  model.
-- Public examples must not import solver/runtime internals.
-- Every public feature, option, workflow, analysis, runtime mode, inspection
-  view, or advanced concept must be documented in runnable examples or removed
+- AxonScope is pre-release with one active user. Prefer direct convergence over
+  compatibility shims, aliases, deprecated wrappers, or parallel old/new
+  paths.
+- Keep one concept, one public name, one execution path, and one canonical
+  public result model.
+- Promote optimizations by replacing the existing production path, not by
+  adding parallel `optimized`/`legacy` routes, hidden slow fallbacks, duplicate
+  kernels, or extra public switches. Benchmark-only prototypes may coexist
+  temporarily until a decision is made; remove the rejected/replaced route
+  when the optimized path is promoted.
+- Internal representations may change freely when public behavior is
+  preserved. If an optimization requires a material change to canonical
+  results, serialized output, user-visible progress, or the public workflow/UI,
+  discuss and approve that product change before implementation.
+- Public orchestration enters JAX through `axonscope.runtime.execution`.
+- Public examples must not import runtime or solver internals.
+- External packages own nerve geometry, trajectories, world coordinates,
+  electrode CAD, and FEM solves. AxonScope owns intrinsic axon coordinates,
+  sampled-footprint stimulation, membrane/cable execution, recording, and
+  analysis.
+- Every public feature must be documented in a runnable example or removed
   from the public surface.
-- World/anatomical coordinates, trajectories, nerve geometry, electrode CAD,
-  surgical placement, and FEM solving stay outside AxonScope core. AxonScope
-  consumes intrinsic positions and sampled footprints.
-- Do not remove unfinished TODO items unless they are completed, rejected, or
-  moved to a named tracking document.
+- Do not remove an unfinished task unless it is completed, rejected, or moved
+  to a named tracking document.
 
-## Active Plan
+## Active Roadmap
 
-### P12 - Runtime Cleanup, Studies, Serialization, Integration
+### P14 - Population, Sweep, And Preparation Scalability
 
-Final P12 performance objective: make warm GPU runs as solver-bound as possible,
-especially by reducing JAX/Python dispatch, input lowering, observer packing,
-and host/device transfer overheads around the solver. In parallel, reduce
-cold-run latency as much as possible through preparation, membrane/runtime
-caching, compilation/lowering reuse, and targeted persistent caches. Keep
-benchmark evidence separated between warm solver-bound claims and cold-start
-improvements.
+Primary objective: remove work that scales with Python object count before
+optimizing the temporal solver. A recruitment sweep must keep one source
+population plus a native amplitude dimension; it must not represent every
+`amplitude x axon` pair as a cloned `AxonInstance` and stimulus graph.
 
-- [x] P12A runtime contract and sanity benchmark gate:
-  use `docs/architecture/p12_runtime_contract_2026_07_12.md` and
-  `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md` as the completed
-  local CPU plus Kaggle GPU smoke gate. This validates that the initial
-  runtime-contract cleanup still runs on the P11-sensitive single-cable and
-  double-cable observer-only paths.
-- [x] P12B runtime/JAX cleanup:
-  use `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md` as the active
-  migration note. Homogenize non-solver preparation, recording/observer
-  lowering, input semantics, benchmark metadata, and result assembly between
-  single-cable and double-cable paths as much as possible without losing P11
-  performance.
-  - [x] Remove unused rate-table option, the direct public
-    `CrankNicholson`/`Solver` execution facade, and the JAX scalar fallback;
-    one-row public simulations use the batch route with `B=1`.
-  - [x] Split the former JAX batch-kernel monolith into explicit
-    `runtime/jax/kernels/single_cable.py`,
-    `runtime/jax/kernels/double_cable.py`, shared chunking/factorized/input
-    helpers, and `runtime/jax/recording/results.py`; remove the old
-    `runtime/jax/batch_kernels.py`/`kernels/batch.py` path.
-  - [x] Split active shared numerical primitives out of the old
-    `runtime/jax/kernels/common.py` bucket into
-    `runtime/jax/cable_geometry.py`,
-    `runtime/jax/kernels/double_cable_linear.py`, and
-    `runtime/jax/kernels/block_tridiagonal.py`; remove legacy PCR/PCR-SoA and
-    diagnostic batched-Thomas helpers from active runtime code, and keep
-    double-cable scan bodies split into CPU Thomas and GPU tiled-Thomas/Triton
-    files.
-  - [x] Review `chunking`, `factorized`, `inputs`, `results`, `core`, and
-    `cable_geometry` one by one: keep `chunking`, `factorized`, and `inputs`
-    as kernel-only shared helpers; move JAX geometry to
-    `runtime/jax/cable_geometry.py`, move result synchronization to
-    `runtime/jax/recording/results.py`, and rename the former vague kernel
-    `core.py` to `runtime/jax/kernels/double_cable_step.py`.
-  - [x] Archive historical P11B/P11C solver probes under
-    `benchmark/legacy/p11_solver_exploration/`, delete the
-    `jax_triton_cold_start_audit` runner/test surface, and keep the active
-    double-cable routes limited to CPU Thomas and GPU looped Triton/tiled
-    Thomas.
-  - [x] Clean the single-cable JAX kernel surface: split scan bodies into
-    `runtime/jax/kernels/single_cable_scans.py`, remove the unsupported
-    observer-only sparse-current plus dense-Vstim route, and keep only dense,
-    factorized, factorized-sparse, and zero-sparse routes that are reachable
-    from the runtime lowering contract.
-  - [x] Reorganize the remaining JAX runtime modules by responsibility:
-    typed runtime policy in `runtime/jax/policy/`, input payload/build/lowering
-    in `runtime/jax/inputs/`, host-side batch preparation and caches in
-    `runtime/jax/preparation/`, observer/recording/result synchronization in
-    `runtime/jax/recording/`, and JAX profiling/metadata helpers in
-    `runtime/jax/benchmarking/`.
-  - [x] Reintroduce dense recording only as a batch-native result path for
-    single-cable groups: `Recording.full()`, gates, currents, conductances, and
-    available state variables lower through the batch route for `B=1` and `B>N`,
-    with explicit signal names, result manifests, memory accounting, focused
-    tests, and a runnable public example. Do not reintroduce scalar fallback
-    execution for this.
-  - [x] Dense observable recording was restored as a public batch-native path,
-    but its dedicated benchmark evidence is deferred out of P12 because the
-    P12 closeout target shifted to observer-only hotpath and cold-start
-    runtime cleanup. Benchmark dense observables when they become an active
-    performance target rather than holding P12 open.
-- [x] Audit `src/axonscope/runtime/jax/` for dead, duplicate, or cable-specific
-  host-side code. Delete unused paths, keep solver/kernel-specific code inside
-  the JAX runtime, and move semantic-only reusable contracts to
-  `src/axonscope/runtime/` when they can support a future NumPy/SciPy runtime.
-  Use `docs/architecture/p12b_jax_runtime_reorganization_proposal_2026_07_12.md`
-  as the proposed file-responsibility map before moving more modules.
-  Method: do the whole audit/move/delete pass first, without running the full
-  test suite after each file or folder. Validate once at the end with
-  `compileall`, `tests/unit`, `git diff --check`, `vulture`, and only then
-  targeted benchmarks if hotpath behavior changed.
-  For every directory or root file below, verify that all retained paths are
-  still used, that there is no dead or duplicate code, that responsibility is
-  not split across redundant routes, and that the code is genuinely
-  JAX-specific. If a contract, planning rule, metadata shape, or host-side
-  semantic helper is runtime-neutral, move it to `src/axonscope/runtime/` so it
-  can serve the future NumPy/SciPy runtime too.
-  - [x] Root JAX files: `__init__.py`, `group_runner.py`, `types.py`, and
-    `cable_geometry.py`.
-  - [x] `runtime/jax/policy/`: typed JAX solver requests, execution context,
-    device/precision lowering, and solver-engine resolution.
-  - [x] `runtime/jax/inputs/`: payload dataclasses, dense/sparse/factorized
-    builders, footprint caches, and semantic input lowering.
-  - [x] `runtime/jax/preparation/`: batch runtime materialization, caches,
-    shape bucketing, host-to-device array preparation, and row stacking.
-  - [x] `runtime/jax/recording/`: VmRaster observer plan/state/update,
-    recording lowering, result synchronization, waits, trimming, and
-    finalization.
-  - [x] `runtime/jax/kernels/`: single-cable, double-cable CPU/GPU, shared
-    chunking/factorized/input helpers, double-cable linear-system helpers, and
-    Triton integration.
-  - [x] `runtime/jax/membranes/`: membrane compiler bridge, Model IR lowering,
-    membrane backend implementations, layout aggregation, programs, and
-    stacking optimizations.
-  - [x] `runtime/jax/benchmarking/`: JAX profiling hooks, memory profiling,
-    benchmark metadata, and estimate/inspection support helpers. Source audit
-    pass started: the runtime-neutral batch memory-estimate math now lives in
-    `runtime/memory_estimates.py`.
-- [x] Audit root `src/axonscope/runtime/` for the future NumPy/SciPy runtime
-  contract. Group files by responsibility, verify every retained path is used,
-  delete dead or duplicate code, and keep only runtime-neutral contracts,
-  host-side semantic planning, public policy, and the concrete-runtime
-  execution boundary at this level. Concrete numerical lowering, device
-  profiling, and solver implementation details must stay under the concrete
-  runtime namespace such as `runtime/jax/`.
-  Method: do the audit/move/delete pass first, without running the full test
-  suite after each file. Validate once at the end with `compileall`,
-  `tests/unit`, `git diff --check`, `vulture`, and targeted benchmarks only if
-  a hot path changes.
-  - [x] Public runtime namespace and policy: `runtime/__init__.py`,
-    `runtime/policy.py`, and `runtime/execution.py`.
-  - [x] Runtime input/output contracts: `runtime/input_contract.py`,
-    `runtime/input_payloads.py`, `runtime/output_contract.py`,
-    `runtime/recording.py`, `runtime/row_output.py`, and
-    `runtime/solver_axon.py`.
-  - [x] Runtime-neutral host planning and preparation:
-    `runtime/input_planning.py`, `runtime/host_preparation.py`,
-    `runtime/group_preparation.py`, `runtime/result_assembly.py`, and
-    `runtime/memory_estimates.py`.
-  - [x] Benchmarking interface and runtime-specific profiling boundary:
-    `runtime/benchmarking.py`.
-- [x] Run a final Graphify-guided runtime cleanup pass before closing P12.
-  Focus on `src/axonscope/runtime/` and `src/axonscope/runtime/jax/`, plus only
-  the direct public boundaries that call into runtime (`simulation.py`,
-  `performance.py`, `inspection.py`, and dispatcher/result assembly) when they
-  expose duplication or dead routes. Inspect runtime high-noise hubs, thin
-  communities, isolated nodes, and parallel modules that look duplicated, then
-  confirm candidates with direct usage search, `vulture`, tests, and examples
-  before deleting or moving code. The 2026-07-13 `graphify cluster-only` refresh
-  wrote `graphify-out/GRAPH_REPORT.md` from commit `8a97deb6` with 8906 nodes,
-  20840 edges, 484 communities, 77 thin communities omitted from the report,
-  and 1077 isolated nodes; filter it down to runtime cleanup evidence, not a
-  repo-wide cleanup pass.
-  First pass: Graphify plus usage search found
-  `runtime/jax/cable_geometry.py::extracellular_absolute_arrays` unused after
-  the host-side `extracellular_runtime_numpy` path took over double-cable
-  absolute-array preparation, so the JAX helper was deleted. `shape_bucketing`,
-  runtime memory snapshots, recording/output lowering, runtime caches, and
-  membrane backend construction remain used or intentionally covered. After the
-  edit, `graphify update` rebuilt `graphify-out/GRAPH_REPORT.md` with 8935
-  nodes, 20942 edges, and 467 communities.
-  Second pass: removed runtime helpers whose only live callers were tests,
-  legacy benchmarks, or replaced dense-preparation paths:
-  `build_membrane_backend_from_axon`,
-  `precompute_extracellular_potential_mV`,
-  `build_vstim_initial_previous_batch`, and the dense direct-footprint Vstim
-  helpers (`build_footprint_vstim_batch`,
-  `build_footprint_vstim_midpoint_batch`,
-  `build_footprint_vstim_initial_previous_batch`, `FootprintEngine`, and their
-  private batch-shape helpers). Tests now use active primitives:
-  `compile_axon_membrane`/`backend_from_membrane`,
-  `build_extracellular_potential_fn` plus
-  `sample_extracellular_potential_mV`, and
-  `build_vstim_midpoint_and_initial_previous_batch`. A follow-up
-  Graphify update rebuilt the runtime map with 8918 nodes, 20864 edges, and
-  466 communities. The final usage scan found zero public runtime definitions
-  whose only remaining callers were tests or legacy benchmarks.
-- [x] Define and enforce the runtime input contract before implementing
-  `axs.runtime.numpy`: prepared batches must expose one cable formulation, one
-  padded `Nx`, a dtype/time grid, typed per-cable solver policy, recording and
-  observer plans, intracellular modes, and extracellular modes
-  (`zero`, `shared_current`, `scaled_shared_waveform`, `current_table`,
-  `dense`). The JAX runner now validates and records a runtime-neutral prepared
-  input summary before kernel enqueue.
-- [x] Before claiming P12 cleanup has no performance loss, re-run the relevant
-  P11 hotpath/realistic benchmark slices for single-cable and double-cable,
-  CPU/GPU where applicable, with fresh artifact directories and git metadata.
-  Fresh local CPU guard rerun on 2026-07-12 wrote
-  `benchmark/results/p12_current_repeats2_single_cpu` and
-  `benchmark/results/p12_current_repeats2_double_cpu`. It shows no solver-side
-  regression versus the recording-contract gate; remaining P12 optimization
-  targets are cold/preparation spans before broader P11/GPU slices can close
-  the performance-loss claim.
-  Kaggle P100 GPU rerun on commit `aab5384` wrote
-  `benchmark/results/p12_final_gpu_single_aab5384` and
-  `benchmark/results/p12_final_gpu_double_jt_aab5384`. Later Kaggle P100
-  1024-axon runs and targeted P12 optimization runs confirmed the current
-  closeout state: single-cable cold improved from
-  `benchmark/results/kaggle/20260713_111647_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axsp12-cold-single`
-  to
-  `benchmark/results/kaggle/20260713_113800_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axsp12-cold-single-hostzero`,
-  while warm single-cable remains dispatch-bound and double-cable warm/cold is
-  good enough for P12 after rejected trim-static and batch-size experiments.
-  Broader P11-style benchmark slices remain future evidence for public speed
-  claims, not a blocker for closing P12 runtime cleanup.
-- [x] Post-P11 runtime/benchmark backlog:
-  continue only the deferred items tracked in
-  `docs/architecture/p11_closeout_2026_07_12.md`. Main follow-ups are GPU
-  double-cable Triton/tiled-Thomas policy thresholds, shared-waveform/scaled
-  extracellular input lowering, adaptive time-chunk policy, GPU dispatch
-  scheduling, model/compiler optimizer closeout, dense fallback decisions, and
-  NRV validation only when numerical behavior changes. This backlog is
-  explicitly deferred out of P12.
-- [x] Evaluate targeted GPU kernels for remaining non-solver device-side
-  bottlenecks, without turning the whole host/runtime path into Triton:
-  first prototype an `extracellular_scaled_shared_waveform` path that writes
-  forcing directly in the solver layout, then prototype observer-only
-  VmRaster/probe packing that extracts or aggregates on GPU without CPU
-  round-trips. Keep this behind the JAX GPU runtime boundary and accept it only
-  with before/after stage benchmarks showing that the cost is device-side and
-  not just Python/JIT/transfer overhead. P12 did not identify an obvious small,
-  safe GPU-kernel promotion; keep this as a future optimization track.
-- [x] After the runtime contract, benchmark surface, and hot-path cleanup are
-  stable, revisit cold-run optimization separately. Focus on JIT/lowering,
-  membrane/runtime preparation caches, pool rebuild costs, and optional
-  persistent compilation caches; do not mix cold-start policy decisions into
-  the current hot-path cleanup.
-  First targeted P12 optimization: uniform stateless Model IR membrane initial
-  arrays now use the NumPy interpreter for cold `Vm0`/`gates0` construction.
-  Local CPU single-cable `runtime.prepare.membrane_init` dropped from 708.2 ms
-  to 3.3 ms in `p12_opt_uniform_init_single_cpu`; keep the broader cold-start
-  item open for double-cable, compile/backend, GPU, and persistent-cache work.
-  Second targeted P12 optimization: stateless heterogeneous Model IR membrane
-  groups now use the same NumPy init path while keeping the JAX backend for
-  execution. Local CPU double-cable `runtime.prepare.membrane_init` dropped from
-  914.5 ms to 4.6 ms, and `runtime.prepare` from 2005.9 ms to 1211.6 ms, in
-  `benchmark/results/p12_opt_heterogeneous_init_double_cpu`. Keep the broader
-  cold-start item open for compile/backend, GPU confirmation, dispatch/enqueue,
-  and persistent-cache work.
-  Third targeted P12 optimization: shared double-cable base runtime now builds
-  cable coefficients and extracellular absolute arrays with the runtime-neutral
-  NumPy host-preparation helpers before compact JAX materialization. Local CPU
-  double-cable `runtime.prepare.base_runtime` dropped from 1209.0 ms to
-  337.5-351.0 ms, and `runtime.prepare` from 1211.6 ms to 341.0-353.9 ms, in
-  `benchmark/results/p12_opt_host_double_only_double_cpu_serial*`. Remaining
-  local costs are mostly enqueue/dispatch, cold membrane compile, and kernel
-  state/observer preparation; confirm this path on GPU before claiming the P12
-  GPU cold-start target improved.
-  Kaggle P100 RSS rerun on commit `569e8d4` wrote
-  `benchmark/results/kaggle/20260713_002054_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-single-rss-569e8d4`
+#### P14A - Reproducible realistic baseline
+
+- [ ] Profile the apparent idle startup before `examples/basic/08` begins
+  visible recruitment work, especially with `fibers_per_family=1000`. Split
+  template/model construction, population expansion, analytical footprint
+  sampling, runnable/sweep-plan construction, first dispatch/signatures,
+  runtime and membrane lowering, JIT, and first solve. Add global wall spans
+  where the current benchmark is blind, then validate locally and on Kaggle
+  CPU/GPU before deciding which work moves behind the lazy runner boundary.
+  - [x] Add the standalone `benchmark/examples/basic_08_startup.py` probe;
+    keep the public example unchanged. A warm-module-cache local CPU startup
+    run with 1000 fibers per family records `16.389 s` before the sweep:
+    `3.399 s` importing modules and `12.990 s` constructing the workload. The
+    latter contains `9.046 s` constructing 1000 MRG axons, `1.425 s`
+    constructing 1000 Rattay-Aberham axons, and `1.257 s` sampling the 2000
+    analytical footprints. Artifacts:
+    `benchmark/results/basic_08_startup_local_20260715_f1000_timing` and
+    `benchmark/results/basic_08_startup_local_20260715_f1000_profile`.
+  - [ ] Run the dedicated probe through `first-amplitude` and `full` at
+    realistic scale to attribute plan construction, runtime preparation, JIT,
+    first solve, and warm amplitudes; repeat on Kaggle CPU/GPU.
+    Local `first-amplitude` validation now covers 1000 fibers per family:
+    startup `2.797 s`, `recruitment_sweep=4.529 s`,
+    `simulation.run_pool=3.069 s`, and 43/2000 activated rows at 5 uA. Full
+    multi-amplitude and Kaggle CPU/GPU evidence remain open.
+
+- [x] Add the `p14_realistic` recruitment workload: 21 amplitudes, `3 ms`,
+  `dt=0.001 ms`, single-cable Rattay-Aberham with `Nx=200`, and double-cable
+  MRG with padded `Nx=74`.
+- [x] Run Kaggle P100 baselines for single/double cable at 196, 1024, and 4096
+  axons with amplitude policies `1`, `2`, and `full` where memory allows.
+- [x] Analyze the 1024/4096 runs using non-overlapping timing spans. Warm
+  policy-1 `simulation.run_pool` is `24.80/91.60 s` for single 1024/4096 and
+  `14.59/47.06 s` for double 1024/4096. `kernel.dispatch_jax` is about 82% of
+  `run_pool`, but still includes deferred GPU execution and VmRaster updates.
+- [x] Identify the large-batch memory failure. With `Nt=3000`, full VmRaster
+  state is `6.02 GiB` for single 4096 x 21 amplitudes and `2.23 GiB` for
+  double. The single executable exposes about `14.03 GB` of input/output
+  arguments and XLA constant-folding over `[86016, 200]`.
+- [x] Record the baseline artifacts:
+  `benchmark/results/kaggle/20260715_161913_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14-realistic-single-1024-cbb0ae4`,
+  `benchmark/results/kaggle/20260715_161913_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14-realistic-double-1024-cbb0ae4`,
+  `benchmark/results/kaggle/20260715_162614_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14-realistic-single-4096-cbb0ae4`,
   and
-  `benchmark/results/kaggle/20260713_002323_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-cold-double-rss-569e8d4`.
-  Double-cable cold preparation is confirmed on GPU:
-  `runtime.prepare.base_runtime` dropped from 2265.5 ms to 652.4 ms and
-  `runtime.prepare.membrane_init` from 936.2 ms to 4.7 ms versus the previous
-  `aab5384` gate. Warm GPU repeat means are not improved yet
-  (`double-cable curve.simulate` 23.1 ms to 26.6 ms), so keep the next P12 GPU
-  optimization focused on dispatch/enqueue/input/observer overhead. Matching
-  `--memory-trace device` probes were run too, but use them for memory evidence,
-  not timing claims, because device-memory snapshots dominate small warm spans.
-  Kaggle P100 1024-axon rerun accepted NumPy cable preparation for single-cable
-  too: commit `1a1183e` changed single-cable from `cable_runtime_source=jax` to
-  `cable_runtime_source=numpy`, and
-  `benchmark/results/kaggle/20260713_003301_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-single-numpy-1a1183e`
-  shows `runtime.prepare.base_runtime` dropping from 1265.9 ms to 699.6 ms
-  versus the JAX baseline
-  `benchmark/results/kaggle/20260713_002938_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-single-jax-24efe36`,
-  while warm `curve.simulate` changes only from 36.35 ms to 37.29 ms. The
-  matching 1024-axon double-cable NumPy run is
-  `benchmark/results/kaggle/20260713_003531_recruitment_curves_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p12-1024-double-numpy-1a1183e`;
-  its all-phase time is still dominated by `kernel.enqueue` and
-  `kernel.dispatch_jax`. Final targeted P12 cold runs then kept the single-cable
-  wins and rejected double-cable trim-static/batch-size tweaks as not worth
-  carrying. Persistent compile caches, larger policy sweeps, and specialized
-  double-cable JITs remain future work.
+  `benchmark/results/kaggle/20260715_162614_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14-realistic-double-4096-cbb0ae4`.
 
-### P13 - Evaluation Du Time Chunk
+#### P14B - Shared immutable axon templates
 
-- [x] Evaluate `time_chunk_steps` as a first-class runtime/performance policy
-  instead of a hidden observer-only default.
-- [x] Benchmark observer-only VmRaster routes across `time_chunk_steps=None`,
-  128, 256, 512, 1024, and full-duration chunks for representative
-  single-cable and double-cable groups; separate cold compile/lowering,
-  warm solve, host enqueue/dispatch, `kernel.wait`, observer finalization, and
-  memory/RSS.
-- [x] Compare CPU and GPU behavior separately. On GPU, prioritize whether
-  chunking improves memory pressure without making warm runs less solver-bound;
-  on CPU, check whether chunking mostly adds Python/JAX dispatch overhead.
-  Initial P13 matrix on 2026-07-13 covered observer-only single/double cable
-  with `Naxon={1,64,1024}` and policies
-  `default,unchunked,128,256,512,1024`. Local CPU results are in
-  `benchmark/results/p13_time_chunk_cpu_matrix`. Kaggle CPU results are in
-  `benchmark/results/kaggle/20260713_131927_time_chunk_sweep_quick_cpu_cpu_axonscope-p13-time-chunk-cpu-a6a1404`.
-  Kaggle GPU single-cable results are in
-  `benchmark/results/kaggle/20260713_131849_time_chunk_sweep_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p13-time-chunk-gpu-a6a1404`;
-  the first combined GPU run intentionally failed for double-cable because
-  `jax-triton` was missing. The corrected double-cable GPU rerun with
-  `jax-triton` is in
-  `benchmark/results/kaggle/20260713_132533_time_chunk_sweep_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-p13-time-chunk-gpu-double-jt-8d092fc`.
-  Decision: keep the observer/VmRaster default simple and use `128` everywhere.
-  The measured effect is globally weak, `512` is not a clear win, and `128`
-  gives a conservative bounded chunk without adding a meaningful warm overhead.
-- [ ] Evaluate dense Vm/full recording separately from VmRaster. Full Vm may
-  still need output/assembly optimizations, but it should not drive the
-  default observer-only chunking policy.
-- [x] Decide the public/internal policy knobs: keep the default simple as
-  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` for observer/VmRaster routes. Do
-  not expose a new public execution-policy option or adaptive default yet.
-- [x] Keep progress logs explicit: report time chunks as time chunks, and
-  reserve wait/synchronization wording for the final JAX/device wait.
-  Verified on 2026-07-13: dispatcher progress uses `solving time chunks` for
-  chunk callbacks, while final synchronization remains `waiting for JAX work`
-  and benchmark timing keeps `kernel.wait` as the explicit device wait span.
+Architecture contract: Python objects are the immutable scientific description;
+execution uses one canonical description-to-array lowering. Materialize compact
+backend-neutral NumPy tables first, then let the selected runtime place/lower
+those arrays to JAX or another backend. Optimizations must be selected from
+typed capabilities and structural/parameter signatures, never concrete axon or
+membrane class names.
 
-### P14 - JAX Temporal Solver And Dispatch Optimization
+- [x] Define and enforce the ownership contract: `Axon` is an immutable,
+  reusable structural template; `AxonInstance` owns per-fiber stimulation and
+  mutable simulation state. Audit axon/layout/membrane fields, solver-axon
+  construction, dispatch signatures, and caches for hidden mutation. `Axon`
+  and `Layout` now reject post-construction reassignment, section and membrane
+  descriptions were already frozen, flattened arrays are read-only, and
+  instance-level stimulation/overrides remain separate.
+- [ ] Split the population-construction profile into axon geometry/layout,
+  membrane source/model construction, diameter/section parameter derivation,
+  solver-axon lowering, signatures/code generation, and row stacking. Report
+  object counts and unique structural hashes as well as elapsed time.
+- [ ] Define a model-agnostic population materialization contract containing
+  padded or bucketed geometry/cable arrays, section or structure codes, unique
+  membrane parameter rows, row/compartment indices, masks, and stable
+  signatures. It must represent every current `Axon`/`Layout`, not only MRG.
+- [ ] Replace per-row/per-section Python materialization with one canonical
+  NumPy lowering over unique descriptions. Repeated population rows should
+  gather from numerical tables rather than instantiate duplicate `Section`,
+  `LayoutElement`, `FlattenedLayout`, or `SolverAxon` object graphs.
+- [ ] Keep backend ownership strict: backend-neutral preparation may use NumPy,
+  but only `runtime/jax` creates JAX arrays, transfers to device, compiles, or
+  launches kernels. Do not use JAX merely to build host-side descriptions.
+- [ ] Make work outside execution lazy by default. Construction should retain
+  only lightweight immutable Python descriptions; numerical materialization,
+  signatures, code generation, and backend preparation should be triggered by
+  `run()` or by an explicit `estimate()`/`inspect()` request, then cached from
+  the same canonical lowering. Do not eagerly perform execution-only work while
+  assembling an axon, population, stimulation, or protocol.
+  - Canonicalize and validate unit-bearing structural parameters once per
+    unique scientific template before numerical population expansion. Rows
+    should reference canonical unitless values/template indices; they must not
+    repeat Pint conversion, diameter quantization, membrane construction, or
+    layout construction. This lowering remains model agnostic and feeds the
+    existing `MaterializedAxonRows` execution route.
+- [ ] Evaluate a unified runnable-plan architecture: axons, populations,
+  recruitment curves, sweeps, and studies should compose immutable simulation
+  plans; one runner should execute one or many plans and own materialization,
+  grouping, scheduling, runtime selection, compilation, and caches. Everything
+  outside the runner remains lazy. Before adopting it, map the concept onto the
+  canonical `AxonSimulation(...).run()` workflow and discuss any public API,
+  result, progress UI, or output change rather than introducing a parallel path.
+- [ ] Preserve public inspection and result semantics. If eager descriptive
+  layouts become expensive, materialize their public view lazily from the same
+  canonical numerical representation; discuss any observable API/UI/output
+  change before implementation.
+- [ ] Add architecture guards forbidding concrete axon/model family checks in
+  generic materialization and runtime modules. Validate at least uniform
+  single-cable, heterogeneous custom layout, shifted myelinated double-cable,
+  and stateful membrane cases through the same lowering contract.
+- [x] Make the shared membrane contract explicit. A 4096-MRG population should
+  compile/load each distinct membrane equation model once; diameter- and
+  section-specific values should be parameter data over that shared model, not
+  thousands of reconstructed `MembraneModel`, Model IR, or `JaxMembraneProgram`
+  objects. The existing model-agnostic gated/leak stack now receives shared
+  solver templates: at 4096 rows it reports three unique encoded rows, 4093
+  cache hits, six host-side leak signatures, and one compiled JAX gated model.
+- [ ] Represent repeated membrane parameterizations as unique parameter rows
+  plus row/compartment indices where this reduces construction and stacking
+  cost. Keep this capability model agnostic: derive uniqueness from the
+  membrane contract and parameters, never from an `MRG` name check. The
+  membrane compiler and generated runtime modules are optimization surfaces:
+  change code generation when useful so `jax_model.py` can emit batch-aware
+  initialization, parameter tables, or lowering helpers directly instead of
+  making the runtime reconstruct model-specific facts.
+- [x] Add focused tests proving that many `AxonInstance` rows may share one
+  axon template without state leakage, changed stimulation, changed results,
+  or invalid cache reuse. Shared and distinct double-cable populations now
+  produce equivalent results while preserving per-instance stimulation.
+- [ ] Add a controlled 4096-MRG A/B benchmark: current construction of 4096
+  equivalent MRG objects versus three shared templates for diameters
+  `7.3/10.0/12.8 um`. Measure population construction, peak host memory,
+  membrane/model object counts, unique parameter rows, `dispatch.build_plan`,
+  first `runtime.prepare`, warm `run_pool`, and exact recruitment equivalence.
+- [x] Promote template sharing into the realistic workload and applicable
+  public population/integration paths. Keep transverse placement and sampled
+  footprints row-specific. The P14 workload shares exact MRG templates, and
+  `population_from_nrv` uses a local complete-constructor-key cache while
+  retaining row-specific NRV metadata and footprints.
+- [x] Keep full `Axon` objects explicit, but reuse immutable derived layouts
+  only after defining a complete key and bounded lifecycle. The canonical MRG
+  layout route now uses a 256-entry cache keyed by quantized diameter, length,
+  nodes, compartment layout, intrinsic shift, temperature, morphology mode,
+  and every physical geometry/myelin parameter. Custom membrane assignments
+  bypass it. Uniform unmyelinated layouts and immutable membrane descriptors
+  use corresponding bounded model-agnostic caches, while generic public
+  `Unmyelinated(membrane=...)` construction preserves the exact user-provided
+  membrane object.
+- [x] Reduce the 4096 double-cable population-construction bottleneck that was
+  about `68.5 s` in the previous Kaggle run. The first local shared-template
+  pass builds 4096 rows in `4.56 s` and `dispatch.build_plan` in `0.143 s`, with
+  three axon templates and three `SolverAxon` objects. Confirm the ratio on the
+  same Kaggle GPU as part of the full P14 acceptance run.
 
-Primary objective: reduce `kernel.dispatch_jax + kernel.wait` and total
-`simulation.run_pool` time on the canonical single-cable and double-cable GPU
-routes. Treat `kernel.dispatch_jax` as part of solver execution: it contains the
-jitted temporal scan, membrane dynamics, system assembly, solver calls, and
-VmRaster updates, not merely Python launch overhead. Do not accept a timing
-shift from `kernel.wait` into `kernel.dispatch_jax`, or the reverse, as a
-performance gain.
+Local construction evidence on 2026-07-15: at 196 MRG rows, exact-template
+sharing reduced population construction from `4.67 s` to `0.292 s` and
+`dispatch.build_plan` from `0.200 s` to `0.0048 s`. Shared construction measured
+`1.58 s` at 1024 rows and `4.56 s` at 4096 rows. `Layout` now owns one canonical
+read-only flattened representation, so shared templates no longer repeat
+per-compartment layout lowering for footprint sampling or solver preparation.
+The 4096-row gated/leak membrane stack takes `0.077 s` after its first compile
+and materializes `8.09 MiB` of initial gate/parameter state. It already
+deduplicates preparation by membrane signatures; P14B's remaining unique-row
+task is specifically about whether carrying a parameter table plus row indices
+into the kernel beats materializing the per-fiber initial state.
 
-- [ ] Establish a reproducible GPU baseline derived from the
-  `examples/with_nrv/01_synthetic_fascicle_geometry.py` AxonScope workload but
-  independent of NRV setup time. Cover single-cable and double-cable,
-  `Naxon={196,1024}`, representative `Nx`/`Nt`, VmRaster, first-amplitude cold
-  execution, subsequent warm amplitudes, and
-  `amplitude_batch_size={1,2,full}`. Record `simulation.run_pool`,
-  `kernel.enqueue`, `kernel.dispatch_jax`, `kernel.wait`, throughput in
-  axon-timesteps/s, memory, executable/cache identity, and numerical outputs.
-- [ ] Decompose the jitted temporal program with JAX/HLO inspection and Nsight
-  device traces. Measure membrane gate/current/conductance evaluation,
-  factorized stimulation, linear-system assembly, tridiagonal or Triton solve,
-  VmRaster update, materialized temporaries/copies, and the number and duration
-  of JAX kernels and Triton custom calls. Keep this instrumentation in
-  benchmark tooling rather than production runtime APIs.
-- [ ] Hoist run-invariant work out of the dispatched temporal executable where
-  evidence shows it is still executed on every call. Evaluate prepared static
-  cable terms, area/background arrays, `cx_plus_gx`, `cx_over_dt`, previous
-  current rows, scan layouts/transposes, and static observer tables. Keep the
-  prepared representation internal, typed, reusable across amplitudes, and
-  membrane-model agnostic.
-- [ ] Optimize the existing single-cable program before introducing a new
-  solver route. Compare `vmap(scan(step))` with `scan(vmap(step))`, inspect the
-  lowering of `jax.lax.linalg.tridiagonal_solve`, and remove only HLO-confirmed
-  intermediate materializations or kernel boundaries. Preserve the canonical
-  factorized-stimulation and strict VmRaster paths.
-- [ ] Optimize the existing double-cable program in two stages. First fuse
-  linear-system assembly and the tiled-Thomas Triton solve so the custom call
-  consumes compact physical/runtime inputs instead of fully materialized
-  system arrays. Then prototype temporal blocking with `K={2,4,8,16}` steps
-  per device call, selecting by total runtime, memory/register pressure, and
-  compile cost rather than assuming a full-duration persistent kernel is best.
-- [ ] Revisit double-cable Triton input/output aliasing only as part of the
-  dispatch/copy optimization pass. The retained three-repeat warm medians are
-  `run_pool=437.5 ms`, `dispatch_jax=82.7 ms`, and `wait=28.7 ms` without
-  aliases versus `565.5/113.5/9.75 ms` with aliases. Profile XLA buffer
-  assignment and copy insertion; test alias subsets, truly ephemeral custom
-  call operands, outer-JIT donation, larger `Nx`, and solver-heavy durations.
-  Retain aliasing only if both total `run_pool` and
-  `kernel.dispatch_jax + kernel.wait` improve with identical results.
-- [ ] Treat generated membrane/JAX model code as a conditional optimization,
-  not the starting point. Promote it only if profiles show material warm costs
-  from membrane gathers, branches, generic row dispatch, or repeated
-  intermediates, or if temporal Triton fusion requires generated membrane
-  operations. Any JAX/Triton lowering must be generated from the canonical
-  membrane contract and remain model agnostic; do not hard-code MRG or another
-  built-in model in the solver. Generated-source and persistent executable
-  caches may improve cold start, but do not count them as warm dispatch gains.
-- [ ] Validate each promoted optimization against CPU references and the prior
-  GPU route. Require matching activation/recruitment outputs, defined Vm
-  tolerances, no unintended GPU fallback, and coverage of single/double cable,
-  stateless/stateful membrane execution, factorized stimulation, and VmRaster.
-  Finish with local CPU and Kaggle GPU runs for `examples/basic/06`, `07`,
-  `08`, and `examples/with_nrv/01`, reporting cold and warm CPU/GPU ratios.
-- [ ] Accept an optimization only when fresh repeated evidence improves
-  `kernel.dispatch_jax + kernel.wait` and end-to-end `simulation.run_pool`
-  without a disproportionate cold-start or memory regression. Prefer at least
-  a 10-15% repeatable gain before carrying a materially more complex kernel
-  path.
+Basic-08 construction evidence after bounded template/model reuse is recorded
+under `benchmark/results/basic_08_startup_local_20260715_f1000_final_r1` and
+`benchmark/results/basic_08_first_amplitude_local_20260715_f1000_final`. At
+1000 fibers per family, pre-sweep workload construction dropped from
+`12.990 s` to `2.813 s` (4.62x) and total startup from `16.389 s` to `6.054 s`
+(2.71x). MRG construction dropped from `9.046 s` to `0.385 s` (23.5x), while
+Rattay-Aberham construction dropped from `1.425 s` to `0.677 s` (2.10x).
+
+The lazy-template A/B probe is recorded under
+`benchmark/results/basic_08_startup_local_20260715_f1000_shared_templates` and
+`benchmark/results/basic_08_first_amplitude_local_20260715_f1000_{distinct,shared}_ab`.
+Vectorized unit validation and diameter quantization cost `0.139 ms` and reduce
+2000 eagerly distinct axons to 63 Rattay-Aberham plus three MRG templates while
+preserving `43/2000` activations at 5 uA. Pre-sweep construction drops from
+`2.835 s` to `1.765 s`; on the cold first-amplitude run,
+`dispatch.build_plan` drops from `467.0 ms` to `173.7 ms`, `runtime.prepare`
+from `2046.0 ms` to `278.9 ms`, and `simulation.run_pool` from `4.241 s` to
+`2.348 s`. Promote this as lazy, model-agnostic description-to-row lowering;
+do not retain the benchmark's family-specific template dictionaries as a
+second production path.
+
+The first production convergence slice now gives `AxonPopulation` the same
+canonical descriptive shape: `axon_templates` in first-occurrence order plus
+`row_template_indices`, while retaining distinct row instances and
+stimulations. `examples/basic/08` canonicalizes its two diameter arrays once,
+constructs 63 Rattay-Aberham and three MRG templates, and computes intrinsic
+positions once per template. The production-backed startup probe at
+`benchmark/results/basic_08_startup_local_20260715_f1000_canonical_templates`
+measures `0.132 ms` for vectorized unit/diameter canonicalization, `0.756 ms`
+for population template indexing, and `1.445 s` total pre-sweep construction;
+`1.201 s` of that remainder is the intentionally row-specific analytical
+footprint test workload. A full local public-example run retained recruitment
+counts `43 141 403 652 843 983 1245 1319`. The next slice must pass this
+template table through protocol/dispatch preparation directly and move
+execution-only numerical derivation behind the runner; do not add a separate
+population execution path.
+
+Shifted-template scaling on local CPU is recorded under
+`benchmark/results/p14_mrg_template_scaling_local_20260715`. At 4096 axons,
+increasing exact `(diameter, x_shift)` templates from `3/11/32/128/512/1024`
+raises population construction from `4.49/4.57/4.98/7.09/17.54/36.78 s`.
+`dispatch.build_plan` remains `0.15-0.32 s`, membrane stacking remains
+`0.20-0.43 s`, and 1024 cable templates collapse to only 57 unique membrane
+rows. Optimize shifted MRG geometry/layout construction before membrane codegen.
+
+First canonical NumPy-row lowering on 2026-07-15: `PreparedCohort` now builds
+one read-only `MaterializedAxonRows` table inside `runtime.prepare`; positions,
+single/double-cable coefficients, capacitance rows, membrane area, and
+extracellular cable arrays consume that table. Cable and extracellular values
+are computed vectorially over unique templates, gathered into population order,
+then transferred once by `runtime/jax`; the former per-`SolverAxon` stacking
+loops were removed. A local 1024-axon/128-shifted-template double-cable smoke
+under `benchmark/results/p14_materialized_rows_local_20260715_v2` measured cold
+`materialize_axons=6.47 ms`, `stack_cable=4.04 ms`, and
+`stack_extracellular=6.46 ms`; warm materialization was `3.09 ms`. The same cold
+run still spent `309.07 ms` in representative base runtime and `247.78 ms` in
+membrane stacking, while population construction outside the runner took
+`6.49 s` on the noisy local laptop. The next convergence step is membrane
+parameter-row lowering and lazy plan construction, not another cable path.
+
+The first membrane-row lowering pass now builds a backend-neutral
+`MembraneRowPlan` with population-to-parameter indices, unique descriptive
+rows, seven unique model signatures, and per-compartment model indices. On the
+same 1024-axon/128-template workload it found 45 membrane rows and 979 reuse
+hits. The JAX gated/leak stack encodes only those rows, gathers dynamic initial
+state once, reuses compiled representative executables, and no longer retries
+the deleted `from_runtime_rows` specialization. Local no-memory-trace evidence
+under `benchmark/results/p14_membrane_host_leak_final_local_20260715` reduced
+`stack_membrane` from `247.78 ms` to `25.29 ms` (`9.8x`); combined axon/membrane
+materialization fell from `254.25 ms` to `32.30 ms` (`7.9x`) with identical
+activation output. Remaining measured membrane-stack work is six generic host
+leak lowerings (`16.54 ms`); prefer emitting their scalar conductance terms in
+the generated runtime contract over adding a model-family shortcut.
+
+#### P14C - Generic native numeric execution axis
+
+- [x] Replace `_build_native_amplitude_pool` and
+  `_refresh_native_amplitude_pool` as the execution representation. Keep a
+  typed plan containing `source_pool[Naxon]`, `values[Namplitude]`, update or
+  scale semantics, ordering, and chunk boundaries without constructing
+  `Namplitude x Naxon` Python objects.
+- [x] Keep `recruitment_sweep` as a small user-facing protocol. It defines the
+  values, criterion, progress, and result contract; dispatcher/runtime code
+  owns grouping, lowering, device execution, and scheduling.
+- [x] Lower amplitude-only point-source changes as temporal current scales or
+  indices over one prepared footprint cohort. Do not recreate
+  `Stimulus`, `Drive`, `ExtracellularStimulation`, or `AxonInstance` objects
+  for every value.
+  - `ExtracellularWaveformUpdate` evaluates one complete waveform factory per
+    value, never per axon. The runtime samples those waveforms into
+    `current_mid_A[Namplitude, Nt]`, maps amplitude-major logical rows through
+    `current_row_indices`, and reuses factorized spatial footprints. It never
+    assumes the value is a global scale, so independently varying phases and
+    timings remain distinct.
+- [x] Promote the current amplitude/waveform mechanism into one generic,
+  planning/runtime-owned numeric execution axis. A protocol supplies source
+  simulations, ordered axis values, typed dynamic inputs, and result indices;
+  planning, dispatch, lowering, and execution consume that contract without
+  depending on recruitment result types or recruitment-specific orchestration.
+  `recruitment_sweep` must remain only one user-facing client of this path.
+- [ ] Generalize and validate that axis beyond MRG and recruitment. Keep it
+  membrane-model agnostic and support both cable formulations, variable
+  diameters, variable footprints, independently varying waveform phases and
+  timings, and every stimulus family whose dynamic inputs can preserve one
+  static execution contract. Reject static-contract changes explicitly.
+  - [x] Support a selected waveform axis in multi-drive extracellular rows.
+    Preparation records each source row's immutable drive waveforms and the
+    selected `drive_id`; lowering replaces only that numerical waveform while
+    retaining every other drive. Single- and double-cable compact factorized
+    kernels consume the resulting `[axis, source, drive, time]` values without
+    constructing axis-by-source simulation objects or falling back to dense
+    `Vext`.
+  - [x] Compress repeated multi-drive temporal rows as unique current patterns
+    `current_mid_A[U, S, Nt]` plus `current_row_indices[B]`. The canonical
+    factorized payload, dense reference materializer, and CPU/GPU kernel input
+    contract now support the same indexed rank-S representation; arbitrary
+    complete waveforms remain supported, including independently changing
+    positive/negative phases and timings.
+  - [x] Validate the multi-drive route on Kaggle P100, additional membrane
+    models, heterogeneous diameters/footprints, and longer chunks. CPU tests
+    cover exact waveform-table materialization, dispatcher subgroup slicing,
+    single- and double-cable recruitment, and compact factorized versus dense
+    double-cable VmRaster equivalence. The P100 artifact ending in
+    `axs-p14c-multidrive-p100-400cf49` covers 16 Rattay-Aberham and 16 MRG axons,
+    two distinct footprints, four amplitudes, and chunk sizes `1/full`. Every
+    cold/warm policy returned `0 18 20 21`; route guards confirmed factorized
+    single/double inputs, two retained drives, and `jax_triton_loop_xb` for
+    double cable. The independent dense Triton check passed at `1.439e-7`
+    maximum absolute error. Warm `simulation.run_pool` was `1.910 s` for four
+    size-1 chunks and `0.563 s` full (`3.39x`), while full warm `kernel.wait`
+    was `14.0 ms` (`2.49%` of run-pool time).
+  - [x] Profile the matching asynchronous P100 route to distinguish device work
+    from host dispatch. The artifact ending in
+    `axs-p14c-dispatch-profile-p100-400cf49` records a warm full
+    `kernel.dispatch_jax=531.8 ms`, final `kernel.wait=0.12 ms`, and `330.9 ms`
+    of events on the serial GPU compute stream. Thus dispatch includes solver
+    execution through queue backpressure; it is not pure launch overhead. The
+    stream contains 67,675 events, led by 3,072 fused double-cable Triton solves
+    (`136.4 ms`) and 3,000 single-cable PCR loop solves (`25.1 ms`) plus first
+    passes (`9.4 ms`). Use the reusable
+    `benchmark/analysis/jax_perfetto_summary.py` reader for future traces. Check
+    whether kernel fusion or fewer launches remains valuable at realistic large
+    populations; never optimize `kernel.wait` in isolation from the device
+    timeline.
+    - The 1024-axon follow-up ending in
+      `axs-p14c-run-pool-profile-1024-p100-9725f34-v2` profiles only the first
+      canonical `simulation.run_pool`, avoiding the one-million-event host
+      saturation seen when profiling the whole sweep. Warm run-pool is
+      `2.757 s`; the GPU compute stream contains 63,811 events totaling
+      `898.7 ms`, while `kernel.wait` is only `68.7 ms`. Host attribution is
+      `runtime.prepare=1.047 s`, numeric-axis lowering about `0.339 s`,
+      extracellular preparation `0.266 s`, and `kernel.enqueue=1.013 s`.
+      Runtime signature construction accounts for about `0.971 s` of prepare,
+      including `0.850 s` in repeated `repr`, directly confirming P14D's
+      trusted-signature task as the next high-value host optimization.
+  - [ ] Add typed numeric-axis inputs for other stimulus families only where
+    their dynamic fields preserve one static execution contract. Changing the
+    number of drives remains an explicit rejection for one prepared axis.
+- [x] Reuse the same generic axis executor from other protocols/studies that
+  vary compatible numerical stimulus inputs. Do not add a second
+  recruitment-only executor, protocol-specific dispatcher route, or hidden
+  expanded-object fallback.
+- [ ] Preserve explicit amplitude chunking during optimization, including `1`,
+  small bounded groups, and `full`. Pad or mask the final group where that
+  avoids a second compiled shape without changing result ordering.
+- [ ] Only after P15 compact observers are implemented and the generic numeric
+  axis is optimized and validated, define user-facing chunk and memory-budget
+  policies from measured CPU/GPU costs. Do not freeze an automatic heuristic
+  while preparation, dispatch, observer, and solver memory costs are changing.
+- [x] Define explicit fallback/rejection behavior when an update changes model,
+  geometry, `Nx`, stimulus timing, or another static execution contract. Never
+  silently expand through a slower legacy route.
+- [x] Remove the current `protocol.sweep.build_amplitude_pool` and
+  `protocol.sweep.refresh_amplitude_pool` scaling costs. At 4096 axons they
+  currently consume about `28 s` per 21-value sweep.
+
+The compact plan now reaches the canonical dispatcher and JAX runtime. Dispatch
+items repeat only lightweight references and virtual result indices; source
+`AxonInstance`, stimulation, membrane, cable, and footprint descriptions remain
+shared. The factorized runtime consumes numerical waveform tables and one
+solver call per chunk for both cable formulations. A selected drive may vary in
+multi-drive rows while the other source waveforms remain fixed. Opaque
+callbacks and static-contract changes are rejected instead of silently taking
+a slower route.
+
+The execution contract is now `NumericAxisInput`, owned by dispatcher planning;
+`ExtracellularWaveformAxisInput` is its first typed dynamic-input family.
+`AxonSimulation._run_numeric_axis`, dispatch expansion, and JAX lowering no
+longer depend on recruitment types. Both `recruitment_sweep` and generic
+`pool_sweep` use this same path. The replaced mutable `Stimulus` runtime handle,
+its global shape revision, and the protocol-only `apply_pool` route were deleted.
+
+Small real CPU cohorts preserve exact activation outputs across chunk sizes and
+show the expected fixed-cost amortization. For three amplitudes, mixed `N=2`
+warm chunk time fell from `136.05 ms` at size 1 to `32.16 ms` full; single
+`N=4` fell from `42.37 ms` to `25.10 ms`, and double `N=4` from `41.41 ms` to
+`27.99 ms`. Artifacts are `benchmark/results/p14c_numeric_axis_debug`,
+`benchmark/results/p14c_numeric_axis_single4_debug`, and
+`benchmark/results/p14c_numeric_axis_double4_debug`.
+
+The realistic single-cable CPU validation under
+`benchmark/results/p14c_numeric_axis_realistic_single196_cpu_20260715`
+preserves the same 21-point curve for chunk sizes `1/2/full`, ending at
+`89/196`. The laptop was thermally unstable: the useful warm comparison is
+chunk 2 `simulation.run_pool=105.76 s` versus full `96.32 s`; the anomalous
+chunk-1 warm run took `475.39 s`. Re-run the same workload on Kaggle P100 before
+making a GPU speedup claim. The priority remaining P14C work is extracting the
+numeric axis as a protocol-independent planning/runtime contract, validating
+broader stimulus families and consumers, then bounded/padded final chunks.
+Define the automatic chunk/memory policy only after P15 observer costs and this
+execution path have stabilized.
+
+Basic-08 typed-waveform evidence is recorded under
+`benchmark/results/basic_08_full_local_20260715_{callback,typed}_ab`. At 2000
+fibers and eight amplitudes, both routes return activation counts
+`43 141 403 652 843 983 1245 1319`. On the same noisy local sequence, the
+callback sweep took `31.02 s` and the typed sweep `11.26 s`. The attributable
+host work is clearer than the thermally variable solver wall time: callback
+`protocol.sweep.value` self time was `15.07 s`; the typed waveform updates cost
+`4.12 ms` total, and dispatch planning fell from eight calls/`753.9 ms` to one
+call/`159.1 ms`. That sequential checkpoint predates the numeric waveform-axis
+lowering above and remains the before-baseline for the next P100 run.
+
+The matching public basic-08 P100 checkpoint is retained under
+`benchmark/results/kaggle/20260715_225850_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-08-p14-gpu-timing-8e113bf`.
+For 100 single-cable plus 100 double-cable fibers and eight amplitudes, the
+fresh cold example took `12.50 s`; the second complete example took `719.8 ms`.
+Inside the second sweep, its first newly constructed-population amplitude took
+`110.9 ms` and the following amplitudes averaged about `38.3 ms`, including
+protocol work (`simulation.run_pool` averaged `31.73 ms`). The curve was stable
+across both passes at `6 18 41 65 82 101 126 135`. Relative to the pre-P14 P100
+artifact from 2026-07-14, the warm sweep fell from `1.802 s` to `392.5 ms` and
+typical hot amplitudes from roughly `162-187 ms` to `38.3 ms`. The older curve
+used unquantized continuous unmyelinated diameters and is therefore not an
+exact same-population numerical A/B.
+
+The exact matching local CPU artifact is
+`benchmark/results/basic_08_cpu_local_p14_compare_20260715`. CPU and P100 both
+returned `6 18 41 65 82 101 126 135`. Post-first-amplitude
+`simulation.run_pool` averaged `107.74 ms` on the local CPU versus `31.73 ms`
+on P100 (`3.40x` GPU speedup); the non-overlapping enqueue-plus-wait kernel
+pipeline averaged `102.62 ms` versus `23.66 ms` (`4.34x`). The fresh cold
+example favored CPU (`5.29 s` versus `12.50 s`) because the GPU paid its JIT;
+the complete already-compiled example favored P100 (`0.720 s` versus `1.627 s`).
+
+Do not use device-memory tracing for GPU timing claims. The matching diagnostic
+artifact ending in `axonscope-basic-08-p14-gpu-8e113bf` enabled per-span device
+memory sampling and inflated the warm example from `0.72 s` to `30.84 s`.
+Its roughly `12.5 GiB` `nvidia-smi` footprint mostly reflects JAX's default GPU
+preallocation rather than live basic-08 arrays; keep memory diagnostics and
+timing runs separate.
+
+The same typed path was validated on the full public
+`with_nrv/01_synthetic_fascicle_geometry.py` workflow under
+`benchmark/results/with_nrv_01_realistic_cpu_20260715_typed_waveform_r1`:
+193 NRV-derived axons, sampled LIFE/FEM footprints, 3 ms at 1 us, and all 21
+amplitudes from 0 to 300 uA. The recruitment curve progressed from `0/193` to
+`120/193`; `dispatch.build_plan` ran once (`86.87 ms`), all waveform updates
+cost `8.05 ms`, and post-cold `runtime.prepare` stayed around `0.4-0.7 ms` per
+amplitude. The CPU sweep took `241.81 s`, dominated by `kernel.wait`
+(`193.02 s`, about 80% of warm `simulation.run_pool`); NRV population and FEM
+footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
+
+#### P14D - Reusable preparation and signatures
+
+- [x] Stop recomputing a deep O(`Naxon`) runtime digest before a cache hit when
+  an unchanged source cohort already has a trusted structural signature.
+  Introduce a versioned typed signature owned by the prepared cohort/plan and
+  invalidate it on relevant structural mutation.
+  - `DispatchGroupStructure` is now constructed once by the canonical dispatch
+    plan. Numeric-axis repetition and backend-only last-row padding derive it
+    compositionally; runtime and prepared-cohort cache lookup consume it
+    directly. The old runtime-owned weak identity signature caches and their
+    duplicate deep builders were removed.
+  - Equivalent reconstructed signatures use compact pickle payloads plus
+    BLAKE2 instead of allocating about `63.3 MB` of `repr` text for the 1024-row
+    mixed workload. Local source-plan construction fell from `1.15 s` to
+    `0.244 s`; expanded runtime+spatial lookup is about `2.8 us` for both
+    groups.
+  - The strict unprofiled P100 A/B artifacts end in
+    `axs-p14d-signature-baseline-1024-p100-9725f34` and
+    `axs-p14d-trusted-signatures-1024-p100-95b1327`. Both return 758 activated
+    axons. Warm `runtime.prepare` falls from `914.1` to `67.8 ms` (`13.5x`),
+    `simulation.run_pool` from `2.190` to `1.422 s` (`1.54x`), and the sweep
+    from `2.473` to `1.773 s` (`1.40x`). Enqueue/dispatch/wait remain stable.
+- [x] Compute each source row's solver and temporal signatures once per
+  dispatch-plan build, then reuse that prepared description for both the
+  content cache key and `DispatchItem` normalization. This replaces the
+  duplicate production work without adding another cache or dispatch path.
+  On the N=1024 mixed/two-drive/five-amplitude P100 R3 comparison,
+  median warm `dispatch.build_plan` falls from `397.3` to `216.4 ms`
+  (`-45.5%`). Median `simulation.run_pool` remains stable at `4.12/4.11 s`,
+  and every repeat returns `0 565 637 707 758`. The retained optimized artifact
+  ends in `axs-p14d-build-plan-reuse-r3-1024-p100-fae6750`; the matching pinned
+  baseline ends in `axs-p14d-build-plan-r3-pin-1024-p100-0c060eb`.
+- [ ] Preserve safe content-based reuse for separately reconstructed but
+  equivalent populations without hashing large `repr(...)` values repeatedly.
+  Benchmark cache miss, identity hit, structural hit, and invalidation.
+  Equivalent reconstruction is covered and no longer uses the large repr path;
+  retain this item for the explicit four-mode cache/invalidation benchmark. A
+  P100 prototype that content-hashed complete footprint arrays was rejected:
+  it replaced about `258 ms` of footprint work with `379 ms` of hashing and
+  raised warm `inputs.extracellular` from `438` to `531 ms`.
+- [ ] Reuse dispatch groups, prepared spatial rows, observer probe plans,
+  membrane/cable runtime rows, and device arrays across amplitude values.
+  Current first-amplitude `runtime.prepare` is about `7.24 s` for single 4096
+  despite the batch runtime itself being found in cache.
+- [ ] Keep one prepared factorized extracellular plan per source cohort and
+  vary only temporal scales/indices. Eliminate repeated row scans and
+  footprint-key reconstruction caused solely by replacing stimulus objects.
+- [x] Sample factorized spatial footprints once per numeric-axis source row,
+  then expand the numerical array according to the trusted amplitude-major
+  dispatch shape and final-row padding. The N=1024 mixed/two-drive P100 run
+  ending in `axs-p14d-compact-spatial-1024-p100-5f1e37c` samples `512` source
+  rows for each `2560`-row cable group and preserves activation counts
+  `0 565 637 707 758`. Versus the deferred-current run, warm footprint compute
+  falls from `291.4` to `53.5 ms`, footprint-key construction from `37.8` to
+  `6.5 ms`, `inputs.extracellular` from `380.1` to `99.1 ms`, and
+  `simulation.run_pool` from `4.417` to `4.099 s`. This removes repeated work
+  inside one run; persistent source-plan reuse across calls remains open above.
+- [x] When a typed numeric axis will replace extracellular currents, defer the
+  base current materialization and sample only the final axis waveforms. The
+  retained N=1024 mixed/two-drive P100 run ending in
+  `axs-p14d-deferred-current-1024-p100-31bd6d6` returns the same
+  `0 565 637 707 758` activations. The discarded
+  `current_scaled_shared_waveform` work was `132.7 ms` in the baseline;
+  `inputs.extracellular` falls from `438.1` to `380.1 ms` and
+  `simulation.run_pool` from `4.440` to `4.417 s`, while dispatch/wait remain
+  stable. The larger sweep span in this single run comes from unrelated
+  `dispatch.build_plan` variance and is not treated as a regression claim.
+- [ ] Consume indexed rank-S current patterns without a device-side
+  `current_mid_A[B, S, Nt]` gather only if this can preserve the canonical
+  solver executable and cold compilation cost. The first prototype fused the
+  gather into the double-cable JIT: warm 1024-axon five-amplitude run-pool
+  improved slightly, but cold double-cable `kernel.dispatch_jax` rose from
+  `7.02 s` to `10.09 s`, so that form was rejected. Keep the compact host
+  payload and external gather until a scan-level indexing/fusion design has a
+  better cold/warm tradeoff.
+- [ ] Retain the compact factorized Vext representation. For single 4096 its
+  current device payload is about `6.6 MB` versus a `9.83 GB` dense equivalent;
+  optimize host discovery rather than rematerializing dense Vstim.
+- [ ] Keep preparation caches bounded, diagnosable, explicitly clearable, and
+  independent of Python object-id reuse after garbage collection.
+
+The indexed multi-drive P100 A/B uses the baseline artifact ending in
+`axs-p14d-indexed-baseline-1024-p100-95b1327` and retained artifact ending in
+`axs-p14d-compact-host-1024-p100-73aadd8`. Both return activation counts
+`0 565 637 707 758` for 1024 mixed axons, five amplitudes, and two drives.
+Per cable group, temporal host payload falls from `61.44 MB` of repeated
+currents to `120 KB` of five unique patterns plus about `10 KB` of indices.
+Warm `simulation.run_pool` falls from `4.545 s` to `4.440 s` (`1.02x`), while
+`kernel.dispatch_jax` remains effectively stable (`3.531 s` to `3.512 s`).
+The dedicated `inputs.numeric_axis` spans are `46.0/54.6 ms` for
+single/double cable. This is primarily a preparation/memory convergence, not a
+solver speedup.
+
+#### P14E - Acceptance gate
+
+- [ ] Re-run local CPU and Kaggle GPU at `Naxon={196,1024,4096}` for both cable
+  formulations. Report population construction, amplitude-plan construction,
+  first and later amplitude times, `run_pool`, preparation, dispatch, wait,
+  host/device memory, and numerical outputs.
+  - The five-amplitude full-batch timing matrix is complete under
+    `benchmark/results/p14e_solver_bound_cpu_local_20260716` and the six P100
+    artifacts ending in `axs-p14e-solver-bound-{single,double}-{196,1024,4096}-p100-fae6750`.
+    Warm `simulation.run_pool` is strongly solver-bound: `99.6-99.8%` on the
+    local CPU and `92.0-94.2%` on P100 when solver time is measured as the
+    non-overlapping `kernel.enqueue + kernel.wait` interval. P100 warm run-pool
+    speedups rise from `17.2x` to `28.2x` for single cable and from `21.2x` to
+    `45.8x` for double cable between 196 and 4096 axons.
+  - The original matrix reconstructed the source population in every phase,
+    reducing complete-wall P100 solver share to `55-60%`. The campaign now
+    builds and profiles one source workload per batch policy, reuses that exact
+    object for cold/warm phases, reports phase-only `wall_ms`, and retains
+    `one_shot_wall_ms` for source-plus-cold cost. The canonical finite-diameter
+    rule used by basic 08 is also applied to realistic single cable: N=4096 now
+    uses 63 shared Rattay-Aberham templates and local source construction falls
+    from `11.35 s` to `5.20 s` (`2.18x`). The earlier `8.37 s` measurement was
+    on P100 and is not used for this local A/B. A fresh P100 acceptance run with
+    these corrected semantics remains required.
+  - CPU double cable used Thomas, P100 double cable used the guarded
+    `jax_triton_loop_xb` route, and both cable formulations retained factorized
+    extracellular inputs. Counts match across devices in 11 of 12 phase/case
+    pairs. Single cable at N=1024 differs by one activation at 225 uA
+    (`325/1024` on local JAX 0.10.1 versus `326/1024` on P100 JAX 0.10.2), so
+    exact numerical acceptance and the requested memory run remain open.
+- [ ] Require exact source-pool immutability and matching activation curves.
+  Cross-backend near-threshold comparisons may use the already documented
+  one-amplitude-step tolerance, but same-backend A/B results must match.
+- [ ] Exit P14 only when Python population/preparation work no longer scales as
+  `Namplitude x Naxon` and the first-amplitude structural preparation is no
+  longer a material fraction of a warm sweep.
+
+### P15 - Compact Activation, Spike, And Propagation Observers
+
+Primary objective: use bounded solver-side event state when a protocol needs
+events rather than a temporal voltage raster. Keep VmRaster as the strict
+raster route and add explicit typed fast paths; do not restore a broad generic
+solver-side observer fallback.
+
+#### P15A - Typed compact event contracts
+
+- [ ] Define canonical runtime output plans and result contracts for compact
+  activation, first crossing, spike count, bounded spike times, and
+  propagation. Specify shapes, dtypes, units, blanking, threshold crossing,
+  hysteresis/refractory behavior, invalid states, and CPU/GPU semantics.
+- [ ] Implement minimal activation as one boolean per amplitude/axon, updated
+  during the temporal scan and returned as `[Namplitude, Naxon]` without
+  allocating or decoding VmRaster.
+- [ ] Implement first-crossing/latency state as `int32` timestep sentinels per
+  selected probe group, converting to physical time only during finalization.
+- [ ] Implement constant-memory first/last spike time and spike count. Add a
+  bounded `K`-event representation with explicit overflow only for workflows
+  that need individual timestamps.
+- [ ] Support existing `PositionSelector` semantics and selectors containing
+  several positions, reducing each probe group online.
+
+#### P15B - Propagation and true conduction block
+
+- [ ] Add canonical propagation analysis with one source probe and one or more
+  targets. Classify at least `propagated`, `blocked`, `not_initiated`, and
+  `ambiguous`.
+- [ ] Require target activation after source activation, optionally inside a
+  valid delay window, so direct or reverse activation is not mistaken for
+  expected propagation.
+- [ ] Support source/proximal/distal probes and distinguish bidirectional,
+  proximal-only, distal-only, local-only, no-initiation, and target-only/direct
+  activation.
+- [ ] Correct `ConductionBlock`: missing distal activation alone is not a
+  block. Derive block from successful initiation followed by target failure,
+  replacing the current definition or making it a view over propagation.
+- [ ] Define repeated-spike propagation separately. Evaluate counters and
+  last-event matching for summaries, with a small bounded FIFO only when
+  source-to-target event pairing is required.
+
+#### P15C - Runtime integration and validation
+
+- [ ] Integrate compact plans through `axonscope.runtime.execution`, output
+  contracts, dispatcher caching, result assembly, and protocol results. Keep
+  identical public semantics for single/double cable and crash on an
+  unintended VmRaster fallback.
+- [ ] Switch `recruitment_sweep` to compact activation only after exact
+  equivalence. Finalize all amplitudes together and avoid creating one public
+  `AxonSimulationResult` per amplitude.
+- [ ] Test no spike, one/repeated spikes, direct target activation, reverse
+  propagation, unilateral/bilateral propagation, true block, failed
+  initiation, blanking/chunk boundaries, overflow, and multi-position probes.
+- [ ] Compare compact plans with retained VmRaster references on local CPU and
+  Kaggle GPU at `Naxon={196,1024,4096}`. Record cold/warm timing, peak memory,
+  transfers, output size, and exact activation/recruitment equivalence.
+- [ ] Require the 4096-axon full recruitment workload to run without a
+  multi-GiB observer state. The target activation state is roughly `86 KB` for
+  21 x 4096 booleans rather than `6.02 GiB` of single-cable VmRaster.
+- [ ] Validate latency, velocity, recruitment, and KES-facing behavior, then add
+  an advanced example showing propagation to one side but not the other.
+
+### P16 - JAX Temporal Solver And Dispatch Optimization
+
+Primary objective: optimize the actual temporal program only after P14/P15
+remove host-pool expansion and full-raster contamination. Treat
+`kernel.dispatch_jax + kernel.wait` as one solver interval; moving work between
+the spans is not a gain.
+
+- [ ] Establish a fresh clean baseline from the P14 realistic workload using
+  compact activation. Cover both cable formulations, `Naxon={196,1024,4096}`,
+  first-call cold execution, subsequent hot amplitudes, representative
+  amplitude chunk sizes, throughput, memory, executable identity, and outputs.
+- [ ] Decompose the jitted program with HLO and Nsight. Measure membrane terms,
+  factorized stimulation, system assembly, tridiagonal/Triton solve, compact
+  observer update, copies/materializations, and kernel/custom-call count.
+- [ ] Re-evaluate time chunking after compact observers. The current realistic
+  VmRaster run launches six dependent JAX calls of 512 steps per cable group and
+  amplitude. A local 58-axon CPU double-cable A/B retained under
+  `benchmark/results/p14_enqueue_cpu_double_58_chunk{512,1024}_r3_20260715`
+  reduced mean warm `simulation.run_pool` from `2.109 s` to `1.991 s` per
+  amplitude at 1024 steps (about 5.6%), but mostly moved asynchronous work from
+  `kernel.enqueue` into `kernel.wait`. Do not change the global default from
+  this narrow CPU case; repeat across single/double cable, population sizes,
+  GPU, memory, and the future compact-state route.
+- [ ] Hoist HLO-confirmed run-invariant work: prepared cable terms,
+  area/background arrays, `cx_plus_gx`, `cx_over_dt`, current rows, scan
+  layouts, and static observer tables. Keep the representation internal,
+  typed, reusable, and membrane-model agnostic.
+- [ ] Optimize the existing single-cable program before adding a new route.
+  Compare `vmap(scan(step))` with `scan(vmap(step))`, inspect
+  `jax.lax.linalg.tridiagonal_solve`, and remove measured materializations or
+  kernel boundaries.
+- [ ] Optimize double cable in stages: first fuse system assembly with the
+  tiled-Thomas custom call so it consumes compact physical/runtime inputs;
+  then test temporal blocking `K={2,4,8,16}` by total runtime, registers,
+  memory, and compile cost.
+- [ ] Revisit Triton input/output aliases only with XLA buffer-assignment
+  evidence. The retained warm medians are `437.5/82.7/28.7 ms` for
+  `run_pool/dispatch/wait` without aliases and `565.5/113.5/9.75 ms` with
+  aliases. Retain an alias only if total solver and run-pool time improve.
+- [ ] Treat generated membrane code as a conditional solver optimization. Use
+  it only if profiles show material warm cost or temporal fusion requires it;
+  never hard-code MRG or another built-in model into a solver.
+- [ ] Evaluate JAX's persistent compilation cache for non-Triton routes under
+  `.axonscope_cache/runtime/jax/xla`. Benchmark true cross-process miss/hit,
+  trace/lower/compile/first execution, size/LRU policy, clean/disable behavior,
+  trusted sharing, cache-miss diagnostics, and interaction with the existing
+  Triton TTIR-to-PTX cache.
+- [ ] Benchmark async JAX scheduling only for forced heterogeneous dispatch
+  groups: incompatible models, cable/Nx shapes, or temporal stimulus
+  signatures. Sweep 2/4/8 groups and require device-idle evidence, bounded
+  pending memory, deterministic ordering, and an end-to-end gain. Keep sync as
+  default otherwise; prior homogeneous 256/1024 runs showed no benefit.
+- [ ] Validate every promoted optimization against CPU references and the prior
+  GPU route, including stateful/stateless membranes, both cable formulations,
+  factorized stimulation, compact observers, and retained VmRaster.
+- [ ] Require a repeatable 10-15% end-to-end or solver-interval gain before
+  retaining materially more complex kernel code.
+
+### P17 - Autonomous Generated Membrane Runtime Contracts
+
+Primary objective: after compilation, runtime-specific generated modules are
+the only source of model-specific runtime facts. Model IR remains a compiler,
+validation, composition, inspection, and reference artifact rather than a
+runtime reconstruction path.
+
+- [x] Generate runtime artifacts lazily per model and target with
+  content-addressed cache directories; JAX currently requests `jax_model.py`.
+- [x] Move stateless gate rates, Q10 factors, conductances, and reversal terms
+  into generated model-agnostic JAX functions.
+- [ ] Generate parameter defaults; names/units; gate, state, current,
+  observable, and diagnostic metadata; update policy; auxiliary state and
+  initialization; stateful prepare/finalize; recording contracts; signatures;
+  and compact inspection/result metadata into `jax_model.py`.
+- [ ] Load this generated contract directly after a cache hit without rebuilding
+  `JaxMembraneProgram` from Model IR or evaluating Model IR expressions.
+- [ ] Emit equivalent target-specific metadata/functions for future runtimes
+  rather than making them consume JAX artifacts.
+- [ ] Validate built-ins, stateful models, composition, parameter overrides,
+  recording labels, diagnostics, numerical equivalence, cache invalidation,
+  generated-code inspection, and cold/warm performance.
+- [ ] Remove the JAX Model IR runtime fallback once all supported contracts are
+  generated and covered.
+
+### P18 - Membrane Model Completion And Validation
+
+- [ ] Implement Nav1.x-family and other Markov-based membrane models through
+  the canonical membrane-source and generated-runtime contracts.
+- [ ] Re-check every built-in membrane model against its NRV implementation;
+  explicitly audit formulas, defaults, states, temperature behavior, and
+  recording semantics that may have been lost during translation.
+- [ ] Finish missing Gaines and Markov model families.
+- [ ] Add focused numerical references and runnable advanced examples for each
+  retained public model.
+
+### P19 - Pre-V1 Cleanup And Public Surface
+
+- [ ] Reorganize `src/`, especially Python modules still at package root, only
+  after P14-P18 settle their ownership boundaries.
+- [ ] Inventory every Python module, function, type, and public export.
+- [ ] Use Graphify, `vulture`, source call sites, examples, and tests to remove
+  code used only by tests, legacy paths, replaced slow routes, and duplicated
+  implementations.
+- [ ] Verify retained code ownership, contracts, runtime boundaries, and lack
+  of duplicate public concepts.
+- [ ] Remove public API not documented by basic or advanced runnable examples.
+- [ ] Run a final Graphify-guided whole-package cleanup after CPU/GPU
+  optimization, with `runtime/jax` treated as the already completed first
+  slice.
+- [ ] Clean `pyproject.toml`, including explicit optional CUDA/Triton GPU
+  dependencies and removal of obsolete extras.
+- [ ] Revisit artifact caching globally: build only requested runtimes, define
+  first-call versus install-time built-ins, document clean/disable/retention,
+  and keep `.axonscope_cache` deterministic and inspectable.
 
 ### P3 - Documentation And Examples
 
-- [x] README rewritten after post-P7 stabilization.
-- [x] Manual cleanup of `docs/`, `GUIDELINES.md`, and `AGENTS.md`.
-- [x] Public examples audited after benchmark flattening.
-- [ ] Write real notebook tutorials under `examples/tutorials/` following the
-  indexed mini-course sequence.
-- [ ] Add a didactic basic example for high-frequency block after block
-  detection exists, so the example distinguishes propagation, activation
-  failure, and true conduction block.
+- [x] Rewrite README after post-P7 stabilization.
+- [x] Audit public examples after benchmark flattening.
+- [ ] Write the indexed notebook mini-course under `examples/tutorials/`.
+- [ ] Add a didactic KES/block example after P15, distinguishing local
+  activation, failed initiation, propagation, and true conduction block, with
+  the required filtering workflow.
 - [ ] Prepare proper Sphinx documentation.
-- [ ] Do/update all public docstrings.
+- [ ] Complete/update all public docstrings.
 
-## Future Phases
+### P13 Remainder - Dense Vm Recording
 
-### Unsorted Future Work
+- [ ] Benchmark dense/full Vm recording separately from VmRaster. It may need
+  a distinct chunk policy, but it must not complicate the established
+  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` VmRaster default without evidence.
 
-These items are intentionally not ordered or scoped into a phase yet.
+## Future Product Phases
 
-- [ ] Continue hardening NRV integration only where the package contract is
-  stable: keep geometry construction in `examples/with_nrv` or benchmarks, and
-  promote future pieces only when they do not duplicate the canonical
-  sampled-footprint path already in `axonscope.integrations.nrv`.
-- [ ] Studies: callable threshold curves, block-threshold curves, recruitment
-  curves, conduction validation, parameter sweeps, reuse policies, retention
-  policies, and study results.
-- [ ] Serialization: final schemas, typed serialization, and persistence
-  strategy.
-- [ ] Work on HPC integration.
-- [ ] Work on FEM footprint integration, see
-  `ideas/fem_axon_gpu_coupling_design.md`. Start with the CPU/NRV path before
-  thinking GPU FEM: split benchmarks into FEM solve, first footprint, cached
-  footprint sampling, and AxonScope solve; cache reusable FEM field bases;
-  avoid repeated point-location by introducing an axon embedding/projection
-  representation; then choose between full precomputed footprints, chunked
-  projection, and future fused projection-solver paths by memory budget.
-- [ ] Add a KES block example after implementing the missing support needed for
-  that workflow, including filtering and the remaining block-analysis pieces.
-- [ ] Reorganize `src/`, especially the Python modules still living at package
-  root.
-- [ ] Revisit the caching strategy: generate artifacts only for the requested
-  runtime, keep cache state clean, and decide whether built-in models should be
-  built on first call and/or at package install time.
-- [ ] Evaluate JAX's native persistent compilation cache for non-Triton JAX
-  routes, then enable it under `.axonscope_cache/runtime/jax/xla` only if fresh
-  evidence is positive. Cover single-cable CPU/GPU, CPU double-cable Thomas,
-  and any future pure-JAX GPU fallback; also test whether it usefully layers on
-  top of the Triton compiled-call cache for the complete XLA executable.
-  Configure the cache before the first JAX compilation and benchmark a true
-  miss followed by a hit in separate processes, splitting trace, lower, XLA
-  compile, first execution, and end-to-end cold time. Decide minimum compile
-  time/entry size, maximum size/LRU retention, explicit clean/disable behavior,
-  trusted-local-directory policy, cache diagnostics, and Kaggle/HPC sharing.
-  Prefer JAX's version/device/HLO-keyed executable cache over an AxonScope
-  reimplementation, while retaining AxonScope-owned policy and benchmark
-  guards around its location and lifecycle.
-  The official JAX cache key covers non-optimized HLO, jaxlib version,
-  relevant XLA flags, device count/topology (GPU model), compression, and an
-  optional custom hook. Runtime values with unchanged abstract shapes/static
-  arguments therefore reuse the same executable; a changed HLO/shape/static
-  argument produces another complete executable rather than incrementally
-  recompiling only one subgraph. Evaluate
-  `jax_persistent_cache_min_entry_size_bytes=-1` and compare the default
-  per-fusion autotune cache with `jax_persistent_cache_enable_xla_caches=all`
-  and `xla_gpu_kernel_cache_file`, including whether the latter usefully
-  persists GPU kernel/PTX work around the Triton custom call. Enable
-  `jax_explain_cache_misses` in diagnostic benchmark runs and keep the cache in
-  a trusted local/shared directory only.
-- [ ] After CPU/GPU optimization work is complete, run a broad cleanup pass to
-  remove unused code and verify contracts. Treat `runtime/jax` as the first
-  completed target, and use Graphify to guide the wider pass.
-- [ ] Test GPU async scheduling. Candidate grouping contract: one batch has the
-  same model, same padded `Nx`, potentially variable diameter, potentially
-  variable footprint, and the same stimulus; incompatible rows form separate
-  groups, then groups may be launched with async GPU scheduling if benchmarks
-  show it helps.
-- [ ] Remove public API surface that is unused or not documented in advanced
-  examples.
-- [x] Validate example performance for `examples/basic/06_activation_velocity.py`,
-  `examples/basic/07_threshold_vs_diameter.py`,
-  `examples/basic/08_recruitment_curve_population.py`, and
-  `examples/with_nrv/01_synthetic_fascicle_geometry.py` on CPU and Kaggle GPU.
-  Record cold and warm timings with global performance counters, then add
-  benchmark coverage to identify any remaining bottlenecks before treating
-  these examples as stable perf gates.
-  - [x] Close the `with_nrv/01_synthetic_fascicle_geometry.py` full-population
-    validation slice. On 2026-07-13, commit `0f5860f` added deterministic NRV
-    seeding plus `recruitment_result.json` export. Full example-01 runs used
-    100 axons per fascicle, 193 AxonScope axons, 21 amplitudes, `duration=3 ms`,
-    `dt=0.001 ms`, and `vm_raster/full`. Artifacts:
-    `benchmark/results/with_nrv_examples_local_cpu_fullpop_seed0_20260713`,
-    `benchmark/results/kaggle/20260713_193414_with_nrv_examples_quick_cpu_cpu_axonscope-with-nrv-01-cpu-fullpop-seed0-0f5860f`,
-    and
-    `benchmark/results/kaggle/20260713_192746_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-with-nrv-01-gpu-fullpop-seed0-0f5860f`.
-    CPU routes stayed on double-cable `thomas`; GPU used double-cable
-    `jax_triton_loop_xb`. Local CPU versus Kaggle P100 GPU ratios were
-    `6.4x` for `protocol.recruitment_sweep`, `7.5x` for `simulation.run_pool`,
-    and `9.3x` for post-compile per-amplitude values. Kaggle CPU versus Kaggle
-    P100 GPU ratios were `12.1x`, `14.3x`, and `17.8x`, respectively. Final
-    recruitment at 300 uA matched at `120/193`; CPU/GPU differed only by a few
-    near-threshold activation decisions, so strict cross-backend checks should
-    allow one amplitude step around threshold crossings.
-  - [x] Close the `examples/basic/06`, `07`, and `08` validation slice. On
-    2026-07-13, local CPU artifact
-    `benchmark/results/basic_examples_local_cpu_validate_20260713` and Kaggle
-    P100 GPU artifact
-    `benchmark/results/kaggle/20260713_203352_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-gpu-7f9b781`
-    ran `benchmark/examples/basic_examples.py --examples 06,07,08 --warmups 0
-    --repeats 1`. Cold/warm wall timings were: `06` CPU `27.12/20.86 s`,
-    GPU `15.60/3.14 s` (`1.7x/6.6x`); `07` CPU `16.63/9.82 s`, GPU
-    `9.92/4.65 s` (`1.7x/2.1x`); `08` CPU `6.78/4.12 s`, GPU `5.16/2.73 s`
-    (`1.3x/1.5x`). GPU `kernel.wait` is already tiny for `06` and `08`, so
-    remaining bottlenecks are mostly JAX/Python dispatch, enqueue, result
-    assembly, and example/protocol overhead rather than raw solver time.
-  - [x] Revalidate these example gates after the final P12 warm-path cache
-    changes at commits `0b76cf7` and `222c504`. Artifacts:
-    `benchmark/results/basic_examples_local_cpu_post_p12_20260714`,
-    `benchmark/results/kaggle/20260714_114908_basic_examples_quick_cpu_cpu_axonscope-basic-06-07-08-post-p12-cpu`,
-    `benchmark/results/kaggle/20260714_021129_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-post-p12-gpu`,
-    `benchmark/results/with_nrv_examples_local_cpu_post_p12_fullpop_clean_20260714`,
-    and
-    `benchmark/results/kaggle/20260714_115613_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-with-nrv-01-post-p12-fullpop-gpu`.
-    Kaggle CPU/P100 wall speedups for the committed `06/07/08` examples were
-    cold `1.73x/1.67x/1.27x` and warm `6.59x/2.27x/1.44x`. The current
-    uncommitted `08` timestep (`dt=0.005 ms`) was validated separately through
-    benchmark-only commit `fd09837`: CPU/GPU warm wall was `7.52/2.96 s`
-    (`2.53x`), and both routes produced counts
-    `6 20 47 67 86 107 130 135`. Full-population `with_nrv/01` improved versus
-    the prior artifacts: local CPU/GPU `protocol.recruitment_sweep` became
-    `204.66/27.81 s` (`7.36x`) and `simulation.run_pool` `201.92/24.78 s`
-    (`8.15x`); median post-compile amplitude time was approximately
-    `9.59/0.986 s` (`9.73x`). Final recruitment matched at `120/193`; three
-    intermediate amplitudes differed by one near-threshold axon.
-- [x] Check whether `recruitment_sweep` can batch amplitude values into one
-  expanded compatible run when the pool, model shapes, footprints, and stimulus
-  timing are shared. Use `examples/basic/08_recruitment_curve_population.py` as
-  the first benchmark target; compare against the current sequential
-  per-amplitude observer-only path.
-  - [x] Add a native-pool opt-in for observer-only recruitment via
-    `batch_amplitudes=True`. It builds an expanded value-major
-    `amplitude x axon` AxonScope pool without `deepcopy`, keeps original rows
-    unmutated, and validates against the sequential path on real single-cable
-    and double-cable/MRG point-source probes.
-  - [x] Fix double-cable observer-only compact factorized Vext so row-specific
-    waveform scales are applied in the VmRaster path, matching the existing
-    dense/probe Vm route. Before this fix, naive expanded MRG pools did not
-    reproduce sequential activation counts because `current_row_scales` were
-    ignored by the double-cable observer path.
-  - [x] Keep `examples/basic/08_recruitment_curve_population.py` on the
-    default sequential amplitude path for now. A full native amplitude batch is
-    functionally correct but slower for this example on Kaggle P100 at commit
-    `9c87208`: `20.01/5.51 s` cold/warm versus the prior sequential
-    `5.16/2.73 s`. Warm full-batch overhead is dominated by
-    `dispatch.build_plan` (`2.64 s`) and `protocol.sweep.build_amplitude_pool`
-    (`0.59 s`), while `kernel.wait` stays around `5 ms`.
-    Follow-up at commit `a572742` fixed the main `dispatch.build_plan` cost by
-    sharing immutable/source axon objects across native amplitude clones instead
-    of shallow-copying each axon. The example remains sequential until the
-    public default policy is decided.
-  - [x] Add configurable amplitude pool chunking for native recruitment
-    batching, e.g. `amplitude_batch_size=1`, `10`, `20`, or `None/full`, so
-    large sweeps can choose between sequential amplitudes, medium
-    `fibers x amplitude_chunk` pools, and fully expanded
-    `fibers x all_amplitudes` pools.
-  - [ ] Finalize and analyze compact observer results once per native amplitude
-    batch instead of constructing one public `AxonSimulationResult` and
-    decoding VmRaster activity after every amplitude. Keep packed/device-local
-    outputs until the batch completes, then preserve value ordering, progress
-    rows, failure attribution, summary-only retention, and the
-    `amplitude_batch_size=1` behavior. Benchmark result-finalization time,
-    device-to-host transfers, peak device/host memory, and end-to-end CPU/GPU
-    time for sizes `1/10/20/full` before making it the default.
-  - [x] Benchmark native amplitude chunk sizes on CPU and Kaggle GPU for
-    single-cable and double-cable pools. Report cold/warm timings, compile
-    overhead, `kernel.dispatch_jax`, enqueue, wait, result assembly, peak
-    memory, and activation-count equivalence against the sequential path.
-    Added `benchmark/run.py --script recruitment_amplitude_batch` at commit
-    `63cc687`, based on the mixed single/double-cable population from
-    `examples/basic/08`. Baseline local CPU artifact
-    `benchmark/results/recruitment_amplitude_batch_local_cpu_baseline_20260713`
-    showed warm sequential `4.01 s`, `1` `7.85 s`, `10` `7.42 s`, `20`
-    `7.29 s`, and full `7.36 s`; native chunks were dominated by
-    `dispatch.build_plan` around `2.65-3.25 s`. Baseline Kaggle P100 artifact
-    `benchmark/results/kaggle/20260713_212454_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-recruitment-amplitude-batch-gpu-63cc687`
-    showed warm sequential `2.61 s`, `1` `5.95 s`, `10` `5.66 s`, `20`
-    `5.62 s`, and full `5.75 s`, with native chunks again dominated by
-    `dispatch.build_plan` around `2.80-2.93 s`.
-  - [x] Validate native amplitude chunking on the full 193-fiber
-    `with_nrv/01` P100 workload at commit `ad53586`, with independent kernels
-    for `sequential/1/5/10/20/full`. `simulation.run_pool` was respectively
-    `24.783/24.821/25.749/25.870/29.420/25.719 s`; all policies reproduced the
-    exact recruitment counts
-    `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111 112 112 114 120`.
-    Native batching therefore does not improve this complete cold sweep yet.
-    Settled size-5 batches reached about `351 ms/amplitude` versus
-    `881 ms/amplitude` sequential, but the first compiled shape and the
-    one-amplitude remainder erased that gain. Larger pools moved the dominant
-    cost into `inputs.extracellular`: `0.328 s` sequential versus
-    `2.792/4.499/9.954/11.933 s` for `5/10/20/full`. Before reconsidering the
-    default, lower shared footprint/current inputs once per unique source
-    cohort and broadcast/project amplitudes on device, then choose chunk sizes
-    that avoid a separately compiled remainder shape.
-  - [x] Remove the hidden full-population double-cable dense fallback exposed
-    by that benchmark. The apparent `inputs.extracellular` growth was not
-    footprint construction: the rank-1 unique-current payload was only
-    `1.50 MB`, but `CURRENT_TABLE` was rejected after lowering and expanded to
-    a `3.74 GB` `[B,Nt,Nx]` tensor. Commit `3991ff4` aligns the double-cable
-    capability contract with the already implemented indexed-current kernel
-    helpers and adds dense-equivalence coverage. On the full 193-fiber P100
-    workload,
-    `benchmark/results/kaggle/20260714_130947_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-compact-current-full-3991ff4`
-    reduced double-cable `inputs.extracellular` from `10.705 s` to `74.0 ms`,
-    `simulation.run_pool` from `24.700 s` to `15.126 s`, and
-    `protocol.recruitment_sweep` from `27.696 s` to `18.762 s`. The full curve
-    retained exact counts
-    `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111 112 112 114 120`.
-    Size-10 chunking remained slower at `24.541 s` for the sweep because it
-    paid three batch shapes, including a separately compiled one-amplitude
-    remainder. Keep `full` as the preferred policy for this workload when
-    memory allows.
-  - [x] Treat an all-zero stimulus as a wildcard while recognizing scaled
-    shared waveforms. Commit `eb94f05` chooses the first nonzero waveform as
-    the base, so a recruitment curve beginning at `0 uA` no longer falls into
-    indexed-current lowering solely because the zero row has no recoverable
-    normalized shape. The final P100 artifact
-    `benchmark/results/kaggle/20260714_133659_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-scaled-zero-full-eb94f05`
-    used `factorized_footprint/scaled_shared_waveform` for both cable groups,
-    reduced the double-cable temporal current from `252 KB` to `12 KB`, and
-    retained the exact activation curve. Its `15.900 s` `simulation.run_pool`
-    was within cold-JIT variation of the indexed result rather than a further
-    demonstrated speedup. Remaining cold non-solver preparation is now mainly
-    `runtime.prepare` (`2.62 s` in this run), especially model-agnostic
-    membrane row construction; address that through the autonomous generated
-    runtime-module contract below, not MRG/passive special cases.
-  - [x] Reduce the remaining full-population `runtime.prepare` cost without a
-    model-family special case. Avoid constructing JAX programs for generic
-    stateless one-current leak members when the gated/leak stack only needs
-    host-side `(g, gE)` row data; validate exact activation equivalence and the
-    `runtime.prepare.stack_membrane` delta on the full NRV example-01 P100 run.
-    Commit `a19da1a` now derives those rows through the generic NumPy Model IR
-    interpreter while retaining JAX compilation for active membrane members.
-    Kaggle P100 artifact
-    `benchmark/results/kaggle/20260714_141909_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-host-leak-a19da1a`
-    reduced `runtime.prepare` from `2.616` to `1.983 s` (-24.2%) and
-    `runtime.prepare.stack_membrane` from `1.096` to `0.512 s` (-53.3%). JAX
-    membrane program builds fell from 81 to 5; `simulation.run_pool` fell from
-    `15.900` to `15.082 s` and the sweep from `19.926` to `18.538 s`. The full
-    recruitment result is byte-identical to the reference artifact, including
-    activation counts `0 28 28 30 37 41 48 57 66 74 82 89 94 99 103 108 111
-    112 112 114 120`.
-  - [ ] Reduce GPU double-cable execution time now attributed to
-    `kernel.dispatch_jax`. The repeated-amplitude P100 trace
-    `benchmark/results/kaggle/20260714_143224_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-host-leak-batch2-a19da1a`
-    confirms that JIT compilation and `runtime.prepare` are reused after the
-    first batch, but the active `jax_triton_loop_xb` route still invokes one
-    Triton block solve per time step. A matching unchunked run at
-    `benchmark/results/kaggle/20260714_144642_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-unchunked-batch2-5ac6334`
-    improved cold `run_pool` from `7.708` to `5.295 s` while warm batches only
-    moved from `0.679` to `0.662 s`, proving that Python time chunks are not the
-    warm bottleneck. First remove the cold second-shape compile by padding the
-    final chunk or selecting an unchunked observer scan when appropriate; then
-    benchmark a model-agnostic persistent/fused temporal GPU route that performs
-    multiple membrane-plus-block-solve steps per device invocation. The
-    real-shape `B=36, Nx=234, Nt=3000` P100 matrix at
-    `benchmark/results/kaggle/20260714_145540_double_cable_solver_policy_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-double-realshape-blockb-5ac6334`
-    found no meaningful warm sensitivity to `BLOCK_B=8/16/32/64`
-    (`238-243 ms/amplitude`), so do not add an adaptive tile-width policy for
-    this problem.
-    - [x] Reuse the regular GPU observer chunk shape for a partial final chunk.
-      Commit `4bcc371` pads only the final Triton/VmRaster chunk and masks the
-      padded observer tail. P100 artifact
-      `benchmark/results/kaggle/20260714_154849_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-fixedchunk-batch2-4bcc371`
-      retained a byte-identical recruitment result while reducing
-      `recruitment_sweep` from `10.488` to `10.079 s` and
-      `simulation.run_pool` from `9.744` to `9.251 s` versus the matching
-      batch-size-2 baseline. Warm batches stayed around `0.68-0.72 s`, as
-      expected: this removes a cold compile shape rather than the temporal
-      launch cost.
-    - [x] Test model-agnostic XLA command buffers before designing a custom
-      temporal kernel. Commit `4c18037` adds benchmark-subprocess environment
-      control and explicitly labels `kernel.dispatch_jax` as a JAX call that
-      may absorb deferred device work. P100 artifact
-      `benchmark/results/kaggle/20260714_155356_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-cmdbuf-batch2-4c18037`
-      used `FUSION,WHILE,CUSTOM_CALL` and retained byte-identical results. It
-      measured cold `simulation.run_pool=8.476 s`, but the later no-command-
-      buffer run below reproduced `8.434 s`; this is cold compile variance, not
-      an attributable gain. Warm double-cable batches also remained effectively
-      flat (`~552.1` versus `~549.7 ms`). Do not enable this globally as a
-      claimed optimization; the remaining route still needs a genuinely
-      persistent/fused temporal lowering generated from the membrane runtime
-      contract.
-    - [x] Reuse one `AxonSimulation` per native amplitude chunk shape and prefer
-      the largest explicit amplitude pool that fits the workload memory budget.
-      Commit `c70615f` preserves the simulation dispatch plan while only
-      refreshing amplitude-dependent row state. The local CPU smoke at
-      `benchmark/results/recruitment_amplitude_batch/p12_steps1_4_cpu_20260714`
-      records one plan miss then seven `AxonSimulation` cache hits for
-      batch-size 1; its full-pool warm `simulation.run_pool` was `52.1 ms`
-      versus `122.8 ms` across the eight one-amplitude runs, with identical
-      activation counts. P100 full-pool artifact
-      `benchmark/results/kaggle/20260714_155724_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-full-reuse-c70615f`
-      retained a byte-identical result and reduced `recruitment_sweep` from
-      `10.079` to `7.815 s`, `simulation.run_pool` from `9.251` to `7.157 s`,
-      and `kernel.dispatch_jax` from `5.918` to `4.283 s` versus batch-size 2.
-      The matching final batch-size-2 P100 artifact
-      `benchmark/results/kaggle/20260714_160554_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-nrv01-reuse-batch2-96ee157`
-      records one `dispatch.build_plan` instead of four, then three explicit
-      `AxonSimulation` plan-cache hits; amplitude-pool refresh fell from `253.0`
-      to `161.7 ms`, and the recruitment output remained byte-identical.
-  - [x] Optimize the first native amplitude-batching bottleneck. Commit
-    `a572742` changed native amplitude clones to reuse the source axon object
-    while keeping each `AxonInstance` separate and mutable only through its
-    stimulation. Local CPU artifact
-    `benchmark/results/recruitment_amplitude_batch_local_cpu_shared_axon_20260713`
-    improved warm timings to sequential `4.11 s`, `10` `4.43 s`, `20`
-    `4.41 s`, and full `4.22 s`; `amplitude_batch_size=1` stays slow at
-    `7.80 s` because it still builds eight separate native pools/plans. Kaggle
-    P100 artifact
-    `benchmark/results/kaggle/20260713_213206_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-recruitment-amplitude-batch-gpu-a572742`
-    improved warm timings to sequential `3.14 s`, `10` `2.58 s`, `20`
-    `2.57 s`, and full `2.56 s`; all policies matched activation counts
-    `6 18 41 65 82 101 126 135`.
-  - [x] Reuse spatial cohort preparation and VmRaster plans across equivalent
-    groups and amplitude-only cohort refreshes. Commit `73cf2ea` separates the
-    immutable spatial cache token from current axon, solver-axon, and
-    stimulation rows. Kaggle P100 artifact
-    `benchmark/results/kaggle/20260713_223515_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-spatial-cache-73cf2ea`
-    reduced warm `simulation.run_pool` from `768.95` to `441.87 ms` for the
-    sequential policy and from `1624.02` to `923.16 ms` for
-    `amplitude_batch_size=1`. Corresponding `inputs.positions` totals dropped
-    from `78.52` to `4.57 ms` and from `566.79` to `17.43 ms`; `observer.plan`
-    dropped from `15.15` to `1.97 ms` and from `76.23` to `2.43 ms`. Every
-    policy retained activation counts `6 18 41 65 82 101 126 135`.
-  - [x] Reuse native amplitude work pools across equal-sized chunks. Commit
-    `19c1b5f` keeps one resettable pool per chunk size, so each amplitude still
-    starts from the source-row state while stable row identities let the
-    dispatcher and runtime caches hit. Kaggle P100 artifact
-    `benchmark/results/kaggle/20260713_224541_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-work-pool-19c1b5f`
-    reduced warm `amplitude_batch_size=1` wall time from `5.72` to `2.52 s`
-    versus the spatial-cache-only run and from `6.85 s` versus the original
-    native baseline. `dispatch.build_plan` fell from `3096.88` to `481.06 ms`,
-    `runtime.prepare` from `499.62` to `59.70 ms`, and
-    `simulation.run_pool` from `923.16` to `421.70 ms`; the trace records one
-    dispatch-plan miss followed by seven hits. All policies retained activation
-    counts `6 18 41 65 82 101 126 135`. Remaining generic protocol cost is
-    mostly the required user update work (`63.20 ms` initial pool plus
-    `441.81 ms` refreshes for 1600 row-amplitude updates), while the benchmark
-    harness itself spends about `0.94 s` constructing the population outside
-    `recruitment_sweep`.
-  - [x] Reduce true first-process recruitment cold preparation without changing
-    solver paths. Commit `cb418ae` initializes structural gated/leak stack gates
-    through the existing NumPy Model IR interpreter instead of triggering an
-    eager JAX gate initialization; commit `f7ea77b` memoizes membrane signatures
-    by object identity while one dispatch plan is built. Local CPU cold wall
-    fell from `8.04 s` to `6.17 s`, with `runtime.prepare.stack_membrane`
-    dropping from `912.10` to `69.20 ms` after the first change and profiled
-    first-plan construction dropping from `0.77` to `0.29 s` after the second.
-    Kaggle P100 artifact
-    `benchmark/results/kaggle/20260713_231018_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-cold-signatures-f7ea77b`
-    improved sequential cold `recruitment_sweep` from `10.38` to `9.74 s`
-    despite run-to-run double-cable JIT variance, with `runtime.prepare`
-    `1.79 s` to `0.95 s` and `dispatch.build_plan` `377.04` to `141.19 ms`.
-    Sequential warm improved from `2.50` to `2.20 s` wall and from `1.47` to
-    `1.17 s` inside `recruitment_sweep`; activation counts remained
-    `6 18 41 65 82 101 126 135`. A local two-process probe also showed a JAX
-    persistent-cache hit reducing cold wall from `6.53` to `4.75 s`, but keep
-    persistent cache location, invalidation, and retention as a separate policy
-    decision rather than enabling it implicitly.
-  - [x] Make source-model runtime code generation lazy per model and runtime
-    target. Source compiler v15 keeps one content-addressed model directory,
-    lets JAX request only `jax_model.py`, and can add `numpy_model.py` later
-    without rewriting the existing JAX artifact. Runtime program hashes no
-    longer depend on which cache targets happen to be present.
-  - [x] Move stateless source-model gate rates, Q10 factors, conductances, and
-    reversal terms into generated `jax_model.py` functions. JAX consumes those
-    functions instead of rebuilding their Model IR expression trees; the
-    structural gated/leak backend now exposes model-agnostic batch capabilities
-    for gate and membrane terms rather than selecting a named model family.
-  - [ ] **Next important step after the current cold/warm optimization pass:**
-    make each generated runtime module, starting with `jax_model.py`, the
-    autonomous source of every model-specific fact required by that runtime.
-    Generate parameter defaults; names and units; gate, membrane-state,
-    current, observable, and diagnostic metadata; gate-update policy;
-    auxiliary-state definitions and initialization; stateful prepare/finalize
-    functions; recording/diagnostic contracts; runtime hashes/signatures; and
-    the compact metadata needed for result labels and runtime inspection.
-    After a cache hit, JAX execution must load this generated contract without
-    reconstructing `JaxMembraneProgram` from Model IR or evaluating Model IR
-    expressions. Keep Model IR only as a compiler artifact for source
-    validation, optimization, composition, generated-code inspection, and
-    NumPy/reference validation; composition or inspection may consume the IR at
-    compile time, but their runtime-specific output must also be emitted into
-    the generated module. Validate stateless and stateful built-ins, composite
-    membranes, parameter overrides, recording labels, numerical equivalence,
-    cache reuse, and cold/warm performance before removing the JAX Model IR
-    fallback.
-  - [x] Capture the production double-cable GPU cold JIT as separate
-    trace/lower/compile/first-execution phases on Kaggle, and compare the
-    generated-term plus batch-capability route against the previous recruitment
-    baseline before retaining any further kernel specialization. P100 artifact
-    `benchmark/results/kaggle/20260713_235628_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-model-codegen-eaa292a`
-    measured `1.093/3.874/0.884/0.171 s`, respectively (`6.022 s` total), so
-    lowering is 64% of the production cold JIT. The controlled row-wise artifact
-    `benchmark/results/kaggle/20260714_000106_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-model-codegen-row-ad0ff51`
-    measured `1.614/5.797/0.711/0.280 s` (`8.402 s` total). Keep the
-    capability-based batch path: it cut measured JIT time by 28%, retained
-    activation counts `6 18 41 65 82 101 126 135`, and left warm recruitment
-    effectively flat (`1.238 s` batch-native versus `1.227 s` row-wise).
-  - [x] Finish the retained double-cable Triton kernel pass without changing
-    the runtime organization. Commits `40ccc47`, `a3ff29e`, and `4f70a5a`
-    reuse scan-static linear terms, fuse forward/backward Thomas passes into
-    one custom call, and reuse two outputs as internal Thomas workspaces. Dense
-    P100 validation retained `1.439e-7` maximum absolute error and one StableHLO
-    custom call. The retained three-repeat no-alias artifact
-    `benchmark/results/kaggle/20260714_004954_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-triton-noalias-warm-4f70a5a`
-    measured about `440.0 ms` warm `simulation.run_pool`, `82.8 ms`
-    `kernel.dispatch_jax`, and `28.8 ms` `kernel.wait`. The official
-    input/output-alias experiment in `dabf920` was rejected and reverted by
-    `d40d21e`: its matching artifact increased those spans to about
-    `569.3/113.5/10.0 ms`, moving work into dispatch despite the lower wait.
-  - [x] Persist the supported double-cable Triton TTIR-to-PTX result under
-    `.axonscope_cache/runtime/jax/triton`. Commit `cd97bfd` stores the compressed
-    `TritonKernelCall` with a checksum and a content key covering source,
-    shapes/dtypes, grid, metaparameters, compute capability, and JAX/JAXlib/
-    jax-triton/Triton versions; unsupported jax-triton versions use the normal
-    upstream lowering. The fresh-process P100 replay
-    `benchmark/results/kaggle/20260714_010800_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-triton-cache-cd97bfd`
-    recorded a real miss then hit for the same `[Nx=22, B=800]` call. Lowering
-    fell from `3.962` to `0.063 s` (`62.5x`), instrumented cold JIT from `6.104`
-    to `1.551 s` (`3.94x`), and full wall time from `12.075` to `7.186 s`.
-    Recruitment counts stayed `6 18 41 65 82 101 126 135`; the independent
-    dense solve passed at `1.439e-7` maximum absolute error. The reusable cache
-    artifact is only `13,376` bytes for this signature.
-  - [x] Test async JAX scheduling across independent dispatcher groups. Commit
-    `0bf9984` added an internal enqueue/finalize scheduler and the
-    `dispatcher_group_scheduling` benchmark. Kaggle P100 warm runs showed no
-    gain: 256 axons were `198.7 ms` sync versus `213.8 ms` async, and 1024
-    axons were `606.6 ms` sync versus `611.5 ms` async. Keep synchronous group
-    execution as the default; revisit async only for workloads with several
-    independent solver-heavy groups and measured device idle time.
-  - [ ] Benchmark async scheduling specifically when heterogeneous workloads
-    force several independent dispatch groups. Cover incompatible membrane
-    models, cable formulations/Nx shapes, and genuinely different stimulus
-    temporal signatures (amplitude-only scaling may remain in one factorized
-    group). Sweep 2/4/8 groups and light versus solver-heavy durations on CPU
-    and Kaggle GPU; compare sync/async warm and cold totals, enqueue/flush/wait,
-    peak memory, device idle time, deterministic result ordering, and numerical
-    equivalence. Keep async opt-in unless it gives a clear end-to-end gain for
-    these forced multi-group cases without excessive pending-device memory.
-- [ ] Implement Nav1.x-family and other Markov-based membrane models.
-- [ ] Re-check each built-in model against the NRV implementation; some details
-  may have been lost during model translation.
-- [ ] Finish missing membrane models, including Gaines and Markov families.
-- [ ] Before v1, make a full list of Python files and package organization.
-- [ ] Before v1, inspect every function/type/module and delete anything not
-  called outside tests, using `vulture` as one input.
-- [ ] Before v1, check where retained code is used, what it is for, whether it
-  respects contracts, and whether it duplicates another implementation. Use
-  Graphify to guide the pass.
-- [ ] Before v1, clean `pyproject.toml`, including optional GPU extras for
-  CUDA/Triton.
+### Studies And Persistence
+
+- [ ] Implement callable threshold curves, block-threshold curves, recruitment
+  curves, conduction validation, parameter sweeps, reuse/retention policies,
+  and canonical study results.
+- [ ] Define final schemas, typed serialization, and persistence strategy.
+
+### External Integration
+
+- [ ] Continue NRV hardening only where the package contract is stable. Keep
+  geometry in `examples/with_nrv` or benchmarks and avoid duplicating the
+  canonical sampled-footprint path in `axonscope.integrations.nrv`.
+- [ ] Work on HPC integration, including cache sharing, scheduling, artifact
+  retention, and reproducible benchmark execution.
+- [ ] Implement the CPU/NRV FEM-footprint path described in
+  `ideas/fem_axon_gpu_coupling_design.md` before GPU FEM. Split FEM solve,
+  first footprint, cached sampling, and AxonScope solve; cache reusable field
+  bases; introduce axon embedding/projection to avoid repeated point location;
+  then select full footprints, chunked projection, or future fused paths by
+  memory budget.
 - [ ] Test Apple Metal acceleration with `jax-mps`:
   https://github.com/tillahoffmann/jax-mps
 
-### P8 - Future Bonus NumPy/SciPy Reference Solver Runtime
+### Deferred NumPy/SciPy Reference Runtime
 
-This is intentionally not the next implementation phase. The NumPy/SciPy
-runtime remains valuable as a future reference/debug backend, but only after
-the model/compiler surface and the current JAX runtime contract are clean
-enough. The goal is a real reference solver runtime, not a JAX-backed
-compatibility path.
+This remains a future debugging/reference backend, not a JAX compatibility
+wrapper and not the next implementation phase.
 
-- [ ] Keep `axs.runtime.numpy` reserved/non-executable until this phase reaches
-  executable behavior through the same `AxonSimulation(...).run()`,
-  `.estimate()`, and `.inspect()` lifecycle as JAX.
-- [ ] Do not start implementation before P10 model/compiler cleanup and P11
-  realistic JAX solver benchmarking/optimization are stable enough that the
-  reference runtime has a clean contract to implement.
-- [ ] Define the first supported scope explicitly: scalar/tiny simulations
-  first, not population batching, GPU parity, or a second public workflow.
-- [ ] Implement the reference solver behind the backend execution facade, using
-  Model IR semantics and SciPy/NumPy numerical primitives rather than JAX
-  membrane backends.
-- [ ] Use the tridiagonal Crank-Nicholson solver path as the first numerical
-  primitive for single-cable tiny simulations; choose SciPy banded/sparse
-  helpers where they make the implementation clearer and deterministic.
-- [ ] Decide and document the v1 model/input subset: single-cable first,
-  intracellular current, sampled extracellular footprints, recording modes,
-  observer support, and whether double-cable waits for a later slice.
-- [ ] Add cross-backend validation against JAX on small deterministic cases:
-  Vm traces, activation/block/latency observers, thresholds, probe recordings,
-  retained membrane recordings, and model-step equivalence.
-- [ ] Wire `ExecutionPolicy(runtime=axs.runtime.numpy)` only after executable
-  behavior, examples, docs, estimates, inspection records, and tests exist.
-- [ ] Document when to use the reference runtime: debugging tiny simulations,
-  semantic validation, backend comparison, and numerical regression tests;
-  document when not to use it.
+- [ ] Keep `axs.runtime.numpy` reserved until it executes through the same
+  `AxonSimulation(...).run()`, `.estimate()`, and `.inspect()` lifecycle.
+- [ ] Define a tiny deterministic v1 subset: single cable first, intracellular
+  current, sampled footprints, recording, observers, and selected membranes.
+- [ ] Implement tridiagonal Crank-Nicolson with clear NumPy/SciPy primitives,
+  favoring readability and numerical reference value over population speed.
+- [ ] Consume the canonical membrane/compiler contract through a NumPy-specific
+  generated target or clear reference representation; never call into the JAX
+  runtime or preserve a second user-facing membrane-authoring path.
+- [ ] Add cross-backend JAX comparisons for Vm, activation, block, latency,
+  thresholds, probes, retained membrane values, and model-step equivalence.
+- [ ] Add runtime policy, examples, docs, estimates, and inspection records only
+  after executable behavior exists.
+- [ ] Document when to use this runtime for tiny deterministic debugging and
+  numerical regression, and when not to use it for population performance or
+  GPU-parity expectations.
 
-## Completed Phase Summary
+## Completed Evidence Summary
 
-Detailed completed ledgers live in the archive and referenced architecture
-docs. Keep only high-level state here.
-
-- P0-P6: public API cleanup, one simulation workflow, protocols/results/views,
-  examples-as-docs, inspection/runtime reports, validation policy, and
-  backend/lowering cleanup are complete for the current JAX path.
-- P7: class-based public membrane models, source compiler, generated JAX/NumPy
-  model-step artifacts, generated-code cache/reporting, direct
-  `JaxMembraneProgram` execution, and old membrane-stack deletion are complete.
-- P9: cold-run micro baseline, scalar/batch span normalization, explicit
-  hotpath chunk controls, and closeout decisions are recorded.
-- P10: model/compiler cleanup and optimizer prep are complete enough for the
-  current runtime work.
-- P11: benchmark reset, JAX solver optimization, large-population Triton
-  exploration, solver-engine flattening, single/double-cable cartography, and
-  runtime cleanup closeout are complete for the current pass.
+- P12 closed runtime/JAX cleanup, warm/cold host preparation, strict route
+  guards, dead-code cleanup, factorized Vext, generated JAX membrane terms,
+  Triton fusion, and TTIR-to-PTX persistence. Detailed decisions remain in
+  `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md` and the benchmark
+  artifacts referenced by `benchmark/README.md`.
+- P13 retained observer/VmRaster chunk size `512`; the measured effect across
+  single/double cable and `Naxon={1,64,1024}` was small enough that adaptive
+  policy was rejected for now.
+- Basic examples 06/07/08 and `with_nrv/01` were validated on local/Kaggle CPU
+  and P100 GPU before the P14 work. Current reference artifacts include
+  `benchmark/results/kaggle/20260714_021129_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-post-p12-gpu`
+  and
+  `benchmark/results/kaggle/20260714_115613_with_nrv_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-with-nrv-01-post-p12-fullpop-gpu`.
+- Native amplitude batching became numerically correct, added configurable
+  chunk sizes, shared source axons across amplitude clones, reused spatial and
+  runtime plans, removed the double-cable dense-current fallback, handled zero
+  waveform scaling, and validated exact recruitment curves. Those changes are
+  retained as evidence and stepping stones, but P14 replaces the remaining
+  expanded-object execution representation.
+- GPU async scheduling across already compatible homogeneous groups was tested
+  and rejected as a default: 256 axons measured `198.7 ms` sync versus
+  `213.8 ms` async, and 1024 measured `606.6` versus `611.5 ms`.
+- The supported double-cable Triton cache reduced TTIR-to-PTX lowering from
+  `3.962` to `0.063 s` and instrumented cold JIT from `6.104` to `1.551 s` for
+  its validated signature, with unchanged recruitment results.
 
 ## Key References
 
-- Architecture reference: `GUIDELINES.md`
-- Agent guide: `AGENTS.md`
-- Full pre-cleanup TODO archive:
-  `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
-- P11 closeout:
-  `docs/architecture/p11_closeout_2026_07_12.md`
-- Solver policy cleanup:
-  `docs/architecture/p11_solver_policy_cleanup_decisions_2026_07_11.md`
-- P12 runtime contract:
-  `docs/architecture/p12_runtime_contract_2026_07_12.md`
-- P12A runtime audit:
-  `docs/architecture/p12a_jax_runtime_audit_2026_07_12.md`
-- P12B runtime/JAX cleanup:
+- Product and architecture: `GUIDELINES.md`
+- Working guide: `AGENTS.md`
+- Benchmark surfaces: `benchmark/README.md`
+- Validation policy: `docs/validation.md`
+- Examples map: `examples/README.md`
+- P11 closeout: `docs/architecture/p11_closeout_2026_07_12.md`
+- P12 runtime cleanup:
   `docs/architecture/p12b_runtime_jax_cleanup_2026_07_12.md`
-- Benchmark surface map: `benchmark/README.md`
+- Pre-cleanup TODO archive:
+  `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`

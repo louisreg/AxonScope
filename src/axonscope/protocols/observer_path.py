@@ -8,10 +8,19 @@ import numpy as np
 
 from axonscope.analysis import ActivationCriterion
 from axonscope.analysis.definitions import Activation
+from axonscope.dispatcher.numeric_axis import NumericAxisInput
 from axonscope.protocols.types import SimulationCandidate
+from axonscope.protocols.progress import (
+    _OneShotProgress,
+    _SweepProgress,
+    _activation_progress_summary,
+)
+from axonscope.protocols.results import PoolSweepResult
+from axonscope.protocols.sweep import _NumericPoolSweepPlan
 from axonscope.recording import Recording
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, activation_values_from_vm_raster
 from axonscope.runtime import ExecutionPolicy
+from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import BatchOptions
 
@@ -74,6 +83,92 @@ def _evaluate_activation_observer_simulation(
 
     pool_result = simulation.run()
     return _activation_observations_from_pool_result(pool_result, activation)
+
+
+def _evaluate_activation_observer_numeric_axis(
+    simulation: AxonSimulation,
+    activation: Activation,
+    axis_input: NumericAxisInput,
+) -> np.ndarray:
+    """Run one numeric execution axis and return axis-major flags."""
+
+    pool_result = simulation._run_numeric_axis(axis_input)
+    values = _activation_observations_from_pool_result(pool_result, activation)
+    return np.asarray(values, dtype=bool).reshape(
+        (axis_input.size, len(simulation.axons))
+    )
+
+
+def _execute_activation_observer_sweep_plan(
+    plan: _NumericPoolSweepPlan,
+    *,
+    criterion: ActivationCriterion,
+    duration: Any,
+    dt: Any,
+    progress: bool | str,
+    batch_options: BatchOptions | None,
+    execution_policy: ExecutionPolicy | None,
+    solver_progress: bool | str,
+) -> PoolSweepResult:
+    """Execute a compact stable-pool plan without amplitude-row expansion."""
+
+    progress_display = _SweepProgress(progress)
+    solver_progress_gate = _OneShotProgress(solver_progress)
+    observation_rows: list[np.ndarray] = []
+    reusable: tuple[AxonSimulation, Activation] | None = None
+    try:
+        for batch_index, batch in enumerate(plan.batches):
+            progress_display.begin(
+                label="Pool sweep",
+                current_index=batch.start_index,
+                values=plan.values,
+                completed_rows=observation_rows,
+                progress_summary=_activation_progress_summary,
+            )
+            with benchmark_span(
+                "protocol.sweep.amplitude_chunk",
+                batch_index=batch_index,
+                start_index=batch.start_index,
+                value_count=len(batch.values),
+                pool_size=plan.source_pool_size,
+                execution_representation="stable_pool",
+            ):
+                if reusable is None:
+                    reusable = _build_activation_observer_simulation(
+                        plan.source_pool,
+                        criterion=criterion,
+                        duration=duration,
+                        dt=dt,
+                        progress=solver_progress_gate.consume(),
+                        batch_options=batch_options,
+                        execution_policy=execution_policy,
+                    )
+                axis_input = plan.input_builder.numeric_axis_input(batch.values)
+                batch_observations = _evaluate_activation_observer_numeric_axis(
+                    reusable[0],
+                    reusable[1],
+                    axis_input,
+                )
+                reusable[0].progress = False
+                for offset, observations in enumerate(batch_observations):
+                    index = batch.start_index + offset
+                    observation_rows.append(observations)
+                    progress_display.update(
+                        label="Pool sweep",
+                        current_index=index,
+                        values=plan.values,
+                        completed_rows=observation_rows,
+                        progress_summary=_activation_progress_summary,
+                    )
+    finally:
+        progress_display.close()
+
+    return PoolSweepResult(
+        values=plan.values,
+        observations=np.asarray(observation_rows, dtype=bool).reshape(
+            (len(plan.values), plan.source_pool_size)
+        ),
+    )
 
 
 def _activation_observations_from_pool_result(
@@ -188,4 +283,6 @@ __all__ = [
     "_can_use_threshold_observer",
     "_evaluate_activation_observer_pool",
     "_evaluate_activation_observer_simulation",
+    "_evaluate_activation_observer_numeric_axis",
+    "_execute_activation_observer_sweep_plan",
 ]

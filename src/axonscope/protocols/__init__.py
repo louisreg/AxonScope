@@ -16,6 +16,7 @@ from axonscope.protocols.results import (
 from axonscope.protocols.sweep import pool_sweep
 from axonscope.protocols.threshold import find_activation_threshold, find_threshold
 from axonscope.protocols.types import ThresholdCriterion, ThresholdStatus
+from axonscope.protocols.updates import ExtracellularWaveformUpdate
 
 
 def __getattr__(name: str) -> Any:
@@ -26,6 +27,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "PoolSweepResult",
+    "ExtracellularWaveformUpdate",
     "RecruitmentCurve",
     "ThresholdCurve",
     "ThresholdCriterion",

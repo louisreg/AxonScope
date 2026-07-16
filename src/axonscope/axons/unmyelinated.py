@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -86,11 +87,32 @@ def _passive_leak(g_pas: Any, e_pas: Any) -> Model:
     conductance = units.to_S_per_cm2(g_pas)
     if conductance <= 0.0:
         raise ValueError("g_pas must be strictly positive when include_passive_leak=True.")
-    return membranes.Passive(Rm=1.0 / conductance, EL=e_pas)
+    return _cached_builtin_model(
+        membranes.Passive,
+        Rm=1.0 / conductance,
+        EL=e_pas,
+    )
 
 
 def _provided_model_params(**params: Any) -> dict[str, Any]:
     return {name: value for name, value in params.items() if value is not _UNSET}
+
+
+def _cached_builtin_model(model_type: type[Model], **params: Any) -> Model:
+    items = tuple(sorted(params.items()))
+    try:
+        hash((model_type, items))
+    except TypeError:
+        return model_type(**params)
+    return _cached_builtin_model_from_items(model_type, items)
+
+
+@lru_cache(maxsize=512)
+def _cached_builtin_model_from_items(
+    model_type: type[Model],
+    items: tuple[tuple[str, Any], ...],
+) -> Model:
+    return model_type(**dict(items))
 
 
 def _single_section_model(
@@ -103,6 +125,26 @@ def _single_section_model(
     Ra: axial_resistivity_t | None,
     Cm: capacitance_density_t | None,
 ) -> Layout:
+    if x is None and isinstance(membrane, MembraneModel):
+        assert length is not None
+        assert compartments is not None
+        return _cached_single_uniform_layout(
+            membrane,
+            units.require_length_um(length, name="length"),
+            round_axon_diameter_um(
+                units.require_length_um(diameter, name="diameter")
+            ),
+            normalize_positive_int(compartments, name="compartments"),
+            units.require_axial_resistivity_ohm_cm(
+                _DEFAULT_Ra if Ra is None else Ra,
+                name="Ra",
+            ),
+            units.require_capacitance_density_uF_per_cm2(
+                _DEFAULT_Cm if Cm is None else Cm,
+                name="Cm",
+            ),
+        )
+
     section = Section(
         "axon",
         membrane=membrane,
@@ -118,6 +160,30 @@ def _single_section_model(
     return Layout.single_uniform(
         section,
         length=length,
+        compartments=compartments,
+    )
+
+
+@lru_cache(maxsize=512)
+def _cached_single_uniform_layout(
+    membrane: MembraneModel,
+    length_um: float,
+    diameter_um: float,
+    compartments: int,
+    Ra_ohm_cm: float,
+    Cm_uF_cm2: float,
+) -> Layout:
+    section = Section(
+        "axon",
+        membrane=membrane,
+        diameter=units.Q_(diameter_um, "micrometer"),
+        Ra=units.Q_(Ra_ohm_cm, "ohm * centimeter"),
+        Cm=units.Q_(Cm_uF_cm2, "microfarad / centimeter ** 2"),
+        tags=("unmyelinated",),
+    )
+    return Layout.single_uniform(
+        section,
+        length=units.Q_(length_um, "micrometer"),
         compartments=compartments,
     )
 
@@ -272,7 +338,8 @@ class HodgkinHuxley(Unmyelinated):
         """
 
         celsius = _quantity_degC(celsius, name="celsius")
-        hh_model = membranes.HodgkinHuxley(
+        hh_model = _cached_builtin_model(
+            membranes.HodgkinHuxley,
             **_provided_model_params(
                 gnabar=gnabar,
                 gkbar=gkbar,
@@ -353,7 +420,8 @@ class RattayAberham(Unmyelinated):
         """
 
         celsius = _quantity_degC(celsius, name="celsius")
-        rattay = membranes.RattayAberham(
+        rattay = _cached_builtin_model(
+            membranes.RattayAberham,
             **_provided_model_params(
                 gnabar=gnabar,
                 gkbar=gkbar,
@@ -428,7 +496,8 @@ class Sundt(Unmyelinated):
 
         celsius = _quantity_degC(celsius, name="celsius")
         super().__init__(
-            membrane=membranes.Sundt(
+            membrane=_cached_builtin_model(
+                membranes.Sundt,
                 **_provided_model_params(
                     gnabar=gnabar,
                     gkdrbar=gkdrbar,
@@ -504,7 +573,8 @@ class Tigerholm(Unmyelinated):
 
         celsius = _quantity_degC(celsius, name="celsius")
         super().__init__(
-            membrane=membranes.Tigerholm(
+            membrane=_cached_builtin_model(
+                membranes.Tigerholm,
                 **_provided_model_params(
                     ena=ena,
                     ek=ek,
@@ -572,7 +642,8 @@ class Schild94(Unmyelinated):
         temperature = _quantity_degC(temperature, name="temperature")
         v_init = _quantity_mV(v_init, name="v_init")
         super().__init__(
-            membrane=membranes.Schild94(
+            membrane=_cached_builtin_model(
+                membranes.Schild94,
                 diameter_um=diameter,
                 celsius=temperature,
                 vinit_mV=v_init,
@@ -626,7 +697,8 @@ class Schild97(Unmyelinated):
         temperature = _quantity_degC(temperature, name="temperature")
         v_init = _quantity_mV(v_init, name="v_init")
         super().__init__(
-            membrane=membranes.Schild97(
+            membrane=_cached_builtin_model(
+                membranes.Schild97,
                 diameter_um=diameter,
                 celsius=temperature,
                 vinit_mV=v_init,

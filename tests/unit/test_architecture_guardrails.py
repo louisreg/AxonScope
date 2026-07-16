@@ -1388,7 +1388,10 @@ def test_jax_runtime_preparation_does_not_own_membrane_stacking_details():
     required_stacking_terms = {
         "class GatedLeakMembraneStack",
         "def try_stack_gated_leak_membrane_from_group",
+    }
+    forbidden_stacking_terms = {
         "def try_stack_gated_leak_membrane_from_runtime_rows",
+        "def _encode_gated_leak_runtime_members",
     }
 
     assert (
@@ -1396,6 +1399,7 @@ def test_jax_runtime_preparation_does_not_own_membrane_stacking_details():
         == []
     )
     assert sorted(term for term in required_stacking_terms if term not in stacking_text) == []
+    assert sorted(term for term in forbidden_stacking_terms if term in stacking_text) == []
 
 
 def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
@@ -2589,3 +2593,37 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "split_gs_4",
     }
     assert archived_options.isdisjoint(option_section)
+
+
+def test_numeric_execution_axis_is_protocol_independent():
+    axis_text = (SRC_ROOT / "dispatcher" / "numeric_axis.py").read_text(
+        encoding="utf-8"
+    )
+    plan_text = (SRC_ROOT / "dispatcher" / "plan.py").read_text(encoding="utf-8")
+    simulation_text = (SRC_ROOT / "simulation.py").read_text(encoding="utf-8")
+    group_runner_text = (
+        SRC_ROOT / "runtime" / "jax" / "group_runner.py"
+    ).read_text(encoding="utf-8")
+    stimulus_text = (SRC_ROOT / "stimulation" / "stimuli.py").read_text(
+        encoding="utf-8"
+    )
+    extracellular_text = (
+        SRC_ROOT / "stimulation" / "extracellular.py"
+    ).read_text(encoding="utf-8")
+
+    assert "axonscope.protocols" not in axis_text
+    assert "recruitment" not in axis_text.lower()
+    assert "expand_dispatch_plan_for_numeric_axis" in plan_text
+    assert "_run_numeric_axis" in simulation_text
+    for obsolete in (
+        "expand_dispatch_plan_for_waveform_axis",
+        "_run_extracellular_waveform_axis",
+        "waveform_axis: tuple",
+        "waveform_source_size",
+        "_lower_group_waveform_axis",
+    ):
+        assert obsolete not in plan_text
+        assert obsolete not in simulation_text
+        assert obsolete not in group_runner_text
+    assert "_replace_runtime_waveform" not in stimulus_text
+    assert "_bind_runtime_stimulus" not in extracellular_text

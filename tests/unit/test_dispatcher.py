@@ -22,8 +22,10 @@ from axonscope.runtime.jax.preparation import (
 )
 import axonscope.dispatcher.plan as dispatch_plan_module
 import axonscope.dispatcher.progress as progress_module
+from axonscope.dispatcher.numeric_axis import ExtracellularWaveformAxisInput
 from axonscope.benchmarking import benchmark_span
 from axonscope.runtime.input_contract import ExtracellularLoweringMode
+from axonscope.runtime.input_payloads import FactorizedExtracellularPotentialBatch
 from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
 )
@@ -44,6 +46,7 @@ from axonscope.preparation.runtime_batches import (
     extracellular_stimulation_rows,
     x_positions_batch_m,
 )
+from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.runtime.solver_axon import build_solver_axon
 from axonscope.runtime.jax.inputs.payloads import (
     materialize_sparse_intracellular_current_density_batch,
@@ -55,6 +58,10 @@ from axonscope.runtime.jax.preparation.base import (
     prepare_solver_runtime,
 )
 from axonscope.stimulation import Stimulus
+
+
+def _membrane_row_plan(group):
+    return MembraneRowPlan.from_dispatch_items(group.items)
 
 
 def test_balanced_biphasic_temporal_signature_ignores_amplitude_scale():
@@ -472,6 +479,30 @@ def test_dispatch_plan_cache_reuses_stable_simulation_instances(monkeypatch):
     assert second is first
 
 
+def test_dispatch_plan_prepares_temporal_signature_once_per_row(monkeypatch):
+    axons = [
+        _passive_double_cable_axon(amp_nA=0.1 + 0.01 * index)
+        for index in range(3)
+    ]
+    original = dispatch_plan_module._stimulation_temporal_signature
+    calls = 0
+
+    def counted(simulation, stimulus_signature_cache):
+        nonlocal calls
+        calls += 1
+        return original(simulation, stimulus_signature_cache)
+
+    monkeypatch.setattr(
+        dispatch_plan_module,
+        "_stimulation_temporal_signature",
+        counted,
+    )
+
+    dispatch_plan_module.build_dispatch_plan(axons)
+
+    assert calls == len(axons)
+
+
 def test_dispatch_plan_cache_survives_amplitude_only_stimulus_replacement(monkeypatch):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     first = dispatch_plan_module.build_dispatch_plan([axon])
@@ -670,9 +701,11 @@ def test_gated_leak_stack_initializes_gated_compartment_gates_from_model(monkeyp
 
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     assert fast_stack is not None
@@ -703,9 +736,11 @@ def test_gated_leak_stack_reuses_repeated_encoded_rows(monkeypatch):
 
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     assert fast_stack is not None
@@ -738,9 +773,11 @@ def test_gated_leak_stack_extracts_stateless_leaks_without_jax_program_build(
     monkeypatch.setattr(membrane_stacking, "compile_membrane_model", counted)
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     assert fast_stack is not None
@@ -788,9 +825,11 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
     group = build_dispatch_plan(axons).groups[0]
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     assert fast_stack is not None
@@ -838,9 +877,11 @@ def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
 
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     assert fast_stack is not None
@@ -861,7 +902,8 @@ def test_dispatch_normalization_computes_each_model_signature_once(monkeypatch):
         for diameter_um in (7.3, 10.0, 12.8)
     )
 
-    items = dispatch_plan_module._normalize_dispatch_items(simulations)
+    prepared_rows = dispatch_plan_module._prepare_dispatch_rows(simulations)
+    items = dispatch_plan_module._normalize_dispatch_items(prepared_rows)
 
     model_ids = {
         id(model)
@@ -883,9 +925,11 @@ def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monk
     group = build_dispatch_plan(axons).groups[0]
     fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
         group,
+        _membrane_row_plan(group),
         target_nx=group.nx,
         dtype_local=group.items[0].solver_axon.dtype,
         solver_options=None,
+        compiled_models_by_signature={},
     )
 
     runtime_caches.clear_batch_runtime_caches()
@@ -897,6 +941,10 @@ def test_double_cable_mrg_membrane_stack_uses_structural_gated_leak_backend(monk
         mode="double",
         include_extracellular=True,
         include_area=True,
+        materialized_axons=(
+            group_preparation.prepared_cohort_for_current_group(group).materialized_axons
+        ),
+        membrane_rows=_membrane_row_plan(group),
     )
 
     assert fast_stack is not None
@@ -1287,7 +1335,10 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     enqueue_metadata = enqueue_events[0].metadata
     assert enqueue_metadata["mode"] == "double"
     assert enqueue_metadata["recording_mode"] == "none"
-    assert enqueue_metadata["timing_role"] == "host_enqueue"
+    assert (
+        enqueue_metadata["timing_role"]
+        == "enqueue_may_execute_deferred_work"
+    )
     assert enqueue_metadata["device_synchronization"] is False
 
     trim_events = [
@@ -1399,32 +1450,36 @@ def test_double_cable_observer_applies_factorized_row_current_scales():
         blanking=stim_start,
         target=axs.positions.ALL,
     )
-    expanded = axs.protocols.recruitment._build_native_amplitude_pool(
-        build_base_pool(),
-        update,
-        tuple(amplitudes),
-    )
-    observer_result = axs.AxonSimulation(
-        expanded,
-        duration=2.0 * axs.ms,
-        dt=0.025 * axs.ms,
-        recording=axs.Recording.none(),
-        batch_options=BatchOptions.none(),
-        observers=(activation,),
-    ).run()
-    voltage_result = axs.AxonSimulation(
-        expanded,
-        duration=2.0 * axs.ms,
-        dt=0.025 * axs.ms,
-        recording=axs.Recording.voltage(),
-    ).run()
+    observer_rows = []
+    voltage_rows = []
+    for amplitude in amplitudes:
+        pool = build_base_pool()
+        for row in pool:
+            update(row, amplitude)
+        observer_result = axs.AxonSimulation(
+            pool,
+            duration=2.0 * axs.ms,
+            dt=0.025 * axs.ms,
+            recording=axs.Recording.none(),
+            batch_options=BatchOptions.none(),
+            observers=(activation,),
+        ).run()
+        voltage_result = axs.AxonSimulation(
+            pool,
+            duration=2.0 * axs.ms,
+            dt=0.025 * axs.ms,
+            recording=axs.Recording.voltage(),
+        ).run()
 
-    observer_raster = observer_result.observations[axs.VM_RASTER_OBSERVATION_KEY]
-    voltage_raster = axs.VmRasterResult.from_result(voltage_result, activation)
-    np.testing.assert_array_equal(
-        observer_raster.any_active(activation, blanking=activation.blanking),
-        voltage_raster.any_active(activation, blanking=activation.blanking),
-    )
+        observer_raster = observer_result.observations[axs.VM_RASTER_OBSERVATION_KEY]
+        voltage_raster = axs.VmRasterResult.from_result(voltage_result, activation)
+        observer_rows.append(
+            observer_raster.any_active(activation, blanking=activation.blanking)
+        )
+        voltage_rows.append(
+            voltage_raster.any_active(activation, blanking=activation.blanking)
+        )
+    np.testing.assert_array_equal(observer_rows, voltage_rows)
 
 
 def test_run_pool_double_cable_probe_prefers_scaled_factorized_vstim(tmp_path):
@@ -1658,7 +1713,7 @@ def test_double_cable_batch_extracellular_stack_matches_row_runtime():
     ).membrane.dtype
 
     stacked = runtime_stacking.stack_extracellular_runtime(
-        group,
+        group_preparation.prepared_cohort_for_current_group(group).materialized_axons,
         dtype_local=dtype_local,
     )
 
@@ -1911,6 +1966,28 @@ def test_prepared_cohort_cache_reuses_spatial_rows_for_equivalent_new_pool():
     assert second.spatial_cache_token is first.spatial_cache_token
 
 
+def test_reconstructed_equivalent_groups_share_trusted_structural_signatures():
+    def make_group():
+        return build_dispatch_plan(
+            [
+                _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0),
+                _hh_axon(nx=11, amp_nA=0.2, y_um=20.0, z_um=30.0),
+            ]
+        ).groups[0]
+
+    first = make_group()
+    second = make_group()
+
+    assert first is not second
+    assert first.structure == second.structure
+    assert group_preparation.group_runtime_signature(first) == (
+        group_preparation.group_runtime_signature(second)
+    )
+    assert group_preparation.group_preparation_signature(first) == (
+        group_preparation.group_preparation_signature(second)
+    )
+
+
 def test_current_group_prepared_cohort_cache_reuses_exact_group(tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     group = build_dispatch_plan([axon]).groups[0]
@@ -2057,81 +2134,6 @@ def test_factorized_footprint_cache_survives_stimulus_replacement(tmp_path):
     )
 
 
-def test_factorized_identity_cache_reuses_static_rows_with_mutated_shared_stimulus(tmp_path):
-    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
-    stimulation = axon.extracellular_stimulations[0]
-    stimulus = stimulation.drives[0].stimulus
-    rows = ((stimulation,), (stimulation,))
-    x_rows = x_positions_batch_m((axon, axon))
-    y_rows = np.asarray([20.0, 20.0], dtype=float)
-    z_rows = np.asarray([30.0, 30.0], dtype=float)
-
-    input_batches._FOOTPRINT_CACHE.clear()
-    input_batches._FOOTPRINT_MV_CACHE.clear()
-    input_batches._FOOTPRINT_JAX_CACHE.clear()
-    input_batches._FACTORIZED_ROWS_IDENTITY_CACHE.clear()
-    axs.enable_benchmark(tmp_path, print_summary=False, save=False)
-    try:
-        with benchmark_span("inputs.extracellular"):
-            first = build_factorized_vstim_midpoint_batch(
-                axon,
-                rows,
-                tsim_ms=0.1,
-                dt_ms=0.05,
-                x_positions_m=x_rows,
-                axon_y_um=y_rows,
-                axon_z_um=z_rows,
-                dtype_local=np.float32,
-                include_initial_previous=True,
-            )
-        updated = Stimulus.pulse(
-            start=0.0 * axs.ms,
-            duration=0.05 * axs.ms,
-            amplitude=20e-6,
-        ).as_unit("ampere")
-        object.__setattr__(stimulus, "t", np.asarray(updated.t, dtype=float))
-        object.__setattr__(stimulus, "y", np.asarray(updated.y, dtype=float))
-        object.__setattr__(stimulus, "mode", updated.mode)
-        object.__setattr__(stimulus, "y_unit", updated.y_unit)
-        with benchmark_span("inputs.extracellular"):
-            second = build_factorized_vstim_midpoint_batch(
-                axon,
-                rows,
-                tsim_ms=0.1,
-                dt_ms=0.05,
-                x_positions_m=x_rows,
-                axon_y_um=y_rows,
-                axon_z_um=z_rows,
-                dtype_local=np.float32,
-                include_initial_previous=True,
-            )
-        report = axs.disable_benchmark(print_summary=False, save=False)
-    finally:
-        axs.disable_benchmark(print_summary=False, save=False)
-
-    assert first is not None
-    assert second is not None
-    statuses = [
-        event.metadata.get("vstim_factorized_identity_cache")
-        for event in report.events
-        if event.name == "inputs.extracellular"
-    ]
-    assert statuses == ["miss", "hit"]
-    assert second.footprint_mV_per_A is first.footprint_mV_per_A
-    np.testing.assert_allclose(
-        np.asarray(second.current_mid_A),
-        2.0 * np.asarray(first.current_mid_A),
-        rtol=1e-6,
-        atol=1e-12,
-    )
-    np.testing.assert_allclose(
-        np.asarray(materialize_factorized_extracellular_potential_batch(second)),
-        2.0 * np.asarray(materialize_factorized_extracellular_potential_batch(first)),
-        rtol=1e-6,
-        atol=1e-6,
-    )
-
-
 def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path):
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
     stimulation = axon.extracellular_stimulations[0]
@@ -2190,6 +2192,82 @@ def test_factorized_vstim_reuses_shared_temporal_stimulus(monkeypatch, tmp_path)
     assert metadata["vstim_temporal_cache_misses"] == 1
     assert metadata["vstim_temporal_previous_cache_hits"] == 3
     assert metadata["vstim_temporal_previous_cache_misses"] == 1
+
+
+def test_factorized_vstim_can_defer_currents_for_numeric_axis(monkeypatch):
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+
+    def fail_if_sampled(*_args, **_kwargs):
+        raise AssertionError("base stimulus must not be sampled for a numeric axis")
+
+    monkeypatch.setattr(Stimulus, "evaluate", fail_if_sampled)
+    payload = build_factorized_vstim_midpoint_batch(
+        axon,
+        [axon.extracellular_stimulations],
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        dtype_local=np.float32,
+        numeric_axis_shape=(1, 1),
+    )
+
+    assert payload is not None
+    assert payload.current_mid_A.shape == (1,)
+    np.testing.assert_array_equal(np.asarray(payload.current_mid_A), [0.0])
+    assert payload.current_row_indices is None
+    assert payload.current_row_scales is None
+
+
+def test_factorized_vstim_samples_numeric_axis_source_footprints_once(monkeypatch):
+    axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=20.0, z_um=30.0)
+    axon_b = _hh_axon(nx=11, amp_nA=0.1, y_um=50.0, z_um=70.0)
+    source_rows = [
+        (axon_a.extracellular_stimulations[0],),
+        (axon_b.extracellular_stimulations[0],),
+    ]
+    source_payload = build_factorized_vstim_midpoint_batch(
+        axon_a,
+        source_rows,
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        dtype_local=np.float32,
+    )
+    assert source_payload is not None
+
+    original_sampler = input_batches._drive_footprint_for_positions
+    sample_count = 0
+
+    def counted_sampler(*args, **kwargs):
+        nonlocal sample_count
+        sample_count += 1
+        return original_sampler(*args, **kwargs)
+
+    monkeypatch.setattr(
+        input_batches,
+        "_drive_footprint_for_positions",
+        counted_sampler,
+    )
+    expanded_payload = build_factorized_vstim_midpoint_batch(
+        axon_a,
+        source_rows * 3 + [source_rows[-1]],
+        tsim_ms=0.1,
+        dt_ms=0.05,
+        dtype_local=np.float32,
+        numeric_axis_shape=(2, 3),
+    )
+
+    assert expanded_payload is not None
+    expected = np.concatenate(
+        [
+            np.tile(np.asarray(source_payload.footprint_mV_per_A), (3, 1)),
+            np.asarray(source_payload.footprint_mV_per_A)[-1:],
+        ],
+        axis=0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(expanded_payload.footprint_mV_per_A),
+        expected,
+    )
+    assert sample_count == 2
 
 
 @pytest.mark.parametrize(
@@ -2396,6 +2474,10 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
     )
 
     runtime_caches.clear_batch_runtime_caches()
+    materialized_axons = (
+        group_preparation.prepared_cohort_for_current_group(group).materialized_axons
+    )
+    membrane_rows = _membrane_row_plan(group)
     first = runtime_preparation.prepare_batch_runtime(
         group,
         tsim_ms=0.1,
@@ -2404,6 +2486,8 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
+        materialized_axons=materialized_axons,
+        membrane_rows=membrane_rows,
         runtime_context=cpu_context,
     )
     second = runtime_preparation.prepare_batch_runtime(
@@ -2414,6 +2498,8 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
+        materialized_axons=materialized_axons,
+        membrane_rows=membrane_rows,
         runtime_context=cpu_context,
     )
     third = runtime_preparation.prepare_batch_runtime(
@@ -2424,6 +2510,8 @@ def test_batch_runtime_cache_separates_runtime_context_scope():
         mode="single",
         include_extracellular=False,
         include_area=False,
+        materialized_axons=materialized_axons,
+        membrane_rows=membrane_rows,
         runtime_context=gpu_context,
     )
 
@@ -2441,6 +2529,251 @@ def test_dispatch_plan_preserves_pool_indices():
     assert tuple(index for group in plan.groups for index in group.pool_indices) == (0, 1)
 
 
+def test_dispatch_plan_numeric_axis_shares_source_instances_and_orders_values():
+    axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
+    axon_b = _hh_axon(nx=11, amp_nA=0.2, y_um=56.0, z_um=78.0)
+    waveforms = (
+        Stimulus.constant(0.0 * axs.uA),
+        Stimulus.constant(1.0 * axs.uA),
+        Stimulus.constant(2.0 * axs.uA),
+    )
+
+    axis_input = ExtracellularWaveformAxisInput(
+        waveforms=waveforms,
+        source_drive_waveforms=((waveforms[0],), (waveforms[0],)),
+        selected_drive_indices=(0, 0),
+    )
+    source_plan = build_dispatch_plan([axon_a, axon_b])
+    plan = dispatch_plan_module.expand_dispatch_plan_for_numeric_axis(
+        source_plan,
+        axis_input,
+    )
+
+    assert [item.index for item in plan.items] == list(range(6))
+    assert [item.simulation for item in plan.items] == [
+        axon_a,
+        axon_b,
+        axon_a,
+        axon_b,
+        axon_a,
+        axon_b,
+    ]
+    assert plan.groups[0].numeric_axis is axis_input
+    assert plan.groups[0].numeric_axis_source_size == 2
+    assert plan.groups[0].pool_indices == tuple(range(6))
+    assert plan.groups[0].structure.runtime_rows == (
+        "dispatch_repeat_rows_v1",
+        source_plan.groups[0].structure.runtime_rows,
+        3,
+    )
+    runtime_signature = group_preparation.group_runtime_signature(plan.groups[0])
+    assert runtime_signature[-1] is plan.groups[0].structure.runtime_rows
+
+
+def test_dispatch_plan_numeric_axis_is_independent_from_dynamic_input_family():
+    axon = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
+    axis_input = SimpleNamespace(
+        size=3,
+        dispatch_signature=("test_dynamic_input", 3),
+    )
+
+    plan = dispatch_plan_module.expand_dispatch_plan_for_numeric_axis(
+        build_dispatch_plan([axon]),
+        axis_input,
+    )
+
+    assert [item.index for item in plan.items] == [0, 1, 2]
+    assert [item.simulation for item in plan.items] == [axon, axon, axon]
+    assert plan.groups[0].numeric_axis is axis_input
+    assert plan.groups[0].signature[-1] == ("test_dynamic_input", 3)
+
+
+def test_dispatch_plan_slices_numeric_axis_source_rows_per_group():
+    axon_a = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
+    axon_b = _hh_axon(nx=13, amp_nA=0.2, y_um=56.0, z_um=78.0)
+    selected = (Stimulus.constant(1.0 * axs.uA),)
+    static = (
+        (Stimulus.constant(2.0 * axs.uA), Stimulus.constant(3.0 * axs.uA)),
+        (Stimulus.constant(4.0 * axs.uA), Stimulus.constant(5.0 * axs.uA)),
+    )
+    axis_input = ExtracellularWaveformAxisInput(
+        waveforms=selected,
+        source_drive_waveforms=static,
+        selected_drive_indices=(0, 1),
+    )
+
+    plan = dispatch_plan_module.expand_dispatch_plan_for_numeric_axis(
+        build_dispatch_plan([axon_a, axon_b]),
+        axis_input,
+    )
+
+    assert len(plan.groups) == 2
+    assert [group.numeric_axis.source_size for group in plan.groups] == [1, 1]
+    assert [
+        group.numeric_axis.selected_drive_indices for group in plan.groups
+    ] == [(0,), (1,)]
+    assert [
+        group.numeric_axis.source_drive_waveforms[0] for group in plan.groups
+    ] == [static[0], static[1]]
+
+
+def test_factorized_waveform_axis_lowers_current_table_without_dense_vstim():
+    payload = FactorizedExtracellularPotentialBatch(
+        current_mid_A=jnp.zeros((4,), dtype=jnp.float32),
+        current_initial_previous_A=jnp.asarray(0.0, dtype=jnp.float32),
+        footprint_mV_per_A=jnp.ones((6, 3), dtype=jnp.float32),
+        target_nx=3,
+    )
+    waveforms = tuple(
+        Stimulus.constant(float(value) * axs.uA) for value in (0.0, 1.0, 2.0)
+    )
+
+    axis_input = ExtracellularWaveformAxisInput(
+        waveforms=waveforms,
+        source_drive_waveforms=((waveforms[0],), (waveforms[0],)),
+        selected_drive_indices=(0, 0),
+    )
+    lowered = input_batches.with_extracellular_waveform_axis(
+        payload,
+        axis_input,
+        source_size=2,
+        tsim_ms=0.4,
+        dt_ms=0.1,
+        dtype_local=jnp.float32,
+        include_initial_previous=True,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(lowered.current_mid_A),
+        np.asarray([[0.0] * 4, [1e-6] * 4, [2e-6] * 4]),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(lowered.current_row_indices),
+        [0, 0, 1, 1, 2, 2],
+    )
+    np.testing.assert_allclose(
+        np.asarray(lowered.current_initial_previous_A),
+        [0.0, 1e-6, 2e-6],
+    )
+    assert lowered.footprint_mV_per_A is payload.footprint_mV_per_A
+    assert lowered.current_row_scales is None
+
+
+def test_factorized_numeric_axis_replaces_selected_drive_per_source_row():
+    payload = FactorizedExtracellularPotentialBatch(
+        current_mid_A=jnp.zeros((4, 2, 4), dtype=jnp.float32),
+        current_initial_previous_A=jnp.zeros((4, 2), dtype=jnp.float32),
+        footprint_mV_per_A=jnp.ones((4, 2, 3), dtype=jnp.float32),
+        target_nx=3,
+    )
+    selected_waveforms = tuple(
+        Stimulus.constant(float(value) * axs.uA) for value in (1.0, 2.0)
+    )
+    source_waveforms = (
+        (Stimulus.constant(10.0 * axs.uA), Stimulus.constant(20.0 * axs.uA)),
+        (Stimulus.constant(10.0 * axs.uA), Stimulus.constant(20.0 * axs.uA)),
+    )
+    axis_input = ExtracellularWaveformAxisInput(
+        waveforms=selected_waveforms,
+        source_drive_waveforms=source_waveforms,
+        selected_drive_indices=(0, 1),
+    )
+
+    lowered = input_batches.with_extracellular_waveform_axis(
+        payload,
+        axis_input,
+        source_size=2,
+        tsim_ms=0.4,
+        dt_ms=0.1,
+        dtype_local=jnp.float32,
+        include_initial_previous=True,
+    )
+
+    expected_uA = np.asarray(
+        [
+            [[1.0] * 4, [20.0] * 4],
+            [[10.0] * 4, [1.0] * 4],
+            [[2.0] * 4, [20.0] * 4],
+            [[10.0] * 4, [2.0] * 4],
+        ]
+    )
+    np.testing.assert_allclose(
+        np.asarray(lowered.current_mid_A),
+        expected_uA * 1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(lowered.current_initial_previous_A),
+        expected_uA[:, :, 0] * 1e-6,
+    )
+    np.testing.assert_array_equal(
+        np.asarray(lowered.current_row_indices),
+        [0, 1, 2, 3],
+    )
+    np.testing.assert_allclose(
+        np.asarray(
+            materialize_factorized_extracellular_potential_batch(lowered)
+        ),
+        np.repeat(
+            np.sum(expected_uA, axis=1)[:, :, None],
+            3,
+            axis=2,
+        )
+        * 1e-6,
+    )
+
+
+def test_factorized_numeric_axis_indexes_repeated_multi_drive_patterns():
+    payload = FactorizedExtracellularPotentialBatch(
+        current_mid_A=jnp.zeros((6, 2, 4), dtype=jnp.float32),
+        current_initial_previous_A=jnp.zeros((6, 2), dtype=jnp.float32),
+        footprint_mV_per_A=jnp.ones((6, 2, 3), dtype=jnp.float32),
+        target_nx=3,
+    )
+    selected_waveforms = tuple(
+        Stimulus.constant(float(value) * axs.uA) for value in (1.0, 2.0)
+    )
+    shared_source_row = (
+        Stimulus.constant(10.0 * axs.uA),
+        Stimulus.constant(20.0 * axs.uA),
+    )
+    axis_input = ExtracellularWaveformAxisInput(
+        waveforms=selected_waveforms,
+        source_drive_waveforms=(shared_source_row, shared_source_row),
+        selected_drive_indices=(0, 0),
+    )
+
+    lowered = input_batches.with_extracellular_waveform_axis(
+        payload,
+        axis_input,
+        source_size=2,
+        tsim_ms=0.4,
+        dt_ms=0.1,
+        dtype_local=jnp.float32,
+        include_initial_previous=True,
+    )
+
+    assert lowered.current_mid_A.shape == (2, 2, 4)
+    assert lowered.current_initial_previous_A.shape == (2, 2)
+    np.testing.assert_array_equal(
+        np.asarray(lowered.current_row_indices),
+        [0, 0, 1, 1, 1, 1],
+    )
+    expected_uA = np.asarray(
+        [
+            [[1.0] * 4, [20.0] * 4],
+            [[1.0] * 4, [20.0] * 4],
+            [[2.0] * 4, [20.0] * 4],
+            [[2.0] * 4, [20.0] * 4],
+            [[2.0] * 4, [20.0] * 4],
+            [[2.0] * 4, [20.0] * 4],
+        ]
+    )
+    np.testing.assert_allclose(
+        np.asarray(materialize_factorized_extracellular_potential_batch(lowered)),
+        np.repeat(np.sum(expected_uA, axis=1)[:, :, None], 3, axis=2) * 1e-6,
+    )
+
+
 def test_dispatch_plan_reuses_solver_axon_for_shared_model_instances():
     model = axs.axons.HodgkinHuxley(
         length=100.0 * axs.um,
@@ -2456,6 +2789,41 @@ def test_dispatch_plan_reuses_solver_axon_for_shared_model_instances():
     assert plan.items[0].solver_axon is plan.items[1].solver_axon
     assert len(plan.groups) == 1
     assert plan.groups[0].size == 2
+
+
+def test_shared_axon_template_keeps_instance_stimulation_and_results_independent():
+    shared_a = _passive_double_cable_axon(amp_nA=0.1)
+    shared_b = axs.AxonInstance(shared_a.axon)
+    shared_b.add_current_clamp(
+        position=50.0 * axs.um,
+        current=Stimulus.pulse(
+            start=0.02 * axs.ms,
+            duration=0.04 * axs.ms,
+            amplitude=0.2,
+        ),
+    )
+    distinct = [
+        _passive_double_cable_axon(amp_nA=0.1),
+        _passive_double_cable_axon(amp_nA=0.2),
+    ]
+
+    shared_result = _run_simulation(
+        [shared_a, shared_b],
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
+    )
+    distinct_result = _run_simulation(
+        distinct,
+        duration=0.1 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.center(axs.signals.Vm),
+    )
+
+    assert shared_a.intracellular_contexts is not shared_b.intracellular_contexts
+    assert not np.array_equal(shared_result[0].Vm, shared_result[1].Vm)
+    np.testing.assert_allclose(shared_result[0].Vm, distinct_result[0].Vm, rtol=1e-6)
+    np.testing.assert_allclose(shared_result[1].Vm, distinct_result[1].Vm, rtol=1e-6)
 
 
 def test_dispatch_plan_parameter_batches_equal_nx_different_geometry():

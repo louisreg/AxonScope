@@ -23,7 +23,7 @@ from axonscope.axons import (
     mrg_like_nodes_from_length,
 )
 from axonscope.axons.templates import mrg_like_node_spacing
-from axonscope.benchmarking import benchmark_span
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.identifiers import DriveId
 from axonscope.population import AxonPopulation
 from axonscope.stimulation import (
@@ -349,16 +349,28 @@ def population_from_nrv(
         include_unmyelinated=include_unmyelinated,
         include_mrg=include_mrg,
     )
-    instances = [
-        AxonInstance(
-            _axon_from_fiber_row(
+    templates: dict[tuple[Any, ...], Axon] = {}
+    instances: list[AxonInstance] = []
+    for row in rows:
+        template_key = _fiber_axon_template_key(
+            row,
+            nerve_length_um=length_um,
+            unmyelinated_compartments=unmyelinated_compartments,
+        )
+        axon = templates.get(template_key)
+        if axon is None:
+            axon = _axon_from_fiber_row(
                 row,
                 nerve_length_um=length_um,
                 unmyelinated_compartments=unmyelinated_compartments,
             )
-        )
-        for row in rows
-    ]
+            templates[template_key] = axon
+        instances.append(AxonInstance(axon))
+    record_benchmark_metadata(
+        nrv_population_rows=len(rows),
+        nrv_population_unique_axon_templates=len(templates),
+        nrv_population_template_cache_hits=len(rows) - len(templates),
+    )
     return NRVAxonPopulation(
         population=AxonPopulation(instances, name=name),
         rows=tuple(rows),
@@ -482,6 +494,33 @@ def _axon_from_fiber_row(
         diameter=diameter,
         compartments=max(3, int(float(nerve_length_um) // 25)),
         celsius=6.3 * ureg.degree_Celsius,
+    )
+
+
+def _fiber_axon_template_key(
+    row: NRVFiberRow,
+    *,
+    nerve_length_um: float,
+    unmyelinated_compartments: int,
+) -> tuple[Any, ...]:
+    """Return the complete constructor key for an NRV-derived axon template."""
+
+    diameter_um = max(float(row.diameter_um), 0.2)
+    if row.kind == "mrg":
+        return (
+            row.kind,
+            diameter_um,
+            float(nerve_length_um),
+            float(row.x_shift_um),
+        )
+    compartments = int(unmyelinated_compartments)
+    if compartments <= 0:
+        compartments = max(3, int(float(nerve_length_um) // 25))
+    return (
+        row.kind,
+        diameter_um,
+        float(nerve_length_um),
+        compartments,
     )
 
 

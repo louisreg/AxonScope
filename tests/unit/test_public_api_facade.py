@@ -776,10 +776,29 @@ def test_public_axon_population_normalizes_instances_and_axons():
     assert population.name == "demo"
     assert not population.is_single
     assert population.axons == (plain_axon, wrapped_axon.axon)
+    assert population.axon_templates == (plain_axon, wrapped_axon.axon)
+    assert population.row_template_indices == (0, 1)
     assert population.instances[0].axon is plain_axon
     assert population.instances[1] is wrapped_axon
     assert tuple(population) == population.instances
     assert repr(population) == "AxonPopulation(n=2, name='demo')"
+
+
+def test_public_axon_population_indexes_shared_templates_without_merging_rows():
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=11,
+        celsius=6.3 * axs.degC,
+    )
+    first = axs.AxonInstance(axon)
+    second = axs.AxonInstance(axon)
+
+    population = axs.AxonPopulation([first, second])
+
+    assert population.instances == (first, second)
+    assert population.axon_templates == (axon,)
+    assert population.row_template_indices == (0, 0)
 
 
 def test_public_axon_population_rejects_empty_and_invalid_entries():

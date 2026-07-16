@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import get_args
 
 import jax.numpy as jnp
@@ -121,8 +122,177 @@ def _patch_simulation_runner(monkeypatch, runner):
         def run(self):
             return runner(self.axons, **self.kwargs)
 
+        def _run_numeric_axis(self, axis_input):
+            return runner(self.axons, axis_input=axis_input, **self.kwargs)
+
     for module in (observer_protocols, sweep_protocols, threshold_protocols):
         monkeypatch.setattr(module, "AxonSimulation", FakeAxonSimulation)
+
+
+def _extracellular_update_pool(count=2):
+    axon = axs.axons.HodgkinHuxley(
+        length=100.0 * axs.um,
+        diameter=0.5 * axs.um,
+        compartments=3,
+    )
+    positions = axon.layout.position_values(unit=axs.um) * axs.um
+    electrode = axs.analytical.PointSourceElectrode(
+        x=50.0 * axs.um,
+        y=10.0 * axs.um,
+        z=0.0 * axs.um,
+    )
+    zero = axs.Stimulus.pulse(
+        start=0.2 * axs.ms,
+        duration=0.1 * axs.ms,
+        amplitude=0.0 * axs.uA,
+    )
+    rows = []
+    for offset in range(count):
+        stimulation = axs.analytical.point_source_stimulation(
+            electrode,
+            positions,
+            sigma=0.3 * axs.S_per_m,
+            stimulus=zero,
+            axon_y=float(offset) * axs.um,
+        )
+        row = axs.AxonInstance(axon)
+        row.add_extracellular_stimulation(stimulation=stimulation)
+        rows.append(row)
+    return tuple(rows)
+
+
+def test_extracellular_waveform_axis_preserves_independent_phase_amplitudes():
+    pool = _extracellular_update_pool(count=1)
+    source_stimulus = pool[0].extracellular_stimulation.drives[0].stimulus
+
+    def waveform(positive_amplitude):
+        positive_uA = float(positive_amplitude.to(axs.uA).magnitude)
+        return axs.Stimulus.from_samples(
+            t=np.asarray([0.0, 0.2, 0.3, 0.4]) * axs.ms,
+            y=np.asarray([0.0, -1.0, positive_uA, 0.0]),
+            unit=axs.uA,
+        )
+
+    update = axs.protocols.ExtracellularWaveformUpdate(waveform)
+    prepared = update.prepare_numeric_axis(pool)
+    axis_input = prepared.numeric_axis_input((2.0 * axs.uA, 3.0 * axs.uA))
+
+    np.testing.assert_allclose(
+        axis_input.waveforms[0].y,
+        [0.0, -1e-6, 2e-6, 0.0],
+    )
+    np.testing.assert_allclose(
+        axis_input.waveforms[1].y,
+        [0.0, -1e-6, 3e-6, 0.0],
+    )
+    assert pool[0].extracellular_stimulation.drives[0].stimulus is source_stimulus
+
+
+def test_extracellular_waveform_axis_prepares_selected_multi_drive_only():
+    row = _extracellular_update_pool(count=1)[0]
+    stimulation = row.extracellular_stimulation
+    first = stimulation.drives[0]
+    first_static = axs.Stimulus.constant(0.25 * axs.uA)
+    second_static = axs.Stimulus.constant(-0.5 * axs.uA)
+    row.add_extracellular_stimulation(
+        stimulation=axs.ExtracellularStimulation(
+            (
+                axs.ExtracellularDrive(
+                    id=first.id,
+                    footprint=first.footprint,
+                    stimulus=first_static,
+                ),
+                axs.ExtracellularDrive(
+                    id=axs.DriveId("second"),
+                    footprint=first.footprint,
+                    stimulus=second_static,
+                ),
+            )
+        ),
+        replace=True,
+    )
+    source = row.extracellular_stimulation
+    update = axs.protocols.ExtracellularWaveformUpdate(
+        lambda value: axs.Stimulus.constant(value),
+        drive_id=axs.DriveId("second"),
+    )
+
+    prepared = update.prepare_numeric_axis((row,))
+    axis_input = prepared.numeric_axis_input((1.0 * axs.uA, 2.0 * axs.uA))
+
+    assert axis_input.drive_count == 2
+    assert axis_input.selected_drive_indices == (1,)
+    assert axis_input.source_drive_waveforms[0][0] is source.drives[0].stimulus
+    assert axis_input.source_drive_waveforms[0][1] is source.drives[1].stimulus
+    np.testing.assert_allclose(axis_input.waveforms[0].y, [1e-6])
+    np.testing.assert_allclose(axis_input.waveforms[1].y, [2e-6])
+    assert row.extracellular_stimulation is source
+
+
+def test_recruitment_reuses_one_observer_simulation_for_typed_waveform(monkeypatch):
+    pool = _extracellular_update_pool()
+    factory_values = []
+    build_calls = []
+    evaluate_calls = []
+
+    def waveform(value):
+        value_uA = float(value.to(axs.uA).magnitude)
+        factory_values.append(value_uA)
+        return axs.Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=-value,
+        )
+
+    def build_simulation(updated_pool, **kwargs):
+        build_calls.append((updated_pool, kwargs))
+        return SimpleNamespace(progress=kwargs.get("progress", False)), "activation"
+
+    def evaluate_numeric_axis(simulation, activation, axis_input):
+        evaluate_calls.append((simulation, activation, axis_input))
+        return np.asarray(
+            [
+                np.full(
+                    (len(pool),),
+                    abs(float(np.min(waveform.y))) * 1e6 >= 2.0,
+                    dtype=bool,
+                )
+                for waveform in axis_input.waveforms
+            ]
+        )
+
+    monkeypatch.setattr(
+        observer_protocols,
+        "_build_activation_observer_simulation",
+        build_simulation,
+    )
+    monkeypatch.setattr(
+        observer_protocols,
+        "_evaluate_activation_observer_numeric_axis",
+        evaluate_numeric_axis,
+    )
+
+    curve = axs.protocols.recruitment_sweep(
+        pool,
+        update=axs.protocols.ExtracellularWaveformUpdate(waveform),
+        values=np.asarray([1.0, 2.0, 3.0]) * axs.uA,
+        duration=1.0 * axs.ms,
+        dt=0.1 * axs.ms,
+        criterion=axs.analysis.ActivationCriterion(),
+        recording=axs.Recording.none(),
+    )
+
+    assert factory_values == [1.0, 2.0, 3.0]
+    assert len(build_calls) == 1
+    assert len(evaluate_calls) == 3
+    assert all(call[0] is evaluate_calls[0][0] for call in evaluate_calls)
+    assert [call[1] for call in evaluate_calls] == ["activation"] * 3
+    assert [call[2].size for call in evaluate_calls] == [1, 1, 1]
+    assert evaluate_calls[0][0].progress is False
+    np.testing.assert_array_equal(
+        curve.activated,
+        [[False, False], [True, True], [True, True]],
+    )
 
 
 def test_vm_raster_shared_activation_decoder_respects_blanking_and_probe_mask():
@@ -523,7 +693,7 @@ def test_recruitment_sweep_keeps_observer_sweeps_sequential_by_default(monkeypat
     )
 
 
-def test_recruitment_sweep_can_batch_observer_amplitudes_into_native_pool(monkeypatch):
+def test_recruitment_sweep_rejects_opaque_batched_update():
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
         blanking=0.5 * axs.ms,
@@ -539,57 +709,21 @@ def test_recruitment_sweep_can_batch_observer_amplitudes_into_native_pool(monkey
         )
         for _ in range(2)
     )
-    calls = []
-    progress_values: list[bool | str] = []
-
     def update(row, tested_current):
         row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
 
-    def fake_simulation_runner(updated_pool, **kwargs):
-        updated_pool = tuple(updated_pool)
-        calls.append(updated_pool)
-        progress_values.append(kwargs.get("progress", False))
-        return _observer_only_pool_result(
-            row.tested_current_nA >= (0.5 if index % 2 == 0 else 1.5)
-            for index, row in enumerate(updated_pool)
+    with pytest.raises(ValueError, match="NumericAxisUpdate"):
+        axs.protocols.recruitment_sweep(
+            pool,
+            update=update,
+            values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
+            duration=2.0 * axs.ms,
+            dt=1.0 * axs.ms,
+            criterion=criterion,
+            recording=axs.Recording.none(),
+            batch_amplitudes=True,
         )
-
-    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
-
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        batch_options=axs.BatchOptions.none(time_chunk_steps=123),
-        solver_progress="plain",
-        batch_amplitudes=True,
-    )
-
-    assert len(calls) == 1
-    assert len(calls[0]) == 6
-    assert progress_values == ["plain"]
-    assert all(row is not original for row in calls[0] for original in pool)
-    assert [row.axon for row in calls[0]] == [
-        pool[0].axon,
-        pool[1].axon,
-        pool[0].axon,
-        pool[1].axon,
-        pool[0].axon,
-        pool[1].axon,
-    ]
     assert not any(hasattr(row, "tested_current_nA") for row in pool)
-    np.testing.assert_allclose(
-        [row.tested_current_nA for row in calls[0]],
-        [0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
-    )
-    np.testing.assert_array_equal(
-        curve.activated,
-        [[False, False], [True, False], [True, True]],
-    )
 
 
 def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
@@ -598,38 +732,48 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
     )
-    pool = tuple(
-        axs.AxonInstance(
-            axs.axons.HodgkinHuxley(
-                length=100.0 * axs.um,
-                diameter=0.5 * axs.um,
-                compartments=3,
-            )
+    pool = _extracellular_update_pool()
+    factory_values = []
+    simulations = []
+
+    def waveform(value):
+        factory_values.append(float(value.to(axs.nA).magnitude))
+        return axs.Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=-value,
         )
-        for _ in range(2)
+
+    def build_simulation(updated_pool, **kwargs):
+        simulation = SimpleNamespace(progress=kwargs.get("progress", False))
+        simulations.append((simulation, tuple(id(row) for row in updated_pool)))
+        return simulation, "activation"
+
+    def evaluate_numeric_axis(_simulation, _activation, axis_input):
+        return np.asarray(
+            [
+                [
+                    abs(float(np.min(waveform.y))) * 1e9 >= 0.5,
+                    abs(float(np.min(waveform.y))) * 1e9 >= 1.5,
+                ]
+                for waveform in axis_input.waveforms
+            ]
+        )
+
+    monkeypatch.setattr(
+        observer_protocols,
+        "_build_activation_observer_simulation",
+        build_simulation,
     )
-    calls = []
-    call_values = []
-    progress_values: list[bool | str] = []
-
-    def update(row, tested_current):
-        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
-
-    def fake_simulation_runner(updated_pool, **kwargs):
-        updated_pool = tuple(updated_pool)
-        calls.append(updated_pool)
-        call_values.append([row.tested_current_nA for row in updated_pool])
-        progress_values.append(kwargs.get("progress", False))
-        return _observer_only_pool_result(
-            row.tested_current_nA >= (0.5 if index % 2 == 0 else 1.5)
-            for index, row in enumerate(updated_pool)
-        )
-
-    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+    monkeypatch.setattr(
+        observer_protocols,
+        "_evaluate_activation_observer_numeric_axis",
+        evaluate_numeric_axis,
+    )
 
     curve = axs.protocols.recruitment_sweep(
         pool,
-        update=update,
+        update=axs.protocols.ExtracellularWaveformUpdate(waveform),
         values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
         duration=2.0 * axs.ms,
         dt=1.0 * axs.ms,
@@ -640,13 +784,10 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
         amplitude_batch_size=2,
     )
 
-    assert len(calls) == 2
-    assert [len(call) for call in calls] == [4, 2]
-    assert progress_values == ["plain", False]
-    np.testing.assert_allclose(
-        [value for values in call_values for value in values],
-        [0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
-    )
+    np.testing.assert_allclose(factory_values, [0.0, 1.0, 2.0])
+    assert len(simulations) == 1
+    assert simulations[0][1] == tuple(id(row) for row in pool)
+    assert simulations[0][0].progress is False
     np.testing.assert_array_equal(
         curve.activated,
         [[False, False], [True, False], [True, True]],
@@ -654,99 +795,200 @@ def test_recruitment_sweep_can_chunk_batched_observer_amplitudes(monkeypatch):
 
 
 def test_recruitment_batch_planning_is_separate_from_execution():
-    pool = tuple(
-        axs.AxonInstance(
-            axs.axons.HodgkinHuxley(
-                length=100.0 * axs.um,
-                diameter=0.5 * axs.um,
-                compartments=3,
-            )
+    pool = _extracellular_update_pool()
+    update = axs.protocols.ExtracellularWaveformUpdate(
+        lambda value: axs.Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=-value,
         )
-        for _ in range(2)
     )
-
-    def update(row, tested_current):
-        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
-
-    plan = recruitment_protocols._plan_native_amplitude_batches(
+    plan = sweep_protocols._plan_numeric_pool_sweep(
         pool,
         update=update,
         values=tuple(np.asarray([0.0, 1.0, 2.0]) * axs.nA),
-        amplitude_batch_size=2,
+        value_batch_size=2,
     )
 
     assert plan.source_pool_size == 2
     assert plan.source_pool == pool
     assert plan.update is update
+    assert [batch.start_index for batch in plan.batches] == [0, 2]
     assert [len(batch.values) for batch in plan.batches] == [2, 1]
-    assert not any(hasattr(row, "tested_current_nA") for row in pool)
+    assert all(batch.values[0] is plan.values[batch.start_index] for batch in plan.batches)
+    assert tuple(id(row) for row in plan.source_pool) == tuple(id(row) for row in pool)
 
 
-def test_recruitment_sweep_reuses_work_pool_for_equal_sized_chunks(monkeypatch):
-    criterion = axs.analysis.ActivationCriterion(
-        threshold=0.0 * axs.mV,
-        blanking=0.5 * axs.ms,
-        target=axs.positions.DISTAL,
-    )
-    pool = (
-        axs.AxonInstance(
-            axs.axons.HodgkinHuxley(
-                length=100.0 * axs.um,
-                diameter=0.5 * axs.um,
-                compartments=3,
+def test_recruitment_numeric_waveform_axis_matches_single_value_chunks():
+    pool = _extracellular_update_pool()
+    values = np.asarray([0.0, 1.0, 2.0]) * axs.uA
+
+    def make_update():
+        return axs.protocols.ExtracellularWaveformUpdate(
+            lambda value: axs.Stimulus.pulse(
+                start=0.2 * axs.ms,
+                duration=0.1 * axs.ms,
+                amplitude=-value,
             )
-        ),
-    )
-    pool_ids = []
-    simulation_ids = []
-    simulation_constructions = []
-    seen_previous_markers = []
-
-    def update(row, tested_current):
-        seen_previous_markers.append(hasattr(row, "previous_marker"))
-        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
-        row.previous_marker = row.tested_current_nA
-
-    class FakeAxonSimulation:
-        def __init__(self, axons, **_kwargs):
-            self.axons = axons
-            simulation_constructions.append(self)
-
-        def run(self):
-            simulation_ids.append(id(self))
-            updated_pool = tuple(self.axons)
-            pool_ids.append(tuple(id(row) for row in updated_pool))
-            return _observer_only_pool_result(
-                row.tested_current_nA >= 0.5 for row in updated_pool
-            )
-
-    def fake_simulation_runner(updated_pool, **_kwargs):
-        updated_pool = tuple(updated_pool)
-        pool_ids.append(tuple(id(row) for row in updated_pool))
-        return _observer_only_pool_result(
-            row.tested_current_nA >= 0.5 for row in updated_pool
         )
 
-    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
-    monkeypatch.setattr(observer_protocols, "AxonSimulation", FakeAxonSimulation)
-
-    curve = axs.protocols.recruitment_sweep(
-        pool,
-        update=update,
-        values=np.asarray([0.0, 1.0, 2.0]) * axs.nA,
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        recording=axs.Recording.none(),
-        batch_amplitudes=True,
+    kwargs = {
+        "pool": pool,
+        "values": values,
+        "duration": 0.6 * axs.ms,
+        "dt": 0.05 * axs.ms,
+        "criterion": axs.analysis.ActivationCriterion(
+            threshold=0.0 * axs.mV,
+            blanking=0.2 * axs.ms,
+            target=axs.positions.ALL,
+        ),
+        "recording": axs.Recording.none(),
+        "batch_amplitudes": True,
+    }
+    one = axs.protocols.recruitment_sweep(
+        update=make_update(),
         amplitude_batch_size=1,
+        **kwargs,
+    )
+    full = axs.protocols.recruitment_sweep(
+        update=make_update(),
+        amplitude_batch_size=None,
+        **kwargs,
     )
 
-    assert pool_ids[0] == pool_ids[1] == pool_ids[2]
-    assert len(simulation_constructions) == 1
-    assert simulation_ids[0] == simulation_ids[1] == simulation_ids[2]
-    assert seen_previous_markers == [False, False, False]
-    np.testing.assert_array_equal(curve.activated, [[False], [True], [True]])
+    np.testing.assert_array_equal(full.activated, one.activated)
+
+
+def test_recruitment_numeric_axis_matches_single_chunks_with_multiple_drives():
+    row = _extracellular_update_pool(count=1)[0]
+    source_stimulation = row.extracellular_stimulation
+    source_drive = source_stimulation.drives[0]
+    row.add_extracellular_stimulation(
+        stimulation=axs.ExtracellularStimulation(
+            (
+                axs.ExtracellularDrive(
+                    id=source_drive.id,
+                    footprint=source_drive.footprint,
+                    stimulus=axs.Stimulus.constant(0.0 * axs.uA),
+                ),
+                axs.ExtracellularDrive(
+                    id=axs.DriveId("variable"),
+                    footprint=source_drive.footprint,
+                    stimulus=axs.Stimulus.constant(0.0 * axs.uA),
+                ),
+            )
+        ),
+        replace=True,
+    )
+    pool = (row,)
+    source = row.extracellular_stimulation
+
+    def make_update():
+        return axs.protocols.ExtracellularWaveformUpdate(
+            lambda value: axs.Stimulus.pulse(
+                start=0.2 * axs.ms,
+                duration=0.1 * axs.ms,
+                amplitude=-value,
+            ),
+            drive_id=axs.DriveId("variable"),
+        )
+
+    kwargs = {
+        "pool": pool,
+        "values": np.asarray([0.0, 1.0, 2.0]) * axs.uA,
+        "duration": 0.6 * axs.ms,
+        "dt": 0.05 * axs.ms,
+        "criterion": axs.analysis.ActivationCriterion(
+            threshold=0.0 * axs.mV,
+            blanking=0.2 * axs.ms,
+            target=axs.positions.ALL,
+        ),
+        "recording": axs.Recording.none(),
+        "batch_amplitudes": True,
+    }
+    one = axs.protocols.recruitment_sweep(
+        update=make_update(),
+        amplitude_batch_size=1,
+        **kwargs,
+    )
+    full = axs.protocols.recruitment_sweep(
+        update=make_update(),
+        amplitude_batch_size=None,
+        **kwargs,
+    )
+
+    np.testing.assert_array_equal(full.activated, one.activated)
+    assert row.extracellular_stimulation is source
+
+
+def test_recruitment_double_cable_numeric_axis_supports_multiple_drives():
+    axon = axs.axons.MRG(
+        diameter=7.3 * axs.um,
+        nodes=4,
+        length=1500.0 * axs.um,
+        compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+    )
+    positions = axon.layout.position_values(unit=axs.um) * axs.um
+    stimulation = axs.analytical.point_source_stimulation(
+        axs.analytical.PointSourceElectrode(
+            x=750.0 * axs.um,
+            y=20.0 * axs.um,
+            z=0.0 * axs.um,
+        ),
+        positions,
+        sigma=0.3 * axs.S_per_m,
+        stimulus=axs.Stimulus.constant(0.0 * axs.uA),
+    )
+    source_drive = stimulation.drives[0]
+    row = axs.AxonInstance(axon)
+    row.add_extracellular_stimulation(
+        stimulation=axs.ExtracellularStimulation(
+            (
+                source_drive,
+                axs.ExtracellularDrive(
+                    id=axs.DriveId("variable"),
+                    footprint=source_drive.footprint,
+                    stimulus=axs.Stimulus.constant(0.0 * axs.uA),
+                ),
+            )
+        )
+    )
+
+    def make_update():
+        return axs.protocols.ExtracellularWaveformUpdate(
+            lambda value: axs.Stimulus.pulse(
+                start=0.1 * axs.ms,
+                duration=0.05 * axs.ms,
+                amplitude=-value,
+            ),
+            drive_id=axs.DriveId("variable"),
+        )
+
+    kwargs = {
+        "pool": (row,),
+        "values": np.asarray([0.0, 1.0]) * axs.uA,
+        "duration": 0.3 * axs.ms,
+        "dt": 0.05 * axs.ms,
+        "criterion": axs.analysis.ActivationCriterion(
+            threshold=0.0 * axs.mV,
+            blanking=0.1 * axs.ms,
+            target=axs.positions.ALL,
+        ),
+        "recording": axs.Recording.none(),
+        "batch_amplitudes": True,
+    }
+    one = axs.protocols.recruitment_sweep(
+        update=make_update(),
+        amplitude_batch_size=1,
+        **kwargs,
+    )
+    full = axs.protocols.recruitment_sweep(
+        update=make_update(),
+        amplitude_batch_size=None,
+        **kwargs,
+    )
+
+    np.testing.assert_array_equal(full.activated, one.activated)
 
 
 def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatch):
@@ -755,29 +997,46 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
         blanking=0.5 * axs.ms,
         target=axs.positions.DISTAL,
     )
-    pool = (
-        axs.AxonInstance(
-            axs.axons.MRG(
+    row = axs.AxonInstance(
+        axs.axons.MRG(
                 diameter=7.3 * axs.um,
                 nodes=4,
                 length=1500.0 * axs.um,
                 compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
-            )
-        ),
+        )
     )
+    row.add_extracellular_stimulation(
+        stimulation=_extracellular_update_pool()[0].extracellular_stimulation
+    )
+    pool = (row,)
     calls = []
 
-    def update(row, tested_current):
-        row.tested_current_nA = float(tested_current.to(axs.nA).magnitude)
+    update = axs.protocols.ExtracellularWaveformUpdate(
+        lambda value: axs.Stimulus.pulse(
+            start=0.2 * axs.ms,
+            duration=0.1 * axs.ms,
+            amplitude=-value,
+        )
+    )
 
-    def fake_simulation_runner(updated_pool, **kwargs):
-        updated_pool = tuple(updated_pool)
-        calls.append(updated_pool)
-        return _observer_only_pool_result(
-            row.tested_current_nA >= 0.5 for row in updated_pool
+    def build_simulation(updated_pool, **_kwargs):
+        calls.append(tuple(updated_pool))
+        return SimpleNamespace(progress=False), "activation"
+
+    def evaluate_numeric_axis(_simulation, _activation, axis_input):
+        return np.asarray(
+            [
+                [abs(float(np.min(waveform.y))) * 1e9 >= 0.5]
+                for waveform in axis_input.waveforms
+            ]
         )
 
-    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+    monkeypatch.setattr(observer_protocols, "_build_activation_observer_simulation", build_simulation)
+    monkeypatch.setattr(
+        observer_protocols,
+        "_evaluate_activation_observer_numeric_axis",
+        evaluate_numeric_axis,
+    )
 
     curve = axs.protocols.recruitment_sweep(
         pool,
@@ -791,7 +1050,7 @@ def test_recruitment_sweep_can_batch_double_cable_observer_amplitudes(monkeypatc
     )
 
     assert len(calls) == 1
-    assert len(calls[0]) == 2
+    assert calls[0] == pool
     np.testing.assert_array_equal(curve.activated, [[False], [True]])
 
 
@@ -874,6 +1133,46 @@ def test_pool_sweep_accepts_generic_observer(monkeypatch):
         [[-70.0, -70.0], [20.0, 20.0], [20.0, 20.0]],
     )
     np.testing.assert_allclose(tested_values_nA, [0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+
+
+def test_pool_sweep_uses_generic_numeric_axis_for_typed_updates(monkeypatch):
+    pool = _extracellular_update_pool()
+    axis_inputs = []
+
+    def fake_simulation_runner(source_pool, *, axis_input, **_kwargs):
+        axis_inputs.append(axis_input)
+        amplitude_uA = abs(float(np.min(axis_input.waveforms[0].y))) * 1e6
+        voltage = 20.0 if amplitude_uA >= 1.0 else -70.0
+        return _public_pool_result(
+            tuple(np.full((3, 2), voltage, dtype=float) for _row in source_pool),
+            axons=tuple(source_pool),
+        )
+
+    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
+    sweep = axs.protocols.pool_sweep(
+        pool,
+        update=axs.protocols.ExtracellularWaveformUpdate(
+            lambda value: axs.Stimulus.pulse(
+                start=0.2 * axs.ms,
+                duration=0.1 * axs.ms,
+                amplitude=-value,
+            )
+        ),
+        values=np.asarray([0.0, 1.0, 2.0]) * axs.uA,
+        observe=lambda result: float(np.max(result.voltage_values(unit=axs.mV))),
+        duration=2.0 * axs.ms,
+        dt=1.0 * axs.ms,
+    )
+
+    assert [axis_input.size for axis_input in axis_inputs] == [1, 1, 1]
+    assert all(
+        type(axis_input).__name__ == "ExtracellularWaveformAxisInput"
+        for axis_input in axis_inputs
+    )
+    np.testing.assert_allclose(
+        sweep.observations,
+        [[-70.0, -70.0], [20.0, 20.0], [20.0, 20.0]],
+    )
 
 
 def test_pool_sweep_solver_progress_is_first_run_only(monkeypatch, capsys):

@@ -35,6 +35,27 @@ def test_unmyelinated_template_accepts_public_unit_names():
         axon.compartment_position(5)
 
 
+def test_layout_reuses_one_read_only_flattened_representation():
+    axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=3)
+
+    first = axs.axons.flatten_layout(axon.layout)
+    second = axs.axons.flatten_layout(axon.layout)
+
+    assert second is first
+    assert not first.x_um.flags.writeable
+    with pytest.raises(ValueError, match="read-only"):
+        first.x_um[0] = -1.0
+
+
+def test_axon_and_layout_descriptions_are_immutable_templates():
+    axon = axs.axons.MRG(diameter=10.0 * axs.um, nodes=3)
+
+    with pytest.raises(AttributeError, match="immutable templates"):
+        axon.temperature = 20.0
+    with pytest.raises(AttributeError, match="Layout descriptions are immutable"):
+        axon.layout.x_shift_um = 20.0
+
+
 def test_unmyelinated_templates_do_not_expose_legacy_geometry_aliases():
     with pytest.raises(TypeError):
         axs.axons.HodgkinHuxley(L=1000.0, d=0.5, Nx=11)
@@ -84,6 +105,100 @@ def test_template_axon_diameters_are_quantized_for_cache_reuse():
     assert axs.axons.mrg_like_node_spacing(2.52 * axs.um) == pytest.approx(
         axs.axons.mrg_like_node_spacing(2.5 * axs.um)
     )
+
+    equivalent_small = axs.axons.RattayAberham(
+        length=100.0 * axs.um,
+        diameter=0.674 * axs.um,
+        compartments=5,
+    )
+    assert small.layout is equivalent_small.layout
+    assert (
+        axs.axons.flatten_layout(small.layout).membrane_models[0]
+        is axs.axons.flatten_layout(equivalent_small.layout).membrane_models[0]
+    )
+
+
+def test_default_mrg_layout_reuses_complete_quantized_template_key():
+    compartments_a = {"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1}
+    compartments_b = {"STIN": 1, "FLUT": 1, "MYSA": 1, "node": 1}
+
+    first = axs.axons.MRG(
+        diameter=2.52 * axs.um,
+        nodes=4,
+        length=1500.0 * axs.um,
+        compartments=compartments_a,
+    )
+    second = axs.axons.MRG(
+        diameter=2.5 * axs.um,
+        nodes=4,
+        length=1500.0 * axs.um,
+        compartments=compartments_b,
+    )
+
+    assert first.layout is second.layout
+    assert axs.axons.flatten_layout(first.layout) is axs.axons.flatten_layout(
+        second.layout
+    )
+
+
+def test_default_mrg_layout_key_separates_structural_parameters():
+    base = axs.axons.MRG(diameter=10.0 * axs.um, nodes=4)
+    shifted = axs.axons.MRG(
+        diameter=10.0 * axs.um,
+        nodes=4,
+        x_shift=25.0 * axs.um,
+    )
+    warmer = axs.axons.MRG(
+        diameter=10.0 * axs.um,
+        nodes=4,
+        temperature=36.0 * axs.degC,
+    )
+
+    assert base.layout is not shifted.layout
+    assert base.layout is not warmer.layout
+    assert base.node_position_values(unit=axs.um)[0] != pytest.approx(
+        shifted.node_position_values(unit=axs.um)[0]
+    )
+    assert (
+        axs.axons.flatten_layout(base.layout).membrane_models[0]
+        != axs.axons.flatten_layout(warmer.layout).membrane_models[0]
+    )
+
+
+def test_cached_default_mrg_layout_matches_explicit_uncached_construction():
+    template = axs.axons.MRGLikeDoubleCableTemplate(
+        diameter=7.3 * axs.um,
+        nodes=4,
+        length=1500.0 * axs.um,
+        compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+    )
+    cached = template.layout()
+    geometry = template.geometry()
+    explicit = axs.axons.layout_from_mrg_like_geometry(
+        geometry,
+        membranes=axs.axons.default_mrg_like_membranes(geometry),
+        compartments=template.compartments,
+    )
+    cached_flat = axs.axons.flatten_layout(cached)
+    explicit_flat = axs.axons.flatten_layout(explicit)
+
+    for field in (
+        "x_um",
+        "edges_um",
+        "lengths_um",
+        "diam_um",
+        "Ra_ohm_cm",
+        "Cm_uF_cm2",
+        "section_indices",
+    ):
+        np.testing.assert_array_equal(
+            getattr(cached_flat, field),
+            getattr(explicit_flat, field),
+        )
+    assert cached_flat.membrane_models == explicit_flat.membrane_models
+    assert cached_flat.section_names == explicit_flat.section_names
+    assert cached_flat.section_tags == explicit_flat.section_tags
+    assert cached_flat.periaxonal_layers == explicit_flat.periaxonal_layers
 
 
 def test_public_axon_diameter_points_to_values_for_non_uniform_layouts():

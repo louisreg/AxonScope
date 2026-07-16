@@ -77,11 +77,9 @@ def clear_all_runtime_caches() -> None:
 
     clear_batch_runtime_caches()
     from axonscope.runtime.group_preparation import (
-        clear_group_signature_caches,
         clear_prepared_cohort_cache,
     )
 
-    clear_group_signature_caches()
     clear_prepared_cohort_cache()
     from axonscope.runtime.jax.policy.execution import clear_jax_execution_caches
 

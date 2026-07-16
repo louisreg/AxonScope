@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 import traceback
 from datetime import datetime
 from typing import Any
@@ -143,7 +144,16 @@ def _install_repo(config: dict[str, Any]) -> None:
     _run([python, "-m", "pip", "install", "-e", install_target], cwd=CHECKOUT_DIR)
     cuda_extra = str(config.get("jax_cuda_extra") or "").strip()
     if cuda_extra:
-        _run([python, "-m", "pip", "install", "-U", f"jax[{cuda_extra}]"])
+        _run(
+            [
+                python,
+                "-m",
+                "pip",
+                "install",
+                "-U",
+                _jax_cuda_requirement(cuda_extra),
+            ]
+        )
     pip_packages = [
         str(package)
         for package in config.get("pip_packages", ())
@@ -151,6 +161,32 @@ def _install_repo(config: dict[str, Any]) -> None:
     ]
     if pip_packages:
         _run([python, "-m", "pip", "install", *pip_packages])
+
+
+def _jax_cuda_requirement(
+    cuda_extra: str,
+    *,
+    pyproject_path: pathlib.Path | None = None,
+) -> str:
+    path = (
+        CHECKOUT_DIR / "pyproject.toml"
+        if pyproject_path is None
+        else pyproject_path
+    )
+    payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    dependencies = payload.get("project", {}).get("dependencies", ())
+    for dependency in dependencies:
+        requirement = str(dependency).strip()
+        if requirement.lower().startswith("jax") and requirement[3:4] in {
+            "<",
+            ">",
+            "=",
+            "!",
+            "~",
+        }:
+            constraint = requirement[3:].split(";", 1)[0].strip()
+            return f"jax[{cuda_extra}]{constraint}"
+    raise RuntimeError(f"No constrained JAX dependency found in {path}.")
 
 
 def _benchmark_command(config: dict[str, Any], output_dir: pathlib.Path) -> list[str]:

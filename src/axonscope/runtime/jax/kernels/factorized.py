@@ -55,6 +55,9 @@ def _factorized_current_mid_rows(
             current = jnp.take(current, row_indices, axis=0)
         return current[:, None, :]
     if current.ndim == 3:
+        if batch.current_row_indices is not None:
+            row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
+            return jnp.take(current, row_indices, axis=0)
         return current
     raise ValueError(
         "factorized current_mid_A must have shape (Nt,), (B, Nt), or (B, K, Nt), "
@@ -94,8 +97,6 @@ def _factorized_current_initial_previous_rows(
         )
     if batch.current_row_indices is not None:
         if previous_arr.ndim == 0:
-            return previous_arr
-        if previous_arr.ndim == 1 and int(previous_arr.shape[0]) == batch_size:
             return previous_arr
         row_indices = jnp.asarray(batch.current_row_indices, dtype=jnp.int32)
         return jnp.take(previous_arr, row_indices, axis=0)

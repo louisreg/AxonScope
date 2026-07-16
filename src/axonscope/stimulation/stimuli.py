@@ -21,20 +21,6 @@ ArrayLike = Any
 UnitLike = Any
 
 
-_STIMULUS_STRUCTURE_REVISION = 0
-
-
-def stimulus_structure_revision() -> int:
-    """Return the process-wide revision for runtime-mutated waveform shapes."""
-
-    return _STIMULUS_STRUCTURE_REVISION
-
-
-def _bump_stimulus_structure_revision() -> None:
-    global _STIMULUS_STRUCTURE_REVISION
-    _STIMULUS_STRUCTURE_REVISION += 1
-
-
 def _readonly_float_array(values: Any) -> np.ndarray:
     arr = np.array(values, dtype=float, copy=True, order="C")
     arr.setflags(write=False)
@@ -137,36 +123,6 @@ class Stimulus:
         object.__setattr__(self, "t", t)
         object.__setattr__(self, "y", y)
         object.__setattr__(self, "y_unit", y_unit)
-
-    def _replace_runtime_waveform(self, source: "Stimulus") -> None:
-        """Replace samples in a reusable runtime handle and track shape changes."""
-
-        previous_shape = self._runtime_shape_token()
-        object.__setattr__(self, "t", source.t)
-        object.__setattr__(self, "y", source.y)
-        object.__setattr__(self, "mode", source.mode)
-        object.__setattr__(self, "y_unit", source.y_unit)
-        object.__setattr__(self, "_scale_shape", source._scale_shape)
-        if self._runtime_shape_token() != previous_shape:
-            _bump_stimulus_structure_revision()
-
-    def _runtime_shape_token(self) -> tuple[Any, ...]:
-        if self._scale_shape is not None:
-            amplitude_shape: tuple[Any, ...] = ("scaled", self._scale_shape)
-        else:
-            y = np.asarray(self.y, dtype=float)
-            nonzero = np.flatnonzero(y)
-            if nonzero.size:
-                normalized = y / y[int(nonzero[0])]
-                amplitude_shape = ("samples", tuple(float(value) for value in normalized))
-            else:
-                amplitude_shape = ("samples", tuple(float(value) for value in y))
-        return (
-            tuple(float(value) for value in self.t),
-            amplitude_shape,
-            self.mode,
-            self.y_unit,
-        )
 
     # ------------------------------------------------------------------
     # Constructors

@@ -7,6 +7,8 @@ from typing import Any, cast
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
+from axonscope.preparation.axon_rows import MaterializedAxonRows
+from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.runtime.group_preparation import (
     group_runtime_signature,
     representative_item,
@@ -42,6 +44,8 @@ def prepare_batch_runtime(
     mode: str,
     include_extracellular: bool,
     include_area: bool,
+    materialized_axons: MaterializedAxonRows,
+    membrane_rows: MembraneRowPlan,
     runtime_context: Any | None = None,
 ) -> SolverRuntime:
     runtime_scope = runtime_context_cache_key(runtime_context)
@@ -111,10 +115,16 @@ def prepare_batch_runtime(
                 runtime = _with_batched_double_cable_runtime(
                     runtime,
                     group,
+                    materialized_axons,
+                    membrane_rows,
                     solver_options=solver_options,
                 )
             else:
-                runtime = _with_batched_single_cable_runtime(runtime, group)
+                runtime = _with_batched_single_cable_runtime(
+                    runtime,
+                    group,
+                    materialized_axons,
+                )
         store_batch_static_runtime(static_cache_key, runtime)
         static_cache_state = "miss"
 

@@ -10,7 +10,9 @@ from axonscope.dispatcher.plan import (
     DispatchPlan,
     build_dispatch_plan,
     dispatch_plan_identity_key,
+    expand_dispatch_plan_for_numeric_axis,
 )
+from axonscope.dispatcher.numeric_axis import NumericAxisInput
 from axonscope.runtime.execution import (
     batch_options_for_execution_context,
     batch_options_from_recording,
@@ -26,7 +28,6 @@ from axonscope.population import AxonPopulation
 from axonscope.recording import Recording
 from axonscope.results import AxonSimulationResult
 from axonscope.solvers import BatchOptions, SolverOptions
-from axonscope.stimulation.stimuli import stimulus_structure_revision
 
 if TYPE_CHECKING:
     from axonscope.dispatcher._records import DispatchRecord
@@ -90,7 +91,7 @@ class AxonSimulation:
         self.progress = progress
         self._dispatch_plan_cache_key: tuple[Any, ...] | None = None
         self._dispatch_plan_cache: DispatchPlan | None = None
-        self._dispatch_plan_revision: tuple[int, int] | None = None
+        self._dispatch_plan_revision: int | None = None
 
     @property
     def is_single(self) -> bool:
@@ -118,6 +119,29 @@ class AxonSimulation:
             execution_policy=self.execution_policy,
             progress=self.progress,
             dispatch_plan=self._dispatch_plan_for_run(),
+        )
+
+    def _run_numeric_axis(
+        self,
+        axis_input: NumericAxisInput,
+    ) -> SimulationRunResult:
+        """Run typed dynamic inputs through the canonical numeric-axis path."""
+
+        plan = expand_dispatch_plan_for_numeric_axis(
+            self._dispatch_plan_for_run(),
+            axis_input,
+        )
+        return _run_population_simulation(
+            self.population,
+            duration=self.duration,
+            dt=self.dt,
+            solver_options=self.solver_options,
+            batch_options=self.batch_options,
+            recording=self.recording,
+            observers=self.observers,
+            execution_policy=self.execution_policy,
+            progress=self.progress,
+            dispatch_plan=plan,
         )
 
     def estimate(self, **kwargs: Any):
@@ -161,10 +185,7 @@ class AxonSimulation:
         )
 
     def _dispatch_plan_for_run(self) -> DispatchPlan:
-        revision = (
-            simulation_structure_revision(),
-            stimulus_structure_revision(),
-        )
+        revision = simulation_structure_revision()
         if self._dispatch_plan_revision == revision and self._dispatch_plan_cache is not None:
             record_benchmark_metadata(axon_simulation_dispatch_plan_cache="identity-hit")
             return self._dispatch_plan_cache

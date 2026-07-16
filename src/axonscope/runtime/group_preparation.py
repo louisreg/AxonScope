@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import weakref
 from collections import OrderedDict
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -13,20 +11,12 @@ from axonscope.benchmarking import record_benchmark_metadata
 from axonscope.axon_instance import extracellular_topology_revision
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
 from axonscope.preparation.cohort import PreparedCohort
+from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.preparation.runtime_batches import extracellular_stimulation_rows
 
 
-_GROUP_SIGNATURE_CACHE_MAX_SIZE = 128
 _PREPARED_COHORT_CACHE_MAX_SIZE = 64
 
-_GROUP_STATIC_SIGNATURE_CACHE: OrderedDict[
-    int,
-    tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]],
-] = OrderedDict()
-_GROUP_RUNTIME_SIGNATURE_CACHE: OrderedDict[
-    int,
-    tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]],
-] = OrderedDict()
 _PREPARED_COHORT_CACHE: OrderedDict[tuple[Any, ...], PreparedCohort] = OrderedDict()
 _PREPARED_COHORT_IDENTITY_CACHE: OrderedDict[
     int,
@@ -95,22 +85,32 @@ def runtime_context_cache_key(context: Any | None) -> tuple[Any, ...] | None:
 def group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
     """Return a structural key for stimulation-independent solver runtimes."""
 
-    return _cached_group_signature(
-        group,
-        cache=_GROUP_RUNTIME_SIGNATURE_CACHE,
-        metadata_key="group_runtime_signature_cache",
-        builder=_build_group_runtime_signature,
+    record_benchmark_metadata(group_runtime_signature_source="dispatch_plan")
+    return (
+        "dispatch_group_runtime_v6",
+        group.mode,
+        int(group.nx),
+        bool(group.geometry_shared),
+        bool(group.has_padding),
+        int(group.size),
+        int(group.structure.schema_version),
+        group.structure.runtime_rows,
     )
 
 
 def group_preparation_signature(group: DispatchGroup) -> tuple[Any, ...]:
     """Return the structural prepared-cohort cache key for a dispatch group."""
 
-    return _cached_group_signature(
-        group,
-        cache=_GROUP_STATIC_SIGNATURE_CACHE,
-        metadata_key="group_static_signature_cache",
-        builder=_build_group_static_signature,
+    record_benchmark_metadata(group_static_signature_source="dispatch_plan")
+    return (
+        "dispatch_group_spatial_v5",
+        group.mode,
+        int(group.nx),
+        bool(group.geometry_shared),
+        bool(group.has_padding),
+        int(group.size),
+        int(group.structure.schema_version),
+        group.structure.spatial_rows,
     )
 
 
@@ -163,13 +163,6 @@ def clear_prepared_cohort_cache() -> None:
     _PREPARED_COHORT_IDENTITY_CACHE.clear()
 
 
-def clear_group_signature_caches() -> None:
-    """Clear cached dispatch-group signatures."""
-
-    _GROUP_STATIC_SIGNATURE_CACHE.clear()
-    _GROUP_RUNTIME_SIGNATURE_CACHE.clear()
-
-
 def _with_current_stimulation_rows(
     cohort: PreparedCohort,
     group: DispatchGroup,
@@ -192,6 +185,7 @@ def _with_current_stimulation_rows(
         representative=representative,
         axons=axons,
         solver_axons=solver_axons,
+        membrane_rows=MembraneRowPlan.from_dispatch_items(group.items),
         stimulations=stimulations,
     )
 
@@ -209,97 +203,6 @@ def _same_stimulation_rows(
     if len(left) != len(right):
         return False
     return all(_same_objects(a, b) for a, b in zip(left, right, strict=True))
-
-
-def _build_group_static_signature(group: DispatchGroup) -> tuple[Any, ...]:
-    rows_digest = _digest_group_spatial_items(group.items)
-    return (
-        "dispatch_group_spatial_v4",
-        group.mode,
-        int(group.nx),
-        bool(group.geometry_shared),
-        bool(group.has_padding),
-        int(group.size),
-        rows_digest,
-    )
-
-
-def _build_group_runtime_signature(group: DispatchGroup) -> tuple[Any, ...]:
-    rows_digest = _digest_group_runtime_items(group.items)
-    return (
-        "dispatch_group_runtime_v5",
-        group.mode,
-        int(group.nx),
-        bool(group.geometry_shared),
-        bool(group.has_padding),
-        int(group.size),
-        rows_digest,
-    )
-
-
-def _digest_group_spatial_items(items: tuple[DispatchItem, ...]) -> str:
-    token_cache: dict[int, str] = {}
-    hasher = hashlib.blake2b(digest_size=16)
-    for item in items:
-        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
-        hasher.update(b"\0")
-    return hasher.hexdigest()
-
-
-def _digest_group_runtime_items(items: tuple[DispatchItem, ...]) -> str:
-    token_cache: dict[int, str] = {}
-    hasher = hashlib.blake2b(digest_size=16)
-    for item in items:
-        hasher.update(_digest_signature_value(item.membrane_signature, token_cache).encode())
-        hasher.update(b"\0")
-        hasher.update(_digest_signature_value(item.cable_signature, token_cache).encode())
-        hasher.update(b"\0")
-        simulation = item.simulation
-        _update_digest_float(hasher, float(getattr(simulation, "v_init", 0.0)))
-        _update_digest_float(hasher, float(getattr(simulation, "Veinit", 0.0)))
-        _update_digest_float(hasher, float(getattr(simulation, "temperature", 0.0)))
-    return hasher.hexdigest()
-
-
-def _digest_signature_value(value: Any, cache: dict[int, str]) -> str:
-    cache_key = id(value)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-    digest = hashlib.blake2b(repr(value).encode("utf-8"), digest_size=16).hexdigest()
-    cache[cache_key] = digest
-    return digest
-
-
-def _update_digest_float(hasher: Any, value: float) -> None:
-    hasher.update(repr(float(value)).encode("ascii"))
-    hasher.update(b"\0")
-
-
-def _cached_group_signature(
-    group: DispatchGroup,
-    *,
-    cache: OrderedDict[int, tuple[weakref.ReferenceType[DispatchGroup], tuple[Any, ...]]],
-    metadata_key: str,
-    builder: Callable[[DispatchGroup], tuple[Any, ...]],
-) -> tuple[Any, ...]:
-    cache_key = id(group)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        ref, signature = cached
-        if ref() is group:
-            cache.move_to_end(cache_key)
-            record_benchmark_metadata(**{metadata_key: "hit"})
-            return signature
-        cache.pop(cache_key, None)
-
-    signature = builder(group)
-    cache[cache_key] = (weakref.ref(group), signature)
-    cache.move_to_end(cache_key)
-    while len(cache) > _GROUP_SIGNATURE_CACHE_MAX_SIZE:
-        cache.popitem(last=False)
-    record_benchmark_metadata(**{metadata_key: "miss"})
-    return signature
 
 
 def _get_prepared_cohort_identity(
@@ -347,7 +250,6 @@ def _cache_store(
 
 
 __all__ = [
-    "clear_group_signature_caches",
     "clear_prepared_cohort_cache",
     "group_preparation_signature",
     "group_runtime_signature",

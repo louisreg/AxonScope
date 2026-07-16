@@ -178,7 +178,7 @@ instance.add_extracellular_stimulation(stimulation=stimulation)
 The analytical point-source helper is a quick-start path. For realistic
 workflows, external tools such as NRV/FEM should generate the field footprint,
 then AxonScope should receive sampled footprint values. See `docs/stimulation.md`
-and `examples/with_nrv/01_realistic_fascicle_geometry.py`.
+and `examples/with_nrv/01_synthetic_fascicle_geometry.py`.
 
 ## Populations, Recording, And Results
 

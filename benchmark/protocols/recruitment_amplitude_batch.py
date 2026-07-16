@@ -20,24 +20,33 @@ if __package__ in {None, ""}:
 
 import axonscope as axs
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
-from axonscope.benchmarking import benchmark_span
+from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = REPO_ROOT / "benchmark" / "results" / "recruitment_amplitude_batch"
 DEFAULT_AMPLITUDES_UA = (5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 120.0, 160.0)
 P14_REALISTIC_AMPLITUDES_UA = tuple(float(value) for value in np.linspace(0.0, 300.0, 21))
+P14_MRG_DIAMETERS_UM = (7.3, 10.0, 12.8)
 
 INTERESTING_STAGES = (
     "benchmark.build_population",
     "benchmark.recruitment_sweep",
-    "protocol.sweep.value",
-    "protocol.sweep.batched_values",
-    "protocol.sweep.build_amplitude_pool",
-    "protocol.sweep.refresh_amplitude_pool",
+    "protocol.sweep.amplitude_chunk",
     "simulation.run_pool",
     "dispatch.build_plan",
     "runtime.prepare",
+    "runtime.prepare.materialize_axons",
+    "runtime.prepare.base_runtime",
+    "runtime.prepare.stack_cable",
+    "runtime.prepare.stack_membrane",
+    "runtime.prepare.membrane_vm0_rows",
+    "runtime.prepare.membrane_encode_rows",
+    "runtime.prepare.membrane_encode_unique_rows",
+    "runtime.prepare.membrane_gather_rows",
+    "runtime.prepare.membrane_initial_gates",
+    "runtime.prepare.membrane_device_arrays",
+    "runtime.prepare.stack_extracellular",
     "inputs.positions",
     "inputs.extracellular",
     "kernel.enqueue",
@@ -54,13 +63,13 @@ class BatchPolicy:
     batch_amplitudes: bool
     amplitude_batch_size: int | None
 
-    @property
-    def expanded_rows(self) -> str:
-        if not self.batch_amplitudes:
-            return "sequential"
-        if self.amplitude_batch_size is None:
-            return "full"
-        return str(self.amplitude_batch_size)
+
+RecruitmentWorkload = tuple[
+    tuple[axs.AxonInstance, ...],
+    Any,
+    Any,
+    axs.analysis.ActivationCriterion,
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +86,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("single", "double", "mixed"),
         default="mixed",
     )
+    parser.add_argument(
+        "--drive-count",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help=(
+            "Use one variable extracellular drive or one variable plus one "
+            "independent static drive."
+        ),
+    )
     parser.add_argument("--policies", default="sequential,1,10,20,full")
     parser.add_argument("--fibers-per-family", type=int, default=100)
     parser.add_argument(
@@ -85,6 +104,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Total axon count; defaults to 196 for p14_realistic.",
     )
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--mrg-template-count",
+        type=int,
+        default=3,
+        help=(
+            "Requested number of distinct MRG diameter/node-shift templates. "
+            "Counts above 3 retain the same three diameters and add intrinsic "
+            "node shifts."
+        ),
+    )
+    parser.add_argument(
+        "--axon-template-policy",
+        choices=("shared", "distinct"),
+        default="shared",
+        help=(
+            "Population-construction A/B control. Production-like runs share exact "
+            "axon templates; 'distinct' preserves the former per-row construction."
+        ),
+    )
     parser.add_argument("--duration-ms", type=float)
     parser.add_argument("--dt-ms", type=float)
     parser.add_argument(
@@ -127,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cold-only", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument(
+        "--profile-scope",
+        choices=("run", "sweep", "run_pool"),
+        default="run",
+        help="Profile the complete case, recruitment_sweep, or simulation.run_pool.",
+    )
     parser.add_argument("--profile-create-perfetto", action="store_true")
     parser.add_argument("--quiet", action=argparse.BooleanOptionalAction, default=True)
     return parser
@@ -177,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--axon-count must be >= 1.")
     if args.time_chunk_steps < 1:
         raise SystemExit("--time-chunk-steps must be >= 1.")
+    if args.mrg_template_count < 1:
+        raise SystemExit("--mrg-template-count must be >= 1.")
     if args.duration_ms <= 0.0:
         raise SystemExit("--duration-ms must be > 0.")
     if args.dt_ms <= 0.0:
@@ -216,8 +262,21 @@ def main(argv: list[str] | None = None) -> int:
         phase_plan.extend(("warm", index) for index in range(args.repeats))
 
     for policy in policies:
+        workload, source_population_build_ms = _build_source_workload(
+            args,
+            output,
+            policy,
+        )
         for phase, repeat in phase_plan:
-            row, counts = _run_one(args, output, policy, phase=phase, repeat=repeat)
+            row, counts = _run_one(
+                args,
+                output,
+                policy,
+                workload=workload,
+                source_population_build_ms=source_population_build_ms,
+                phase=phase,
+                repeat=repeat,
+            )
             if reference_counts is None:
                 reference_counts = counts
                 row["matches_reference"] = True
@@ -332,6 +391,8 @@ def _triton_cache_child_command(
         str(args.workload),
         "--cable",
         str(args.cable),
+        "--drive-count",
+        str(args.drive_count),
         "--policies",
         "full",
         "--fibers-per-family",
@@ -340,6 +401,10 @@ def _triton_cache_child_command(
         str(args.axon_count),
         "--seed",
         str(args.seed),
+        "--mrg-template-count",
+        str(args.mrg_template_count),
+        "--axon-template-policy",
+        str(args.axon_template_policy),
         "--duration-ms",
         str(args.duration_ms),
         "--dt-ms",
@@ -439,6 +504,8 @@ def _run_one(
     output: Path,
     policy: BatchPolicy,
     *,
+    workload: RecruitmentWorkload,
+    source_population_build_ms: float,
     phase: str,
     repeat: int,
 ) -> tuple[dict[str, Any], np.ndarray]:
@@ -447,7 +514,8 @@ def _run_one(
     failed = False
     error = ""
     counts = np.asarray([], dtype=int)
-    n_axons = 0
+    pool, update, current_steps, criterion = workload
+    n_axons = len(pool)
     try:
         with axs.benchmark(
             run_dir,
@@ -459,18 +527,16 @@ def _run_one(
             memory_top_n=args.memory_top_n,
             profile=bool(args.profile),
             profile_runtime="jax" if args.profile else "auto",
+            profile_span={
+                "sweep": "benchmark.recruitment_sweep",
+                "run_pool": "simulation.run_pool",
+            }.get(args.profile_scope),
+            profile_output=(
+                run_dir / "profiles" / args.profile_scope if args.profile else None
+            ),
             profile_create_perfetto=bool(args.profile_create_perfetto),
             jax_device_memory_profile=False,
         ):
-            with benchmark_span(
-                "benchmark.build_population",
-                policy=policy.label,
-                phase=phase,
-                repeat=repeat,
-                fibers_per_family=args.fibers_per_family,
-            ):
-                pool, update, current_steps, criterion = _build_workload(args)
-                n_axons = len(pool)
             execution_policy = _execution_policy(args.platform)
             with benchmark_span(
                 "benchmark.recruitment_sweep",
@@ -498,10 +564,15 @@ def _run_one(
                     solver_progress=False,
                 )
             counts = np.asarray(curve.activated, dtype=bool).sum(axis=1)
+        if args.drive_count == 2:
+            _validate_multi_drive_routes(
+                run_dir,
+                cable=args.cable,
+                platform=args.platform,
+            )
         write_run_pool_detail(
             run_dir,
             amplitudes=args.amplitudes,
-            batch_amplitudes=policy.batch_amplitudes,
         )
     except BaseException as exc:
         failed = True
@@ -525,9 +596,16 @@ def _run_one(
                 "fibers_per_family": args.fibers_per_family,
                 "workload": args.workload,
                 "cable": args.cable,
+                "drive_count": args.drive_count,
                 "n_axons": n_axons or args.axon_count,
                 "amplitude_count": len(args.amplitudes),
                 "wall_ms": (end - start) / 1_000_000.0,
+                "source_population_build_ms": source_population_build_ms,
+                "one_shot_wall_ms": (
+                    (end - start) / 1_000_000.0 + source_population_build_ms
+                    if phase == "cold"
+                    else ""
+                ),
                 "failed": failed,
                 "error": error,
             }
@@ -535,12 +613,139 @@ def _run_one(
     return row, counts
 
 
-def _build_workload(args: argparse.Namespace) -> tuple[
-    tuple[axs.AxonInstance, ...],
-    Any,
-    Any,
-    axs.analysis.ActivationCriterion,
-]:
+def _build_source_workload(
+    args: argparse.Namespace,
+    output: Path,
+    policy: BatchPolicy,
+) -> tuple[RecruitmentWorkload, float]:
+    """Build and profile the immutable source workload once per batch policy."""
+
+    run_dir = output / policy.label / "source_population"
+    start = time.perf_counter_ns()
+    with axs.benchmark(
+        run_dir,
+        print_summary=False,
+        save=True,
+        sync_device=False,
+        record_shapes=True,
+        memory_trace=args.memory_trace,
+        memory_top_n=args.memory_top_n,
+        profile=False,
+        jax_device_memory_profile=False,
+    ):
+        with benchmark_span(
+            "benchmark.build_population",
+            policy=policy.label,
+            fibers_per_family=args.fibers_per_family,
+        ):
+            workload = _build_workload(args)
+    elapsed_ms = (time.perf_counter_ns() - start) / 1_000_000.0
+    source_row = _row_from_run_dir(run_dir)
+    measured_ms = source_row.get("benchmark.build_population_ms", "")
+    if measured_ms not in {"", None}:
+        elapsed_ms = float(measured_ms)
+    return workload, elapsed_ms
+
+
+def _validate_multi_drive_routes(
+    run_dir: Path,
+    *,
+    cable: str,
+    platform: str,
+) -> None:
+    """Reject dense or non-production routes in the multi-drive benchmark."""
+
+    events_path = run_dir / "events.jsonl"
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    expected_modes = (
+        {"single", "double"}
+        if cable == "mixed"
+        else {str(cable)}
+    )
+    extracellular_by_mode: dict[str, dict[str, Any]] = {}
+    numeric_axis_by_mode: dict[str, dict[str, Any]] = {}
+    groups_by_mode: dict[str, dict[str, Any]] = {}
+    for event in events:
+        metadata = event.get("metadata", {})
+        if event.get("name") == "inputs.extracellular":
+            capability = str(metadata.get("extracellular_capability_cable", ""))
+            mode = capability.removesuffix("-cable")
+            if mode in expected_modes:
+                extracellular_by_mode[mode] = metadata
+        elif event.get("name") == "inputs.numeric_axis":
+            mode = str(metadata.get("mode", ""))
+            if mode in expected_modes:
+                numeric_axis_by_mode[mode] = metadata
+        elif event.get("name") == "dispatch.group.total":
+            mode = str(metadata.get("mode", ""))
+            if mode in expected_modes:
+                groups_by_mode[mode] = metadata
+
+    if set(extracellular_by_mode) != expected_modes:
+        raise RuntimeError(
+            "multi-drive validation did not observe every expected extracellular "
+            f"group: got {sorted(extracellular_by_mode)}, "
+            f"expected {sorted(expected_modes)}."
+        )
+    if set(groups_by_mode) != expected_modes:
+        raise RuntimeError(
+            "multi-drive validation did not observe every expected dispatch group: "
+            f"got {sorted(groups_by_mode)}, expected {sorted(expected_modes)}."
+        )
+    if set(numeric_axis_by_mode) != expected_modes:
+        raise RuntimeError(
+            "multi-drive validation did not observe every numeric-axis lowering: "
+            f"got {sorted(numeric_axis_by_mode)}, expected {sorted(expected_modes)}."
+        )
+
+    for mode, metadata in extracellular_by_mode.items():
+        if metadata.get("extracellular_format") != "factorized_footprint":
+            raise RuntimeError(f"{mode} multi-drive execution used a dense input route.")
+        if metadata.get("dense_vstim_avoided") is not True:
+            raise RuntimeError(f"{mode} multi-drive execution materialized dense Vext.")
+        if int(metadata.get("nstim", 0)) != 2:
+            raise RuntimeError(f"{mode} multi-drive execution did not retain both drives.")
+
+    for mode, metadata in numeric_axis_by_mode.items():
+        if int(metadata.get("extracellular_waveform_drive_count", 0)) != 2:
+            raise RuntimeError(f"{mode} numeric axis did not lower two drives.")
+    for mode, metadata in groups_by_mode.items():
+        if (
+            metadata.get("prepared_input_contract_extracellular_format")
+            != "factorized_footprint"
+        ):
+            raise RuntimeError(f"{mode} prepared a non-factorized input contract.")
+
+    if platform == "gpu" and "double" in expected_modes:
+        block_solver = groups_by_mode["double"].get(
+            "execution_policy_double_cable_block_solver"
+        )
+        if block_solver != "jax_triton_loop_xb":
+            raise RuntimeError(
+                "double-cable GPU multi-drive execution did not use the production "
+                f"Triton route: got {block_solver!r}."
+            )
+
+    payload = {
+        "expected_modes": sorted(expected_modes),
+        "factorized_modes": sorted(extracellular_by_mode),
+        "dense_vstim_avoided": True,
+        "drive_count": 2,
+        "double_cable_block_solver": groups_by_mode.get("double", {}).get(
+            "execution_policy_double_cable_block_solver"
+        ),
+    }
+    (run_dir / "multi_drive_route_validation.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
     rng = np.random.default_rng(int(args.seed))
     single_count, double_count = _cable_counts(args.cable, int(args.axon_count))
     realistic = args.workload == "p14_realistic"
@@ -557,10 +762,23 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         z=0.0 * axs.um,
         min_distance=5.0 * axs.um,
     )
+    secondary_electrode = axs.analytical.PointSourceElectrode(
+        x=0.7 * fiber_length,
+        y=0.0 * axs.um,
+        z=0.0 * axs.um,
+        min_distance=5.0 * axs.um,
+    )
+    variable_drive_id = axs.DriveId("variable")
+    static_drive_id = axs.DriveId("static")
     zero_current = axs.Stimulus.pulse(
         start=stim_start,
         duration=pulse_width,
         amplitude=0.0 * axs.uA,
+    )
+    static_current = axs.Stimulus.pulse(
+        start=stim_start + 0.25 * axs.ms,
+        duration=0.08 * axs.ms,
+        amplitude=-5.0 * axs.uA,
     )
 
     radius_um = circle_radius.to(axs.um).magnitude
@@ -574,39 +792,71 @@ def _build_workload(args: argparse.Namespace) -> tuple[
     myelinated_y = myelinated_radii * np.cos(myelinated_angles) * axs.um
     myelinated_z = myelinated_radii * np.sin(myelinated_angles) * axs.um
 
-    unmyelinated_diameters = rng.uniform(0.4, 1.2, single_count) * axs.um
-    myelinated_diameters = (
-        rng.choice(np.asarray([7.3, 10.0, 12.8]), size=double_count)
-        * axs.um
+    unmyelinated_diameters_um = axs.axons.round_axon_diameter_values_um(
+        rng.uniform(0.4, 1.2, single_count)
     )
+    myelinated_diameters, myelinated_x_shifts = _mrg_population_templates(
+        rng,
+        row_count=double_count,
+        template_count=int(args.mrg_template_count),
+    )
+    myelinated_diameters = myelinated_diameters * axs.um
+    myelinated_x_shifts = myelinated_x_shifts * axs.um
 
     pool: list[axs.AxonInstance] = []
-    for diameter, y, z in zip(
-        unmyelinated_diameters,
+    unmyelinated_templates: dict[float, tuple[Any, Any]] = {}
+    mrg_templates: dict[tuple[Any, ...], Any] = {}
+    for diameter_um, y, z in zip(
+        unmyelinated_diameters_um,
         unmyelinated_y,
         unmyelinated_z,
         strict=True,
     ):
-        axon = axs.axons.RattayAberham(
-            length=fiber_length,
-            diameter=diameter,
-            compartments=(200 if realistic else 61),
-            celsius=37.0 * axs.degC,
+        diameter_key = float(diameter_um)
+        template = (
+            unmyelinated_templates.get(diameter_key)
+            if args.axon_template_policy == "shared"
+            else None
         )
+        if template is None:
+            axon = axs.axons.RattayAberham(
+                length=fiber_length,
+                diameter=diameter_key * axs.um,
+                compartments=(200 if realistic else 61),
+                celsius=37.0 * axs.degC,
+            )
+            positions = axon.layout.position_values(unit=axs.um) * axs.um
+            template = (axon, positions)
+            if args.axon_template_policy == "shared":
+                unmyelinated_templates[diameter_key] = template
+        axon, positions = template
         extracellular = axs.analytical.point_source_stimulation(
             electrode,
-            axon.layout.position_values(unit=axs.um) * axs.um,
+            positions,
             sigma=sigma,
             stimulus=zero_current,
+            drive_id=variable_drive_id,
             axon_y=y,
             axon_z=z,
         )
+        if args.drive_count == 2:
+            static_drive = axs.analytical.point_source_drive(
+                secondary_electrode,
+                positions,
+                sigma=sigma,
+                stimulus=static_current,
+                drive_id=static_drive_id,
+                axon_y=y,
+                axon_z=z,
+            )
+            extracellular = extracellular.add(static_drive)
         row = axs.AxonInstance(axon)
         row.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(row)
 
-    for diameter, y, z in zip(
+    for diameter, x_shift, y, z in zip(
         myelinated_diameters,
+        myelinated_x_shifts,
         myelinated_y,
         myelinated_z,
         strict=True,
@@ -614,31 +864,80 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         if realistic:
             nodes = max(
                 2,
-                axs.axons.mrg_like_nodes_from_length(diameter, fiber_length),
+                axs.axons.mrg_like_nodes_from_length(
+                    diameter,
+                    fiber_length,
+                    x_shift=x_shift,
+                ),
             )
+            compartments: Any = 1
+        else:
+            nodes = 4
+            compartments = {"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1}
+        template_key = (
+            float(diameter.to(axs.um).magnitude),
+            int(nodes),
+            float(fiber_length.to(axs.um).magnitude),
+            float(x_shift.to(axs.um).magnitude),
+            repr(compartments),
+        )
+        axon = (
+            mrg_templates.get(template_key)
+            if args.axon_template_policy == "shared"
+            else None
+        )
+        if axon is None:
             axon = axs.axons.MRG(
                 diameter=diameter,
                 nodes=nodes,
                 length=fiber_length,
+                x_shift=x_shift,
+                compartments=compartments,
             )
-        else:
-            axon = axs.axons.MRG(
-                diameter=diameter,
-                nodes=4,
-                length=fiber_length,
-                compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
-            )
+            if args.axon_template_policy == "shared":
+                mrg_templates[template_key] = axon
         extracellular = axs.analytical.point_source_stimulation(
             electrode,
             axon.layout.position_values(unit=axs.um) * axs.um,
             sigma=sigma,
             stimulus=zero_current,
+            drive_id=variable_drive_id,
             axon_y=y,
             axon_z=z,
         )
+        if args.drive_count == 2:
+            static_drive = axs.analytical.point_source_drive(
+                secondary_electrode,
+                axon.layout.position_values(unit=axs.um) * axs.um,
+                sigma=sigma,
+                stimulus=static_current,
+                drive_id=static_drive_id,
+                axon_y=y,
+                axon_z=z,
+            )
+            extracellular = extracellular.add(static_drive)
         row = axs.AxonInstance(axon)
         row.add_extracellular_stimulation(stimulation=extracellular)
         pool.append(row)
+
+    unique_axons = {id(row.axon): row.axon for row in pool}
+    unique_sections = {
+        id(section): section
+        for axon in unique_axons.values()
+        for section in axon.layout.sections
+    }
+    unique_membranes = {
+        id(section.membrane): section.membrane for section in unique_sections.values()
+    }
+    record_benchmark_metadata(
+        axon_template_policy=args.axon_template_policy,
+        population_rows=len(pool),
+        population_unique_axon_templates=len(unique_axons),
+        population_unique_sections=len(unique_sections),
+        population_unique_membrane_models=len(unique_membranes),
+        population_requested_mrg_templates=int(args.mrg_template_count),
+        population_realized_mrg_templates=len(mrg_templates),
+    )
 
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,
@@ -646,22 +945,14 @@ def _build_workload(args: argparse.Namespace) -> tuple[
         target=axs.positions.ALL,
     )
 
-    def update_point_source_current(row: axs.AxonInstance, current_magnitude: Any) -> None:
-        stimulation = row.extracellular_stimulation
-        if stimulation is None:
-            raise ValueError("simulation has no extracellular stimulation to update.")
-        drive = stimulation.drives[0]
-        row.add_extracellular_stimulation(
-            stimulation=stimulation.replace_drive(
-                drive.id,
-                stimulus=axs.Stimulus.pulse(
-                    start=stim_start,
-                    duration=pulse_width,
-                    amplitude=-current_magnitude,
-                ),
-            ),
-            replace=True,
-        )
+    update_point_source_current = axs.protocols.ExtracellularWaveformUpdate(
+        lambda current_magnitude: axs.Stimulus.pulse(
+            start=stim_start,
+            duration=pulse_width,
+            amplitude=-current_magnitude,
+        ),
+        drive_id=variable_drive_id,
+    )
 
     return tuple(pool), update_point_source_current, current_steps, criterion
 
@@ -673,6 +964,39 @@ def _cable_counts(cable: str, axon_count: int) -> tuple[int, int]:
         return 0, axon_count
     single_count = axon_count // 2
     return single_count, axon_count - single_count
+
+
+def _mrg_population_templates(
+    rng: np.random.Generator,
+    *,
+    row_count: int,
+    template_count: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return balanced MRG diameters and intrinsic node shifts for a benchmark."""
+
+    if row_count <= 0:
+        return np.empty((0,), dtype=float), np.empty((0,), dtype=float)
+    realized_count = min(int(template_count), int(row_count))
+    if realized_count == 3:
+        diameters = rng.choice(np.asarray([7.3, 10.0, 12.8]), size=row_count)
+        return diameters.astype(float), np.zeros((row_count,), dtype=float)
+
+    base_diameters = np.asarray(P14_MRG_DIAMETERS_UM, dtype=float)
+    shift_level_count = int(np.ceil(realized_count / len(base_diameters)))
+    template_diameters = np.empty((realized_count,), dtype=float)
+    template_shifts = np.empty((realized_count,), dtype=float)
+    for index in range(realized_count):
+        diameter_um = float(base_diameters[index % len(base_diameters)])
+        shift_level = index // len(base_diameters)
+        shift_fraction = float(shift_level) / float(shift_level_count)
+        template_diameters[index] = diameter_um
+        template_shifts[index] = shift_fraction * float(
+            axs.axons.mrg_like_node_spacing(diameter_um * axs.um)
+        )
+
+    template_indices = np.arange(row_count, dtype=np.int64) % realized_count
+    rng.shuffle(template_indices)
+    return template_diameters[template_indices], template_shifts[template_indices]
 
 
 def _execution_policy(platform: str) -> axs.ExecutionPolicy:
@@ -728,10 +1052,13 @@ def _write_runs(output: Path, rows: list[dict[str, Any]]) -> None:
         "platform",
         "workload",
         "cable",
+        "drive_count",
         "fibers_per_family",
         "n_axons",
         "amplitude_count",
         "wall_ms",
+        "source_population_build_ms",
+        "one_shot_wall_ms",
         *[f"{stage}_ms" for stage in INTERESTING_STAGES],
         "matches_reference",
         "activation_counts",
@@ -758,6 +1085,7 @@ def _write_cases(
                 "platform",
                 "workload",
                 "cable",
+                "drive_count",
                 "policy",
                 "n_axons",
                 "amplitude_count",
@@ -772,6 +1100,7 @@ def _write_cases(
                     "platform": args.platform,
                     "workload": args.workload,
                     "cable": args.cable,
+                    "drive_count": args.drive_count,
                     "policy": policy.label,
                     "n_axons": args.axon_count,
                     "amplitude_count": len(args.amplitudes),
@@ -790,6 +1119,9 @@ def _write_manifest(
         "platform": args.platform,
         "workload": args.workload,
         "cable": args.cable,
+        "drive_count": args.drive_count,
+        "axon_template_policy": args.axon_template_policy,
+        "mrg_template_count": args.mrg_template_count,
         "policies": [policy.label for policy in policies],
         "fibers_per_family": args.fibers_per_family,
         "n_axons": args.axon_count,
@@ -805,6 +1137,7 @@ def _write_manifest(
         "triton_cache_replay": args.triton_cache_replay,
         "memory_trace": args.memory_trace,
         "profile": bool(args.profile),
+        "profile_scope": args.profile_scope,
         "profile_create_perfetto": bool(args.profile_create_perfetto),
         "output": str(output),
     }
@@ -817,25 +1150,27 @@ def _write_report(output: Path, rows: list[dict[str, Any]]) -> None:
     lines = [
         "# Recruitment Amplitude Batch Benchmark",
         "",
-        "| cable | policy | phase | wall ms | build plan ms | build pool ms | "
-        "refresh pool ms | run pool ms | dispatch_jax ms | wait ms | counts match |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| cable | policy | phase | wall ms | source build ms | one-shot ms | "
+        "build plan ms | chunk ms | "
+        "run pool ms | dispatch_jax ms | wait ms | counts match |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | --- |",
     ]
     for row in rows:
         lines.append(
             (
-                "| {cable} | {policy} | {phase} | {wall} | {build_plan} | {build_pool} | "
-                "{refresh_pool} | {run_pool} | {dispatch} | {wait} | {match} |"
+                "| {cable} | {policy} | {phase} | {wall} | {source_build} | "
+                "{one_shot} | {build_plan} | {chunk} | {run_pool} | {dispatch} | "
+                "{wait} | {match} |"
             ).format(
                 cable=row["cable"],
                 policy=row["policy"],
                 phase=row["phase"],
                 wall=_fmt(row.get("wall_ms", "")),
+                source_build=_fmt(row.get("source_population_build_ms", "")),
+                one_shot=_fmt(row.get("one_shot_wall_ms", "")),
                 build_plan=_fmt(row.get("dispatch.build_plan_ms", "")),
-                build_pool=_fmt(row.get("protocol.sweep.build_amplitude_pool_ms", "")),
-                refresh_pool=_fmt(
-                    row.get("protocol.sweep.refresh_amplitude_pool_ms", "")
-                ),
+                chunk=_fmt(row.get("protocol.sweep.amplitude_chunk_ms", "")),
                 run_pool=_fmt(row.get("simulation.run_pool_ms", "")),
                 dispatch=_fmt(row.get("kernel.dispatch_jax_ms", "")),
                 wait=_fmt(row.get("kernel.wait_ms", "")),
@@ -851,9 +1186,7 @@ def _format_progress(row: dict[str, Any]) -> str:
         f"{row['phase']}#{row['repeat']}: "
         f"wall={float(row['wall_ms']):.1f} ms "
         f"build_plan={_fmt(row.get('dispatch.build_plan_ms', ''))} ms "
-        f"build_pool={_fmt(row.get('protocol.sweep.build_amplitude_pool_ms', ''))} ms "
-        "refresh_pool="
-        f"{_fmt(row.get('protocol.sweep.refresh_amplitude_pool_ms', ''))} ms "
+        f"chunk={_fmt(row.get('protocol.sweep.amplitude_chunk_ms', ''))} ms "
         f"wait={_fmt(row.get('kernel.wait_ms', ''))} ms"
     )
 

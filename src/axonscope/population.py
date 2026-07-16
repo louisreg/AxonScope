@@ -28,6 +28,9 @@ class AxonPopulation(Sequence[AxonInstance]):
         name: str | None = None,
     ) -> None:
         self._items = _normalize_population_items(axons)
+        self._axon_templates, self._row_template_indices = _index_axon_templates(
+            self._items
+        )
         self.name = name
 
     @classmethod
@@ -73,7 +76,26 @@ class AxonPopulation(Sequence[AxonInstance]):
     def axons(self) -> tuple[Axon, ...]:
         """Return the descriptive axons in population order."""
 
-        return tuple(item.axon for item in self._items)
+        return tuple(
+            self._axon_templates[index] for index in self._row_template_indices
+        )
+
+    @property
+    def axon_templates(self) -> tuple[Axon, ...]:
+        """Return unique descriptive axons in first-occurrence order.
+
+        Population rows may safely share immutable :class:`Axon` objects. This
+        compact view lets planning and preparation consume that sharing without
+        rediscovering it from every row.
+        """
+
+        return self._axon_templates
+
+    @property
+    def row_template_indices(self) -> tuple[int, ...]:
+        """Map each population row to :attr:`axon_templates`."""
+
+        return self._row_template_indices
 
     @property
     def instances(self) -> tuple[AxonInstance, ...]:
@@ -126,6 +148,25 @@ def _normalize_population_items(axons: AxonPopulationInput) -> tuple[AxonInstanc
         detail = ", ".join(invalid)
         raise TypeError(f"AxonPopulation received invalid entries: {detail}.")
     return tuple(items)
+
+
+def _index_axon_templates(
+    items: tuple[AxonInstance, ...],
+) -> tuple[tuple[Axon, ...], tuple[int, ...]]:
+    """Index immutable axon templates by identity in one population pass."""
+
+    templates: list[Axon] = []
+    indices: list[int] = []
+    template_index_by_identity: dict[int, int] = {}
+    for item in items:
+        identity = id(item.axon)
+        template_index = template_index_by_identity.get(identity)
+        if template_index is None:
+            template_index = len(templates)
+            template_index_by_identity[identity] = template_index
+            templates.append(item.axon)
+        indices.append(template_index)
+    return tuple(templates), tuple(indices)
 
 
 __all__ = ["AxonPopulation", "AxonPopulationInput"]

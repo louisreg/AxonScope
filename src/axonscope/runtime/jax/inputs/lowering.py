@@ -7,9 +7,13 @@ formats directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Sequence
 
+from axonscope.dispatcher.numeric_axis import (
+    ExtracellularWaveformAxisInput,
+    NumericAxisInput,
+)
 from axonscope.runtime.input_contract import (
     ExtracellularInputFormat,
     ExtracellularLoweringCapabilities,
@@ -121,6 +125,51 @@ class PlannedInputLowering:
     extracellular_mode: ExtracellularLoweringMode | None = None
 
 
+def lower_numeric_axis_input(
+    extracellular: LoweredExtracellularInput,
+    axis_input: NumericAxisInput,
+    *,
+    source_size: int,
+    tsim_ms: float,
+    dt_ms: float,
+    dtype_local: Any,
+    include_initial_previous: bool,
+) -> LoweredExtracellularInput:
+    """Lower one typed numeric-axis input through the backend input contract."""
+
+    if not isinstance(axis_input, ExtracellularWaveformAxisInput):
+        raise RuntimeError(
+            "JAX does not support numeric-axis input "
+            f"{type(axis_input).__name__!r}."
+        )
+
+    factorized = extracellular.factorized
+    if factorized is None:
+        raise RuntimeError(
+            "compact waveform-axis execution requires factorized extracellular input; "
+            f"lowering selected {extracellular.format!r}."
+        )
+    from axonscope.runtime.jax.inputs.extracellular import (
+        with_extracellular_waveform_axis,
+    )
+
+    axis_payload = with_extracellular_waveform_axis(
+        factorized,
+        axis_input,
+        source_size=source_size,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        dtype_local=dtype_local,
+        include_initial_previous=include_initial_previous,
+    )
+    return replace(
+        extracellular,
+        midpoint=axis_payload,
+        initial_previous=None,
+        mode=ExtracellularLoweringMode.CURRENT_TABLE,
+    )
+
+
 def lower_single_cable_intracellular_input(
     *,
     group: DispatchGroup,
@@ -215,6 +264,7 @@ def lower_single_cable_extracellular_input(
     intracellular: LoweredIntracellularInput,
     observer_plan: Any | None,
     require_factorized: bool = False,
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> LoweredExtracellularInput:
     """Lower single-cable extracellular inputs to zero, factorized, or dense."""
 
@@ -245,6 +295,7 @@ def lower_single_cable_extracellular_input(
         dtype_local=runtime.membrane.dtype,
         single_cable_lower=runtime.cable.lower,
         single_cable_upper=runtime.cable.upper,
+        numeric_axis_shape=numeric_axis_shape,
     )
     if factorized is not None:
         return LoweredExtracellularInput(
@@ -292,6 +343,7 @@ def lower_double_cable_extracellular_input(
     tsim_ms: float,
     dt_ms: float,
     require_factorized: bool = False,
+    numeric_axis_shape: tuple[int, int] | None = None,
 ) -> LoweredExtracellularInput:
     """Lower double-cable extracellular inputs.
 
@@ -316,6 +368,7 @@ def lower_double_cable_extracellular_input(
         axon_z_um=cohort.axon_z_um,
         dtype_local=runtime.membrane.dtype,
         include_initial_previous=True,
+        numeric_axis_shape=numeric_axis_shape,
     )
     if factorized is not None and supports_compact_double_cable_factorized(
         factorized
@@ -458,8 +511,19 @@ def supports_compact_double_cable_factorized(
     mode = _factorized_extracellular_mode(factorized)
     if not JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES.supports(mode):
         return False
-    if factorized.drive_count != 1:
-        return False
+    if factorized.drive_count > 1:
+        current_shape = tuple(
+            int(dim) for dim in getattr(factorized.current_mid_A, "shape", ())
+        )
+        previous_shape = tuple(int(dim) for dim in getattr(previous, "shape", ()))
+        footprint_shape = tuple(
+            int(dim) for dim in getattr(factorized.footprint_mV_per_A, "shape", ())
+        )
+        return bool(
+            len(footprint_shape) == 3
+            and len(current_shape) in {2, 3}
+            and len(previous_shape) in {1, 2}
+        )
     previous_is_scalar = jnp.asarray(previous).ndim == 0
     if factorized.shared_current:
         return bool(previous_is_scalar)
@@ -503,6 +567,7 @@ __all__ = [
     "has_intracellular_contexts",
     "lower_double_cable_extracellular_input",
     "lower_double_cable_intracellular_input",
+    "lower_numeric_axis_input",
     "lower_single_cable_extracellular_input",
     "lower_single_cable_intracellular_input",
     "plan_input_lowering",

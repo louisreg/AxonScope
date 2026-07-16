@@ -138,32 +138,16 @@ def main() -> None:
             simulation.add_extracellular_stimulation(stimulation=stimulation)
             pool.append(simulation)
 
-        # Step 4: recruitment_sweep calls this callback once per row and sampled
-        # amplitude. Only the temporal waveform changes; the amplitude samples
-        # keep the same positive "current magnitude" meaning for all waveforms.
-        def update_waveform_current(
-            simulation: axs.AxonInstance,
-            current_magnitude: Any,
-            *,
-            waveform_name: str,
-        ) -> None:
-            stimulation = simulation.extracellular_stimulation
-            if stimulation is None:
-                raise ValueError("simulation has no extracellular stimulation to update.")
-            drive = stimulation.drives[0]
-            updated = stimulation.replace_drive(
-                drive.id,
-                stimulus=build_waveform_stimulus(waveform_name, current_magnitude),
+        update_waveform_current = axs.protocols.ExtracellularWaveformUpdate(
+            lambda current_magnitude, name=waveform: build_waveform_stimulus(
+                name,
+                current_magnitude,
             )
-            simulation.add_extracellular_stimulation(stimulation=updated, replace=True)
+        )
 
         curve = axs.protocols.recruitment_sweep(
             tuple(pool),
-            update=lambda sim, current, name=waveform: update_waveform_current(
-                sim,
-                current,
-                waveform_name=name,
-            ),
+            update=update_waveform_current,
             values=amplitudes,
             duration=3.0 * axs.ms,
             dt=0.02 * axs.ms,

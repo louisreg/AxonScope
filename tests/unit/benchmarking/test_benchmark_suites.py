@@ -564,13 +564,13 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
         curve_context="threshold",
     )
     pool = phase_pool.pool
-    original_stimulation_ids = [
-        id(simulation.extracellular_stimulation)
+    original_stimulations = [
+        simulation.extracellular_stimulation
         for simulation in pool
         if simulation.extracellular_stimulation is not None
     ]
-    original_stimulus_ids = [
-        id(simulation.extracellular_stimulation.drives[0].stimulus)
+    original_stimuli = [
+        simulation.extracellular_stimulation.drives[0].stimulus
         for simulation in pool
         if simulation.extracellular_stimulation is not None
     ]
@@ -578,16 +578,32 @@ def test_curve_workload_can_update_pool_amplitudes_without_rebuilding():
     _update_pool_amplitudes(phase_pool, np.asarray([0.3, 0.4], dtype=float), options)
 
     assert [meta["row"] for meta in row_meta] == [0, 1]
-    assert [
-        id(simulation.extracellular_stimulation)
+    updated_stimulations = [
+        simulation.extracellular_stimulation
         for simulation in pool
         if simulation.extracellular_stimulation is not None
-    ] == original_stimulation_ids
-    assert [
-        id(simulation.extracellular_stimulation.drives[0].stimulus)
+    ]
+    updated_stimuli = [
+        simulation.extracellular_stimulation.drives[0].stimulus
         for simulation in pool
         if simulation.extracellular_stimulation is not None
-    ] == original_stimulus_ids
+    ]
+    assert all(
+        updated is not original
+        for updated, original in zip(
+            updated_stimulations,
+            original_stimulations,
+            strict=True,
+        )
+    )
+    assert all(
+        updated is not original
+        for updated, original in zip(
+            updated_stimuli,
+            original_stimuli,
+            strict=True,
+        )
+    )
     currents = []
     for simulation in pool:
         stimulation = simulation.extracellular_stimulation
@@ -704,11 +720,13 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
     assert all(stimulation is not None for stimulation in stimulations)
     assert len({id(stimulation) for stimulation in stimulations}) == 3
     assert len(set(original_stimulus_ids)) == 1
-    assert [
+    updated_stimulus_ids = [
         id(stimulation.drives[0].stimulus)
         for stimulation in stimulations
         if stimulation is not None
-    ] == original_stimulus_ids
+    ]
+    assert len(set(updated_stimulus_ids)) == 1
+    assert updated_stimulus_ids[0] != original_stimulus_ids[0]
     assert calls == [0.5]
     currents = [
         float(np.asarray(stimulation.drives[0].stimulus.evaluate([0.21], unit=axs.uA))[0])
@@ -716,22 +734,6 @@ def test_curve_workload_reuses_common_amplitude_stimulus_builds(monkeypatch):
         if stimulation is not None
     ]
     np.testing.assert_allclose(currents, [-0.5, -0.5, -0.5])
-
-
-def test_curve_workload_stimulus_copy_reuses_read_only_sample_buffers():
-    source = axs.Stimulus.pulse(
-        start=0.1 * axs.ms,
-        amplitude=2.0 * axs.uA,
-        duration=0.2 * axs.ms,
-    ).as_unit(axs.A)
-    target = axs.Stimulus.constant(0.0, unit=axs.A)
-
-    curve_runtime._copy_stimulus_state(target=target, source=source)
-
-    assert target.t is source.t
-    assert target.y is source.y
-    assert not target.t.flags.writeable
-    assert not target.y.flags.writeable
 
 
 def test_curve_workload_reused_pool_keeps_stimulus_source_cache(tmp_path):
@@ -769,7 +771,7 @@ def test_curve_workload_reused_pool_keeps_stimulus_source_cache(tmp_path):
         event
         for event in report.events
         if event.name == "curve.update_amplitudes.rows"
-        and event.metadata.get("curve_update_mode") == "row_stimulus_mutation"
+        and event.metadata.get("curve_update_mode") == "row_stimulations"
     ]
     assert [
         (
@@ -932,7 +934,13 @@ def test_threshold_single_cable_row_local_stimuli_keep_one_dispatch_group():
         curve_context="threshold",
     )
     assert phase_pool.shared_stimulus is None
-    assert len({id(handle.stimulus) for handle in phase_pool.update_handles}) == 3
+    assert len(
+        {
+            id(instance.extracellular_stimulation.drives[0].stimulus)
+            for instance in phase_pool.pool
+            if instance.extracellular_stimulation is not None
+        }
+    ) == 3
 
     plan = build_dispatch_plan(phase_pool.pool)
     identity_key = dispatch_plan_identity_key(phase_pool.pool)

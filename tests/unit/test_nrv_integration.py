@@ -151,6 +151,26 @@ def test_population_from_nrv_builds_axonscope_population_without_footprints():
     assert bridge.axons[0].n_compartments > 0
 
 
+def test_population_from_nrv_shares_only_exact_axon_templates():
+    fascicle = _FakeFascicle(
+        [
+            (0, {"types": 1, "diameters": 8.0, "y": 1.0, "z": 2.0, "node_shift": 0.25}),
+            (1, {"types": 1, "diameters": 8.0, "y": 3.0, "z": 4.0, "node_shift": 0.25}),
+            (2, {"types": 1, "diameters": 8.0, "y": 5.0, "z": 6.0, "node_shift": 0.50}),
+        ],
+        {"keep": [True, True, True]},
+    )
+
+    bridge = axs_nrv.population_from_nrv(
+        SimpleNamespace(fascicles={0: fascicle}),
+        nerve_length_um=10_000.0,
+    )
+
+    assert bridge.axons[0] is bridge.axons[1]
+    assert bridge.axons[2] is not bridge.axons[0]
+    assert bridge.instances[0] is not bridge.instances[1]
+
+
 def test_footprints_from_nrv_samples_all_electrodes_for_population_bridge():
     rows = (
         axs_nrv.NRVFiberRow("0", 0, "mrg", 8.0, 10.0, 20.0),

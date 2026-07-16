@@ -41,7 +41,13 @@ def double_cable_kernel_group(group: DispatchGroup) -> DispatchGroup:
         ),
         mode=group.mode,
         nx=int(target_nx),
+        structure=group.structure.padded_with_last(
+            group.items[-1],
+            target_size - group.size,
+        ),
         geometry_shared=False,
+        numeric_axis=group.numeric_axis,
+        numeric_axis_source_size=group.numeric_axis_source_size,
     )
 
 

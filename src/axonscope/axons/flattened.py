@@ -106,6 +106,17 @@ class FlattenedLayout:
         if np.any(Cm_uF_cm2.astype(float) <= 0.0):
             raise ValueError("Cm_uF_cm2 must be strictly positive.")
 
+        for array in (
+            x_um,
+            edges_um,
+            lengths_um,
+            diam_um,
+            Ra_ohm_cm,
+            Cm_uF_cm2,
+            section_indices,
+        ):
+            array.setflags(write=False)
+
         object.__setattr__(self, "x_um", x_um)
         object.__setattr__(self, "edges_um", edges_um)
         object.__setattr__(self, "lengths_um", lengths_um)
@@ -136,9 +147,15 @@ class FlattenedLayout:
 def flatten_layout(layout: "Layout") -> FlattenedLayout:
     """Derive canonical per-compartment arrays from a descriptive layout."""
 
+    cached = getattr(layout, "_flattened_cache", None)
+    if cached is not None:
+        return cached
     if layout.x_centers_um is not None:
-        return _flatten_x_centers(layout)
-    return _flatten_elements(layout)
+        flattened = _flatten_x_centers(layout)
+    else:
+        flattened = _flatten_elements(layout)
+    object.__setattr__(layout, "_flattened_cache", flattened)
+    return flattened
 
 
 def _flatten_x_centers(layout: "Layout") -> FlattenedLayout:

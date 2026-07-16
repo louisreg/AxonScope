@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from axonscope.preparation.axon_rows import MaterializedAxonRows
 
 
 EXTRACELLULAR_SPACE_FIELDS = (
@@ -33,6 +36,247 @@ class ExtracellularRuntimeArrays:
     right_i: np.ndarray
     left_e: np.ndarray
     right_e: np.ndarray
+
+
+@dataclass(frozen=True)
+class CableRuntimeRows:
+    """Template-major cable arrays before population gathering."""
+
+    lower: np.ndarray
+    diag: np.ndarray
+    upper: np.ndarray
+    area_cm2: np.ndarray
+
+
+@dataclass(frozen=True)
+class ExtracellularRuntimeRows:
+    """Template-major double-cable arrays before population gathering."""
+
+    Cm_abs: np.ndarray
+    Cx_abs: np.ndarray
+    Gx_abs: np.ndarray
+    Gax_e: np.ndarray
+    Gax_i: np.ndarray
+    left_i: np.ndarray
+    right_i: np.ndarray
+    left_e: np.ndarray
+    right_e: np.ndarray
+
+
+def cable_runtime_rows_numpy(
+    rows: MaterializedAxonRows,
+    *,
+    dtype: np.dtype,
+    include_area: bool,
+) -> CableRuntimeRows:
+    """Lower all unique axon templates to cable arrays with NumPy."""
+
+    lower, diag, upper = diffusion_operator_rows_numpy(rows, dtype=dtype)
+    if include_area:
+        area = compartment_area_rows_cm2_numpy(rows, dtype=dtype)
+        area = _edge_pad_template_rows(area, rows.template_nx)
+    else:
+        area = np.zeros_like(lower)
+    return CableRuntimeRows(
+        lower=_readonly(lower),
+        diag=_readonly(diag),
+        upper=_readonly(upper),
+        area_cm2=_readonly(area),
+    )
+
+
+def diffusion_operator_rows_numpy(
+    rows: MaterializedAxonRows,
+    *,
+    dtype: np.dtype,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized diffusion coefficients for a materialized template table."""
+
+    dtype = np.dtype(dtype)
+    valid = np.asarray(rows.valid_mask, dtype=bool)
+    template_nx = np.asarray(rows.template_nx, dtype=np.intp)
+    template_count, nx = valid.shape
+    edge_valid = valid[:, :-1] & valid[:, 1:]
+
+    lengths_cm = np.asarray(rows.compartment_lengths_um, dtype=dtype) * dtype.type(1e-4)
+    diam_um = np.asarray(rows.diam_um, dtype=dtype)
+    ra_ohm_cm = np.asarray(rows.Ra_ohm_cm, dtype=dtype)
+    cm_uF_cm2 = np.asarray(rows.Cm_uF_cm2, dtype=dtype)
+
+    area_cm2 = np.pi * (diam_um * dtype.type(1e-4)) * lengths_cm
+    radius_cm = dtype.type(0.5) * diam_um * dtype.type(1e-4)
+    cross_section_cm2 = np.pi * radius_cm**2
+    edge_resistance = (
+        ra_ohm_cm[:, :-1]
+        * (dtype.type(0.5) * lengths_cm[:, :-1])
+        / np.maximum(cross_section_cm2[:, :-1], dtype.type(1e-30))
+        + ra_ohm_cm[:, 1:]
+        * (dtype.type(0.5) * lengths_cm[:, 1:])
+        / np.maximum(cross_section_cm2[:, 1:], dtype.type(1e-30))
+    )
+    gax_i_mS = np.where(
+        edge_valid,
+        dtype.type(1e3) / np.maximum(edge_resistance, dtype.type(1e-18)),
+        dtype.type(0),
+    )
+    cm_abs_uF = cm_uF_cm2 * area_cm2
+    heterogeneous_lower = np.zeros((template_count, nx), dtype=dtype)
+    heterogeneous_upper = np.zeros((template_count, nx), dtype=dtype)
+    heterogeneous_lower[:, 1:] = np.where(
+        edge_valid,
+        gax_i_mS / np.maximum(cm_abs_uF[:, 1:], dtype.type(1e-30)),
+        dtype.type(0),
+    )
+    heterogeneous_upper[:, :-1] = np.where(
+        edge_valid,
+        gax_i_mS / np.maximum(cm_abs_uF[:, :-1], dtype.type(1e-30)),
+        dtype.type(0),
+    )
+    heterogeneous_diag = -(heterogeneous_lower + heterogeneous_upper)
+
+    counts = np.maximum(template_nx, 1).astype(dtype)
+    mean_diam = np.sum(np.where(valid, diam_um, 0), axis=1) / counts
+    mean_ra = np.sum(np.where(valid, ra_ohm_cm, 0), axis=1) / counts
+    mean_cm = np.sum(np.where(valid, cm_uF_cm2, 0), axis=1) / counts
+    uniform_radius_cm = dtype.type(0.5) * mean_diam * dtype.type(1e-4)
+    capacitance = (
+        dtype.type(2.0)
+        * np.pi
+        * uniform_radius_cm
+        * mean_cm
+        * dtype.type(1e-6)
+    )
+    axial_resistance = mean_ra / (np.pi * uniform_radius_cm**2)
+    diffusion = dtype.type(1.0) / (axial_resistance * capacitance) / dtype.type(1000.0)
+
+    uniform_lower = np.zeros((template_count, nx), dtype=dtype)
+    uniform_diag = np.zeros((template_count, nx), dtype=dtype)
+    uniform_upper = np.zeros((template_count, nx), dtype=dtype)
+    h = np.asarray(rows.h_cm, dtype=dtype)
+    row_ids = np.arange(template_count)
+    last = template_nx - 1
+    last_edge = template_nx - 2
+    first_h = h[:, 0]
+    last_h = h[row_ids, last_edge]
+    left_coef = dtype.type(2.0) * diffusion / (first_h**2)
+    right_coef = dtype.type(2.0) * diffusion / (last_h**2)
+    if nx > 2:
+        h_left = h[:, :-1]
+        h_right = h[:, 1:]
+        interior_valid = valid[:, 1:-1] & valid[:, 2:]
+        safe_h_left = np.where(interior_valid, h_left, dtype.type(1))
+        safe_h_right = np.where(interior_valid, h_right, dtype.type(1))
+        denom = safe_h_left + safe_h_right
+        uniform_lower[:, 1:-1] = np.where(
+            interior_valid,
+            dtype.type(2.0) * diffusion[:, None] / (safe_h_left * denom),
+            dtype.type(0),
+        )
+        uniform_diag[:, 1:-1] = np.where(
+            interior_valid,
+            -dtype.type(2.0)
+            * diffusion[:, None]
+            / (safe_h_left * safe_h_right),
+            dtype.type(0),
+        )
+        uniform_upper[:, 1:-1] = np.where(
+            interior_valid,
+            dtype.type(2.0) * diffusion[:, None] / (safe_h_right * denom),
+            dtype.type(0),
+        )
+    uniform_diag[:, 0] = -left_coef
+    uniform_upper[:, 0] = left_coef
+    uniform_lower[row_ids, last] = right_coef
+    uniform_diag[row_ids, last] = -right_coef
+
+    heterogeneous = np.asarray(
+        rows.has_heterogeneous_cable_properties,
+        dtype=bool,
+    )[:, None]
+    lower = np.where(heterogeneous, heterogeneous_lower, uniform_lower)
+    diag = np.where(heterogeneous, heterogeneous_diag, uniform_diag)
+    upper = np.where(heterogeneous, heterogeneous_upper, uniform_upper)
+    return _readonly(lower), _readonly(diag), _readonly(upper)
+
+
+def compartment_area_rows_cm2_numpy(
+    rows: MaterializedAxonRows,
+    *,
+    dtype: np.dtype,
+) -> np.ndarray:
+    """Return template-major membrane area arrays in cm2."""
+
+    dtype = np.dtype(dtype)
+    diam = np.asarray(rows.diam_um, dtype=dtype)
+    length_cm = np.asarray(rows.compartment_lengths_um, dtype=dtype) * dtype.type(1e-4)
+    area = np.pi * (diam * dtype.type(1e-4)) * length_cm
+    return _readonly(np.where(rows.valid_mask, area, dtype.type(0)))
+
+
+def extracellular_runtime_rows_numpy(
+    rows: MaterializedAxonRows,
+    *,
+    dtype: np.dtype,
+) -> ExtracellularRuntimeRows:
+    """Lower all unique templates to padded double-cable arrays with NumPy."""
+
+    dtype = np.dtype(dtype)
+    valid = np.asarray(rows.valid_mask, dtype=bool)
+    edge_valid = valid[:, :-1] & valid[:, 1:]
+    area = compartment_area_rows_cm2_numpy(rows, dtype=dtype)
+    cm_abs = np.asarray(rows.Cm_uF_cm2, dtype=dtype) * area
+    cx_abs = np.asarray(rows.xc_uF_cm2, dtype=dtype) * area
+    gx_abs = np.asarray(rows.xg_S_cm2, dtype=dtype) * dtype.type(1e3) * area
+
+    xraxial = np.asarray(rows.xraxial_MOhm_per_cm, dtype=dtype)
+    dx_cm = np.asarray(rows.dx_cm, dtype=dtype)
+    edge_resistance = (
+        xraxial[:, :-1] * dtype.type(0.5) * dx_cm[:, :-1]
+        + xraxial[:, 1:] * dtype.type(0.5) * dx_cm[:, 1:]
+    )
+    gax_e = np.where(
+        edge_valid,
+        dtype.type(1e-3) / np.maximum(edge_resistance, dtype.type(1e-18)),
+        dtype.type(0),
+    )
+    lower, _, upper = diffusion_operator_rows_numpy(rows, dtype=dtype)
+    gax_i = np.where(
+        edge_valid,
+        dtype.type(0.5)
+        * (upper[:, :-1] * cm_abs[:, :-1] + lower[:, 1:] * cm_abs[:, 1:]),
+        dtype.type(0),
+    )
+    zero = np.zeros((rows.template_count, 1), dtype=dtype)
+    left_i = np.concatenate((zero, gax_i), axis=1)
+    right_i = np.concatenate((gax_i, zero), axis=1)
+    left_e = np.concatenate((zero, gax_e), axis=1)
+    right_e = np.concatenate((gax_e, zero), axis=1)
+    return ExtracellularRuntimeRows(
+        Cm_abs=_readonly(_edge_pad_template_rows(cm_abs, rows.template_nx)),
+        Cx_abs=_readonly(_edge_pad_template_rows(cx_abs, rows.template_nx)),
+        Gx_abs=_readonly(_edge_pad_template_rows(gx_abs, rows.template_nx)),
+        Gax_e=_readonly(gax_e),
+        Gax_i=_readonly(gax_i),
+        left_i=_readonly(left_i),
+        right_i=_readonly(right_i),
+        left_e=_readonly(left_e),
+        right_e=_readonly(right_e),
+    )
+
+
+def _edge_pad_template_rows(values: np.ndarray, template_nx: np.ndarray) -> np.ndarray:
+    width = int(values.shape[1])
+    indices = np.minimum(
+        np.arange(width, dtype=np.intp)[None, :],
+        np.asarray(template_nx, dtype=np.intp)[:, None] - 1,
+    )
+    return np.take_along_axis(values, indices, axis=1)
+
+
+def _readonly(values: np.ndarray) -> np.ndarray:
+    array = np.asarray(values)
+    array.setflags(write=False)
+    return array
 
 
 def diffusion_operator_coeffs_numpy(
@@ -228,12 +472,18 @@ def pad_gate_array_numpy(
 
 
 __all__ = [
+    "CableRuntimeRows",
     "EXTRACELLULAR_EDGE_FIELDS",
     "EXTRACELLULAR_SPACE_FIELDS",
     "ExtracellularRuntimeArrays",
+    "ExtracellularRuntimeRows",
+    "cable_runtime_rows_numpy",
     "compartment_area_cm2_numpy",
+    "compartment_area_rows_cm2_numpy",
+    "diffusion_operator_rows_numpy",
     "diffusion_operator_coeffs_numpy",
     "extracellular_runtime_numpy",
+    "extracellular_runtime_rows_numpy",
     "pad_edge_array_numpy",
     "pad_gate_array_numpy",
     "pad_space_array_numpy",

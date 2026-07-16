@@ -26,8 +26,6 @@ from axonscope.axons.layout import Layout
 from axonscope.axons.templates.mrg_like_double_cable import (
     MRGLikeDoubleCableTemplate,
     SectionCompartments,
-    default_mrg_like_membranes,
-    layout_from_mrg_like_geometry,
     mrg_like_layout,
     mrg_like_length_from_nodes,
     mrg_like_nodes_from_length,
@@ -254,12 +252,14 @@ class MRG(Myelinated):
             Periaxonal spaces around node/MYSA, FLUT, and STIN sections.
         """
 
-        template = MRGLikeDoubleCableTemplate(
+        layout = mrg_like_layout(
             diameter=diameter,
             nodes=nodes,
             length=length,
             compartments=compartments,
             x_shift=x_shift,
+            membranes=membranes,
+            temperature=temperature,
             fit_all=fit_all,
             mysa_length=mysa_length,
             node_length=node_length,
@@ -269,16 +269,6 @@ class MRG(Myelinated):
             node_space=node_space,
             flut_space=flut_space,
             stin_space=stin_space,
-        )
-        geometry = template.geometry()
-        section_layout = membranes or default_mrg_like_membranes(
-            geometry,
-            temperature=temperature,
-        )
-        layout = layout_from_mrg_like_geometry(
-            geometry,
-            membranes=section_layout,
-            compartments=compartments,
         )
         super().__init__(
             layout=layout,

@@ -57,11 +57,59 @@ without changing their public workflow, records one cold run plus optional
 warmups/repeats, and writes `runs.csv`, per-run benchmark traces, and
 `report.md`.
 
+`benchmark/examples/basic_08_startup.py` is the dedicated construction/startup
+probe for the basic-08 workload. It reproduces the workload without importing
+or modifying the public example and instruments heavy module imports, Python
+population construction, position and footprint generation, stimulation
+attachment, protocol setup, and optional first/full sweep execution. The
+default stops before the sweep so a 1000-fiber-per-family startup profile stays
+focused:
+
+```bash
+MPLBACKEND=Agg python benchmark/examples/basic_08_startup.py \
+  --fibers-per-family 1000 \
+  --scope startup \
+  --profile \
+  --output benchmark/results/basic_08_startup_local_f1000
+```
+
+Use `--template-policy distinct` for the public-example construction baseline
+and `--template-policy shared` to measure the proposed lazy lowering: diameter
+units are validated and quantized once, unique immutable axon templates are
+constructed once, and row-specific positions, footprints, and instances remain
+distinct.
+
+Use `--waveform-update-policy callback` to reproduce per-row
+`Stimulus`/`Drive`/`ExtracellularStimulation` replacement, or `typed` to use
+the production numeric-axis path and one reusable simulation. The typed factory
+returns one complete waveform payload for each sampled value; source simulation
+descriptions remain immutable, and positive and negative phases need not share
+one scale.
+
+Use `--scope first-amplitude` to include dispatch, preparation, JIT, and one
+solver call, or `--scope full` for all eight amplitudes. Run timing and
+`--profile` cases separately because deterministic profiling substantially
+inflates object-construction time.
+
+The exact public basic-08 P100 checkpoint after shared templates and typed
+waveform reuse is retained under
+`results/kaggle/20260715_225850_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-08-p14-gpu-timing-8e113bf`.
+It deliberately uses `--memory-trace off`; per-span JAX device-memory sampling
+substantially synchronizes this short workload and must be captured in a
+separate diagnostic run.
+
 `with_nrv_examples` is the matching executable-docs gate for
 `examples/with_nrv/01_synthetic_fascicle_geometry.py` and
 `examples/with_nrv/02_realistic_fascicle_geometry.py`. It preserves the public
 NRV-to-AxonScope handoff path but uses smoke-scale defaults unless explicitly
 overridden, because NRV/FEM setup dominates the wall time.
+
+The realistic CPU typed-waveform validation is retained in
+`results/with_nrv_01_realistic_cpu_20260715_typed_waveform_r1`. It runs example
+01 with 193 generated axons, the sampled FEM footprints, 3 ms at 1 us, and 21
+sequential amplitudes. Use `runs.csv` for the NRV/AxonScope boundary and
+`01/sequential/cold_00/run_pool_detail.csv` for per-amplitude single/double
+cable, preparation, enqueue/dispatch, and wait timings.
 
 `recruitment_amplitude_batch` also provides the NRV-independent P14 temporal
 solver baseline. The `p14_realistic` workload keeps the AxonScope dimensions
@@ -80,11 +128,194 @@ python benchmark/run.py \
   --output benchmark/results/p14_double_cpu
 ```
 
-Each run writes aggregate timings to `runs.csv` and one row per amplitude
-batch and cable mode to `run_pool_detail.csv`, including
+Each run writes aggregate timings to `runs.csv` and one row per numeric
+amplitude chunk and cable mode to `run_pool_detail.csv`, including
 `kernel.dispatch_jax`, `kernel.wait`, their combined solver time, and solver
-percentages. Add `--profile` only for a dedicated trace run; profiling is off
-for timing baselines.
+percentages. `protocol.sweep.amplitude_chunk` records compact plan boundaries.
+Chunk sizes no longer clone `Namplitude x Naxon` Python rows: compatible
+waveforms lower to one current table and one solver invocation per chunk over
+shared source descriptions and factorized footprints. Use `--drive-count 2`
+to retain an independent nonzero static drive while the typed numeric axis
+varies the selected drive. This mode writes
+`multi_drive_route_validation.json` and fails if either cable formulation
+materializes dense `Vext`; GPU double-cable runs also require the production
+`jax_triton_loop_xb` solver. Add
+`--profile` only for a dedicated trace run; profiling is off for timing
+baselines. Use `--profile-scope run_pool` for large populations so Python
+population and dispatch-plan construction cannot fill the trace before device
+execution starts. The generic benchmark instrumentation also accepts
+`profile_span="simulation.run_pool"` for the same first-matching-span capture.
+`inputs.numeric_axis` isolates numeric waveform sampling and pattern
+construction from `inputs.extracellular`, which owns the source cohort's
+static footprints. Its metadata reports logical/kernel batch sizes, unique
+temporal pattern count, cache hits/misses, and current/index payload bytes.
+
+For JAX Perfetto JSON traces, use
+`python benchmark/analysis/jax_perfetto_summary.py TRACE --tracks` to list
+host/device tracks, or add `--track-pattern device:GPU` for GPU kernels only.
+Device durations explain where asynchronous work actually ran; do not interpret
+`kernel.wait` alone as solver time or `kernel.dispatch_jax` as pure host
+overhead. Profiling perturbs host timings, so retain an unprofiled matching run
+for wall-time comparisons.
+
+The P100 multi-drive checkpoint is
+`results/kaggle/20260716_120035_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14c-multidrive-p100-400cf49`.
+It covers 16 Rattay-Aberham and 16 MRG axons, two distinct point-source
+footprints, four amplitudes, and chunk sizes `1/full`. Every phase returned
+activation counts `0 18 20 21`; both cable modes stayed factorized, and the
+independent double-cable Triton comparison passed at `1.439e-7` maximum absolute
+error.
+
+The matching attribution trace is
+`results/kaggle/20260716_121220_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14c-dispatch-profile-p100-400cf49`.
+Its warm full run recorded `531.8 ms` in `kernel.dispatch_jax`, `0.12 ms` in the
+final wait, and `330.9 ms` of events on the serial GPU compute stream. Therefore
+dispatch absorbed substantial solver/device execution through JAX backpressure;
+it is not a separable non-solver cost. The trace contains 67,675 compute-stream
+events, including 3,072 fused double-cable Triton solves (`136.4 ms`) and 3,000
+single-cable PCR loop solves (`25.1 ms`) plus their first passes (`9.4 ms`).
+This is launch/fusion evidence, not a timing baseline: Perfetto inflated host
+preparation and total wall time.
+
+The large-population follow-up is
+`results/kaggle/20260716_142325_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14c-run-pool-profile-1024-p100-9725f34-v2`.
+It profiles only the canonical `simulation.run_pool` span for 1024 mixed axons,
+two drives, and one 300 uA amplitude. The warm trace stays below saturation and
+contains 63,811 compute-stream events totaling `898.7 ms`; host
+`simulation.run_pool` is `2.757 s`. The non-overlapping host attribution is
+`runtime.prepare=1.047 s`, numeric-axis lowering about `0.339 s`, factorized
+extracellular preparation `0.266 s`, `kernel.enqueue=1.013 s`, and final
+`kernel.wait=68.7 ms`. Inside preparation, deep runtime-signature construction
+takes about `0.971 s`, including `0.850 s` in repeated `repr`; this is the next
+P14D host target. Trace serialization occurs after the measured run-pool span
+and inflates the enclosing sweep, so use the matching unprofiled run for
+end-to-end timing.
+
+P14D's strict unprofiled trusted-signature A/B uses
+`results/kaggle/20260716_145813_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-signature-baseline-1024-p100-9725f34`
+and
+`results/kaggle/20260716_145512_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-trusted-signatures-1024-p100-95b1327`.
+Both runs return 758 activated axons for the same 1024 mixed axons, two drives,
+and one 300 uA amplitude. Warm `runtime.prepare` drops from `914.1` to
+`67.8 ms`, `simulation.run_pool` from `2.190` to `1.422 s`, and the complete
+sweep from `2.473` to `1.773 s`. Enqueue, dispatch, and wait remain stable;
+the gain is preparation reuse. Cold compilation varies between these single
+runs, so they are not evidence for a cold solver speedup.
+
+The indexed multi-drive P100 comparison uses
+`results/kaggle/20260716_152802_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-indexed-baseline-1024-p100-95b1327`
+and the retained compact-host run
+`results/kaggle/20260716_153356_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-compact-host-1024-p100-73aadd8`.
+Both return `0 565 637 707 758` for 1024 mixed axons, two drives, and five
+amplitudes. Each cable group now carries five unique `[S, Nt]` current patterns
+(`120 KB`) plus row indices instead of 2560 repeated patterns (`61.44 MB`).
+Warm `simulation.run_pool` is `4.545 s` before and `4.440 s` after; dispatch is
+stable within about 0.5%. A rejected intermediate run ending in
+`axs-p14d-indexed-multidrive-1024-p100-e432bb7` fused the gather into the large
+double-cable JIT and raised cold double dispatch from `7.02 s` to `10.09 s`.
+The retained route therefore keeps the compact host representation while
+preserving the canonical solver executable.
+
+The follow-up P100 run
+`results/kaggle/20260716_162034_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-deferred-current-1024-p100-31bd6d6`
+stops sampling the base extracellular currents when a typed numeric axis will
+immediately replace them. It returns the same `0 565 637 707 758` activations.
+Against the retained compact-host run, warm `inputs.extracellular` decreases
+from `438.1` to `380.1 ms` and `simulation.run_pool` from `4.440` to `4.417 s`;
+dispatch (`3.512` versus `3.498 s`) and wait (`223.9` versus `223.8 ms`) are
+stable. The removed `current_scaled_shared_waveform` spans totaled `132.7 ms`;
+the net input reduction is smaller because footprint construction varied in
+the opposite direction. A separate prototype ending in
+`axs-p14d-footprint-reuse-1024-p100-8b7cc66` is rejected evidence: hashing full
+footprint arrays cost `378.6 ms` and raised `inputs.extracellular` to
+`530.9 ms`.
+
+The retained spatial-axis follow-up is
+`results/kaggle/20260716_163340_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-compact-spatial-1024-p100-5f1e37c`.
+For each cable group it samples `512` source footprints once and expands them
+to the trusted `2560`-row amplitude-major runtime shape. Against the preceding
+deferred-current run, warm footprint compute drops from `291.4` to `53.5 ms`,
+footprint-key construction from `37.8` to `6.5 ms`,
+`inputs.extracellular` from `380.1` to `99.1 ms`, and
+`simulation.run_pool` from `4.417` to `4.099 s`. Dispatch remains
+`3.50-3.52 s`, wait remains about `224 ms`, and activation counts remain
+exactly `0 565 637 707 758`. This is source-row spatial preparation reuse
+inside one numeric-axis run, not yet persistent prepared-plan reuse across
+separate calls.
+
+The dispatch-plan follow-up compares
+`results/kaggle/20260716_210823_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-build-plan-r3-pin-1024-p100-0c060eb`
+with
+`results/kaggle/20260716_212310_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14d-build-plan-reuse-r3-1024-p100-fae6750`.
+Both use JAX/JAXlib 0.10.2 and return exactly `0 565 637 707 758` in every
+repeat. Reusing one prepared row signature for cache lookup and normalization
+reduces median warm `dispatch.build_plan` from `397.3` to `216.4 ms` (`-45.5%`)
+while median `simulation.run_pool` remains `4.12/4.11 s`. In the optimized
+run, median cache-key construction is `11.4 ms`; normalization is `128.6 ms`,
+grouping `60.1 ms`, and group materialization `13.0 ms`. The Kaggle installer
+now derives the CUDA JAX requirement from `pyproject.toml`; the earlier run
+ending in `axs-p14d-build-plan-r3-1024-p100-5f1e37c`, which silently upgraded
+to JAX 0.11.0, is rejected as incomparable evidence.
+
+The P14E solver-bound scaling matrix uses five amplitudes
+`0,75,150,225,300 uA`, full amplitude batching, `3 ms` at `1 us`, two drives,
+and `Naxon={196,1024,4096}` separately for each cable formulation. Local CPU
+artifacts are under `results/p14e_solver_bound_cpu_local_20260716`; matching
+P100 artifacts end in
+`axs-p14e-solver-bound-{single,double}-{196,1024,4096}-p100-fae6750`.
+Warm results are:
+
+| cable | Naxon | CPU run_pool | P100 run_pool | P100 solver share | speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| single | 196 | 17.796 s | 1.032 s | 92.7% | 17.2x |
+| single | 1024 | 125.468 s | 5.056 s | 92.0% | 24.8x |
+| single | 4096 | 546.119 s | 19.391 s | 93.0% | 28.2x |
+| double | 196 | 14.064 s | 0.664 s | 94.2% | 21.2x |
+| double | 1024 | 93.229 s | 2.737 s | 93.6% | 34.1x |
+| double | 4096 | 467.803 s | 10.219 s | 93.6% | 45.8x |
+
+Solver share is the non-overlapping `(kernel.enqueue + kernel.wait) /
+simulation.run_pool`; `dispatch_jax` is nested in enqueue. Local CPU warm
+solver share is `99.6-99.8%`. Cold P100 run-pool speedups are lower but scale
+with population: `5.0/14.4/21.0x` for single cable and `1.9/9.1/22.3x` for
+double cable. The P100 routes are the factorized single-cable JAX tridiagonal
+solver and guarded double-cable `jax_triton_loop_xb`; local double cable uses
+Thomas.
+
+This establishes that `run_pool` is solver-bound, but the original campaign
+also exposed a benchmark-semantic issue: every cold/warm phase rebuilt the
+source population. At N=4096 that repeated work cost `8.37 s` single and
+`6.63 s` double and reduced complete-wall P100 solver share to `55-60%`.
+The campaign now constructs one source workload per batch policy, profiles it
+under `source_population/`, and passes the same object to cold, warmup, and
+warm phases. `wall_ms` is phase execution only,
+`source_population_build_ms` is the separately measured reusable source cost,
+and `one_shot_wall_ms` adds source construction to cold execution. Realistic
+single-cable populations now also use basic 08's canonical finite-diameter
+templates; a local N=4096 source probe contains 63 templates and takes
+`5.20 s`, versus `11.35 s` in the earlier local warm phase (`2.18x`). The
+earlier P100 source cost is not mixed into this local A/B. Activation counts in
+the earlier matrix match in every comparison except single N=1024 at 225 uA,
+where local JAX 0.10.1 returns `325/1024` and P100 JAX 0.10.2 returns
+`326/1024`. Treat a fresh corrected-semantics P100 run, that boundary row, and
+memory acceptance as open P14E validation.
+
+`kernel.dispatch_jax` is nested inside `kernel.enqueue`; do not add the two
+when reading the CSV. `kernel_solver_ms` is the non-overlapping
+`kernel.enqueue + kernel.wait` pipeline because enqueue can execute deferred
+JAX work through queue backpressure, particularly on CPU. The separate dispatch
+column remains useful for locating Python-to-JAX call overhead.
+
+The realistic workload canonicalizes diameters and shares exact single- and
+double-cable axon templates by default, matching basic 08. Use
+`--axon-template-policy distinct` only for the P14 population-construction A/B;
+it deliberately restores per-row template construction inside this benchmark
+and is not a second production execution path.
+
+Use `--mrg-template-count N` to vary exact MRG geometry diversity while keeping
+the realistic diameter set fixed at `7.3/10.0/12.8 um`. Values above three add
+intrinsic node shifts, which isolates the cost of shifted cable layouts from
+membrane-model diversity.
 
 Use `--time-chunk-steps default` or omit the option to keep AxonScope's
 recording-specific default; for observer-only runs this currently means the

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, cast
 
 from axonscope.benchmarking import (
@@ -36,6 +36,7 @@ from axonscope.runtime.jax.inputs.lowering import (
     JAX_SINGLE_CABLE_INPUT_CONTRACT,
     lower_double_cable_extracellular_input,
     lower_double_cable_intracellular_input,
+    lower_numeric_axis_input,
     lower_single_cable_extracellular_input,
     lower_single_cable_intracellular_input,
 )
@@ -188,6 +189,22 @@ def _prepare_jax_batch_group(
         tsim_ms=tsim_ms,
         dt_ms=dt_ms,
     ):
+        with benchmark_span(
+            "runtime.prepare.materialize_axons",
+            group_id=group.group_id,
+            group_size=group.size,
+            mode=group.mode,
+            nx=group.nx,
+        ):
+            cohort = prepared_cohort_for_current_group(kernel_group)
+            record_benchmark_metadata(
+                materialized_axon_rows=cohort.materialized_axons.size,
+                materialized_axon_templates=cohort.materialized_axons.template_count,
+                materialized_axon_nbytes=cohort.materialized_axons.nbytes,
+                membrane_parameter_rows=cohort.membrane_rows.unique_count,
+                membrane_parameter_cache_hits=cohort.membrane_rows.cache_hits,
+                membrane_unique_models=cohort.membrane_rows.unique_model_count,
+            )
         runtime = prepare_batch_runtime(
             kernel_group,
             tsim_ms=tsim_ms,
@@ -196,6 +213,8 @@ def _prepare_jax_batch_group(
             mode=mode,
             include_extracellular=mode == "double",
             include_area=mode == "double",
+            materialized_axons=cohort.materialized_axons,
+            membrane_rows=cohort.membrane_rows,
             runtime_context=runtime_context,
         )
         if kernel_group is not group:
@@ -213,7 +232,6 @@ def _prepare_jax_batch_group(
         group_size=group.size,
         nx=group.nx,
     ):
-        cohort = prepared_cohort_for_current_group(kernel_group)
         metadata = {
             **benchmark_array_metadata(
                 "x_positions_m",
@@ -556,6 +574,52 @@ def _extracellular_has_initial_previous(extracellular: Any) -> bool:
     )
 
 
+def _group_numeric_axis_shape(group: DispatchGroup) -> tuple[int, int] | None:
+    axis_input = group.numeric_axis
+    if axis_input is None:
+        return None
+    source_size = group.numeric_axis_source_size
+    if source_size is None:
+        raise RuntimeError("numeric-axis dispatch group is missing its source size.")
+    return int(source_size), int(axis_input.size)
+
+
+def _lower_group_numeric_axis(
+    lowered_inputs: _LoweredJaxBatchInputs,
+    *,
+    group: DispatchGroup,
+    runtime: Any,
+    tsim_ms: float,
+    dt_ms: float,
+    include_initial_previous: bool,
+) -> _LoweredJaxBatchInputs:
+    axis_input = group.numeric_axis
+    if axis_input is None:
+        return lowered_inputs
+    source_size, _axis_size = _group_numeric_axis_shape(group)
+    with benchmark_span(
+        "inputs.numeric_axis",
+        source_size=source_size,
+        axis_size=axis_input.size,
+        logical_batch_size=axis_input.size * source_size,
+        kernel_batch_size=group.size,
+        mode=group.mode,
+    ):
+        extracellular = lower_numeric_axis_input(
+            lowered_inputs.extracellular,
+            axis_input,
+            source_size=source_size,
+            tsim_ms=tsim_ms,
+            dt_ms=dt_ms,
+            dtype_local=runtime.membrane.dtype,
+            include_initial_previous=include_initial_previous,
+        )
+    return replace(
+        lowered_inputs,
+        extracellular=extracellular,
+    )
+
+
 def _emit_kernel_compile_progress(
     *,
     group: DispatchGroup,
@@ -633,6 +697,7 @@ def _lower_single_cable_inputs(
             intracellular=intracellular,
             observer_plan=observer_plan,
             require_factorized=require_factorized_extracellular,
+            numeric_axis_shape=_group_numeric_axis_shape(group),
         )
         record_extracellular_lowering_metadata(
             extracellular,
@@ -686,6 +751,7 @@ def _lower_double_cable_inputs(
             tsim_ms=tsim_ms,
             dt_ms=dt_ms,
             require_factorized=require_factorized_extracellular,
+            numeric_axis_shape=_group_numeric_axis_shape(kernel_group),
         )
         record_extracellular_lowering_metadata(
             extracellular,
@@ -749,6 +815,14 @@ def _enqueue_single_cable_batch_group(
             extracellular_stimulation_count=cohort.extracellular_stimulation_count,
         ),
     )
+    lowered_inputs = _lower_group_numeric_axis(
+        lowered_inputs,
+        group=group,
+        runtime=runtime,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        include_initial_previous=False,
+    )
     _guard_gpu_observer_extracellular_route(
         runtime_context=runtime_context,
         observer_plan=observer_plan,
@@ -785,13 +859,17 @@ def _enqueue_single_cable_batch_group(
         group_size=group.size,
         mode=group.mode,
         recording_mode=kernel_options.recording.mode,
-        timing_role="host_enqueue",
+        timing_role="enqueue_may_execute_deferred_work",
         device_synchronization=False,
         explicit_wait_span="kernel.wait",
     ):
         out = SingleCableVStimBatchKernel(
             runtime=runtime,
-            Cm_uF_cm2=group_cm_uF_cm2(group, runtime),
+            Cm_uF_cm2=group_cm_uF_cm2(
+                group,
+                runtime,
+                cohort.materialized_axons,
+            ),
             has_driven_extracellular=cohort.extracellular_stimulation_count > 0,
         ).run(
             intracellular_current_density_mid=lowered_inputs.intracellular.midpoint,
@@ -883,6 +961,14 @@ def _enqueue_double_cable_batch_group(
         dt_ms=dt_ms,
         require_factorized_extracellular=require_factorized_extracellular,
     )
+    lowered_inputs = _lower_group_numeric_axis(
+        lowered_inputs,
+        group=kernel_group,
+        runtime=runtime,
+        tsim_ms=tsim_ms,
+        dt_ms=dt_ms,
+        include_initial_previous=True,
+    )
     _guard_gpu_observer_extracellular_route(
         runtime_context=runtime_context,
         observer_plan=observer_plan,
@@ -935,7 +1021,7 @@ def _enqueue_double_cable_batch_group(
         group_size=group.size,
         mode=group.mode,
         recording_mode=kernel_options.recording.mode,
-        timing_role="host_enqueue",
+        timing_role="enqueue_may_execute_deferred_work",
         device_synchronization=False,
         explicit_wait_span="kernel.wait",
     ):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TypeAlias
 
 import numpy as np
@@ -127,6 +128,23 @@ def _compartments_for_section(value: dict[str, int] | int, section_name: str) ->
     if isinstance(value, int):
         return value
     return value.get(section_name.lower(), 1)
+
+
+def _section_compartments_cache_key(
+    value: SectionCompartments,
+) -> int | tuple[tuple[str, int], ...]:
+    normalized = _normalize_section_compartments(value)
+    if isinstance(normalized, int):
+        return normalized
+    return tuple(sorted(normalized.items()))
+
+
+def _section_compartments_from_cache_key(
+    value: int | tuple[tuple[str, int], ...],
+) -> SectionCompartments:
+    if isinstance(value, int):
+        return value
+    return dict(value)
 
 
 def mrg_like_node_spacing(diameter: length_t, *, fit_all: bool = False) -> float:
@@ -584,6 +602,36 @@ def mrg_like_layout(
     start.
     """
 
+    if membranes is None:
+        return _cached_default_mrg_like_layout(
+            round_axon_diameter_um(
+                units.require_length_um(diameter, name="diameter")
+            ),
+            _normalize_nodes(nodes),
+            None if length is None else units.require_length_um(length, name="length"),
+            _section_compartments_cache_key(compartments),
+            None if x_shift is None else units.require_length_um(x_shift, name="x_shift"),
+            bool(fit_all),
+            units.require_length_um(mysa_length, name="mysa_length"),
+            units.require_length_um(node_length, name="node_length"),
+            units.require_axoplasmic_resistivity_ohm_um(
+                axoplasmic_resistivity,
+                name="axoplasmic_resistivity",
+            ),
+            units.require_capacitance_density_uF_per_cm2(
+                myelin_capacitance,
+                name="myelin_capacitance",
+            ),
+            units.require_conductance_density_S_per_cm2(
+                myelin_conductance,
+                name="myelin_conductance",
+            ),
+            units.require_length_um(node_space, name="node_space"),
+            units.require_length_um(flut_space, name="flut_space"),
+            units.require_length_um(stin_space, name="stin_space"),
+            units.require_temperature_degC(temperature, name="temperature"),
+        )
+
     geometry = build_mrg_like_geometry(
         diameter=diameter,
         nodes=nodes,
@@ -599,14 +647,67 @@ def mrg_like_layout(
         flut_space=flut_space,
         stin_space=stin_space,
     )
-    section_membranes = membranes or default_mrg_like_membranes(
+    return layout_from_mrg_like_geometry(
         geometry,
-        temperature=temperature,
+        membranes=membranes,
+        compartments=compartments,
+    )
+
+
+@lru_cache(maxsize=256)
+def _cached_default_mrg_like_layout(
+    diameter_um: float,
+    nodes: int,
+    length_um: float | None,
+    compartments: int | tuple[tuple[str, int], ...],
+    x_shift_um: float | None,
+    fit_all: bool,
+    mysa_length_um: float,
+    node_length_um: float,
+    axoplasmic_resistivity_ohm_um: float,
+    myelin_capacitance_uF_cm2: float,
+    myelin_conductance_S_cm2: float,
+    node_space_um: float,
+    flut_space_um: float,
+    stin_space_um: float,
+    temperature_degC: float,
+) -> Layout:
+    """Build one immutable default MRG layout per canonical structural key."""
+
+    geometry = build_mrg_like_geometry(
+        diameter=units.Q_(diameter_um, "micrometer"),
+        nodes=nodes,
+        length=None if length_um is None else units.Q_(length_um, "micrometer"),
+        x_shift=(
+            None if x_shift_um is None else units.Q_(x_shift_um, "micrometer")
+        ),
+        fit_all=fit_all,
+        mysa_length=units.Q_(mysa_length_um, "micrometer"),
+        node_length=units.Q_(node_length_um, "micrometer"),
+        axoplasmic_resistivity=units.Q_(
+            axoplasmic_resistivity_ohm_um,
+            "ohm * micrometer",
+        ),
+        myelin_capacitance=units.Q_(
+            myelin_capacitance_uF_cm2,
+            "microfarad / centimeter ** 2",
+        ),
+        myelin_conductance=units.Q_(
+            myelin_conductance_S_cm2,
+            "siemens / centimeter ** 2",
+        ),
+        node_space=units.Q_(node_space_um, "micrometer"),
+        flut_space=units.Q_(flut_space_um, "micrometer"),
+        stin_space=units.Q_(stin_space_um, "micrometer"),
+    )
+    membranes = default_mrg_like_membranes(
+        geometry,
+        temperature=units.Q_(temperature_degC, "degree_Celsius"),
     )
     return layout_from_mrg_like_geometry(
         geometry,
-        membranes=section_membranes,
-        compartments=compartments,
+        membranes=membranes,
+        compartments=_section_compartments_from_cache_key(compartments),
     )
 
 
@@ -689,15 +790,23 @@ class MRGLikeDoubleCableTemplate:
             Temperature for the default membrane assignment.
         """
 
-        geometry = self.geometry()
-        section_membranes = membranes or default_mrg_like_membranes(
-            geometry,
-            temperature=temperature,
-        )
-        return layout_from_mrg_like_geometry(
-            geometry,
-            membranes=section_membranes,
+        return mrg_like_layout(
+            diameter=self.diameter,
+            nodes=self.nodes,
+            length=self.length,
             compartments=self.compartments,
+            x_shift=self.x_shift,
+            fit_all=self.fit_all,
+            mysa_length=self.mysa_length,
+            node_length=self.node_length,
+            axoplasmic_resistivity=self.axoplasmic_resistivity,
+            myelin_capacitance=self.myelin_capacitance,
+            myelin_conductance=self.myelin_conductance,
+            node_space=self.node_space,
+            flut_space=self.flut_space,
+            stin_space=self.stin_space,
+            membranes=membranes,
+            temperature=temperature,
         )
 
 

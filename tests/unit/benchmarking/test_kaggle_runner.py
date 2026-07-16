@@ -3,8 +3,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from benchmark.kaggle.kernel_entry import _benchmark_environment, _redact_env_value
+from benchmark.kaggle.kernel_entry import (
+    _benchmark_environment,
+    _jax_cuda_requirement,
+    _redact_env_value,
+)
 from benchmark.kaggle.run_kernel import main as run_kaggle
+
+
+def test_kaggle_cuda_install_preserves_project_jax_constraint(tmp_path: Path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[project]\ndependencies = ["numpy>=1.26", "jax>=0.10.1,<0.11.0"]\n',
+        encoding="utf-8",
+    )
+
+    assert (
+        _jax_cuda_requirement("cuda12", pyproject_path=pyproject)
+        == "jax[cuda12]>=0.10.1,<0.11.0"
+    )
 
 
 def test_kaggle_runner_dry_run_writes_kernel_package(tmp_path: Path):

@@ -26,7 +26,6 @@ def write_run_pool_detail(
     run_dir: Path,
     *,
     amplitudes: Sequence[float],
-    batch_amplitudes: bool,
 ) -> None:
     """Write one all/single/double timing row per run-pool invocation."""
 
@@ -49,19 +48,15 @@ def write_run_pool_detail(
             for event in events
             if _is_descendant(event, int(run_pool_event["event_id"]), by_id)
         ]
-        if batch_amplitudes:
-            batch_span = _nearest_ancestor_named(
-                run_pool_event,
-                "protocol.sweep.batched_values",
-                by_id,
-            )
-            value_count = int((batch_span or {}).get("metadata", {}).get("value_count", 0))
-            unit_amplitudes = amplitude_values[
-                completed_value_count : completed_value_count + value_count
-            ]
-        else:
-            value_count = 1
-            unit_amplitudes = amplitude_values[unit_index : unit_index + 1]
+        chunk_span = _nearest_ancestor_named(
+            run_pool_event,
+            "protocol.sweep.amplitude_chunk",
+            by_id,
+        )
+        value_count = int((chunk_span or {}).get("metadata", {}).get("value_count", 1))
+        unit_amplitudes = amplitude_values[
+            completed_value_count : completed_value_count + value_count
+        ]
 
         run_pool_ms = float(run_pool_event.get("duration_ms", 0.0))
         base = {
@@ -91,16 +86,17 @@ def write_run_pool_detail(
             row["group_ms"] = group_ms
             for stage in RUN_POOL_DETAIL_STAGES:
                 row[f"{stage}_ms"] = _sum_stage(mode_events, stage)
-            dispatch_ms = float(row["kernel.dispatch_jax_ms"])
+            enqueue_ms = float(row["kernel.enqueue_ms"])
             wait_ms = float(row["kernel.wait_ms"])
-            solver_ms = dispatch_ms + wait_ms
+            # dispatch_jax is nested in enqueue. On asynchronous backends the
+            # enqueue call can also absorb solver work through queue backpressure.
+            solver_ms = enqueue_ms + wait_ms
             row["kernel_solver_ms"] = solver_ms
             row["kernel_solver_pct_group"] = _percent(solver_ms, group_ms)
             row["kernel_wait_pct_group"] = _percent(wait_ms, group_ms)
             row["kernel_wait_pct_solver"] = _percent(wait_ms, solver_ms)
             rows.append(row)
         completed_value_count += value_count
-
     if not rows:
         return
     with (run_dir / "run_pool_detail.csv").open("w", encoding="utf-8", newline="") as handle:

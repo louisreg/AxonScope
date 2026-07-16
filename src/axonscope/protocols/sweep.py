@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as np
@@ -11,6 +12,8 @@ from axonscope.protocols.results import PoolSweepResult
 from axonscope.protocols.types import (
     PoolObserver,
     PoolUpdate,
+    NumericAxisInputBuilder,
+    NumericAxisUpdate,
     ProgressSummary,
     SimulationCandidate,
 )
@@ -20,6 +23,29 @@ from axonscope.runtime import ExecutionPolicy
 from axonscope.runtime.benchmarking import benchmark_span
 from axonscope.simulation import AxonSimulation
 from axonscope.solvers import BatchOptions
+
+
+@dataclass(frozen=True)
+class _NumericAxisValueBatch:
+    """One ordered, bounded slice of values in a compact sweep plan."""
+
+    start_index: int
+    values: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class _NumericPoolSweepPlan:
+    """Protocol-neutral numeric-axis plan over one stable source population."""
+
+    source_pool: tuple[SimulationCandidate, ...]
+    values: tuple[Any, ...]
+    update: NumericAxisUpdate
+    input_builder: NumericAxisInputBuilder
+    batches: tuple[_NumericAxisValueBatch, ...]
+
+    @property
+    def source_pool_size(self) -> int:
+        return len(self.source_pool)
 
 
 def pool_sweep(
@@ -81,6 +107,8 @@ def pool_sweep(
     progress_display = _SweepProgress(progress)
     solver_progress_gate = _OneShotProgress(solver_progress)
     observation_rows: list[np.ndarray] = []
+    reusable_simulation: AxonSimulation | None = None
+    reusable_axis_builder: NumericAxisInputBuilder | None = None
     try:
         for index, value in enumerate(value_tuple):
             progress_display.begin(
@@ -96,17 +124,35 @@ def pool_sweep(
                 value=str(value),
                 pool_size=len(base_pool),
             ):
-                results = _run_updated_pool(
-                    base_pool,
-                    update,
-                    tuple(value for _ in base_pool),
-                    duration=duration,
-                    dt=dt,
-                    recording=recording,
-                    batch_options=batch_options,
-                    execution_policy=execution_policy,
-                    progress=solver_progress_gate.consume(),
-                )
+                if isinstance(update, NumericAxisUpdate):
+                    if reusable_simulation is None:
+                        reusable_axis_builder = update.prepare_numeric_axis(base_pool)
+                        reusable_simulation = AxonSimulation(
+                            axons=base_pool,
+                            duration=duration,
+                            dt=dt,
+                            recording=recording or Recording.voltage(),
+                            batch_options=batch_options,
+                            execution_policy=execution_policy,
+                            progress=solver_progress_gate.consume(),
+                        )
+                    if reusable_axis_builder is None:
+                        raise RuntimeError("numeric-axis input builder was not prepared.")
+                    axis_input = reusable_axis_builder.numeric_axis_input((value,))
+                    results = tuple(reusable_simulation._run_numeric_axis(axis_input))
+                    reusable_simulation.progress = False
+                else:
+                    results = _run_updated_pool(
+                        base_pool,
+                        update,
+                        tuple(value for _ in base_pool),
+                        duration=duration,
+                        dt=dt,
+                        recording=recording,
+                        batch_options=batch_options,
+                        execution_policy=execution_policy,
+                        progress=solver_progress_gate.consume(),
+                    )
                 observations = np.asarray([observe(result) for result in results])
             observation_rows.append(observations)
             progress_display.update(
@@ -172,6 +218,50 @@ def _apply_pool_update(
 ) -> SimulationCandidate:
     updated = update(row, value)
     return row if updated is None else updated
+
+
+def _plan_numeric_pool_sweep(
+    pool: tuple[SimulationCandidate, ...],
+    *,
+    update: PoolUpdate,
+    values: tuple[Any, ...],
+    value_batch_size: int | None,
+) -> _NumericPoolSweepPlan:
+    """Plan ordered value chunks without expanding value-by-population rows."""
+
+    if not isinstance(update, NumericAxisUpdate):
+        raise ValueError(
+            "compact value batches require a typed NumericAxisUpdate; arbitrary "
+            "row callbacks cannot prove a stable execution contract."
+        )
+    input_builder = update.prepare_numeric_axis(pool)
+    chunk_size = _normalize_value_batch_size(value_batch_size, len(values))
+    batches = tuple(
+        _NumericAxisValueBatch(
+            start_index=start,
+            values=values[start : start + chunk_size],
+        )
+        for start in range(0, len(values), chunk_size)
+    )
+    return _NumericPoolSweepPlan(
+        source_pool=pool,
+        values=values,
+        update=update,
+        input_builder=input_builder,
+        batches=batches,
+    )
+
+
+def _normalize_value_batch_size(
+    value_batch_size: int | None,
+    value_count: int,
+) -> int:
+    if value_batch_size is None:
+        return max(value_count, 1)
+    chunk_size = int(value_batch_size)
+    if chunk_size < 1:
+        raise ValueError("amplitude_batch_size must be a positive integer or None.")
+    return chunk_size
 
 
 __all__ = [

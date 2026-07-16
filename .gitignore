@@ -57,3 +57,7 @@ benchmark/legacy/pre_p11/kaggle/kaggle_config.json
 benchmark/legacy/pre_p11/kaggle/kernel-metadata.json
 figures/nrv_tests/
 figures/physics_tests/*.png
+
+
+# Graphify stuffs
+graphify-out/*

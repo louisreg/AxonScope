@@ -39,6 +39,7 @@ class BenchmarkOptions:
     memory_top_n: int = 0
     profile: bool = False
     profile_runtime: str = "auto"
+    profile_span: str | None = None
     profile_output: Path | None = None
     profile_create_perfetto: bool = False
     profile_create_perfetto_link: bool = False
@@ -60,6 +61,7 @@ class BenchmarkConfig:
     memory_top_n: int = 0
     profile: bool = False
     profile_runtime: str = "auto"
+    profile_span: str | None = None
     profile_output: Path | None = None
     profile_create_perfetto: bool = False
     profile_create_perfetto_link: bool = False
@@ -203,6 +205,7 @@ class BenchmarkSession:
     _next_event_id: int = 0
     _token: Token[BenchmarkSession | None] | None = None
     _profile_handle: Any | None = None
+    _profile_span_completed: bool = False
     _tracemalloc_started: bool = False
 
     @contextmanager
@@ -226,6 +229,15 @@ class BenchmarkSession:
             tracemalloc_start=tracemalloc_start,
         )
         self._stack.append(span)
+        owns_profile = (
+            self.config.profile
+            and self.config.profile_span == span.name
+            and not self._profile_span_completed
+        )
+        if owns_profile:
+            # A named profile captures the first matching canonical execution span.
+            self._profile_span_completed = True
+            self.start_profile()
         failed = False
         try:
             yield
@@ -240,6 +252,8 @@ class BenchmarkSession:
             raise
         finally:
             end_ns = time.perf_counter_ns()
+            if owns_profile:
+                self.stop_profile()
             popped = self._stack.pop()
             if popped is not span:
                 raise RuntimeError("benchmark span stack became inconsistent.")
@@ -292,6 +306,7 @@ class BenchmarkSession:
         self.metadata["profile"] = {
             "enabled": True,
             "runtime": self.config.profile_runtime,
+            "span": self.config.profile_span,
             "output": str(profile_output),
             "create_perfetto_trace": self.config.profile_create_perfetto,
             "create_perfetto_link": self.config.profile_create_perfetto_link,
@@ -383,6 +398,7 @@ def enable_benchmark(
     memory_top_n: int = 0,
     profile: bool | None = None,
     profile_runtime: str | None = None,
+    profile_span: str | None = None,
     profile_output: str | Path | None = None,
     profile_create_perfetto: bool | None = None,
     profile_create_perfetto_link: bool | None = None,
@@ -401,6 +417,7 @@ def enable_benchmark(
         memory_top_n = options.memory_top_n
         profile = options.profile if profile is None else profile
         profile_runtime = profile_runtime or options.profile_runtime
+        profile_span = profile_span or options.profile_span
         profile_output = profile_output or options.profile_output
         profile_create_perfetto = (
             options.profile_create_perfetto
@@ -429,6 +446,9 @@ def enable_benchmark(
     resolved_profile_runtime = str(profile_runtime or "auto").lower()
     if resolved_profile_runtime not in {"auto", "jax", "none"}:
         raise ValueError("profile_runtime must be one of: auto, jax, none.")
+    resolved_profile_span = None if profile_span is None else str(profile_span).strip()
+    if resolved_profile_span == "":
+        raise ValueError("profile_span must be a non-empty benchmark span name.")
     profile_stages = _normalize_profile_stages(jax_device_memory_profile_stages)
     output = Path(output_dir)
     if save:
@@ -445,6 +465,7 @@ def enable_benchmark(
         memory_top_n=int(memory_top_n),
         profile=resolved_profile,
         profile_runtime=resolved_profile_runtime,
+        profile_span=resolved_profile_span,
         profile_output=Path(profile_output) if profile_output is not None else None,
         profile_create_perfetto=bool(profile_create_perfetto)
         if profile_create_perfetto is not None
@@ -465,7 +486,8 @@ def enable_benchmark(
     if reset:
         session.reset()
     session._token = _ACTIVE_SESSION.set(session)
-    session.start_profile()
+    if config.profile_span is None:
+        session.start_profile()
     return session
 
 
@@ -694,6 +716,7 @@ def _collect_metadata(output_dir: Path, config: BenchmarkConfig) -> dict[str, An
         "profile": {
             "enabled": config.profile,
             "runtime": config.profile_runtime,
+            "span": config.profile_span,
             "output": str(config.profile_output) if config.profile_output else None,
             "active": False,
         },

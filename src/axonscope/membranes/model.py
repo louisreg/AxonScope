@@ -8,6 +8,7 @@ import sys
 import types
 from collections.abc import Callable, Mapping as MappingABC
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, ClassVar, Mapping, Sequence, dataclass_transform
 
@@ -199,6 +200,16 @@ class Model(metaclass=_MembraneModelClass):
     def to_membrane_model(self) -> "MembraneModel":
         """Return the internal descriptor used by solvers and inspectors."""
 
+        try:
+            hash(self)
+        except TypeError:
+            # User models may contain unhashable array-valued parameters.
+            return self._to_membrane_model_uncached()
+        return _cached_model_descriptor(self, np.dtype(self.dtype).str)
+
+    def _to_membrane_model_uncached(self) -> "MembraneModel":
+        """Build the descriptor for a model not present in the bounded cache."""
+
         from axonscope.membranes.compiler import parameterized_membrane_model
 
         descriptor = MembraneModel(
@@ -236,6 +247,15 @@ class Model(metaclass=_MembraneModelClass):
         """Mark intermediates as intentionally retained inside a source section."""
 
         _ = values
+
+
+@lru_cache(maxsize=512)
+def _cached_model_descriptor(
+    model: Model,
+    dtype_key: str,
+) -> "MembraneModel":
+    _ = dtype_key
+    return model._to_membrane_model_uncached()
 
 
 def _install_parameter_alias_init(cls: type[Model]) -> None:

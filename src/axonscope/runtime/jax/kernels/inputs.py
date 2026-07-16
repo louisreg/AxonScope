@@ -271,17 +271,26 @@ def _as_factorized_extracellular_potential_batch(
                 f"scales={None if current_row_scales is None else current_row_scales.shape}."
             )
     elif footprint_mV_per_A.ndim == 3 and current_mid_A.ndim == 3:
-        if current_row_indices is not None:
-            raise ValueError(f"{name}.current_row_indices are only valid for rank-1 batches.")
         if current_row_scales is not None:
             raise ValueError(
                 f"{name}.current_row_scales with row-specific multi-drive current "
                 "require current_mid_A shape (S, Nt)."
             )
-        if current_mid_A.shape != (batch_size, drive_count, nt):
+        expected_rows = batch_size if current_row_indices is None else int(current_mid_A.shape[0])
+        valid_current = (
+            current_mid_A.shape == (expected_rows, drive_count, nt)
+            and expected_rows >= 1
+            and (
+                current_row_indices is None
+                or current_row_indices.shape == (batch_size,)
+            )
+        )
+        if not valid_current:
             raise ValueError(
-                f"{name}.current_mid_A must have shape (B, K, Nt)="
-                f"({batch_size}, {drive_count}, {nt}), got {current_mid_A.shape}."
+                f"{name}.current_mid_A must have shape (B, K, Nt) or "
+                f"(U, K, Nt) with current_row_indices (B,), got "
+                f"current={current_mid_A.shape} and "
+                f"indices={None if current_row_indices is None else current_row_indices.shape}."
             )
     else:
         raise ValueError(
@@ -302,11 +311,16 @@ def _as_factorized_extracellular_potential_batch(
             )
             expected = f"scalar or (B,)=({batch_size},)"
         elif footprint_mV_per_A.ndim == 2:
-            valid_previous = current_initial_previous_A.shape in {
-                (int(current_mid_A.shape[0]),),
-                (batch_size,),
-            }
-            expected = f"(U,) or (B,), U={int(current_mid_A.shape[0])}, B={batch_size}"
+            valid_previous = current_initial_previous_A.shape == (
+                int(current_mid_A.shape[0]),
+            )
+            expected = f"(U,), U={int(current_mid_A.shape[0])}"
+        elif current_row_indices is not None:
+            valid_previous = current_initial_previous_A.shape == (
+                int(current_mid_A.shape[0]),
+                drive_count,
+            )
+            expected = f"(U, S)=({int(current_mid_A.shape[0])}, {drive_count})"
         elif current_mid_A.ndim == 2:
             valid_previous = current_initial_previous_A.shape == (drive_count,)
             expected = f"(S,)=({drive_count},)"

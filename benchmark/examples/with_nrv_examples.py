@@ -32,7 +32,7 @@ INTERESTING_STAGES = (
     "nrv_bridge.footprints_from_nrv",
     "nrv_bridge.stimulated_population",
     "protocol.recruitment_sweep",
-    "protocol.sweep.value",
+    "protocol.sweep.amplitude_chunk",
     "simulation.setup",
     "simulation.run_pool",
     "dispatch.build_plan",
@@ -297,7 +297,6 @@ def _run_one(
         write_run_pool_detail(
             run_dir,
             amplitudes=amplitudes,
-            batch_amplitudes=amplitude_batch_policy.batch_amplitudes,
         )
         row.update(
             {

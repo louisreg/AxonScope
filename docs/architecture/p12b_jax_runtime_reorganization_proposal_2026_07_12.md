@@ -58,7 +58,7 @@ are smaller responsibility-mixing points:
 | `inputs/lowering.py` | Select dense/sparse/factorized input formats | Move semantic decisions toward `runtime/input_contract.py` and `runtime/input_planning.py`; keep only JAX adapter wiring here. |
 | `inputs/extracellular.py` | Dense/factorized extracellular JAX input builders and footprint caches | Keep; later extract footprint cache/sampling helpers only if it improves clarity without hiding hot-path behavior. |
 | `inputs/intracellular.py` | Dense/sparse intracellular JAX input builders | Keep as the JAX current-density materialization module. |
-| `inputs/payloads.py` | Sparse/factorized payload dataclasses plus JAX materializers | Move dataclasses to a runtime-neutral `runtime/input_payloads.py`; keep JAX materializers under `runtime/jax/inputs/materialize.py`. |
+| `inputs/payloads.py` | JAX materializers for sparse/factorized payload contracts | Done: dataclasses moved to runtime-neutral `runtime/input_payloads.py`; JAX materializers remain in `runtime/jax/inputs/payloads.py`. |
 | `kernels/single_cable.py` | Active single-cable batch solver kernel and chunk routes | Keep; future cleanup should only extract repeated non-solver orchestration if benchmarks stay stable. |
 | `kernels/double_cable.py` | Double-cable route wrapper, chunk routes, and CPU/GPU dispatch | Keep as the cable-level wrapper; avoid solver-specific code here. |
 | `kernels/double_cable_cpu.py` | CPU double-cable scan body and Thomas solve binding | Keep CPU-specific. |
@@ -115,7 +115,7 @@ src/axonscope/runtime/
       extracellular.py       # extracellular input materialization and footprint caches
       intracellular.py       # intracellular current-density materialization
       stimulus.py            # scalar JAX stimulus callable compilation
-      payloads.py            # sparse/factorized batch payloads
+      payloads.py            # JAX materializers for sparse/factorized payloads
     recording/
       observer.py            # VmRaster plan/state/update/finalize
       lowering.py            # observer/recording lowering cache
@@ -180,11 +180,11 @@ or JAX profiler stays inside `runtime/jax`.
      kernel helpers.
 
 3. **Extract array/payload contracts**
-   - Move `SparseIntracellularCurrentDensityBatch` and
-     `FactorizedExtracellularPotentialBatch` to runtime-neutral
-     `runtime/input_payloads.py` if their dataclass validation remains
-     array-library agnostic.
-   - Keep JAX materialization functions in `runtime/jax/inputs/materialize.py`.
+   - Done: `SparseIntracellularCurrentDensityBatch` and
+     `FactorizedExtracellularPotentialBatch` live in runtime-neutral
+     `runtime/input_payloads.py`.
+   - JAX materialization functions remain in `runtime/jax/inputs/payloads.py`
+     with guardrails preventing that module from re-owning the payload classes.
 
 4. **Split input builders**
    - Move JAX intracellular builders to `runtime/jax/inputs/intracellular.py`.
