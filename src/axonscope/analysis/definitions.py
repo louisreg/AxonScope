@@ -565,44 +565,6 @@ class Latency:
 
 
 @dataclass(frozen=True)
-class ConductionBlock:
-    """Report whether the requested distal activation target failed to activate."""
-
-    threshold: Any = -20.0
-    blanking: Any = 0.0
-    target: PositionSelector = DISTAL
-    signal: Signal[Any] = MEMBRANE_VOLTAGE
-    name: str = "conduction_block"
-    algorithm_version: str = "conduction_block_v1"
-
-    @property
-    def requirements(self) -> AnalysisRequirements:
-        return AnalysisRequirements(
-            required_signals=(self.signal,),
-            required_result_fields=("Vm", "t", "positions"),
-            required_positions=(self.target,),
-            supported_myelination=_ANY_MYELINATION,
-            supported_formulations=_ANY_FORMULATION,
-            required_capabilities=("membrane_voltage_trace",),
-            algorithm_version=self.algorithm_version,
-            recording_hint=_VM_RECORDING_HINT,
-        )
-
-    def evaluate(self, result: Any) -> AnalysisResult:
-        return _evaluate_rows(self, result, self._evaluate_one, unit=None)
-
-    def _evaluate_one(self, row: Any) -> tuple[bool, AnalysisStatus, str, ActivationEvent]:
-        _require_membrane_voltage(row, self.signal)
-        event = _activation_event(
-            row,
-            threshold=self.threshold,
-            blanking=self.blanking,
-            target=self.target,
-        )
-        return not bool(event.activated), AnalysisStatus.VALID, "", event
-
-
-@dataclass(frozen=True)
 class PeakVoltage:
     """Return the maximum membrane voltage over selected recorded positions."""
 
@@ -910,7 +872,6 @@ class ConductionVelocity:
 
 __all__ = [
     "Activation",
-    "ConductionBlock",
     "ConductionVelocity",
     "Latency",
     "PeakVoltage",

@@ -1354,49 +1354,6 @@ def test_find_threshold_uses_activation_observer_only_path(monkeypatch):
     assert all(call["batch_options"].time_chunk_steps == 5 for call in calls)
 
 
-def test_find_threshold_supports_conduction_block_observer_only_path(monkeypatch):
-    criterion = axs.analysis.ConductionBlock(
-        threshold=0.0 * axs.mV,
-        blanking=0.5 * axs.ms,
-        target=axs.positions.DISTAL,
-    )
-    block_thresholds_nA = np.asarray([0.5, 1.5], dtype=float)
-    pool = tuple(_DummyAxon() for _ in block_thresholds_nA)
-    calls: list[dict] = []
-
-    def update(row, current):
-        row.tested_current = current
-
-    def fake_simulation_runner(updated_pool, **kwargs):
-        calls.append(kwargs)
-        activation_flags = [
-            axs.units.to_nA(row.tested_current) < block_thresholds_nA[pool.index(row)]
-            for row in updated_pool
-        ]
-        return _observer_only_pool_result(activation_flags)
-
-    _patch_simulation_runner(monkeypatch, fake_simulation_runner)
-
-    curve = axs.protocols.find_threshold(
-        pool,
-        update=update,
-        bounds=(0.0 * axs.nA, 2.0 * axs.nA),
-        duration=2.0 * axs.ms,
-        dt=1.0 * axs.ms,
-        criterion=criterion,
-        tolerance=0.25 * axs.nA,
-        max_iterations=8,
-        recording=axs.Recording.none(),
-    )
-
-    assert curve.status == ("threshold", "threshold")
-    np.testing.assert_allclose(curve.threshold_uA * 1000.0, [0.5, 1.5], atol=0.25)
-    assert calls
-    assert all(not call["recording"].voltage for call in calls)
-    assert all(not call["recording"].wants_observables for call in calls)
-    assert all(call["observers"][0].name == "activation" for call in calls)
-
-
 def test_find_threshold_requires_current_units():
     criterion = axs.analysis.ActivationCriterion(
         threshold=0.0 * axs.mV,

@@ -1,4 +1,4 @@
-# Recorders, VmRaster Observers, Thresholds, And Recruitment
+# Recorders, Compact Observers, Thresholds, And Recruitment
 
 This document records the current recording/observer strategy. The older broad
 solver-side observer design is superseded.
@@ -12,20 +12,23 @@ Recording.voltage(...)
     retains Vm traces for plotting, validation, and post-hoc analyses
 
 Recording.none() + threshold-style observers
-    retains only packed observations["vm_raster"]
+    retains bounded analysis results or packed observations["vm_raster"]
 ```
 
 The active solver-side observer path is intentionally narrow:
 
 - public threshold-style analysis definitions such as
-  `axs.analysis.Activation(...)`, `axs.analysis.Latency(...)`, and
-  `axs.analysis.ConductionBlock(...)` may lower to a VmRaster plan;
+  `axs.analysis.Activation(...)`, `axs.analysis.Latency(...)`,
+  `axs.analysis.SpikeCount(...)`, and `axs.analysis.VmRaster(...)` may lower to
+  a compact observer plan;
 - backend kernels threshold fixed membrane-voltage probes at every solver `dt`;
-- backend kernels return compact `observations["vm_raster"]`;
+- activation, latency, and spike definitions return named bounded
+  `AnalysisResult` observations without a temporal raster;
+- explicit `VmRaster` definitions return packed `observations["vm_raster"]`;
 - `axs.results.VmRasterResult` and `axs.results.unpack_vm_raster_words(...)`
   own result-side unpacking;
-- activation, latency, velocity, threshold, and recruitment summaries are
-  post-processing of the packed raster.
+- velocity remains result-side analysis, while threshold and recruitment may
+  consume compact activation results directly.
 
 `PeakVoltage` remains post-hoc on recorded Vm. Do not document or reintroduce a
 generic `Activation`/`PeakVoltage` compiled observer interface unless a future
@@ -37,7 +40,7 @@ Recording policies describe outputs to retain:
 
 - full Vm for teaching and validation;
 - center/probe/explicit Vm positions for lighter trace inspection;
-- no Vm traces when compact VmRaster observations are enough.
+- no Vm traces when bounded observations or compact VmRaster are enough.
 
 The conceptual home of membrane voltage is `result.recordings["Vm"]` on a
 one-axon result view. `result.Vm` remains a convenience alias.

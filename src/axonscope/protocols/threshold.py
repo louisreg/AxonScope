@@ -7,7 +7,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from axonscope.analysis import ActivationCriterion, ActivationEvent
-from axonscope.analysis.definitions import Activation, ConductionBlock
+from axonscope.analysis.definitions import Activation
 from axonscope.protocols.observer_path import (
     _can_use_threshold_observer,
     _evaluate_activation_observer_pool,
@@ -161,9 +161,9 @@ def find_threshold(
     ``pool`` contains the simulations to evaluate. ``update(simulation,
     current)`` is called before each run to change the searched parameter,
     usually a stimulus amplitude. ``criterion`` may be an
-    ``ActivationCriterion``, ``Activation``, or ``ConductionBlock``. The update
-    function may mutate the row and return ``None``, or return a replacement
-    simulation. ``rows`` optionally carries user-facing values such as
+    ``ActivationCriterion`` or ``Activation``. The update function may mutate
+    the row and return ``None``, or return a replacement simulation. ``rows``
+    optionally carries user-facing values such as
     diameters for plotting and callable bounds. ``solver_progress`` is
     forwarded only to the first solver call so cold-start compilation remains
     visible without logging every bisection run.
@@ -360,7 +360,7 @@ def _evaluate_threshold_updated_pool(
         _apply_threshold_update(row, update, float(current_uA))
         for row, current_uA in zip(pool, values_uA, strict=True)
     )
-    activation_criterion, invert_activation = _threshold_activation_criterion(criterion)
+    activation_criterion = _threshold_activation_criterion(criterion)
     if _can_use_threshold_observer(recording, activation_criterion):
         activation = _evaluate_activation_observer_pool(
             updated_pool,
@@ -370,7 +370,7 @@ def _evaluate_threshold_updated_pool(
             batch_options=batch_options,
             progress=progress,
         )
-        return _invert_if_needed(activation, invert_activation)
+        return np.asarray(activation, dtype=bool)
     pool_result = AxonSimulation(
         axons=updated_pool,
         duration=duration,
@@ -379,49 +379,28 @@ def _evaluate_threshold_updated_pool(
         batch_options=batch_options,
         progress=progress,
     ).run()
-    return _invert_if_needed(
-        np.asarray(
-            [activation_criterion.evaluate(result).activated for result in pool_result],
-            dtype=bool,
-        ),
-        invert_activation,
+    return np.asarray(
+        [activation_criterion.evaluate(result).activated for result in pool_result],
+        dtype=bool,
     )
 
 
 def _threshold_activation_criterion(
     criterion: ThresholdCriterion,
-) -> tuple[ActivationCriterion, bool]:
-    """Return the activation detector and whether its boolean should invert."""
+) -> ActivationCriterion:
+    """Return the activation detector used by threshold search."""
 
     if isinstance(criterion, ActivationCriterion):
-        return criterion, False
+        return criterion
     if isinstance(criterion, Activation):
-        return (
-            ActivationCriterion(
-                threshold=criterion.threshold,
-                blanking=criterion.blanking,
-                target=criterion.target,
-            ),
-            False,
-        )
-    if isinstance(criterion, ConductionBlock):
-        return (
-            ActivationCriterion(
-                threshold=criterion.threshold,
-                blanking=criterion.blanking,
-                target=criterion.target,
-            ),
-            True,
+        return ActivationCriterion(
+            threshold=criterion.threshold,
+            blanking=criterion.blanking,
+            target=criterion.target,
         )
     raise TypeError(
-        "criterion must be ActivationCriterion, axs.analysis.Activation, "
-        "or axs.analysis.ConductionBlock."
+        "criterion must be ActivationCriterion or axs.analysis.Activation."
     )
-
-
-def _invert_if_needed(values: np.ndarray, invert: bool) -> np.ndarray:
-    values_bool = np.asarray(values, dtype=bool)
-    return ~values_bool if invert else values_bool
 
 
 def _apply_threshold_update(

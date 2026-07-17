@@ -20,7 +20,6 @@ from axonscope.benchmarking import benchmark_span, benchmark_wait
 from axonscope.analysis.core import AnalysisResult, AnalysisStatus
 from axonscope.analysis.definitions import (
     Activation,
-    ConductionBlock,
     ConductionVelocity,
     Latency,
     SpikeCount,
@@ -118,7 +117,7 @@ def _require_vm_signal(signal: Any) -> None:
 def _is_vm_raster_definition(definition: Any) -> bool:
     return isinstance(
         definition,
-        (Activation, Latency, SpikeCount, VmRaster, ConductionBlock, ConductionVelocity),
+        (Activation, Latency, SpikeCount, VmRaster, ConductionVelocity),
     )
 
 

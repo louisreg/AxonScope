@@ -23,7 +23,6 @@ from axonscope.analysis.activation import (
 )
 from axonscope.analysis.definitions import (
     Activation,
-    ConductionBlock,
     ConductionVelocity,
     Latency,
     PeakVoltage,
@@ -58,7 +57,6 @@ __all__ = [
     "AnalysisRequirements",
     "AnalysisResult",
     "AnalysisStatus",
-    "ConductionBlock",
     "ConductionVelocity",
     "Latency",
     "MissingAnalysisInputError",

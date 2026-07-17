@@ -308,7 +308,7 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
         )
         axons.append(sim)
 
-    raster_definition = axs.analysis.ConductionBlock(
+    raster_definition = axs.analysis.VmRaster(
         threshold=-80.0 * axs.mV,
         target=axs.positions.ALL,
         name="threshold_raster",

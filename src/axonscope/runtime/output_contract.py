@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from axonscope.analysis.definitions import (
     Activation,
-    ConductionBlock,
     ConductionVelocity,
     Latency,
     SpikeCount,
@@ -145,7 +144,7 @@ def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
         for observer in observers
         if isinstance(
             observer,
-            (Activation, Latency, SpikeCount, VmRaster, ConductionBlock, ConductionVelocity),
+            (Activation, Latency, SpikeCount, VmRaster, ConductionVelocity),
         )
     )
 

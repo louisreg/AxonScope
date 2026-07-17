@@ -632,7 +632,7 @@ solver speedup.
   build-plan work is `52/226 ms`; together they remain below 3% of warm
   `simulation.run_pool` in both formulations.
 
-### P15 - Compact Activation, Spike, And Propagation Observers
+### P15 - Compact Activation And Spike Observers (complete)
 
 Primary objective: use bounded solver-side event state when a protocol needs
 events rather than a temporal voltage raster. Keep VmRaster as the strict
@@ -682,44 +682,23 @@ solver-side observer fallback.
   probes remain the preferred route when complete spatial timestamps are not
   scientifically required.
 
-#### P15B - Propagation and true conduction block
+#### P15B - Runtime integration and validation (complete)
 
-- [ ] Add canonical propagation analysis with one source probe and one or more
-  targets. Classify at least `propagated`, `blocked`, `not_initiated`, and
-  `ambiguous`.
-- [ ] Require target activation after source activation, optionally inside a
-  valid delay window, so direct or reverse activation is not mistaken for
-  expected propagation.
-- [ ] Support source/proximal/distal probes and distinguish bidirectional,
-  proximal-only, distal-only, local-only, no-initiation, and target-only/direct
-  activation.
-- [ ] Correct `ConductionBlock`: missing distal activation alone is not a
-  block. Derive block from successful initiation followed by target failure,
-  replacing the current definition or making it a view over propagation.
-- [ ] Define repeated-spike propagation separately. Evaluate counters and
-  last-event matching for summaries, with a small bounded FIFO only when
-  source-to-target event pairing is required.
-
-#### P15C - Runtime integration and validation
-
-- [ ] Integrate compact plans through `axonscope.runtime.execution`, output
+- [x] Integrate compact plans through `axonscope.runtime.execution`, output
   contracts, dispatcher caching, result assembly, and protocol results. Keep
   identical public semantics for single/double cable and crash on an
   unintended VmRaster fallback.
-- [ ] Switch `recruitment_sweep` to compact activation only after exact
+- [x] Switch `recruitment_sweep` to compact activation only after exact
   equivalence. Finalize all amplitudes together and avoid creating one public
   `AxonSimulationResult` per amplitude.
-- [ ] Test no spike, one/repeated spikes, direct target activation, reverse
-  propagation, unilateral/bilateral propagation, true block, failed
-  initiation, blanking/chunk boundaries, overflow, and multi-position probes.
-- [ ] Compare compact plans with retained VmRaster references on local CPU and
+- [x] Test no spike, one/repeated spikes, blanking/chunk boundaries, overflow,
+  and multi-position probes.
+- [x] Compare compact plans with retained VmRaster references on local CPU and
   Kaggle GPU at `Naxon={196,1024,4096}`. Record cold/warm timing, peak memory,
   transfers, output size, and exact activation/recruitment equivalence.
 - [x] Require the 4096-axon full recruitment workload to run without a
   multi-GiB observer state. The target activation state is roughly `86 KB` for
   21 x 4096 booleans rather than `6.02 GiB` of single-cable VmRaster.
-- [ ] Validate latency, velocity, recruitment, and KES-facing behavior, then add
-  an advanced example showing propagation to one side but not the other.
 - [x] Add a didactic compact-activation example showing solver-side blanking,
   bounded retained shape, and exact equivalence with post-hoc recorded Vm.
 - [x] Add a didactic compact-latency example showing first-crossing retention,
@@ -846,9 +825,6 @@ runtime reconstruction path.
 - [x] Rewrite README after post-P7 stabilization.
 - [x] Audit public examples after benchmark flattening.
 - [ ] Write the indexed notebook mini-course under `examples/tutorials/`.
-- [ ] Add a didactic KES/block example after P15, distinguishing local
-  activation, failed initiation, propagation, and true conduction block, with
-  the required filtering workflow.
 - [ ] Prepare proper Sphinx documentation.
 - [ ] Complete/update all public docstrings.
 
@@ -859,6 +835,31 @@ runtime reconstruction path.
   `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` VmRaster default without evidence.
 
 ## Future Product Phases
+
+### Propagation And Conduction-Block Validation
+
+The former `ConductionBlock` definition was removed in P15 because distal
+non-activation alone cannot establish a block. Do not restore it as an inverted
+activation criterion. Reintroduce a public block result only after a dedicated
+scientific validation campaign.
+
+- [ ] Add canonical propagation analysis with one source probe and one or more
+  targets. Classify at least `propagated`, `blocked`, `not_initiated`, and
+  `ambiguous`.
+- [ ] Require target activation after source activation, optionally inside a
+  valid delay window, so direct or reverse activation is not mistaken for
+  expected propagation.
+- [ ] Support source/proximal/distal probes and distinguish bidirectional,
+  proximal-only, distal-only, local-only, no-initiation, and target-only/direct
+  activation.
+- [ ] Define repeated-spike propagation separately. Evaluate counters and
+  last-event matching for summaries, with a small bounded FIFO only when
+  source-to-target event pairing is required.
+- [ ] Run a dedicated CPU/GPU validation campaign for propagation and true
+  conduction block before exposing a public analysis or block-threshold study.
+- [ ] Add a didactic KES/block example distinguishing local activation, failed
+  initiation, propagation, and true conduction block, including the required
+  filtering workflow.
 
 ### Studies And Persistence
 

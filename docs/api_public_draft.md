@@ -30,10 +30,10 @@ the examples. In short:
 - `axs.Recording.full()`, `axs.Recording.center(...)`, `axs.Recording.none()`,
   `axs.signals`, one-axon result views, `recording_manifest`, and compact
   `observations` are current result/recording concepts.
-- `axs.analysis.Activation`, `axs.analysis.Latency`, and
-  `axs.analysis.ConductionBlock` can feed the strict VmRaster observer-only
-  route. `axs.analysis.PeakVoltage` remains post-hoc on recorded Vm until a
-  dedicated benchmarked solver-side design is accepted.
+- `axs.analysis.Activation`, `axs.analysis.Latency`,
+  `axs.analysis.SpikeCount`, and `axs.analysis.VmRaster` can feed the strict
+  compact observer route. `axs.analysis.PeakVoltage` remains post-hoc on
+  recorded Vm until a dedicated benchmarked solver-side design is accepted.
 - Solver policy exposes exact single-cable and double-cable solver choices.
   Approximate double-cable surrogates are not public API.
 

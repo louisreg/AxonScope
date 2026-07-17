@@ -7,7 +7,7 @@ from typing import Any, Callable, Literal, Protocol, TypeAlias, runtime_checkabl
 import numpy as np
 
 from axonscope.analysis import ActivationCriterion
-from axonscope.analysis.definitions import Activation, ConductionBlock
+from axonscope.analysis.definitions import Activation
 from axonscope.axon_instance import AxonInstance
 from axonscope.axons.axon import Axon
 from axonscope.dispatcher.numeric_axis import NumericAxisInput
@@ -54,7 +54,7 @@ ThresholdUpdate: TypeAlias = PoolUpdate
 ThresholdStatus: TypeAlias = Literal["threshold", "below_range", "above_range"]
 """Threshold-search outcome, distinct from per-row ``AnalysisStatus`` values."""
 
-ThresholdCriterion: TypeAlias = ActivationCriterion | Activation | ConductionBlock
+ThresholdCriterion: TypeAlias = ActivationCriterion | Activation
 """Criterion accepted by generic threshold search."""
 
 
