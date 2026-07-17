@@ -1,33 +1,80 @@
-"""Benchmark-only phase capture for production JAX callables."""
+"""Benchmark-only phase and compiler-IR capture for production JAX callables."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import jax
 
 
-_DOUBLE_CABLE_STATIC_ARGS = frozenset(
+_COMMON_STATIC_ARGS = frozenset(
     {
         "backend",
         "membrane",
         "has_driven_extracellular",
         "stateless_vm_only",
+        "observer_retention",
+        "raster_temporal_stride",
+    }
+)
+_SINGLE_CABLE_STATIC_ARGS = _COMMON_STATIC_ARGS
+_DOUBLE_CABLE_STATIC_ARGS = _COMMON_STATIC_ARGS | frozenset(
+    {
         "double_cable_block_solver",
         "tiled_thomas_block_b",
     }
 )
 
 
-def install_production_double_cable_capture(output_path: Path) -> None:
-    """Capture the first production integrated double-cable JIT invocation."""
+def install_production_jax_captures(
+    output_dir: Path,
+    *,
+    cables: tuple[str, ...],
+) -> None:
+    """Capture the first compact factorized JIT invocation for each cable."""
 
-    import axonscope.runtime.jax.kernels.double_cable as double_cable
+    requested = frozenset(cables)
+    unknown = requested - {"single", "double"}
+    if unknown:
+        raise ValueError(f"unsupported JAX phase-capture cables: {sorted(unknown)}")
 
-    original = double_cable._run_double_cable_batch_observer_integrated_scan
+    if "single" in requested:
+        import axonscope.runtime.jax.kernels.single_cable as single_cable
+
+        _install_capture(
+            single_cable,
+            attribute="_run_single_cable_factorized_vstim_batch_sparse_observer_scan",
+            static_args=_SINGLE_CABLE_STATIC_ARGS,
+            label="single",
+            output_dir=output_dir,
+        )
+
+    if "double" in requested:
+        import axonscope.runtime.jax.kernels.double_cable as double_cable
+
+        _install_capture(
+            double_cable,
+            attribute="_run_double_cable_batch_observer_integrated_scan",
+            static_args=_DOUBLE_CABLE_STATIC_ARGS,
+            label="double",
+            output_dir=output_dir,
+        )
+
+
+def _install_capture(
+    module: ModuleType,
+    *,
+    attribute: str,
+    static_args: frozenset[str],
+    label: str,
+    output_dir: Path,
+) -> None:
+    original = getattr(module, attribute)
     captured = False
 
     def capture_first_call(**kwargs: Any) -> Any:
@@ -44,43 +91,48 @@ def install_production_double_cable_capture(output_path: Path) -> None:
         lowered = traced.lower()
         lower_s = time.perf_counter() - lower_start
         stablehlo = lowered.as_text()
-        from axonscope.runtime.jax.kernels.triton_call_cache import (
-            last_triton_kernel_cache_event,
-        )
 
-        triton_kernel_cache = last_triton_kernel_cache_event()
+        triton_kernel_cache = None
+        if label == "double":
+            from axonscope.runtime.jax.kernels.triton_call_cache import (
+                last_triton_kernel_cache_event,
+            )
+
+            triton_kernel_cache = last_triton_kernel_cache_event()
 
         compile_start = time.perf_counter()
         executable = lowered.compile()
         compile_s = time.perf_counter() - compile_start
+        optimized_hlo = executable.as_text()
 
         dynamic_kwargs = {
-            name: value
-            for name, value in kwargs.items()
-            if name not in _DOUBLE_CABLE_STATIC_ARGS
+            name: value for name, value in kwargs.items() if name not in static_args
         }
         first_start = time.perf_counter()
         result = executable(**dynamic_kwargs)
         jax.block_until_ready(result)
         first_execution_s = time.perf_counter() - first_start
 
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stablehlo_path = output_dir / f"{label}.stablehlo.txt"
+        optimized_hlo_path = output_dir / f"{label}.compiled.optimized_hlo.txt"
+        stablehlo_path.write_text(stablehlo, encoding="utf-8")
+        optimized_hlo_path.write_text(optimized_hlo, encoding="utf-8")
+
         payload = {
-            "callable": (
-                "axonscope.runtime.jax.kernels.double_cable_gpu."
-                "_run_double_cable_batch_observer_integrated_scan"
-            ),
+            "cable": label,
+            "callable": f"{module.__name__}.{attribute}",
             "trace_s": trace_s,
             "lower_s": lower_s,
             "compile_s": compile_s,
             "first_execution_s": first_execution_s,
             "total_cold_s": trace_s + lower_s + compile_s + first_execution_s,
-            "stablehlo_bytes": len(stablehlo.encode("utf-8")),
-            "stablehlo_lines": stablehlo.count("\n") + 1,
-            "stablehlo_custom_calls": stablehlo.count("stablehlo.custom_call"),
+            "stablehlo": _text_metadata(stablehlo, stablehlo_path),
+            "optimized_hlo": _text_metadata(optimized_hlo, optimized_hlo_path),
             "triton_kernel_cache": triton_kernel_cache,
             "static": {
                 name: _json_scalar(kwargs[name])
-                for name in sorted(_DOUBLE_CABLE_STATIC_ARGS)
+                for name in sorted(static_args)
                 if name in kwargs
             },
             "dynamic": {
@@ -88,14 +140,24 @@ def install_production_double_cable_capture(output_path: Path) -> None:
                 for name, value in dynamic_kwargs.items()
             },
         }
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
+        (output_dir / f"{label}.jit_phases.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         return result
 
-    double_cable._run_double_cable_batch_observer_integrated_scan = capture_first_call
+    setattr(module, attribute, capture_first_call)
+
+
+def _text_metadata(text: str, path: Path) -> dict[str, Any]:
+    encoded = text.encode("utf-8")
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "bytes": len(encoded),
+        "lines": text.count("\n") + 1,
+        "custom_calls": text.count("custom_call"),
+    }
 
 
 def _shape_tree(value: Any) -> Any:
@@ -118,3 +180,6 @@ def _json_scalar(value: Any) -> Any:
     if callable(static_signature):
         return repr(static_signature())
     return f"{type(value).__module__}.{type(value).__qualname__}"
+
+
+__all__ = ["install_production_jax_captures"]

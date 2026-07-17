@@ -141,9 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--memory-top-n", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
-        "--capture-double-cable-jit-phases",
+        "--capture-jit-phases",
         action="store_true",
-        help="Capture trace/lower/compile/first-execution for the first production GPU JIT.",
+        help=(
+            "Capture trace/lower/compile/first-execution and compiler IR for "
+            "the first production JIT of each selected cable."
+        ),
     )
     parser.add_argument(
         "--validate-double-cable-kernel",
@@ -240,12 +243,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.triton_cache_replay:
         return _run_triton_cache_replay(args, output)
 
-    if args.capture_double_cable_jit_phases:
+    if args.capture_jit_phases:
         from benchmark.analysis.jax_phase_capture import (
-            install_production_double_cable_capture,
+            install_production_jax_captures,
         )
 
-        install_production_double_cable_capture(output / "double_cable_jit_phases.json")
+        cables = ("single", "double") if args.cable == "mixed" else (args.cable,)
+        install_production_jax_captures(output / "jax_phase_capture", cables=cables)
     if args.disable_batch_membrane_capability:
         from axonscope.runtime.jax.membranes.backend import (
             GatedLeakStackMembraneBackend,
@@ -421,7 +425,7 @@ def _triton_cache_child_command(
         str(output),
         "--memory-trace",
         "off",
-        "--capture-double-cable-jit-phases",
+        "--capture-jit-phases",
         "--cold-only",
     ]
     if args.disable_batch_membrane_capability:
@@ -432,7 +436,7 @@ def _triton_cache_child_command(
 
 
 def _read_triton_cache_child(output: Path, *, label: str) -> dict[str, Any]:
-    phase_path = output / "double_cable_jit_phases.json"
+    phase_path = output / "jax_phase_capture" / "double.jit_phases.json"
     phase = json.loads(phase_path.read_text(encoding="utf-8"))
     cache_event = phase.get("triton_kernel_cache")
     if not isinstance(cache_event, dict):
@@ -455,9 +459,9 @@ def _read_triton_cache_child(output: Path, *, label: str) -> dict[str, Any]:
         "compile_s": float(phase["compile_s"]),
         "first_execution_s": float(phase["first_execution_s"]),
         "total_cold_s": float(phase["total_cold_s"]),
-        "stablehlo_bytes": int(phase["stablehlo_bytes"]),
-        "stablehlo_lines": int(phase["stablehlo_lines"]),
-        "stablehlo_custom_calls": int(phase["stablehlo_custom_calls"]),
+        "stablehlo_bytes": int(phase["stablehlo"]["bytes"]),
+        "stablehlo_lines": int(phase["stablehlo"]["lines"]),
+        "stablehlo_custom_calls": int(phase["stablehlo"]["custom_calls"]),
         "triton_kernel_cache": cache_event,
     }
 
@@ -1190,7 +1194,7 @@ def _write_manifest(
         "repeats": args.repeats,
         "warmups": args.warmups,
         "cold_only": args.cold_only,
-        "capture_double_cable_jit_phases": args.capture_double_cable_jit_phases,
+        "capture_jit_phases": args.capture_jit_phases,
         "validate_double_cable_kernel": args.validate_double_cable_kernel,
         "triton_cache_replay": args.triton_cache_replay,
         "memory_trace": args.memory_trace,

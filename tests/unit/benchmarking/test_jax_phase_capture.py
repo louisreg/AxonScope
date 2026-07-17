@@ -8,7 +8,7 @@ import jax.numpy as jnp
 
 import axonscope.runtime.jax.kernels.double_cable as double_cable
 from benchmark.analysis.jax_phase_capture import (
-    install_production_double_cable_capture,
+    install_production_jax_captures,
 )
 
 
@@ -49,8 +49,7 @@ def test_production_double_cable_capture_splits_jax_cold_phases(tmp_path, monkey
         "_run_double_cable_batch_observer_integrated_scan",
         fake_kernel,
     )
-    output = tmp_path / "phases.json"
-    install_production_double_cable_capture(output)
+    install_production_jax_captures(tmp_path, cables=("double",))
 
     result = double_cable._run_double_cable_batch_observer_integrated_scan(
         backend="backend",
@@ -63,12 +62,19 @@ def test_production_double_cable_capture_splits_jax_cold_phases(tmp_path, monkey
     )
 
     assert jnp.array_equal(result, jnp.ones((2, 3), dtype=jnp.float32))
-    payload = json.loads(output.read_text(encoding="utf-8"))
+    payload = json.loads(
+        (tmp_path / "double.jit_phases.json").read_text(encoding="utf-8")
+    )
     assert payload["trace_s"] >= 0.0
     assert payload["lower_s"] >= 0.0
     assert payload["compile_s"] >= 0.0
     assert payload["first_execution_s"] >= 0.0
-    assert payload["stablehlo_bytes"] > 0
-    assert payload["stablehlo_custom_calls"] >= 0
+    assert payload["stablehlo"]["bytes"] > 0
+    assert payload["stablehlo"]["custom_calls"] >= 0
+    assert len(payload["stablehlo"]["sha256"]) == 64
+    assert payload["optimized_hlo"]["bytes"] > 0
+    assert len(payload["optimized_hlo"]["sha256"]) == 64
     assert payload["triton_kernel_cache"] is None
     assert payload["dynamic"]["Vi0_mV"][0]["shape"] == [2, 3]
+    assert (tmp_path / "double.stablehlo.txt").is_file()
+    assert (tmp_path / "double.compiled.optimized_hlo.txt").is_file()

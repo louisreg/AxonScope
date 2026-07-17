@@ -40,12 +40,16 @@ def test_triton_cache_replay_uses_two_fresh_processes(
             "compile_s": 0.8,
             "first_execution_s": 0.1,
             "total_cold_s": 5.9 if status == "miss" else 2.4,
-            "stablehlo_bytes": 100,
-            "stablehlo_lines": 10,
-            "stablehlo_custom_calls": 1,
+            "stablehlo": {
+                "bytes": 100,
+                "lines": 10,
+                "custom_calls": 1,
+            },
             "triton_kernel_cache": {"status": status, "key": "same"},
         }
-        (child_output / "double_cable_jit_phases.json").write_text(
+        phase_dir = child_output / "jax_phase_capture"
+        phase_dir.mkdir()
+        (phase_dir / "double.jit_phases.json").write_text(
             json.dumps(phase),
             encoding="utf-8",
         )

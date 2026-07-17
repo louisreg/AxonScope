@@ -297,6 +297,43 @@ are stable and scale with population size. Small double-cable cold compilation
 remains noisy (`0.69x/0.86x` at 196/1024), while double 4096 improves `1.11x`;
 do not interpret the small cold rows as steady-state regressions.
 
+The fresh P16 baseline at commit `d1313b9` repeats the same guarded P100
+workload after P15 completion. Each case has one warmup and two measured warm
+runs; the table reports their median `simulation.run_pool` time. Artifacts end
+in `axs-p16-baseline-{single,double}-{196,1024,4096}-p100-d1313b9`:
+
+| cable | Naxon | cold run_pool | median warm run_pool | warm solver share | activation counts |
+| --- | ---: | ---: | ---: | ---: | --- |
+| single | 196 | 3.299 s | 0.542 s | 93.9% | `0 17 48 67 89` |
+| single | 1024 | 6.622 s | 2.359 s | 93.4% | `0 85 197 326 433` |
+| single | 4096 | 15.590 s | 8.920 s | 94.5% | `2 383 878 1340 1768` |
+| double | 196 | 11.519 s | 0.517 s | 95.1% | `0 196 196 196 196` |
+| double | 1024 | 11.308 s | 1.870 s | 93.2% | `0 1024 1024 1024 1024` |
+| double | 4096 | 18.101 s | 6.703 s | 91.9% | `0 4096 4096 4096 4096` |
+
+Every cold, warmup, and warm row matches its same-process activation reference.
+The current double-drive workload saturates the double-cable population above
+zero current; retain these counts for route and timing equivalence, not as a
+graded recruitment-curve validation. Local CPU N=196 confirms that full
+five-amplitude batching is about `1.8x` faster for single cable and `2.1x`
+faster for double cable than five unit chunks. P16 therefore uses full batching
+as its temporal-program baseline and profiles chunk policies separately.
+
+Use `--capture-jit-phases` only for a dedicated compiler diagnostic run. It
+captures the first production compact-factorized JIT for each selected cable,
+writes trace/lower/compile/first-execution timings and stable identities under
+`jax_phase_capture/*.jit_phases.json`, and retains both StableHLO and compiled
+optimized HLO. Summarize the latter with:
+
+```bash
+python benchmark/analysis/hlo_fusion_summary.py \
+  OUTPUT/jax_phase_capture \
+  --output OUTPUT/hlo_summary
+```
+
+The capture compiles and executes explicitly, so its wall timings are compiler
+diagnostics rather than clean baseline measurements.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is
