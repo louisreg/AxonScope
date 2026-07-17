@@ -7,7 +7,7 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-16 after the corrected P14E CPU/P100 acceptance matrix.
+Updated on 2026-07-17 after defining the P15 observer-retention families.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -638,6 +638,20 @@ solver-side observer fallback.
 
 #### P15A - Typed compact event contracts
 
+- [ ] Define three explicit solver-output families without a generic observer
+  fallback:
+  - temporally downsampled VmRaster for visualization or retained threshold
+    state, with a typed stride/sample period and documented aliasing semantics;
+  - spatial VmRaster probes using the existing `PositionSelector` and
+    row-aware probe tables, optionally combined with temporal downsampling;
+  - bounded spike events storing timestep indices rather than a temporal
+    raster. For population sweeps, use
+    `[Namplitude, Naxon, Nprobe, K]` `int32` event indices plus per-probe
+    `count` and `overflow`; `Nprobe=Nx` is the explicit all-compartment case.
+  Keep full VmRaster as the lossless reference route. Downsampled raster output
+  must not silently back exact activation/spike analyses when crossings may be
+  missed; use event-preserving window reduction or a compact event plan for
+  those analyses.
 - [ ] Define canonical runtime output plans and result contracts for compact
   activation, first crossing, spike count, bounded spike times, and
   propagation. Specify shapes, dtypes, units, blanking, threshold crossing,
@@ -649,9 +663,19 @@ solver-side observer fallback.
   selected probe group, converting to physical time only during finalization.
 - [ ] Implement constant-memory first/last spike time and spike count. Add a
   bounded `K`-event representation with explicit overflow only for workflows
-  that need individual timestamps.
+  that need individual timestamps. Detect rising threshold crossings with
+  blanking plus hysteresis/refractory semantics so one broad spike is not
+  counted at every timestep. Store integer timesteps during the scan and
+  convert to physical timestamps only during result finalization.
 - [ ] Support existing `PositionSelector` semantics and selectors containing
   several positions, reducing each probe group online.
+- [ ] Extend `estimate()`/`inspect()` with output-state and transfer estimates
+  for full raster, downsampled raster, probes, and bounded events. Make the
+  `Nprobe x K` cost visible before execution and require an explicit policy for
+  expensive all-compartment event capture. At 21 amplitudes, 4096 axons,
+  200 compartments, and `K=4`, event indices alone are about `263 MiB`; sparse
+  probes remain the preferred route when complete spatial timestamps are not
+  scientifically required.
 
 #### P15B - Propagation and true conduction block
 
