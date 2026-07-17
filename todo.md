@@ -761,6 +761,18 @@ the spans is not a gain.
     `axs-p16-node-first-double-1024-p100-ac542e4`,
     `axs-p16-nftrace-d1024-p100-ac542e4`, and
     `axs-p16-nf-d4096-p100-ac542e4`.
+  - [x] Replace the production coefficient-materialization boundary with one
+    physical-term Triton custom call that assembles each 2x2 block in registers
+    before Thomas elimination. Combined with node-first state, median warm
+    `simulation.run_pool` improves from the P16 baseline by `26.3%` at N=1024
+    (`1.870 -> 1.378 s`) and `26.2%` at N=4096 (`6.703 -> 4.945 s`). The
+    incremental solver-interval gain over node-first alone is about `8.9%` and
+    `6.8%`; first-miss Triton compilation grows from `3.70` to `4.98 s`, so
+    cold remains a cache target. Independent P100 dense-solve validation passes
+    with max absolute/scaled errors `8.82e-7/1.96e-7`. Artifacts end in
+    `axs-p16-fusedasm-d{1024,4096}-p100-ff80df8`,
+    `axs-p16-fusedtrace-d1024-p100-ff80df8`, and
+    `axs-p16-fusedvalidate-p100-ff80df8`.
   - Keep one coherent state layout across membrane evaluation and the
     node-first Triton solve. A direct `dynamic_update_slice` gate-carry
     experiment was rejected: it changed optimized gate layout to
@@ -774,6 +786,10 @@ the spans is not a gain.
   future fused membrane kernel, but generating model-specific JAX/Triton
   operations from the compiled membrane contract belongs to P17; never
   hard-code MRG or another built-in model into a solver.
+  - The retained fused-assembly profile leaves about `337 ms` in generated JAX
+    membrane/gate reconstruction at N=1024. Moving that work into Triton is a
+    P17 generated-contract experiment, not another hand-written P16 solver
+    specialization.
 - [ ] Evaluate JAX's persistent compilation cache for non-Triton routes under
   `.axonscope_cache/runtime/jax/xla`. Benchmark true cross-process miss/hit,
   trace/lower/compile/first execution, size/LRU policy, clean/disable behavior,

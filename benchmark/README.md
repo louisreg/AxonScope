@@ -369,6 +369,23 @@ Artifacts end in
 `axs-p16-nftrace-d1024-p100-ac542e4`, with the large timing run ending in
 `axs-p16-nf-d4096-p100-ac542e4`.
 
+Commit `ff80df8` then replaces the production
+`materialized coefficients/RHS -> Triton` boundary with one model-agnostic
+physical-term custom call. It forms each 2x2 block in Triton registers before
+Thomas elimination and removes the measured `430 ms` JAX assembly fusion. At
+N=1024, median warm `simulation.run_pool` is `1.378 s`, `8.6%` below node-first
+alone and `26.3%` below the P16 baseline. At N=4096 it is `4.945 s`, `2.6%`
+below node-first alone and `26.2%` below baseline; the non-overlapping solver
+interval improves by about `8.9/6.8%` over node-first. The first Triton miss is
+more expensive (`4.98 s` compilation versus `3.70 s`), and cold run-pool time
+regresses `5.5%` at N=4096 versus node-first while remaining `14.4%` faster than
+the P16 baseline. Direct P100 validation against independent dense NumPy solves
+passes at `Nx=22`, batch 7, with max absolute/scaled errors
+`8.82e-7/1.96e-7`. Artifacts end in
+`axs-p16-fusedasm-d{1024,4096}-p100-ff80df8`,
+`axs-p16-fusedtrace-d1024-p100-ff80df8`, and
+`axs-p16-fusedvalidate-p100-ff80df8`.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is
