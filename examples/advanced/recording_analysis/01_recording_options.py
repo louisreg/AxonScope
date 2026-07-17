@@ -105,7 +105,8 @@ def main() -> None:
 
     # Step 4: create four public Recording objects and inspect their plans before
     # solving. The plan is backend-neutral and answers "which columns are kept?".
-    # Recording.none() is shown in 05_vmraster_observer_only.py because it is
+    # Recording.none() is shown in ../observers/01_vmraster_observer_only.py
+    # because it is
     # useful when solver-side observers replace stored Vm traces.
     recording_modes = {
         "voltage": axs.Recording.voltage(),

@@ -258,7 +258,7 @@ python examples/basic/03_point_source_footprint.py
 python examples/basic/05_population_pool_run.py
 python examples/basic/08_recruitment_curve_population.py
 python examples/advanced/runtime/03_pipeline_inspection.py
-python examples/advanced/recording_analysis/05_vmraster_observer_only.py
+python examples/advanced/observers/01_vmraster_observer_only.py
 python examples/advanced/protocols/02_recruitment_waveforms.py
 ```
 

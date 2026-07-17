@@ -1,11 +1,12 @@
 """Retain first-crossing latency without storing a Vm time raster.
 
 Run:
-    python examples/advanced/recording_analysis/07_compact_latency.py
+    python examples/advanced/observers/03_compact_latency.py
 """
 
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 import axonscope as axs
@@ -60,12 +61,64 @@ def main() -> None:
     ).run()
     reference = np.asarray(recorded.analyze(latency).values, dtype=float)
     np.testing.assert_allclose(values, reference, equal_nan=True)
+    reference_raster = axs.VmRasterResult.from_result(recorded, latency)
 
     print("=== Compact latency ===")
     print(f"latency (ms): {values.tolist()}")
     print(f"retained shape: {inspection.probes[0].retained_shape}")
     print(f"retained bytes: {inspection.probes[0].retained_bytes}")
     print(f"Vm retained: {inspection.lowerings[0].retained_vm_width > 0}")
+
+    fig, (ax_trace, ax_raster, ax_latency) = plt.subplots(
+        3,
+        1,
+        figsize=(8.0, 7.8),
+        constrained_layout=True,
+    )
+    labels = ("0 nA", "4 nA")
+    for row, label, value in zip(recorded, labels, values, strict=True):
+        vm_mV = row.voltage_values(unit=axs.mV)
+        center = vm_mV.shape[1] // 2
+        row.plot_trace(
+            ax=ax_trace,
+            index=center,
+            time_unit=axs.ms,
+            voltage_unit=axs.mV,
+            label=label,
+        )
+        if np.isfinite(value):
+            ax_trace.axvline(value, color="C3", linestyle="--", linewidth=1.0)
+    ax_trace.axhline(0.0, color="0.3", linestyle="--", linewidth=1.0)
+    ax_trace.axvline(0.20, color="0.5", linestyle=":", linewidth=1.0)
+    ax_trace.set(title="Recorded Vm reference", xlabel="Time (ms)", ylabel="Vm (mV)")
+    ax_trace.legend()
+
+    reference_raster.plot(
+        ax=ax_raster,
+        row=1,
+        time_unit=axs.ms,
+        title="Raster derived from dense Vm (4 nA reference)",
+    )
+
+    finite = np.isfinite(values)
+    indices = np.arange(values.size)
+    ax_latency.scatter(indices[finite], values[finite], color="C3", s=60, label="detected")
+    ax_latency.scatter(
+        indices[~finite],
+        np.zeros(np.count_nonzero(~finite)),
+        color="0.4",
+        marker="x",
+        s=60,
+        label="not detected",
+    )
+    ax_latency.set(
+        title="One retained first-crossing timestep per axon",
+        ylabel="Latency (ms)",
+        xticks=indices,
+        xticklabels=labels,
+    )
+    ax_latency.legend()
+    plt.show()
 
 
 if __name__ == "__main__":

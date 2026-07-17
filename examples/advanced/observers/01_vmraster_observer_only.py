@@ -1,7 +1,7 @@
 """Run VmRaster observer-only output without stored Vm traces.
 
 Run:
-    python examples/advanced/recording_analysis/05_vmraster_observer_only.py
+    python examples/advanced/observers/01_vmraster_observer_only.py
 
 The previous example keeps Vm and evaluates analyses post-hoc. This one uses
 `Recording.none()` plus solver-side threshold observers, so the result keeps a

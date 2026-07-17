@@ -73,14 +73,17 @@ still runnable examples, but they explain the moving parts more explicitly.
   criteria from recorded Vm.
 - `recording_analysis/04_analysis_layer.py`: use structured post-hoc analyses,
   statuses, reports, and population denominators.
-- `recording_analysis/05_vmraster_observer_only.py`: run trace-free VmRaster
-  observer-only simulations with `Recording.none()`.
-- `recording_analysis/06_compact_activation.py`: retain one activation boolean
-  per axon, apply solver-side blanking, and compare with recorded Vm analysis.
-- `recording_analysis/07_compact_latency.py`: retain one first-crossing step per
-  axon and return latency without storing a Vm time raster.
-- `recording_analysis/08_dense_observable_recording.py`: record dense gates,
+- `recording_analysis/05_dense_recording.py`: record dense gates,
   currents, and conductances through batch-native result manifests.
+
+### Observers
+
+- `observers/01_vmraster_observer_only.py`: run trace-free VmRaster
+  observer-only simulations with `Recording.none()`.
+- `observers/02_compact_activation.py`: retain one activation boolean per axon,
+  apply solver-side blanking, and compare it visually with recorded Vm.
+- `observers/03_compact_latency.py`: retain one first-crossing step per axon and
+  compare compact latency visually with recorded Vm.
 
 ### Protocols
 

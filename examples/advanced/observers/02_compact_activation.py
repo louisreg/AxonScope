@@ -1,11 +1,12 @@
 """Retain one activation flag per axon without storing a Vm time raster.
 
 Run:
-    python examples/advanced/recording_analysis/06_compact_activation.py
+    python examples/advanced/observers/02_compact_activation.py
 """
 
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 import axonscope as axs
@@ -60,12 +61,53 @@ def main() -> None:
     ).run()
     reference = np.asarray(recorded.analyze(activation).values, dtype=bool)
     np.testing.assert_array_equal(flags, reference)
+    reference_raster = axs.VmRasterResult.from_result(recorded, activation)
 
     print("=== Compact activation ===")
     print(f"flags: {flags.tolist()}")
     print(f"retained shape: {inspection.probes[0].retained_shape}")
     print(f"retained bytes: {inspection.probes[0].retained_bytes}")
     print(f"Vm retained: {inspection.lowerings[0].retained_vm_width > 0}")
+
+    fig, (ax_trace, ax_raster, ax_flags) = plt.subplots(
+        3,
+        1,
+        figsize=(8.0, 7.8),
+        constrained_layout=True,
+    )
+    labels = ("0 nA", "4 nA")
+    for row, label in zip(recorded, labels, strict=True):
+        vm_mV = row.voltage_values(unit=axs.mV)
+        center = vm_mV.shape[1] // 2
+        row.plot_trace(
+            ax=ax_trace,
+            index=center,
+            time_unit=axs.ms,
+            voltage_unit=axs.mV,
+            label=label,
+        )
+    ax_trace.axhline(0.0, color="0.3", linestyle="--", linewidth=1.0)
+    ax_trace.axvline(0.20, color="0.5", linestyle=":", linewidth=1.0)
+    ax_trace.set(title="Recorded Vm reference", xlabel="Time (ms)", ylabel="Vm (mV)")
+    ax_trace.legend()
+
+    reference_raster.plot(
+        ax=ax_raster,
+        row=1,
+        time_unit=axs.ms,
+        title="Raster derived from dense Vm (4 nA reference)",
+    )
+
+    ax_flags.bar(labels, flags.astype(int), color=("0.65", "C0"))
+    ax_flags.set(
+        title="One retained boolean per axon",
+        ylabel="Activated",
+        ylim=(0.0, 1.15),
+        yticks=(0, 1),
+    )
+    for index, flag in enumerate(flags):
+        ax_flags.text(index, 0.05 if flag else 0.03, str(bool(flag)), ha="center")
+    plt.show()
 
 
 if __name__ == "__main__":
