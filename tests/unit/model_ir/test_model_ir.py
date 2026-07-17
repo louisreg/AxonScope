@@ -464,12 +464,22 @@ def test_generated_hh_supports_model_agnostic_gated_leak_batch_capability(tmp_pa
         V_mV=voltage,
         dt=0.005,
     )
+    update_jaxpr = str(
+        jax.make_jaxpr(
+            lambda g_prev, vm: backend.batch_cn_gate_update(
+                g_prev=g_prev,
+                V_mV=vm,
+                dt=0.005,
+            )
+        )(gates, voltage)
+    )
     expected_gm, expected_ge = jax.vmap(
         lambda row: backend.membrane_conductance_terms_for_row(0, row)
     )(actual)
     actual_gm, actual_ge = backend.batch_membrane_conductance_terms(actual)
 
     np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-7)
+    assert "dynamic_update_slice" in update_jaxpr
     np.testing.assert_allclose(actual_gm, expected_gm, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
 

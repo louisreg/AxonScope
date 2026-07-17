@@ -541,9 +541,10 @@ class GatedLeakStackMembraneBackend:
             V_mV=V_mV.reshape((-1,)),
             dt=dt,
         ).reshape((*batch_shape, self.gated_gate_count))
-        return jnp.concatenate(
-            [gated_gates, g_prev[..., self.gated_gate_count :]],
-            axis=-1,
+        return jax.lax.dynamic_update_slice(
+            g_prev,
+            gated_gates,
+            (0,) * g_prev.ndim,
         )
 
     def currents_for_row(
