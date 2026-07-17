@@ -300,20 +300,42 @@ def assemble_double_cable_linear_system_xb(
     )
 
 
-def solve_double_cable_linear_system_jax_triton_loop_xb(
-    system: DoubleCableLinearSystemXB,
+def solve_double_cable_physical_system_jax_triton_loop_xb(
     *,
+    static: DoubleCableLinearSystemStaticTermsXB,
+    Vi: Array,
+    Ve: Array,
+    Gm_density: Array,
+    GE_density: Array,
+    Iinj_abs: Array,
+    I_outward_abs: Array,
+    I_corr_abs: Array,
+    extracellular_drive_abs: Array,
     block_b: int = 32,
     return_node_first: bool = False,
 ) -> tuple[Array, Array]:
-    """Solve a node-first double-cable system with the private jax-triton route."""
+    """Assemble and solve a node-first system with the private GPU route."""
 
     from .triton_double_cable import (
-        solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
+        solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb,
     )
 
-    Vi_xb, Ve_xb = solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
-        *system,
+    Vi_xb, Ve_xb = solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
+        static.a00_static,
+        static.a11_static,
+        static.cm_over_dt,
+        static.cx_over_dt,
+        static.off_i,
+        static.off_e,
+        Vi,
+        Ve,
+        Gm_density,
+        GE_density,
+        static.area,
+        Iinj_abs,
+        I_outward_abs,
+        I_corr_abs,
+        extracellular_drive_abs,
         block_b=block_b,
     )
     if return_node_first:

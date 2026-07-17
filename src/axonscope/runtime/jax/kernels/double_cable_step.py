@@ -8,9 +8,8 @@ import jax
 
 from ..cable_geometry import Array
 from .double_cable_linear import (
-    assemble_double_cable_linear_system_xb,
     double_cable_space_to_xb,
-    solve_double_cable_linear_system_jax_triton_loop_xb,
+    solve_double_cable_physical_system_jax_triton_loop_xb,
 )
 
 
@@ -183,7 +182,6 @@ def solve_double_cable_batch_step(
     *,
     backend: Any,
     row_indices: Array,
-    area_batch: Array,
     linear_static_xb: Any | None,
     batch_size: int,
     nx: int,
@@ -198,26 +196,23 @@ def solve_double_cable_batch_step(
         backend=backend,
         row_indices=row_indices,
     )
-    Gm_abs = Gm_den * area_batch
-    GE_abs = GE_den * area_batch
-
     if double_cable_block_solver == "jax_triton_loop_xb":
         if linear_static_xb is None:
             raise ValueError("linear_static_xb is required for jax_triton_loop_xb.")
-        system_xb = assemble_double_cable_linear_system_xb(
+        return solve_double_cable_physical_system_jax_triton_loop_xb(
+            static=linear_static_xb,
             Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
             Ve=double_cable_space_to_xb(Ve, batch_size=batch_size, nx=nx),
-            Gm_abs=double_cable_space_to_xb(
-                Gm_abs,
+            Gm_density=double_cable_space_to_xb(
+                Gm_den,
                 batch_size=batch_size,
                 nx=nx,
             ),
-            GE_abs=double_cable_space_to_xb(
-                GE_abs,
+            GE_density=double_cable_space_to_xb(
+                GE_den,
                 batch_size=batch_size,
                 nx=nx,
             ),
-            static=linear_static_xb,
             Iinj_abs=double_cable_space_to_xb(
                 Iinj_abs,
                 batch_size=batch_size,
@@ -238,9 +233,6 @@ def solve_double_cable_batch_step(
                 batch_size=batch_size,
                 nx=nx,
             ),
-        )
-        return solve_double_cable_linear_system_jax_triton_loop_xb(
-            system_xb,
             block_b=tiled_thomas_block_b,
             return_node_first=return_node_first,
         )

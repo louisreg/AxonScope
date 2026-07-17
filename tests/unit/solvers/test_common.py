@@ -12,14 +12,14 @@ from axonscope.runtime.jax.cable_geometry import (
     diffusion_operator_coeffs,
 )
 from axonscope.runtime.jax.kernels.double_cable_linear import (
-    DoubleCableLinearSystemXB,
+    DoubleCableLinearSystemStaticTermsXB,
     assemble_double_cable_linear_system,
     assemble_double_cable_linear_system_xb,
     double_cable_space_from_xb,
     double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
-    solve_double_cable_linear_system_jax_triton_loop_xb,
+    solve_double_cable_physical_system_jax_triton_loop_xb,
 )
 
 
@@ -329,40 +329,57 @@ def test_double_cable_triton_boundary_can_retain_node_first(monkeypatch):
         (nx, batch_size)
     )
     edges = jnp.ones((nx - 1, batch_size), dtype=jnp.float32)
-    system = DoubleCableLinearSystemXB(
-        a00=space + 10.0,
-        a01=space,
-        a10=space,
-        a11=space + 11.0,
-        off0=edges,
-        off1=edges,
-        rhs0=space + 1.0,
-        rhs1=space + 2.0,
+    ones = jnp.ones_like(space)
+    zeros = jnp.zeros_like(space)
+    static = DoubleCableLinearSystemStaticTermsXB(
+        area=ones,
+        cm_over_dt=ones,
+        cx_over_dt=ones,
+        cx_plus_gx=ones,
+        a00_static=space + 10.0,
+        a11_static=space + 11.0,
+        off_i=edges,
+        off_e=edges,
+        background_abs=zeros,
+        zero_abs=zeros,
     )
+    vi = space + 1.0
+    ve = space + 2.0
 
     monkeypatch.setattr(
         triton_double_cable,
-        "solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb",
-        lambda *values, block_b: (values[-2], values[-1]),
+        "solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb",
+        lambda *values, block_b: (values[6], values[7]),
     )
 
-    vi_xb, ve_xb = solve_double_cable_linear_system_jax_triton_loop_xb(
-        system,
+    inputs = dict(
+        static=static,
+        Vi=vi,
+        Ve=ve,
+        Gm_density=zeros,
+        GE_density=zeros,
+        Iinj_abs=zeros,
+        I_outward_abs=zeros,
+        I_corr_abs=zeros,
+        extracellular_drive_abs=zeros,
+    )
+    vi_xb, ve_xb = solve_double_cable_physical_system_jax_triton_loop_xb(
+        **inputs,
         return_node_first=True,
     )
-    vi_batch, ve_batch = solve_double_cable_linear_system_jax_triton_loop_xb(
-        system,
+    vi_batch, ve_batch = solve_double_cable_physical_system_jax_triton_loop_xb(
+        **inputs,
     )
 
-    np.testing.assert_array_equal(np.asarray(vi_xb), np.asarray(system.rhs0))
-    np.testing.assert_array_equal(np.asarray(ve_xb), np.asarray(system.rhs1))
+    np.testing.assert_array_equal(np.asarray(vi_xb), np.asarray(vi))
+    np.testing.assert_array_equal(np.asarray(ve_xb), np.asarray(ve))
     np.testing.assert_array_equal(
         np.asarray(vi_batch),
-        np.asarray(system.rhs0).T,
+        np.asarray(vi).T,
     )
     np.testing.assert_array_equal(
         np.asarray(ve_batch),
-        np.asarray(system.rhs1).T,
+        np.asarray(ve).T,
     )
 
 

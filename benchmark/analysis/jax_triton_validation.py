@@ -22,32 +22,66 @@ def validate_double_cable_tiled_thomas(
     import jax.numpy as jnp
 
     from axonscope.runtime.jax.kernels.triton_double_cable import (
-        solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb,
+        solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb,
     )
 
     rng = np.random.default_rng(seed)
     shape = (nx, batch_size)
     edge_shape = (nx - 1, batch_size)
-    a00 = 4.0 + 0.2 * rng.random(shape)
-    a11 = 5.0 + 0.2 * rng.random(shape)
-    a01 = -0.15 - 0.02 * rng.random(shape)
-    a10 = -0.12 - 0.02 * rng.random(shape)
+    a00_static = 4.0 + 0.2 * rng.random(shape)
+    a11_static = 5.0 + 0.2 * rng.random(shape)
+    cm_over_dt = 0.15 + 0.02 * rng.random(shape)
+    cx_over_dt = 0.08 + 0.01 * rng.random(shape)
     off0 = -0.35 - 0.02 * rng.random(edge_shape)
     off1 = -0.30 - 0.02 * rng.random(edge_shape)
-    rhs0 = rng.normal(size=shape)
-    rhs1 = rng.normal(size=shape)
+    vi = -70.0 + rng.normal(size=shape)
+    ve = rng.normal(size=shape)
+    gm_density = 0.01 + 0.005 * rng.random(shape)
+    ge_density = rng.normal(size=shape)
+    area = 0.5 + 0.1 * rng.random(shape)
+    iinj_abs = rng.normal(size=shape)
+    i_outward_abs = rng.normal(size=shape)
+    i_corr_abs = rng.normal(size=shape)
+    extracellular_drive_abs = rng.normal(size=shape)
 
-    gpu0, gpu1 = solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb(
-        *(jnp.asarray(value, dtype=jnp.float32) for value in (
-            a00,
-            a01,
-            a10,
-            a11,
-            off0,
-            off1,
-            rhs0,
-            rhs1,
-        )),
+    gm_abs = gm_density * area
+    ge_abs = ge_density * area
+    charge = cm_over_dt * (vi - ve)
+    a00 = a00_static + gm_abs
+    a01 = -(cm_over_dt + gm_abs)
+    a10 = a01
+    a11 = a11_static + gm_abs
+    rhs0 = charge + ge_abs + iinj_abs - i_outward_abs - i_corr_abs
+    rhs1 = (
+        -charge
+        - ge_abs
+        + cx_over_dt * ve
+        + extracellular_drive_abs
+        + i_outward_abs
+        + i_corr_abs
+    )
+
+    gpu0, gpu1 = solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
+        *(
+            jnp.asarray(value, dtype=jnp.float32)
+            for value in (
+                a00_static,
+                a11_static,
+                cm_over_dt,
+                cx_over_dt,
+                off0,
+                off1,
+                vi,
+                ve,
+                gm_density,
+                ge_density,
+                area,
+                iinj_abs,
+                i_outward_abs,
+                i_corr_abs,
+                extracellular_drive_abs,
+            )
+        ),
         block_b=block_b,
     )
     jax.block_until_ready((gpu0, gpu1))
