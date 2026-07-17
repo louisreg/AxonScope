@@ -359,6 +359,49 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
     )
 
 
+def test_compact_latency_matches_posthoc_at_float32_blanking_boundary():
+    axon = axs.AxonInstance(
+        axs.axons.HodgkinHuxley(
+            length=120.0 * axs.um,
+            diameter=0.8 * axs.um,
+            compartments=31,
+            celsius=6.3 * axs.degC,
+        )
+    )
+    axon.add_current_clamp(
+        position=60.0 * axs.um,
+        current=axs.Stimulus.pulse(
+            start=0.05 * axs.ms,
+            duration=0.10 * axs.ms,
+            amplitude=4.0 * axs.nA,
+        ),
+    )
+    latency = axs.analysis.Latency(
+        threshold=0.0 * axs.mV,
+        blanking=0.20 * axs.ms,
+        target=axs.positions.CENTER,
+    )
+
+    compact = _run_simulation(
+        [axon],
+        duration=2.0 * axs.ms,
+        dt=0.005 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[latency],
+    )
+    recorded = _run_simulation(
+        [axon],
+        duration=2.0 * axs.ms,
+        dt=0.005 * axs.ms,
+        recording=axs.Recording.voltage(),
+    )
+
+    compact_values = compact.observations["latency"].values
+    posthoc_values = recorded.analyze(latency).values
+    np.testing.assert_allclose(compact_values, posthoc_values, equal_nan=True)
+    np.testing.assert_allclose(compact_values, [0.205])
+
+
 def test_pool_observer_only_zero_field_does_not_materialize_dense_vstim():
     axons = []
     for amplitude in (0.4, 0.5):

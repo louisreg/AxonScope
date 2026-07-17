@@ -527,10 +527,7 @@ def update_threshold_observer_state_batch_from_tables(
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[None, :, None])
     if retention in {"activation", "first_crossing"}:
         time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
-        after_blanking = _is_after_blanking(
-            time_ms,
-            jnp.asarray(blanking_ms)[None, :, None],
-        )
+        after_blanking = time_ms >= jnp.asarray(blanking_ms)[None, :, None]
         crossed = jnp.any(hit & after_blanking, axis=-1)
         if retention == "activation":
             return jnp.asarray(state, dtype=bool) | crossed
@@ -566,7 +563,7 @@ def update_threshold_observer_state_scalar_from_tables(
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[:, None])
     if retention in {"activation", "first_crossing"}:
         time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
-        after_blanking = _is_after_blanking(time_ms, jnp.asarray(blanking_ms)[:, None])
+        after_blanking = time_ms >= jnp.asarray(blanking_ms)[:, None]
         crossed = jnp.any(hit & after_blanking, axis=-1)
         if retention == "activation":
             return jnp.asarray(state, dtype=bool) | crossed
@@ -574,17 +571,6 @@ def update_threshold_observer_state_scalar_from_tables(
         step = jnp.asarray(step_index, dtype=jnp.int32)
         return jnp.where((current < 0) & crossed, step, current)
     return _write_raster_bits(state, hit, step_index)
-
-
-def _is_after_blanking(time_ms: Any, blanking_ms: Any) -> Any:
-    time = jnp.asarray(time_ms)
-    blanking = jnp.asarray(blanking_ms, dtype=time.dtype)
-    tolerance = (
-        jnp.asarray(4.0, dtype=time.dtype)
-        * jnp.asarray(jnp.finfo(time.dtype).eps, dtype=time.dtype)
-        * jnp.maximum(jnp.asarray(1.0, dtype=time.dtype), jnp.abs(blanking))
-    )
-    return time >= blanking - tolerance
 
 
 def _write_raster_bits(words: Any, hit: Any, step_index: Any) -> Any:

@@ -1164,12 +1164,15 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
         observers=latency_observer,
         benchmark_observer_state_scope="chunk",
     )
-    eligible = sample_times_ms >= 0.2
     crossing = np.asarray(full.Vm)[:, :, center] >= -80.0
+    sample_times_device_ms = (
+        np.arange(crossing.shape[1], dtype=np.float32) + np.float32(1.0)
+    ) * np.float32(dt)
+    eligible = sample_times_device_ms >= np.float32(0.2)
     expected_latency = np.full(crossing.shape[0], np.nan)
     for row, values in enumerate(crossing[:, eligible]):
         if np.any(values):
-            expected_latency[row] = sample_times_ms[eligible][np.argmax(values)]
+            expected_latency[row] = sample_times_device_ms[eligible][np.argmax(values)]
     np.testing.assert_allclose(
         _compact_latency_values(compact_latency),
         expected_latency,
