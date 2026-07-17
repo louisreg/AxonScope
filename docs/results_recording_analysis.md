@@ -172,7 +172,8 @@ Public result surface audit:
 | `AxonResultView` | one simulated row; exposes `Vm`, `t`, `signal(...)`, `recorded_axis`, recordings, observations, diagnostics, final state, plots, and analysis/report helpers. |
 | `RecordedSignal` and `RecordingManifest` | structured record of requested and available signals. |
 | `RecordedAxis` | canonical interpretation of retained Vm columns as intrinsic axon positions plus original layout indices. |
-| `VmRasterResult` | compact observer-only threshold raster stored under `observations["vm_raster"]`. |
+| `AnalysisResult` | compact activation flags stored under `observations["activation"]`. |
+| `VmRasterResult` | packed observer-only threshold raster stored under `observations["vm_raster"]`. |
 | `AnalysisReport` and protocol summaries | separate scientific interpretations of results; they do not mutate or merge into raw numerical result objects. |
 
 View/rendering helpers are intentionally separate from data containers:
@@ -347,17 +348,17 @@ online_activation = observer.finalize()
 posthoc_activation = result.analyze(activation)
 ```
 
-Solver-side observer-only execution now uses one strict VmRaster primitive.
-Threshold-style definitions such as `axs.analysis.Activation(...)` lower to
-fixed membrane-voltage probes, the solver thresholds those probes at every
-`dt`, and the result carries compact `observations["vm_raster"]` rather than
-retained Vm traces. Activation, latency, velocity, threshold, and recruitment
-summaries are post-processing of that raster.
+Solver-side observer-only execution uses one probe-and-threshold lowering with
+typed retention policies. An `axs.analysis.Activation(...)`-only request updates
+one boolean per row and definition during the scan, applies `blanking` as the
+earliest accepted sample time, and returns `observations["activation"]` without
+retaining Vm or a temporal raster. Definitions that need crossing time or
+propagation history retain the packed VmRaster route.
 
-The packed result container is `axs.results.VmRasterResult` and the canonical
-observation key is `axs.results.VM_RASTER_OBSERVATION_KEY`. Solver/backend code
-owns the packed-bit update loop, but CPU unpacking and result-side helpers live
-with public results.
+Compact activation returns the canonical `AnalysisResult`. The packed reference
+container remains `axs.results.VmRasterResult` under
+`axs.results.VM_RASTER_OBSERVATION_KEY`. Solver/backend code owns both scan-state
+updates, while result conversion remains outside the kernels.
 
 ```python
 run = axs.AxonSimulation(
@@ -370,14 +371,16 @@ run = axs.AxonSimulation(
     ],
 ).run()
 result = run.single
+activated = bool(result.observations["activation"].value)
 ```
 
 For pool runs, compatible single-cable and double-cable groups can use the
 compact observer-only batch path. Row-specific probe tables and masks must be
 lowered before the solver so padded rows do not force full Vm retention.
-Population-level `result.observations["vm_raster"]` may be padded to a shared
-probe width; an individual `result[i].observations["vm_raster"]` view exposes
-that row's own probe width.
+For VmRaster outputs, population-level `result.observations["vm_raster"]` may be
+padded to a shared probe width; an individual row view exposes that row's own
+probe width. Compact activation has shape `[Naxon]` and does not retain a probe
+or time axis after the online reduction.
 `PeakVoltage` and other rich analyses remain post-hoc on recorded Vm until a
 dedicated solver-side implementation is designed, benchmarked, and kept off the
 hot path.

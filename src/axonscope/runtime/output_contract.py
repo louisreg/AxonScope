@@ -13,7 +13,7 @@ from axonscope.analysis.definitions import (
 )
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
-OutputSink = Literal["vm", "none", "vm_raster"]
+OutputSink = Literal["vm", "none", "activation", "vm_raster"]
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class OutputPlan:
         row_record_indices: Any | None = None,
     ) -> "OutputPlan":
         if options.recording.mode == "none":
-            sink: OutputSink = "vm_raster" if observers else "none"
+            sink: OutputSink = observer_output_label(observers, recording_mode="none")
         else:
             sink = "vm"
         return cls(
@@ -68,6 +68,8 @@ def observer_output_label(
 
     if observers is None:
         return "none"
+    if recording_mode == "none" and observers_are_compact_activation_compatible(observers):
+        return "activation"
     if recording_mode == "none" and observers_are_vm_raster_compatible(observers):
         return "vm_raster"
     if recording_mode == "none":
@@ -81,6 +83,14 @@ def observers_are_vm_raster_compatible(observers: tuple[Any, ...] | None) -> boo
     if observers is None:
         return False
     return bool(observers) and len(vm_raster_definitions(observers)) == len(observers)
+
+
+def observers_are_compact_activation_compatible(
+    observers: tuple[Any, ...] | None,
+) -> bool:
+    """Return whether observers need only one retained activation flag per row."""
+
+    return bool(observers) and all(isinstance(observer, Activation) for observer in observers)
 
 
 def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:

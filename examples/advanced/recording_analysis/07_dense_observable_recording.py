@@ -1,7 +1,7 @@
 """Record dense membrane observables through the public batch result path.
 
 Run:
-    python examples/advanced/recording_analysis/06_dense_observable_recording.py
+    python examples/advanced/recording_analysis/07_dense_observable_recording.py
 """
 
 from __future__ import annotations

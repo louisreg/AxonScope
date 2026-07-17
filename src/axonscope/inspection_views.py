@@ -85,11 +85,11 @@ def format_simulation_inspection(report: SimulationInspection) -> str:
         )
     lines.append("probes:")
     for probes in report.probes:
-        shape = _shape_text(probes.packed_shape)
+        shape = _shape_text(probes.retained_shape)
         lines.append(
             f"  group {probes.group_id}: names={probes.observer_names}, "
             f"row_aware={probes.row_aware}, max_probes={probes.max_probe_count}, "
-            f"packed_shape={shape}, packed_bytes={probes.packed_bytes}"
+            f"retained_shape={shape}, retained_bytes={probes.retained_bytes}"
         )
     lines.append("memory:")
     for memory in report.memory:
@@ -100,7 +100,7 @@ def format_simulation_inspection(report: SimulationInspection) -> str:
             f"Iinj={_bytes_text(memory.dense_iinj_bytes)}, "
             f"Vext={_bytes_text(memory.dense_vstim_bytes)}, "
             f"Vm={_bytes_text(memory.retained_vm_bytes)}, "
-            f"VmRaster={_bytes_text(memory.vm_raster_bytes)}, "
+            f"observer={_bytes_text(memory.observer_bytes)}, "
             f"total={_bytes_text(memory.total_estimated_bytes)}, "
             f"retained={_bytes_text(memory.retained_public_bytes)}"
         )
@@ -274,7 +274,7 @@ def print_simulation_inspection(
             str(padding.padded_compartments),
             f"{padding.padded_fraction:.3f}",
             names,
-            _shape_text(probe.packed_shape),
+            _shape_text(probe.retained_shape),
         )
 
     console.print(
@@ -398,7 +398,7 @@ def plot_simulation_inspection_details(
         ("Iinj", [item.dense_iinj_bytes for item in report.memory]),
         ("Vext", [item.dense_vstim_bytes for item in report.memory]),
         ("Vm", [item.retained_vm_bytes for item in report.memory]),
-        ("VmRaster", [item.vm_raster_bytes for item in report.memory]),
+        ("observer", [item.observer_bytes for item in report.memory]),
     )
     memory_scale, memory_unit = _memory_plot_scale(memory_parts)
     for label, values in memory_parts:

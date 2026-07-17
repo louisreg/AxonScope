@@ -6,7 +6,7 @@ import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.analytical import PointSourceElectrode
 from axonscope.axons import HodgkinHuxley
-from axonscope.runtime.jax.recording.observer import finalize_vm_raster_state
+from axonscope.runtime.jax.recording.observer import finalize_threshold_observer_state
 from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
 from axonscope.stimulation import Stimulus
 
@@ -33,7 +33,7 @@ def kernel_observations(out):
         return out.observations
     pending = out.pending_observation
     assert pending is not None
-    return finalize_vm_raster_state(
+    return finalize_threshold_observer_state(
         pending.plan,
         pending.state,
         nt=pending.nt,

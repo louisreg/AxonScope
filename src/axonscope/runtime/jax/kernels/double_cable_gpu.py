@@ -8,8 +8,9 @@ import jax
 import jax.numpy as jnp
 
 from axonscope.runtime.jax.recording.observer import (
-    VmRasterState,
-    update_vm_raster_state_batch_from_tables,
+    ObserverRetention,
+    ThresholdObserverState,
+    update_threshold_observer_state_batch_from_tables,
 )
 
 from . import double_cable_step as solver_core
@@ -387,6 +388,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
         "stateless_vm_only",
         "double_cable_block_solver",
         "tiled_thomas_block_b",
+        "observer_retention",
     ),
 )
 def _run_double_cable_batch_observer_integrated_scan(
@@ -397,14 +399,16 @@ def _run_double_cable_batch_observer_integrated_scan(
     stateless_vm_only: bool,
     double_cable_block_solver: str,
     tiled_thomas_block_b: int,
+    observer_retention: ObserverRetention,
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
     state0: tuple[Array, ...],
-    observer_state0: VmRasterState,
+    observer_state0: ThresholdObserverState,
     raster_probe_indices: Array,
     raster_probe_mask: Array,
     raster_thresholds_mV: Array,
+    raster_blanking_ms: Array,
     area_cm2: Array,
     Cm_abs: Array,
     Cx_abs: Array,
@@ -425,7 +429,7 @@ def _run_double_cable_batch_observer_integrated_scan(
     extracellular_current_mid_A: Array | None = None,
     extracellular_current_initial_previous_A: Array | None = None,
     extracellular_footprint_mV_per_A: Array | None = None,
-) -> tuple[Array, Array, Array, tuple[Array, ...], VmRasterState]:
+) -> tuple[Array, Array, Array, tuple[Array, ...], ThresholdObserverState]:
     """Run one observer-only chunk using the batch-native tiled-Thomas solver."""
 
     batch_size = int(Vi0_mV.shape[0])
@@ -598,13 +602,16 @@ def _run_double_cable_batch_observer_integrated_scan(
         )
         Vm_new = Vi_new - Ve_new
 
-        observer_state = update_vm_raster_state_batch_from_tables(
+        observer_state = update_threshold_observer_state_batch_from_tables(
             observer_state,
             vm_mV=Vm_new,
             step_index=time_start_index + local_step,
             probe_indices=raster_probe_indices,
             probe_mask=raster_probe_mask,
             thresholds_mV=raster_thresholds_mV,
+            blanking_ms=raster_blanking_ms,
+            dt_ms=dt_ms,
+            retention=observer_retention,
         )
         if stateless_vm_only:
             return (Vi_new, Ve_new, gates_pred, observer_state, *extra), None

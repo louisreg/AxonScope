@@ -403,7 +403,7 @@ def _lower_output_plan_for_group(
             observers,
             cohort=cohort,
             dtype=runtime.membrane.dtype,
-            prefer_vm_raster=kernel_options.recording.mode == "none",
+            prefer_threshold_observer=kernel_options.recording.mode == "none",
         )
     return kernel_options, observer_plan
 

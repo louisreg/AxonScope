@@ -12,6 +12,7 @@ from axonscope.runtime.execution import (
     CableSolverRoute,
     batch_options_from_recording,
     benchmark_lower_recording_options,
+    benchmark_observer_output_label,
     benchmark_observers_are_vm_raster_compatible,
     benchmark_plan_input_lowering,
     benchmark_vm_raster_definitions,
@@ -285,6 +286,10 @@ def _inspect_lowering(
     observers: tuple[Any, ...] | None,
 ) -> LoweringInspection:
     vm_raster_supported = benchmark_observers_are_vm_raster_compatible(observers)
+    observer_output = benchmark_observer_output_label(
+        observers,
+        recording_mode=batch_options.recording.mode,
+    )
     if not _can_batch(
         group,
         batch_options=batch_options,
@@ -295,7 +300,7 @@ def _inspect_lowering(
         if observers is None:
             observer_format = "none"
         elif batch_options.recording.mode == "none" and vm_raster_supported:
-            observer_format = "vm_raster"
+            observer_format = observer_output
         elif batch_options.recording.mode == "none":
             observer_format = "unsupported_observer_only"
         else:
@@ -320,7 +325,7 @@ def _inspect_lowering(
         batch_options,
         observers=observers,
     )
-    observer_plan = (
+    observer_plan = bool(
         observers is not None
         and kernel_options.recording.mode == "none"
         and vm_raster_supported
@@ -339,7 +344,7 @@ def _inspect_lowering(
     dense_iinj_shape = None if intracellular_format != "dense" else dense_shape
     dense_vstim_shape = None if extracellular_format != "dense" else dense_shape
     if observer_plan:
-        observer_format = "vm_raster"
+        observer_format = observer_output
     elif observers and kernel_options.recording.mode == "none":
         observer_format = "unsupported_observer_only"
     elif observers:
@@ -385,8 +390,8 @@ def _inspect_probes(
             probe_indices_by_row=(),
             row_probe_counts=(),
             max_probe_count=0,
-            packed_shape=None,
-            packed_bytes=0,
+            retained_shape=None,
+            retained_bytes=0,
         )
 
     names = tuple(str(definition.name) for definition in definitions)
@@ -411,9 +416,22 @@ def _inspect_probes(
         by_row.append(tuple(row_indices))
         counts.append(tuple(row_counts))
 
-    word_count = (int(step_count) + 31) // 32
-    packed_shape = (int(group.size), len(definitions), int(max_probe_count), word_count)
-    packed_bytes = int(np.prod(packed_shape)) * np.dtype(np.uint32).itemsize
+    observer_output = benchmark_observer_output_label(
+        observers,
+        recording_mode=batch_options.recording.mode,
+    )
+    if observer_output == "activation":
+        retained_shape = (int(group.size), len(definitions))
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(bool).itemsize
+    else:
+        word_count = (int(step_count) + 31) // 32
+        retained_shape = (
+            int(group.size),
+            len(definitions),
+            int(max_probe_count),
+            word_count,
+        )
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.uint32).itemsize
     return ProbeInspection(
         group_id=int(group.group_id),
         observer_names=names,
@@ -427,8 +445,8 @@ def _inspect_probes(
         probe_indices_by_row=tuple(by_row),
         row_probe_counts=tuple(counts),
         max_probe_count=int(max_probe_count),
-        packed_shape=packed_shape,
-        packed_bytes=packed_bytes,
+        retained_shape=retained_shape,
+        retained_bytes=retained_bytes,
     )
 
 
@@ -449,16 +467,20 @@ def _inspect_memory(
     retained_vm_bytes = (
         int(group.size) * int(step_count) * int(lowering.retained_vm_width) * itemsize
     )
-    vm_raster_bytes = int(probes.packed_bytes) if lowering.observer_format == "vm_raster" else 0
+    observer_bytes = (
+        int(probes.retained_bytes)
+        if lowering.observer_format in {"activation", "vm_raster"}
+        else 0
+    )
     total_estimated = (
         state_bytes
         + prepared_position_bytes
         + dense_iinj_bytes
         + dense_vstim_bytes
         + retained_vm_bytes
-        + vm_raster_bytes
+        + observer_bytes
     )
-    retained_public = retained_vm_bytes + vm_raster_bytes
+    retained_public = retained_vm_bytes + observer_bytes
     return MemoryInspection(
         group_id=int(group.group_id),
         dtype=str(dtype),
@@ -467,7 +489,7 @@ def _inspect_memory(
         dense_iinj_bytes=dense_iinj_bytes,
         dense_vstim_bytes=dense_vstim_bytes,
         retained_vm_bytes=retained_vm_bytes,
-        vm_raster_bytes=vm_raster_bytes,
+        observer_bytes=observer_bytes,
         total_estimated_bytes=int(total_estimated),
         retained_public_bytes=int(retained_public),
     )
@@ -537,13 +559,14 @@ def _inspect_result_assembly(
         )
         if observers is None:
             observations = "none"
-        elif (
-            batch_options.recording.mode == "none"
-            and benchmark_observers_are_vm_raster_compatible(observers)
-        ):
-            observations = 'observations["vm_raster"]'
         elif batch_options.recording.mode == "none":
-            observations = "unsupported_observer_only"
+            output = benchmark_observer_output_label(observers, recording_mode="none")
+            if output == "activation":
+                observations = 'observations["activation"]'
+            elif output == "vm_raster":
+                observations = 'observations["vm_raster"]'
+            else:
+                observations = "unsupported_observer_only"
         else:
             observations = "posthoc_from_recorded_vm"
         return ResultAssemblyInspection(
@@ -566,11 +589,16 @@ def _inspect_result_assembly(
         and benchmark_observers_are_vm_raster_compatible(observers)
     )
     if observer_only:
+        output = benchmark_observer_output_label(observers, recording_mode="none")
         return ResultAssemblyInspection(
             group_id=int(group.group_id),
             record_kind="compact dispatch cohort",
             vm_output="none",
-            observation_output='observations["vm_raster"]',
+            observation_output=(
+                'observations["activation"]'
+                if output == "activation"
+                else 'observations["vm_raster"]'
+            ),
             public_result="compact AxonSimulationResult cohort",
         )
 
@@ -627,9 +655,9 @@ def _inspect_assembly_details(
         else probes
     )
     observation_shape = (
-        probes.packed_shape
+        probes.retained_shape
         if (
-            probes.packed_shape is not None
+            probes.retained_shape is not None
             and kernel_options.recording.mode == "none"
             and benchmark_observers_are_vm_raster_compatible(observers)
         )

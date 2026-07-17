@@ -1,4 +1,4 @@
-"""Shared JAX batch-kernel chunking and VmRaster helpers."""
+"""Shared JAX batch-kernel chunking and threshold-observer helpers."""
 
 from __future__ import annotations
 
@@ -7,23 +7,24 @@ import jax.numpy as jnp
 from axonscope.benchmarking import benchmark_span
 from axonscope.runtime.jax.cable_geometry import Array
 from axonscope.runtime.jax.recording.observer import (
-    VmRasterPlan,
-    VmRasterState,
-    combine_vm_raster_chunk_states,
-    init_vm_raster_state,
+    ObserverRetention,
+    ThresholdObserverPlan,
+    ThresholdObserverState,
+    combine_threshold_observer_chunk_states,
+    init_threshold_observer_state,
 )
 
 
-def _vm_raster_probe_tables_for_kernel(
-    plan: VmRasterPlan,
+def _threshold_probe_tables_for_kernel(
+    plan: ThresholdObserverPlan,
     *,
     batch_size: int,
 ) -> tuple[Array, Array]:
     with benchmark_span(
         "kernel.prepare_observer_tables",
-        observer="vm_raster",
+        observer=plan.retention,
         group_size=batch_size,
-        raster_count=plan.raster_count,
+        observer_definition_count=plan.definition_count,
         probe_count=plan.probe_count,
         row_aware=plan.row_aware,
     ):
@@ -37,8 +38,24 @@ def _vm_raster_probe_tables_for_kernel(
             )
         return indices, mask
 
-def _init_local_vm_raster_chunk_template(
-    plan: VmRasterPlan,
+
+def _threshold_blanking_for_chunk(
+    plan: ThresholdObserverPlan,
+    *,
+    start: int,
+    dt_ms: Array,
+    local_state: bool,
+) -> Array:
+    """Express absolute activation blanking in a chunk-local time frame."""
+
+    if local_state and plan.retention == "activation":
+        start_step = jnp.asarray(start, dtype=jnp.asarray(dt_ms).dtype)
+        return plan.blanking_ms - start_step * dt_ms
+    return plan.blanking_ms
+
+
+def _init_local_threshold_chunk_template(
+    plan: ThresholdObserverPlan,
     *,
     batch_size: int,
     chunk_ranges: tuple[tuple[int, int], ...],
@@ -46,7 +63,7 @@ def _init_local_vm_raster_chunk_template(
     variant: str,
     time_chunk_steps: int | None,
     enabled: bool,
-) -> VmRasterState | None:
+) -> ThresholdObserverState | None:
     if not enabled:
         return None
     max_chunk_steps = max((stop - start for start, stop in chunk_ranges), default=0)
@@ -57,16 +74,16 @@ def _init_local_vm_raster_chunk_template(
         mode=mode,
         variant=variant,
         output="observer_only",
-        observer="vm_raster",
+        observer=plan.retention,
         state="chunk_template",
         group_size=batch_size,
         chunk_steps=max_chunk_steps,
         chunk_count=len(chunk_ranges),
         time_chunk_steps=time_chunk_steps,
     ):
-        return init_vm_raster_state(plan, batch_size=batch_size, nt=max_chunk_steps)
+        return init_threshold_observer_state(plan, batch_size=batch_size, nt=max_chunk_steps)
 
-def _resolve_vm_raster_observer_state_scope(
+def _resolve_threshold_observer_state_scope(
     scope: str | None,
     *,
     time_chunk_steps: int | None,
@@ -82,8 +99,8 @@ def _resolve_vm_raster_observer_state_scope(
         return "full"
     return text
 
-def _combine_vm_raster_chunk_states(
-    states: list[VmRasterState],
+def _combine_threshold_observer_chunk_states(
+    states: list[ThresholdObserverState],
     *,
     starts: list[int],
     lengths: list[int],
@@ -91,12 +108,13 @@ def _combine_vm_raster_chunk_states(
     mode: str,
     variant: str,
     time_chunk_steps: int | None,
-) -> VmRasterState:
+    retention: ObserverRetention = "vm_raster",
+) -> ThresholdObserverState:
     with benchmark_span(
         "kernel.combine_observer_chunks",
         mode=mode,
         variant=variant,
-        observer="vm_raster",
+        observer=retention,
         observer_state_scope="chunk",
         chunk_count=len(states),
         chunk_steps_min=min(lengths) if lengths else None,
@@ -104,11 +122,12 @@ def _combine_vm_raster_chunk_states(
         time_chunk_steps=time_chunk_steps,
         nt=nt,
     ):
-        return combine_vm_raster_chunk_states(
+        return combine_threshold_observer_chunk_states(
             states,
             starts=starts,
             lengths=lengths,
             nt=nt,
+            retention=retention,
         )
 
 def _normalize_time_chunk_steps(time_chunk_steps: int | None, *, nt: int) -> int | None:
@@ -157,12 +176,12 @@ def _concat_trace_chunks(chunks: list[Array]) -> Array:
         return jnp.concatenate(chunks, axis=1)
 
 __all__ = [
-    "_combine_vm_raster_chunk_states",
+    "_combine_threshold_observer_chunk_states",
     "_concat_trace_chunks",
-    "_init_local_vm_raster_chunk_template",
+    "_init_local_threshold_chunk_template",
     "_normalize_time_chunk_steps",
     "_pad_time_chunk",
-    "_resolve_vm_raster_observer_state_scope",
+    "_resolve_threshold_observer_state_scope",
     "_time_chunks",
-    "_vm_raster_probe_tables_for_kernel",
+    "_threshold_probe_tables_for_kernel",
 ]

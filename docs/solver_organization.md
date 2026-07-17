@@ -115,9 +115,9 @@ AxonSimulation.run()
   -> AxonSimulationResult at the public boundary
 ```
 
-Observer requests are lowered through `build_vm_raster_plan(...)` or evaluated
-post-hoc from retained Vm using the same batch result assembly path as larger
-groups.
+Observer requests are lowered through `build_threshold_observer_plan(...)` or
+evaluated post-hoc from retained Vm using the same batch result assembly path as
+larger groups.
 
 ### Pool And Planning Route
 
@@ -228,21 +228,23 @@ prepared-cohort caches. `runtime/jax/preparation/caches.py` owns only bounded JA
 runtime/forcing cache storage, while `runtime/jax/preparation/shape_bucketing.py` owns the
 opt-in double-cable kernel shape bucketing policy and metadata.
 
-### VmRaster, Dense/Factorized Vext, And Results
+### Threshold Observers, Dense/Factorized Vext, And Results
 
 `runtime/jax/recording/lowering.py` owns batch recording/observer lowering:
 it keeps padded `center`/`probes` Vm recording row-aware when all rows retain a
 common output width, expands to full Vm only when row-aware recording is not
-available, and lowers compatible public observer definitions to solver-side
-VmRaster plans through `build_vm_raster_plan(...)`. Batch kernels update packed
-observer output during the scan, including one-row `B=1` runs. The public result
-key is strictly `observations["vm_raster"]`; activation, latency, velocity,
-threshold, and recruitment stay in post-processing. The result container and CPU
-unpacking live under `axonscope.results`, not in solver runtime modules.
+available, and lowers compatible public observer definitions to one solver-side
+`ThresholdObserverPlan` through `build_threshold_observer_plan(...)`. Batch
+kernels update either bounded activation flags or packed VmRaster output during
+the scan, including one-row `B=1` runs. Activation-only output uses
+`observations["activation"]`; definitions requiring temporal history retain
+`observations["vm_raster"]`. Result containers and CPU conversion live under
+`axonscope.results`, not in solver runtime modules.
 
-Chunked observer-only batch kernels use local VmRaster states per chunk and
-assemble them into one full-duration packed raster before result assembly. The
-observer-only result path can keep compact dispatch cohort records instead of
+Chunked observer-only batch kernels use local threshold states per chunk. They
+combine activation with boolean OR or assemble VmRaster into one full-duration
+packed raster before result assembly. The observer-only result path can keep
+compact dispatch cohort records instead of
 materializing one Vm trace per axon. The
 host-side assembly repacks whole `uint32` word slices per chunk, including
 unaligned chunk starts, so this cost stays outside solver-specific code while

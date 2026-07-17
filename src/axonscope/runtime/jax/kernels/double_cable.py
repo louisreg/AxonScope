@@ -19,25 +19,26 @@ from axonscope.runtime.jax.inputs.payloads import (
 )
 from axonscope.runtime.jax.cable_geometry import Array
 from axonscope.runtime.jax.recording.observer import (
-    PendingVmRasterObservation,
-    VmRasterPlan,
-    VmRasterState,
-    init_vm_raster_state,
-    trim_vm_raster_state,
+    PendingThresholdObservation,
+    ThresholdObserverPlan,
+    ThresholdObserverState,
+    init_threshold_observer_state,
+    trim_threshold_observer_state,
 )
 from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
 from axonscope.runtime.jax.types import SolverRuntime
 from axonscope.solvers.options import BatchOptions
 
 from .chunking import (
-    _combine_vm_raster_chunk_states,
+    _combine_threshold_observer_chunk_states,
     _concat_trace_chunks,
-    _init_local_vm_raster_chunk_template,
+    _init_local_threshold_chunk_template,
     _normalize_time_chunk_steps,
     _pad_time_chunk,
-    _resolve_vm_raster_observer_state_scope,
+    _resolve_threshold_observer_state_scope,
+    _threshold_blanking_for_chunk,
     _time_chunks,
-    _vm_raster_probe_tables_for_kernel,
+    _threshold_probe_tables_for_kernel,
 )
 from .factorized import (
     _factorized_current_initial_previous_rows,
@@ -211,7 +212,7 @@ class DoubleCableBatchKernel:
         extracellular_potential_initial_previous_mV: Array | None = None,
         intracellular_current_density_mid: Array | None = None,
         options: BatchOptions | None = None,
-        observers: VmRasterPlan | None = None,
+        observers: ThresholdObserverPlan | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
         solver_engine: JaxSolverEngine | None = None,
         benchmark_observer_state_scope: str | None = None,
@@ -391,7 +392,7 @@ class DoubleCableBatchKernel:
             return BatchKernelResult(
                 Vm=None,
                 t=grid.t_vec_ms,
-                pending_observation=PendingVmRasterObservation(
+                pending_observation=PendingThresholdObservation(
                     plan=observers,
                     state=observer_state,
                     nt=grid.Nt,
@@ -873,7 +874,7 @@ def _run_double_cable_batch_observer_chunks(
     *,
     runtime: SolverRuntime,
     Veinit_mV: float,
-    observers: VmRasterPlan,
+    observers: ThresholdObserverPlan,
     has_driven_extracellular: bool,
     stateless_vm_only: bool,
     double_cable_block_solver: str,
@@ -884,7 +885,7 @@ def _run_double_cable_batch_observer_chunks(
     time_chunk_steps: int | None,
     progress_callback: Callable[[int, int], None] | None,
     observer_state_scope: str | None = None,
-) -> VmRasterState:
+) -> ThresholdObserverState:
     membrane_runtime = runtime.membrane
     extracellular = runtime.extracellular
     if extracellular is None:
@@ -935,10 +936,10 @@ def _run_double_cable_batch_observer_chunks(
         variant=kernel_block_solver,
         time_chunk_steps=time_chunk_steps,
         factorized_vext=factorized_vext is not None,
-        observer="vm_raster",
+        observer=observers.retention,
     )
     Vi, Ve, gates, state = _initial_double_cable_batch_state(runtime, batch_size, Veinit_mV)
-    raster_probe_indices, raster_probe_mask = _vm_raster_probe_tables_for_kernel(
+    raster_probe_indices, raster_probe_mask = _threshold_probe_tables_for_kernel(
         observers,
         batch_size=batch_size,
     )
@@ -951,7 +952,7 @@ def _run_double_cable_batch_observer_chunks(
             "kernel.prepare_factorized_vext",
             mode="double",
             output="observer_only",
-            observer="vm_raster",
+            observer=observers.retention,
             variant=kernel_block_solver,
             group_size=batch_size,
             nx=nx,
@@ -1012,12 +1013,12 @@ def _run_double_cable_batch_observer_chunks(
         if fixed_gpu_chunk_steps is not None
         else int(grid.Nt)
     )
-    resolved_observer_state_scope = _resolve_vm_raster_observer_state_scope(
+    resolved_observer_state_scope = _resolve_threshold_observer_state_scope(
         observer_state_scope,
         time_chunk_steps=time_chunk_steps,
     )
     local_observer_chunks = resolved_observer_state_scope == "chunk"
-    observer_chunk_state_template = _init_local_vm_raster_chunk_template(
+    observer_chunk_state_template = _init_local_threshold_chunk_template(
         observers,
         batch_size=batch_size,
         chunk_ranges=chunk_ranges,
@@ -1032,32 +1033,35 @@ def _run_double_cable_batch_observer_chunks(
             "kernel.prepare_observer_state",
             mode="double",
             output="observer_only",
-            observer="vm_raster",
+            observer=observers.retention,
             variant=kernel_block_solver,
             state_scope="full",
             group_size=batch_size,
             nt=grid.Nt,
             time_chunk_steps=time_chunk_steps,
         ):
-            observer_state = init_vm_raster_state(
+            observer_state = init_threshold_observer_state(
                 observers,
                 batch_size=batch_size,
                 nt=observer_storage_nt,
             )
-    observer_chunk_states: list[VmRasterState] = []
+    observer_chunk_states: list[ThresholdObserverState] = []
     observer_chunk_starts: list[int] = []
     observer_chunk_lengths: list[int] = []
     for chunk_index, (start, stop) in enumerate(chunk_ranges, start=1):
         valid_chunk_steps = stop - start
         compiled_chunk_steps = (
             fixed_gpu_chunk_steps
-            if fixed_gpu_chunk_steps is not None
+            if (
+                fixed_gpu_chunk_steps is not None
+                and observers.retention != "activation"
+            )
             else valid_chunk_steps
         )
         with benchmark_span(
             "kernel.chunk_setup",
             mode="double",
-            observer="vm_raster",
+            observer=observers.retention,
             variant=kernel_block_solver,
             output="observer_only",
             factorized_vext=factorized_vext is not None,
@@ -1132,7 +1136,7 @@ def _run_double_cable_batch_observer_chunks(
                 device_synchronization=False,
                 explicit_wait_span="kernel.wait",
                 mode="double",
-                observer="vm_raster",
+                observer=observers.retention,
                 variant=kernel_block_solver,
                 factorized_vext=factorized_vext is not None,
                 group_size=batch_size,
@@ -1161,6 +1165,13 @@ def _run_double_cable_batch_observer_chunks(
                     raster_probe_indices=raster_probe_indices,
                     raster_probe_mask=raster_probe_mask,
                     raster_thresholds_mV=observers.thresholds_mV,
+                    raster_blanking_ms=_threshold_blanking_for_chunk(
+                        observers,
+                        start=start,
+                        dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+                        local_state=local_observer_chunks,
+                    ),
+                    observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,
                     Cx_abs=Cx_abs,
@@ -1189,7 +1200,7 @@ def _run_double_cable_batch_observer_chunks(
                 device_synchronization=False,
                 explicit_wait_span="kernel.wait",
                 mode="double",
-                observer="vm_raster",
+                observer=observers.retention,
                 variant=kernel_block_solver,
                 factorized_vext=factorized_vext is not None,
                 group_size=batch_size,
@@ -1217,6 +1228,13 @@ def _run_double_cable_batch_observer_chunks(
                     raster_probe_indices=raster_probe_indices,
                     raster_probe_mask=raster_probe_mask,
                     raster_thresholds_mV=observers.thresholds_mV,
+                    raster_blanking_ms=_threshold_blanking_for_chunk(
+                        observers,
+                        start=start,
+                        dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
+                        local_state=local_observer_chunks,
+                    ),
+                    observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,
                     Cx_abs=Cx_abs,
@@ -1241,7 +1259,7 @@ def _run_double_cable_batch_observer_chunks(
         with benchmark_span(
             "kernel.chunk_bookkeeping",
             mode="double",
-            observer="vm_raster",
+            observer=observers.retention,
             variant=kernel_block_solver,
             output="observer_only",
             group_size=batch_size,
@@ -1261,7 +1279,7 @@ def _run_double_cable_batch_observer_chunks(
                 progress_callback(chunk_index, len(chunk_ranges))
 
     if local_observer_chunks:
-        return _combine_vm_raster_chunk_states(
+        return _combine_threshold_observer_chunk_states(
             observer_chunk_states,
             starts=observer_chunk_starts,
             lengths=observer_chunk_lengths,
@@ -1269,9 +1287,14 @@ def _run_double_cable_batch_observer_chunks(
             mode="double",
             variant=kernel_block_solver,
             time_chunk_steps=time_chunk_steps,
+            retention=observers.retention,
         )
     assert observer_state is not None
-    return trim_vm_raster_state(observer_state, nt=grid.Nt)
+    return trim_threshold_observer_state(
+        observer_state,
+        nt=grid.Nt,
+        retention=observers.retention,
+    )
 
 def _initial_double_cable_batch_state(
     runtime: SolverRuntime,

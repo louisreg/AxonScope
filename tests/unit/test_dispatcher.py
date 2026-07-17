@@ -1031,7 +1031,10 @@ def test_run_pool_observer_only_keeps_one_compact_cohort_record():
     assert result[0].indices == (0, 1)
     assert result[0].Vm is None
     assert result[0].observations is not None
-    assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
+    np.testing.assert_array_equal(
+        result[0].observations["activation"].values,
+        [True, True],
+    )
 
 
 def test_run_pool_observer_only_batches_singleton_groups():
@@ -1142,7 +1145,7 @@ def test_run_pool_reports_scaled_extracellular_waveform_lowering(tmp_path):
         contract_metadata["prepared_input_contract_extracellular_mode"]
         == "scaled_shared_waveform"
     )
-    assert contract_metadata["prepared_input_contract_output_sink"] == "vm_raster"
+    assert contract_metadata["prepared_input_contract_output_sink"] == "activation"
 
 
 def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
@@ -1169,10 +1172,13 @@ def test_run_pool_double_cable_observer_only_keeps_one_compact_cohort_record(
     assert result[0].indices == (0, 1)
     assert result[0].Vm is None
     assert result[0].observations is not None
-    assert result[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (2, 1, 1, 1)
+    np.testing.assert_array_equal(
+        result[0].observations["activation"].values,
+        [True, True],
+    )
 
 
-def test_default_observer_state_scope_preallocates_full_vm_raster(tmp_path):
+def test_default_activation_state_scope_matches_chunk_combination(tmp_path):
     def run_case(scope: str | None):
         axons = [
             _passive_double_cable_axon(amp_nA=0.1),
@@ -1205,13 +1211,13 @@ def test_default_observer_state_scope_preallocates_full_vm_raster(tmp_path):
 
         assert len(result) == 1
         assert result[0].observations is not None
-        raster = result[0].observations[axs.VM_RASTER_OBSERVATION_KEY]
-        return np.asarray(raster.words), report
+        activation_result = result[0].observations["activation"]
+        return np.asarray(activation_result.values), report
 
-    default_words, default_report = run_case(None)
-    chunk_words, chunk_report = run_case("chunk")
+    default_values, default_report = run_case(None)
+    chunk_values, chunk_report = run_case("chunk")
 
-    np.testing.assert_array_equal(chunk_words, default_words)
+    np.testing.assert_array_equal(chunk_values, default_values)
     assert default_report is not None
     assert chunk_report is not None
     assert not any(
@@ -1306,9 +1312,8 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert isinstance(result[0], DispatchCohortRecord)
     assert result[0].Vm is None
     assert result[0].observations is not None
-    raster = result[0].observations[axs.VM_RASTER_OBSERVATION_KEY]
-    assert raster.batch_size == len(axons)
-    assert raster.words.shape[0] == len(axons)
+    activation_result = result[0].observations["activation"]
+    assert np.asarray(activation_result.values).shape == (len(axons),)
     assert report is not None
     extracellular_events = [
         event for event in report.events if event.name == "inputs.extracellular"
@@ -1362,7 +1367,7 @@ def test_run_pool_double_cable_observer_uses_factorized_footprint_vstim():
     assert dispatch_events[0].parent_event_id == enqueue_events[0].event_id
     dispatch_metadata = dispatch_events[0].metadata
     assert dispatch_metadata["mode"] == "double"
-    assert dispatch_metadata["observer"] == "vm_raster"
+    assert dispatch_metadata["observer"] == "activation"
     assert dispatch_metadata["factorized_vext"] is True
     assert (
         dispatch_metadata["timing_role"]
@@ -1471,11 +1476,9 @@ def test_double_cable_observer_applies_factorized_row_current_scales():
             recording=axs.Recording.voltage(),
         ).run()
 
-        observer_raster = observer_result.observations[axs.VM_RASTER_OBSERVATION_KEY]
+        observer_activation = observer_result.observations["activation"]
         voltage_raster = axs.VmRasterResult.from_result(voltage_result, activation)
-        observer_rows.append(
-            observer_raster.any_active(activation, blanking=activation.blanking)
-        )
+        observer_rows.append(np.asarray(observer_activation.values, dtype=bool))
         voltage_rows.append(
             voltage_raster.any_active(activation, blanking=activation.blanking)
         )

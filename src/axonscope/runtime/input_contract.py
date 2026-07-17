@@ -110,7 +110,7 @@ class RuntimeInputContract:
     extracellular: ExtracellularLoweringCapabilities
     supports_padding: bool
     supports_row_specific_parameters: bool
-    supports_observer_only_vm_raster: bool
+    supports_threshold_observer: bool
 
     def supports_intracellular(self, mode: IntracellularLoweringMode) -> bool:
         """Return whether this runtime/cable path can consume ``mode``."""
@@ -140,9 +140,7 @@ class RuntimeInputContract:
             f"{prefix}supports_row_specific_parameters": (
                 self.supports_row_specific_parameters
             ),
-            f"{prefix}supports_observer_only_vm_raster": (
-                self.supports_observer_only_vm_raster
-            ),
+            f"{prefix}supports_threshold_observer": self.supports_threshold_observer,
         }
         metadata.update(
             self.extracellular.as_metadata(
@@ -278,7 +276,7 @@ def validate_prepared_runtime_input(
         errors.append("runtime does not support row-specific parameters")
     if (
         summary.output_sink == "vm_raster"
-        and not contract.supports_observer_only_vm_raster
+        and not contract.supports_threshold_observer
     ):
         errors.append("runtime does not support observer-only VmRaster output")
     if not contract.supports_intracellular(summary.intracellular_mode):

@@ -1,22 +1,22 @@
-"""Solver-side Vm rasterization.
+"""Solver-side threshold observers.
 
-The solver-side observer path intentionally does one small, fixed operation:
-threshold selected membrane-voltage probes at each time step and pack the
-boolean raster into ``uint32`` words. Higher-level activation, latency, or
-threshold-search analyses are post-processing concerns.
+One probe-and-threshold lowering supports bounded activation flags and packed
+VmRaster retention. Higher-level latency, velocity, and propagation analyses
+remain result-side concerns until they receive explicit bounded contracts.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from axonscope.benchmarking import benchmark_span, benchmark_wait
+from axonscope.analysis.core import AnalysisResult, AnalysisStatus
 from axonscope.analysis.definitions import (
     Activation,
     ConductionBlock,
@@ -33,12 +33,13 @@ from axonscope.signals import MEMBRANE_VOLTAGE, Signal
 from axonscope.utils import units
 
 
-VmRasterState = Any
+ThresholdObserverState = Any
+ObserverRetention = Literal["activation", "vm_raster"]
 
 
 @dataclass(frozen=True)
-class VmRasterPlan:
-    """Static probe/threshold plan for packed Vm rasterization."""
+class ThresholdObserverPlan:
+    """Static probe/threshold plan with a bounded or raster retention policy."""
 
     definitions: tuple[Any, ...]
     names: tuple[str, ...]
@@ -47,16 +48,19 @@ class VmRasterPlan:
     original_indices: Any
     positions_um: Any
     thresholds_mV: Any
+    blanking_ms: Any
     probe_indices_host: np.ndarray
     probe_mask_host: np.ndarray
     original_indices_host: np.ndarray
     positions_um_host: np.ndarray
     thresholds_mV_host: np.ndarray
+    blanking_ms_host: np.ndarray
+    retention: ObserverRetention = "vm_raster"
     row_aware: bool = False
 
     @property
-    def raster_count(self) -> int:
-        """Number of threshold/probe sets carried in the packed raster."""
+    def definition_count(self) -> int:
+        """Number of threshold/probe definitions carried by the plan."""
 
         return len(self.names)
 
@@ -68,23 +72,23 @@ class VmRasterPlan:
 
 
 @dataclass(frozen=True)
-class PendingVmRasterObservation:
-    """Device-resident VmRaster output awaiting synchronization/finalization."""
+class PendingThresholdObservation:
+    """Device-resident threshold output awaiting synchronization/finalization."""
 
-    plan: VmRasterPlan
-    state: VmRasterState
+    plan: ThresholdObserverPlan
+    state: ThresholdObserverState
     nt: int
     dt_ms: float
 
 
-def trim_pending_vm_raster_observation(
-    pending: PendingVmRasterObservation,
+def trim_pending_threshold_observation(
+    pending: PendingThresholdObservation,
     *,
     batch_size: int,
-) -> PendingVmRasterObservation:
-    """Drop backend-only padded rows from a pending VmRaster state."""
+) -> PendingThresholdObservation:
+    """Drop backend-only padded rows from a pending threshold state."""
 
-    return PendingVmRasterObservation(
+    return PendingThresholdObservation(
         plan=pending.plan,
         state=pending.state[: int(batch_size)],
         nt=pending.nt,
@@ -153,13 +157,13 @@ def _select_raster_probe_columns(
     return selected.astype(np.int32, copy=False)
 
 
-def build_vm_raster_plan(
+def build_threshold_observer_plan(
     definitions: Any,
     *,
     positions_um: Any,
     original_indices: Any | None = None,
     dtype: Any = jnp.float32,
-) -> VmRasterPlan | None:
+) -> ThresholdObserverPlan | None:
     """Lower threshold-style public observers to one packed VmRaster plan."""
 
     if definitions is None:
@@ -178,6 +182,7 @@ def build_vm_raster_plan(
     names: list[str] = []
     selected_by_row: list[list[np.ndarray]] = []
     thresholds: list[float] = []
+    blanking_values: list[float] = []
 
     for definition in raster_defs:
         if not _is_vm_raster_definition(definition):
@@ -191,6 +196,7 @@ def build_vm_raster_plan(
 
         names.append(str(definition.name))
         thresholds.append(_threshold_mV(definition))
+        blanking_values.append(units.to_ms(getattr(definition, "blanking", 0.0)))
         selected_by_row.append(
             [
                 _select_raster_probe_columns(
@@ -232,7 +238,11 @@ def build_vm_raster_plan(
             position_table[raster_index, :count] = position_rows[0, selected]
 
     thresholds_array = np.asarray(thresholds, dtype=float)
-    return VmRasterPlan(
+    blanking_array = np.asarray(blanking_values, dtype=float)
+    retention: ObserverRetention = (
+        "activation" if all(isinstance(value, Activation) for value in raster_defs) else "vm_raster"
+    )
+    return ThresholdObserverPlan(
         definitions=raster_defs,
         names=tuple(names),
         probe_indices=jnp.asarray(index_table, dtype=jnp.int32),
@@ -240,11 +250,14 @@ def build_vm_raster_plan(
         original_indices=jnp.asarray(original_table, dtype=jnp.int32),
         positions_um=jnp.asarray(position_table, dtype=dtype),
         thresholds_mV=jnp.asarray(thresholds_array, dtype=dtype),
+        blanking_ms=jnp.asarray(blanking_array, dtype=dtype),
         probe_indices_host=_readonly_np_array(index_table, dtype=np.int32),
         probe_mask_host=_readonly_np_array(mask_table, dtype=bool),
         original_indices_host=_readonly_np_array(original_table, dtype=np.int32),
         positions_um_host=_readonly_np_array(position_table, dtype=float),
         thresholds_mV_host=_readonly_np_array(thresholds_array, dtype=float),
+        blanking_ms_host=_readonly_np_array(blanking_array, dtype=float),
+        retention=retention,
         row_aware=row_aware,
     )
 
@@ -285,37 +298,50 @@ def _vm_raster_any_active_jax_kernels() -> tuple[Any, Any]:
     return any_active_all_probes, any_active_masked
 
 
-def init_vm_raster_state(
-    plan: VmRasterPlan,
+def init_threshold_observer_state(
+    plan: ThresholdObserverPlan,
     *,
     batch_size: int,
     nt: int,
-) -> VmRasterState:
+) -> ThresholdObserverState:
     """Return zeroed packed words carried by solver scans."""
 
-    word_count = (int(nt) + 31) // 32
-    shape = (
-        int(batch_size),
-        int(plan.raster_count),
-        int(plan.probe_count),
-        int(word_count),
-    )
+    if plan.retention == "activation":
+        shape = (int(batch_size), int(plan.definition_count))
+        dtype = jnp.bool_
+    else:
+        word_count = (int(nt) + 31) // 32
+        shape = (
+            int(batch_size),
+            int(plan.definition_count),
+            int(plan.probe_count),
+            int(word_count),
+        )
+        dtype = jnp.uint32
     key = (
-        "vm_raster_state_zeros_v1",
+        "threshold_observer_state_zeros_v2",
+        plan.retention,
         shape,
         _current_jax_device_key(),
     )
     cached = get_batched_static_array(key)
     if cached is not None:
         return cached
-    out = jnp.zeros(shape, dtype=jnp.uint32)
+    out = jnp.zeros(shape, dtype=dtype)
     store_batched_static_array(key, out)
     return out
 
 
-def trim_vm_raster_state(state: VmRasterState, *, nt: int) -> VmRasterState:
+def trim_threshold_observer_state(
+    state: ThresholdObserverState,
+    *,
+    nt: int,
+    retention: ObserverRetention = "vm_raster",
+) -> ThresholdObserverState:
     """Trim packed observer storage and clear bits beyond the real duration."""
 
+    if retention == "activation":
+        return state
     word_count = (int(nt) + 31) // 32
     trimmed = jnp.asarray(state)[..., :word_count]
     tail_bits = int(nt) & 31
@@ -342,13 +368,14 @@ def _current_jax_device_key() -> tuple[Any, ...]:
     )
 
 
-def combine_vm_raster_chunk_states(
-    states: Sequence[VmRasterState],
+def combine_threshold_observer_chunk_states(
+    states: Sequence[ThresholdObserverState],
     *,
     starts: Sequence[int],
     lengths: Sequence[int] | None = None,
     nt: int,
-) -> VmRasterState:
+    retention: ObserverRetention = "vm_raster",
+) -> ThresholdObserverState:
     """Pack local chunk rasters back into one full-duration raster state."""
 
     if not states:
@@ -357,6 +384,9 @@ def combine_vm_raster_chunk_states(
         raise ValueError("VmRaster chunk states and starts must have the same length.")
     if lengths is not None and len(states) != len(lengths):
         raise ValueError("VmRaster chunk states and lengths must have the same length.")
+
+    if retention == "activation":
+        return jnp.any(jnp.stack(tuple(jnp.asarray(state) for state in states)), axis=0)
 
     if lengths is None:
         chunk_lengths = [None] * len(states)
@@ -448,15 +478,18 @@ def combine_vm_raster_chunk_states(
     return combined
 
 
-def update_vm_raster_state_batch_from_tables(
-    state: VmRasterState,
+def update_threshold_observer_state_batch_from_tables(
+    state: ThresholdObserverState,
     *,
     vm_mV: Any,
     step_index: Any,
     probe_indices: Any,
     probe_mask: Any,
     thresholds_mV: Any,
-) -> VmRasterState:
+    blanking_ms: Any = 0.0,
+    dt_ms: Any = 1.0,
+    retention: ObserverRetention = "vm_raster",
+) -> ThresholdObserverState:
     """Pack one batched Vm time step from pre-batched probe tables."""
 
     vm = jnp.asarray(vm_mV)
@@ -469,18 +502,25 @@ def update_vm_raster_state_batch_from_tables(
 
     selected = jnp.take_along_axis(vm[:, None, :], indices, axis=2)
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[None, :, None])
+    if retention == "activation":
+        time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
+        after_blanking = time_ms >= jnp.asarray(blanking_ms)[None, :, None]
+        return jnp.asarray(state, dtype=bool) | jnp.any(hit & after_blanking, axis=-1)
     return _write_raster_bits(state, hit, step_index)
 
 
-def update_vm_raster_state_scalar_from_tables(
-    state: VmRasterState,
+def update_threshold_observer_state_scalar_from_tables(
+    state: ThresholdObserverState,
     *,
     vm_mV: Any,
     step_index: Any,
     probe_indices: Any,
     probe_mask: Any,
     thresholds_mV: Any,
-) -> VmRasterState:
+    blanking_ms: Any = 0.0,
+    dt_ms: Any = 1.0,
+    retention: ObserverRetention = "vm_raster",
+) -> ThresholdObserverState:
     """Pack one scalar Vm time step from static probe tables."""
 
     vm = jnp.asarray(vm_mV)
@@ -493,6 +533,10 @@ def update_vm_raster_state_scalar_from_tables(
 
     selected = jnp.take(vm, indices, axis=0)
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[:, None])
+    if retention == "activation":
+        time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
+        after_blanking = time_ms >= jnp.asarray(blanking_ms)[:, None]
+        return jnp.asarray(state, dtype=bool) | jnp.any(hit & after_blanking, axis=-1)
     return _write_raster_bits(state, hit, step_index)
 
 
@@ -509,28 +553,41 @@ def _write_raster_bits(words: Any, hit: Any, step_index: Any) -> Any:
     return jax.lax.dynamic_update_slice(words, updated[..., None], starts)
 
 
-def finalize_vm_raster_state(
-    plan: VmRasterPlan,
-    state: VmRasterState,
+def finalize_threshold_observer_state(
+    plan: ThresholdObserverPlan,
+    state: ThresholdObserverState,
     *,
     nt: int,
     dt_ms: float,
     synchronize: bool = True,
     materialize_words: bool = True,
-) -> dict[str, VmRasterResult]:
-    """Package packed raster words as the single solver-side observation."""
+) -> dict[str, object]:
+    """Finalize bounded activation or packed VmRaster output."""
 
     if synchronize:
         with benchmark_span(
             "kernel.wait",
-            observer="vm_raster",
+            observer=plan.retention,
             wait_scope="observer_state",
-            raster_count=plan.raster_count,
+            observer_definition_count=plan.definition_count,
             probe_count=plan.probe_count,
             nt=int(nt),
             row_aware=plan.row_aware,
         ):
             benchmark_wait(state)
+
+    if plan.retention == "activation":
+        values = np.asarray(state, dtype=bool)
+        statuses = (AnalysisStatus.VALID,) * int(values.shape[0])
+        return {
+            definition.name: AnalysisResult(
+                name=definition.name,
+                values=values[:, index],
+                statuses=statuses,
+                definition=definition,
+            )
+            for index, definition in enumerate(plan.definitions)
+        }
 
     span_name = (
         "kernel.finalize_observer.to_host"
@@ -540,7 +597,7 @@ def finalize_vm_raster_state(
     with benchmark_span(
         span_name,
         observer="vm_raster",
-        raster_count=plan.raster_count,
+        raster_count=plan.definition_count,
         probe_count=plan.probe_count,
         nt=int(nt),
         row_aware=plan.row_aware,
@@ -573,15 +630,15 @@ def finalize_vm_raster_state(
 
 
 __all__ = [
-    "PendingVmRasterObservation",
-    "VmRasterPlan",
-    "VmRasterState",
-    "build_vm_raster_plan",
-    "combine_vm_raster_chunk_states",
-    "finalize_vm_raster_state",
-    "init_vm_raster_state",
-    "trim_vm_raster_state",
-    "trim_pending_vm_raster_observation",
-    "update_vm_raster_state_batch_from_tables",
-    "update_vm_raster_state_scalar_from_tables",
+    "PendingThresholdObservation",
+    "ThresholdObserverPlan",
+    "ThresholdObserverState",
+    "build_threshold_observer_plan",
+    "combine_threshold_observer_chunk_states",
+    "finalize_threshold_observer_state",
+    "init_threshold_observer_state",
+    "trim_threshold_observer_state",
+    "trim_pending_threshold_observation",
+    "update_threshold_observer_state_batch_from_tables",
+    "update_threshold_observer_state_scalar_from_tables",
 ]

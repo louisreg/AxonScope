@@ -423,7 +423,7 @@ def _estimate_dispatch_group(
         observers,
         recording_mode=kernel_options.recording.mode,
     )
-    observer_plan = observer_output == "vm_raster" and can_batch
+    observer_plan = observer_output in {"activation", "vm_raster"} and can_batch
     simulations = tuple(item.simulation for item in group.items)
     stimulation_rows = _stimulation_rows(simulations)
     has_extracellular = any(stimulation_rows)
@@ -487,8 +487,13 @@ def _estimate_dispatch_group(
     retained_vm_bytes = (
         int(group.size) * int(step_count) * int(retained_vm_width) * int(dtype.itemsize)
     )
-    vm_raster_bytes = (
-        _vm_raster_nbytes(group, step_count=step_count, observers=observers)
+    observer_bytes = (
+        _threshold_observer_nbytes(
+            group,
+            step_count=step_count,
+            observers=observers,
+            observer_output=observer_output,
+        )
         if observer_plan
         else 0
     )
@@ -498,7 +503,7 @@ def _estimate_dispatch_group(
         step_count=step_count,
         dtype=dtype,
     )
-    retained_bytes = retained_vm_bytes + vm_raster_bytes + observable_bytes
+    retained_bytes = retained_vm_bytes + observer_bytes + observable_bytes
     total_bytes = (
         state_bytes
         + prepared_position_bytes
@@ -722,25 +727,36 @@ def _aggregate_estimate_items(
             dtype=dtype,
         )
     )
-    vm_raster_bytes = sum(
-        _vm_raster_nbytes(
-            group,
-            step_count=step_count,
-            observers=observers,
+    observer_bytes_by_output = {
+        output: sum(
+            _threshold_observer_nbytes(
+                group,
+                step_count=step_count,
+                observers=observers,
+                observer_output=output,
+            )
+            for group, estimate in zip(groups, estimate_groups, strict=True)
+            if estimate.observer_output == output
         )
-        for group, estimate in zip(groups, estimate_groups, strict=True)
-        if estimate.observer_output == "vm_raster"
-    )
-    if vm_raster_bytes:
+        for output in ("activation", "vm_raster")
+    }
+    for output, output_bytes in observer_bytes_by_output.items():
+        if not output_bytes:
+            continue
+        dtype = np.dtype(bool) if output == "activation" else np.dtype("uint32")
         items.append(
             _item_with_bytes(
-                "outputs.vm_raster",
+                f"outputs.{output}",
                 (axon_count,),
-                np.dtype("uint32"),
-                bytes=vm_raster_bytes,
+                dtype,
+                bytes=output_bytes,
                 role="public_output",
                 retained=True,
-                note="packed solver-side VmRaster observations",
+                note=(
+                    "solver-side activation flags"
+                    if output == "activation"
+                    else "packed solver-side VmRaster observations"
+                ),
             )
         )
     return tuple(item for item in items if item.bytes > 0 or item.retained)
@@ -803,15 +819,18 @@ def _can_batch_group(
     )
 
 
-def _vm_raster_nbytes(
+def _threshold_observer_nbytes(
     group: DispatchGroup,
     *,
     step_count: int,
     observers: tuple[Any, ...] | None,
+    observer_output: str,
 ) -> int:
     definitions = benchmark_vm_raster_definitions(observers)
     if not definitions:
         return 0
+    if observer_output == "activation":
+        return int(group.size) * len(definitions) * np.dtype(bool).itemsize
     max_probe_count = 0
     for item in group.items:
         positions_um = np.asarray(item.solver_axon.x_um, dtype=float)

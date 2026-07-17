@@ -51,8 +51,7 @@ from axonscope.runtime.jax.inputs.payloads import (
     materialize_factorized_extracellular_potential_batch,
     materialize_sparse_intracellular_current_density_batch,
 )
-from axonscope.results import VM_RASTER_OBSERVATION_KEY
-from axonscope.runtime.jax.recording.observer import build_vm_raster_plan
+from axonscope.runtime.jax.recording.observer import build_threshold_observer_plan
 from axonscope.runtime.jax.preparation.base import prepare_solver_runtime
 from axonscope.stimulation import Stimulus
 from tests.unit.solvers._batch_helpers import (
@@ -78,6 +77,10 @@ def test_batch_recording_resolves_common_policies():
         BatchRecording.indices([5]).indices_for(5)
     assert BatchOptions.center().recording.mode == "center"
     assert not hasattr(BatchOptions.center(), "double_cable_block_solver")
+
+
+def _compact_activation_values(result):
+    return np.asarray(kernel_observations(result)["activation"].values)
 
 
 def test_final_time_chunk_padding_preserves_prefix_and_policy():
@@ -599,8 +602,9 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster(mo
     activation = axs.analysis.Activation(
         threshold=-20.0 * axs.mV,
         target=axs.positions.CENTER,
+        blanking=0.2 * axs.ms,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -650,16 +654,13 @@ def test_factorized_footprint_batch_matches_dense_builder_and_observer_raster(mo
     assert dense_out.Vm is None
     assert factorized_out.Vm is None
     assert factorized_chunked.Vm is None
-    dense_observations = kernel_observations(dense_out)
-    factorized_observations = kernel_observations(factorized_out)
-    factorized_chunked_observations = kernel_observations(factorized_chunked)
     np.testing.assert_array_equal(
-        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(factorized_out),
+        _compact_activation_values(dense_out),
     )
     np.testing.assert_array_equal(
-        np.asarray(factorized_chunked_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(factorized_chunked),
+        _compact_activation_values(dense_out),
     )
 
 
@@ -765,7 +766,7 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
         threshold=-20.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -790,11 +791,9 @@ def test_factorized_footprint_batch_supports_multi_drive_observer_without_dense_
         observers=observer,
     )
 
-    dense_observations = kernel_observations(dense_out)
-    factorized_observations = kernel_observations(factorized_out)
     np.testing.assert_array_equal(
-        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(factorized_out),
+        _compact_activation_values(dense_out),
     )
 
 
@@ -831,7 +830,7 @@ def test_single_cable_factorized_observer_avoids_dense_vstim_materialization(mon
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -868,11 +867,9 @@ def test_single_cable_factorized_observer_avoids_dense_vstim_materialization(mon
         observers=observer,
     )
 
-    dense_observations = kernel_observations(dense_out)
-    factorized_observations = kernel_observations(factorized_out)
     np.testing.assert_array_equal(
-        np.asarray(factorized_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(factorized_out),
+        _compact_activation_values(dense_out),
     )
 
 
@@ -1091,8 +1088,9 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
+        blanking=0.2 * axs.ms,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -1109,6 +1107,13 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
         options=BatchOptions.none(),
         observers=observer,
     )
+    compact_chunked = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(time_chunk_steps=7),
+        observers=observer,
+        benchmark_observer_state_scope="chunk",
+    )
     full = kernel.run(
         extracellular_potential_mid_mV=vext_mid,
         extracellular_potential_initial_previous_mV=vext_previous,
@@ -1117,10 +1122,18 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
 
     center = axon.n_compartments // 2
     assert compact.Vm is None
-    raster = kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY]
+    sample_times_ms = (np.arange(np.asarray(full.Vm).shape[1]) + 1) * dt
     np.testing.assert_array_equal(
-        np.any(raster.unpack()[:, 0, 0, :], axis=1),
-        np.any(np.asarray(full.Vm)[:, :, center] >= -80.0, axis=1),
+        _compact_activation_values(compact),
+        np.any(
+            (np.asarray(full.Vm)[:, :, center] >= -80.0)
+            & (sample_times_ms[None, :] >= 0.2),
+            axis=1,
+        ),
+    )
+    np.testing.assert_array_equal(
+        _compact_activation_values(compact_chunked),
+        _compact_activation_values(compact),
     )
 
 
@@ -1158,7 +1171,7 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -1191,16 +1204,13 @@ def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
         observers=observer,
     )
 
-    dense_observations = kernel_observations(dense)
-    compact_observations = kernel_observations(compact)
-    chunked_observations = kernel_observations(chunked)
     np.testing.assert_array_equal(
-        np.asarray(compact_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(compact),
+        _compact_activation_values(dense),
     )
     np.testing.assert_array_equal(
-        np.asarray(chunked_observations[VM_RASTER_OBSERVATION_KEY].words),
-        np.asarray(dense_observations[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(chunked),
+        _compact_activation_values(dense),
     )
 
 
@@ -1264,7 +1274,7 @@ def test_double_cable_multi_drive_factorized_observer_matches_dense_thomas():
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -1285,10 +1295,8 @@ def test_double_cable_multi_drive_factorized_observer_matches_dense_thomas():
     )
 
     np.testing.assert_array_equal(
-        np.asarray(
-            kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY].words
-        ),
-        np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(compact),
+        _compact_activation_values(dense),
     )
 
 
@@ -1333,7 +1341,7 @@ def test_double_cable_indexed_current_table_matches_dense_thomas(monkeypatch):
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -1375,13 +1383,13 @@ def test_double_cable_indexed_current_table_matches_dense_thomas(monkeypatch):
         require_compact_factorized_extracellular=True,
     )
 
-    expected = np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words)
+    expected = _compact_activation_values(dense)
     np.testing.assert_array_equal(
-        np.asarray(kernel_observations(compact)[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(compact),
         expected,
     )
     np.testing.assert_array_equal(
-        np.asarray(kernel_observations(chunked)[VM_RASTER_OBSERVATION_KEY].words),
+        _compact_activation_values(chunked),
         expected,
     )
 
@@ -1442,7 +1450,7 @@ def test_double_cable_indexed_multi_drive_table_matches_dense_thomas(monkeypatch
         threshold=-80.0 * axs.mV,
         target=axs.positions.CENTER,
     )
-    observer = build_vm_raster_plan(
+    observer = build_threshold_observer_plan(
         (activation,),
         positions_um=runtime.axon.x_um,
         dtype=runtime.membrane.dtype,
@@ -1483,10 +1491,10 @@ def test_double_cable_indexed_multi_drive_table_matches_dense_thomas(monkeypatch
         require_compact_factorized_extracellular=True,
     )
 
-    expected = np.asarray(kernel_observations(dense)[VM_RASTER_OBSERVATION_KEY].words)
+    expected = _compact_activation_values(dense)
     for result in (compact, chunked):
         np.testing.assert_array_equal(
-            np.asarray(kernel_observations(result)[VM_RASTER_OBSERVATION_KEY].words),
+            _compact_activation_values(result),
             expected,
         )
 

@@ -7,7 +7,7 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-17 after defining the P15 observer-retention families.
+Updated on 2026-07-17 after implementing compact activation retention.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -15,12 +15,13 @@ Updated on 2026-07-17 after defining the P15 observer-retention families.
 - The production runtime is JAX. CPU double-cable uses Thomas; GPU
   double-cable uses the Triton tiled-Thomas route; single-cable uses the JAX
   tridiagonal route.
-- VmRaster is currently the only strict solver-side observer route. It is
-  correct, but its full temporal state makes large recruitment batches
-  memory-bound and prevents clean measurement of solver performance.
+- The strict solver-side threshold route now has two retention policies:
+  compact activation keeps one boolean per row and definition, while VmRaster
+  remains the temporal reference for analyses that need crossing history.
 - Recruitment now keeps one source population and a native numerical amplitude
   axis; it no longer expands `Namplitude x Naxon` Python objects. Large sweeps
-  remain constrained by VmRaster state until P15 adds compact event observers.
+  use compact activation when their criterion is activation-only. P15 still
+  needs bounded crossing, spike, and propagation event states.
 - Work proceeds in dependency order:
   1. P15 compact activation, spike, and propagation observers.
   2. P16 low-level JAX temporal solver and dispatch optimization.
@@ -28,12 +29,12 @@ Updated on 2026-07-17 after defining the P15 observer-retention families.
   4. P18 membrane-model completion and validation.
   5. P19 pre-v1 cleanup and public-surface convergence.
 
-Latest fast validation recorded by the P14 checkpoint:
+Latest fast validation recorded by the compact-activation checkpoint:
 
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-700 passed, 1 skipped
+701 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -656,9 +657,10 @@ solver-side observer fallback.
   activation, first crossing, spike count, bounded spike times, and
   propagation. Specify shapes, dtypes, units, blanking, threshold crossing,
   hysteresis/refractory behavior, invalid states, and CPU/GPU semantics.
-- [ ] Implement minimal activation as one boolean per amplitude/axon, updated
+- [x] Implement minimal activation as one boolean per amplitude/axon, updated
   during the temporal scan and returned as `[Namplitude, Naxon]` without
-  allocating or decoding VmRaster.
+  allocating or decoding VmRaster. Apply `Activation.blanking` in the scan so
+  threshold hits are accepted only for samples at or after `tmin`.
 - [ ] Implement first-crossing/latency state as `int32` timestep sentinels per
   selected probe group, converting to physical time only during finalization.
 - [ ] Implement constant-memory first/last spike time and spike count. Add a
@@ -715,6 +717,8 @@ solver-side observer fallback.
   21 x 4096 booleans rather than `6.02 GiB` of single-cable VmRaster.
 - [ ] Validate latency, velocity, recruitment, and KES-facing behavior, then add
   an advanced example showing propagation to one side but not the other.
+- [x] Add a didactic compact-activation example showing solver-side blanking,
+  bounded retained shape, and exact equivalence with post-hoc recorded Vm.
 
 ### P16 - JAX Temporal Solver And Dispatch Optimization
 

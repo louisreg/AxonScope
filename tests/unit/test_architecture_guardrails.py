@@ -1683,7 +1683,7 @@ def test_group_runner_routes_recording_lowering_through_lowering_module():
     text = path.read_text(encoding="utf-8")
     tree = ast.parse(text, filename=str(path))
     forbidden_call_names = {
-        "build_vm_raster_plan",
+        "build_threshold_observer_plan",
         "_observer_plan_for_cohort",
         "_observers_are_vm_raster_compatible",
         "_vm_raster_definitions",
@@ -2129,7 +2129,7 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
         "extracellular",
         "supports_padding",
         "supports_row_specific_parameters",
-        "supports_observer_only_vm_raster",
+        "supports_threshold_observer",
     ]
 
     assert normalize_cable_formulation("single") == "single-cable"
@@ -2147,8 +2147,8 @@ def test_runtime_input_contract_is_cable_agnostic_and_runtime_neutral():
     assert double.supports_padding
     assert single.supports_row_specific_parameters
     assert double.supports_row_specific_parameters
-    assert single.supports_observer_only_vm_raster
-    assert double.supports_observer_only_vm_raster
+    assert single.supports_threshold_observer
+    assert double.supports_threshold_observer
 
     assert single.supports_intracellular(
         IntracellularLoweringMode.SPARSE_CURRENT_CLAMP
@@ -2384,7 +2384,7 @@ def test_runtime_output_plan_contract_is_runtime_neutral():
     assert OutputPlan.from_batch_options(
         BatchOptions.none(),
         observers=(object(),),
-    ).sink == "vm_raster"
+    ).sink == "unsupported_observer_only"
     assert OutputPlan.from_batch_options(
         BatchOptions.full(),
         observers=(object(),),
@@ -2550,7 +2550,7 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "### Pool And Planning Route",
         "### Single-Cable Batch Route",
         "### Double-Cable Batch Route",
-        "### VmRaster, Dense/Factorized Vext, And Results",
+        "### Threshold Observers, Dense/Factorized Vext, And Results",
         "build_dispatch_plan",
         "_run_batch_group",
         "enqueue_jax_batch_group",
@@ -2562,7 +2562,7 @@ def test_solver_route_map_documents_retained_runtime_paths():
         "build_vstim_midpoint_and_initial_previous_batch",
         "SingleCableVStimBatchKernel",
         "DoubleCableBatchKernel",
-        "build_vm_raster_plan",
+        "build_threshold_observer_plan",
         "runtime/result_assembly.py",
         "runtime/jax/membranes/",
         "runtime/jax/membranes/stacking.py",

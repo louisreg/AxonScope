@@ -63,7 +63,7 @@ JAX_SINGLE_CABLE_INPUT_CONTRACT = RuntimeInputContract(
     extracellular=JAX_SINGLE_CABLE_EXTRACELLULAR_CAPABILITIES,
     supports_padding=True,
     supports_row_specific_parameters=True,
-    supports_observer_only_vm_raster=True,
+    supports_threshold_observer=True,
 )
 JAX_DOUBLE_CABLE_INPUT_CONTRACT = RuntimeInputContract(
     cable="double-cable",
@@ -76,7 +76,7 @@ JAX_DOUBLE_CABLE_INPUT_CONTRACT = RuntimeInputContract(
     extracellular=JAX_DOUBLE_CABLE_EXTRACELLULAR_CAPABILITIES,
     supports_padding=True,
     supports_row_specific_parameters=True,
-    supports_observer_only_vm_raster=True,
+    supports_threshold_observer=True,
 )
 
 

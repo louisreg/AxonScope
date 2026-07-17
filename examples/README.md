@@ -75,7 +75,9 @@ still runnable examples, but they explain the moving parts more explicitly.
   statuses, reports, and population denominators.
 - `recording_analysis/05_vmraster_observer_only.py`: run trace-free VmRaster
   observer-only simulations with `Recording.none()`.
-- `recording_analysis/06_dense_observable_recording.py`: record dense gates,
+- `recording_analysis/06_compact_activation.py`: retain one activation boolean
+  per axon, apply solver-side blanking, and compare with recorded Vm analysis.
+- `recording_analysis/07_dense_observable_recording.py`: record dense gates,
   currents, and conductances through batch-native result manifests.
 
 ### Protocols

@@ -9,9 +9,9 @@ from axonscope.benchmarking import benchmark_span
 from axonscope.dispatcher.plan import DispatchGroup
 from axonscope.runtime.jax.cable_geometry import Array
 from axonscope.runtime.jax.recording.observer import (
-    PendingVmRasterObservation,
-    finalize_vm_raster_state,
-    trim_pending_vm_raster_observation,
+    PendingThresholdObservation,
+    finalize_threshold_observer_state,
+    trim_pending_threshold_observation,
 )
 from axonscope.runtime.result_assembly import (
     trim_observations_batch,
@@ -27,7 +27,7 @@ class BatchKernelResult:
     t: Array
     recordings: dict[str, Any] | None = None
     observations: dict[str, object] | None = None
-    pending_observation: PendingVmRasterObservation | None = None
+    pending_observation: PendingThresholdObservation | None = None
 
 
 def trim_batch_kernel_result(
@@ -52,7 +52,7 @@ def trim_batch_kernel_result(
         pending = (
             None
             if out.pending_observation is None
-            else trim_pending_vm_raster_observation(
+            else trim_pending_threshold_observation(
                 out.pending_observation,
                 batch_size=size,
             )
@@ -100,7 +100,7 @@ def finalize_pending_batch_observation(
     with benchmark_span(
         "kernel.finalize_observer",
         mode=mode,
-        observer="vm_raster",
+        observer=pending.plan.retention,
         group_id=group.group_id,
         group_size=group.size,
         synchronized_before_finalize=True,
@@ -108,7 +108,7 @@ def finalize_pending_batch_observation(
     ):
         observations = cast(
             dict[str, object],
-            finalize_vm_raster_state(
+            finalize_threshold_observer_state(
                 pending.plan,
                 pending.state,
                 nt=pending.nt,

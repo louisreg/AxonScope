@@ -1,4 +1,4 @@
-"""JAX VmRaster observer lowering for batch execution."""
+"""JAX threshold-observer lowering for batch execution."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from axonscope.runtime.output_contract import observer_definition_signature
 from axonscope.runtime.recording import cohort_original_indices
 
 
-_VM_RASTER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
-_VM_RASTER_PLAN_IDENTITY_CACHE: OrderedDict[tuple[Any, ...], tuple[Any, Any]] = OrderedDict()
+_THRESHOLD_OBSERVER_PLAN_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE: OrderedDict[tuple[Any, ...], tuple[Any, Any]] = OrderedDict()
 _RECORDING_LOWERING_CACHE_MAX_SIZE = 64
 
 
@@ -23,96 +23,96 @@ def lower_observers_for_cohort(
     *,
     cohort: Any,
     dtype: Any,
-    prefer_vm_raster: bool = False,
+    prefer_threshold_observer: bool = False,
 ) -> Any:
-    """Lower public observers to a VmRaster plan when the kernel can consume one."""
+    """Lower public observers to the canonical threshold plan."""
 
-    if observers is None or not prefer_vm_raster:
+    if observers is None or not prefer_threshold_observer:
         return None
-    identity_key = _vm_raster_plan_identity_cache_key(
+    identity_key = _threshold_observer_plan_identity_cache_key(
         observers,
         cohort=cohort,
         dtype=dtype,
     )
     spatial_token = _cohort_spatial_cache_token(cohort)
     cached = _identity_cache_get(
-        _VM_RASTER_PLAN_IDENTITY_CACHE,
+        _THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE,
         identity_key,
         spatial_token,
     )
     if cached is not None:
         record_benchmark_metadata(
-            vm_raster_plan_identity_cache="hit",
-            vm_raster_plan_cache="hit",
+            threshold_observer_plan_identity_cache="hit",
+            threshold_observer_plan_cache="hit",
         )
         return cached
 
-    cache_key = _vm_raster_plan_cache_key(
+    cache_key = _threshold_observer_plan_cache_key(
         observers,
         cohort=cohort,
         dtype=dtype,
     )
-    cached = _cache_get(_VM_RASTER_PLAN_CACHE, cache_key)
+    cached = _cache_get(_THRESHOLD_OBSERVER_PLAN_CACHE, cache_key)
     if cached is not None:
         _identity_cache_store(
-            _VM_RASTER_PLAN_IDENTITY_CACHE,
+            _THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE,
             identity_key,
             spatial_token,
             cached,
         )
         record_benchmark_metadata(
-            vm_raster_plan_identity_cache="miss",
-            vm_raster_plan_cache="hit",
+            threshold_observer_plan_identity_cache="miss",
+            threshold_observer_plan_cache="hit",
         )
         return cached
 
-    from axonscope.runtime.jax.recording.observer import build_vm_raster_plan
+    from axonscope.runtime.jax.recording.observer import build_threshold_observer_plan
 
     row_positions_um = np.asarray(cohort.x_positions_m, dtype=float) * 1e6
-    plan = build_vm_raster_plan(
+    plan = build_threshold_observer_plan(
         observers,
         positions_um=row_positions_um,
         original_indices=cohort_original_indices(cohort),
         dtype=dtype,
     )
-    _cache_store(_VM_RASTER_PLAN_CACHE, cache_key, plan)
+    _cache_store(_THRESHOLD_OBSERVER_PLAN_CACHE, cache_key, plan)
     _identity_cache_store(
-        _VM_RASTER_PLAN_IDENTITY_CACHE,
+        _THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE,
         identity_key,
         spatial_token,
         plan,
     )
     record_benchmark_metadata(
-        vm_raster_plan_identity_cache="miss",
-        vm_raster_plan_cache="miss",
-        vm_raster_count=0 if plan is None else plan.raster_count,
-        vm_raster_probe_count=0 if plan is None else plan.probe_count,
+        threshold_observer_plan_identity_cache="miss",
+        threshold_observer_plan_cache="miss",
+        threshold_observer_count=0 if plan is None else plan.definition_count,
+        threshold_observer_probe_count=0 if plan is None else plan.probe_count,
     )
     return plan
 
 
-def _vm_raster_plan_cache_key(
+def _threshold_observer_plan_cache_key(
     observers: tuple[Any, ...],
     *,
     cohort: Any,
     dtype: Any,
 ) -> tuple[Any, ...]:
     return (
-        "vm_raster_plan_v1",
+        "threshold_observer_plan_v1",
         str(np.dtype(dtype)),
         _prepared_cohort_signature(cohort),
         tuple(observer_definition_signature(observer) for observer in observers),
     )
 
 
-def _vm_raster_plan_identity_cache_key(
+def _threshold_observer_plan_identity_cache_key(
     observers: tuple[Any, ...],
     *,
     cohort: Any,
     dtype: Any,
 ) -> tuple[Any, ...]:
     return (
-        "vm_raster_plan_identity_v1",
+        "threshold_observer_plan_identity_v1",
         id(_cohort_spatial_cache_token(cohort)),
         str(np.dtype(dtype)),
         tuple(observer_definition_signature(observer) for observer in observers),

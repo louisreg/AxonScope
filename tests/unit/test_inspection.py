@@ -150,7 +150,7 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
     lowering = report.lowerings[0]
     assert lowering.intracellular_format == "sparse_current_clamp"
     assert lowering.extracellular_format == "zero_no_extracellular_stimulation"
-    assert lowering.observer_format == "vm_raster"
+    assert lowering.observer_format == "activation"
     assert lowering.retained_vm_width == 0
     assert lowering.materializes_dense_vstim is False
 
@@ -162,22 +162,22 @@ def test_inspection_reports_observer_only_lowering_and_compact_results():
     assert probes.observer_names == ("activation",)
     assert probes.thresholds_mV == (-80.0,)
     assert probes.row_probe_counts == ((1,), (1,))
-    assert probes.packed_shape == (2, 1, 1, 1)
-    assert probes.packed_bytes == 8
+    assert probes.retained_shape == (2, 1)
+    assert probes.retained_bytes == 2
 
     memory = report.memory[0]
-    assert memory.vm_raster_bytes == 8
-    assert memory.retained_public_bytes == 8
+    assert memory.observer_bytes == 2
+    assert memory.retained_public_bytes == 2
     assert memory.retained_public_mib > 0.0
 
     assembly = report.result_assembly[0]
     assert assembly.record_kind == "compact dispatch cohort"
     assert assembly.vm_output == "none"
-    assert assembly.observation_output == 'observations["vm_raster"]'
+    assert assembly.observation_output == 'observations["activation"]'
 
     detail = report.assembly_details[0]
     assert detail.vm_shape is None
-    assert detail.observation_shape == (2, 1, 1, 1)
+    assert detail.observation_shape == (2, 1)
     assert detail.observations_are_batched is True
     assert detail.public_rows == 1
 
@@ -250,5 +250,5 @@ def test_inspection_marks_unsupported_observer_only_requests():
 
     assert report.lowerings[0].observer_format == "unsupported_observer_only"
     assert report.result_assembly[0].observation_output == "unsupported_observer_only"
-    assert report.probes[0].packed_shape is None
+    assert report.probes[0].retained_shape is None
     assert report.assembly_details[0].observation_shape is None

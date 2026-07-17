@@ -570,6 +570,7 @@ def _run_one(
                 cable=args.cable,
                 platform=args.platform,
             )
+        _validate_compact_activation_route(run_dir, cable=args.cable)
         write_run_pool_detail(
             run_dir,
             amplitudes=args.amplitudes,
@@ -740,6 +741,63 @@ def _validate_multi_drive_routes(
         ),
     }
     (run_dir / "multi_drive_route_validation.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _validate_compact_activation_route(run_dir: Path, *, cable: str) -> None:
+    """Reject a recruitment benchmark that falls back to temporal VmRaster."""
+
+    events = [
+        json.loads(line)
+        for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    expected_modes = {"single", "double"} if cable == "mixed" else {str(cable)}
+    sinks: dict[str, str] = {}
+    dispatch_observers: set[str] = set()
+    for event in events:
+        metadata = event.get("metadata", {})
+        if event.get("name") == "dispatch.group.total":
+            mode = str(metadata.get("mode", ""))
+            if mode in expected_modes:
+                sinks[mode] = str(
+                    metadata.get("prepared_input_contract_output_sink", "")
+                )
+                if metadata.get("runtime_input_contract_supports_threshold_observer") is not True:
+                    raise RuntimeError(
+                        f"{mode} runtime contract does not support threshold observers."
+                    )
+        elif event.get("name") == "kernel.dispatch_jax":
+            mode = str(metadata.get("mode", ""))
+            if mode in expected_modes:
+                dispatch_observers.add(str(metadata.get("observer", "")))
+
+    if set(sinks) != expected_modes:
+        raise RuntimeError(
+            "compact activation validation did not observe every dispatch mode: "
+            f"got {sorted(sinks)}, expected {sorted(expected_modes)}."
+        )
+    fallback_modes = sorted(mode for mode, sink in sinks.items() if sink != "activation")
+    if fallback_modes:
+        raise RuntimeError(
+            "recruitment benchmark used a non-compact observer sink for "
+            f"{fallback_modes}: {sinks}."
+        )
+    if dispatch_observers != {"activation"}:
+        raise RuntimeError(
+            "recruitment benchmark dispatched an unexpected observer route: "
+            f"{sorted(dispatch_observers)}."
+        )
+
+    payload = {
+        "expected_modes": sorted(expected_modes),
+        "output_sinks": sinks,
+        "dispatch_observer": "activation",
+        "vm_raster_fallback": False,
+    }
+    (run_dir / "compact_activation_route_validation.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )

@@ -202,13 +202,10 @@ def test_observer_only_run_returns_compact_observations_without_vm():
     with pytest.raises(ValueError, match="Vm recording"):
         _ = compact.Vm
     assert compact.observations is not None
-    raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
-    assert raster.names == ("activation",)
-    assert raster.words.shape == (1, 1, 1, 1)
-    probe_index = int(np.asarray(raster.original_indices).reshape(-1)[0])
+    compact_activation = compact.observations["activation"]
     np.testing.assert_array_equal(
-        raster.unpack()[0, 0, 0],
-        np.asarray(recorded.Vm)[:, probe_index] >= -80.0,
+        compact_activation.values,
+        [np.any(np.asarray(recorded.Vm)[:, recorded.Vm.shape[1] // 2] >= -80.0)],
     )
 
 
@@ -274,8 +271,7 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
     assert len(compact) == 2
     assert compact.recordings == (None, None)
     assert compact.observations is not None
-    raster = compact.observations[axs.VM_RASTER_OBSERVATION_KEY]
-    assert raster.words.shape == (2, 1, 1, 1)
+    compact_activation = compact.observations["activation"]
     expected = np.stack(
         [
             np.asarray(recorded[row].Vm)[:, 0] >= -80.0
@@ -284,17 +280,12 @@ def test_pool_observer_only_run_returns_compact_observations_without_vm():
         axis=0,
     )
     np.testing.assert_array_equal(
-        raster.unpack()[:, 0, 0, :],
-        expected,
+        compact_activation.values,
+        np.any(expected, axis=1),
     )
     with pytest.raises(ValueError, match="Vm recording"):
         _ = compact[0].Vm
-    assert compact[0].observations[axs.VM_RASTER_OBSERVATION_KEY].words.shape == (
-        1,
-        1,
-        1,
-        1,
-    )
+    assert compact[0].observations["activation"].values.shape == (1,)
 
 
 def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
@@ -317,9 +308,10 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
         )
         axons.append(sim)
 
-    activation = axs.analysis.Activation(
+    activation = axs.analysis.Latency(
         threshold=-80.0 * axs.mV,
         target=axs.positions.ALL,
+        name="activation_raster",
     )
     recorded = _run_simulation(
         axons,

@@ -10,27 +10,27 @@ from axonscope.runtime.jax.recording import lowering as recording_lowering
 from axonscope.positions import ALL, CENTER, DISTAL, Indices
 from axonscope.results import VM_RASTER_OBSERVATION_KEY, unpack_vm_raster_words
 from axonscope.runtime.jax.recording.observer import (
-    build_vm_raster_plan,
-    combine_vm_raster_chunk_states,
-    finalize_vm_raster_state,
-    init_vm_raster_state,
-    trim_vm_raster_state,
-    update_vm_raster_state_batch_from_tables,
+    build_threshold_observer_plan,
+    combine_threshold_observer_chunk_states,
+    finalize_threshold_observer_state,
+    init_threshold_observer_state,
+    trim_threshold_observer_state,
+    update_threshold_observer_state_batch_from_tables,
 )
 
 
 def test_vm_raster_trim_clears_padded_tail_bits():
     state = np.full((1, 1, 1, 3), np.uint32(0xFFFFFFFF), dtype=np.uint32)
 
-    trimmed = trim_vm_raster_state(state, nt=35)
+    trimmed = trim_threshold_observer_state(state, nt=35)
 
     assert trimmed.shape == (1, 1, 1, 2)
     assert int(np.asarray(trimmed)[0, 0, 0, 0]) == 0xFFFFFFFF
     assert int(np.asarray(trimmed)[0, 0, 0, 1]) == 0b111
 
 
-def test_vm_raster_plan_lowers_shared_probe_tables():
-    plan = build_vm_raster_plan(
+def test_threshold_observer_plan_lowers_shared_probe_tables():
+    plan = build_threshold_observer_plan(
         (
             axs.analysis.Activation(
                 threshold=0.0 * axs.mV,
@@ -48,7 +48,7 @@ def test_vm_raster_plan_lowers_shared_probe_tables():
 
     assert plan is not None
     assert plan.row_aware is False
-    assert plan.raster_count == 2
+    assert plan.definition_count == 2
     assert plan.probe_count == 2
     np.testing.assert_array_equal(np.asarray(plan.probe_indices), [[1, 0], [1, 3]])
     np.testing.assert_array_equal(np.asarray(plan.probe_mask), [[True, False], [True, True]])
@@ -59,9 +59,63 @@ def test_vm_raster_plan_lowers_shared_probe_tables():
     assert plan.probe_mask_host.flags.writeable is False
 
 
-def test_vm_raster_plan_cache_survives_stimulation_replacement(monkeypatch):
-    recording_lowering._VM_RASTER_PLAN_CACHE.clear()
-    recording_lowering._VM_RASTER_PLAN_IDENTITY_CACHE.clear()
+def test_activation_only_plan_retains_bool_and_respects_blanking_across_chunks():
+    activation = axs.analysis.Activation(
+        threshold=0.0 * axs.mV,
+        blanking=0.15 * axs.ms,
+        target=Indices([0, 2]),
+        name="activation",
+    )
+    plan = build_threshold_observer_plan(
+        (activation,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+
+    assert plan is not None
+    assert plan.retention == "activation"
+    first = init_threshold_observer_state(plan, batch_size=1, nt=2)
+    assert first.shape == (1, 1)
+    first = update_threshold_observer_state_batch_from_tables(
+        first,
+        vm_mV=np.asarray([[5.0, -1.0, -1.0]], dtype=np.float32),
+        step_index=0,
+        probe_indices=np.asarray(plan.probe_indices)[None, ...],
+        probe_mask=np.asarray(plan.probe_mask)[None, ...],
+        thresholds_mV=plan.thresholds_mV,
+        blanking_ms=plan.blanking_ms,
+        dt_ms=0.1,
+        retention=plan.retention,
+    )
+    np.testing.assert_array_equal(first, [[False]])
+
+    second = init_threshold_observer_state(plan, batch_size=1, nt=2)
+    second = update_threshold_observer_state_batch_from_tables(
+        second,
+        vm_mV=np.asarray([[-1.0, -1.0, 5.0]], dtype=np.float32),
+        step_index=1,
+        probe_indices=np.asarray(plan.probe_indices)[None, ...],
+        probe_mask=np.asarray(plan.probe_mask)[None, ...],
+        thresholds_mV=plan.thresholds_mV,
+        blanking_ms=plan.blanking_ms,
+        dt_ms=0.1,
+        retention=plan.retention,
+    )
+    combined = combine_threshold_observer_chunk_states(
+        [first, second],
+        starts=[0, 1],
+        lengths=[1, 1],
+        nt=2,
+        retention=plan.retention,
+    )
+    observations = finalize_threshold_observer_state(plan, combined, nt=2, dt_ms=0.1)
+
+    assert tuple(observations) == ("activation",)
+    np.testing.assert_array_equal(observations["activation"].values, [True])
+
+
+def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypatch):
+    recording_lowering._THRESHOLD_OBSERVER_PLAN_CACHE.clear()
+    recording_lowering._THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE.clear()
     axons = (object(), object())
     solver_axons = (
         SimpleNamespace(n_compartments=3),
@@ -101,7 +155,7 @@ def test_vm_raster_plan_cache_survives_stimulation_replacement(monkeypatch):
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_vm_raster=True,
+        prefer_threshold_observer=True,
     )
     refreshed = SimpleNamespace(
         **{
@@ -119,15 +173,15 @@ def test_vm_raster_plan_cache_survives_stimulation_replacement(monkeypatch):
         observers,
         cohort=refreshed,
         dtype=np.float32,
-        prefer_vm_raster=True,
+        prefer_threshold_observer=True,
     )
 
     assert first is second
 
 
-def test_vm_raster_plan_identity_cache_reuses_same_prepared_cohort(monkeypatch):
-    recording_lowering._VM_RASTER_PLAN_CACHE.clear()
-    recording_lowering._VM_RASTER_PLAN_IDENTITY_CACHE.clear()
+def test_threshold_observer_plan_identity_cache_reuses_same_prepared_cohort(monkeypatch):
+    recording_lowering._THRESHOLD_OBSERVER_PLAN_CACHE.clear()
+    recording_lowering._THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE.clear()
     cohort = SimpleNamespace(
         group_id=0,
         mode="single",
@@ -163,7 +217,7 @@ def test_vm_raster_plan_identity_cache_reuses_same_prepared_cohort(monkeypatch):
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_vm_raster=True,
+        prefer_threshold_observer=True,
     )
 
     def fail_digest(_values):
@@ -175,14 +229,14 @@ def test_vm_raster_plan_identity_cache_reuses_same_prepared_cohort(monkeypatch):
         observers,
         cohort=cohort,
         dtype=np.float32,
-        prefer_vm_raster=True,
+        prefer_threshold_observer=True,
     )
 
     assert second is first
 
 
 def test_vm_raster_update_packs_row_aware_threshold_bits():
-    plan = build_vm_raster_plan(
+    plan = build_threshold_observer_plan(
         (
             axs.analysis.Activation(
                 threshold=0.0 * axs.mV,
@@ -224,8 +278,8 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
         [[3, 0, 0, 0], [1, 0, 0, 0]],
     )
 
-    state = init_vm_raster_state(plan, batch_size=2, nt=35)
-    state = update_vm_raster_state_batch_from_tables(
+    state = init_threshold_observer_state(plan, batch_size=2, nt=35)
+    state = update_threshold_observer_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -239,7 +293,7 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
         probe_mask=plan.probe_mask,
         thresholds_mV=plan.thresholds_mV,
     )
-    state = update_vm_raster_state_batch_from_tables(
+    state = update_threshold_observer_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -253,7 +307,7 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
         probe_mask=plan.probe_mask,
         thresholds_mV=plan.thresholds_mV,
     )
-    state = update_vm_raster_state_batch_from_tables(
+    state = update_threshold_observer_state_batch_from_tables(
         state,
         vm_mV=np.asarray(
             [
@@ -282,7 +336,7 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     np.testing.assert_array_equal(raster[0, 0, :, 33], [True, False, True, False])
     np.testing.assert_array_equal(raster[1, 0, :, 33], [False, True, False, False])
 
-    observations = finalize_vm_raster_state(plan, state, nt=35, dt_ms=0.1)
+    observations = finalize_threshold_observer_state(plan, state, nt=35, dt_ms=0.1)
     result = observations[VM_RASTER_OBSERVATION_KEY]
     assert result.names == ("activation", "latency")
     assert result.nt == 35
@@ -294,7 +348,7 @@ def test_vm_raster_update_packs_row_aware_threshold_bits():
     assert result.thresholds_mV is plan.thresholds_mV_host
     np.testing.assert_array_equal(result.unpack(), raster)
 
-    lazy_observations = finalize_vm_raster_state(
+    lazy_observations = finalize_threshold_observer_state(
         plan,
         state,
         nt=35,
@@ -322,7 +376,7 @@ def test_vm_raster_combines_local_chunk_states_across_word_boundaries():
     chunk1[0, 0, 0, 1] |= np.uint32(1 << 9)
     chunk2[0, 0, 0, 0] |= np.uint32(1 << 4)
 
-    combined = combine_vm_raster_chunk_states(
+    combined = combine_threshold_observer_chunk_states(
         [chunk0, chunk1, chunk2],
         starts=[0, 40, 90],
         lengths=[40, 50, 10],
@@ -340,14 +394,14 @@ def test_vm_raster_keeps_single_full_chunk_state():
     chunk[0, 0, 0, 0] |= np.uint32(1 << 3)
     chunk[0, 0, 0, 1] |= np.uint32(1 << 1)
 
-    combined = combine_vm_raster_chunk_states([chunk], starts=[0], lengths=[64], nt=64)
+    combined = combine_threshold_observer_chunk_states([chunk], starts=[0], lengths=[64], nt=64)
 
     np.testing.assert_array_equal(np.asarray(combined), chunk)
 
 
-def test_vm_raster_plan_rejects_non_threshold_observers():
+def test_threshold_observer_plan_rejects_non_threshold_observers():
     with pytest.raises(NotImplementedError, match="threshold-style Vm"):
-        build_vm_raster_plan(
+        build_threshold_observer_plan(
             (axs.analysis.PeakVoltage(target=CENTER),),
             positions_um=np.asarray([0.0, 50.0, 100.0]),
         )

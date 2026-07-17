@@ -95,7 +95,7 @@ class LoweringInspection:
 
 @dataclass(frozen=True)
 class ProbeInspection:
-    """Predicted VmRaster probe lowering for one dispatch group."""
+    """Predicted threshold-observer probe lowering for one dispatch group."""
 
     group_id: int
     observer_names: tuple[str, ...]
@@ -104,8 +104,8 @@ class ProbeInspection:
     probe_indices_by_row: tuple[tuple[tuple[int, ...], ...], ...]
     row_probe_counts: tuple[tuple[int, ...], ...]
     max_probe_count: int
-    packed_shape: tuple[int, ...] | None
-    packed_bytes: int
+    retained_shape: tuple[int, ...] | None
+    retained_bytes: int
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ class MemoryInspection:
     dense_iinj_bytes: int
     dense_vstim_bytes: int
     retained_vm_bytes: int
-    vm_raster_bytes: int
+    observer_bytes: int
     total_estimated_bytes: int
     retained_public_bytes: int
 
