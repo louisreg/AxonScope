@@ -665,12 +665,13 @@ solver-side observer fallback.
   threshold hits are accepted only for samples at or after `tmin`.
 - [x] Implement first-crossing/latency state as `int32` timestep sentinels per
   selected probe group, converting to physical time only during finalization.
-- [ ] Implement constant-memory first/last spike time and spike count. Add a
-  bounded `K`-event representation with explicit overflow only for workflows
-  that need individual timestamps. Detect rising threshold crossings with
-  blanking plus hysteresis/refractory semantics so one broad spike is not
-  counted at every timestep. Store integer timesteps during the scan and
-  convert to physical timestamps only during result finalization.
+- [x] Implement constant-memory first/last spike time and spike count. Detect
+  rising threshold crossings with blanking plus hysteresis/refractory semantics
+  so one broad spike is not counted at every timestep. Store integer timesteps
+  during the scan and convert to physical timestamps only during result
+  finalization.
+- [ ] Add a bounded `K`-event representation with explicit overflow only for
+  workflows that need individual timestamps.
 - [x] Support existing `PositionSelector` semantics and selectors containing
   several positions, reducing each probe group online.
 - [ ] Extend `estimate()`/`inspect()` with output-state and transfer estimates
@@ -723,6 +724,8 @@ solver-side observer fallback.
   bounded retained shape, and exact equivalence with post-hoc recorded Vm.
 - [x] Add a didactic compact-latency example showing first-crossing retention,
   bounded retained shape, and exact equivalence with post-hoc recorded Vm.
+- [x] Add a didactic compact-spike example showing dense Vm, its threshold
+  raster, and exact count/first/last equivalence with constant-memory output.
 
 ### P16 - JAX Temporal Solver And Dispatch Optimization
 

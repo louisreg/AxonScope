@@ -1054,7 +1054,7 @@ def _run_double_cable_batch_observer_chunks(
             fixed_gpu_chunk_steps
             if (
                 fixed_gpu_chunk_steps is not None
-                and observers.retention != "activation"
+                and observers.retention not in {"activation", "spike_summary"}
             )
             else valid_chunk_steps
         )
@@ -1171,6 +1171,8 @@ def _run_double_cable_batch_observer_chunks(
                         dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
                         local_state=local_observer_chunks,
                     ),
+                    raster_reset_thresholds_mV=observers.reset_thresholds_mV,
+                    raster_refractory_ms=observers.refractory_ms,
                     observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,
@@ -1234,6 +1236,8 @@ def _run_double_cable_batch_observer_chunks(
                         dt_ms=jnp.asarray(grid.dt_ms, dtype=dtype_local),
                         local_state=local_observer_chunks,
                     ),
+                    raster_reset_thresholds_mV=observers.reset_thresholds_mV,
+                    raster_refractory_ms=observers.refractory_ms,
                     observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,

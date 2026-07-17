@@ -141,6 +141,29 @@ def test_compact_latency_estimate_counts_first_crossing_steps():
     assert output.bytes == 8
 
 
+def test_spike_summary_estimate_counts_constant_memory_probe_state():
+    axon = _hh(compartments=5)
+    spike_count = axs.analysis.SpikeCount(
+        threshold=-20.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    simulation = axs.AxonSimulation(
+        axs.AxonPopulation([_clamped_instance(axon), _clamped_instance(axon)]),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[spike_count],
+    )
+
+    estimate = simulation.estimate()
+    output = estimate.item("outputs.spike_summary")
+
+    assert estimate.groups[0].observer_output == "spike_summary"
+    assert output.shape == (2,)
+    assert output.dtype == "int32"
+    assert output.bytes == 32
+
+
 def test_extracellular_estimate_surfaces_factorized_footprint_without_dense_vstim():
     axon = _hh(compartments=5)
     stimulus = axs.Stimulus.pulse(

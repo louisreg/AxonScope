@@ -16,7 +16,7 @@ from axonscope.analysis.core import (
     MissingAnalysisInputError,
 )
 from axonscope.analysis.activation import ActivationCriterion, ActivationEvent
-from axonscope.analysis.posthoc import conduction_velocity, rasterize
+from axonscope.analysis.posthoc import conduction_velocity
 from axonscope.positions import ALL, DISTAL, PositionSelector
 from axonscope.results.pool import AxonSimulationResult
 from axonscope.signals import MEMBRANE_VOLTAGE, Signal
@@ -656,26 +656,37 @@ class PeakVoltage:
 
 
 @dataclass(frozen=True)
+class SpikeCountEvent:
+    """Constant-memory summary of detected threshold-crossing spikes."""
+
+    count: int
+    first_time_ms: float | None = None
+    last_time_ms: float | None = None
+
+
+@dataclass(frozen=True)
 class SpikeCount:
-    """Count detected action-potential peaks in a voltage recording."""
+    """Count rearmed threshold crossings at selected axon positions."""
 
     threshold: Any = -20.0
-    min_distance: Any = 0.5
-    peak_height: Any | None = None
-    min_width: Any | None = 0.1
+    reset_threshold: Any = -40.0
+    blanking: Any = 0.0
+    refractory: Any = 0.5
+    target: PositionSelector = ALL
     signal: Signal[Any] = MEMBRANE_VOLTAGE
     name: str = "spike_count"
-    algorithm_version: str = "spike_count_v1"
+    algorithm_version: str = "spike_count_crossing_v2"
 
     @property
     def requirements(self) -> AnalysisRequirements:
         return AnalysisRequirements(
             required_signals=(self.signal,),
             required_result_fields=("Vm", "t", "positions"),
-            required_positions=(ALL,),
+            required_positions=(self.target,),
             supported_myelination=_ANY_MYELINATION,
             supported_formulations=_ANY_FORMULATION,
             required_capabilities=("membrane_voltage_trace",),
+            online_supported=True,
             algorithm_version=self.algorithm_version,
             recording_hint=_VM_RECORDING_HINT,
         )
@@ -683,16 +694,71 @@ class SpikeCount:
     def evaluate(self, result: Any) -> AnalysisResult:
         return _evaluate_rows(self, result, self._evaluate_one, unit=None)
 
-    def _evaluate_one(self, row: Any) -> tuple[int, AnalysisStatus, str, None]:
-        _require_membrane_voltage(row, self.signal)
-        spike_times_ms, _ = rasterize(
-            row,
-            threshold_mV=self.threshold,
-            min_distance_ms=self.min_distance,
-            peak_height_mV=self.peak_height,
-            min_width_ms=self.min_width,
+    def _evaluate_one(
+        self,
+        row: Any,
+    ) -> tuple[int, AnalysisStatus, str, SpikeCountEvent]:
+        vm = _require_membrane_voltage(row, self.signal)
+        time_ms = _time_values(row)
+        if time_ms.shape[0] != vm.shape[0]:
+            raise ValueError("result time length must match membrane-voltage rows.")
+        columns, _, _ = _selected_columns(row, target=self.target, vm=vm)
+        event = _spike_count_event_from_arrays(
+            time_ms,
+            vm[:, columns],
+            threshold_mV=units.to_mV(self.threshold),
+            reset_threshold_mV=units.to_mV(self.reset_threshold),
+            blanking_ms=units.to_ms(self.blanking),
+            refractory_ms=units.to_ms(self.refractory),
         )
-        return int(spike_times_ms.shape[0]), AnalysisStatus.VALID, "", None
+        return event.count, AnalysisStatus.VALID, "", event
+
+
+def _spike_count_event_from_arrays(
+    time_ms: np.ndarray,
+    vm_mV: np.ndarray,
+    *,
+    threshold_mV: float,
+    reset_threshold_mV: float,
+    blanking_ms: float,
+    refractory_ms: float,
+) -> SpikeCountEvent:
+    if reset_threshold_mV >= threshold_mV:
+        raise ValueError("reset_threshold must be below threshold.")
+    if blanking_ms < 0.0:
+        raise ValueError("blanking must be non-negative.")
+    if refractory_ms < 0.0:
+        raise ValueError("refractory must be non-negative.")
+
+    selected = np.asarray(vm_mV, dtype=float)
+    if selected.ndim != 2 or selected.shape[1] == 0:
+        raise ValueError("SpikeCount target must select at least one position.")
+    armed = np.ones(selected.shape[1], dtype=bool)
+    last_time = np.full(selected.shape[1], -np.inf, dtype=float)
+    count = 0
+    first_time_ms: float | None = None
+    last_event_time_ms: float | None = None
+
+    for sample_time, sample in zip(time_ms, selected, strict=True):
+        hit = sample >= threshold_mV
+        crossing = armed & hit
+        refractory_ready = (sample_time - last_time) >= refractory_ms
+        fire = crossing & (sample_time >= blanking_ms) & refractory_ready
+        if np.any(fire):
+            event_count = int(np.count_nonzero(fire))
+            count += event_count
+            event_time = float(sample_time)
+            if first_time_ms is None:
+                first_time_ms = event_time
+            last_event_time_ms = event_time
+            last_time[fire] = event_time
+        armed = (armed & ~crossing) | (sample <= reset_threshold_mV)
+
+    return SpikeCountEvent(
+        count=count,
+        first_time_ms=first_time_ms,
+        last_time_ms=last_event_time_ms,
+    )
 
 
 @dataclass(frozen=True)
@@ -784,4 +850,5 @@ __all__ = [
     "Latency",
     "PeakVoltage",
     "SpikeCount",
+    "SpikeCountEvent",
 ]

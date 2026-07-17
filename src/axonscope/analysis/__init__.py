@@ -28,6 +28,7 @@ from axonscope.analysis.definitions import (
     Latency,
     PeakVoltage,
     SpikeCount,
+    SpikeCountEvent,
 )
 from axonscope.analysis.posthoc import (
     average_velocity,
@@ -63,6 +64,7 @@ __all__ = [
     "PeakVoltage",
     "ActivationObserver",
     "SpikeCount",
+    "SpikeCountEvent",
     "average_velocity",
     "analyze",
     "conduction_velocity",

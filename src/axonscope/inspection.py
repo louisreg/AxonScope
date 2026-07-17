@@ -426,6 +426,14 @@ def _inspect_probes(
     elif observer_output == "first_crossing":
         retained_shape = (int(group.size), len(definitions))
         retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
+    elif observer_output == "spike_summary":
+        retained_shape = (
+            int(group.size),
+            len(definitions),
+            int(max_probe_count),
+            4,
+        )
+        retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
     else:
         word_count = (int(step_count) + 31) // 32
         retained_shape = (
@@ -472,7 +480,8 @@ def _inspect_memory(
     )
     observer_bytes = (
         int(probes.retained_bytes)
-        if lowering.observer_format in {"activation", "first_crossing", "vm_raster"}
+        if lowering.observer_format
+        in {"activation", "first_crossing", "spike_summary", "vm_raster"}
         else 0
     )
     total_estimated = (
@@ -568,6 +577,8 @@ def _inspect_result_assembly(
                 observations = 'observations["activation"]'
             elif output == "first_crossing":
                 observations = 'observations["latency"]'
+            elif output == "spike_summary":
+                observations = 'observations["spike_count"]'
             elif output == "vm_raster":
                 observations = 'observations["vm_raster"]'
             else:
@@ -605,7 +616,11 @@ def _inspect_result_assembly(
                 else (
                     'observations["latency"]'
                     if output == "first_crossing"
-                    else 'observations["vm_raster"]'
+                    else (
+                        'observations["spike_count"]'
+                        if output == "spike_summary"
+                        else 'observations["vm_raster"]'
+                    )
                 )
             ),
             public_result="compact AxonSimulationResult cohort",

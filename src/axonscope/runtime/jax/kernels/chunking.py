@@ -66,6 +66,10 @@ def _init_local_threshold_chunk_template(
 ) -> ThresholdObserverState | None:
     if not enabled:
         return None
+    if plan.retention == "spike_summary":
+        raise ValueError(
+            "spike-summary observer state must remain continuous across time chunks"
+        )
     max_chunk_steps = max((stop - start for start, stop in chunk_ranges), default=0)
     if max_chunk_steps <= 0:
         return None

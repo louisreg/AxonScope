@@ -87,6 +87,10 @@ def _compact_latency_values(result):
     return np.asarray(kernel_observations(result)["latency"].values)
 
 
+def _compact_spike_count_values(result):
+    return np.asarray(kernel_observations(result)["spike_count"].values)
+
+
 def test_final_time_chunk_padding_preserves_prefix_and_policy():
     values = jnp.asarray([[1.0, 2.0, 3.0]])
 
@@ -1182,6 +1186,35 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
         _compact_latency_values(chunked_latency),
         expected_latency,
         equal_nan=True,
+    )
+
+    spike_count = axs.analysis.SpikeCount(
+        threshold=-80.0 * axs.mV,
+        reset_threshold=-90.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    spike_observer = build_threshold_observer_plan(
+        (spike_count,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert spike_observer is not None
+    compact_spikes = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(),
+        observers=spike_observer,
+    )
+    chunked_spikes = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(time_chunk_steps=7),
+        observers=spike_observer,
+    )
+    np.testing.assert_array_equal(_compact_spike_count_values(compact_spikes), [1, 1])
+    np.testing.assert_array_equal(
+        _compact_spike_count_values(chunked_spikes),
+        _compact_spike_count_values(compact_spikes),
     )
 
 

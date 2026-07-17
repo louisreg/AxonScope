@@ -191,6 +191,60 @@ def test_latency_first_crossing_reports_undetermined_and_ignores_padded_tail():
     assert result.messages == ("threshold was not crossed at the requested target.",)
 
 
+def test_spike_summary_counts_rearmed_crossings_with_blanking_and_refractory():
+    spike_count = axs.analysis.SpikeCount(
+        threshold=0.0 * axs.mV,
+        reset_threshold=-20.0 * axs.mV,
+        blanking=0.15 * axs.ms,
+        refractory=0.25 * axs.ms,
+        target=CENTER,
+    )
+    plan = build_threshold_observer_plan(
+        (spike_count,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+
+    assert plan is not None
+    assert plan.retention == "spike_summary"
+    state = init_threshold_observer_state(plan, batch_size=1, nt=8)
+    assert state.shape == (1, 1, 1, 4)
+    center_values = (5.0, 5.0, -30.0, 5.0, -30.0, 5.0, -30.0, 5.0)
+    for step, center_value in enumerate(center_values):
+        state = update_threshold_observer_state_batch_from_tables(
+            state,
+            vm_mV=np.asarray([[-70.0, center_value, -70.0]], dtype=np.float32),
+            step_index=step,
+            probe_indices=np.asarray(plan.probe_indices)[None, ...],
+            probe_mask=np.asarray(plan.probe_mask)[None, ...],
+            thresholds_mV=plan.thresholds_mV,
+            reset_thresholds_mV=plan.reset_thresholds_mV,
+            blanking_ms=plan.blanking_ms,
+            refractory_ms=plan.refractory_ms,
+            dt_ms=0.1,
+            retention=plan.retention,
+        )
+
+    result = finalize_threshold_observer_state(plan, state, nt=8, dt_ms=0.1)[
+        "spike_count"
+    ]
+    np.testing.assert_array_equal(result.values, [2])
+    assert result.events == (
+        axs.analysis.SpikeCountEvent(
+            count=2,
+            first_time_ms=0.4,
+            last_time_ms=0.8,
+        ),
+    )
+    with pytest.raises(ValueError, match="continuous across chunks"):
+        combine_threshold_observer_chunk_states(
+            [state, state],
+            starts=[0, 4],
+            lengths=[4, 4],
+            nt=8,
+            retention=plan.retention,
+        )
+
+
 def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypatch):
     recording_lowering._THRESHOLD_OBSERVER_PLAN_CACHE.clear()
     recording_lowering._THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE.clear()

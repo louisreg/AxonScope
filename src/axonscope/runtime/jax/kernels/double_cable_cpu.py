@@ -508,6 +508,8 @@ def _run_double_cable_batch_observer_scan(
     raster_probe_mask: Array,
     raster_thresholds_mV: Array,
     raster_blanking_ms: Array,
+    raster_reset_thresholds_mV: Array,
+    raster_refractory_ms: Array,
     area_cm2: Array,
     Cm_abs: Array,
     Cx_abs: Array,
@@ -750,6 +752,8 @@ def _run_double_cable_batch_observer_scan(
                 probe_mask=raster_probe_mask_row,
                 thresholds_mV=raster_thresholds_mV,
                 blanking_ms=raster_blanking_ms,
+                reset_thresholds_mV=raster_reset_thresholds_mV,
+                refractory_ms=raster_refractory_ms,
                 dt_ms=dt_ms,
                 retention=observer_retention,
             )

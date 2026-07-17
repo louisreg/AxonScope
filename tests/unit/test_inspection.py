@@ -208,6 +208,28 @@ def test_inspection_reports_compact_latency_first_crossing_storage():
     assert report.result_assembly[0].observation_output == 'observations["latency"]'
 
 
+def test_inspection_reports_constant_memory_spike_summary_storage():
+    spike_count = axs.analysis.SpikeCount(
+        threshold=-20.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    report = _inspect_simulation(
+        _clamped_pool(),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[spike_count],
+    )
+
+    assert report.lowerings[0].observer_format == "spike_summary"
+    assert report.probes[0].retained_shape == (2, 1, 1, 4)
+    assert report.probes[0].retained_bytes == 32
+    assert report.memory[0].observer_bytes == 32
+    assert report.result_assembly[0].observation_output == (
+        'observations["spike_count"]'
+    )
+
+
 def test_inspection_reports_singleton_observer_only_batch_route():
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,

@@ -210,7 +210,11 @@ def test_spike_count_and_velocity_use_structured_undetermined_status():
     local_only = _fake_result(second_peak=False)
 
     spike_count = propagated.analyze(
-        axs.analysis.SpikeCount(threshold=0.0 * axs.mV, min_distance=2.0 * axs.ms)
+        axs.analysis.SpikeCount(
+            threshold=0.0 * axs.mV,
+            reset_threshold=-20.0 * axs.mV,
+            refractory=2.0 * axs.ms,
+        )
     )
     velocity = propagated.analyze(axs.analysis.ConductionVelocity(threshold=0.0 * axs.mV))
     no_velocity = local_only.analyze(axs.analysis.ConductionVelocity(threshold=0.0 * axs.mV))

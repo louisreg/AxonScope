@@ -10,10 +10,18 @@ from axonscope.analysis.definitions import (
     ConductionBlock,
     ConductionVelocity,
     Latency,
+    SpikeCount,
 )
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
-OutputSink = Literal["vm", "none", "activation", "first_crossing", "vm_raster"]
+OutputSink = Literal[
+    "vm",
+    "none",
+    "activation",
+    "first_crossing",
+    "spike_summary",
+    "vm_raster",
+]
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,8 @@ def observer_output_label(
         return "activation"
     if recording_mode == "none" and observers_are_compact_latency_compatible(observers):
         return "first_crossing"
+    if recording_mode == "none" and observers_are_compact_spike_compatible(observers):
+        return "spike_summary"
     if recording_mode == "none" and observers_are_vm_raster_compatible(observers):
         return "vm_raster"
     if recording_mode == "none":
@@ -103,6 +113,14 @@ def observers_are_compact_latency_compatible(
     return bool(observers) and all(isinstance(observer, Latency) for observer in observers)
 
 
+def observers_are_compact_spike_compatible(
+    observers: tuple[Any, ...] | None,
+) -> bool:
+    """Return whether observers need bounded per-probe spike summaries."""
+
+    return bool(observers) and all(isinstance(observer, SpikeCount) for observer in observers)
+
+
 def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
     """Return observer definitions supported by solver-side VmRaster."""
 
@@ -111,7 +129,10 @@ def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
     return tuple(
         observer
         for observer in observers
-        if isinstance(observer, (Activation, Latency, ConductionBlock, ConductionVelocity))
+        if isinstance(
+            observer,
+            (Activation, Latency, SpikeCount, ConductionBlock, ConductionVelocity),
+        )
     )
 
 
@@ -129,6 +150,8 @@ def observer_definition_signature(observer: Any) -> tuple[Any, ...]:
         repr(target),
         _maybe_millivolt(getattr(observer, "threshold", None)),
         _maybe_millisecond(getattr(observer, "blanking", None)),
+        _maybe_millivolt(getattr(observer, "reset_threshold", None)),
+        _maybe_millisecond(getattr(observer, "refractory", None)),
     )
 
 
@@ -155,6 +178,7 @@ __all__ = [
     "observer_output_label",
     "observers_are_compact_activation_compatible",
     "observers_are_compact_latency_compatible",
+    "observers_are_compact_spike_compatible",
     "observers_are_vm_raster_compatible",
     "vm_raster_definitions",
 ]
