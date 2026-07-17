@@ -308,10 +308,10 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
         )
         axons.append(sim)
 
-    activation = axs.analysis.Latency(
+    raster_definition = axs.analysis.ConductionBlock(
         threshold=-80.0 * axs.mV,
         target=axs.positions.ALL,
-        name="activation_raster",
+        name="threshold_raster",
     )
     recorded = _run_simulation(
         axons,
@@ -324,7 +324,7 @@ def test_pool_observer_only_mixed_widths_pads_vm_raster_metadata():
         duration=0.1 * axs.ms,
         dt=0.05 * axs.ms,
         recording=axs.Recording.none(),
-        observers=[activation],
+        observers=[raster_definition],
     )
 
     assert compact.observations is not None

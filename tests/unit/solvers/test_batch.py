@@ -83,6 +83,10 @@ def _compact_activation_values(result):
     return np.asarray(kernel_observations(result)["activation"].values)
 
 
+def _compact_latency_values(result):
+    return np.asarray(kernel_observations(result)["latency"].values)
+
+
 def test_final_time_chunk_padding_preserves_prefix_and_policy():
     values = jnp.asarray([[1.0, 2.0, 3.0]])
 
@@ -1134,6 +1138,47 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
     np.testing.assert_array_equal(
         _compact_activation_values(compact_chunked),
         _compact_activation_values(compact),
+    )
+
+    latency = axs.analysis.Latency(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+        blanking=0.2 * axs.ms,
+    )
+    latency_observer = build_threshold_observer_plan(
+        (latency,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert latency_observer is not None
+    compact_latency = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(),
+        observers=latency_observer,
+    )
+    chunked_latency = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(time_chunk_steps=7),
+        observers=latency_observer,
+        benchmark_observer_state_scope="chunk",
+    )
+    eligible = sample_times_ms >= 0.2
+    crossing = np.asarray(full.Vm)[:, :, center] >= -80.0
+    expected_latency = np.full(crossing.shape[0], np.nan)
+    for row, values in enumerate(crossing[:, eligible]):
+        if np.any(values):
+            expected_latency[row] = sample_times_ms[eligible][np.argmax(values)]
+    np.testing.assert_allclose(
+        _compact_latency_values(compact_latency),
+        expected_latency,
+        equal_nan=True,
+    )
+    np.testing.assert_allclose(
+        _compact_latency_values(chunked_latency),
+        expected_latency,
+        equal_nan=True,
     )
 
 

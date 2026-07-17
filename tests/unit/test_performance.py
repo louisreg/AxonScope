@@ -118,6 +118,29 @@ def test_observer_only_population_estimate_uses_sparse_current_clamp_inputs():
         estimate.item("inputs.intracellular_current_density")
 
 
+def test_compact_latency_estimate_counts_first_crossing_steps():
+    axon = _hh(compartments=5)
+    latency = axs.analysis.Latency(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    simulation = axs.AxonSimulation(
+        axs.AxonPopulation([_clamped_instance(axon), _clamped_instance(axon)]),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[latency],
+    )
+
+    estimate = simulation.estimate()
+    output = estimate.item("outputs.first_crossing")
+
+    assert estimate.groups[0].observer_output == "first_crossing"
+    assert output.shape == (2,)
+    assert output.dtype == "int32"
+    assert output.bytes == 8
+
+
 def test_extracellular_estimate_surfaces_factorized_footprint_without_dense_vstim():
     axon = _hh(compartments=5)
     stimulus = axs.Stimulus.pulse(

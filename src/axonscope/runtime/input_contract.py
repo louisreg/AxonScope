@@ -275,10 +275,10 @@ def validate_prepared_runtime_input(
     if summary.row_specific_parameters and not contract.supports_row_specific_parameters:
         errors.append("runtime does not support row-specific parameters")
     if (
-        summary.output_sink == "vm_raster"
+        summary.output_sink in {"activation", "first_crossing", "vm_raster"}
         and not contract.supports_threshold_observer
     ):
-        errors.append("runtime does not support observer-only VmRaster output")
+        errors.append("runtime does not support observer-only threshold output")
     if not contract.supports_intracellular(summary.intracellular_mode):
         errors.append(
             f"intracellular mode {summary.intracellular_mode.value!r} is unsupported"

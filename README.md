@@ -209,9 +209,11 @@ indices = axs.Recording.indices([0, 10, 20], axs.signals.Vm)
 ```
 
 For trace-free threshold-style observer runs, use compatible analysis
-definitions with `Recording.none()`. The solver returns packed VmRaster output
-under `observations["vm_raster"]`; activation, latency, velocity, thresholds,
-and recruitment summaries remain result-side post-processing.
+definitions with `Recording.none()`. Activation-only requests retain one
+boolean per axon under `observations["activation"]`; latency-only requests
+retain one first-crossing timestep and return physical time under
+`observations["latency"]`. Analyses needing richer crossing history use packed
+VmRaster under `observations["vm_raster"]`.
 
 See `docs/results_recording_analysis.md` and `docs/pool_dispatch.md`.
 

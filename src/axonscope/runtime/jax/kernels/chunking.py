@@ -48,7 +48,7 @@ def _threshold_blanking_for_chunk(
 ) -> Array:
     """Express absolute activation blanking in a chunk-local time frame."""
 
-    if local_state and plan.retention == "activation":
+    if local_state and plan.retention in {"activation", "first_crossing"}:
         start_step = jnp.asarray(start, dtype=jnp.asarray(dt_ms).dtype)
         return plan.blanking_ms - start_step * dt_ms
     return plan.blanking_ms

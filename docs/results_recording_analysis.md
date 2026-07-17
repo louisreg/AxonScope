@@ -172,7 +172,7 @@ Public result surface audit:
 | `AxonResultView` | one simulated row; exposes `Vm`, `t`, `signal(...)`, `recorded_axis`, recordings, observations, diagnostics, final state, plots, and analysis/report helpers. |
 | `RecordedSignal` and `RecordingManifest` | structured record of requested and available signals. |
 | `RecordedAxis` | canonical interpretation of retained Vm columns as intrinsic axon positions plus original layout indices. |
-| `AnalysisResult` | compact activation flags stored under `observations["activation"]`. |
+| `AnalysisResult` | compact activation flags or first-crossing latencies stored under their definition names in `observations`. |
 | `VmRasterResult` | packed observer-only threshold raster stored under `observations["vm_raster"]`. |
 | `AnalysisReport` and protocol summaries | separate scientific interpretations of results; they do not mutate or merge into raw numerical result objects. |
 
@@ -352,8 +352,11 @@ Solver-side observer-only execution uses one probe-and-threshold lowering with
 typed retention policies. An `axs.analysis.Activation(...)`-only request updates
 one boolean per row and definition during the scan, applies `blanking` as the
 earliest accepted sample time, and returns `observations["activation"]` without
-retaining Vm or a temporal raster. Definitions that need crossing time or
-propagation history retain the packed VmRaster route.
+retaining Vm or a temporal raster. An `axs.analysis.Latency(...)`-only request
+similarly retains one `int32` first-crossing timestep per row and definition,
+then converts it to milliseconds during finalization. Mixed threshold
+definitions and definitions that need propagation history retain the packed
+VmRaster route.
 
 Compact activation returns the canonical `AnalysisResult`. The packed reference
 container remains `axs.results.VmRasterResult` under
@@ -374,6 +377,10 @@ result = run.single
 activated = bool(result.observations["activation"].value)
 ```
 
+Replace the observer with `axs.analysis.Latency(...)` to receive the canonical
+`AnalysisResult` under `observations["latency"]`; rows without a crossing are
+`UNDETERMINED` with a `NaN` value.
+
 For pool runs, compatible single-cable and double-cable groups can use the
 compact observer-only batch path. Row-specific probe tables and masks must be
 lowered before the solver so padded rows do not force full Vm retention.
@@ -381,6 +388,8 @@ For VmRaster outputs, population-level `result.observations["vm_raster"]` may be
 padded to a shared probe width; an individual row view exposes that row's own
 probe width. Compact activation has shape `[Naxon]` and does not retain a probe
 or time axis after the online reduction.
+Compact latency has the same logical shape and retains one `int32` timestep per
+axon instead of a boolean.
 `PeakVoltage` and other rich analyses remain post-hoc on recorded Vm until a
 dedicated solver-side implementation is designed, benchmarked, and kept off the
 hot path.

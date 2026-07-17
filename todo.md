@@ -7,7 +7,8 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-17 after implementing compact activation retention.
+Updated on 2026-07-17 after validating compact activation at P14E scale and
+implementing compact first-crossing latency.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -15,9 +16,10 @@ Updated on 2026-07-17 after implementing compact activation retention.
 - The production runtime is JAX. CPU double-cable uses Thomas; GPU
   double-cable uses the Triton tiled-Thomas route; single-cable uses the JAX
   tridiagonal route.
-- The strict solver-side threshold route now has two retention policies:
-  compact activation keeps one boolean per row and definition, while VmRaster
-  remains the temporal reference for analyses that need crossing history.
+- The strict solver-side threshold route now has three retention policies:
+  compact activation keeps one boolean per row and definition, compact latency
+  keeps one first-crossing `int32`, and VmRaster remains the temporal reference
+  for analyses that need crossing history.
 - Recruitment now keeps one source population and a native numerical amplitude
   axis; it no longer expands `Namplitude x Naxon` Python objects. Large sweeps
   use compact activation when their criterion is activation-only. P15 still
@@ -34,7 +36,7 @@ Latest fast validation recorded by the compact-activation checkpoint:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-701 passed, 1 skipped
+705 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -661,7 +663,7 @@ solver-side observer fallback.
   during the temporal scan and returned as `[Namplitude, Naxon]` without
   allocating or decoding VmRaster. Apply `Activation.blanking` in the scan so
   threshold hits are accepted only for samples at or after `tmin`.
-- [ ] Implement first-crossing/latency state as `int32` timestep sentinels per
+- [x] Implement first-crossing/latency state as `int32` timestep sentinels per
   selected probe group, converting to physical time only during finalization.
 - [ ] Implement constant-memory first/last spike time and spike count. Add a
   bounded `K`-event representation with explicit overflow only for workflows
@@ -669,7 +671,7 @@ solver-side observer fallback.
   blanking plus hysteresis/refractory semantics so one broad spike is not
   counted at every timestep. Store integer timesteps during the scan and
   convert to physical timestamps only during result finalization.
-- [ ] Support existing `PositionSelector` semantics and selectors containing
+- [x] Support existing `PositionSelector` semantics and selectors containing
   several positions, reducing each probe group online.
 - [ ] Extend `estimate()`/`inspect()` with output-state and transfer estimates
   for full raster, downsampled raster, probes, and bounded events. Make the
@@ -712,12 +714,14 @@ solver-side observer fallback.
 - [ ] Compare compact plans with retained VmRaster references on local CPU and
   Kaggle GPU at `Naxon={196,1024,4096}`. Record cold/warm timing, peak memory,
   transfers, output size, and exact activation/recruitment equivalence.
-- [ ] Require the 4096-axon full recruitment workload to run without a
+- [x] Require the 4096-axon full recruitment workload to run without a
   multi-GiB observer state. The target activation state is roughly `86 KB` for
   21 x 4096 booleans rather than `6.02 GiB` of single-cable VmRaster.
 - [ ] Validate latency, velocity, recruitment, and KES-facing behavior, then add
   an advanced example showing propagation to one side but not the other.
 - [x] Add a didactic compact-activation example showing solver-side blanking,
+  bounded retained shape, and exact equivalence with post-hoc recorded Vm.
+- [x] Add a didactic compact-latency example showing first-crossing retention,
   bounded retained shape, and exact equivalence with post-hoc recorded Vm.
 
 ### P16 - JAX Temporal Solver And Dispatch Optimization

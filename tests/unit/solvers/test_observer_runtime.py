@@ -113,6 +113,84 @@ def test_activation_only_plan_retains_bool_and_respects_blanking_across_chunks()
     np.testing.assert_array_equal(observations["activation"].values, [True])
 
 
+def test_latency_only_plan_retains_first_crossing_across_chunks():
+    latency = axs.analysis.Latency(
+        threshold=0.0 * axs.mV,
+        blanking=0.25 * axs.ms,
+        target=Indices([0, 2]),
+        name="latency",
+    )
+    plan = build_threshold_observer_plan(
+        (latency,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+
+    assert plan is not None
+    assert plan.retention == "first_crossing"
+    chunks = []
+    for values, local_step, blanking_ms in (
+        ([5.0, -1.0, -1.0], 1, 0.25),
+        ([-1.0, -1.0, 5.0], 1, 0.05),
+        ([5.0, -1.0, -1.0], 0, -0.15),
+    ):
+        state = init_threshold_observer_state(plan, batch_size=1, nt=2)
+        state = update_threshold_observer_state_batch_from_tables(
+            state,
+            vm_mV=np.asarray([values], dtype=np.float32),
+            step_index=local_step,
+            probe_indices=np.asarray(plan.probe_indices)[None, ...],
+            probe_mask=np.asarray(plan.probe_mask)[None, ...],
+            thresholds_mV=plan.thresholds_mV,
+            blanking_ms=np.asarray([blanking_ms]),
+            dt_ms=0.1,
+            retention=plan.retention,
+        )
+        chunks.append(state)
+
+    combined = combine_threshold_observer_chunk_states(
+        chunks,
+        starts=[0, 2, 4],
+        lengths=[2, 2, 1],
+        nt=5,
+        retention=plan.retention,
+    )
+    observations = finalize_threshold_observer_state(plan, combined, nt=5, dt_ms=0.1)
+
+    result = observations["latency"]
+    np.testing.assert_allclose(result.values, [0.4])
+    assert result.statuses == (axs.analysis.AnalysisStatus.VALID,)
+    assert result.unit == "millisecond"
+
+
+def test_latency_first_crossing_reports_undetermined_and_ignores_padded_tail():
+    latency = axs.analysis.Latency(
+        threshold=0.0 * axs.mV,
+        target=CENTER,
+    )
+    plan = build_threshold_observer_plan(
+        (latency,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+    assert plan is not None
+    missed = init_threshold_observer_state(plan, batch_size=1, nt=2)
+    padded = np.asarray([[1]], dtype=np.int32)
+
+    combined = combine_threshold_observer_chunk_states(
+        [missed, padded],
+        starts=[0, 2],
+        lengths=[2, 1],
+        nt=3,
+        retention=plan.retention,
+    )
+    result = finalize_threshold_observer_state(plan, combined, nt=3, dt_ms=0.1)[
+        "latency"
+    ]
+
+    assert np.isnan(result.values[0])
+    assert result.statuses == (axs.analysis.AnalysisStatus.UNDETERMINED,)
+    assert result.messages == ("threshold was not crossed at the requested target.",)
+
+
 def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypatch):
     recording_lowering._THRESHOLD_OBSERVER_PLAN_CACHE.clear()
     recording_lowering._THRESHOLD_OBSERVER_PLAN_IDENTITY_CACHE.clear()

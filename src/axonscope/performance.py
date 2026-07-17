@@ -423,7 +423,7 @@ def _estimate_dispatch_group(
         observers,
         recording_mode=kernel_options.recording.mode,
     )
-    observer_plan = observer_output in {"activation", "vm_raster"} and can_batch
+    observer_plan = observer_output in {"activation", "first_crossing", "vm_raster"} and can_batch
     simulations = tuple(item.simulation for item in group.items)
     stimulation_rows = _stimulation_rows(simulations)
     has_extracellular = any(stimulation_rows)
@@ -738,12 +738,17 @@ def _aggregate_estimate_items(
             for group, estimate in zip(groups, estimate_groups, strict=True)
             if estimate.observer_output == output
         )
-        for output in ("activation", "vm_raster")
+        for output in ("activation", "first_crossing", "vm_raster")
     }
     for output, output_bytes in observer_bytes_by_output.items():
         if not output_bytes:
             continue
-        dtype = np.dtype(bool) if output == "activation" else np.dtype("uint32")
+        if output == "activation":
+            dtype = np.dtype(bool)
+        elif output == "first_crossing":
+            dtype = np.dtype("int32")
+        else:
+            dtype = np.dtype("uint32")
         items.append(
             _item_with_bytes(
                 f"outputs.{output}",
@@ -755,7 +760,11 @@ def _aggregate_estimate_items(
                 note=(
                     "solver-side activation flags"
                     if output == "activation"
-                    else "packed solver-side VmRaster observations"
+                    else (
+                        "solver-side first-crossing steps"
+                        if output == "first_crossing"
+                        else "packed solver-side VmRaster observations"
+                    )
                 ),
             )
         )
@@ -831,6 +840,8 @@ def _threshold_observer_nbytes(
         return 0
     if observer_output == "activation":
         return int(group.size) * len(definitions) * np.dtype(bool).itemsize
+    if observer_output == "first_crossing":
+        return int(group.size) * len(definitions) * np.dtype(np.int32).itemsize
     max_probe_count = 0
     for item in group.items:
         positions_um = np.asarray(item.solver_axon.x_um, dtype=float)

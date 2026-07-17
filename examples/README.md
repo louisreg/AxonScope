@@ -77,7 +77,9 @@ still runnable examples, but they explain the moving parts more explicitly.
   observer-only simulations with `Recording.none()`.
 - `recording_analysis/06_compact_activation.py`: retain one activation boolean
   per axon, apply solver-side blanking, and compare with recorded Vm analysis.
-- `recording_analysis/07_dense_observable_recording.py`: record dense gates,
+- `recording_analysis/07_compact_latency.py`: retain one first-crossing step per
+  axon and return latency without storing a Vm time raster.
+- `recording_analysis/08_dense_observable_recording.py`: record dense gates,
   currents, and conductances through batch-native result manifests.
 
 ### Protocols

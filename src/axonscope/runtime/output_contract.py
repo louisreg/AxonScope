@@ -13,7 +13,7 @@ from axonscope.analysis.definitions import (
 )
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
-OutputSink = Literal["vm", "none", "activation", "vm_raster"]
+OutputSink = Literal["vm", "none", "activation", "first_crossing", "vm_raster"]
 
 
 @dataclass(frozen=True)
@@ -70,6 +70,8 @@ def observer_output_label(
         return "none"
     if recording_mode == "none" and observers_are_compact_activation_compatible(observers):
         return "activation"
+    if recording_mode == "none" and observers_are_compact_latency_compatible(observers):
+        return "first_crossing"
     if recording_mode == "none" and observers_are_vm_raster_compatible(observers):
         return "vm_raster"
     if recording_mode == "none":
@@ -91,6 +93,14 @@ def observers_are_compact_activation_compatible(
     """Return whether observers need only one retained activation flag per row."""
 
     return bool(observers) and all(isinstance(observer, Activation) for observer in observers)
+
+
+def observers_are_compact_latency_compatible(
+    observers: tuple[Any, ...] | None,
+) -> bool:
+    """Return whether observers need only one first-crossing step per row."""
+
+    return bool(observers) and all(isinstance(observer, Latency) for observer in observers)
 
 
 def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
@@ -143,6 +153,8 @@ __all__ = [
     "OutputSink",
     "observer_definition_signature",
     "observer_output_label",
+    "observers_are_compact_activation_compatible",
+    "observers_are_compact_latency_compatible",
     "observers_are_vm_raster_compatible",
     "vm_raster_definitions",
 ]

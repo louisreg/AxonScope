@@ -274,6 +274,29 @@ cold and warm execution:
 | double | 1024 | 1.708 s | 10.731 s | 12.770 s | 2.666 s | 95.8% |
 | double | 4096 | 6.912 s | 18.188 s | 25.791 s | 9.971 s | 95.8% |
 
+The P15 compact-activation checkpoint reruns this exact matrix at commit
+`375fe59`, with a benchmark guard requiring `output_sink=activation` and
+`observer=activation` on every dispatch. The P100 artifacts end in
+`axs-p15-compact-{single,double}-{196,1024,4096}-p100-375fe59`:
+
+| cable | Naxon | cold run_pool | warm run_pool | P14E warm | warm speedup | warm dispatch_jax | warm wait |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| single | 196 | 3.151 s | 0.512 s | 0.988 s | 1.93x | 0.429 s | 0.023 s |
+| single | 1024 | 5.920 s | 2.346 s | 4.774 s | 2.04x | 2.057 s | 0.123 s |
+| single | 4096 | 15.900 s | 9.066 s | 18.706 s | 2.06x | 7.863 s | 0.470 s |
+| double | 196 | 11.957 s | 0.523 s | 0.649 s | 1.24x | 0.391 s | 0.050 s |
+| double | 1024 | 12.448 s | 1.875 s | 2.666 s | 1.42x | 1.494 s | 0.180 s |
+| double | 4096 | 16.391 s | 6.576 s | 9.971 s | 1.52x | 5.468 s | 0.487 s |
+
+All cold/warm rows match their same-backend activation reference exactly.
+The compact state is `[5 * Naxon, 1]` boolean for this five-amplitude matrix:
+`0.96 KiB`, `5 KiB`, and `20 KiB` at the three population sizes. At the
+21-amplitude target workload, 4096 axons retain about `84 KiB`, rather than
+the roughly `6.02 GiB` full single-cable threshold raster. Warm improvements
+are stable and scale with population size. Small double-cable cold compilation
+remains noisy (`0.69x/0.86x` at 196/1024), while double 4096 improves `1.11x`;
+do not interpret the small cold rows as steady-state regressions.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is

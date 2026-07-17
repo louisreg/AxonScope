@@ -538,6 +538,7 @@ class Latency:
             supported_myelination=_ANY_MYELINATION,
             supported_formulations=_ANY_FORMULATION,
             required_capabilities=("membrane_voltage_trace",),
+            online_supported=True,
             algorithm_version=self.algorithm_version,
             recording_hint=_VM_RECORDING_HINT,
         )

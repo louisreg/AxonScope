@@ -1,8 +1,9 @@
 """Solver-side threshold observers.
 
-One probe-and-threshold lowering supports bounded activation flags and packed
-VmRaster retention. Higher-level latency, velocity, and propagation analyses
-remain result-side concerns until they receive explicit bounded contracts.
+One probe-and-threshold lowering supports bounded activation flags, first
+crossing steps, and packed VmRaster retention. Higher-level velocity and
+propagation analyses remain result-side concerns until they receive explicit
+bounded contracts.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from axonscope.utils import units
 
 
 ThresholdObserverState = Any
-ObserverRetention = Literal["activation", "vm_raster"]
+ObserverRetention = Literal["activation", "first_crossing", "vm_raster"]
 
 
 @dataclass(frozen=True)
@@ -239,9 +240,12 @@ def build_threshold_observer_plan(
 
     thresholds_array = np.asarray(thresholds, dtype=float)
     blanking_array = np.asarray(blanking_values, dtype=float)
-    retention: ObserverRetention = (
-        "activation" if all(isinstance(value, Activation) for value in raster_defs) else "vm_raster"
-    )
+    if all(isinstance(value, Activation) for value in raster_defs):
+        retention: ObserverRetention = "activation"
+    elif all(isinstance(value, Latency) for value in raster_defs):
+        retention = "first_crossing"
+    else:
+        retention = "vm_raster"
     return ThresholdObserverPlan(
         definitions=raster_defs,
         names=tuple(names),
@@ -309,6 +313,11 @@ def init_threshold_observer_state(
     if plan.retention == "activation":
         shape = (int(batch_size), int(plan.definition_count))
         dtype = jnp.bool_
+        fill_value = False
+    elif plan.retention == "first_crossing":
+        shape = (int(batch_size), int(plan.definition_count))
+        dtype = jnp.int32
+        fill_value = -1
     else:
         word_count = (int(nt) + 31) // 32
         shape = (
@@ -318,6 +327,7 @@ def init_threshold_observer_state(
             int(word_count),
         )
         dtype = jnp.uint32
+        fill_value = 0
     key = (
         "threshold_observer_state_zeros_v2",
         plan.retention,
@@ -327,7 +337,7 @@ def init_threshold_observer_state(
     cached = get_batched_static_array(key)
     if cached is not None:
         return cached
-    out = jnp.zeros(shape, dtype=dtype)
+    out = jnp.full(shape, fill_value, dtype=dtype)
     store_batched_static_array(key, out)
     return out
 
@@ -340,7 +350,7 @@ def trim_threshold_observer_state(
 ) -> ThresholdObserverState:
     """Trim packed observer storage and clear bits beyond the real duration."""
 
-    if retention == "activation":
+    if retention in {"activation", "first_crossing"}:
         return state
     word_count = (int(nt) + 31) // 32
     trimmed = jnp.asarray(state)[..., :word_count]
@@ -387,6 +397,19 @@ def combine_threshold_observer_chunk_states(
 
     if retention == "activation":
         return jnp.any(jnp.stack(tuple(jnp.asarray(state) for state in states)), axis=0)
+    if retention == "first_crossing":
+        candidates = []
+        local_lengths = lengths if lengths is not None else (None,) * len(states)
+        for state, start, length in zip(states, starts, local_lengths, strict=True):
+            local = jnp.asarray(state, dtype=jnp.int32)
+            valid = local >= 0
+            if length is not None:
+                valid = valid & (local < int(length))
+            candidates.append(jnp.where(valid, local + int(start), -1))
+        stacked = jnp.stack(tuple(candidates), axis=0)
+        sentinel = jnp.asarray(int(nt), dtype=jnp.int32)
+        earliest = jnp.min(jnp.where(stacked >= 0, stacked, sentinel), axis=0)
+        return jnp.where(earliest < sentinel, earliest, -1)
 
     if lengths is None:
         chunk_lengths = [None] * len(states)
@@ -502,10 +525,18 @@ def update_threshold_observer_state_batch_from_tables(
 
     selected = jnp.take_along_axis(vm[:, None, :], indices, axis=2)
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[None, :, None])
-    if retention == "activation":
+    if retention in {"activation", "first_crossing"}:
         time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
-        after_blanking = time_ms >= jnp.asarray(blanking_ms)[None, :, None]
-        return jnp.asarray(state, dtype=bool) | jnp.any(hit & after_blanking, axis=-1)
+        after_blanking = _is_after_blanking(
+            time_ms,
+            jnp.asarray(blanking_ms)[None, :, None],
+        )
+        crossed = jnp.any(hit & after_blanking, axis=-1)
+        if retention == "activation":
+            return jnp.asarray(state, dtype=bool) | crossed
+        current = jnp.asarray(state, dtype=jnp.int32)
+        step = jnp.asarray(step_index, dtype=jnp.int32)
+        return jnp.where((current < 0) & crossed, step, current)
     return _write_raster_bits(state, hit, step_index)
 
 
@@ -533,11 +564,27 @@ def update_threshold_observer_state_scalar_from_tables(
 
     selected = jnp.take(vm, indices, axis=0)
     hit = mask & (selected >= jnp.asarray(thresholds_mV)[:, None])
-    if retention == "activation":
+    if retention in {"activation", "first_crossing"}:
         time_ms = (jnp.asarray(step_index) + 1) * jnp.asarray(dt_ms)
-        after_blanking = time_ms >= jnp.asarray(blanking_ms)[:, None]
-        return jnp.asarray(state, dtype=bool) | jnp.any(hit & after_blanking, axis=-1)
+        after_blanking = _is_after_blanking(time_ms, jnp.asarray(blanking_ms)[:, None])
+        crossed = jnp.any(hit & after_blanking, axis=-1)
+        if retention == "activation":
+            return jnp.asarray(state, dtype=bool) | crossed
+        current = jnp.asarray(state, dtype=jnp.int32)
+        step = jnp.asarray(step_index, dtype=jnp.int32)
+        return jnp.where((current < 0) & crossed, step, current)
     return _write_raster_bits(state, hit, step_index)
+
+
+def _is_after_blanking(time_ms: Any, blanking_ms: Any) -> Any:
+    time = jnp.asarray(time_ms)
+    blanking = jnp.asarray(blanking_ms, dtype=time.dtype)
+    tolerance = (
+        jnp.asarray(4.0, dtype=time.dtype)
+        * jnp.asarray(jnp.finfo(time.dtype).eps, dtype=time.dtype)
+        * jnp.maximum(jnp.asarray(1.0, dtype=time.dtype), jnp.abs(blanking))
+    )
+    return time >= blanking - tolerance
 
 
 def _write_raster_bits(words: Any, hit: Any, step_index: Any) -> Any:
@@ -589,6 +636,17 @@ def finalize_threshold_observer_state(
             for index, definition in enumerate(plan.definitions)
         }
 
+    if plan.retention == "first_crossing":
+        steps = np.asarray(state, dtype=np.int32)
+        return {
+            definition.name: _finalize_first_crossing_result(
+                definition,
+                steps[:, index],
+                dt_ms=float(dt_ms),
+            )
+            for index, definition in enumerate(plan.definitions)
+        }
+
     span_name = (
         "kernel.finalize_observer.to_host"
         if bool(materialize_words)
@@ -627,6 +685,32 @@ def finalize_threshold_observer_state(
             _any_active_impl=None if materialize_words else vm_raster_any_active_jax,
         )
     }
+
+
+def _finalize_first_crossing_result(
+    definition: Any,
+    steps: np.ndarray,
+    *,
+    dt_ms: float,
+) -> AnalysisResult:
+    crossed = steps >= 0
+    values = np.where(crossed, (steps.astype(float) + 1.0) * dt_ms, np.nan)
+    statuses = tuple(
+        AnalysisStatus.VALID if value else AnalysisStatus.UNDETERMINED
+        for value in crossed
+    )
+    messages = tuple(
+        "" if value else "threshold was not crossed at the requested target."
+        for value in crossed
+    )
+    return AnalysisResult(
+        name=definition.name,
+        values=values,
+        statuses=statuses,
+        messages=messages,
+        unit="millisecond",
+        definition=definition,
+    )
 
 
 __all__ = [
