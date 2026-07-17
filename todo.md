@@ -749,6 +749,18 @@ the spans is not a gain.
   tiled-Thomas custom call so it consumes compact physical/runtime inputs;
   then test temporal blocking `K={2,4,8,16}` by total runtime, registers,
   memory, and compile cost.
+  - [x] Keep the compact double-cable scan state node-first when the membrane
+    backend advertises model-agnostic node-first batch support. On P100 at
+    N=1024, median warm `simulation.run_pool` falls from about `1.870 s` to
+    `1.508 s` (`-19.4%`) with exact activation counts. At N=4096 it falls from
+    `6.703 s` to `5.077 s` (`-24.3%`), while cold run-pool time falls from
+    `18.101 s` to `14.678 s` (`-18.9%`). Warm Perfetto device
+    time falls from about `1.76 s` to `1.39 s` (`-21%`): the five measured
+    per-step layout kernels costing about `639 ms` disappear, while the
+    remaining assembly fusion grows from `252` to `430 ms`. Artifacts end in
+    `axs-p16-node-first-double-1024-p100-ac542e4`,
+    `axs-p16-nftrace-d1024-p100-ac542e4`, and
+    `axs-p16-nf-d4096-p100-ac542e4`.
   - Keep one coherent state layout across membrane evaluation and the
     node-first Triton solve. A direct `dynamic_update_slice` gate-carry
     experiment was rejected: it changed optimized gate layout to

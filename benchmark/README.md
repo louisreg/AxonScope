@@ -351,6 +351,24 @@ runtime regressed from about `1.87 s` to `2.62 s`; commit `7112d22` removes the
 candidate. Future layout work must measure the whole solver interval and keep
 one coherent state layout across membrane evaluation and the Triton solve.
 
+The retained node-first double-cable scan at commit `ac542e4` instead keeps
+`Vi`, `Ve`, and gate state node-first whenever the compiled membrane backend
+advertises model-agnostic node-first batch support. At N=1024, median warm
+`simulation.run_pool` improves from about `1.870 s` to `1.508 s` (`-19.4%`)
+and total sweep wall from `2.065 s` to `1.682 s` (`-18.5%`), with the same
+`0 1024 1024 1024 1024` activation counts. At N=4096, median warm run-pool
+time improves from `6.703 s` to `5.077 s` (`-24.3%`) and cold run-pool time
+from `18.101 s` to `14.678 s` (`-18.9%`), with exact
+`0 4096 4096 4096 4096` counts. The matching N=1024 warm Perfetto stream falls
+from about `1.76 s` to `1.39 s` (`-21%`). Five per-step layout kernels totaling
+about `639 ms` disappear. The remaining device work is approximately `430 ms`
+system/physical-term assembly, `340 ms` tiled Thomas, `330 ms` membrane/gate
+reconstruction, `161 ms` observer reductions, and `122 ms` device copies.
+Artifacts end in
+`axs-p16-node-first-double-1024-p100-ac542e4` and
+`axs-p16-nftrace-d1024-p100-ac542e4`, with the large timing run ending in
+`axs-p16-nf-d4096-p100-ac542e4`.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is
