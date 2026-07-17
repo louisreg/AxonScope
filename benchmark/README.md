@@ -334,6 +334,23 @@ python benchmark/analysis/hlo_fusion_summary.py \
 The capture compiles and executes explicitly, so its wall timings are compiler
 diagnostics rather than clean baseline measurements.
 
+Warm P100 Perfetto traces at N=1024 decompose the actual 3000-step device
+program. The single-cable stream spends about 51% in the two cuSPARSE GTSV
+kernels, 18% updating gates, 14% assembling the cable system, 11% evaluating
+membrane terms, and the remainder in the compact observer and scan
+bookkeeping. The double-cable stream spends only about 19% in the tiled-Thomas
+Triton kernel; gate reconstruction, batch/node layout transforms, system
+assembly, and device copies dominate the rest. Artifacts end in
+`axs-p16-warmtrace-{single,double}-1024-p100-7648bbc`.
+
+A rejected P16 experiment replaced the stacked gated/leak gate concatenation
+with `dynamic_update_slice`. Although numerically exact, optimized HLO changed
+the gate carry from the favorable batch-first layout to `{gate,batch,node}` and
+introduced a full transpose in every step. Double-cable N=1024 median warm
+runtime regressed from about `1.87 s` to `2.62 s`; commit `7112d22` removes the
+candidate. Future layout work must measure the whole solver interval and keep
+one coherent state layout across membrane evaluation and the Triton solve.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is

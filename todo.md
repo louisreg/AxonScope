@@ -720,6 +720,14 @@ the spans is not a gain.
 - [ ] Decompose the jitted program with HLO and Nsight. Measure membrane terms,
   factorized stimulation, system assembly, tridiagonal/Triton solve, compact
   observer update, copies/materializations, and kernel/custom-call count.
+  - Optimized-HLO and warm Perfetto capture now cover both production routes.
+    At N=1024, single cable is about 51% cuSPARSE and otherwise mostly gate,
+    membrane, and system assembly. Double cable is only about 19% Triton and is
+    dominated by gate reconstruction, batch/node layout changes, assembly, and
+    copies. Artifacts end in
+    `axs-p16-hlo-{single,double}-4096-p100-7648bbc` and
+    `axs-p16-warmtrace-{single,double}-1024-p100-7648bbc`. Nsight and fresh
+    compact-state memory evidence remain open.
 - [ ] Re-evaluate time chunking after compact observers. The current realistic
   VmRaster run launches six dependent JAX calls of 512 steps per cable group and
   amplitude. A local 58-axon CPU double-cable A/B retained under
@@ -741,6 +749,11 @@ the spans is not a gain.
   tiled-Thomas custom call so it consumes compact physical/runtime inputs;
   then test temporal blocking `K={2,4,8,16}` by total runtime, registers,
   memory, and compile cost.
+  - Keep one coherent state layout across membrane evaluation and the
+    node-first Triton solve. A direct `dynamic_update_slice` gate-carry
+    experiment was rejected: it changed optimized gate layout to
+    `{gate,batch,node}`, added a full per-step transpose, and regressed N=1024
+    median warm runtime from about `1.87 s` to `2.62 s` despite exact outputs.
 - [ ] Revisit Triton input/output aliases only with XLA buffer-assignment
   evidence. The retained warm medians are `437.5/82.7/28.7 ms` for
   `run_pool/dispatch/wait` without aliases and `565.5/113.5/9.75 ms` with
