@@ -189,6 +189,7 @@ def solve_double_cable_batch_step(
     nx: int,
     double_cable_block_solver: str,
     tiled_thomas_block_b: int,
+    return_node_first: bool = False,
 ) -> tuple[Array, Array]:
     """Solve one batched double-cable implicit step."""
 
@@ -241,6 +242,7 @@ def solve_double_cable_batch_step(
         return solve_double_cable_linear_system_jax_triton_loop_xb(
             system_xb,
             block_b=tiled_thomas_block_b,
+            return_node_first=return_node_first,
         )
 
     raise ValueError(

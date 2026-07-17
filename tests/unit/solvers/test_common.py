@@ -12,12 +12,14 @@ from axonscope.runtime.jax.cable_geometry import (
     diffusion_operator_coeffs,
 )
 from axonscope.runtime.jax.kernels.double_cable_linear import (
+    DoubleCableLinearSystemXB,
     assemble_double_cable_linear_system,
     assemble_double_cable_linear_system_xb,
     double_cable_space_from_xb,
     double_cable_space_to_xb,
     prepare_double_cable_linear_system_static_terms,
     prepare_double_cable_linear_system_static_terms_xb,
+    solve_double_cable_linear_system_jax_triton_loop_xb,
 )
 
 
@@ -316,6 +318,52 @@ def test_double_cable_linear_system_xb_assembly_matches_batch_first():
                 np.asarray(batch_first),
                 rtol=1e-6,
             )
+
+
+def test_double_cable_triton_boundary_can_retain_node_first(monkeypatch):
+    from axonscope.runtime.jax.kernels import triton_double_cable
+
+    nx = 4
+    batch_size = 3
+    space = jnp.arange(nx * batch_size, dtype=jnp.float32).reshape(
+        (nx, batch_size)
+    )
+    edges = jnp.ones((nx - 1, batch_size), dtype=jnp.float32)
+    system = DoubleCableLinearSystemXB(
+        a00=space + 10.0,
+        a01=space,
+        a10=space,
+        a11=space + 11.0,
+        off0=edges,
+        off1=edges,
+        rhs0=space + 1.0,
+        rhs1=space + 2.0,
+    )
+
+    monkeypatch.setattr(
+        triton_double_cable,
+        "solve_block_tridiagonal_2x2_jax_triton_tiled_thomas_loop_xb",
+        lambda *values, block_b: (values[-2], values[-1]),
+    )
+
+    vi_xb, ve_xb = solve_double_cable_linear_system_jax_triton_loop_xb(
+        system,
+        return_node_first=True,
+    )
+    vi_batch, ve_batch = solve_double_cable_linear_system_jax_triton_loop_xb(
+        system,
+    )
+
+    np.testing.assert_array_equal(np.asarray(vi_xb), np.asarray(system.rhs0))
+    np.testing.assert_array_equal(np.asarray(ve_xb), np.asarray(system.rhs1))
+    np.testing.assert_array_equal(
+        np.asarray(vi_batch),
+        np.asarray(system.rhs0).T,
+    )
+    np.testing.assert_array_equal(
+        np.asarray(ve_batch),
+        np.asarray(system.rhs1).T,
+    )
 
 
 def test_scalar_block_tridiagonal_solver_handles_single_row_under_jit():

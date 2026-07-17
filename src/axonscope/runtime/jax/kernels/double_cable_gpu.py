@@ -460,9 +460,18 @@ def _run_double_cable_batch_observer_integrated_scan(
         batch_size=batch_size,
         nx=nx,
     )
-    area_batch = double_cable_space_from_xb(linear_static_xb.area)
-    background_abs = double_cable_space_from_xb(linear_static_xb.background_abs)
-    zero_abs = double_cable_space_from_xb(linear_static_xb.zero_abs)
+    use_node_first_state = bool(
+        stateless_vm_only
+        and getattr(backend, "supports_node_first_batch", False)
+    )
+    if use_node_first_state:
+        area_batch = linear_static_xb.area
+        background_abs = linear_static_xb.background_abs
+        zero_abs = linear_static_xb.zero_abs
+    else:
+        area_batch = double_cable_space_from_xb(linear_static_xb.area)
+        background_abs = double_cable_space_from_xb(linear_static_xb.background_abs)
+        zero_abs = double_cable_space_from_xb(linear_static_xb.zero_abs)
     cx_plus_gx_batch = double_cable_space_from_xb(linear_static_xb.cx_plus_gx)
     cx_over_dt_batch = double_cable_space_from_xb(linear_static_xb.cx_over_dt)
 
@@ -509,7 +518,14 @@ def _run_double_cable_batch_observer_integrated_scan(
     if intracellular_current_density_mid is None:
         intracellular_current_abs_mid = None
     else:
-        intracellular_current_abs_mid = intracellular_current_density_mid * area_batch[:, None, :]
+        intracellular_area = (
+            jnp.swapaxes(area_batch, 0, 1)
+            if use_node_first_state
+            else area_batch
+        )
+        intracellular_current_abs_mid = (
+            intracellular_current_density_mid * intracellular_area[:, None, :]
+        )
 
     batch_gate_update = partial(
         solver_core.batch_gate_update,
@@ -548,6 +564,7 @@ def _run_double_cable_batch_observer_integrated_scan(
         nx=nx,
         double_cable_block_solver=double_cable_block_solver,
         tiled_thomas_block_b=tiled_thomas_block_b,
+        return_node_first=use_node_first_state,
     )
 
     def step(carry, step_inputs):
@@ -564,12 +581,27 @@ def _run_double_cable_batch_observer_integrated_scan(
                 previous_current_A=previous_current_A,
                 footprint_batch=footprint_batch,
             )
+            if use_node_first_state:
+                extracellular_drive_abs = jnp.swapaxes(
+                    extracellular_drive_abs,
+                    0,
+                    1,
+                )
         else:
             if intracellular_current_abs_mid is None:
                 extracellular_drive_abs, local_step = step_inputs
                 Iinj_abs = jnp.zeros_like(area_batch)
             else:
                 Iinj_abs, extracellular_drive_abs, local_step = step_inputs
+        if use_node_first_state:
+            if intracellular_current_abs_mid is not None:
+                Iinj_abs = jnp.swapaxes(Iinj_abs, 0, 1)
+            if not use_factorized_vext:
+                extracellular_drive_abs = jnp.swapaxes(
+                    extracellular_drive_abs,
+                    0,
+                    1,
+                )
         Vi, Ve, gates, observer_state, *extra = carry
         extra = tuple(extra)
         Vm = Vi - Ve
@@ -608,7 +640,11 @@ def _run_double_cable_batch_observer_integrated_scan(
 
         observer_state = update_threshold_observer_state_batch_from_tables(
             observer_state,
-            vm_mV=Vm_new,
+            vm_mV=(
+                jnp.swapaxes(Vm_new, 0, 1)
+                if use_node_first_state
+                else Vm_new
+            ),
             step_index=time_start_index + local_step,
             probe_indices=raster_probe_indices,
             probe_mask=raster_probe_mask,
@@ -680,13 +716,31 @@ def _run_double_cable_batch_observer_integrated_scan(
         )
     final_carry, _ = jax.lax.scan(
         step,
-        (Vi0_mV, Ve0_mV, gates0, observer_state0, *state0),
+        (
+            jnp.swapaxes(Vi0_mV, 0, 1) if use_node_first_state else Vi0_mV,
+            jnp.swapaxes(Ve0_mV, 0, 1) if use_node_first_state else Ve0_mV,
+            jnp.swapaxes(gates0, 0, 1) if use_node_first_state else gates0,
+            observer_state0,
+            *state0,
+        ),
         scan_inputs,
     )
     return (
-        final_carry[0],
-        final_carry[1],
-        final_carry[2],
+        (
+            jnp.swapaxes(final_carry[0], 0, 1)
+            if use_node_first_state
+            else final_carry[0]
+        ),
+        (
+            jnp.swapaxes(final_carry[1], 0, 1)
+            if use_node_first_state
+            else final_carry[1]
+        ),
+        (
+            jnp.swapaxes(final_carry[2], 0, 1)
+            if use_node_first_state
+            else final_carry[2]
+        ),
         tuple(final_carry[4:]),
         final_carry[3],
     )

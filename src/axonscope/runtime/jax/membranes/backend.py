@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import fields, is_dataclass
-from typing import Any, NamedTuple, Protocol
+from typing import Any, ClassVar, NamedTuple, Protocol
 
 import jax
 import jax.numpy as jnp
@@ -475,6 +475,8 @@ class GatedLeakStackMembraneBackend:
     dtype: jnp.dtype
     gated_gate_count: int
     gated_channel_count: int
+
+    supports_node_first_batch: ClassVar[bool] = True
 
     @property
     def Nx(self) -> int:

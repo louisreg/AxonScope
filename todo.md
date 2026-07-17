@@ -758,9 +758,10 @@ the spans is not a gain.
   evidence. The retained warm medians are `437.5/82.7/28.7 ms` for
   `run_pool/dispatch/wait` without aliases and `565.5/113.5/9.75 ms` with
   aliases. Retain an alias only if total solver and run-pool time improve.
-- [ ] Treat generated membrane code as a conditional solver optimization. Use
-  it only if profiles show material warm cost or temporal fusion requires it;
-  never hard-code MRG or another built-in model into a solver.
+- [ ] Keep P16 membrane work backend-contract based. Profiles may justify a
+  future fused membrane kernel, but generating model-specific JAX/Triton
+  operations from the compiled membrane contract belongs to P17; never
+  hard-code MRG or another built-in model into a solver.
 - [ ] Evaluate JAX's persistent compilation cache for non-Triton routes under
   `.axonscope_cache/runtime/jax/xla`. Benchmark true cross-process miss/hit,
   trace/lower/compile/first execution, size/LRU policy, clean/disable behavior,
@@ -796,6 +797,11 @@ runtime reconstruction path.
   `JaxMembraneProgram` from Model IR or evaluating Model IR expressions.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
+- [ ] If P16 leaves material membrane/gate cost after layout and generic
+  assembly optimization, let the generated contract optionally emit
+  model-agnostic Triton membrane operations that can be fused with temporal
+  execution. Keep equations and parameters generated from the membrane source,
+  not hand-written in a cable solver.
 - [ ] Validate built-ins, stateful models, composition, parameter overrides,
   recording labels, diagnostics, numerical equivalence, cache invalidation,
   generated-code inspection, and cold/warm performance.

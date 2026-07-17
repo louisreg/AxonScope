@@ -834,6 +834,7 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
 
     assert fast_stack is not None
     backend = fast_stack.backend
+    assert backend.supports_node_first_batch
     gates = jnp.asarray(fast_stack.gates0_rows)
     voltage = jnp.asarray(
         np.linspace(-82.0, -68.0, gates.shape[0] * gates.shape[1]).reshape(

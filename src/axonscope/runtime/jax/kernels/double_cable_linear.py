@@ -304,6 +304,7 @@ def solve_double_cable_linear_system_jax_triton_loop_xb(
     system: DoubleCableLinearSystemXB,
     *,
     block_b: int = 32,
+    return_node_first: bool = False,
 ) -> tuple[Array, Array]:
     """Solve a node-first double-cable system with the private jax-triton route."""
 
@@ -315,4 +316,6 @@ def solve_double_cable_linear_system_jax_triton_loop_xb(
         *system,
         block_b=block_b,
     )
+    if return_node_first:
+        return Vi_xb, Ve_xb
     return double_cable_space_from_xb(Vi_xb), double_cable_space_from_xb(Ve_xb)
