@@ -656,12 +656,37 @@ class PeakVoltage:
 
 
 @dataclass(frozen=True)
+class VmRaster:
+    """Retain threshold occupancy in event-preserving temporal windows.
+
+    ``every_n_steps`` controls the output time resolution. Each retained bit is
+    the logical OR of all threshold hits in that window, so crossings are not
+    silently lost; their time is quantized to the window duration.
+    """
+
+    threshold: Any = -20.0
+    target: PositionSelector = ALL
+    every_n_steps: int = 1
+    signal: Signal[Any] = MEMBRANE_VOLTAGE
+    name: str = "vm_raster"
+
+    def __post_init__(self) -> None:
+        if int(self.every_n_steps) < 1:
+            raise ValueError("every_n_steps must be >= 1.")
+        if not isinstance(self.target, PositionSelector):
+            raise TypeError("target must be an axonscope PositionSelector.")
+
+
+@dataclass(frozen=True)
 class SpikeCountEvent:
     """Constant-memory summary of detected threshold-crossing spikes."""
 
     count: int
     first_time_ms: float | None = None
     last_time_ms: float | None = None
+    probe_counts: tuple[int, ...] = ()
+    spike_times_ms: tuple[tuple[float, ...], ...] = ()
+    overflow: tuple[bool, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -673,9 +698,26 @@ class SpikeCount:
     blanking: Any = 0.0
     refractory: Any = 0.5
     target: PositionSelector = ALL
+    max_spikes: int | None = None
+    allow_all_compartments: bool = False
     signal: Signal[Any] = MEMBRANE_VOLTAGE
     name: str = "spike_count"
     algorithm_version: str = "spike_count_crossing_v2"
+
+    def __post_init__(self) -> None:
+        if self.max_spikes is not None and int(self.max_spikes) < 1:
+            raise ValueError("max_spikes must be >= 1 when provided.")
+        if not isinstance(self.target, PositionSelector):
+            raise TypeError("target must be an axonscope PositionSelector.")
+        if (
+            self.max_spikes is not None
+            and self.target is ALL
+            and not self.allow_all_compartments
+        ):
+            raise ValueError(
+                "bounded spike timestamps at ALL compartments require "
+                "allow_all_compartments=True; prefer a sparse PositionSelector."
+            )
 
     @property
     def requirements(self) -> AnalysisRequirements:
@@ -710,6 +752,7 @@ class SpikeCount:
             reset_threshold_mV=units.to_mV(self.reset_threshold),
             blanking_ms=units.to_ms(self.blanking),
             refractory_ms=units.to_ms(self.refractory),
+            max_spikes=self.max_spikes,
         )
         return event.count, AnalysisStatus.VALID, "", event
 
@@ -722,6 +765,7 @@ def _spike_count_event_from_arrays(
     reset_threshold_mV: float,
     blanking_ms: float,
     refractory_ms: float,
+    max_spikes: int | None,
 ) -> SpikeCountEvent:
     if reset_threshold_mV >= threshold_mV:
         raise ValueError("reset_threshold must be below threshold.")
@@ -735,6 +779,9 @@ def _spike_count_event_from_arrays(
         raise ValueError("SpikeCount target must select at least one position.")
     armed = np.ones(selected.shape[1], dtype=bool)
     last_time = np.full(selected.shape[1], -np.inf, dtype=float)
+    bounded_times: list[list[float]] = [[] for _ in range(selected.shape[1])]
+    probe_counts = np.zeros(selected.shape[1], dtype=np.int64)
+    overflow = np.zeros(selected.shape[1], dtype=bool)
     count = 0
     first_time_ms: float | None = None
     last_event_time_ms: float | None = None
@@ -752,12 +799,30 @@ def _spike_count_event_from_arrays(
                 first_time_ms = event_time
             last_event_time_ms = event_time
             last_time[fire] = event_time
+            probe_counts[fire] += 1
+            if max_spikes is not None:
+                for probe_index in np.flatnonzero(fire):
+                    if len(bounded_times[probe_index]) < int(max_spikes):
+                        bounded_times[probe_index].append(event_time)
+                    else:
+                        overflow[probe_index] = True
         armed = (armed & ~crossing) | (sample <= reset_threshold_mV)
 
     return SpikeCountEvent(
         count=count,
         first_time_ms=first_time_ms,
         last_time_ms=last_event_time_ms,
+        probe_counts=tuple(int(value) for value in probe_counts),
+        spike_times_ms=(
+            tuple(tuple(values) for values in bounded_times)
+            if max_spikes is not None
+            else ()
+        ),
+        overflow=(
+            tuple(bool(value) for value in overflow)
+            if max_spikes is not None
+            else ()
+        ),
     )
 
 
@@ -851,4 +916,5 @@ __all__ = [
     "PeakVoltage",
     "SpikeCount",
     "SpikeCountEvent",
+    "VmRaster",
 ]

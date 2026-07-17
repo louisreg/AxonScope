@@ -25,6 +25,7 @@ from axonscope.analysis.definitions import (
     Latency,
     SpikeCount,
     SpikeCountEvent,
+    VmRaster,
 )
 from axonscope.positions import PositionSelector
 from axonscope.results.vm_raster import VM_RASTER_OBSERVATION_KEY, VmRasterResult
@@ -41,6 +42,7 @@ ObserverRetention = Literal[
     "activation",
     "first_crossing",
     "spike_summary",
+    "spike_events",
     "vm_raster",
 ]
 
@@ -59,6 +61,8 @@ class ThresholdObserverPlan:
     blanking_ms: Any
     reset_thresholds_mV: Any
     refractory_ms: Any
+    temporal_stride: int
+    max_spikes: int | None
     probe_indices_host: np.ndarray
     probe_mask_host: np.ndarray
     original_indices_host: np.ndarray
@@ -114,7 +118,7 @@ def _require_vm_signal(signal: Any) -> None:
 def _is_vm_raster_definition(definition: Any) -> bool:
     return isinstance(
         definition,
-        (Activation, Latency, SpikeCount, ConductionBlock, ConductionVelocity),
+        (Activation, Latency, SpikeCount, VmRaster, ConductionBlock, ConductionVelocity),
     )
 
 
@@ -198,6 +202,8 @@ def build_threshold_observer_plan(
     blanking_values: list[float] = []
     reset_thresholds: list[float] = []
     refractory_values: list[float] = []
+    temporal_strides: list[int] = []
+    spike_capacities: list[int | None] = []
 
     for definition in raster_defs:
         if not _is_vm_raster_definition(definition):
@@ -216,6 +222,8 @@ def build_threshold_observer_plan(
             units.to_mV(getattr(definition, "reset_threshold", _threshold_mV(definition)))
         )
         refractory_values.append(units.to_ms(getattr(definition, "refractory", 0.0)))
+        temporal_strides.append(int(getattr(definition, "every_n_steps", 1)))
+        spike_capacities.append(getattr(definition, "max_spikes", None))
         selected_by_row.append(
             [
                 _select_raster_probe_columns(
@@ -260,12 +268,23 @@ def build_threshold_observer_plan(
     blanking_array = np.asarray(blanking_values, dtype=float)
     reset_thresholds_array = np.asarray(reset_thresholds, dtype=float)
     refractory_array = np.asarray(refractory_values, dtype=float)
+    temporal_stride = max(temporal_strides, default=1)
+    if any(value != temporal_stride for value in temporal_strides):
+        raise ValueError("VmRaster definitions in one plan must share every_n_steps.")
+    if temporal_stride != 1 and not all(isinstance(value, VmRaster) for value in raster_defs):
+        raise ValueError(
+            "downsampling is only supported by explicit VmRaster definitions; "
+            "exact analyses retain their dedicated compact state."
+        )
     if all(isinstance(value, Activation) for value in raster_defs):
         retention: ObserverRetention = "activation"
     elif all(isinstance(value, Latency) for value in raster_defs):
         retention = "first_crossing"
     elif all(isinstance(value, SpikeCount) for value in raster_defs):
-        retention = "spike_summary"
+        capacity = spike_capacities[0]
+        if any(value != capacity for value in spike_capacities):
+            raise ValueError("SpikeCount definitions in one plan must share max_spikes.")
+        retention = "spike_events" if capacity is not None else "spike_summary"
     else:
         retention = "vm_raster"
     return ThresholdObserverPlan(
@@ -279,6 +298,8 @@ def build_threshold_observer_plan(
         blanking_ms=jnp.asarray(blanking_array, dtype=dtype),
         reset_thresholds_mV=jnp.asarray(reset_thresholds_array, dtype=dtype),
         refractory_ms=jnp.asarray(refractory_array, dtype=dtype),
+        temporal_stride=int(temporal_stride),
+        max_spikes=(None if retention != "spike_events" else int(spike_capacities[0])),
         probe_indices_host=_readonly_np_array(index_table, dtype=np.int32),
         probe_mask_host=_readonly_np_array(mask_table, dtype=bool),
         original_indices_host=_readonly_np_array(original_table, dtype=np.int32),
@@ -342,17 +363,21 @@ def init_threshold_observer_state(
         shape = (int(batch_size), int(plan.definition_count))
         dtype = jnp.int32
         fill_value = -1
-    elif plan.retention == "spike_summary":
+    elif plan.retention in {"spike_summary", "spike_events"}:
+        state_width = 4 if plan.max_spikes is None else 5 + int(plan.max_spikes)
         shape = (
             int(batch_size),
             int(plan.definition_count),
             int(plan.probe_count),
-            4,
+            state_width,
         )
         dtype = jnp.int32
         fill_value = None
     else:
-        word_count = (int(nt) + 31) // 32
+        sampled_nt = (int(nt) + int(plan.temporal_stride) - 1) // int(
+            plan.temporal_stride
+        )
+        word_count = (sampled_nt + 31) // 32
         shape = (
             int(batch_size),
             int(plan.definition_count),
@@ -370,10 +395,12 @@ def init_threshold_observer_state(
     cached = get_batched_static_array(key)
     if cached is not None:
         return cached
-    if plan.retention == "spike_summary":
+    if plan.retention in {"spike_summary", "spike_events"}:
         out = jnp.zeros(shape, dtype=dtype)
         out = out.at[..., 1:3].set(-1)
         out = out.at[..., 3].set(1)
+        if plan.retention == "spike_events":
+            out = out.at[..., 5:].set(-1)
     else:
         out = jnp.full(shape, fill_value, dtype=dtype)
     store_batched_static_array(key, out)
@@ -385,14 +412,16 @@ def trim_threshold_observer_state(
     *,
     nt: int,
     retention: ObserverRetention = "vm_raster",
+    temporal_stride: int = 1,
 ) -> ThresholdObserverState:
     """Trim packed observer storage and clear bits beyond the real duration."""
 
-    if retention in {"activation", "first_crossing", "spike_summary"}:
+    if retention in {"activation", "first_crossing", "spike_summary", "spike_events"}:
         return state
-    word_count = (int(nt) + 31) // 32
+    sampled_nt = (int(nt) + int(temporal_stride) - 1) // int(temporal_stride)
+    word_count = (sampled_nt + 31) // 32
     trimmed = jnp.asarray(state)[..., :word_count]
-    tail_bits = int(nt) & 31
+    tail_bits = sampled_nt & 31
     if tail_bits and word_count:
         tail_mask = jnp.asarray((1 << tail_bits) - 1, dtype=jnp.uint32)
         trimmed = trimmed.at[..., -1].set(trimmed[..., -1] & tail_mask)
@@ -448,7 +477,7 @@ def combine_threshold_observer_chunk_states(
         sentinel = jnp.asarray(int(nt), dtype=jnp.int32)
         earliest = jnp.min(jnp.where(stacked >= 0, stacked, sentinel), axis=0)
         return jnp.where(earliest < sentinel, earliest, -1)
-    if retention == "spike_summary":
+    if retention in {"spike_summary", "spike_events"}:
         raise ValueError("spike-summary state must remain continuous across chunks")
 
     if lengths is None:
@@ -552,6 +581,7 @@ def update_threshold_observer_state_batch_from_tables(
     blanking_ms: Any = 0.0,
     reset_thresholds_mV: Any | None = None,
     refractory_ms: Any = 0.0,
+    temporal_stride: int = 1,
     dt_ms: Any = 1.0,
     retention: ObserverRetention = "vm_raster",
 ) -> ThresholdObserverState:
@@ -576,7 +606,7 @@ def update_threshold_observer_state_batch_from_tables(
         current = jnp.asarray(state, dtype=jnp.int32)
         step = jnp.asarray(step_index, dtype=jnp.int32)
         return jnp.where((current < 0) & crossed, step, current)
-    if retention == "spike_summary":
+    if retention in {"spike_summary", "spike_events"}:
         return _update_spike_summary_state(
             state,
             selected=selected,
@@ -588,7 +618,11 @@ def update_threshold_observer_state_batch_from_tables(
             refractory_ms=jnp.asarray(refractory_ms)[None, :, None],
             dt_ms=dt_ms,
         )
-    return _write_raster_bits(state, hit, step_index)
+    raster_step = jnp.asarray(step_index) // jnp.asarray(
+        temporal_stride,
+        dtype=jnp.asarray(step_index).dtype,
+    )
+    return _write_raster_bits(state, hit, raster_step)
 
 
 def update_threshold_observer_state_scalar_from_tables(
@@ -602,6 +636,7 @@ def update_threshold_observer_state_scalar_from_tables(
     blanking_ms: Any = 0.0,
     reset_thresholds_mV: Any | None = None,
     refractory_ms: Any = 0.0,
+    temporal_stride: int = 1,
     dt_ms: Any = 1.0,
     retention: ObserverRetention = "vm_raster",
 ) -> ThresholdObserverState:
@@ -626,7 +661,7 @@ def update_threshold_observer_state_scalar_from_tables(
         current = jnp.asarray(state, dtype=jnp.int32)
         step = jnp.asarray(step_index, dtype=jnp.int32)
         return jnp.where((current < 0) & crossed, step, current)
-    if retention == "spike_summary":
+    if retention in {"spike_summary", "spike_events"}:
         return _update_spike_summary_state(
             state,
             selected=selected,
@@ -638,7 +673,11 @@ def update_threshold_observer_state_scalar_from_tables(
             refractory_ms=jnp.asarray(refractory_ms)[:, None],
             dt_ms=dt_ms,
         )
-    return _write_raster_bits(state, hit, step_index)
+    raster_step = jnp.asarray(step_index) // jnp.asarray(
+        temporal_stride,
+        dtype=jnp.asarray(step_index).dtype,
+    )
+    return _write_raster_bits(state, hit, raster_step)
 
 
 def _write_raster_bits(words: Any, hit: Any, step_index: Any) -> Any:
@@ -681,12 +720,26 @@ def _update_spike_summary_state(
     )
     fire = crossing & (time_ms >= blanking_ms) & refractory_ready
     reset = mask & (selected <= reset_thresholds_mV)
-    return jnp.stack(
+    summary = (
+        count + fire.astype(jnp.int32),
+        jnp.where((first < 0) & fire, step, first),
+        jnp.where(fire, step, last),
+        ((armed & ~crossing) | reset).astype(jnp.int32),
+    )
+    if current.shape[-1] == 4:
+        return jnp.stack(summary, axis=-1)
+
+    overflow = current[..., 4] != 0
+    event_steps = current[..., 5:]
+    slots = jnp.arange(event_steps.shape[-1], dtype=jnp.int32)
+    write = fire[..., None] & (count[..., None] == slots)
+    updated_steps = jnp.where(write, step, event_steps)
+    updated_overflow = overflow | (fire & (count >= event_steps.shape[-1]))
+    return jnp.concatenate(
         (
-            count + fire.astype(jnp.int32),
-            jnp.where((first < 0) & fire, step, first),
-            jnp.where(fire, step, last),
-            ((armed & ~crossing) | reset).astype(jnp.int32),
+            jnp.stack(summary, axis=-1),
+            updated_overflow[..., None].astype(jnp.int32),
+            updated_steps,
         ),
         axis=-1,
     )
@@ -739,7 +792,7 @@ def finalize_threshold_observer_state(
             for index, definition in enumerate(plan.definitions)
         }
 
-    if plan.retention == "spike_summary":
+    if plan.retention in {"spike_summary", "spike_events"}:
         values = np.asarray(state, dtype=np.int32)
         probe_mask = np.asarray(plan.probe_mask_host, dtype=bool)
         if probe_mask.ndim == 2:
@@ -777,11 +830,14 @@ def finalize_threshold_observer_state(
         positions_um = plan.positions_um_host
         thresholds_mV = plan.thresholds_mV_host
 
+    sampled_nt = (int(nt) + int(plan.temporal_stride) - 1) // int(
+        plan.temporal_stride
+    )
     return {
         VM_RASTER_OBSERVATION_KEY: VmRasterResult(
             words=words,
-            nt=int(nt),
-            dt_ms=float(dt_ms),
+            nt=sampled_nt,
+            dt_ms=float(dt_ms) * int(plan.temporal_stride),
             definitions=plan.definitions,
             names=plan.names,
             probe_indices=probe_indices,
@@ -834,13 +890,41 @@ def _finalize_spike_summary_result(
     last_steps = np.where(probe_mask, state[..., 2], -1)
     first = np.min(first_steps, axis=-1)
     last = np.max(last_steps, axis=-1)
+    has_bounded_events = state.shape[-1] > 4
     events = tuple(
         SpikeCountEvent(
             count=int(count),
             first_time_ms=None if first_step >= nt else (float(first_step) + 1.0) * dt_ms,
             last_time_ms=None if last_step < 0 else (float(last_step) + 1.0) * dt_ms,
+            probe_counts=tuple(
+                int(value)
+                for value, valid in zip(row_state[:, 0], row_mask, strict=True)
+                if valid
+            ),
+            spike_times_ms=(
+                tuple(
+                    tuple((float(step) + 1.0) * dt_ms for step in probe_steps if step >= 0)
+                    for probe_steps, valid in zip(
+                        row_state[:, 5:], row_mask, strict=True
+                    )
+                    if valid
+                )
+                if has_bounded_events
+                else ()
+            ),
+            overflow=(
+                tuple(
+                    bool(value)
+                    for value, valid in zip(row_state[:, 4], row_mask, strict=True)
+                    if valid
+                )
+                if has_bounded_events
+                else ()
+            ),
         )
-        for count, first_step, last_step in zip(counts, first, last, strict=True)
+        for count, first_step, last_step, row_state, row_mask in zip(
+            counts, first, last, state, probe_mask, strict=True
+        )
     )
     return AnalysisResult(
         name=definition.name,

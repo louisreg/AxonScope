@@ -597,6 +597,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_single_cable_vstim_batch_observer_scan(
@@ -624,6 +625,7 @@ def _run_single_cable_vstim_batch_observer_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     intracellular_current_density_mid: Array,
     extracellular_potential_mid_mV: Array,
     time_start_index: Array,
@@ -706,6 +708,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     blanking_ms=raster_blanking_ms,
                     reset_thresholds_mV=raster_reset_thresholds_mV,
                     refractory_ms=raster_refractory_ms,
+                    temporal_stride=raster_temporal_stride,
                     dt_ms=dt_ms,
                     retention=observer_retention,
                 )
@@ -747,6 +750,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                 blanking_ms=raster_blanking_ms,
                 reset_thresholds_mV=raster_reset_thresholds_mV,
                 refractory_ms=raster_refractory_ms,
+                temporal_stride=raster_temporal_stride,
                 dt_ms=dt_ms,
                 retention=observer_retention,
             )
@@ -795,6 +799,7 @@ def _run_single_cable_vstim_batch_observer_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_single_cable_factorized_vstim_batch_observer_scan(
@@ -819,6 +824,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     intracellular_current_density_mid: Array,
     extracellular_current_mid_A: Array,
     extracellular_forcing_footprint_mV_per_A: Array,
@@ -899,7 +905,8 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     thresholds_mV=raster_thresholds_mV,
                 blanking_ms=raster_blanking_ms,
                 reset_thresholds_mV=raster_reset_thresholds_mV,
-                refractory_ms=raster_refractory_ms,
+                    refractory_ms=raster_refractory_ms,
+                    temporal_stride=raster_temporal_stride,
                 dt_ms=dt_ms,
                 retention=observer_retention,
                 )
@@ -941,6 +948,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
+            temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
             )
@@ -1005,6 +1013,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
         "has_driven_extracellular",
         "stateless_vm_only",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
@@ -1029,6 +1038,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     intracellular_current_density_values_mid: Array,
     intracellular_current_density_indices: Array,
     intracellular_current_density_mask: Array,
@@ -1118,7 +1128,8 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     thresholds_mV=raster_thresholds_mV,
                 blanking_ms=raster_blanking_ms,
                 reset_thresholds_mV=raster_reset_thresholds_mV,
-                refractory_ms=raster_refractory_ms,
+                    refractory_ms=raster_refractory_ms,
+                    temporal_stride=raster_temporal_stride,
                 dt_ms=dt_ms,
                 retention=observer_retention,
                 )
@@ -1160,6 +1171,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
+            temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
             )
@@ -1229,6 +1241,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         "stateless_vm_only",
         "has_sparse_iinj",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
@@ -1254,6 +1267,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     intracellular_current_density_values_mid: Array,
     intracellular_current_density_indices: Array,
     intracellular_current_density_mask: Array,
@@ -1347,7 +1361,8 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     thresholds_mV=raster_thresholds_mV,
                 blanking_ms=raster_blanking_ms,
                 reset_thresholds_mV=raster_reset_thresholds_mV,
-                refractory_ms=raster_refractory_ms,
+                    refractory_ms=raster_refractory_ms,
+                    temporal_stride=raster_temporal_stride,
                 dt_ms=dt_ms,
                 retention=observer_retention,
                 )
@@ -1389,6 +1404,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
+            temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
             )
@@ -1454,6 +1470,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
         "membrane",
         "stateless_vm_only",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
@@ -1480,6 +1497,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     intracellular_current_density_values_mid: Array,
     intracellular_current_density_indices: Array,
     intracellular_current_density_mask: Array,
@@ -1561,7 +1579,8 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     thresholds_mV=raster_thresholds_mV,
                 blanking_ms=raster_blanking_ms,
                 reset_thresholds_mV=raster_reset_thresholds_mV,
-                refractory_ms=raster_refractory_ms,
+                    refractory_ms=raster_refractory_ms,
+                    temporal_stride=raster_temporal_stride,
                 dt_ms=dt_ms,
                 retention=observer_retention,
                 )
@@ -1603,6 +1622,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
+            temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
             )

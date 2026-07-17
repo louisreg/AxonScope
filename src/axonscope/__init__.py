@@ -33,6 +33,7 @@ from axonscope.analysis import (
     PeakVoltage,
     SpikeCount,
     SpikeCountEvent,
+    VmRaster,
 )
 from axonscope.axon_instance import AxonInstance
 from axonscope.benchmarking import (
@@ -184,6 +185,7 @@ __all__ = [
     "PeakVoltage",
     "SpikeCount",
     "SpikeCountEvent",
+    "VmRaster",
     "AxonId",
     "DriveId",
     "SignalId",

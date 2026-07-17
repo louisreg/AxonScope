@@ -354,9 +354,18 @@ one boolean per row and definition during the scan, applies `blanking` as the
 earliest accepted sample time, and returns `observations["activation"]` without
 retaining Vm or a temporal raster. An `axs.analysis.Latency(...)`-only request
 similarly retains one `int32` first-crossing timestep per row and definition,
-then converts it to milliseconds during finalization. Mixed threshold
-definitions and definitions that need propagation history retain the packed
-VmRaster route.
+then converts it to milliseconds during finalization. A `SpikeCount`-only
+request retains four `int32` values per selected probe: count, first timestep,
+last timestep, and rearm state. With `max_spikes=K`, it retains `5 + K`
+`int32` values per probe, including overflow and the first `K` event timesteps.
+The count remains exact after overflow.
+
+`axs.analysis.VmRaster(...)` is the explicit raster request. Its
+`PositionSelector` controls the spatial probes and `every_n_steps` controls the
+temporal stride. Each output bit is the OR of all threshold hits in that
+window, so a short crossing is preserved but its displayed time is quantized
+to the window duration. Downsampled rasters never silently back exact
+activation, latency, or spike analyses.
 
 Compact activation returns the canonical `AnalysisResult`. The packed reference
 container remains `axs.results.VmRasterResult` under
@@ -390,6 +399,11 @@ probe width. Compact activation has shape `[Naxon]` and does not retain a probe
 or time axis after the online reduction.
 Compact latency has the same logical shape and retains one `int32` timestep per
 axon instead of a boolean.
+Compact spike timestamps have retained shape
+`[Naxon, Ndefinition, Nprobe, 5 + K]`. Selecting all compartments with bounded
+timestamps requires `allow_all_compartments=True`; sparse probes are the
+default-safe choice. `estimate()` and `inspect()` report this retained cost
+before execution.
 `PeakVoltage` and other rich analyses remain post-hoc on recorded Vm until a
 dedicated solver-side implementation is designed, benchmarked, and kept off the
 hot path.

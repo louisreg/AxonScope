@@ -719,6 +719,7 @@ def _vm_raster_from_single_result(
 
     selected_by_definition: list[np.ndarray] = []
     thresholds_mV: list[float] = []
+    temporal_strides: list[int] = []
     for definition in definitions:
         _require_vm_raster_definition(definition)
         target = getattr(definition, "target")
@@ -729,6 +730,11 @@ def _vm_raster_from_single_result(
         )
         selected_by_definition.append(selected)
         thresholds_mV.append(_threshold_mV(definition))
+        temporal_strides.append(int(getattr(definition, "every_n_steps", 1)))
+
+    temporal_stride = max(temporal_strides, default=1)
+    if any(value != temporal_stride for value in temporal_strides):
+        raise ValueError("VmRaster definitions must share every_n_steps.")
 
     nt = int(vm.shape[0])
     probe_width = max(int(selected.size) for selected in selected_by_definition)
@@ -748,10 +754,22 @@ def _vm_raster_from_single_result(
         selected_positions_um[definition_index, :count] = positions_um[selected]
         bits[definition_index, :count, :] = vm[:, selected].T >= float(threshold_mV)
 
+    if temporal_stride > 1:
+        sampled_nt = (nt + temporal_stride - 1) // temporal_stride
+        padded = np.zeros(
+            bits.shape[:-1] + (sampled_nt * temporal_stride,),
+            dtype=bool,
+        )
+        padded[..., :nt] = bits
+        bits = padded.reshape(
+            bits.shape[:-1] + (sampled_nt, temporal_stride)
+        ).any(axis=-1)
+        nt = sampled_nt
+
     return cls(
         words=_pack_vm_raster_bits(bits)[None, ...],
         nt=nt,
-        dt_ms=dt_ms,
+        dt_ms=dt_ms * temporal_stride,
         definitions=definitions,
         names=tuple(str(definition.name) for definition in definitions),
         probe_indices=probe_indices,

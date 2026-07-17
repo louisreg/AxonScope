@@ -426,16 +426,20 @@ def _inspect_probes(
     elif observer_output == "first_crossing":
         retained_shape = (int(group.size), len(definitions))
         retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
-    elif observer_output == "spike_summary":
+    elif observer_output in {"spike_summary", "spike_events"}:
+        capacity = getattr(definitions[0], "max_spikes", None)
+        state_width = 4 if capacity is None else 5 + int(capacity)
         retained_shape = (
             int(group.size),
             len(definitions),
             int(max_probe_count),
-            4,
+            state_width,
         )
         retained_bytes = int(np.prod(retained_shape)) * np.dtype(np.int32).itemsize
     else:
-        word_count = (int(step_count) + 31) // 32
+        temporal_stride = int(getattr(definitions[0], "every_n_steps", 1))
+        sampled_steps = (int(step_count) + temporal_stride - 1) // temporal_stride
+        word_count = (sampled_steps + 31) // 32
         retained_shape = (
             int(group.size),
             len(definitions),
@@ -481,7 +485,7 @@ def _inspect_memory(
     observer_bytes = (
         int(probes.retained_bytes)
         if lowering.observer_format
-        in {"activation", "first_crossing", "spike_summary", "vm_raster"}
+        in {"activation", "first_crossing", "spike_summary", "spike_events", "vm_raster"}
         else 0
     )
     total_estimated = (
@@ -577,7 +581,7 @@ def _inspect_result_assembly(
                 observations = 'observations["activation"]'
             elif output == "first_crossing":
                 observations = 'observations["latency"]'
-            elif output == "spike_summary":
+            elif output in {"spike_summary", "spike_events"}:
                 observations = 'observations["spike_count"]'
             elif output == "vm_raster":
                 observations = 'observations["vm_raster"]'
@@ -618,7 +622,7 @@ def _inspect_result_assembly(
                     if output == "first_crossing"
                     else (
                         'observations["spike_count"]'
-                        if output == "spike_summary"
+                        if output in {"spike_summary", "spike_events"}
                         else 'observations["vm_raster"]'
                     )
                 )

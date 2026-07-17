@@ -41,6 +41,7 @@ def main() -> None:
         blanking=0.20 * axs.ms,
         refractory=1.0 * axs.ms,
         target=axs.positions.CENTER,
+        max_spikes=1,
     )
 
     compact_simulation = axs.AxonSimulation(
@@ -70,6 +71,7 @@ def main() -> None:
     ):
         assert compact_event is not None and reference_event is not None
         assert compact_event.count == reference_event.count
+        assert compact_event.probe_counts == reference_event.probe_counts
         if compact_event.first_time_ms is None:
             assert reference_event.first_time_ms is None
             assert compact_event.last_time_ms is None
@@ -80,6 +82,13 @@ def main() -> None:
             (reference_event.first_time_ms, reference_event.last_time_ms),
             equal_nan=True,
         )
+        assert compact_event.overflow == reference_event.overflow
+        for compact_times, reference_times in zip(
+            compact_event.spike_times_ms,
+            reference_event.spike_times_ms,
+            strict=True,
+        ):
+            np.testing.assert_allclose(compact_times, reference_times)
     reference_raster = axs.VmRasterResult.from_result(recorded, spike_count)
 
     print("=== Compact spike count ===")
@@ -130,7 +139,7 @@ def main() -> None:
             va="bottom",
         )
     ax_summary.set(
-        title="Constant-memory count and first/last timestamps",
+        title="Bounded K=1 timestamp storage (second spike overflows)",
         ylabel="Spike count",
         xticks=indices,
         xticklabels=labels,

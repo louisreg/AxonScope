@@ -427,6 +427,7 @@ def _estimate_dispatch_group(
         "activation",
         "first_crossing",
         "spike_summary",
+        "spike_events",
         "vm_raster",
     } and can_batch
     simulations = tuple(item.simulation for item in group.items)
@@ -743,7 +744,13 @@ def _aggregate_estimate_items(
             for group, estimate in zip(groups, estimate_groups, strict=True)
             if estimate.observer_output == output
         )
-        for output in ("activation", "first_crossing", "spike_summary", "vm_raster")
+        for output in (
+            "activation",
+            "first_crossing",
+            "spike_summary",
+            "spike_events",
+            "vm_raster",
+        )
     }
     for output, output_bytes in observer_bytes_by_output.items():
         if not output_bytes:
@@ -752,7 +759,7 @@ def _aggregate_estimate_items(
             dtype = np.dtype(bool)
         elif output == "first_crossing":
             dtype = np.dtype("int32")
-        elif output == "spike_summary":
+        elif output in {"spike_summary", "spike_events"}:
             dtype = np.dtype("int32")
         else:
             dtype = np.dtype("uint32")
@@ -772,7 +779,7 @@ def _aggregate_estimate_items(
                         if output == "first_crossing"
                         else (
                             "solver-side per-probe spike summaries"
-                            if output == "spike_summary"
+                            if output in {"spike_summary", "spike_events"}
                             else "packed solver-side VmRaster observations"
                         )
                     )
@@ -863,10 +870,19 @@ def _threshold_observer_nbytes(
                 original_indices=original_indices,
             )
             max_probe_count = max(max_probe_count, len(selected))
-    if observer_output == "spike_summary":
-        shape = (int(group.size), len(definitions), int(max_probe_count), 4)
+    if observer_output in {"spike_summary", "spike_events"}:
+        capacity = getattr(definitions[0], "max_spikes", None)
+        state_width = 4 if capacity is None else 5 + int(capacity)
+        shape = (
+            int(group.size),
+            len(definitions),
+            int(max_probe_count),
+            state_width,
+        )
         return int(np.prod(shape)) * np.dtype(np.int32).itemsize
-    word_count = (int(step_count) + 31) // 32
+    temporal_stride = int(getattr(definitions[0], "every_n_steps", 1))
+    sampled_steps = (int(step_count) + temporal_stride - 1) // temporal_stride
+    word_count = (sampled_steps + 31) // 32
     shape = (int(group.size), len(definitions), int(max_probe_count), word_count)
     return int(np.prod(shape)) * np.dtype(np.uint32).itemsize
 

@@ -230,6 +230,40 @@ def test_inspection_reports_constant_memory_spike_summary_storage():
     )
 
 
+def test_inspection_reports_bounded_spike_event_and_downsampled_raster_storage():
+    bounded = axs.analysis.SpikeCount(
+        target=axs.positions.CENTER,
+        max_spikes=3,
+    )
+    bounded_report = _inspect_simulation(
+        _clamped_pool(),
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[bounded],
+    )
+
+    assert bounded_report.lowerings[0].observer_format == "spike_events"
+    assert bounded_report.probes[0].retained_shape == (2, 1, 1, 8)
+    assert bounded_report.probes[0].retained_bytes == 64
+
+    raster = axs.analysis.VmRaster(
+        target=axs.positions.CENTER,
+        every_n_steps=10,
+    )
+    raster_report = _inspect_simulation(
+        _clamped_pool(),
+        duration=10.0 * axs.ms,
+        dt=0.01 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[raster],
+    )
+
+    assert raster_report.lowerings[0].observer_format == "vm_raster"
+    assert raster_report.probes[0].retained_shape == (2, 1, 1, 4)
+    assert raster_report.probes[0].retained_bytes == 32
+
+
 def test_inspection_reports_singleton_observer_only_batch_route():
     activation = axs.analysis.Activation(
         threshold=-80.0 * axs.mV,

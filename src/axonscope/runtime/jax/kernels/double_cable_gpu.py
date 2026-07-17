@@ -389,6 +389,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
         "double_cable_block_solver",
         "tiled_thomas_block_b",
         "observer_retention",
+        "raster_temporal_stride",
     ),
 )
 def _run_double_cable_batch_observer_integrated_scan(
@@ -411,6 +412,7 @@ def _run_double_cable_batch_observer_integrated_scan(
     raster_blanking_ms: Array,
     raster_reset_thresholds_mV: Array,
     raster_refractory_ms: Array,
+    raster_temporal_stride: int,
     area_cm2: Array,
     Cm_abs: Array,
     Cx_abs: Array,
@@ -614,6 +616,7 @@ def _run_double_cable_batch_observer_integrated_scan(
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
+            temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
         )

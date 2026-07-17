@@ -212,8 +212,12 @@ For trace-free threshold-style observer runs, use compatible analysis
 definitions with `Recording.none()`. Activation-only requests retain one
 boolean per axon under `observations["activation"]`; latency-only requests
 retain one first-crossing timestep and return physical time under
-`observations["latency"]`. Analyses needing richer crossing history use packed
-VmRaster under `observations["vm_raster"]`.
+`observations["latency"]`. `SpikeCount` retains count/first/last in constant
+memory and optionally `max_spikes=K` timestamps plus explicit overflow.
+`VmRaster(every_n_steps=N, target=...)` retains packed spatial probes using an
+event-preserving OR over each temporal window under
+`observations["vm_raster"]`; exact event analyses keep their dedicated compact
+state rather than using a downsampled raster implicitly.
 
 See `docs/results_recording_analysis.md` and `docs/pool_dispatch.md`.
 

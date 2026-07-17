@@ -1217,6 +1217,51 @@ def test_double_cable_compact_event_observer_thomas_matches_full_vm():
         _compact_spike_count_values(compact_spikes),
     )
 
+    bounded_spikes = replace(spike_count, max_spikes=1)
+    bounded_observer = build_threshold_observer_plan(
+        (bounded_spikes,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert bounded_observer is not None
+    compact_bounded = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(time_chunk_steps=7),
+        observers=bounded_observer,
+    )
+    bounded_result = kernel_observations(compact_bounded)["spike_count"]
+    np.testing.assert_array_equal(bounded_result.values, [1, 1])
+    assert all(event.spike_times_ms == ((dt,),) for event in bounded_result.events)
+    assert all(event.overflow == (False,) for event in bounded_result.events)
+
+    raster_definition = axs.analysis.VmRaster(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+        every_n_steps=3,
+    )
+    raster_observer = build_threshold_observer_plan(
+        (raster_definition,),
+        positions_um=runtime.axon.x_um,
+        dtype=runtime.membrane.dtype,
+    )
+    assert raster_observer is not None
+    compact_raster = kernel.run(
+        extracellular_potential_mid_mV=vext_mid,
+        extracellular_potential_initial_previous_mV=vext_previous,
+        options=BatchOptions.none(time_chunk_steps=7),
+        observers=raster_observer,
+    )
+    raster = kernel_observations(compact_raster)[axs.VM_RASTER_OBSERVATION_KEY]
+    dense_crossing = np.asarray(full.Vm)[:, :, center] >= -80.0
+    sampled_nt = (dense_crossing.shape[1] + 2) // 3
+    padded_crossing = np.zeros((dense_crossing.shape[0], sampled_nt * 3), dtype=bool)
+    padded_crossing[:, : dense_crossing.shape[1]] = dense_crossing
+    expected_raster = padded_crossing.reshape(
+        dense_crossing.shape[0], sampled_nt, 3
+    ).any(axis=-1)
+    np.testing.assert_array_equal(raster.unpack()[:, 0, 0], expected_raster)
+
 
 def test_double_cable_factorized_footprint_observer_matches_dense_thomas():
     axon = hh_extracellular_axon(current_clamp=False)

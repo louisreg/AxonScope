@@ -1054,7 +1054,14 @@ def _run_double_cable_batch_observer_chunks(
             fixed_gpu_chunk_steps
             if (
                 fixed_gpu_chunk_steps is not None
-                and observers.retention not in {"activation", "spike_summary"}
+                and observers.retention
+                not in {
+                    "activation",
+                    "first_crossing",
+                    "spike_summary",
+                    "spike_events",
+                }
+                and observers.temporal_stride == 1
             )
             else valid_chunk_steps
         )
@@ -1173,6 +1180,7 @@ def _run_double_cable_batch_observer_chunks(
                     ),
                     raster_reset_thresholds_mV=observers.reset_thresholds_mV,
                     raster_refractory_ms=observers.refractory_ms,
+                    raster_temporal_stride=observers.temporal_stride,
                     observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,
@@ -1238,6 +1246,7 @@ def _run_double_cable_batch_observer_chunks(
                     ),
                     raster_reset_thresholds_mV=observers.reset_thresholds_mV,
                     raster_refractory_ms=observers.refractory_ms,
+                    raster_temporal_stride=observers.temporal_stride,
                     observer_retention=observers.retention,
                     area_cm2=area_cm2,
                     Cm_abs=Cm_abs,
@@ -1298,6 +1307,7 @@ def _run_double_cable_batch_observer_chunks(
         observer_state,
         nt=grid.Nt,
         retention=observers.retention,
+        temporal_stride=observers.temporal_stride,
     )
 
 def _initial_double_cable_batch_state(

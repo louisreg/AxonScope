@@ -639,12 +639,12 @@ events rather than a temporal voltage raster. Keep VmRaster as the strict
 raster route and add explicit typed fast paths; do not restore a broad generic
 solver-side observer fallback.
 
-#### P15A - Typed compact event contracts
+#### P15A - Typed compact event contracts (complete)
 
-- [ ] Define three explicit solver-output families without a generic observer
+- [x] Define three explicit solver-output families without a generic observer
   fallback:
   - temporally downsampled VmRaster for visualization or retained threshold
-    state, with a typed stride/sample period and documented aliasing semantics;
+    state, with a typed step stride and documented window semantics;
   - spatial VmRaster probes using the existing `PositionSelector` and
     row-aware probe tables, optionally combined with temporal downsampling;
   - bounded spike events storing timestep indices rather than a temporal
@@ -655,9 +655,9 @@ solver-side observer fallback.
   must not silently back exact activation/spike analyses when crossings may be
   missed; use event-preserving window reduction or a compact event plan for
   those analyses.
-- [ ] Define canonical runtime output plans and result contracts for compact
-  activation, first crossing, spike count, bounded spike times, and
-  propagation. Specify shapes, dtypes, units, blanking, threshold crossing,
+- [x] Define canonical runtime output plans and result contracts for compact
+  activation, first crossing, spike count, and bounded spike times. Specify
+  shapes, dtypes, units, blanking, threshold crossing,
   hysteresis/refractory behavior, invalid states, and CPU/GPU semantics.
 - [x] Implement minimal activation as one boolean per amplitude/axon, updated
   during the temporal scan and returned as `[Namplitude, Naxon]` without
@@ -670,11 +670,11 @@ solver-side observer fallback.
   so one broad spike is not counted at every timestep. Store integer timesteps
   during the scan and convert to physical timestamps only during result
   finalization.
-- [ ] Add a bounded `K`-event representation with explicit overflow only for
+- [x] Add a bounded `K`-event representation with explicit overflow only for
   workflows that need individual timestamps.
 - [x] Support existing `PositionSelector` semantics and selectors containing
   several positions, reducing each probe group online.
-- [ ] Extend `estimate()`/`inspect()` with output-state and transfer estimates
+- [x] Extend `estimate()`/`inspect()` with output-state and transfer estimates
   for full raster, downsampled raster, probes, and bounded events. Make the
   `Nprobe x K` cost visible before execution and require an explicit policy for
   expensive all-compartment event capture. At 21 amplitudes, 4096 axons,

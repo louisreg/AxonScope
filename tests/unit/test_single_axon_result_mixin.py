@@ -328,6 +328,26 @@ def test_rasterize_rejects_negative_min_distance(fake_result):
         rasterize(fake_result, min_distance_ms=-1.0)
 
 
+def test_vm_raster_from_dense_uses_event_preserving_time_windows(fake_result):
+    definition = axs.analysis.VmRaster(
+        threshold=0.0 * axs.mV,
+        target=axs.positions.CENTER,
+        every_n_steps=10,
+    )
+
+    raster = axs.VmRasterResult.from_result(fake_result, definition)
+    expected = fake_result.Vm[:, 1] >= 0.0
+    padded = np.zeros(5010, dtype=bool)
+    padded[: expected.size] = expected
+
+    assert raster.nt == 501
+    assert raster.dt_ms == pytest.approx(0.1)
+    np.testing.assert_array_equal(
+        raster.unpack()[0, 0, 0],
+        padded.reshape(501, 10).any(axis=1),
+    )
+
+
 # ── average_velocity ──────────────────────────────────────────────────────────
 
 def test_compute_propagation_velocity():

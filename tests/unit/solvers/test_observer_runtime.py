@@ -233,6 +233,7 @@ def test_spike_summary_counts_rearmed_crossings_with_blanking_and_refractory():
             count=2,
             first_time_ms=0.4,
             last_time_ms=0.8,
+            probe_counts=(2,),
         ),
     )
     with pytest.raises(ValueError, match="continuous across chunks"):
@@ -244,6 +245,95 @@ def test_spike_summary_counts_rearmed_crossings_with_blanking_and_refractory():
             retention=plan.retention,
         )
 
+
+def test_bounded_spike_events_store_k_timestamps_and_report_overflow():
+    spike_count = axs.analysis.SpikeCount(
+        threshold=0.0 * axs.mV,
+        reset_threshold=-20.0 * axs.mV,
+        refractory=0.0 * axs.ms,
+        target=CENTER,
+        max_spikes=2,
+    )
+    plan = build_threshold_observer_plan(
+        (spike_count,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+
+    assert plan is not None
+    assert plan.retention == "spike_events"
+    state = init_threshold_observer_state(plan, batch_size=1, nt=6)
+    assert state.shape == (1, 1, 1, 7)
+    for step, center_value in enumerate((-30.0, 5.0, -30.0, 5.0, -30.0, 5.0)):
+        state = update_threshold_observer_state_batch_from_tables(
+            state,
+            vm_mV=np.asarray([[-70.0, center_value, -70.0]], dtype=np.float32),
+            step_index=step,
+            probe_indices=np.asarray(plan.probe_indices)[None, ...],
+            probe_mask=np.asarray(plan.probe_mask)[None, ...],
+            thresholds_mV=plan.thresholds_mV,
+            reset_thresholds_mV=plan.reset_thresholds_mV,
+            blanking_ms=plan.blanking_ms,
+            refractory_ms=plan.refractory_ms,
+            dt_ms=0.1,
+            retention=plan.retention,
+        )
+
+    result = finalize_threshold_observer_state(plan, state, nt=6, dt_ms=0.1)[
+        "spike_count"
+    ]
+    np.testing.assert_array_equal(result.values, [3])
+    event = result.events[0]
+    assert event.count == 3
+    assert event.first_time_ms == pytest.approx(0.2)
+    assert event.last_time_ms == pytest.approx(0.6)
+    np.testing.assert_allclose(event.spike_times_ms, ((0.2, 0.4),))
+    assert event.overflow == (True,)
+
+
+def test_bounded_spike_events_require_explicit_all_compartment_policy():
+    with pytest.raises(ValueError, match="allow_all_compartments=True"):
+        build_threshold_observer_plan(
+            (axs.analysis.SpikeCount(max_spikes=2),),
+            positions_um=np.asarray([0.0, 50.0, 100.0]),
+        )
+
+
+def test_downsampled_vm_raster_ors_hits_within_each_window():
+    raster_definition = axs.analysis.VmRaster(
+        threshold=0.0 * axs.mV,
+        target=CENTER,
+        every_n_steps=4,
+    )
+    plan = build_threshold_observer_plan(
+        (raster_definition,),
+        positions_um=np.asarray([0.0, 50.0, 100.0]),
+    )
+
+    assert plan is not None
+    assert plan.retention == "vm_raster"
+    assert plan.temporal_stride == 4
+    state = init_threshold_observer_state(plan, batch_size=1, nt=10)
+    for step in range(10):
+        state = update_threshold_observer_state_batch_from_tables(
+            state,
+            vm_mV=np.asarray(
+                [[-70.0, 5.0 if step in {1, 4, 9} else -70.0, -70.0]],
+                dtype=np.float32,
+            ),
+            step_index=step,
+            probe_indices=np.asarray(plan.probe_indices)[None, ...],
+            probe_mask=np.asarray(plan.probe_mask)[None, ...],
+            thresholds_mV=plan.thresholds_mV,
+            temporal_stride=plan.temporal_stride,
+            retention=plan.retention,
+        )
+
+    raster = finalize_threshold_observer_state(plan, state, nt=10, dt_ms=0.1)[
+        VM_RASTER_OBSERVATION_KEY
+    ]
+    assert raster.nt == 3
+    assert raster.dt_ms == pytest.approx(0.4)
+    np.testing.assert_array_equal(raster.unpack()[0, 0, 0], [True, True, True])
 
 def test_threshold_observer_plan_cache_survives_stimulation_replacement(monkeypatch):
     recording_lowering._THRESHOLD_OBSERVER_PLAN_CACHE.clear()

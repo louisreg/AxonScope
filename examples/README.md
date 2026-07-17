@@ -85,7 +85,10 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `observers/03_compact_latency.py`: retain one first-crossing step per axon and
   compare compact latency visually with recorded Vm.
 - `observers/04_compact_spike_count.py`: count repeated rearmed crossings with
-  constant memory and compare count/first/last with dense Vm and its raster.
+  bounded timestamp storage and explicit overflow, then compare it with dense
+  Vm and its raster.
+- `observers/05_downsampled_vm_raster.py`: retain sparse spatial probes in
+  event-preserving temporal windows and compare them with dense Vm.
 
 ### Protocols
 

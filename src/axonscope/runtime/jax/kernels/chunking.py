@@ -66,9 +66,13 @@ def _init_local_threshold_chunk_template(
 ) -> ThresholdObserverState | None:
     if not enabled:
         return None
-    if plan.retention == "spike_summary":
+    if plan.retention in {"spike_summary", "spike_events"}:
         raise ValueError(
             "spike-summary observer state must remain continuous across time chunks"
+        )
+    if plan.temporal_stride != 1:
+        raise ValueError(
+            "downsampled VmRaster state must remain continuous across time chunks"
         )
     max_chunk_steps = max((stop - start for start, stop in chunk_ranges), default=0)
     if max_chunk_steps <= 0:

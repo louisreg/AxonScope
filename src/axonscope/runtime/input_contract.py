@@ -276,7 +276,7 @@ def validate_prepared_runtime_input(
         errors.append("runtime does not support row-specific parameters")
     if (
         summary.output_sink
-        in {"activation", "first_crossing", "spike_summary", "vm_raster"}
+        in {"activation", "first_crossing", "spike_summary", "spike_events", "vm_raster"}
         and not contract.supports_threshold_observer
     ):
         errors.append("runtime does not support observer-only threshold output")

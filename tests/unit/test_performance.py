@@ -164,6 +164,41 @@ def test_spike_summary_estimate_counts_constant_memory_probe_state():
     assert output.bytes == 32
 
 
+def test_estimate_counts_bounded_spike_events_and_downsampled_raster_words():
+    axon = _hh(compartments=5)
+    population = axs.AxonPopulation(
+        [_clamped_instance(axon), _clamped_instance(axon)]
+    )
+    bounded = axs.AxonSimulation(
+        population,
+        duration=0.10 * axs.ms,
+        dt=0.05 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[axs.analysis.SpikeCount(target=axs.positions.CENTER, max_spikes=3)],
+    ).estimate()
+
+    bounded_output = bounded.item("outputs.spike_events")
+    assert bounded.groups[0].observer_output == "spike_events"
+    assert bounded_output.bytes == 64
+
+    raster = axs.AxonSimulation(
+        population,
+        duration=10.0 * axs.ms,
+        dt=0.01 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=[
+            axs.analysis.VmRaster(
+                target=axs.positions.CENTER,
+                every_n_steps=10,
+            )
+        ],
+    ).estimate()
+
+    raster_output = raster.item("outputs.vm_raster")
+    assert raster.groups[0].observer_output == "vm_raster"
+    assert raster_output.bytes == 32
+
+
 def test_extracellular_estimate_surfaces_factorized_footprint_without_dense_vstim():
     axon = _hh(compartments=5)
     stimulus = axs.Stimulus.pulse(

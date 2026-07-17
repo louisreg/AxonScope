@@ -11,6 +11,7 @@ from axonscope.analysis.definitions import (
     ConductionVelocity,
     Latency,
     SpikeCount,
+    VmRaster,
 )
 from axonscope.solvers.options import BatchOptions, BatchRecording
 
@@ -20,6 +21,7 @@ OutputSink = Literal[
     "activation",
     "first_crossing",
     "spike_summary",
+    "spike_events",
     "vm_raster",
 ]
 
@@ -81,7 +83,16 @@ def observer_output_label(
     if recording_mode == "none" and observers_are_compact_latency_compatible(observers):
         return "first_crossing"
     if recording_mode == "none" and observers_are_compact_spike_compatible(observers):
-        return "spike_summary"
+        return (
+            "spike_events"
+            if any(observer.max_spikes is not None for observer in observers)
+            else "spike_summary"
+        )
+    if recording_mode == "none" and any(
+        isinstance(observer, SpikeCount) and observer.max_spikes is not None
+        for observer in observers
+    ):
+        return "unsupported_observer_only"
     if recording_mode == "none" and observers_are_vm_raster_compatible(observers):
         return "vm_raster"
     if recording_mode == "none":
@@ -118,7 +129,10 @@ def observers_are_compact_spike_compatible(
 ) -> bool:
     """Return whether observers need bounded per-probe spike summaries."""
 
-    return bool(observers) and all(isinstance(observer, SpikeCount) for observer in observers)
+    if not observers or not all(isinstance(observer, SpikeCount) for observer in observers):
+        return False
+    capacities = {observer.max_spikes for observer in observers}
+    return len(capacities) == 1
 
 
 def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
@@ -131,7 +145,7 @@ def vm_raster_definitions(observers: tuple[Any, ...] | None) -> tuple[Any, ...]:
         for observer in observers
         if isinstance(
             observer,
-            (Activation, Latency, SpikeCount, ConductionBlock, ConductionVelocity),
+            (Activation, Latency, SpikeCount, VmRaster, ConductionBlock, ConductionVelocity),
         )
     )
 
@@ -152,6 +166,9 @@ def observer_definition_signature(observer: Any) -> tuple[Any, ...]:
         _maybe_millisecond(getattr(observer, "blanking", None)),
         _maybe_millivolt(getattr(observer, "reset_threshold", None)),
         _maybe_millisecond(getattr(observer, "refractory", None)),
+        getattr(observer, "max_spikes", None),
+        bool(getattr(observer, "allow_all_compartments", False)),
+        int(getattr(observer, "every_n_steps", 1)),
     )
 
 
