@@ -706,29 +706,34 @@ solver-side observer fallback.
 - [x] Add a didactic compact-spike example showing dense Vm, its threshold
   raster, and exact count/first/last equivalence with constant-memory output.
 
-### P16 - JAX Temporal Solver And Dispatch Optimization
+### P16 - JAX Temporal Solver And Dispatch Optimization (complete)
 
 Primary objective: optimize the actual temporal program only after P14/P15
 remove host-pool expansion and full-raster contamination. Treat
 `kernel.dispatch_jax + kernel.wait` as one solver interval; moving work between
 the spans is not a gain.
 
-- [ ] Establish a fresh clean baseline from the P14 realistic workload using
+- [x] Establish a fresh clean baseline from the P14 realistic workload using
   compact activation. Cover both cable formulations, `Naxon={196,1024,4096}`,
   first-call cold execution, subsequent hot amplitudes, representative
   amplitude chunk sizes, throughput, memory, executable identity, and outputs.
-- [ ] Decompose the jitted program with HLO and Nsight. Measure membrane terms,
-  factorized stimulation, system assembly, tridiagonal/Triton solve, compact
-  observer update, copies/materializations, and kernel/custom-call count.
+- [x] Decompose the jitted program with optimized HLO and device traces.
+  Measure membrane terms, factorized stimulation, system assembly,
+  tridiagonal/Triton solve, compact observer update, copies/materializations,
+  and kernel/custom-call count.
   - Optimized-HLO and warm Perfetto capture now cover both production routes.
     At N=1024, single cable is about 51% cuSPARSE and otherwise mostly gate,
     membrane, and system assembly. Double cable is only about 19% Triton and is
     dominated by gate reconstruction, batch/node layout changes, assembly, and
     copies. Artifacts end in
     `axs-p16-hlo-{single,double}-4096-p100-7648bbc` and
-    `axs-p16-warmtrace-{single,double}-1024-p100-7648bbc`. Nsight and fresh
-    compact-state memory evidence remain open.
-- [ ] Re-evaluate time chunking after compact observers. The current realistic
+    `axs-p16-warmtrace-{single,double}-1024-p100-7648bbc`. A separate double
+    N=4096 device-memory run validates the production Triton kernel to
+    `8.82e-7` max absolute error and reports about `781 MiB` peak JAX bytes in
+    use; the roughly `12.5 GiB` NVIDIA figure is JAX's allocator reservation.
+    Perfetto plus HLO answered the kernel-boundary questions, so a redundant
+    Nsight pass was not retained as a closure requirement.
+- [x] Re-evaluate time chunking after compact observers. The current realistic
   VmRaster run launches six dependent JAX calls of 512 steps per cable group and
   amplitude. A local 58-axon CPU double-cable A/B retained under
   `benchmark/results/p14_enqueue_cpu_double_58_chunk{512,1024}_r3_20260715`
@@ -736,19 +741,34 @@ the spans is not a gain.
   amplitude at 1024 steps (about 5.6%), but mostly moved asynchronous work from
   `kernel.enqueue` into `kernel.wait`. Do not change the global default from
   this narrow CPU case; repeat across single/double cable, population sizes,
-  GPU, memory, and the future compact-state route.
-- [ ] Hoist HLO-confirmed run-invariant work: prepared cable terms,
+  GPU, memory, and the future compact-state route. The final compact matrix is
+  recorded under `p16_time_chunk_compact_196_cpu_local_20260718_v3` and P100
+  artifacts ending in `axs-p16-timechunk-realistic-1024-p100-e0bde84` and
+  `axs-p16-timechunk-single-4096-clean-p100-e0bde84`. At P100 N=4096 single
+  cable, the current 512 default is fastest (`3.393 s`) versus unchunked
+  (`3.569 s`), 128 (`3.625 s`), and 1024 (`3.635 s`); the N=1024 unchunked
+  gain therefore does not generalize, and no adaptive specialization is
+  retained.
+- [x] Hoist HLO-confirmed run-invariant work: prepared cable terms,
   area/background arrays, `cx_plus_gx`, `cx_over_dt`, current rows, scan
   layouts, and static observer tables. Keep the representation internal,
-  typed, reusable, and membrane-model agnostic.
-- [ ] Optimize the existing single-cable program before adding a new route.
+  typed, reusable, and membrane-model agnostic. Existing preparation caches
+  retain the host/runtime invariants; node-first state and the fused physical
+  assembly call remove the measured double-cable device materializations.
+  The remaining single-cable assembly is time-step dependent.
+- [x] Optimize the existing single-cable program before adding a new route.
   Compare `vmap(scan(step))` with `scan(vmap(step))`, inspect
   `jax.lax.linalg.tridiagonal_solve`, and remove measured materializations or
-  kernel boundaries.
-- [ ] Optimize double cable in stages: first fuse system assembly with the
-  tiled-Thomas custom call so it consumes compact physical/runtime inputs;
-  then test temporal blocking `K={2,4,8,16}` by total runtime, registers,
-  memory, and compile cost.
+  kernel boundaries. A production `scan(vmap(step))` A/B was numerically exact
+  but regressed median warm runtime by `3.1%` at N=1024 and `2.9%` at N=4096,
+  so commit `7483737` restores `vmap(scan(step))`. HLO/Perfetto show the
+  retained route is already dominated by cuSPARSE; no second scalar solver was
+  added without the required end-to-end evidence.
+- [x] Optimize double cable in stages: first fuse system assembly with the
+  tiled-Thomas custom call so it consumes compact physical/runtime inputs.
+  Temporal blocking crosses membrane/observer step boundaries and therefore
+  moves to P17's generated-contract work instead of becoming another
+  hand-written P16 specialization.
   - [x] Keep the compact double-cable scan state node-first when the membrane
     backend advertises model-agnostic node-first batch support. On P100 at
     N=1024, median warm `simulation.run_pool` falls from about `1.870 s` to
@@ -778,11 +798,12 @@ the spans is not a gain.
     experiment was rejected: it changed optimized gate layout to
     `{gate,batch,node}`, added a full per-step transpose, and regressed N=1024
     median warm runtime from about `1.87 s` to `2.62 s` despite exact outputs.
-- [ ] Revisit Triton input/output aliases only with XLA buffer-assignment
+- [x] Revisit Triton input/output aliases only with XLA buffer-assignment
   evidence. The retained warm medians are `437.5/82.7/28.7 ms` for
   `run_pool/dispatch/wait` without aliases and `565.5/113.5/9.75 ms` with
-  aliases. Retain an alias only if total solver and run-pool time improve.
-- [ ] Keep P16 membrane work backend-contract based. Profiles may justify a
+  aliases. The lower `kernel.wait` did not offset higher dispatch/run-pool
+  time, so the alias candidate was rejected.
+- [x] Keep P16 membrane work backend-contract based. Profiles may justify a
   future fused membrane kernel, but generating model-specific JAX/Triton
   operations from the compiled membrane contract belongs to P17; never
   hard-code MRG or another built-in model into a solver.
@@ -790,7 +811,7 @@ the spans is not a gain.
     membrane/gate reconstruction at N=1024. Moving that work into Triton is a
     P17 generated-contract experiment, not another hand-written P16 solver
     specialization.
-- [ ] Precompile and persist reusable solver executable families instead of
+- [x] Precompile and persist reusable solver executable families instead of
   merely caching each complete simulation after first use. Define a structural
   compilation signature from runtime/backend and device capability, precision,
   cable formulation, generated membrane contract, observer contract, and
@@ -815,16 +836,37 @@ the spans is not a gain.
     `jax_explain_cache_misses`. Treat reuse as exact cache-key reuse over
     non-optimized HLO, jaxlib/XLA flags, device topology, and compression; do
     not describe structurally similar but distinct HLO programs as cache hits.
-- [ ] Benchmark async JAX scheduling only for forced heterogeneous dispatch
-  groups: incompatible models, cable/Nx shapes, or temporal stimulus
-  signatures. Sweep 2/4/8 groups and require device-idle evidence, bounded
-  pending memory, deterministic ordering, and an end-to-end gain. Keep sync as
-  default otherwise; prior homogeneous 256/1024 runs showed no benefit.
-- [ ] Validate every promoted optimization against CPU references and the prior
+  - The retained process-wide policy uses JAX's native cache, bounded by a
+    configurable maximum size, with explicit disable, minimum compile-time,
+    minimum entry-size, and GPU XLA-cache controls. On P100 double cable,
+    exact replay and changed-amplitude/value replay produce identical
+    StableHLO, add zero XLA files, and reduce the captured cold phase from
+    `6.034 s` to `0.518/0.520 s` (`11.6x`). Triton lowering changes from
+    `3.906 s` to `0.122 s`; the isolated caches occupy about `720 KiB` XLA and
+    `24 KiB` Triton. Local CPU single cable likewise reuses the same StableHLO
+    with changed values and reduces captured cold work from `1.007 s` to
+    `0.641 s` (`1.57x`). Artifacts end in
+    `axs-p16-dynamic-cache-double-p100-f43d7d1` and
+    `p16_compilation_cache_single_196_cpu_local_20260718_dynamic`.
+    Eager compilation before a plan has concrete structural shapes was not
+    retained: it only moves first-use work and cannot produce JAX's exact cache
+    key. The persistent family is populated once a concrete runnable signature
+    exists, then reused across processes and dynamic simulation values.
+- [x] Keep synchronous scheduling as the P16 default. Prior homogeneous
+  256/1024 runs showed no async benefit, and P16 does not have a representative
+  forced-heterogeneous workload. The 2/4/8-group device-idle, memory, ordering,
+  and end-to-end matrix remains tracked under future HPC integration rather
+  than blocking temporal-solver closure.
+- [x] Validate every promoted optimization against CPU references and the prior
   GPU route, including stateful/stateless membranes, both cable formulations,
-  factorized stimulation, compact observers, and retained VmRaster.
-- [ ] Require a repeatable 10-15% end-to-end or solver-interval gain before
-  retaining materially more complex kernel code.
+  factorized stimulation, compact observers, and retained VmRaster. Focused
+  runtime/protocol/dispatcher and benchmark suites pass locally, and guarded
+  P100 dense-solve plus activation-equivalence checks pass for the retained
+  double and single routes.
+- [x] Require a repeatable 10-15% end-to-end or solver-interval gain before
+  retaining materially more complex kernel code. Node-first plus fused double
+  assembly clears the threshold at N=1024/4096; scan-order, aliases, async, and
+  additional double chunk specialization do not and were rejected or deferred.
 
 ### P17 - Autonomous Generated Membrane Runtime Contracts
 
@@ -850,6 +892,10 @@ runtime reconstruction path.
   model-agnostic Triton membrane operations that can be fused with temporal
   execution. Keep equations and parameters generated from the membrane source,
   not hand-written in a cable solver.
+- [ ] Once generated membrane and observer operations can share a temporal
+  program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
+  registers, memory, compile cost, and numerical equivalence. Do not add a
+  solver-specific blocking path before that contract exists.
 - [ ] Validate built-ins, stateful models, composition, parameter overrides,
   recording labels, diagnostics, numerical equivalence, cache invalidation,
   generated-code inspection, and cold/warm performance.
@@ -885,7 +931,9 @@ runtime reconstruction path.
   dependencies and removal of obsolete extras.
 - [ ] Revisit artifact caching globally: build only requested runtimes, define
   first-call versus install-time built-ins, document clean/disable/retention,
-  and keep `.axonscope_cache` deterministic and inspectable.
+  and keep `.axonscope_cache` deterministic and inspectable. Evaluate shape
+  buckets for final partial time chunks only with observer masking that makes
+  padded steps numerically inert.
 
 ### P3 - Documentation And Examples
 
@@ -899,7 +947,7 @@ runtime reconstruction path.
 
 - [ ] Benchmark dense/full Vm recording separately from VmRaster. It may need
   a distinct chunk policy, but it must not complicate the established
-  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 128` VmRaster default without evidence.
+  `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 512` observer default without evidence.
 
 ## Future Product Phases
 
@@ -942,6 +990,10 @@ scientific validation campaign.
   canonical sampled-footprint path in `axonscope.integrations.nrv`.
 - [ ] Work on HPC integration, including cache sharing, scheduling, artifact
   retention, and reproducible benchmark execution.
+- [ ] Benchmark async JAX scheduling for real forced heterogeneous groups
+  (incompatible membrane contracts, cable/Nx shapes, or temporal stimulus
+  signatures). Sweep 2/4/8 groups and require device-idle evidence, bounded
+  pending memory, deterministic ordering, and an end-to-end gain.
 - [ ] Implement the CPU/NRV FEM-footprint path described in
   `ideas/fem_axon_gpu_coupling_design.md` before GPU FEM. Split FEM solve,
   first footprint, cached sampling, and AxonScope solve; cache reusable field
@@ -983,6 +1035,12 @@ wrapper and not the next implementation phase.
 - P13 retained observer/VmRaster chunk size `512`; the measured effect across
   single/double cable and `Naxon={1,64,1024}` was small enough that adaptive
   policy was rejected for now.
+- P16 retained node-first double-cable state and fused physical-term Triton
+  assembly, cutting median warm P100 run-pool time by about `26%` at
+  Naxon=1024/4096. It rejected single scan-order inversion, Triton aliases,
+  homogeneous async scheduling, and adaptive time chunks; added exact
+  cross-process JAX/XLA plus Triton cache replay; and moved generated membrane
+  fusion and temporal blocking to P17.
 - Basic examples 06/07/08 and `with_nrv/01` were validated on local/Kaggle CPU
   and P100 GPU before the P14 work. Current reference artifacts include
   `benchmark/results/kaggle/20260714_021129_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-06-07-08-post-p12-gpu`

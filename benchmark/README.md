@@ -386,6 +386,40 @@ passes at `Nx=22`, batch 7, with max absolute/scaled errors
 `axs-p16-fusedtrace-d1024-p100-ff80df8`, and
 `axs-p16-fusedvalidate-p100-ff80df8`.
 
+The matching single-cable scan-order experiment did not earn a production
+change. Replacing `vmap(scan(step))` with `scan(vmap(step))` preserved exact
+activation counts but regressed median warm P100 runtime by `3.1%` at N=1024
+and `2.9%` at N=4096. Commit `7483737` restores the original route. Optimized
+HLO and Perfetto already place about 51% of its device time in cuSPARSE, so P16
+does not add an unproven second scalar solver.
+
+Commit `f43d7d1` validates persistent compilation replay as an exact structural
+cache, not a value cache. On P100 double cable, a fresh process with changed
+amplitudes, footprints, waveform values, and parameter rows produces identical
+StableHLO and adds zero XLA cache files. The captured cold phase falls from
+`6.034 s` on a miss to `0.518 s` for exact replay and `0.520 s` for changed
+dynamic values (`11.6x`); Triton lowering falls from `3.906 s` to `0.122 s`.
+The isolated cache occupies about `720 KiB` for XLA and `24 KiB` for Triton.
+Local CPU single cable likewise reuses identical StableHLO with changed values,
+reducing captured cold work from `1.007 s` to `0.641 s` (`1.57x`). Artifacts
+end in `axs-p16-dynamic-cache-double-p100-f43d7d1` and
+`p16_compilation_cache_single_196_cpu_local_20260718_dynamic`.
+
+The final compact-observer time-chunk matrix uses 3000 steps (`15 ms` at
+`dt=0.005 ms`). On local CPU N=196, single cable varies by only about `3.6%`
+between chunk 512 and unchunked, while double varies by about `0.6%`; these
+small laptop differences do not justify a policy change. On P100 N=1024,
+double cable's best policy improves `curve.simulate` by only `3.3%` over chunk
+128. Single cable is more sensitive: unchunked is `1.403 s` versus `1.787 s`
+at 128 and `1.531 s` at the current 512 default. The result does not generalize:
+at N=4096, chunk 512 is fastest at `3.393 s`, ahead of unchunked (`3.569 s`),
+128 (`3.625 s`), and 1024 (`3.635 s`). The separate memory run shows only
+about `0.34 MiB` additional JAX bytes for unchunked/1024 versus 128. P16 keeps
+the single global default at 512 rather than adding an adaptive specialization.
+Artifacts end in `p16_time_chunk_compact_196_cpu_local_20260718_v3`,
+`axs-p16-timechunk-realistic-1024-p100-e0bde84`, and
+`axs-p16-timechunk-single-4096-{clean-,}p100-e0bde84`.
+
 `one-shot cold` includes reusable source construction; `cold run_pool` and
 `warm run_pool` do not. Solver share is the non-overlapping
 `(kernel.enqueue + kernel.wait) / simulation.run_pool`; `dispatch_jax` is
