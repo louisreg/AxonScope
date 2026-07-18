@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v2"
+MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +43,7 @@ class GeneratedFunctionSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class GeneratedJaxMembraneContract:
+class GeneratedMembraneContract:
     """Model-specific facts required by the JAX runtime after generation."""
 
     version: str
@@ -63,6 +63,8 @@ class GeneratedJaxMembraneContract:
     membrane_state_display_names: tuple[str, ...]
     observable_display_names: tuple[str, ...]
     raw_current_names: tuple[str, ...]
+    current_output_names: tuple[str, ...]
+    observable_output_names: tuple[str, ...]
     current_names: tuple[str, ...]
     current_groups: tuple[tuple[int, ...], ...]
     conductance_names: tuple[str, ...]
@@ -116,9 +118,9 @@ class GeneratedJaxMembraneContract:
             ) from exc
 
 
-def load_generated_jax_membrane_contract(
+def load_generated_membrane_contract(
     module: Any,
-) -> GeneratedJaxMembraneContract:
+) -> GeneratedMembraneContract:
     """Load and validate the autonomous runtime contract from one module."""
 
     raw = getattr(module, "RUNTIME_CONTRACT", None)
@@ -126,7 +128,7 @@ def load_generated_jax_membrane_contract(
         raise TypeError("Generated JAX membrane module has no runtime contract.")
     version = str(raw.get("version", ""))
     declared_version = str(getattr(module, "RUNTIME_CONTRACT_VERSION", ""))
-    if version != JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION:
+    if version != MEMBRANE_RUNTIME_CONTRACT_VERSION:
         raise ValueError(f"Unsupported generated membrane contract {version!r}.")
     if declared_version != version:
         raise ValueError("Generated membrane contract version metadata is inconsistent.")
@@ -135,7 +137,7 @@ def load_generated_jax_membrane_contract(
         _parameter_spec(entry)
         for entry in _mapping_sequence(raw, "parameters")
     )
-    contract = GeneratedJaxMembraneContract(
+    contract = GeneratedMembraneContract(
         version=version,
         model_name=_required_string(raw, "model_name"),
         inputs=tuple(
@@ -174,6 +176,8 @@ def load_generated_jax_membrane_contract(
         ),
         observable_display_names=_string_tuple(raw, "observable_display_names"),
         raw_current_names=_string_tuple(raw, "raw_current_names"),
+        current_output_names=_string_tuple(raw, "current_output_names"),
+        observable_output_names=_string_tuple(raw, "observable_output_names"),
         current_names=_string_tuple(raw, "current_names"),
         current_groups=_index_groups(raw, "current_groups"),
         conductance_names=_string_tuple(raw, "conductance_names"),
@@ -206,6 +210,10 @@ def load_generated_jax_membrane_contract(
         raise ValueError("Generated membrane current metadata has inconsistent lengths.")
     required_functions = {
         "init_state",
+        "gate_terms",
+        "membrane_terms",
+        "reversal_terms",
+        "model_step",
         "prepare_state",
         "step_current_terms",
         "finalize_state",
@@ -225,6 +233,10 @@ def load_generated_jax_membrane_contract(
         raise ValueError("Generated membrane state metadata is inconsistent.")
     if tuple(value.name for value in contract.currents) != contract.raw_current_names:
         raise ValueError("Generated membrane current metadata is inconsistent.")
+    if len(contract.current_output_names) != len(contract.currents):
+        raise ValueError("Generated membrane current outputs are inconsistent.")
+    if len(contract.observable_output_names) != len(contract.observables):
+        raise ValueError("Generated membrane observable outputs are inconsistent.")
     if tuple(value.name for value in contract.diagnostics) != contract.diagnostic_names:
         raise ValueError("Generated membrane diagnostic metadata is inconsistent.")
     if contract.function("prepare_state").outputs != contract.prepare_state_update_names:
@@ -328,10 +340,10 @@ def _index_groups(
 
 
 __all__ = [
-    "GeneratedJaxMembraneContract",
+    "GeneratedMembraneContract",
     "GeneratedFunctionSpec",
     "GeneratedParameterSpec",
     "GeneratedQuantitySpec",
-    "JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION",
-    "load_generated_jax_membrane_contract",
+    "MEMBRANE_RUNTIME_CONTRACT_VERSION",
+    "load_generated_membrane_contract",
 ]

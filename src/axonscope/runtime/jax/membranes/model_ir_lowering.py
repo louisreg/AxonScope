@@ -16,7 +16,7 @@ from axonscope.model_ir.schema import (
     StateUpdate,
 )
 from axonscope.runtime.jax.membranes.generated_contract import (
-    GeneratedJaxMembraneContract,
+    GeneratedMembraneContract,
 )
 
 
@@ -70,7 +70,7 @@ class JaxModelIRLowering:
         *,
         dtype: jnp.dtype,
         generated_module: Any | None = None,
-        generated_contract: GeneratedJaxMembraneContract | None = None,
+        generated_contract: GeneratedMembraneContract | None = None,
         parameter_values: dict[str, Any] | None = None,
     ) -> None:
         self.model = model

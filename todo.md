@@ -893,8 +893,14 @@ runtime reconstruction path.
 - [ ] Add the remaining recording contracts and compact inspection/result
   metadata to `jax_model.py`; generate composite-model runtime artifacts so
   composition no longer requires a runtime Model IR fallback.
-- [ ] Load this generated contract directly after a cache hit without rebuilding
-  `JaxMembraneProgram` from Model IR or evaluating Model IR expressions.
+- [x] Load single-source JAX plus NumPy host-support artifacts directly after a
+  cache hit without parsing the source, deserializing `optimized_graph.json`,
+  rebuilding `MembraneProgram`, or evaluating Model IR expressions. Preserve
+  per-instance parameters in the runtime static signature. A local 25-repeat
+  check reduced HH cache loading from `2.04 ms` to `0.79 ms` and program build
+  from `2.62 ms` to `1.09 ms`; Schild97 moved from `30.06 ms` to `1.04 ms` and
+  `27.23 ms` to `4.65 ms`, respectively. The reproducible probe lives in
+  `benchmark/membrane_runtime_cache.py`.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
 - [ ] If P16 leaves material membrane/gate cost after layout and generic

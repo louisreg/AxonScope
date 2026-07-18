@@ -42,7 +42,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v18"
+SOURCE_COMPILER_VERSION = "source_codegen.v19"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -107,6 +107,16 @@ class SourceModelCompileResult:
     """Compiled source model and generated-code cache metadata."""
 
     model: ModelIR
+    source_hash: str
+    source_path: Path
+    function_name: str
+    cache: GeneratedCodeCache
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedSourceRuntimeResult:
+    """Generated modules loaded from cache without deserializing Model IR."""
+
     source_hash: str
     source_path: Path
     function_name: str
@@ -222,6 +232,29 @@ def compile_model_source_file(
         source_path=source_path,
         function_name=",".join(program.function_names),
         cache=cache,
+    )
+
+
+def load_generated_source_runtime(
+    path: str | os.PathLike[str],
+    *,
+    function_name: str = "equations",
+    model_class_name: str | None = None,
+    cache_root: str | os.PathLike[str] | None = None,
+    targets: tuple[str, ...] = ("jax", "numpy"),
+) -> GeneratedSourceRuntimeResult | None:
+    """Load cached runtime modules without parsing source or loading Model IR."""
+
+    normalized_targets = _normalize_codegen_targets(targets)
+    source_path = Path(path).resolve()
+    source_text_hash = _source_text_hash(source_path.read_text(encoding="utf-8"))
+    return _try_load_generated_source_runtime(
+        source_path=source_path,
+        source_text_hash=source_text_hash,
+        function_name=function_name,
+        model_class_name=model_class_name,
+        cache_root=cache_root,
+        targets=normalized_targets,
     )
 
 
@@ -2395,6 +2428,39 @@ def _try_load_compiled_source_cache(
     load_generated_modules: tuple[str, ...],
     generated_targets: tuple[str, ...],
 ) -> SourceModelCompileResult | None:
+    runtime = _try_load_generated_source_runtime(
+        source_path=source_path,
+        source_text_hash=source_text_hash,
+        function_name=function_name,
+        model_class_name=model_class_name,
+        cache_root=cache_root,
+        targets=generated_targets,
+        load_targets=load_generated_modules,
+    )
+    if runtime is None:
+        return None
+    model = _load_cached_model_ir(runtime.cache.directory)
+    model = _with_parameter_defaults(model, parameter_defaults)
+    model = _with_codegen_cache_metadata(model, runtime.cache)
+    return SourceModelCompileResult(
+        model=model,
+        source_hash=runtime.source_hash,
+        source_path=runtime.source_path,
+        function_name=runtime.function_name,
+        cache=runtime.cache,
+    )
+
+
+def _try_load_generated_source_runtime(
+    *,
+    source_path: Path,
+    source_text_hash: str,
+    function_name: str,
+    model_class_name: str | None,
+    cache_root: str | os.PathLike[str] | None,
+    targets: tuple[str, ...],
+    load_targets: tuple[str, ...] | None = None,
+) -> GeneratedSourceRuntimeResult | None:
     root = _cache_root(cache_root)
     index_path = _source_cache_index_path(
         root,
@@ -2421,7 +2487,7 @@ def _try_load_compiled_source_cache(
     if not isinstance(cache_key, str) or not cache_key:
         return None
     directory = root / cache_key
-    generated_files = _generated_cache_files(directory, targets=generated_targets)
+    generated_files = _generated_cache_files(directory, targets=targets)
     manifest_path = directory / "manifest.json"
     cache_hit, cache_reason = _cache_manifest_status(
         manifest_path,
@@ -2435,8 +2501,6 @@ def _try_load_compiled_source_cache(
         source_text_hash=source_text_hash,
     ):
         return None
-    model = _load_cached_model_ir(directory)
-    model = _with_parameter_defaults(model, parameter_defaults)
     cache = GeneratedCodeCache(
         key=cache_key,
         directory=directory,
@@ -2447,18 +2511,15 @@ def _try_load_compiled_source_cache(
         loaded_modules=_load_generated_modules(
             generated_files,
             key=cache_key,
-            targets=load_generated_modules,
+            targets=targets if load_targets is None else load_targets,
         ),
     )
-    model = _with_codegen_cache_metadata(model, cache)
-    source_hash = str(index.get("source_hash") or model.metadata.get("source_hash") or "")
+    source_hash = str(index.get("source_hash") or "")
     compiled_function_name = str(
         index.get("compiled_function_name")
-        or model.metadata.get("source_function")
         or function_name
     )
-    return SourceModelCompileResult(
-        model=model,
+    return GeneratedSourceRuntimeResult(
         source_hash=source_hash,
         source_path=source_path,
         function_name=compiled_function_name,
@@ -2881,6 +2942,10 @@ def _generated_module_source(
     )
     step = model.step_program
     runtime_outputs = {
+        "reversal_terms": tuple(
+            (f"reversal:{index}:{current.name}", current.reversal)
+            for index, current in enumerate(model.currents)
+        ),
         "init_state": tuple(
             (state.name, state.initial if state.initial is not None else literal(0.0))
             for state in membrane_states
@@ -2937,8 +3002,25 @@ def _generated_module_source(
         }
         for name, outputs in runtime_outputs.items()
     }
+    runtime_functions.update(
+        {
+            "gate_terms": {
+                "args": gate_arg_names,
+                "outputs": tuple(name for name, _ in gate_outputs),
+            },
+            "membrane_terms": {
+                "args": membrane_arg_names,
+                "outputs": tuple(name for name, _ in membrane_outputs),
+            },
+            "model_step": {
+                "args": arg_names,
+                "outputs": output_names,
+            },
+        }
+    )
     runtime_contract = _generated_runtime_contract(
         model,
+        metadata=metadata,
         functions=runtime_functions,
     )
     return (
@@ -2961,7 +3043,7 @@ def _generated_module_source(
             f"def model_step({args}):\n"
             f"{body}\n\n"
             f"RUNTIME_CONTRACT = {runtime_contract!r}\n"
-            "RUNTIME_CONTRACT_VERSION = 'jax_membrane_runtime.v2'\n"
+            "RUNTIME_CONTRACT_VERSION = 'jax_membrane_runtime.v3'\n"
         )
     )
 
@@ -2969,12 +3051,13 @@ def _generated_module_source(
 def _generated_runtime_contract(
     model: ModelIR,
     *,
+    metadata: dict[str, Any],
     functions: dict[str, dict[str, tuple[str, ...]]],
 ) -> dict[str, Any]:
     program = membrane_program_from_model_ir(model)
     step = model.step_program
     return {
-        "version": "jax_membrane_runtime.v2",
+        "version": "jax_membrane_runtime.v3",
         "model_name": program.name,
         "functions": functions,
         "inputs": tuple(
@@ -3021,6 +3104,14 @@ def _generated_runtime_contract(
         "membrane_state_display_names": program.membrane_state_display_names,
         "observable_display_names": program.observable_display_names,
         "raw_current_names": program.raw_current_names,
+        "current_output_names": tuple(
+            str(spec["expression"])
+            for spec in metadata.get("currents", {}).values()
+        ),
+        "observable_output_names": tuple(
+            str(spec["expression"])
+            for spec in metadata.get("observables", {}).values()
+        ),
         "current_names": program.current_names,
         "current_groups": program.current_groups,
         "conductance_names": program.conductance_names,
@@ -3375,9 +3466,11 @@ def _unit_label(value: Any) -> str | None:
 
 __all__ = [
     "GeneratedCodeCache",
+    "GeneratedSourceRuntimeResult",
     "SOURCE_COMPILER_VERSION",
     "SOURCE_CONTRACT_VERSION",
     "SourceModelCompileError",
     "SourceModelCompileResult",
     "compile_model_source_file",
+    "load_generated_source_runtime",
 ]

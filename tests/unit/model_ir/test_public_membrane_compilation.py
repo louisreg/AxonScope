@@ -44,6 +44,10 @@ def test_stateful_public_membranes_compile_through_model_ir():
         )
         assert set(membrane.generated_contract.functions) == {
             "init_state",
+            "gate_terms",
+            "membrane_terms",
+            "reversal_terms",
+            "model_step",
             "prepare_state",
             "step_current_terms",
             "finalize_state",

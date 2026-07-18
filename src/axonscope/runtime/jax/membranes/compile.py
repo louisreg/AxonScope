@@ -1,12 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from pathlib import Path
+from typing import Any
 
 from axonscope.axons.axon import Axon
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
-from axonscope.membranes.compiler import lower_membrane_model_with_sources
+from axonscope.membranes.compiler import (
+    lower_membrane_model_with_sources,
+    membrane_source_path,
+)
 from axonscope.membranes.model import ensure_membrane_model
-from axonscope.model_ir.source import SourceModelCompileResult
+from axonscope.model_ir.source import (
+    GeneratedCodeCache,
+    GeneratedSourceRuntimeResult,
+    SOURCE_COMPILER_VERSION,
+    SOURCE_CONTRACT_VERSION,
+    SourceModelCompileResult,
+    load_generated_source_runtime,
+)
 from axonscope.runtime.jax.membranes.backend import (
     MembraneBackend,
     UniformMembraneBackend,
@@ -40,29 +51,76 @@ def compile_membrane_model(
 
     _resolve_solver_options(solver_options)
     model = ensure_membrane_model(model)
+    cached_runtime: GeneratedSourceRuntimeResult | None = None
+    lowered = None
 
     with benchmark_span("runtime.prepare.membrane_compile.source_lowering"):
         try:
-            lowered = lower_membrane_model_with_sources(
-                model,
-                load_generated_modules=("jax",),
-                generated_targets=("jax",),
-            )
+            cached_runtime = _load_cached_generated_runtime(model)
+            if cached_runtime is None:
+                lowered = lower_membrane_model_with_sources(
+                    model,
+                    load_generated_modules=("jax", "numpy"),
+                    generated_targets=("jax", "numpy"),
+                )
         except ValueError as exc:
             raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
-    _record_membrane_source_compile_metadata(model.kind, lowered.source_results)
+    source_results = (
+        (cached_runtime,)
+        if cached_runtime is not None
+        else lowered.source_results
+    )
+    _record_membrane_source_compile_metadata(model.kind, source_results)
     with benchmark_span("runtime.prepare.membrane_compile.program_build"):
-        return cast(
-            JaxMembraneProgram,
-            JaxMembraneProgram.from_model_ir(
-                lowered.model,
+        if cached_runtime is not None:
+            return JaxMembraneProgram.from_generated_module(
+                cached_runtime.cache.loaded_modules["jax"],
+                host_module=cached_runtime.cache.loaded_modules["numpy"],
+                parameter_overrides={
+                    str(name): value for name, value in model.params.items()
+                },
                 dtype_local=model.dtype,
-                generated_module=_single_generated_module(
-                    lowered.source_results,
-                    target="jax",
-                ),
+                codegen_cache=_codegen_cache_metadata(cached_runtime.cache),
+            )
+        assert lowered is not None
+        return JaxMembraneProgram.from_model_ir(
+            lowered.model,
+            dtype_local=model.dtype,
+            generated_module=_single_generated_module(
+                lowered.source_results,
+                target="jax",
+            ),
+            host_module=_single_generated_module(
+                lowered.source_results,
+                target="numpy",
             ),
         )
+
+
+def _load_cached_generated_runtime(model: Any) -> GeneratedSourceRuntimeResult | None:
+    if model.kind == "composite":
+        return None
+    source_path = (
+        Path(model.source_path).resolve()
+        if model.source_path is not None
+        else membrane_source_path(model.kind)
+    )
+    return load_generated_source_runtime(
+        source_path,
+        model_class_name=model.source_class,
+        targets=("jax", "numpy"),
+    )
+
+
+def _codegen_cache_metadata(cache: GeneratedCodeCache) -> dict[str, Any]:
+    return {
+        "compiler": SOURCE_COMPILER_VERSION,
+        "contract": SOURCE_CONTRACT_VERSION,
+        "files": tuple(path.name for path in cache.generated_files),
+        "key": cache.key,
+        "manifest": cache.manifest_path.name,
+        "targets": tuple(sorted(cache.loaded_modules)),
+    }
 
 
 def compile_axon_membrane(
@@ -131,7 +189,10 @@ def backend_from_membrane(membrane: Any, nx: int) -> MembraneBackend:
 
 def _record_membrane_source_compile_metadata(
     kind: str,
-    source_results: tuple[SourceModelCompileResult, ...],
+    source_results: tuple[
+        SourceModelCompileResult | GeneratedSourceRuntimeResult,
+        ...,
+    ],
 ) -> None:
     if not source_results:
         return

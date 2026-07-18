@@ -10,10 +10,12 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span
 from axonscope.dispatcher.plan import DispatchGroup, DispatchItem
-from axonscope.membranes.compiler import lower_membrane_model_with_sources
+from axonscope.membranes.compiler import (
+    lower_membrane_model_with_sources,
+    membrane_source_path,
+)
 from axonscope.membranes.model import ensure_membrane_model
-from axonscope.model_ir.interpreter import NumpyModelInterpreter
-from axonscope.model_ir.program import membrane_program_from_model_ir
+from axonscope.model_ir.source import load_generated_source_runtime
 from axonscope.preparation.membrane_rows import MembraneRowPlan
 from axonscope.runtime.jax.membranes.backend import (
     GatedLeakStackMembraneBackend,
@@ -21,6 +23,9 @@ from axonscope.runtime.jax.membranes.backend import (
     membrane_static_signature,
 )
 from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+from axonscope.runtime.jax.membranes.generated_contract import (
+    load_generated_membrane_contract,
+)
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.solvers.options import SolverOptions
 
@@ -272,10 +277,10 @@ def _encode_gated_leak_group_row(
     if row_gated_gates is None:
         with benchmark_span("runtime.prepare.membrane_initial_gates"):
             if isinstance(gated_model, JaxMembraneProgram):
-                row_gated_gates = NumpyModelInterpreter(
-                    gated_model.model_ir,
-                    dtype=np_dtype,
-                ).init_gates(np.asarray([vm0], dtype=np_dtype))[0]
+                row_gated_gates = gated_model.init_gates_host(
+                    np.asarray([vm0], dtype=np_dtype),
+                    dtype_local=np_dtype,
+                )[0]
             else:
                 row_gated_gates = np.asarray(
                     gated_model.init_gates(
@@ -328,33 +333,57 @@ def _try_host_stateless_leak_member(
         "runtime.prepare.membrane_host_leak",
         membrane_kind=descriptor.kind,
     ):
-        try:
-            lowered = lower_membrane_model_with_sources(
-                descriptor,
-                load_generated_modules=(),
-                generated_targets=(),
-            )
-        except (TypeError, ValueError):
-            return None
-        model_ir = lowered.model
-        program = membrane_program_from_model_ir(model_ir)
+        source_path = (
+            membrane_source_path(descriptor.kind)
+            if descriptor.source_path is None
+            else descriptor.source_path
+        )
+        cached = load_generated_source_runtime(
+            source_path,
+            model_class_name=descriptor.source_class,
+            targets=("numpy",),
+        )
+        if cached is None:
+            try:
+                lowered = lower_membrane_model_with_sources(
+                    descriptor,
+                    load_generated_modules=("numpy",),
+                    generated_targets=("numpy",),
+                )
+            except (TypeError, ValueError):
+                return None
+            if len(lowered.source_results) != 1:
+                return None
+            module = lowered.source_results[0].cache.loaded_modules["numpy"]
+        else:
+            module = cached.cache.loaded_modules["numpy"]
+        contract = load_generated_membrane_contract(module)
         if (
-            model_ir.gates
-            or program.membrane_states
-            or model_ir.step_program is not None
-            or program.final_gate_update_mode == "post_solve_voltage"
-            or len(model_ir.currents) != 1
+            contract.gate_state_names
+            or contract.membrane_state_names
+            or contract.has_step_program
+            or contract.final_gate_update_mode == "post_solve_voltage"
+            or len(contract.currents) != 1
         ):
             return None
-        interpreter = NumpyModelInterpreter(model_ir, dtype=dtype)
+        parameters = contract.parameter_values(descriptor.params)
+        spec = contract.function("membrane_terms")
+        env = {
+            name: np.asarray(value, dtype=dtype)
+            for name, value in parameters.items()
+        }
+        if any(name not in env for name in spec.args):
+            return None
         try:
-            g, ge = interpreter.membrane_conductance_terms(
-                np.zeros((1, 0), dtype=dtype)
-            )
+            raw = module.membrane_terms(*(env[name] for name in spec.args))
         except (KeyError, TypeError, ValueError):
             return None
-        g_value = dtype.type(np.asarray(g, dtype=dtype).reshape(-1)[0])
-        ge_value = dtype.type(np.asarray(ge, dtype=dtype).reshape(-1)[0])
+        values = raw if isinstance(raw, tuple) else (raw,)
+        if len(values) != 2:
+            return None
+        g_value = dtype.type(np.asarray(values[0], dtype=dtype).reshape(-1)[0])
+        reversal = dtype.type(np.asarray(values[1], dtype=dtype).reshape(-1)[0])
+        ge_value = dtype.type(g_value * reversal)
     if not np.isfinite(g_value) or not np.isfinite(ge_value):
         return None
     return _GatedLeakMember(

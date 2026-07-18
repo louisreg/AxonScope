@@ -1285,13 +1285,12 @@ def test_jax_runtime_does_not_compile_stateful_legacy_composites():
         assert token not in text
 
 
-def test_jax_runtime_compiles_public_membranes_through_one_model_ir_route():
+def test_jax_runtime_uses_generated_cache_then_one_compiler_fallback():
     text = (
         SRC_ROOT / "runtime" / "jax" / "membranes" / "compile.py"
     ).read_text(encoding="utf-8")
     forbidden = {
         'model.kind == "axnode"',
-        'model.kind == "composite"',
         'model.kind == "hodgkin_huxley"',
         'model.kind == "passive"',
         'model.kind == "rattay_aberham"',
@@ -1301,8 +1300,10 @@ def test_jax_runtime_compiles_public_membranes_through_one_model_ir_route():
         'model.kind == "tigerholm"',
     }
 
+    assert "load_generated_source_runtime(" in text
+    assert "JaxMembraneProgram.from_generated_module(" in text
     assert "lower_membrane_model_with_sources(" in text
-    assert 'load_generated_modules=("jax",)' in text
+    assert 'load_generated_modules=("jax", "numpy")' in text
     assert sorted(term for term in forbidden if term in text) == []
 
 

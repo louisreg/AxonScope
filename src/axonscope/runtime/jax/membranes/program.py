@@ -13,9 +13,10 @@ from axonscope.model_ir.interpreter import NumpyModelInterpreter, parameter_defa
 from axonscope.utils.settings import dtype
 
 from .model_ir_lowering import JaxModelIRLowering
+from .generated_lowering import GeneratedJaxMembraneLowering
 from .generated_contract import (
-    GeneratedJaxMembraneContract,
-    load_generated_jax_membrane_contract,
+    GeneratedMembraneContract,
+    load_generated_membrane_contract,
 )
 
 
@@ -28,31 +29,48 @@ class JaxMembraneProgram:
 
     def __init__(
         self,
-        program: MembraneProgram,
+        program: MembraneProgram | None,
         *,
         dtype_local: jnp.dtype | None = None,
         generated_module: Any | None = None,
+        host_module: Any | None = None,
+        parameter_overrides: dict[str, Any] | None = None,
+        codegen_cache: dict[str, Any] | None = None,
     ) -> None:
+        if program is None and generated_module is None:
+            raise ValueError("A membrane program or generated module is required.")
         self.program = program
-        self.model_ir = program.model
+        self.model_ir = None if program is None else program.model
         self.dtype = normalize_jax_dtype(dtype_local)
-        self.generated_contract: GeneratedJaxMembraneContract | None = None
-        parameter_values = None
+        self.generated_contract: GeneratedMembraneContract | None = None
+        self._host_module = host_module
+        self._parameter_values: dict[str, Any] = {}
         if generated_module is not None:
-            self.generated_contract = load_generated_jax_membrane_contract(
+            self.generated_contract = load_generated_membrane_contract(
                 generated_module
             )
-            _validate_generated_contract(self.generated_contract, program)
-            parameter_values = self.generated_contract.parameter_values(
-                parameter_defaults(self.model_ir)
+            if program is not None:
+                _validate_generated_contract(self.generated_contract, program)
+            model_parameters = (
+                parameter_defaults(program.model)
+                if parameter_overrides is None and program is not None
+                else parameter_overrides
             )
-        self.lowering = JaxModelIRLowering(
-            self.model_ir,
-            dtype=self.dtype,
-            generated_module=generated_module,
-            generated_contract=self.generated_contract,
-            parameter_values=parameter_values,
-        )
+            parameter_values = self.generated_contract.parameter_values(
+                model_parameters
+            )
+            self._parameter_values = dict(parameter_values)
+            self.lowering = GeneratedJaxMembraneLowering(
+                generated_module,
+                self.generated_contract,
+                dtype=self.dtype,
+                parameter_values=parameter_values,
+            )
+        else:
+            assert program is not None
+            self._parameter_values = parameter_defaults(program.model)
+            self.lowering = JaxModelIRLowering(program.model, dtype=self.dtype)
+        self._codegen_cache = dict(codegen_cache or {})
         self.q10 = dtype(self._representative_q10())
         self._static_signature_cache: tuple[Any, ...] | None = None
         self._g_bar_cache: jnp.ndarray | None = None
@@ -66,11 +84,34 @@ class JaxMembraneProgram:
         *,
         dtype_local: jnp.dtype | None = None,
         generated_module: Any | None = None,
+        host_module: Any | None = None,
     ) -> "JaxMembraneProgram":
         return cls(
             membrane_program_from_model_ir(model_ir),
             dtype_local=dtype_local,
             generated_module=generated_module,
+            host_module=host_module,
+        )
+
+    @classmethod
+    def from_generated_module(
+        cls,
+        generated_module: Any,
+        *,
+        parameter_overrides: dict[str, Any],
+        dtype_local: jnp.dtype | None = None,
+        host_module: Any | None = None,
+        codegen_cache: dict[str, Any] | None = None,
+    ) -> "JaxMembraneProgram":
+        """Build directly from an autonomous generated runtime artifact."""
+
+        return cls(
+            None,
+            dtype_local=dtype_local,
+            generated_module=generated_module,
+            host_module=host_module,
+            parameter_overrides=parameter_overrides,
+            codegen_cache=codegen_cache,
         )
 
     @property
@@ -85,19 +126,29 @@ class JaxMembraneProgram:
             self.__class__.__module__,
             self.__class__.__qualname__,
             str(self.dtype),
-            self.program.structural_hash,
-            self.program.parameterized_hash,
-            self.program.final_gate_update_mode,
+            self._structural_hash,
+            self._parameterized_hash,
+            tuple(
+                (name, _parameter_signature_value(value))
+                for name, value in sorted(self._parameter_values.items())
+            ),
+            self._final_gate_update_mode,
         )
         self._static_signature_cache = signature
         return signature
 
     @property
     def source_provenance(self) -> dict[str, Any]:
+        if self.generated_contract is not None:
+            return dict(self.generated_contract.source_provenance)
+        assert self.program is not None
         return dict(self.program.source_provenance)
 
     @property
     def codegen_cache(self) -> dict[str, Any]:
+        if self._codegen_cache:
+            return dict(self._codegen_cache)
+        assert self.program is not None
         return dict(self.program.codegen_cache)
 
     @property
@@ -112,12 +163,24 @@ class JaxMembraneProgram:
                 values.append(self.lowering.parameters[name])
                 continue
             if fallback is None:
-                fallback = NumpyModelInterpreter(
-                    self.model_ir,
-                    dtype=np.float32,
-                ).conductances(
-                    np.zeros((1, len(self.program.gate_state_names)), dtype=np.float32)
-                )[0]
+                if self.model_ir is None:
+                    gates = jnp.zeros(
+                        (1, len(self.generated_contract.gate_state_names)),
+                        dtype=self.dtype,
+                    )
+                    state = self.lowering.init_membrane_state(
+                        jnp.zeros((1,), dtype=self.dtype)
+                    )
+                    fallback = np.asarray(
+                        self.lowering.conductances(gates, state=state)[0]
+                    )
+                else:
+                    fallback = NumpyModelInterpreter(
+                        self.model_ir,
+                        dtype=np.float32,
+                    ).conductances(
+                        np.zeros((1, len(self.program.gate_state_names)), dtype=np.float32)
+                    )[0]
             values.append(jnp.asarray(fallback[index], dtype=self.dtype))
         if not values:
             out = jnp.zeros((0,), dtype=self.dtype)
@@ -151,6 +214,48 @@ class JaxMembraneProgram:
 
     def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
         return self.lowering.init_gates(V0_mV)
+
+    def init_gates_host(
+        self,
+        V0_mV: np.ndarray,
+        *,
+        dtype_local: np.dtype,
+    ) -> np.ndarray:
+        """Initialize gates through the generated NumPy companion artifact."""
+
+        if self.generated_contract is None or self._host_module is None:
+            if self.model_ir is None:
+                raise ValueError("Generated NumPy membrane module is unavailable.")
+            return NumpyModelInterpreter(
+                self.model_ir,
+                dtype=dtype_local,
+            ).init_gates(V0_mV)
+        V = np.atleast_1d(np.asarray(V0_mV, dtype=dtype_local))
+        if not self.generated_contract.gate_state_names:
+            return np.zeros((V.shape[0], 0), dtype=dtype_local)
+        spec = self.generated_contract.function("gate_terms")
+        env = {
+            name: np.asarray(value, dtype=dtype_local)
+            for name, value in self._parameter_values.items()
+        }
+        env["Vm"] = V
+        missing = tuple(name for name in spec.args if name not in env)
+        if missing:
+            raise ValueError(
+                f"Generated host gate arguments are unavailable: {missing!r}."
+            )
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            raw = self._host_module.gate_terms(*(env[name] for name in spec.args))
+        values = raw if isinstance(raw, tuple) else (raw,)
+        if len(values) != len(spec.outputs):
+            raise ValueError("Generated host gate output count is inconsistent.")
+        alpha = np.stack(
+            [np.broadcast_to(value, V.shape) for value in values[0::3]], axis=1
+        ).astype(dtype_local)
+        beta = np.stack(
+            [np.broadcast_to(value, V.shape) for value in values[1::3]], axis=1
+        ).astype(dtype_local)
+        return alpha / np.maximum(alpha + beta, np.asarray(1e-12, dtype=dtype_local))
 
     def cn_gate_update(self, g_prev: jnp.ndarray, V_mV: jnp.ndarray, dt: float) -> jnp.ndarray:
         gates = jnp.asarray(g_prev, dtype=self.dtype)
@@ -280,7 +385,7 @@ class JaxMembraneProgram:
     ) -> jnp.ndarray:
         return aggregate_columns(
             self.conductances(gates, state),
-            self.program.conductance_groups,
+            self._conductance_groups,
         )
 
     def gate_trace_matrix(
@@ -289,11 +394,11 @@ class JaxMembraneProgram:
         state: tuple[jnp.ndarray, ...] = (),
     ) -> jnp.ndarray:
         base = jnp.asarray(gates, dtype=self.dtype)
-        if not self.program.gate_trace_observable_names:
+        if not self._gate_trace_observable_names:
             return base
         extras = [
             self.lowering.observable_matrix(name, base, state=state)
-            for name in self.program.gate_trace_observable_names
+            for name in self._gate_trace_observable_names
         ]
         return jnp.concatenate([base, jnp.stack(extras, axis=1)], axis=1)
 
@@ -304,7 +409,7 @@ class JaxMembraneProgram:
         state: tuple[jnp.ndarray, ...] = (),
     ) -> jnp.ndarray:
         raw_currents = self.lowering.current_matrix(V_mV, gates, state=state)
-        return aggregate_columns(raw_currents, self.program.current_groups)
+        return aggregate_columns(raw_currents, self._current_groups)
 
     def prepare_membrane_step(
         self,
@@ -393,10 +498,30 @@ class JaxMembraneProgram:
         if self.generated_contract is not None:
             if not self.generated_contract.gate_state_names:
                 return 1.0
-            q10 = np.asarray(
-                self.lowering.q10_factors(jnp.asarray([0.0], dtype=self.dtype))
-            )
-        elif not self.model_ir.gates:
+            if self._host_module is not None:
+                spec = self.generated_contract.function("gate_terms")
+                np_dtype = np.dtype(self.dtype)
+                env = {
+                    name: np.asarray(value, dtype=np_dtype)
+                    for name, value in self._parameter_values.items()
+                }
+                env["Vm"] = np.asarray([0.0], dtype=np_dtype)
+                with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+                    raw = self._host_module.gate_terms(
+                        *(env[name] for name in spec.args)
+                    )
+                values = raw if isinstance(raw, tuple) else (raw,)
+                q10 = np.stack(
+                    [np.broadcast_to(value, (1,)) for value in values[2::3]],
+                    axis=1,
+                )
+            else:
+                q10 = np.asarray(
+                    self.lowering.q10_factors(
+                        jnp.asarray([0.0], dtype=self.dtype)
+                    )
+                )
+        elif self.model_ir is None or not self.model_ir.gates:
             return 1.0
         else:
             q10 = NumpyModelInterpreter(self.model_ir).q10_factors([0.0])
@@ -437,13 +562,52 @@ class JaxMembraneProgram:
             return self.generated_contract.membrane_state_display_names
         return self.program.membrane_state_display_names
 
+    @property
+    def _structural_hash(self) -> str:
+        if self.generated_contract is not None:
+            return self.generated_contract.structural_hash
+        assert self.program is not None
+        return self.program.structural_hash
+
+    @property
+    def _parameterized_hash(self) -> str:
+        if self.generated_contract is not None:
+            return self.generated_contract.parameterized_hash
+        assert self.program is not None
+        return self.program.parameterized_hash
+
+    @property
+    def _conductance_groups(self) -> tuple[tuple[int, ...], ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.conductance_groups
+        assert self.program is not None
+        return self.program.conductance_groups
+
+    @property
+    def _current_groups(self) -> tuple[tuple[int, ...], ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.current_groups
+        assert self.program is not None
+        return self.program.current_groups
+
+    @property
+    def _gate_trace_observable_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.gate_trace_observable_names
+        assert self.program is not None
+        return self.program.gate_trace_observable_names
+
 
 def is_jax_membrane_program_kind(model: Any, kind: str) -> bool:
-    return isinstance(model, JaxMembraneProgram) and model.program.name == kind
+    if not isinstance(model, JaxMembraneProgram):
+        return False
+    if model.generated_contract is not None:
+        return model.generated_contract.model_name == kind
+    return model.program is not None and model.program.name == kind
 
 
 def _validate_generated_contract(
-    contract: GeneratedJaxMembraneContract,
+    contract: GeneratedMembraneContract,
     program: MembraneProgram,
 ) -> None:
     expected = {
@@ -480,6 +644,13 @@ def normalize_jax_dtype(dtype_local: Any | None) -> jnp.dtype:
     if resolved == np.dtype("float64"):
         return jnp.float64
     return jnp.float32
+
+
+def _parameter_signature_value(value: Any) -> Any:
+    array = np.asarray(value)
+    if array.shape == ():
+        return array.item()
+    return (str(array.dtype), tuple(array.shape), array.tobytes())
 
 
 def aggregate_columns(

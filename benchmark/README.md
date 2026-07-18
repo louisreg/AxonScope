@@ -43,6 +43,17 @@ python benchmark/run.py \
   --dry-run
 ```
 
+`benchmark/membrane_runtime_cache.py` isolates P17 source-cache loading and
+`JaxMembraneProgram` construction for the cached Model IR reference path and
+the autonomous generated JAX/NumPy path:
+
+```bash
+MPLBACKEND=Agg python benchmark/membrane_runtime_cache.py \
+  --models hodgkin_huxley,schild97 \
+  --repeats 25 \
+  --output benchmark/results/p17_generated_runtime_cache_local/summary.json
+```
+
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
 Real execution writes timing, memory, environment, raw activation rows, and

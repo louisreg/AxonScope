@@ -9,7 +9,6 @@ import numpy as np
 
 from axonscope.benchmarking import benchmark_span, record_benchmark_metadata
 from axonscope.axons.axon import Axon
-from axonscope.model_ir.interpreter import NumpyModelInterpreter
 from axonscope.runtime.jax.membranes.backend import (
     HeterogeneousMembraneBackend,
     MembraneBackend,
@@ -310,10 +309,7 @@ def _prepare_uniform_model_ir_initial_arrays(
     _ = backend
     np_dtype = np.dtype(dtype_local)
     vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
-    gates_np = NumpyModelInterpreter(
-        membrane.model_ir,
-        dtype=np_dtype,
-    ).init_gates(vm0_np)
+    gates_np = membrane.init_gates_host(vm0_np, dtype_local=np_dtype)
     background_np = np.zeros((nx,), dtype=np_dtype)
     return (
         jnp.asarray(vm0_np, dtype=dtype_local),
@@ -336,7 +332,6 @@ def _prepare_heterogeneous_membrane_initial_arrays(
     vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
     gates_np = np.zeros((nx, backend.n_gates_max), dtype=np_dtype)
     background_np = np.zeros((nx,), dtype=np_dtype)
-    interpreters: dict[int, NumpyModelInterpreter] = {}
     for group in backend.groups:
         indices = np.asarray(group.indices, dtype=np.int64)
         if group.gate_size:
@@ -346,7 +341,6 @@ def _prepare_heterogeneous_membrane_initial_arrays(
                 local_v,
                 dtype_local=dtype_local,
                 np_dtype=np_dtype,
-                interpreters=interpreters,
             )
             gates_np[indices, : group.gate_size] = np.asarray(
                 np.broadcast_to(local_gates, (len(indices), group.gate_size)),
@@ -372,15 +366,9 @@ def _initial_gates_for_heterogeneous_group(
     *,
     dtype_local: jnp.dtype,
     np_dtype: np.dtype,
-    interpreters: dict[int, NumpyModelInterpreter],
 ) -> np.ndarray:
     if isinstance(model, JaxMembraneProgram):
-        identity = id(model)
-        interpreter = interpreters.get(identity)
-        if interpreter is None:
-            interpreter = NumpyModelInterpreter(model.model_ir, dtype=np_dtype)
-            interpreters[identity] = interpreter
-        return np.asarray(interpreter.init_gates(local_v_np), dtype=np_dtype)
+        return model.init_gates_host(local_v_np, dtype_local=np_dtype)
     local_v = jnp.asarray(local_v_np, dtype=dtype_local)
     return np.asarray(model.init_gates(local_v), dtype=np_dtype)
 

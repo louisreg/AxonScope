@@ -20,7 +20,7 @@ from axonscope.runtime.jax.membranes.backend import (
 )
 from axonscope.runtime.jax.membranes.compile import compile_membrane_model
 from axonscope.runtime.jax.membranes.generated_contract import (
-    load_generated_jax_membrane_contract,
+    load_generated_membrane_contract,
 )
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
@@ -306,7 +306,7 @@ def test_source_codegen_cache_keeps_canonical_defaults_across_overrides(tmp_path
     assert second.cache.cache_hit is True
     assert second.cache.key == first.cache.key
 
-    contract = load_generated_jax_membrane_contract(
+    contract = load_generated_membrane_contract(
         second.cache.loaded_modules["jax"]
     )
     assert contract.model_name == "passive"
@@ -2158,10 +2158,64 @@ def test_compile_membrane_model_reports_source_cache_status_to_benchmark(
         == "single_source_loaded"
         for event in events
     )
-    assert all(event.metadata["membrane_source_loaded_targets"] == ["jax"] for event in events)
+    assert all(
+        event.metadata["membrane_source_loaded_targets"] == ["jax", "numpy"]
+        for event in events
+    )
     assert events[0].metadata["membrane_source_cache_keys"] == events[1].metadata[
         "membrane_source_cache_keys"
     ]
+
+
+def test_compile_membrane_cache_hit_does_not_load_model_ir_or_parse_ast(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    model = MembraneModel("hodgkin_huxley", {})
+    first = compile_membrane_model(model)
+
+    def fail(*args, **kwargs):
+        _ = args, kwargs
+        raise AssertionError("generated runtime cache hit must not load Model IR")
+
+    monkeypatch.setattr(source_compiler, "_load_cached_model_ir", fail)
+    monkeypatch.setattr(source_compiler.ast, "parse", fail)
+    second = compile_membrane_model(model)
+
+    V = np.asarray([-70.0, -45.0], dtype=np.float32)
+    first_gates = first.init_gates_host(V, dtype_local=np.dtype(np.float32))
+    second_gates = second.init_gates_host(V, dtype_local=np.dtype(np.float32))
+    assert first.model_ir is not None
+    assert second.model_ir is None
+    np.testing.assert_allclose(second_gates, first_gates, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(
+        second.currents(jnp.asarray(V), jnp.asarray(second_gates)),
+        first.currents(jnp.asarray(V), jnp.asarray(first_gates)),
+        rtol=1e-6,
+        atol=1e-7,
+    )
+
+
+def test_generated_runtime_cache_hit_keeps_parameter_overrides_distinct(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    first = compile_membrane_model(
+        MembraneModel("passive", {"Rm": 20_000.0, "EL": -65.0})
+    )
+    second = compile_membrane_model(
+        MembraneModel("passive", {"Rm": 40_000.0, "EL": -55.0})
+    )
+    V = jnp.asarray([-70.0], dtype=jnp.float32)
+    gates = jnp.zeros((1, 0), dtype=jnp.float32)
+
+    assert first.model_ir is not None
+    assert second.model_ir is None
+    assert first.static_signature() != second.static_signature()
+    np.testing.assert_allclose(first.currents(V, gates), [-0.25], rtol=1e-6)
+    np.testing.assert_allclose(second.currents(V, gates), [-0.375], rtol=1e-6)
 
 
 def test_compile_membrane_model_returns_direct_jax_program_contract():

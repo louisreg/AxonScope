@@ -1,0 +1,26 @@
+{
+  "repeats": 25,
+  "models": {
+    "hodgkin_huxley": {
+      "cached_graph_load_median_ms": 2.0356570603325963,
+      "generated_runtime_load_median_ms": 0.7866669911891222,
+      "load_speedup": 2.587698585465632,
+      "model_ir_program_build_median_ms": 2.621556050144136,
+      "generated_program_build_median_ms": 1.0867929086089134,
+      "program_build_speedup": 2.412194659514026
+    },
+    "schild97": {
+      "cached_graph_load_median_ms": 30.063988990150392,
+      "generated_runtime_load_median_ms": 1.0368869407102466,
+      "load_speedup": 28.9944716340599,
+      "model_ir_program_build_median_ms": 27.228311984799802,
+      "generated_program_build_median_ms": 4.649786977097392,
+      "program_build_speedup": 5.855819227614799
+    }
+  },
+  "notes": [
+    "Fresh temporary codegen cache per model.",
+    "Generated modules remain imported between repeats.",
+    "Times isolate cache loading and membrane-program construction."
+  ]
+}
