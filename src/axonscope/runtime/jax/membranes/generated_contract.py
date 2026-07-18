@@ -204,6 +204,10 @@ def load_generated_membrane_contract(
     )
     if len(contract.gate_state_names) != len(contract.gate_update_modes):
         raise ValueError("Generated membrane gate metadata has inconsistent lengths.")
+    if len(contract.gate_names) != (
+        len(contract.gate_state_names) + len(contract.gate_trace_observable_names)
+    ):
+        raise ValueError("Generated membrane recorded gate names are inconsistent.")
     if len(contract.raw_current_names) != len(
         contract.conductance_parameter_names
     ):
@@ -237,13 +241,73 @@ def load_generated_membrane_contract(
         raise ValueError("Generated membrane current outputs are inconsistent.")
     if len(contract.observable_output_names) != len(contract.observables):
         raise ValueError("Generated membrane observable outputs are inconsistent.")
+    if len(contract.observable_display_names) != len(contract.observables):
+        raise ValueError("Generated membrane observable names are inconsistent.")
+    if len(contract.membrane_state_display_names) != len(
+        contract.membrane_state_names
+    ):
+        raise ValueError("Generated membrane state names are inconsistent.")
+    observable_names = {value.name for value in contract.observables}
+    if not set(contract.gate_trace_observable_names).issubset(observable_names):
+        raise ValueError("Generated membrane gate observables are inconsistent.")
     if tuple(value.name for value in contract.diagnostics) != contract.diagnostic_names:
         raise ValueError("Generated membrane diagnostic metadata is inconsistent.")
+    _validate_name_groups(
+        contract.current_names,
+        contract.current_groups,
+        raw_count=len(contract.raw_current_names),
+        label="current",
+    )
+    _validate_name_groups(
+        contract.conductance_names,
+        contract.conductance_groups,
+        raw_count=len(contract.raw_current_names),
+        label="conductance",
+    )
+    if contract.function("gate_terms").outputs != tuple(
+        item
+        for state_name in contract.gate_state_names
+        for item in (
+            f"alpha:{state_name}",
+            f"beta:{state_name}",
+            f"q10:{state_name}",
+        )
+    ):
+        raise ValueError("Generated gate-term signature is inconsistent.")
+    if len(contract.function("membrane_terms").outputs) != 2 * len(
+        contract.currents
+    ):
+        raise ValueError("Generated membrane-term signature is inconsistent.")
+    if len(contract.function("reversal_terms").outputs) != len(contract.currents):
+        raise ValueError("Generated reversal-term signature is inconsistent.")
+    if contract.function("model_step").outputs != (
+        *contract.current_output_names,
+        *contract.observable_output_names,
+    ):
+        raise ValueError("Generated model-step recording signature is inconsistent.")
+    if contract.function("init_state").outputs != contract.membrane_state_names:
+        raise ValueError("Generated initial-state signature is inconsistent.")
     if contract.function("prepare_state").outputs != contract.prepare_state_update_names:
         raise ValueError("Generated prepare-state signature is inconsistent.")
     if contract.function("finalize_state").outputs != contract.finalize_state_update_names:
         raise ValueError("Generated finalize-state signature is inconsistent.")
+    if contract.function("diagnostics").outputs != contract.diagnostic_names:
+        raise ValueError("Generated diagnostic signature is inconsistent.")
     return contract
+
+
+def _validate_name_groups(
+    names: tuple[str, ...],
+    groups: tuple[tuple[int, ...], ...],
+    *,
+    raw_count: int,
+    label: str,
+) -> None:
+    if len(names) != len(groups):
+        raise ValueError(f"Generated membrane {label} groups are inconsistent.")
+    indices = tuple(index for group in groups for index in group)
+    if len(indices) != raw_count or sorted(indices) != list(range(raw_count)):
+        raise ValueError(f"Generated membrane {label} groups are not a partition.")
 
 
 def _parameter_spec(value: Mapping[str, Any]) -> GeneratedParameterSpec:

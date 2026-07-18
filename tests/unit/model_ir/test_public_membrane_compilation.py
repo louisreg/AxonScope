@@ -6,7 +6,7 @@ from axonscope.runtime.jax.membranes.compile import compile_membrane_model
 from axonscope.runtime.jax.membranes.program import is_jax_membrane_program_kind
 
 
-def test_stateful_public_membranes_compile_through_model_ir():
+def test_stateful_public_membranes_compile_to_generated_runtime():
     cases = (
         (
             lambda: Schild94(
@@ -35,6 +35,7 @@ def test_stateful_public_membranes_compile_through_model_ir():
         membrane = compile_membrane_model(ax.layout.sections[0].membrane)
 
         assert is_jax_membrane_program_kind(membrane, kind)
+        assert membrane.model_ir is None
         assert membrane.membrane_state_specs()
         assert membrane.generated_contract is not None
         assert membrane.generated_contract.has_step_program
@@ -53,6 +54,19 @@ def test_stateful_public_membranes_compile_through_model_ir():
             "finalize_state",
             "diagnostics",
         }
+
+
+def test_stateless_public_membrane_cache_miss_does_not_retain_model_ir(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+
+    membrane = compile_membrane_model(axs.membranes.HodgkinHuxley())
+
+    assert membrane.generated_contract is not None
+    assert membrane.model_ir is None
+    assert membrane.uses_generated_model_step
 
 
 def test_stateful_dynamics_stay_out_of_axon_templates():

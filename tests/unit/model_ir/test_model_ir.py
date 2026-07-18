@@ -4,6 +4,7 @@ import ast
 import importlib.util
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -316,6 +317,25 @@ def test_source_codegen_cache_keeps_canonical_defaults_across_overrides(tmp_path
     assert contract.structural_hash == membrane_program_from_model_ir(
         second.model
     ).structural_hash
+
+
+def test_generated_contract_rejects_inconsistent_recording_groups(tmp_path):
+    compiled = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    generated = compiled.cache.loaded_modules["jax"]
+    raw_contract = dict(generated.RUNTIME_CONTRACT)
+    raw_contract["current_groups"] = ((0,), (1,), (1,))
+    invalid = SimpleNamespace(
+        RUNTIME_CONTRACT=raw_contract,
+        RUNTIME_CONTRACT_VERSION=generated.RUNTIME_CONTRACT_VERSION,
+    )
+
+    with pytest.raises(ValueError, match="current groups are not a partition"):
+        load_generated_membrane_contract(invalid)
 
 
 def test_source_codegen_adds_runtime_targets_without_rewriting_cached_artifacts(tmp_path):
@@ -2123,6 +2143,7 @@ def test_compile_membrane_model_uses_dsl_for_covered_public_builtins():
         compiled = compile_membrane_model(model)
         assert isinstance(compiled, JaxMembraneProgram)
         assert compiled.uses_generated_model_step
+        assert compiled.model_ir is None
 
 
 def test_compile_membrane_model_reports_source_cache_status_to_benchmark(
@@ -2186,7 +2207,7 @@ def test_compile_membrane_cache_hit_does_not_load_model_ir_or_parse_ast(
     V = np.asarray([-70.0, -45.0], dtype=np.float32)
     first_gates = first.init_gates_host(V, dtype_local=np.dtype(np.float32))
     second_gates = second.init_gates_host(V, dtype_local=np.dtype(np.float32))
-    assert first.model_ir is not None
+    assert first.model_ir is None
     assert second.model_ir is None
     np.testing.assert_allclose(second_gates, first_gates, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(
@@ -2211,7 +2232,7 @@ def test_generated_runtime_cache_hit_keeps_parameter_overrides_distinct(
     V = jnp.asarray([-70.0], dtype=jnp.float32)
     gates = jnp.zeros((1, 0), dtype=jnp.float32)
 
-    assert first.model_ir is not None
+    assert first.model_ir is None
     assert second.model_ir is None
     assert first.static_signature() != second.static_signature()
     np.testing.assert_allclose(first.currents(V, gates), [-0.25], rtol=1e-6)
@@ -2278,7 +2299,9 @@ def test_composite_of_model_ir_components_compiles_without_legacy_composite():
     V = jnp.linspace(-85.0, 20.0, 7, dtype=jnp.float32)
 
     assert isinstance(membrane, JaxMembraneProgram)
-    assert not membrane.uses_generated_model_step
+    assert membrane.uses_generated_model_step
+    assert membrane.model_ir is None
+    assert membrane.codegen_cache["targets"] == ("jax", "numpy")
     assert membrane.gate_names() == (
         "rattay_aberham.m",
         "rattay_aberham.h",
@@ -2295,3 +2318,48 @@ def test_composite_of_model_ir_components_compiles_without_legacy_composite():
     assert np.isfinite(np.asarray(membrane.currents(V, gates))).all()
     assert np.isfinite(np.asarray(membrane.conductance_trace_matrix(gates))).all()
     assert np.isfinite(np.asarray(membrane.ionic_current_trace_matrix(V, gates))).all()
+
+
+def test_composite_generated_runtime_cache_reuses_code_across_parameters(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("AXONSCOPE_MODEL_CODEGEN_CACHE", str(tmp_path / "codegen"))
+    first = compile_membrane_model(
+        membranes.Composite(
+            {
+                "weak": membranes.Passive(Rm=20_000.0, EL=-70.0),
+                "strong": membranes.Passive(Rm=5_000.0, EL=-60.0),
+            }
+        )
+    )
+    runtime_compile = importlib.import_module(
+        "axonscope.runtime.jax.membranes.compile"
+    )
+    monkeypatch.setattr(
+        runtime_compile,
+        "lower_membrane_model_with_sources",
+        lambda *args, **kwargs: pytest.fail(
+            "composite cache hit must not rebuild Model IR"
+        ),
+    )
+    second = compile_membrane_model(
+        membranes.Composite(
+            {
+                "weak": membranes.Passive(Rm=10_000.0, EL=-65.0),
+                "strong": membranes.Passive(Rm=2_500.0, EL=-55.0),
+            }
+        )
+    )
+
+    assert first.codegen_cache["key"] == second.codegen_cache["key"]
+    assert first.codegen_cache["files"] == second.codegen_cache["files"]
+    assert first.model_ir is None
+    assert second.model_ir is None
+    assert first.static_signature() != second.static_signature()
+    Vm = jnp.asarray([-70.0, -60.0], dtype=jnp.float32)
+    gates = jnp.zeros((2, 0), dtype=jnp.float32)
+    assert not np.allclose(
+        np.asarray(first.ionic_current_trace_matrix(Vm, gates)),
+        np.asarray(second.ionic_current_trace_matrix(Vm, gates)),
+    )

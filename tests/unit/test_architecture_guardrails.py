@@ -1424,9 +1424,10 @@ def test_jax_runtime_no_longer_has_model_ir_membrane_adapter():
     }
 
     assert not adapter_path.exists()
-    assert "JaxMembraneProgram.from_model_ir(" in compile_text
+    assert "JaxMembraneProgram.from_model_ir(" not in compile_text
+    assert "JaxMembraneProgram.from_generated_module(" in compile_text
     assert "lowered.model" in compile_text
-    assert "generated_module=" in compile_text
+    assert "missing generated targets" in compile_text
     assert "ModelIRMembrane" not in runtime_text
     for filename in runtime_modules:
         text = (SRC_ROOT / "runtime" / "jax" / filename).read_text(encoding="utf-8")

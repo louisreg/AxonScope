@@ -45,7 +45,8 @@ python benchmark/run.py \
 
 `benchmark/membrane_runtime_cache.py` isolates P17 source-cache loading and
 `JaxMembraneProgram` construction for the cached Model IR reference path and
-the autonomous generated JAX/NumPy path:
+the autonomous generated JAX/NumPy path. It also measures first-build and
+cache-hit compilation for a labelled composite membrane:
 
 ```bash
 MPLBACKEND=Agg python benchmark/membrane_runtime_cache.py \

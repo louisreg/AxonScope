@@ -890,9 +890,22 @@ runtime reconstruction path.
   routes fail on incomplete entrypoints instead of silently interpreting the
   missing operation, and generated signatures avoid unrequested current-matrix
   construction in state hooks.
-- [ ] Add the remaining recording contracts and compact inspection/result
-  metadata to `jax_model.py`; generate composite-model runtime artifacts so
-  composition no longer requires a runtime Model IR fallback.
+- [x] Audit recording and compact result metadata against the generated
+  contract. All currently public solver-recorded groups (gates, aggregated
+  currents/conductances, membrane states, and diagnostics) now load from
+  `jax_model.py`; generated loading validates display names, raw-column
+  partitions, observables, state/diagnostic outputs, and callable signatures.
+  Generic model observables remain compiler/inspection outputs until a public
+  typed `Recording` policy is deliberately introduced, rather than being
+  exposed implicitly as a P17 side effect.
+- [x] Generate one content-addressed JAX/NumPy artifact for stateless composite
+  models. Cache hits derive identity from component source keys and public
+  labels, preserve parameter overrides as runtime values, and load without
+  deserializing/recomposing Model IR or entering `JaxModelIRLowering`. The local
+  P17 probe measures `46.47 ms` for first generation and `3.71 ms` for a warm
+  Rattay-Aberham plus Passive composite build. Direct composite loading is
+  `1.96x` faster than the earlier `7.27 ms` graph-recomposition cache hit; the
+  remainder is small generated-contract and JAX-program construction overhead.
 - [x] Load single-source JAX plus NumPy host-support artifacts directly after a
   cache hit without parsing the source, deserializing `optimized_graph.json`,
   rebuilding `MembraneProgram`, or evaluating Model IR expressions. Preserve
@@ -912,11 +925,18 @@ runtime reconstruction path.
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a
   solver-specific blocking path before that contract exists.
-- [ ] Validate built-ins, stateful models, composition, parameter overrides,
-  recording labels, diagnostics, numerical equivalence, cache invalidation,
-  generated-code inspection, and cold/warm performance.
-- [ ] Remove the JAX Model IR runtime fallback once all supported contracts are
-  generated and covered.
+- [x] Validate built-ins, stateful models, composition, parameter overrides,
+  recording labels/groups, diagnostics, numerical equivalence against the
+  Model IR oracle, cache invalidation, generated-code inspection, and cold/warm
+  performance. The final focused/full local passes complete with `115 passed`
+  and `724 passed, 1 skipped`; P17 cache evidence is recorded under
+  `benchmark/results/p17_composite_generated_runtime_local_20260718/`.
+- [x] Remove the JAX Model IR production fallback. Cache misses and hits for
+  single-source stateless/stateful membranes and stateless composites now
+  construct `JaxMembraneProgram` only through autonomous generated modules;
+  missing JAX/NumPy targets fail explicitly and production programs retain no
+  Model IR graph. `JaxModelIRLowering` remains an internal numerical oracle for
+  compiler tests, not an `AxonSimulation` execution route.
 
 ### P18 - Membrane Model Completion And Validation
 

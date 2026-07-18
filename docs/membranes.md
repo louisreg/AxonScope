@@ -214,7 +214,18 @@ Conceptually, this is still one membrane description for one section. Spatial
 length and compartment count live in `Layout`. The solver composes supported
 components through the internal compiler path with aggregated public current
 and conductance names. Unsupported components fail at compile time; public
-composites do not fall back to a separate old composite runtime path.
+composites generate one content-addressed JAX/NumPy runtime artifact and do not
+fall back to either a separate composite backend or runtime Model IR lowering.
+Once generated, the component source keys and labels reload that artifact
+without deserializing or recomposing the graph. Parameter values remain runtime
+inputs, so changing them reuses the same generated code.
+
+Generated modules carry the names and column groups needed by public recording
+for gates, currents, conductances, membrane states, and diagnostics. AxonScope
+validates those groups and their callable output signatures while loading the
+module, before a solver can execute it. Model-specific generic observables are
+available to compilation and inspection but are not implicitly added as a new
+public `Recording` signal category.
 
 Composite component labels are part of the public recording identity. A mapping
 is the clearest form when labels matter:

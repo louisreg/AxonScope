@@ -258,6 +258,130 @@ def load_generated_source_runtime(
     )
 
 
+def ensure_generated_model_ir_runtime(
+    model: ModelIR,
+    *,
+    cache_identity: Any,
+    cache_root: str | os.PathLike[str] | None = None,
+    load_generated_modules: tuple[str, ...] = ("jax", "numpy"),
+    generated_targets: tuple[str, ...] = ("jax", "numpy"),
+) -> GeneratedCodeCache:
+    """Generate autonomous runtime targets for one validated compiled graph."""
+
+    model = assert_valid_model_ir(model)
+    generated_targets = _normalize_codegen_targets(
+        (*generated_targets, *load_generated_modules)
+    )
+    source_hash = structural_hash(model)
+    key = _generated_model_ir_cache_key(cache_identity)
+    root = _cache_root(cache_root)
+    directory = root / key
+    manifest_path = directory / "manifest.json"
+    generated_files = _generated_cache_files(directory, targets=generated_targets)
+    cache_hit, cache_reason = _cache_manifest_status(
+        manifest_path,
+        key=key,
+        generated_files=generated_files,
+    )
+    if not cache_hit:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "source_snapshot.py").write_text(
+            "# Generated from a validated AxonScope compiled membrane graph.\n",
+            encoding="utf-8",
+        )
+        graph_json = canonical_json(model, include_dynamic_values=True)
+        for graph_name in ("graph.json", "optimized_graph.json"):
+            (directory / graph_name).write_text(graph_json + "\n", encoding="utf-8")
+        metadata, assignments = _model_ir_codegen_inputs(model)
+        for target in generated_targets:
+            generated_path = directory / _generated_module_file_name(target)
+            generated_path.write_text(
+                _generated_module_source(
+                    model,
+                    metadata,
+                    assignments=assignments,
+                    target=target,
+                    key=key,
+                    source_hash=source_hash,
+                ),
+                encoding="utf-8",
+            )
+        manifest = {
+            "cache_key": key,
+            "compiler": SOURCE_COMPILER_VERSION,
+            "contract": SOURCE_CONTRACT_VERSION,
+            "files": [path.name for path in generated_files],
+            "kind": "compiled_model_ir",
+            "source_hash": source_hash,
+            "targets": list(generated_targets),
+        }
+        manifest_path.write_text(
+            json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return GeneratedCodeCache(
+        key=key,
+        directory=directory,
+        manifest_path=manifest_path,
+        cache_hit=cache_hit,
+        cache_reason=cache_reason,
+        generated_files=generated_files,
+        loaded_modules=_load_generated_modules(
+            generated_files,
+            key=key,
+            targets=load_generated_modules,
+        ),
+    )
+
+
+def load_generated_model_ir_runtime(
+    *,
+    cache_identity: Any,
+    cache_root: str | os.PathLike[str] | None = None,
+    targets: tuple[str, ...] = ("jax", "numpy"),
+) -> GeneratedCodeCache | None:
+    """Load targets for a compiled-graph identity without loading its graph."""
+
+    targets = _normalize_codegen_targets(targets)
+    key = _generated_model_ir_cache_key(cache_identity)
+    directory = _cache_root(cache_root) / key
+    manifest_path = directory / "manifest.json"
+    generated_files = _generated_cache_files(directory, targets=targets)
+    cache_hit, cache_reason = _cache_manifest_status(
+        manifest_path,
+        key=key,
+        generated_files=generated_files,
+    )
+    if not cache_hit:
+        return None
+    return GeneratedCodeCache(
+        key=key,
+        directory=directory,
+        manifest_path=manifest_path,
+        cache_hit=True,
+        cache_reason=cache_reason,
+        generated_files=generated_files,
+        loaded_modules=_load_generated_modules(
+            generated_files,
+            key=key,
+            targets=targets,
+        ),
+    )
+
+
+def _generated_model_ir_cache_key(cache_identity: Any) -> str:
+    return _hash_json(
+        {
+            "compiler": SOURCE_COMPILER_VERSION,
+            "contract": SOURCE_CONTRACT_VERSION,
+            "identity": cache_identity,
+            "kind": "compiled_model_ir",
+            "schema": MODEL_IR_SCHEMA_VERSION,
+            "targets": ("jax", "numpy"),
+        }
+    )
+
+
 def _source_program(
     tree: ast.Module,
     *,
@@ -3048,6 +3172,39 @@ def _generated_module_source(
     )
 
 
+def _model_ir_codegen_inputs(
+    model: ModelIR,
+) -> tuple[dict[str, Any], dict[str, Expression]]:
+    """Return source-generator inputs for an already compiled model graph."""
+
+    current_outputs = tuple(
+        (f"_current_{index}", current.current)
+        for index, current in enumerate(model.currents)
+    )
+    observable_outputs = tuple(
+        (f"_observable_{index}", observable.expression)
+        for index, observable in enumerate(model.observables)
+    )
+    metadata = {
+        "inputs": {value.name: {} for value in model.inputs},
+        "states": {value.name: {} for value in model.states},
+        "parameters": {value.name: {} for value in model.parameters},
+        "currents": {
+            f"current_{index}": {"expression": name}
+            for index, (name, _) in enumerate(current_outputs)
+        },
+        "observables": {
+            observable.name: {"expression": name}
+            for observable, (name, _) in zip(
+                model.observables,
+                observable_outputs,
+                strict=True,
+            )
+        },
+    }
+    return metadata, dict((*current_outputs, *observable_outputs))
+
+
 def _generated_runtime_contract(
     model: ModelIR,
     *,
@@ -3134,18 +3291,7 @@ def _generated_runtime_contract(
         ),
         "structural_hash": program.structural_hash,
         "parameterized_hash": program.parameterized_hash,
-        "source_provenance": {
-            key: program.source_provenance[key]
-            for key in (
-                "compiler",
-                "contract",
-                "function_names",
-                "path",
-                "schema",
-                "source_hash",
-            )
-            if key in program.source_provenance
-        },
+        "source_provenance": dict(program.source_provenance),
     }
 
 
@@ -3472,5 +3618,7 @@ __all__ = [
     "SourceModelCompileError",
     "SourceModelCompileResult",
     "compile_model_source_file",
+    "ensure_generated_model_ir_runtime",
+    "load_generated_model_ir_runtime",
     "load_generated_source_runtime",
 ]
