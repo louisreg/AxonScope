@@ -533,7 +533,6 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert call_kwargs["TOTAL"] == values["Vm"].size
     assert call_kwargs["LINEARIZE_PREVIOUS"] is False
     assert call_kwargs["grid"] == (1,)
-    assert call_kwargs["input_output_aliases"] == {1: 0}
     assert call_kwargs["vmap_flatten_elements"] is True
 
 

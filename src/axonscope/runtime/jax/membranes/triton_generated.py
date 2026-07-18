@@ -112,7 +112,6 @@ def advance_generated_membrane_terms(
         BLOCK_SIZE=int(block_size),
         num_warps=4,
         num_stages=1,
-        input_output_aliases={1: 0},
         vmap_flatten_elements=True,
     )
     return gates_out, gm, ge
