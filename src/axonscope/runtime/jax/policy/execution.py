@@ -77,7 +77,11 @@ def jax_execution_context(
             str(cache_policy.directory) if cache_policy.directory is not None else None
         ),
         jax_compilation_cache_min_compile_time_s=cache_policy.min_compile_time_s,
+        jax_compilation_cache_min_entry_size_bytes=(
+            cache_policy.min_entry_size_bytes
+        ),
         jax_compilation_cache_max_size_bytes=cache_policy.max_size_bytes,
+        jax_compilation_cache_xla_caches=cache_policy.xla_caches,
     )
 
     if policy is None:

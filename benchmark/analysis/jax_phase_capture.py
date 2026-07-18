@@ -35,6 +35,7 @@ def install_production_jax_captures(
     output_dir: Path,
     *,
     cables: tuple[str, ...],
+    platform: str,
 ) -> None:
     """Capture the first compact factorized JIT invocation for each cable."""
 
@@ -57,9 +58,14 @@ def install_production_jax_captures(
     if "double" in requested:
         import axonscope.runtime.jax.kernels.double_cable as double_cable
 
+        gpu_platform = str(platform).lower() == "gpu"
         _install_capture(
             double_cable,
-            attribute="_run_double_cable_batch_observer_integrated_scan",
+            attribute=(
+                "_run_double_cable_batch_observer_integrated_scan"
+                if gpu_platform
+                else "_run_double_cable_batch_observer_scan"
+            ),
             static_args=_DOUBLE_CABLE_STATIC_ARGS,
             label="double",
             output_dir=output_dir,

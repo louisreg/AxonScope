@@ -8,7 +8,7 @@ from pathlib import Path
 from benchmark.protocols import recruitment_amplitude_batch
 
 
-def test_triton_cache_replay_uses_two_fresh_processes(
+def test_compilation_cache_replay_uses_two_fresh_processes(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -16,9 +16,11 @@ def test_triton_cache_replay_uses_two_fresh_processes(
         [
             "--platform",
             "gpu",
+            "--cable",
+            "double",
             "--fibers-per-family",
             "2",
-            "--triton-cache-replay",
+            "--compilation-cache-replay",
             "--validate-double-cable-kernel",
             "--output",
             str(tmp_path),
@@ -44,6 +46,7 @@ def test_triton_cache_replay_uses_two_fresh_processes(
                 "bytes": 100,
                 "lines": 10,
                 "custom_calls": 1,
+                "sha256": "same-hlo",
             },
             "triton_kernel_cache": {"status": status, "key": "same"},
         }
@@ -68,23 +71,39 @@ def test_triton_cache_replay_uses_two_fresh_processes(
 
     monkeypatch.setattr(recruitment_amplitude_batch.subprocess, "run", fake_run)
 
-    assert recruitment_amplitude_batch._run_triton_cache_replay(args, tmp_path) == 0
+    assert (
+        recruitment_amplitude_batch._run_compilation_cache_replay(args, tmp_path)
+        == 0
+    )
 
     assert len(calls) == 2
     expected_cache = str(tmp_path / "triton_kernel_cache")
     assert {env["AXONSCOPE_TRITON_KERNEL_CACHE"] for _, env in calls} == {
         expected_cache
     }
+    expected_xla_cache = str(tmp_path / "jax_xla_cache")
+    assert {env["AXONSCOPE_JAX_COMPILATION_CACHE"] for _, env in calls} == {
+        expected_xla_cache
+    }
+    assert all(
+        env["AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] == "-1"
+        for _, env in calls
+    )
     assert all("--cold-only" in command for command, _ in calls)
     assert all(
         command[command.index("--policies") + 1] == "full"
         for command, _ in calls
     )
+    assert all(
+        command[command.index("--platform") + 1] == "gpu"
+        for command, _ in calls
+    )
     assert "--validate-double-cable-kernel" not in calls[0][0]
     assert "--validate-double-cable-kernel" in calls[1][0]
 
-    replay = json.loads((tmp_path / "triton_cache_replay.json").read_text())
+    replay = json.loads((tmp_path / "compilation_cache_replay.json").read_text())
     assert replay["activation_counts_match"] is True
+    assert replay["stablehlo_match"] is True
     assert replay["lower_speedup"] == 8.0
     assert [
         process["triton_kernel_cache"]["status"]

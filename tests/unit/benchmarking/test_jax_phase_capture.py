@@ -49,7 +49,11 @@ def test_production_double_cable_capture_splits_jax_cold_phases(tmp_path, monkey
         "_run_double_cable_batch_observer_integrated_scan",
         fake_kernel,
     )
-    install_production_jax_captures(tmp_path, cables=("double",))
+    install_production_jax_captures(
+        tmp_path,
+        cables=("double",),
+        platform="gpu",
+    )
 
     result = double_cable._run_double_cable_batch_observer_integrated_scan(
         backend="backend",

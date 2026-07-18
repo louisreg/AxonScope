@@ -790,11 +790,31 @@ the spans is not a gain.
     membrane/gate reconstruction at N=1024. Moving that work into Triton is a
     P17 generated-contract experiment, not another hand-written P16 solver
     specialization.
-- [ ] Evaluate JAX's persistent compilation cache for non-Triton routes under
-  `.axonscope_cache/runtime/jax/xla`. Benchmark true cross-process miss/hit,
-  trace/lower/compile/first execution, size/LRU policy, clean/disable behavior,
-  trusted sharing, cache-miss diagnostics, and interaction with the existing
-  Triton TTIR-to-PTX cache.
+- [ ] Precompile and persist reusable solver executable families instead of
+  merely caching each complete simulation after first use. Define a structural
+  compilation signature from runtime/backend and device capability, precision,
+  cable formulation, generated membrane contract, observer contract, and
+  bucketed batch/Nx/time-chunk shapes. Keep amplitudes, footprints, waveform
+  values, membrane parameter rows, and other same-shape simulation data as
+  dynamic operands so changing them does not create another executable.
+  - Use JAX's persistent compilation cache for non-Triton executable replay
+    under `.axonscope_cache/runtime/jax/xla`, together with the existing Triton
+    TTIR-to-PTX cache. Determine whether executable families can be lowered and
+    compiled eagerly when a runnable plan is finalized, before the first
+    measured simulation amplitude. Follow JAX's official persistent-cache
+    contract:
+    <https://docs.jax.dev/en/latest/persistent_compilation_cache.html>.
+  - Benchmark true cross-process miss/hit and same-signature reuse while
+    changing amplitudes, footprints, waveform values, and parameter rows.
+    Report trace/lower/compile/first execution separately, executable identity,
+    the exact reason for every specialization/cache miss, cache size/LRU,
+    clean/disable behavior, trusted sharing, and shape-bucket cardinality.
+    Explicitly test `jax_persistent_cache_min_compile_time_secs`,
+    `jax_persistent_cache_min_entry_size_bytes`, the relevant
+    `jax_persistent_cache_enable_xla_caches` GPU modes, and
+    `jax_explain_cache_misses`. Treat reuse as exact cache-key reuse over
+    non-optimized HLO, jaxlib/XLA flags, device topology, and compression; do
+    not describe structurally similar but distinct HLO programs as cache hits.
 - [ ] Benchmark async JAX scheduling only for forced heterogeneous dispatch
   groups: incompatible models, cable/Nx shapes, or temporal stimulus
   signatures. Sweep 2/4/8 groups and require device-idle evidence, bounded

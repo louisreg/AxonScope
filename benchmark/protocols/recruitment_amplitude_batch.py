@@ -154,11 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate the active Triton solver against dense NumPy solves after timing.",
     )
     parser.add_argument(
-        "--triton-cache-replay",
+        "--compilation-cache-replay",
         action="store_true",
         help=(
-            "Run two fresh GPU processes against one persistent Triton kernel cache "
-            "and compare cache-miss/cache-hit lowering."
+            "Run two fresh processes against shared persistent JAX/XLA and "
+            "Triton caches and compare cold compilation replay."
         ),
     )
     parser.add_argument(
@@ -240,8 +240,8 @@ def main(argv: list[str] | None = None) -> int:
         _write_cases(output, args, policies)
         print(f"dry-run: recruitment_amplitude_batch -> {output}")
         return 0
-    if args.triton_cache_replay:
-        return _run_triton_cache_replay(args, output)
+    if args.compilation_cache_replay:
+        return _run_compilation_cache_replay(args, output)
 
     if args.capture_jit_phases:
         from benchmark.analysis.jax_phase_capture import (
@@ -249,7 +249,11 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         cables = ("single", "double") if args.cable == "mixed" else (args.cable,)
-        install_production_jax_captures(output / "jax_phase_capture", cables=cables)
+        install_production_jax_captures(
+            output / "jax_phase_capture",
+            cables=cables,
+            platform=args.platform,
+        )
     if args.disable_batch_membrane_capability:
         from axonscope.runtime.jax.membranes.backend import (
             GatedLeakStackMembraneBackend,
@@ -303,29 +307,35 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _run_triton_cache_replay(args: argparse.Namespace, output: Path) -> int:
-    if args.platform != "gpu":
-        raise SystemExit("--triton-cache-replay requires --platform gpu.")
+def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int:
+    if args.cable == "mixed":
+        raise SystemExit("--compilation-cache-replay requires one cable route.")
 
-    cache_root = output / "triton_kernel_cache"
-    if cache_root.exists() and any(cache_root.iterdir()):
+    xla_cache_root = output / "jax_xla_cache"
+    triton_cache_root = output / "triton_kernel_cache"
+    cache_roots = (xla_cache_root, triton_cache_root)
+    if any(root.exists() and any(root.iterdir()) for root in cache_roots):
         raise SystemExit(
-            "--triton-cache-replay requires a fresh output directory; "
-            f"cache artifacts already exist under {cache_root}."
+            "--compilation-cache-replay requires a fresh output directory."
         )
 
     records: list[dict[str, Any]] = []
-    for index, (label, expected_status) in enumerate(
-        (("cache_miss", "miss"), ("cache_hit", "hit"))
-    ):
+    for index, label in enumerate(("cache_miss", "cache_replay")):
         child_output = output / label
-        command = _triton_cache_child_command(
+        command = _compilation_cache_child_command(
             args,
             child_output,
             validate=args.validate_double_cable_kernel and index == 1,
         )
+        before_xla = _cache_tree_snapshot(xla_cache_root)
+        before_triton = _cache_tree_snapshot(triton_cache_root)
         environment = os.environ.copy()
-        environment["AXONSCOPE_TRITON_KERNEL_CACHE"] = str(cache_root)
+        environment["AXONSCOPE_JAX_COMPILATION_CACHE"] = str(xla_cache_root)
+        environment["AXONSCOPE_JAX_CACHE_MIN_COMPILE_TIME_S"] = "0"
+        environment["AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES"] = "-1"
+        environment["AXONSCOPE_JAX_PERSISTENT_XLA_CACHES"] = "all"
+        environment["AXONSCOPE_TRITON_KERNEL_CACHE"] = str(triton_cache_root)
+        environment["JAX_EXPLAIN_CACHE_MISSES"] = "true"
         environment["MPLCONFIGDIR"] = str(child_output / ".matplotlib")
         completed = subprocess.run(
             command,
@@ -335,27 +345,38 @@ def _run_triton_cache_replay(args: argparse.Namespace, output: Path) -> int:
         )
         if completed.returncode:
             raise RuntimeError(
-                f"Triton cache replay child {label!r} failed with exit code "
+                f"Compilation cache replay child {label!r} failed with exit code "
                 f"{completed.returncode}."
             )
-        record = _read_triton_cache_child(child_output, label=label)
-        actual_status = record["triton_kernel_cache"]["status"]
-        if actual_status != expected_status:
-            raise RuntimeError(
-                f"Triton cache replay expected {expected_status!r} for {label!r}, "
-                f"got {actual_status!r}."
-            )
+        record = _read_compilation_cache_child(
+            child_output,
+            label=label,
+            cable=args.cable,
+        )
+        record["jax_xla_cache"] = _cache_tree_delta(
+            before_xla,
+            _cache_tree_snapshot(xla_cache_root),
+        )
+        record["triton_cache"] = _cache_tree_delta(
+            before_triton,
+            _cache_tree_snapshot(triton_cache_root),
+        )
         records.append(record)
 
     counts_match = records[0]["activation_counts"] == records[1]["activation_counts"]
     if not counts_match:
-        raise RuntimeError("Triton cache replay changed recruitment activation counts.")
+        raise RuntimeError("Compilation cache replay changed activation counts.")
 
     miss = records[0]
     hit = records[1]
+    stablehlo_match = miss["stablehlo_sha256"] == hit["stablehlo_sha256"]
+    if not stablehlo_match:
+        raise RuntimeError("Compilation replay produced different StableHLO programs.")
     payload = {
-        "cache_root": str(cache_root),
+        "jax_xla_cache_root": str(xla_cache_root),
+        "triton_cache_root": str(triton_cache_root),
         "activation_counts_match": counts_match,
+        "stablehlo_match": stablehlo_match,
         "lower_saved_s": miss["lower_s"] - hit["lower_s"],
         "lower_speedup": _ratio(miss["lower_s"], hit["lower_s"]),
         "total_cold_saved_s": miss["total_cold_s"] - hit["total_cold_s"],
@@ -365,20 +386,20 @@ def _run_triton_cache_replay(args: argparse.Namespace, output: Path) -> int:
         ),
         "processes": records,
     }
-    (output / "triton_cache_replay.json").write_text(
+    (output / "compilation_cache_replay.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    _write_triton_cache_replay_report(output, payload)
+    _write_compilation_cache_replay_report(output, payload)
     print(
-        "triton cache replay: "
+        "compilation cache replay: "
         f"lower {miss['lower_s']:.3f}s -> {hit['lower_s']:.3f}s; "
         f"cold {miss['total_cold_s']:.3f}s -> {hit['total_cold_s']:.3f}s"
     )
     return 0
 
 
-def _triton_cache_child_command(
+def _compilation_cache_child_command(
     args: argparse.Namespace,
     output: Path,
     *,
@@ -390,7 +411,7 @@ def _triton_cache_child_command(
         "--preset",
         str(args.preset),
         "--platform",
-        "gpu",
+        str(args.platform),
         "--workload",
         str(args.workload),
         "--cable",
@@ -435,12 +456,15 @@ def _triton_cache_child_command(
     return command
 
 
-def _read_triton_cache_child(output: Path, *, label: str) -> dict[str, Any]:
-    phase_path = output / "jax_phase_capture" / "double.jit_phases.json"
+def _read_compilation_cache_child(
+    output: Path,
+    *,
+    label: str,
+    cable: str,
+) -> dict[str, Any]:
+    phase_path = output / "jax_phase_capture" / f"{cable}.jit_phases.json"
     phase = json.loads(phase_path.read_text(encoding="utf-8"))
     cache_event = phase.get("triton_kernel_cache")
-    if not isinstance(cache_event, dict):
-        raise RuntimeError(f"Triton cache replay child {label!r} recorded no event.")
 
     with (output / "runs.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -462,26 +486,28 @@ def _read_triton_cache_child(output: Path, *, label: str) -> dict[str, Any]:
         "stablehlo_bytes": int(phase["stablehlo"]["bytes"]),
         "stablehlo_lines": int(phase["stablehlo"]["lines"]),
         "stablehlo_custom_calls": int(phase["stablehlo"]["custom_calls"]),
+        "stablehlo_sha256": str(phase["stablehlo"]["sha256"]),
         "triton_kernel_cache": cache_event,
     }
 
 
-def _write_triton_cache_replay_report(
+def _write_compilation_cache_replay_report(
     output: Path,
     payload: dict[str, Any],
 ) -> None:
     lines = [
-        "# Triton Persistent Cache Replay",
+        "# JAX/XLA And Triton Compilation Cache Replay",
         "",
-        "| process | cache | trace s | lower s | compile s | first exec s | cold s | wall ms |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| process | Triton | trace s | lower s | compile s | first exec s | cold s | wall ms | new XLA files |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for record in payload["processes"]:
         lines.append(
             "| {label} | {status} | {trace_s:.4f} | {lower_s:.4f} | "
             "{compile_s:.4f} | {first_execution_s:.4f} | {total_cold_s:.4f} | "
-            "{wall_ms:.1f} |".format(
-                status=record["triton_kernel_cache"]["status"],
+            "{wall_ms:.1f} | {new_xla_files} |".format(
+                status=(record["triton_kernel_cache"] or {}).get("status", "n/a"),
+                new_xla_files=record["jax_xla_cache"]["new_file_count"],
                 **record,
             )
         )
@@ -489,14 +515,44 @@ def _write_triton_cache_replay_report(
         [
             "",
             f"Activation counts match: {payload['activation_counts_match']}",
+            f"StableHLO matches: {payload['stablehlo_match']}",
             f"Lowering speedup: {payload['lower_speedup']:.3f}x",
             f"Cold-phase speedup: {payload['total_cold_speedup']:.3f}x",
         ]
     )
-    (output / "triton_cache_replay.md").write_text(
+    (output / "compilation_cache_replay.md").write_text(
         "\n".join(lines) + "\n",
         encoding="utf-8",
     )
+
+
+def _cache_tree_snapshot(root: Path) -> dict[str, int]:
+    if not root.exists():
+        return {}
+    return {
+        str(path.relative_to(root)): path.stat().st_size
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _cache_tree_delta(
+    before: dict[str, int],
+    after: dict[str, int],
+) -> dict[str, Any]:
+    new_files = sorted(set(after) - set(before))
+    changed_files = sorted(
+        path for path in set(after) & set(before) if after[path] != before[path]
+    )
+    return {
+        "file_count": len(after),
+        "bytes": sum(after.values()),
+        "new_file_count": len(new_files),
+        "new_bytes": sum(after[path] for path in new_files),
+        "changed_file_count": len(changed_files),
+        "new_files": new_files,
+        "changed_files": changed_files,
+    }
 
 
 def _ratio(numerator: float, denominator: float) -> float:
@@ -1196,7 +1252,7 @@ def _write_manifest(
         "cold_only": args.cold_only,
         "capture_jit_phases": args.capture_jit_phases,
         "validate_double_cable_kernel": args.validate_double_cable_kernel,
-        "triton_cache_replay": args.triton_cache_replay,
+        "compilation_cache_replay": args.compilation_cache_replay,
         "memory_trace": args.memory_trace,
         "profile": bool(args.profile),
         "profile_scope": args.profile_scope,

@@ -18,7 +18,9 @@ class JaxCompilationCachePolicy:
     enabled: bool
     directory: Path | None
     min_compile_time_s: float
+    min_entry_size_bytes: int
     max_size_bytes: int
+    xla_caches: str
 
 
 def configure_jax_compilation_cache(
@@ -42,7 +44,15 @@ def configure_jax_compilation_cache(
         "jax_persistent_cache_min_compile_time_secs",
         policy.min_compile_time_s,
     )
+    jax_config.update(
+        "jax_persistent_cache_min_entry_size_bytes",
+        policy.min_entry_size_bytes,
+    )
     jax_config.update("jax_compilation_cache_max_size", policy.max_size_bytes)
+    jax_config.update(
+        "jax_persistent_cache_enable_xla_caches",
+        policy.xla_caches,
+    )
     return policy
 
 
@@ -72,10 +82,27 @@ def jax_compilation_cache_policy() -> JaxCompilationCachePolicy:
             default=0.5,
             minimum=0.0,
         ),
+        min_entry_size_bytes=_environment_int(
+            "AXONSCOPE_JAX_CACHE_MIN_ENTRY_SIZE_BYTES",
+            default=0,
+            minimum=-1,
+        ),
         max_size_bytes=_environment_int(
             "AXONSCOPE_JAX_CACHE_MAX_SIZE_BYTES",
             default=2 * 1024**3,
             minimum=-1,
+        ),
+        xla_caches=_environment_choice(
+            "AXONSCOPE_JAX_PERSISTENT_XLA_CACHES",
+            default="xla_gpu_per_fusion_autotune_cache_dir",
+            choices=frozenset(
+                {
+                    "all",
+                    "none",
+                    "xla_gpu_kernel_cache_file",
+                    "xla_gpu_per_fusion_autotune_cache_dir",
+                }
+            ),
         ),
     )
 
@@ -97,6 +124,19 @@ def _environment_int(name: str, *, default: int, minimum: int) -> int:
     value = int(raw)
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}, got {value}.")
+    return value
+
+
+def _environment_choice(
+    name: str,
+    *,
+    default: str,
+    choices: frozenset[str],
+) -> str:
+    value = os.environ.get(name, default).strip().lower()
+    if value not in choices:
+        expected = ", ".join(sorted(choices))
+        raise ValueError(f"{name} must be one of {expected}; got {value!r}.")
     return value
 
 
