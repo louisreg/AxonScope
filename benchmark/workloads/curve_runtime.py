@@ -1102,9 +1102,19 @@ def _activation_values(result: Any, activation: Any, *, recording_mode: str) -> 
             observations = getattr(result, "observations", None)
             if observations is None:
                 raise RuntimeError("observer-only benchmark produced no observations.")
-            raster = observations[VM_RASTER_OBSERVATION_KEY]
+            compact = observations.get(activation.name)
+            raster = observations.get(VM_RASTER_OBSERVATION_KEY)
+            if compact is None and raster is None:
+                raise RuntimeError(
+                    "observer-only benchmark produced neither compact activation "
+                    "nor VmRaster observations."
+                )
         with benchmark_span("curve.analyze_activation.vm_raster_values"):
-            values = activation_values_from_vm_raster(raster, activation)
+            values = (
+                compact.values
+                if compact is not None
+                else activation_values_from_vm_raster(raster, activation)
+            )
     else:
         with benchmark_span("curve.analyze_activation.dense_values"):
             values = _dense_activation_values(result, activation)

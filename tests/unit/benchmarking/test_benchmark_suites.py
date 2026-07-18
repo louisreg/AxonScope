@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -20,6 +21,25 @@ from benchmark.workloads import curve_runtime
 from benchmark.run import SCRIPTS, main as run_benchmark
 from benchmark.workloads.curve_options import PRESETS, build_parser, resolved_options
 from benchmark.workloads.curve_runtime import _build_pool, _update_pool_amplitudes
+
+
+def test_curve_workload_reads_compact_activation_observation():
+    activation = SimpleNamespace(name="activation")
+    result = SimpleNamespace(
+        observations={
+            "activation": SimpleNamespace(
+                values=np.asarray([False, True, True], dtype=bool)
+            )
+        }
+    )
+
+    values = curve_runtime._activation_values(
+        result,
+        activation,
+        recording_mode="observer_only",
+    )
+
+    np.testing.assert_array_equal(values, [False, True, True])
 
 
 def _build_test_phase_pool(options, amplitudes, *, curve_context):
