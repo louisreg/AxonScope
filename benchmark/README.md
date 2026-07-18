@@ -67,6 +67,9 @@ The corresponding single-cable P100 artifacts end in
 `axs-p17-sg-single-time-{1024,4096}-dd62242`; they use the same five-amplitude,
 3000-step workload and compare against the P16 baseline artifacts for
 Naxon={1024,4096} plus the Naxon=1024 warm trace.
+The compiler-IR capture ending in `axs-p17-single-hlo-1024-7e7c7d9` attributes
+the remaining single-cable gate, conductance, and assembly fusions before the
+generated Triton experiment.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.

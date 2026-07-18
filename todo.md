@@ -955,6 +955,16 @@ runtime reconstruction path.
   model-agnostic Triton membrane operations that can be fused with temporal
   execution. Keep equations and parameters generated from the membrane source,
   not hand-written in a cable solver.
+  - The retained single-cable Naxon=1024 HLO/Perfetto evidence identifies
+    `413.5 ms` in the three-gate update (`7` generated exponentials),
+    `129.6 ms` in a separate `GE` conductance reduction, and `293.5 ms` in the
+    `Gm` plus forcing/system-assembly fusion. XLA duplicates shared channel
+    conductance arithmetic across the `Gm` and `GE` consumers. The first
+    single-cable Triton experiment should therefore replace those existing JAX
+    preparation kernels with one generated pre-solve operation that emits
+    updated gates, diagonal, and RHS while retaining the canonical cuSPARSE
+    solve. Do not add a second single-cable solver route or a model-specific
+    kernel. Artifact ends in `axs-p17-single-hlo-1024-7e7c7d9`.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a
