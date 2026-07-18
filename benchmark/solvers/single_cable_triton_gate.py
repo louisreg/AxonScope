@@ -280,15 +280,18 @@ def _build_summary(
 
 def _print_summary(rows: list[dict[str, Any]]) -> None:
     reference = {
-        int(row["batch_size"]): float(row["warm_median_s"])
+        (int(row["nx"]), int(row["batch_size"])): float(row["warm_median_s"])
         for row in rows
         if row["solver"] == "jax_tridiagonal_solve"
     }
-    print("solver,batch,block,cold_ms,warm_ms,speedup,max_abs_error")
+    print("solver,nx,batch,block,cold_ms,warm_ms,speedup,max_abs_error")
     for row in rows:
-        speedup = reference[int(row["batch_size"])] / float(row["warm_median_s"])
+        speedup = (
+            reference[(int(row["nx"]), int(row["batch_size"]))]
+            / float(row["warm_median_s"])
+        )
         print(
-            f"{row['solver']},{row['batch_size']},{row['block_b']},"
+            f"{row['solver']},{row['nx']},{row['batch_size']},{row['block_b']},"
             f"{1000.0 * float(row['cold_s']):.3f},"
             f"{1000.0 * float(row['warm_median_s']):.3f},{speedup:.3f},"
             f"{float(row['max_abs_error']):.3e}"

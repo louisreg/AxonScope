@@ -134,6 +134,15 @@ and lower/JIT time from `3.58` to `0.049 s`. Artifacts end in
 `axs-p17b-single-e2e-{base,triton}-{1024,4096}-3da043c`,
 `axs-p17b-single-threshold-{base,triton}-3da043c`, and
 `axs-p17b-single-cache-replay-1024-3da043c`.
+The validation artifact ending in `axs-p17b-single-validation-4010332` covers
+`Nx={2,17,63,127,200}` and batch tails `B={1,127,129,513,5123}`. All 25
+heterogeneous float32 systems match JAX/cuSPARSE and a float64 dense NumPy
+subset within `1.907e-5` absolute error.
+The N=1024 persistent-cache artifact also retains the P100 PTX. It confirms
+contiguous node-first batch-lane accesses, one 128-thread program per tile,
+39 `b32` plus 35 `b64` virtual registers, and no shared/local memory or
+`ld.local`/`st.local` spill traffic. The measured gate does not justify cable
+assembly fusion during the initial production replacement.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.

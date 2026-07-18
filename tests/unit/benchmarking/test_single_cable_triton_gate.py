@@ -6,6 +6,7 @@ from benchmark.solvers.single_cable_triton import dependency_skip_reason
 from benchmark.solvers import single_cable_triton
 from benchmark.solvers.single_cable_triton_gate import (
     _jax_solve_xb,
+    _print_summary,
     build_parser,
     dense_reference_subset,
     make_system_xb,
@@ -86,3 +87,29 @@ def test_gate_parser_accepts_batch_tail_and_launch_sweep():
     assert args.batch_sizes == "129,513"
     assert args.block_b == "64,128"
     assert args.dry_run is True
+
+
+def test_print_summary_keys_reference_by_nx_and_batch(capsys):
+    rows = [
+        {
+            "solver": solver,
+            "nx": nx,
+            "batch_size": 128,
+            "block_b": "" if solver == "jax_tridiagonal_solve" else 128,
+            "cold_s": 1.0,
+            "warm_median_s": warm,
+            "max_abs_error": 0.0,
+        }
+        for nx, solver, warm in (
+            (17, "jax_tridiagonal_solve", 2.0),
+            (17, "triton_tiled_thomas", 1.0),
+            (200, "jax_tridiagonal_solve", 8.0),
+            (200, "triton_tiled_thomas", 2.0),
+        )
+    ]
+
+    _print_summary(rows)
+
+    output = capsys.readouterr().out
+    assert "triton_tiled_thomas,17,128,128,1000.000,1000.000,2.000" in output
+    assert "triton_tiled_thomas,200,128,128,1000.000,2000.000,4.000" in output

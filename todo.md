@@ -1123,14 +1123,31 @@ Retain this as solve-only evidence, not an end-to-end claim. Artifact:
   `0.049 s`. Artifacts end in `axs-p17b-single-e2e-{base,triton}-{1024,4096}-3da043c`,
   `axs-p17b-single-threshold-{base,triton}-3da043c`, and
   `axs-p17b-single-cache-replay-1024-3da043c`.
-- [ ] Validate the kernel against dense NumPy and the canonical CPU/GPU solver
+- [x] Validate the kernel against dense NumPy and the canonical CPU/GPU solver
   across representative `Nx`, batch tails, heterogeneous coefficients,
   intracellular/extracellular forcing, zero stimulation, float32 precision,
   and near-threshold activation outputs.
-- [ ] Profile memory coalescing, forward/backward recurrence cost, kernel
+  The P100 matrix ending in `axs-p17b-single-validation-4010332` covers
+  `Nx={2,17,63,127,200}` and `B={1,127,129,513,5123}` with heterogeneous
+  diagonally dominant float32 systems and arbitrary RHS forcing. All 25 Triton
+  systems match JAX/cuSPARSE and a float64 dense NumPy subset with at most
+  `1.907e-5` absolute error. Arbitrary RHS covers intracellular and
+  extracellular solve-boundary forcing; the retained realistic runs cover
+  factorized extracellular input, zero amplitude, compact activation, and the
+  near-threshold bound recorded above.
+- [x] Profile memory coalescing, forward/backward recurrence cost, kernel
   count, registers/spills, compile time, and warm throughput. Only after the
   solve-only result is understood, test cable assembly inside the same kernel
   if the profile identifies a material boundary.
+  The retained N=1024 cache artifact exposes the generated P100 PTX: batch
+  lanes access contiguous node-first addresses, the custom call launches one
+  128-thread program per batch tile, and the sequential work is exactly the
+  forward/backward `Nx` Thomas recurrence. The PTX declares 39 `b32`, 35
+  `b64`, and 4 predicate virtual registers, with no shared/local memory and no
+  `ld.local`/`st.local` spill traffic. Solve-only scaling, first compile,
+  persistent replay, and realistic warm throughput are recorded above. No
+  material cable-assembly boundary is established, so do not fuse it during
+  this promotion.
 - [ ] Promote the winner by replacing the existing internal GPU single-cable
   solve, with no public policy or retained alternative route, only if repeated
   Naxon=1024/4096 runs improve the total solver interval or `run_pool` by at
