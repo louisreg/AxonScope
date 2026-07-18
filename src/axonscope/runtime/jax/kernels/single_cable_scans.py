@@ -8,7 +8,10 @@ import jax
 import jax.numpy as jnp
 
 from axonscope.runtime.jax.cable_geometry import Array, apply_diffusion_operator
-from axonscope.runtime.jax.membranes.backend import advance_stateless_membrane_terms
+from axonscope.runtime.jax.membranes.backend import (
+    advance_stateless_membrane_terms,
+    membrane_conductance_terms_with_static_gates,
+)
 from axonscope.runtime.jax.recording.observer import (
     ObserverRetention,
     ThresholdObserverState,
@@ -752,7 +755,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     linearization_gates = gates
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
-                Gm, GE = _observer_scan_membrane_conductance_terms(
+                Gm, GE = membrane_conductance_terms_with_static_gates(
                     backend,
                     linearization_gates,
                     static_scan_gates,
@@ -976,7 +979,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-                Gm, GE = _observer_scan_membrane_conductance_terms(
+                Gm, GE = membrane_conductance_terms_with_static_gates(
                     backend,
                     linearization_gates,
                     static_scan_gates,
@@ -1224,7 +1227,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-                Gm, GE = _observer_scan_membrane_conductance_terms(
+                Gm, GE = membrane_conductance_terms_with_static_gates(
                     backend,
                     linearization_gates,
                     static_scan_gates,
@@ -1482,7 +1485,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-                Gm, GE = _observer_scan_membrane_conductance_terms(
+                Gm, GE = membrane_conductance_terms_with_static_gates(
                     backend,
                     linearization_gates,
                     static_scan_gates,
@@ -1726,7 +1729,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-                Gm, GE = _observer_scan_membrane_conductance_terms(
+                Gm, GE = membrane_conductance_terms_with_static_gates(
                     backend,
                     linearization_gates,
                     static_scan_gates,

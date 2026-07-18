@@ -13,6 +13,21 @@ Array1D = jnp.ndarray  # shape (N,)
 Array2D = jnp.ndarray  # shape (N, n_gates)
 
 
+def membrane_conductance_terms_with_static_gates(
+    backend: Any,
+    gates: jnp.ndarray,
+    static_gates: jnp.ndarray | None,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Evaluate conductance terms from compact or complete gate storage."""
+
+    if static_gates is None:
+        return backend.membrane_conductance_terms(gates)
+    batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
+    if not callable(batch_terms):
+        raise TypeError("A split gate carry requires batch membrane terms.")
+    return batch_terms(gates, static_gates=static_gates)
+
+
 def advance_stateless_membrane_terms(
     backend: Any,
     *,
@@ -45,13 +60,11 @@ def advance_stateless_membrane_terms(
         )
     gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
     linearization_gates = gates if linearize_previous else gates_pred
-    if static_gates is None:
-        Gm, GE = backend.membrane_conductance_terms(linearization_gates)
-    else:
-        batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
-        if not callable(batch_terms):
-            raise TypeError("A split gate carry requires batch membrane terms.")
-        Gm, GE = batch_terms(linearization_gates, static_gates=static_gates)
+    Gm, GE = membrane_conductance_terms_with_static_gates(
+        backend,
+        linearization_gates,
+        static_gates,
+    )
     return gates_pred, Gm, GE
 
 
