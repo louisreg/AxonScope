@@ -565,6 +565,18 @@ def _run_double_cable_batch_observer_integrated_scan(
         return_node_first=use_node_first_state,
     )
 
+    gates0_scan = jnp.swapaxes(gates0, 0, 1) if use_node_first_state else gates0
+    split_scan_gates = getattr(backend, "split_scan_gates", None)
+    merge_scan_gates = getattr(backend, "merge_scan_gates", None)
+    if (
+        use_node_first_state
+        and callable(split_scan_gates)
+        and callable(merge_scan_gates)
+    ):
+        gates0_scan, static_scan_gates = split_scan_gates(gates0_scan)
+    else:
+        static_scan_gates = None
+
     def step(carry, step_inputs):
         if use_factorized_vext:
             if intracellular_current_abs_mid is None:
@@ -633,6 +645,7 @@ def _run_double_cable_batch_observer_integrated_scan(
             I_outward_abs=explicit_outward_current_abs,
             I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
+            static_gates=static_scan_gates,
         )
         Vm_new = Vi_new - Ve_new
 
@@ -717,12 +730,15 @@ def _run_double_cable_batch_observer_integrated_scan(
         (
             jnp.swapaxes(Vi0_mV, 0, 1) if use_node_first_state else Vi0_mV,
             jnp.swapaxes(Ve0_mV, 0, 1) if use_node_first_state else Ve0_mV,
-            jnp.swapaxes(gates0, 0, 1) if use_node_first_state else gates0,
+            gates0_scan,
             observer_state0,
             *state0,
         ),
         scan_inputs,
     )
+    final_gates = final_carry[2]
+    if static_scan_gates is not None:
+        final_gates = merge_scan_gates(final_gates, static_scan_gates)
     return (
         (
             jnp.swapaxes(final_carry[0], 0, 1)
@@ -735,9 +751,9 @@ def _run_double_cable_batch_observer_integrated_scan(
             else final_carry[1]
         ),
         (
-            jnp.swapaxes(final_carry[2], 0, 1)
+            jnp.swapaxes(final_gates, 0, 1)
             if use_node_first_state
-            else final_carry[2]
+            else final_gates
         ),
         tuple(final_carry[4:]),
         final_carry[3],

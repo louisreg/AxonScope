@@ -855,14 +855,32 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
         V_mV=voltage,
         dt=0.005,
     )
+    dynamic_gates, static_gates = backend.split_scan_gates(gates)
+    dynamic_updated = backend.batch_cn_gate_update(
+        g_prev=dynamic_gates,
+        V_mV=voltage,
+        dt=0.005,
+    )
     expected_gm, expected_ge = jax.vmap(
         lambda row: backend.membrane_conductance_terms_for_row(0, row)
     )(actual_gates)
     actual_gm, actual_ge = backend.batch_membrane_conductance_terms(actual_gates)
+    split_gm, split_ge = backend.batch_membrane_conductance_terms(
+        dynamic_updated,
+        static_gates=static_gates,
+    )
 
     np.testing.assert_allclose(actual_gates, expected_gates, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(
+        backend.merge_scan_gates(dynamic_updated, static_gates),
+        expected_gates,
+        rtol=1e-6,
+        atol=1e-7,
+    )
     np.testing.assert_allclose(actual_gm, expected_gm, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(split_gm, expected_gm, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(split_ge, expected_ge, rtol=1e-6, atol=1e-7)
 
 
 def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):

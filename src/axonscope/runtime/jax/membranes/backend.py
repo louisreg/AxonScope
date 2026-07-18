@@ -505,6 +505,23 @@ class GatedLeakStackMembraneBackend:
     def _gated_gates(self, gates: Array2D) -> Array2D:
         return gates[:, : self.gated_gate_count]
 
+    def split_scan_gates(self, gates: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Separate evolving gates from invariant compartment layout values."""
+
+        return (
+            gates[..., : self.gated_gate_count],
+            gates[..., self.gated_gate_count :],
+        )
+
+    def merge_scan_gates(
+        self,
+        dynamic_gates: jnp.ndarray,
+        static_gates: jnp.ndarray,
+    ) -> jnp.ndarray:
+        """Restore the canonical runtime gate array at a scan boundary."""
+
+        return jnp.concatenate([dynamic_gates, static_gates], axis=-1)
+
     def init_gates(self, V0_mV: Array1D) -> Array2D:
         gated_gates = self.gated_model.init_gates(V0_mV)
         out = jnp.zeros((self.Nx, self.n_gates_max), dtype=self.dtype)
@@ -543,9 +560,11 @@ class GatedLeakStackMembraneBackend:
             V_mV=V_mV.reshape((-1,)),
             dt=dt,
         ).reshape((*batch_shape, self.gated_gate_count))
-        return jnp.concatenate(
-            [gated_gates, g_prev[..., self.gated_gate_count :]],
-            axis=-1,
+        if int(g_prev.shape[-1]) == self.gated_gate_count:
+            return gated_gates
+        return self.merge_scan_gates(
+            gated_gates,
+            g_prev[..., self.gated_gate_count :],
         )
 
     def currents_for_row(
@@ -584,6 +603,8 @@ class GatedLeakStackMembraneBackend:
     def batch_membrane_conductance_terms(
         self,
         gates: jnp.ndarray,
+        *,
+        static_gates: jnp.ndarray | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Evaluate every compatible row through one flattened membrane call."""
 
@@ -595,9 +616,14 @@ class GatedLeakStackMembraneBackend:
         )
         gated_gm = gated_gm.reshape(batch_shape)
         gated_ge = gated_ge.reshape(batch_shape)
-        gated_mask = gates[..., self._gated_mask_col]
-        leak_gm = gates[..., self._leak_g_col]
-        leak_ge = gates[..., self._leak_ge_col]
+        if static_gates is None:
+            gated_mask = gates[..., self._gated_mask_col]
+            leak_gm = gates[..., self._leak_g_col]
+            leak_ge = gates[..., self._leak_ge_col]
+        else:
+            leak_gm = static_gates[..., 0]
+            leak_ge = static_gates[..., 1]
+            gated_mask = static_gates[..., 2]
         return (
             gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
             gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,

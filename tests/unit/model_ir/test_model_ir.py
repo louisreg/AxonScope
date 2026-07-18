@@ -522,14 +522,32 @@ def test_generated_hh_supports_model_agnostic_gated_leak_batch_capability(tmp_pa
         V_mV=voltage,
         dt=0.005,
     )
+    dynamic_gates, static_gates = backend.split_scan_gates(gates)
+    dynamic_actual = backend.batch_cn_gate_update(
+        g_prev=dynamic_gates,
+        V_mV=voltage,
+        dt=0.005,
+    )
     expected_gm, expected_ge = jax.vmap(
         lambda row: backend.membrane_conductance_terms_for_row(0, row)
     )(actual)
     actual_gm, actual_ge = backend.batch_membrane_conductance_terms(actual)
+    dynamic_gm, dynamic_ge = backend.batch_membrane_conductance_terms(
+        dynamic_actual,
+        static_gates=static_gates,
+    )
 
     np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(
+        backend.merge_scan_gates(dynamic_actual, static_gates),
+        expected,
+        rtol=1e-6,
+        atol=1e-7,
+    )
     np.testing.assert_allclose(actual_gm, expected_gm, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(dynamic_gm, expected_gm, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(dynamic_ge, expected_ge, rtol=1e-6, atol=1e-7)
 
 
 def test_source_parameter_defaults_must_include_units_for_dimensioned_values(tmp_path):

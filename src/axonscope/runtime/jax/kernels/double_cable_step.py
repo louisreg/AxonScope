@@ -73,11 +73,14 @@ def batch_membrane_conductance_terms(
     *,
     backend: Any,
     row_indices: Array,
+    static_gates: Array | None = None,
 ) -> tuple[Array, Array]:
     """Evaluate membrane conductance terms for one batched gate state."""
 
     batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
     if callable(batch_terms):
+        if static_gates is not None:
+            return batch_terms(gates, static_gates=static_gates)
         return batch_terms(gates)
     row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
     if callable(row_terms):
@@ -188,6 +191,7 @@ def solve_double_cable_batch_step(
     double_cable_block_solver: str,
     tiled_thomas_block_b: int,
     return_node_first: bool = False,
+    static_gates: Array | None = None,
 ) -> tuple[Array, Array]:
     """Solve one batched double-cable implicit step."""
 
@@ -195,6 +199,7 @@ def solve_double_cable_batch_step(
         gates_new,
         backend=backend,
         row_indices=row_indices,
+        static_gates=static_gates,
     )
     if double_cable_block_solver == "jax_triton_loop_xb":
         if linear_static_xb is None:
