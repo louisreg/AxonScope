@@ -1091,7 +1091,7 @@ kernel can replace the canonical single-cable cuSPARSE solve with a clear
 end-to-end gain. This is a benchmark gate, not permission to add a second
 production solver route.
 
-- [ ] Capture a fresh retained single-cable P100 baseline at
+- [x] Capture a fresh retained single-cable P100 baseline at
   `Naxon={1024,4096}`, `Nx=200`, five amplitudes, compact activation, and the
   existing factorized stimulus path. Record cold/warm run-pool, complete
   sweep, solver interval, cuSPARSE kernels, assembly/membrane/observer kernels,
@@ -1109,6 +1109,20 @@ NumPy and JAX/cuSPARSE equivalence with `1.907e-5` maximum absolute error. At
 compile costs `3.73 s`; later launch-width specializations cost `0.12-0.14 s`.
 Retain this as solve-only evidence, not an end-to-end claim. Artifact:
 `axs-p17b-single-thomas-gate-fc4ae5c`.
+- Fresh realistic P100 A/B runs on 2026-07-19 (`3da043c`) clear the retained
+  performance threshold. At `Naxon=1024`, median warm wall/run-pool improve
+  from `2.378/2.202 s` to `1.944/1.790 s` (`1.22x/1.23x`). At
+  `Naxon=4096`, they improve from `8.844/8.448 s` to `5.671/5.288 s`
+  (`1.56x/1.60x`); median `kernel.dispatch_jax` falls from `7.344 s` to
+  `4.321 s` and `kernel.wait` from `439.1 ms` to `310.1 ms`. Coarse
+  activation counts are identical at N=4096. At N=1024, one fiber differs at
+  exactly `225 uA`; a focused `224.9/225.0/225.1 uA` run bounds the transition
+  shift below `0.1 uA` (`<0.045%`). Raw first-process cold is worse at N=1024
+  because of Triton startup, but persistent-cache replay reduces candidate
+  wall time from `9.71 s` to `3.64 s` and the lower/JIT phase from `3.58 s` to
+  `0.049 s`. Artifacts end in `axs-p17b-single-e2e-{base,triton}-{1024,4096}-3da043c`,
+  `axs-p17b-single-threshold-{base,triton}-3da043c`, and
+  `axs-p17b-single-cache-replay-1024-3da043c`.
 - [ ] Validate the kernel against dense NumPy and the canonical CPU/GPU solver
   across representative `Nx`, batch tails, heterogeneous coefficients,
   intracellular/extracellular forcing, zero stimulation, float32 precision,

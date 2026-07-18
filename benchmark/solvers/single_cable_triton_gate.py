@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", default="quick")
     parser.add_argument("--platform", choices=("gpu",), default="gpu")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--nx", type=int, default=200)
+    parser.add_argument("--nx", default="200")
     parser.add_argument("--batch-sizes", default="5120,20480")
     parser.add_argument("--block-b", default="64,128,256")
     parser.add_argument("--warmups", type=int, default=2)
@@ -42,10 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    nx_values = _positive_ints(args.nx, name="nx")
     batch_sizes = _positive_ints(args.batch_sizes, name="batch-sizes")
     block_sizes = _positive_ints(args.block_b, name="block-b")
-    if args.nx < 2:
-        raise ValueError("--nx must be >= 2.")
+    if min(nx_values) < 2:
+        raise ValueError("--nx values must be >= 2.")
     if args.warmups < 0 or args.repeats < 1:
         raise ValueError("--warmups must be >= 0 and --repeats must be >= 1.")
 
@@ -55,7 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "script": "single_cable_triton_gate",
         "preset": args.preset,
         "platform": args.platform,
-        "nx": args.nx,
+        "nx": nx_values,
         "batch_sizes": batch_sizes,
         "block_b": block_sizes,
         "warmups": args.warmups,
@@ -75,61 +76,72 @@ def main(argv: Sequence[str] | None = None) -> int:
     import jax.numpy as jnp
 
     rows: list[dict[str, Any]] = []
-    for batch_size in batch_sizes:
-        host_system = make_system_xb(args.nx, batch_size, seed=args.seed + batch_size)
-        device_system = tuple(jnp.asarray(value) for value in host_system)
-        reference = jax.jit(_jax_solve_xb)
-        jax_times, jax_result = _time_callable(
-            lambda: reference(*device_system),
-            warmups=args.warmups,
-            repeats=args.repeats,
-        )
-        rows.append(
-            _timing_row(
-                solver="jax_tridiagonal_solve",
-                nx=args.nx,
-                batch_size=batch_size,
-                block_b=None,
-                times=jax_times,
-                max_abs_error=0.0,
-                max_rel_error=0.0,
+    for nx in nx_values:
+        for batch_size in batch_sizes:
+            host_system = make_system_xb(
+                nx,
+                batch_size,
+                seed=args.seed + nx * 100_003 + batch_size,
             )
-        )
-
-        dense_reference = dense_reference_subset(host_system, count=min(8, batch_size))
-        np.testing.assert_allclose(
-            np.asarray(jax_result)[:, : dense_reference.shape[1]],
-            dense_reference,
-            rtol=2e-5,
-            atol=2e-5,
-        )
-        for block_b in block_sizes:
-            candidate = jax.jit(
-                lambda dl, d, du, rhs, block_b=block_b: solve_tridiagonal_xb(
-                    dl, d, du, rhs, block_b=block_b
-                )
-            )
-            candidate_times, candidate_result = _time_callable(
-                lambda: candidate(*device_system),
+            device_system = tuple(jnp.asarray(value) for value in host_system)
+            reference = jax.jit(_jax_solve_xb)
+            jax_times, jax_result = _time_callable(
+                lambda: reference(*device_system),
                 warmups=args.warmups,
                 repeats=args.repeats,
             )
-            candidate_host = np.asarray(candidate_result)
-            jax_host = np.asarray(jax_result)
-            abs_error = np.abs(candidate_host - jax_host)
-            rel_error = abs_error / np.maximum(np.abs(jax_host), np.float32(1e-7))
-            np.testing.assert_allclose(candidate_host, jax_host, rtol=2e-5, atol=2e-5)
             rows.append(
                 _timing_row(
-                    solver="triton_tiled_thomas",
-                    nx=args.nx,
+                    solver="jax_tridiagonal_solve",
+                    nx=nx,
                     batch_size=batch_size,
-                    block_b=block_b,
-                    times=candidate_times,
-                    max_abs_error=float(abs_error.max(initial=0.0)),
-                    max_rel_error=float(rel_error.max(initial=0.0)),
+                    block_b=None,
+                    times=jax_times,
+                    max_abs_error=0.0,
+                    max_rel_error=0.0,
                 )
             )
+
+            dense_reference = dense_reference_subset(
+                host_system, count=min(8, batch_size)
+            )
+            np.testing.assert_allclose(
+                np.asarray(jax_result)[:, : dense_reference.shape[1]],
+                dense_reference,
+                rtol=2e-5,
+                atol=2e-5,
+            )
+            for block_b in block_sizes:
+                candidate = jax.jit(
+                    lambda dl, d, du, rhs, block_b=block_b: solve_tridiagonal_xb(
+                        dl, d, du, rhs, block_b=block_b
+                    )
+                )
+                candidate_times, candidate_result = _time_callable(
+                    lambda: candidate(*device_system),
+                    warmups=args.warmups,
+                    repeats=args.repeats,
+                )
+                candidate_host = np.asarray(candidate_result)
+                jax_host = np.asarray(jax_result)
+                abs_error = np.abs(candidate_host - jax_host)
+                rel_error = abs_error / np.maximum(
+                    np.abs(jax_host), np.float32(1e-7)
+                )
+                np.testing.assert_allclose(
+                    candidate_host, jax_host, rtol=2e-5, atol=2e-5
+                )
+                rows.append(
+                    _timing_row(
+                        solver="triton_tiled_thomas",
+                        nx=nx,
+                        batch_size=batch_size,
+                        block_b=block_b,
+                        times=candidate_times,
+                        max_abs_error=float(abs_error.max(initial=0.0)),
+                        max_rel_error=float(rel_error.max(initial=0.0)),
+                    )
+                )
 
     _write_rows(output / "runs.csv", rows)
     summary = _build_summary(config, rows, jax.devices())
@@ -247,7 +259,7 @@ def _build_summary(
     config: dict[str, Any], rows: list[dict[str, Any]], devices: Sequence[Any]
 ) -> dict[str, Any]:
     reference = {
-        int(row["batch_size"]): float(row["warm_median_s"])
+        (int(row["nx"]), int(row["batch_size"])): float(row["warm_median_s"])
         for row in rows
         if row["solver"] == "jax_tridiagonal_solve"
     }
@@ -255,7 +267,8 @@ def _build_summary(
     for row in rows:
         item = dict(row)
         item["warm_speedup_vs_jax"] = (
-            reference[int(row["batch_size"])] / float(row["warm_median_s"])
+            reference[(int(row["nx"]), int(row["batch_size"]))]
+            / float(row["warm_median_s"])
         )
         enriched.append(item)
     return {
@@ -291,4 +304,3 @@ def _positive_ints(value: str, *, name: str) -> tuple[int, ...]:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

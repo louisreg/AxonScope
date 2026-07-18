@@ -71,9 +71,18 @@ def test_custom_vmap_collapses_rows_to_one_node_first_solve(monkeypatch):
 
 def test_gate_parser_accepts_batch_tail_and_launch_sweep():
     args = build_parser().parse_args(
-        ["--batch-sizes", "129,513", "--block-b", "64,128", "--dry-run"]
+        [
+            "--nx",
+            "17,63,200",
+            "--batch-sizes",
+            "129,513",
+            "--block-b",
+            "64,128",
+            "--dry-run",
+        ]
     )
 
+    assert args.nx == "17,63,200"
     assert args.batch_sizes == "129,513"
     assert args.block_b == "64,128"
     assert args.dry_run is True

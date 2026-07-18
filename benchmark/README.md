@@ -106,7 +106,7 @@ reports first-call and warm timings across launch widths:
 python benchmark/run.py \
   --script single_cable_triton_gate \
   --platform gpu \
-  --nx 200 \
+  --nx 17,63,127,200 \
   --batch-sizes 5120,20480 \
   --block-b 64,128,256 \
   --output benchmark/results/p17b_single_cable_triton_gate
@@ -121,6 +121,19 @@ solve time from `0.773` to `0.450 ms` at `B=5120` (`1.72x`) and from `2.412` to
 `0.565 ms` at `B=20480` (`4.27x`), with `1.907e-5` maximum absolute difference.
 Its first Triton startup/compile cost was `3.73 s`, so persistent-cache replay
 and realistic temporal integration remain mandatory before promotion.
+
+The realistic P100 gate at `Naxon=1024/4096`, `Nx=200`, five amplitudes, and
+compact activation also passes the performance threshold. Median warm
+`run_pool` improves from `2.202` to `1.790 s` at N=1024 (`1.23x`) and from
+`8.448` to `5.288 s` at N=4096 (`1.60x`). At N=4096, median
+`kernel.dispatch_jax` falls from `7.344` to `4.321 s`; all five activation
+counts match. A focused N=1024 threshold run bounds the one boundary-count
+difference at `225 uA` to a transition movement below `0.1 uA`. Fresh-process
+persistent-cache replay reduces candidate wall time from `9.71` to `3.64 s`
+and lower/JIT time from `3.58` to `0.049 s`. Artifacts end in
+`axs-p17b-single-e2e-{base,triton}-{1024,4096}-3da043c`,
+`axs-p17b-single-threshold-{base,triton}-3da043c`, and
+`axs-p17b-single-cache-replay-1024-3da043c`.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
