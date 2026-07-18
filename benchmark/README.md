@@ -78,6 +78,9 @@ behind a guard that rejects JAX fallback. A subsequent diagonal/RHS fusion was
 numerically valid but performance-neutral (`-0.14%` median warm run-pool) and
 was reverted; its audit artifacts end in `axs-p17-system-smoke-10c14e2` and
 `axs-p17-system-time-1024-10c14e2`.
+Generated-kernel launch tuning is recorded in artifacts ending in
+`axs-p17-mem-b{128w4,256w4,256w8,512w8}-da19b9d`; the complete warm run-pool
+spread was only `0.26%`, so the default `256x4` launch remains fixed.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.

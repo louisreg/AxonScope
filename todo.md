@@ -991,6 +991,12 @@ runtime reconstruction path.
     `axs-p17-system-smoke-10c14e2` and `axs-p17-system-time-1024-10c14e2`.
     Keep this item open: a larger gain now requires reducing temporal/custom-
     call boundaries, not moving the final two elementwise expressions.
+  - Generated-kernel launch tuning on the same Naxon=1024 P100 workload found
+    median warm `simulation.run_pool` of `2.0648/2.0702/2.0667/2.0672 s` for
+    `BLOCK_SIZE x num_warps = 128x4/256x4/256x8/512x8`. All activation counts
+    stayed exact, but the full spread is only `0.26%`; retain the simple
+    `256x4` launch and no public/internal tuning policy. Artifacts end in
+    `axs-p17-mem-b{128w4,256w4,256w8,512w8}-da19b9d`.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a

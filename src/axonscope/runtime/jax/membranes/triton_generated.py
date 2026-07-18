@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import importlib.util
-import os
 import sys
 from typing import Any
 
@@ -18,23 +17,6 @@ from .generated_contract import load_generated_membrane_contract
 
 
 _TRITON_MODULES: dict[str, Any] = {}
-
-
-def _generated_membrane_launch_config(default_block_size: int) -> tuple[int, int]:
-    block_size = int(
-        os.environ.get(
-            "AXONSCOPE_GENERATED_TRITON_MEMBRANE_BLOCK_SIZE",
-            default_block_size,
-        )
-    )
-    num_warps = int(
-        os.environ.get("AXONSCOPE_GENERATED_TRITON_MEMBRANE_NUM_WARPS", 4)
-    )
-    if block_size < 1:
-        raise ValueError("Generated Triton membrane block size must be >= 1.")
-    if num_warps not in {1, 2, 4, 8}:
-        raise ValueError("Generated Triton membrane num_warps must be 1, 2, 4, or 8.")
-    return block_size, num_warps
 
 
 def load_generated_triton_module(program: Any) -> Any | None:
@@ -88,7 +70,8 @@ def advance_generated_membrane_terms(
             "Generated Triton membrane gates must have shape "
             f"{Vm.shape} + (Ngates,), got {gate_values.shape}."
         )
-    block_size, num_warps = _generated_membrane_launch_config(block_size)
+    if int(block_size) < 1:
+        raise ValueError("block_size must be >= 1.")
 
     contract = load_generated_membrane_contract(module)
     kernel_spec = contract.function("advance_gates_and_membrane_terms_kernel")
@@ -127,8 +110,9 @@ def advance_generated_membrane_terms(
         TOTAL=total,
         LINEARIZE_PREVIOUS=bool(linearize_previous),
         BLOCK_SIZE=int(block_size),
-        num_warps=num_warps,
+        num_warps=4,
         num_stages=1,
+        input_output_aliases={1: 0},
         vmap_flatten_elements=True,
     )
     return gates_out, gm, ge
