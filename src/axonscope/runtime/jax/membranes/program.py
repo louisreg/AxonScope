@@ -50,6 +50,7 @@ class JaxMembraneProgram:
             self.model_ir,
             dtype=self.dtype,
             generated_module=generated_module,
+            generated_contract=self.generated_contract,
             parameter_values=parameter_values,
         )
         self.q10 = dtype(self._representative_q10())
@@ -389,9 +390,16 @@ class JaxMembraneProgram:
         return jnp.zeros((int(Nx),), dtype=self.dtype)
 
     def _representative_q10(self) -> float:
-        if not self.model_ir.gates:
+        if self.generated_contract is not None:
+            if not self.generated_contract.gate_state_names:
+                return 1.0
+            q10 = np.asarray(
+                self.lowering.q10_factors(jnp.asarray([0.0], dtype=self.dtype))
+            )
+        elif not self.model_ir.gates:
             return 1.0
-        q10 = NumpyModelInterpreter(self.model_ir).q10_factors([0.0])
+        else:
+            q10 = NumpyModelInterpreter(self.model_ir).q10_factors([0.0])
         if q10.shape[1] == 0:
             return 1.0
         first = float(q10[0, 0])

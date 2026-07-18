@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v1"
+JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,12 +24,37 @@ class GeneratedParameterSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class GeneratedQuantitySpec:
+    """Typed quantity metadata for one generated runtime value."""
+
+    name: str
+    unit: str
+    dtype: str
+    shape: tuple[int | str, ...]
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedFunctionSpec:
+    """Positional signature of one pure generated runtime entrypoint."""
+
+    args: tuple[str, ...]
+    outputs: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GeneratedJaxMembraneContract:
     """Model-specific facts required by the JAX runtime after generation."""
 
     version: str
     model_name: str
+    inputs: tuple[GeneratedQuantitySpec, ...]
     parameters: tuple[GeneratedParameterSpec, ...]
+    states: tuple[GeneratedQuantitySpec, ...]
+    currents: tuple[GeneratedQuantitySpec, ...]
+    observables: tuple[GeneratedQuantitySpec, ...]
+    diagnostics: tuple[GeneratedQuantitySpec, ...]
+    functions: Mapping[str, GeneratedFunctionSpec]
     gate_state_names: tuple[str, ...]
     gate_update_modes: tuple[str, ...]
     membrane_state_names: tuple[str, ...]
@@ -80,6 +105,16 @@ class GeneratedJaxMembraneContract:
         values.update({str(name): value for name, value in overrides.items()})
         return values
 
+    def function(self, name: str) -> GeneratedFunctionSpec:
+        """Return one required generated entrypoint signature."""
+
+        try:
+            return self.functions[name]
+        except KeyError as exc:
+            raise ValueError(
+                f"Generated membrane contract has no {name!r} function."
+            ) from exc
+
 
 def load_generated_jax_membrane_contract(
     module: Any,
@@ -103,7 +138,30 @@ def load_generated_jax_membrane_contract(
     contract = GeneratedJaxMembraneContract(
         version=version,
         model_name=_required_string(raw, "model_name"),
+        inputs=tuple(
+            _quantity_spec(entry) for entry in _mapping_sequence(raw, "inputs")
+        ),
         parameters=parameters,
+        states=tuple(
+            _quantity_spec(entry) for entry in _mapping_sequence(raw, "states")
+        ),
+        currents=tuple(
+            _quantity_spec(entry) for entry in _mapping_sequence(raw, "currents")
+        ),
+        observables=tuple(
+            _quantity_spec(entry) for entry in _mapping_sequence(raw, "observables")
+        ),
+        diagnostics=tuple(
+            _quantity_spec(entry) for entry in _mapping_sequence(raw, "diagnostics")
+        ),
+        functions={
+            str(name): GeneratedFunctionSpec(
+                args=_string_tuple(spec, "args"),
+                outputs=_string_tuple(spec, "outputs"),
+            )
+            for name, spec in _mapping(raw, "functions").items()
+            if isinstance(spec, Mapping)
+        },
         gate_state_names=_string_tuple(raw, "gate_state_names"),
         gate_update_modes=_string_tuple(raw, "gate_update_modes"),
         membrane_state_names=_string_tuple(raw, "membrane_state_names"),
@@ -146,6 +204,33 @@ def load_generated_jax_membrane_contract(
         contract.conductance_parameter_names
     ):
         raise ValueError("Generated membrane current metadata has inconsistent lengths.")
+    required_functions = {
+        "init_state",
+        "prepare_state",
+        "step_current_terms",
+        "finalize_state",
+        "diagnostics",
+    }
+    missing_functions = required_functions.difference(contract.functions)
+    if missing_functions:
+        names = ", ".join(sorted(missing_functions))
+        raise ValueError(f"Generated membrane contract is missing functions: {names}.")
+    state_names = tuple(value.name for value in contract.states)
+    expected_state_names = set(contract.gate_state_names) | set(
+        contract.membrane_state_names
+    )
+    if set(state_names) != expected_state_names or len(state_names) != len(
+        expected_state_names
+    ):
+        raise ValueError("Generated membrane state metadata is inconsistent.")
+    if tuple(value.name for value in contract.currents) != contract.raw_current_names:
+        raise ValueError("Generated membrane current metadata is inconsistent.")
+    if tuple(value.name for value in contract.diagnostics) != contract.diagnostic_names:
+        raise ValueError("Generated membrane diagnostic metadata is inconsistent.")
+    if contract.function("prepare_state").outputs != contract.prepare_state_update_names:
+        raise ValueError("Generated prepare-state signature is inconsistent.")
+    if contract.function("finalize_state").outputs != contract.finalize_state_update_names:
+        raise ValueError("Generated finalize-state signature is inconsistent.")
     return contract
 
 
@@ -158,6 +243,16 @@ def _parameter_spec(value: Mapping[str, Any]) -> GeneratedParameterSpec:
         role=_required_string(value, "role"),
         variability=_required_string(value, "variability"),
         default=value.get("default"),
+    )
+
+
+def _quantity_spec(value: Mapping[str, Any]) -> GeneratedQuantitySpec:
+    return GeneratedQuantitySpec(
+        name=_required_string(value, "name"),
+        unit=_required_string(value, "unit"),
+        dtype=_required_string(value, "dtype"),
+        shape=tuple(value.get("shape", ())),
+        role=_required_string(value, "role"),
     )
 
 
@@ -234,7 +329,9 @@ def _index_groups(
 
 __all__ = [
     "GeneratedJaxMembraneContract",
+    "GeneratedFunctionSpec",
     "GeneratedParameterSpec",
+    "GeneratedQuantitySpec",
     "JAX_MEMBRANE_RUNTIME_CONTRACT_VERSION",
     "load_generated_jax_membrane_contract",
 ]

@@ -883,10 +883,16 @@ runtime reconstruction path.
   canonical parameter metadata, names/groups, states, gate policies,
   diagnostics, step-hook declarations, and structural identity. Keep generated
   cache contents canonical across per-instance parameter overrides.
-- [ ] Generate parameter defaults; names/units; gate, state, current,
-  observable, and diagnostic metadata; update policy; auxiliary state and
-  initialization; stateful prepare/finalize; recording contracts; signatures;
-  and compact inspection/result metadata into `jax_model.py`.
+- [x] Generate parameter defaults; typed input/state/current/observable/
+  diagnostic metadata; gate update policy; auxiliary-state initialization;
+  stateful prepare/finalize and current terms; diagnostics; and callable
+  signatures into the v2 `jax_model.py` contract. Single-source generated
+  routes fail on incomplete entrypoints instead of silently interpreting the
+  missing operation, and generated signatures avoid unrequested current-matrix
+  construction in state hooks.
+- [ ] Add the remaining recording contracts and compact inspection/result
+  metadata to `jax_model.py`; generate composite-model runtime artifacts so
+  composition no longer requires a runtime Model IR fallback.
 - [ ] Load this generated contract directly after a cache hit without rebuilding
   `JaxMembraneProgram` from Model IR or evaluating Model IR expressions.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes

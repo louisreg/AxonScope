@@ -426,7 +426,10 @@ def test_jax_membrane_program_uses_generated_gate_and_membrane_terms(tmp_path):
 
     def fake_gate_terms(Vm, celsius):
         _ = celsius
-        return tuple(jnp.full_like(Vm, value) for value in range(1, 10))
+        return tuple(
+            jnp.full_like(Vm, value)
+            for value in (1.0, 2.0, 3.0, 4.0, 5.0, 3.0, 7.0, 8.0, 3.0)
+        )
 
     def fake_membrane_terms(m, h, n, gnabar, gkbar, gl, el, ena, ek):
         _ = m, h, n, gnabar, gkbar, gl, el, ena, ek
@@ -447,7 +450,7 @@ def test_jax_membrane_program_uses_generated_gate_and_membrane_terms(tmp_path):
         alpha, beta, q10 = membrane.lowering.gate_terms(V)
         np.testing.assert_allclose(np.asarray(alpha), [[1.0, 4.0, 7.0]] * 2)
         np.testing.assert_allclose(np.asarray(beta), [[2.0, 5.0, 8.0]] * 2)
-        np.testing.assert_allclose(np.asarray(q10), [[3.0, 6.0, 9.0]] * 2)
+        np.testing.assert_allclose(np.asarray(q10), [[3.0, 3.0, 3.0]] * 2)
         gm, ge = membrane.membrane_conductance_terms(gates)
         np.testing.assert_allclose(np.asarray(gm), [6.0, 6.0])
         np.testing.assert_allclose(np.asarray(ge), [140.0, 140.0])
@@ -1288,8 +1291,13 @@ def test_schild_sources_export_full_calcium_step_program(tmp_path):
         low, high = interpreter.init_membrane_state([-80.0, -40.0])[-1]
         assert low != pytest.approx(high)
         generated = (compiled.cache.directory / "numpy_model.py").read_text(encoding="utf-8")
-        assert "Vm_prev" not in generated
-        assert "I_ion" not in generated
+        assert "def init_state(" in generated
+        assert "def prepare_state(" in generated
+        assert "def step_current_terms(" in generated
+        assert "def finalize_state(" in generated
+        assert "def diagnostics(" in generated
+        assert "Vm_prev" in generated
+        assert "I_ion" in generated
         assert "OUTPUT_NAMES" in generated
 
 
@@ -1323,6 +1331,73 @@ def test_schild_public_descriptors_compile_source_and_keep_dynamic_kca_initial()
         assert low != pytest.approx(high)
         assert model.step_program is not None
         assert model.step_program.prepare_gate_source is LinearizationGateSource.PREVIOUS
+
+
+def test_generated_schild_stateful_entrypoints_match_model_ir_lowering(tmp_path):
+    compiled = compile_model_source_file(
+        SCHILD97_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    generated = JaxMembraneProgram.from_model_ir(
+        compiled.model,
+        generated_module=compiled.cache.loaded_modules["jax"],
+    )
+    interpreted = JaxMembraneProgram.from_model_ir(compiled.model)
+    V = jnp.asarray([-70.0, -45.0], dtype=jnp.float32)
+    V_new = V + 0.25
+
+    generated_gates = generated.init_gates(V)
+    interpreted_gates = interpreted.init_gates(V)
+    generated_state = generated.init_membrane_state(2, jnp.float32, V)
+    interpreted_state = interpreted.init_membrane_state(2, jnp.float32, V)
+    generated_ion = generated.currents(V, generated_gates, generated_state)
+    interpreted_ion = interpreted.currents(V, interpreted_gates, interpreted_state)
+    background = jnp.asarray([0.1, 0.2], dtype=jnp.float32)
+    generated_plan = generated.prepare_membrane_step(
+        V, generated_gates, generated_gates, generated_state, 0.01, generated_ion, background
+    )
+    interpreted_plan = interpreted.prepare_membrane_step(
+        V,
+        interpreted_gates,
+        interpreted_gates,
+        interpreted_state,
+        0.01,
+        interpreted_ion,
+        background,
+    )
+    generated_final = generated.finalize_membrane_step(
+        V, V_new, generated_gates, generated_gates, generated_state, generated_plan, 0.01
+    )
+    interpreted_final = interpreted.finalize_membrane_step(
+        V, V_new, interpreted_gates, interpreted_gates, interpreted_state, interpreted_plan, 0.01
+    )
+    generated_diagnostics = generated.compute_step_diagnostics(
+        V, V_new, generated_gates, generated_gates, generated_state,
+        generated_final, generated_plan, generated_ion,
+    )
+    interpreted_diagnostics = interpreted.compute_step_diagnostics(
+        V, V_new, interpreted_gates, interpreted_gates, interpreted_state,
+        interpreted_final, interpreted_plan, interpreted_ion,
+    )
+
+    for actual, expected in zip(generated_state, interpreted_state, strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-7)
+    for actual, expected in zip(generated_plan.state, interpreted_plan.state, strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+    for actual, expected in (
+        (generated_plan.total_outward_current, interpreted_plan.total_outward_current),
+        (generated_plan.explicit_outward_current, interpreted_plan.explicit_outward_current),
+        (generated_plan.correction_current, interpreted_plan.correction_current),
+    ):
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+    for actual, expected in zip(generated_final, interpreted_final, strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+    for actual, expected in zip(
+        generated_diagnostics, interpreted_diagnostics, strict=True
+    ):
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
 
 
 def test_hh_model_ir_keeps_gates_currents_and_observables_visible():

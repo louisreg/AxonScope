@@ -15,6 +15,9 @@ from axonscope.model_ir.schema import (
     ModelIR,
     StateUpdate,
 )
+from axonscope.runtime.jax.membranes.generated_contract import (
+    GeneratedJaxMembraneContract,
+)
 
 
 def evaluate_expression_jax(expr: Expression, env: dict[str, Any], *, dtype: jnp.dtype) -> Any:
@@ -67,6 +70,7 @@ class JaxModelIRLowering:
         *,
         dtype: jnp.dtype,
         generated_module: Any | None = None,
+        generated_contract: GeneratedJaxMembraneContract | None = None,
         parameter_values: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
@@ -86,6 +90,7 @@ class JaxModelIRLowering:
         self.membrane_state_names = self.program.membrane_state_names
         self.state_names = self.gate_state_names
         self.generated_module = generated_module
+        self.generated_contract = generated_contract
         self.generated_arg_names = _generated_names(generated_module, "ARG_NAMES")
         self.generated_output_names = _generated_names(generated_module, "OUTPUT_NAMES")
         self.generated_output_index = {
@@ -229,6 +234,13 @@ class JaxModelIRLowering:
     ) -> tuple[jnp.ndarray, ...]:
         V = jnp.atleast_1d(jnp.asarray(V0_mV, dtype=self.dtype))
         env = self._base_env(V, parameters=parameters)
+        generated = self._generated_runtime_outputs(
+            "init_state",
+            env=env,
+            node_count=V.shape[0],
+        )
+        if generated is not None:
+            return tuple(generated[name] for name in self.membrane_state_names)
         values: list[jnp.ndarray] = []
         for state in self.membrane_states:
             if state.initial is None:
@@ -277,6 +289,15 @@ class JaxModelIRLowering:
         gates_arr = jnp.asarray(gates, dtype=self.dtype)
         node_count = int(gates_arr.shape[0]) if gates_arr.ndim else 1
         env = self._state_env(gates_arr, state=state, parameters=parameters)
+        generated = self._generated_term_outputs(
+            function_name="membrane_terms",
+            arg_names=self.generated_membrane_arg_names,
+            output_names=self.generated_membrane_output_names,
+            env=env,
+            node_count=node_count,
+        )
+        if generated is not None:
+            return _stack_columns(list(generated[0::2]), node_count, self.dtype)
         cols = [
             _as_node_vector(
                 evaluate_expression_jax(current.conductance, env, dtype=self.dtype),
@@ -381,15 +402,27 @@ class JaxModelIRLowering:
         env: dict[str, Any],
         node_count: int,
     ) -> tuple[jnp.ndarray, ...] | None:
-        if self.generated_module is None or any(name not in env for name in arg_names):
+        if self.generated_module is None:
             return None
+        missing = tuple(name for name in arg_names if name not in env)
+        if missing:
+            raise ValueError(
+                f"Generated {function_name!r} arguments are unavailable: {missing!r}."
+            )
         function = getattr(self.generated_module, function_name, None)
-        if not callable(function) or not output_names:
+        if not callable(function):
+            raise TypeError(
+                f"Generated membrane module has no {function_name!r} function."
+            )
+        if not output_names:
             return None
         raw = function(*(env[name] for name in arg_names))
         values = raw if isinstance(raw, tuple) else (raw,)
         if len(values) != len(output_names):
-            return None
+            raise ValueError(
+                f"Generated {function_name!r} returned {len(values)} values; "
+                f"expected {len(output_names)}."
+            )
         return tuple(
             _as_node_vector(value, node_count, self.dtype)
             for value in values
@@ -427,6 +460,7 @@ class JaxModelIRLowering:
             if step.prepare_gate_source is LinearizationGateSource.PREVIOUS
             else gates_next
         )
+        prepare_required = self._generated_function_args("prepare_state")
         env = self._step_env(
             V,
             prepare_gates,
@@ -435,7 +469,9 @@ class JaxModelIRLowering:
             I_ion=ion,
             I_background=background,
             parameters=parameters,
+            required_names=prepare_required,
         )
+        term_required = self._generated_function_args("step_current_terms")
         term_env = self._step_env(
             V,
             gates_next,
@@ -444,11 +480,26 @@ class JaxModelIRLowering:
             I_ion=ion,
             I_background=background,
             parameters=parameters,
+            required_names=term_required,
         )
-        prepared_state = self._apply_state_updates(
-            state,
-            step.prepare_state_updates,
-            env,
+        generated_state = self._generated_runtime_outputs(
+            "prepare_state",
+            env=env,
+            node_count=V.shape[0],
+        )
+        prepared_state = (
+            self._merge_state_updates(state, generated_state, node_count=V.shape[0])
+            if generated_state is not None
+            else self._apply_state_updates(
+                state,
+                step.prepare_state_updates,
+                env,
+                node_count=V.shape[0],
+            )
+        )
+        generated_terms = self._generated_runtime_outputs(
+            "step_current_terms",
+            env=term_env,
             node_count=V.shape[0],
         )
         linearization_gates = (
@@ -459,19 +510,25 @@ class JaxModelIRLowering:
         return (
             prepared_state,
             linearization_gates,
-            self._step_current_term(
+            self._generated_or_interpreted_step_term(
+                "total_outward_current",
+                generated_terms,
                 step.total_outward_current,
                 term_env,
                 fallback=background + ion,
                 node_count=V.shape[0],
             ),
-            self._step_current_term(
+            self._generated_or_interpreted_step_term(
+                "explicit_outward_current",
+                generated_terms,
                 step.explicit_outward_current,
                 term_env,
                 fallback=background,
                 node_count=V.shape[0],
             ),
-            self._step_current_term(
+            self._generated_or_interpreted_step_term(
+                "correction_current",
+                generated_terms,
                 step.correction_current,
                 term_env,
                 fallback=jnp.zeros((V.shape[0],), dtype=self.dtype),
@@ -495,17 +552,35 @@ class JaxModelIRLowering:
         if step is None or not step.finalize_state_updates:
             return tuple(jnp.asarray(value, dtype=self.dtype) for value in prepared_state)
         V_new = jnp.atleast_1d(jnp.asarray(V_mV_new, dtype=self.dtype))
+        finalize_required = self._generated_function_args("finalize_state")
+        finalize_ion = (
+            self.currents(V_new, gates_new, state=prepared_state)
+            if finalize_required is None or "I_ion" in finalize_required
+            else jnp.zeros((V_new.shape[0],), dtype=self.dtype)
+        )
         env = self._step_env(
             V_new,
             jnp.asarray(gates_new, dtype=self.dtype),
             state=prepared_state,
             dt_ms=dt_ms,
-            I_ion=self.currents(V_new, gates_new, state=prepared_state),
+            I_ion=finalize_ion,
             I_background=jnp.zeros((V_new.shape[0],), dtype=self.dtype),
             parameters=parameters,
             V_prev=jnp.atleast_1d(jnp.asarray(V_mV_prev, dtype=self.dtype)),
+            required_names=finalize_required,
         )
         _ = gates_prev, state_prev
+        generated = self._generated_runtime_outputs(
+            "finalize_state",
+            env=env,
+            node_count=V_new.shape[0],
+        )
+        if generated is not None:
+            return self._merge_state_updates(
+                prepared_state,
+                generated,
+                node_count=V_new.shape[0],
+            )
         return self._apply_state_updates(
             prepared_state,
             step.finalize_state_updates,
@@ -531,6 +606,7 @@ class JaxModelIRLowering:
             return ()
         V_prev = jnp.atleast_1d(jnp.asarray(V_mV_prev, dtype=self.dtype))
         V_new = jnp.atleast_1d(jnp.asarray(V_mV_new, dtype=self.dtype))
+        diagnostic_required = self._generated_function_args("diagnostics")
         env = self._step_env(
             V_new,
             jnp.asarray(gates_new, dtype=self.dtype),
@@ -540,10 +616,18 @@ class JaxModelIRLowering:
             I_background=jnp.zeros((V_new.shape[0],), dtype=self.dtype),
             parameters=parameters,
             V_prev=V_prev,
+            required_names=diagnostic_required,
         )
         _ = gates_prev, state_prev, state_new
         env["Vm_prev"] = V_prev
         env["Vm_new"] = V_new
+        generated = self._generated_runtime_outputs(
+            "diagnostics",
+            env=env,
+            node_count=V_new.shape[0],
+        )
+        if generated is not None:
+            return tuple(generated[name] for name in self.program.diagnostic_names)
         return tuple(
             _as_node_vector(
                 evaluate_expression_jax(diagnostic.expression, env, dtype=self.dtype),
@@ -714,6 +798,7 @@ class JaxModelIRLowering:
         I_background: Any,
         parameters: dict[str, Any] | None = None,
         V_prev: jnp.ndarray | None = None,
+        required_names: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         env = self._state_env(gates, state=state, V=V, parameters=parameters)
         env["Vm_new"] = V
@@ -721,12 +806,20 @@ class JaxModelIRLowering:
         env["dt"] = jnp.asarray(dt_ms, dtype=self.dtype)
         env["I_ion"] = _as_node_vector(I_ion, V.shape[0], self.dtype)
         env["I_background"] = _as_node_vector(I_background, V.shape[0], self.dtype)
-        currents = self.current_matrix(V, gates, state=state, parameters=parameters)
-        for index, name in enumerate(self.model_current_names):
-            if name not in env:
-                env[name] = currents[:, index]
-            else:
-                env[name] = env[name] + currents[:, index]
+        required_currents = (
+            set(self.model_current_names)
+            if required_names is None
+            else set(self.model_current_names).intersection(required_names)
+        )
+        if required_currents:
+            currents = self.current_matrix(V, gates, state=state, parameters=parameters)
+            for index, name in enumerate(self.model_current_names):
+                if name not in required_currents:
+                    continue
+                if name not in env:
+                    env[name] = currents[:, index]
+                else:
+                    env[name] = env[name] + currents[:, index]
         return env
 
     @property
@@ -758,6 +851,82 @@ class JaxModelIRLowering:
             state_values[state_name] = value
             env[state_name] = value
         return tuple(state_values[name] for name in self.membrane_state_names)
+
+    def _merge_state_updates(
+        self,
+        state: tuple[Any, ...],
+        updates: dict[str, jnp.ndarray],
+        *,
+        node_count: int,
+    ) -> tuple[jnp.ndarray, ...]:
+        state_values = {
+            name: _as_node_vector(value, node_count, self.dtype)
+            for name, value in zip(self.membrane_state_names, state, strict=True)
+        }
+        state_values.update(updates)
+        return tuple(state_values[name] for name in self.membrane_state_names)
+
+    def _generated_runtime_outputs(
+        self,
+        function_name: str,
+        *,
+        env: dict[str, Any],
+        node_count: int,
+    ) -> dict[str, jnp.ndarray] | None:
+        if self.generated_module is None and self.generated_contract is None:
+            return None
+        if self.generated_module is None or self.generated_contract is None:
+            raise ValueError(
+                "Generated membrane module and contract must be loaded together."
+            )
+        spec = self.generated_contract.function(function_name)
+        missing = tuple(name for name in spec.args if name not in env)
+        if missing:
+            raise ValueError(
+                f"Generated {function_name!r} arguments are unavailable: {missing!r}."
+            )
+        function = getattr(self.generated_module, function_name, None)
+        if not callable(function):
+            raise TypeError(
+                f"Generated membrane module has no {function_name!r} function."
+            )
+        raw = function(*(env[name] for name in spec.args))
+        values = raw if isinstance(raw, tuple) else (raw,)
+        if not spec.outputs:
+            return {}
+        if len(values) != len(spec.outputs):
+            raise ValueError(
+                f"Generated {function_name!r} returned {len(values)} values; "
+                f"expected {len(spec.outputs)}."
+            )
+        return {
+            name: _as_node_vector(value, node_count, self.dtype)
+            for name, value in zip(spec.outputs, values, strict=True)
+        }
+
+    def _generated_function_args(self, name: str) -> tuple[str, ...] | None:
+        if self.generated_contract is None:
+            return None
+        return self.generated_contract.function(name).args
+
+    def _generated_or_interpreted_step_term(
+        self,
+        name: str,
+        generated: dict[str, jnp.ndarray] | None,
+        expression: Expression | None,
+        env: dict[str, Any],
+        *,
+        fallback: Any,
+        node_count: int,
+    ) -> jnp.ndarray:
+        if generated is not None and name in generated:
+            return generated[name]
+        return self._step_current_term(
+            expression,
+            env,
+            fallback=fallback,
+            node_count=node_count,
+        )
 
     def _step_current_term(
         self,
