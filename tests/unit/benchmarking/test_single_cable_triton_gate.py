@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from benchmark.solvers.single_cable_triton import dependency_skip_reason
+from benchmark.solvers import single_cable_triton
 from benchmark.solvers.single_cable_triton_gate import (
     _jax_solve_xb,
     build_parser,
@@ -43,6 +44,29 @@ def test_batched_jax_reference_matches_dense_node_first_layout():
     actual = _jax_solve_xb(*(jnp.asarray(value) for value in system))
 
     np.testing.assert_allclose(np.asarray(actual), dense, rtol=2e-5, atol=2e-5)
+
+
+def test_custom_vmap_collapses_rows_to_one_node_first_solve(monkeypatch):
+    import jax
+    import jax.numpy as jnp
+
+    calls = []
+
+    def fake_solve(dl, d, du, rhs, *, block_b=128):
+        del dl, d, du, block_b
+        calls.append(rhs.shape)
+        return rhs + 3.0
+
+    monkeypatch.setattr(single_cable_triton, "solve_tridiagonal_xb", fake_solve)
+    rows = jnp.arange(20, dtype=jnp.float32).reshape((4, 5))
+    actual = jax.vmap(single_cable_triton.solve_tridiagonal_row)(
+        rows, rows + 10.0, rows, rows
+    )
+
+    np.testing.assert_array_equal(np.asarray(actual), np.asarray(rows + 3.0))
+    # custom_vmap traces the scalar implementation to establish its output tree,
+    # then emits the node-first batched rule used by the enclosing vmap.
+    assert calls[-1] == (5, 4)
 
 
 def test_gate_parser_accepts_batch_tail_and_launch_sweep():

@@ -161,6 +161,60 @@ def solve_tridiagonal_xb(
     return solution
 
 
+def solve_tridiagonal_row(dl: Any, d: Any, du: Any, rhs: Any) -> Any:
+    """Solve one row while collapsing an enclosing axon vmap to one GPU call."""
+
+    return _solve_tridiagonal_row_custom_vmap(dl, d, du, rhs)
+
+
+def _solve_tridiagonal_row_impl(dl: Any, d: Any, du: Any, rhs: Any) -> Any:
+    import jax.numpy as jnp
+
+    values = solve_tridiagonal_xb(
+        jnp.asarray(dl)[:, None],
+        jnp.asarray(d)[:, None],
+        jnp.asarray(du)[:, None],
+        jnp.asarray(rhs)[:, None],
+    )
+    return values[:, 0]
+
+
+try:
+    from jax import custom_batching
+except ModuleNotFoundError:  # pragma: no cover - JAX is a project dependency.
+    _solve_tridiagonal_row_custom_vmap = _solve_tridiagonal_row_impl
+else:
+    _solve_tridiagonal_row_custom_vmap = custom_batching.custom_vmap(
+        _solve_tridiagonal_row_impl
+    )
+
+    @_solve_tridiagonal_row_custom_vmap.def_vmap
+    def _solve_tridiagonal_row_vmap(
+        axis_size: int,
+        in_batched: tuple[bool, bool, bool, bool],
+        dl: Any,
+        d: Any,
+        du: Any,
+        rhs: Any,
+    ) -> tuple[Any, bool]:
+        del axis_size
+        if not all(in_batched):
+            raise ValueError(
+                "The benchmark Triton row solver requires every tridiagonal "
+                "operand to share the axon batch axis."
+            )
+        solution_xb = solve_tridiagonal_xb(dl.T, d.T, du.T, rhs.T)
+        return solution_xb.T, True
+
+
+def install_single_cable_scan_candidate() -> None:
+    """Install the candidate at the benchmark-only single-cable solve boundary."""
+
+    from axonscope.runtime.jax.kernels import single_cable_scans
+
+    single_cable_scans._solve_single_cable_tridiagonal_row = solve_tridiagonal_row
+
+
 def _num_warps_for_block_b(block_b: int) -> int:
     if block_b >= 128:
         return 4
@@ -169,5 +223,9 @@ def _num_warps_for_block_b(block_b: int) -> int:
     return 1
 
 
-__all__ = ["dependency_skip_reason", "solve_tridiagonal_xb"]
-
+__all__ = [
+    "dependency_skip_reason",
+    "install_single_cable_scan_candidate",
+    "solve_tridiagonal_row",
+    "solve_tridiagonal_xb",
+]

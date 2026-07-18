@@ -130,6 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated recruitment amplitudes in microamperes.",
     )
     parser.add_argument("--time-chunk-steps", type=int, default=128)
+    parser.add_argument(
+        "--single-cable-solver-candidate",
+        choices=("triton_tiled_thomas",),
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmups", type=int, default=0)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
@@ -230,6 +235,17 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--duration-ms must be > 0.")
     if args.dt_ms <= 0.0:
         raise SystemExit("--dt-ms must be > 0.")
+    if args.single_cable_solver_candidate is not None:
+        if args.platform != "gpu" or args.cable != "single":
+            raise SystemExit(
+                "--single-cable-solver-candidate requires --platform gpu "
+                "and --cable single."
+            )
+        from benchmark.solvers.single_cable_triton import (
+            install_single_cable_scan_candidate,
+        )
+
+        install_single_cable_scan_candidate()
 
     policies = _parse_policies(args.policies)
     output = Path(args.output)
@@ -476,6 +492,13 @@ def _compilation_cache_child_command(
     ]
     if args.disable_batch_membrane_capability:
         command.append("--disable-batch-membrane-capability")
+    if args.single_cable_solver_candidate is not None:
+        command.extend(
+            (
+                "--single-cable-solver-candidate",
+                str(args.single_cable_solver_candidate),
+            )
+        )
     return command
 
 
@@ -682,6 +705,9 @@ def _run_one(
                 "fibers_per_family": args.fibers_per_family,
                 "workload": args.workload,
                 "cable": args.cable,
+                "single_cable_solver_candidate": (
+                    args.single_cable_solver_candidate or "canonical"
+                ),
                 "drive_count": args.drive_count,
                 "n_axons": n_axons or args.axon_count,
                 "amplitude_count": len(args.amplitudes),
@@ -1195,6 +1221,7 @@ def _write_runs(output: Path, rows: list[dict[str, Any]]) -> None:
         "platform",
         "workload",
         "cable",
+        "single_cable_solver_candidate",
         "drive_count",
         "fibers_per_family",
         "n_axons",
@@ -1262,6 +1289,7 @@ def _write_manifest(
         "platform": args.platform,
         "workload": args.workload,
         "cable": args.cable,
+        "single_cable_solver_candidate": args.single_cable_solver_candidate,
         "drive_count": args.drive_count,
         "axon_template_policy": args.axon_template_policy,
         "mrg_template_count": args.mrg_template_count,

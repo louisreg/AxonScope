@@ -18,6 +18,17 @@ from axonscope.runtime.jax.recording.observer import (
 from .inputs import _record_vm_row
 
 
+def _solve_single_cable_tridiagonal_row(
+    dl: Array,
+    d: Array,
+    du: Array,
+    rhs: Array,
+) -> Array:
+    """Solve one row; benchmark gates may replace this single internal seam."""
+
+    return jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+
+
 def _record_matrix_row(values: Array, record_indices: Array, *, record_full: bool) -> Array:
     if record_full:
         return values
@@ -174,7 +185,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 output = _record_vm_row(
@@ -455,7 +466,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 output = _record_vm_row(
@@ -758,7 +769,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 observer_state = update_threshold_observer_state_scalar_from_tables(
@@ -982,7 +993,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 observer_state = update_threshold_observer_state_scalar_from_tables(
@@ -1230,7 +1241,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 observer_state = update_threshold_observer_state_scalar_from_tables(
@@ -1488,7 +1499,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 observer_state = update_threshold_observer_state_scalar_from_tables(
@@ -1731,7 +1742,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     - correction_current
                 )
             )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
+            Vm_new = _solve_single_cable_tridiagonal_row(dl_row, d, du_row, rhs)
 
             if stateless_vm_only:
                 observer_state = update_threshold_observer_state_scalar_from_tables(
