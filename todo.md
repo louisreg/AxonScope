@@ -914,6 +914,17 @@ runtime reconstruction path.
   from `2.62 ms` to `1.09 ms`; Schild97 moved from `30.06 ms` to `1.04 ms` and
   `27.23 ms` to `4.65 ms`, respectively. The reproducible probe lives in
   `benchmark/membrane_runtime_cache.py`.
+- [x] Keep invariant compartment layout values outside the evolving GPU scan
+  state for capability-stacked gated/leak membranes. The canonical backend now
+  carries only generated dynamic gates through the node-first double-cable
+  scan and restores the full internal gate array once per chunk. On the exact
+  P100 Naxon=1024, five-amplitude, 3000-step profile, this removes the
+  per-step `f32[74,5120,7]` gate reconstruction: device time falls from
+  `1267.3` to `945.1 ms` (`-25.4%`) and profiled `simulation.run_pool` from
+  `1740.2` to `1431.5 ms` (`-17.7%`), with unchanged `0 1024 1024 1024 1024`
+  activation counts. The Thomas kernel itself remains `404.4 ms`; artifacts
+  end in `axs-p17-membrane-trace-d1024-p100-d8ccff1` and
+  `axs-p17-static-gates-d1024-p100-cf8adcd`.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
 - [ ] If P16 leaves material membrane/gate cost after layout and generic
