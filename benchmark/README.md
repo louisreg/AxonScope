@@ -60,7 +60,8 @@ P17 GPU membrane-layout A/B traces reuse
 artifacts ending in `axs-p17-membrane-trace-d1024-p100-d8ccff1` and
 `axs-p17-static-gates-d1024-p100-cf8adcd` compare the same five-amplitude,
 3000-step double-cable workload before and after removing invariant layout
-columns from the temporal scan carry.
+columns from the temporal scan carry. Repeated unprofiled scaling results are
+stored in artifacts ending in `axs-p17-sg-time-d{1024,4096}-5623f0a`.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.

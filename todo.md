@@ -924,7 +924,12 @@ runtime reconstruction path.
   `1740.2` to `1431.5 ms` (`-17.7%`), with unchanged `0 1024 1024 1024 1024`
   activation counts. The Thomas kernel itself remains `404.4 ms`; artifacts
   end in `axs-p17-membrane-trace-d1024-p100-d8ccff1` and
-  `axs-p17-static-gates-d1024-p100-cf8adcd`.
+  `axs-p17-static-gates-d1024-p100-cf8adcd`. Repeated unprofiled P100 runs
+  confirm median warm `simulation.run_pool` improvements against the final P16
+  reference from `1.378` to `1.111 s` at Naxon=1024 (`-19.4%`) and from
+  `4.945` to `3.599 s` at Naxon=4096 (`-27.2%`). Median complete recruitment
+  sweeps are `1.218` and `4.119 s`, respectively; artifacts end in
+  `axs-p17-sg-time-d{1024,4096}-5623f0a`.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
 - [ ] If P16 leaves material membrane/gate cost after layout and generic
