@@ -313,14 +313,28 @@ def solve_double_cable_physical_system_jax_triton_loop_xb(
     extracellular_drive_abs: Array,
     block_b: int = 32,
     return_node_first: bool = False,
-) -> tuple[Array, Array]:
+    membrane_plan: Any | None = None,
+    gates: Array | None = None,
+    static_gates: Array | None = None,
+    dt_ms: Any | None = None,
+    linearize_previous: bool = False,
+) -> tuple[Array, ...]:
     """Assemble and solve a node-first system with the private GPU route."""
 
     from .triton_double_cable import (
         solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb,
     )
 
-    Vi_xb, Ve_xb = solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
+    fused_options = {}
+    if membrane_plan is not None:
+        fused_options = {
+            "membrane_plan": membrane_plan,
+            "gates": gates,
+            "static_gates": static_gates,
+            "dt_ms": dt_ms,
+            "linearize_previous": linearize_previous,
+        }
+    solved = solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
         static.a00_static,
         static.a11_static,
         static.cm_over_dt,
@@ -337,7 +351,18 @@ def solve_double_cable_physical_system_jax_triton_loop_xb(
         I_corr_abs,
         extracellular_drive_abs,
         block_b=block_b,
+        **fused_options,
     )
+    if membrane_plan is not None:
+        gates_new, Vi_xb, Ve_xb = solved
+        if return_node_first:
+            return gates_new, Vi_xb, Ve_xb
+        return (
+            double_cable_space_from_xb(gates_new),
+            double_cable_space_from_xb(Vi_xb),
+            double_cable_space_from_xb(Ve_xb),
+        )
+    Vi_xb, Ve_xb = solved
     if return_node_first:
         return Vi_xb, Ve_xb
     return double_cable_space_from_xb(Vi_xb), double_cable_space_from_xb(Ve_xb)

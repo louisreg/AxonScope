@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 from pathlib import Path
+from types import FunctionType
 from typing import Any
 
 
@@ -27,7 +28,19 @@ except ModuleNotFoundError:  # pragma: no cover - common local CPU/dev path.
 if triton is not None and tl is not None:
 
     @triton.jit
-    def _tiled_block_thomas_fused_loop_kernel(
+    def _unused_generated_membrane_at(
+        Vm,
+        gates_ptr,
+        dt_ptr,
+        parameters_ptr,
+        gates_out_ptr,
+        offset,
+        mask,
+        linearize_previous: tl.constexpr,
+    ):
+        return 0.0, 0.0
+
+    def _tiled_block_thomas_fused_loop_kernel_template(
         a00_static,
         a11_static,
         cm_over_dt,
@@ -38,6 +51,10 @@ if triton is not None and tl is not None:
         ve,
         gm_density,
         ge_density,
+        gates,
+        static_gates,
+        dt,
+        membrane_parameters,
         area,
         iinj_abs,
         i_outward_abs,
@@ -47,10 +64,14 @@ if triton is not None and tl is not None:
         c01,
         c10,
         c11,
+        gates_out,
         out0,
         out1,
         N: tl.constexpr,
         B: tl.constexpr,
+        FUSED_MEMBRANE: tl.constexpr,
+        BLEND_STATIC_GATES: tl.constexpr,
+        LINEARIZE_PREVIOUS: tl.constexpr,
         BLOCK_B: tl.constexpr,
     ):
         tile = tl.program_id(0)
@@ -64,8 +85,32 @@ if triton is not None and tl is not None:
         vi_value = tl.load(vi + offset, mask=mask, other=0.0)
         ve_value = tl.load(ve + offset, mask=mask, other=0.0)
         area_value = tl.load(area + offset, mask=mask, other=0.0)
-        gm_abs = tl.load(gm_density + offset, mask=mask, other=0.0) * area_value
-        ge_abs = tl.load(ge_density + offset, mask=mask, other=0.0) * area_value
+        if FUSED_MEMBRANE:
+            gated_gm, gated_ge = _generated_membrane_at(
+                vi_value - ve_value,
+                gates,
+                dt,
+                membrane_parameters,
+                gates_out,
+                offset,
+                mask,
+                LINEARIZE_PREVIOUS,
+            )
+            if BLEND_STATIC_GATES:
+                leak_offset = offset * 3
+                leak_gm = tl.load(static_gates + leak_offset, mask=mask, other=0.0)
+                leak_ge = tl.load(static_gates + leak_offset + 1, mask=mask, other=0.0)
+                gated_mask = tl.load(static_gates + leak_offset + 2, mask=mask, other=0.0)
+                gm_value = gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm
+                ge_value = gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge
+            else:
+                gm_value = gated_gm
+                ge_value = gated_ge
+        else:
+            gm_value = tl.load(gm_density + offset, mask=mask, other=0.0)
+            ge_value = tl.load(ge_density + offset, mask=mask, other=0.0)
+        gm_abs = gm_value * area_value
+        ge_abs = ge_value * area_value
         charge = cm * (vi_value - ve_value)
         iout = tl.load(i_outward_abs + offset, mask=mask, other=0.0)
         icorr = tl.load(i_corr_abs + offset, mask=mask, other=0.0)
@@ -121,8 +166,32 @@ if triton is not None and tl is not None:
                 vi_value = tl.load(vi + offset, mask=mask, other=0.0)
                 ve_value = tl.load(ve + offset, mask=mask, other=0.0)
                 area_value = tl.load(area + offset, mask=mask, other=0.0)
-                gm_abs = tl.load(gm_density + offset, mask=mask, other=0.0) * area_value
-                ge_abs = tl.load(ge_density + offset, mask=mask, other=0.0) * area_value
+                if FUSED_MEMBRANE:
+                    gated_gm, gated_ge = _generated_membrane_at(
+                        vi_value - ve_value,
+                        gates,
+                        dt,
+                        membrane_parameters,
+                        gates_out,
+                        offset,
+                        mask,
+                        LINEARIZE_PREVIOUS,
+                    )
+                    if BLEND_STATIC_GATES:
+                        leak_offset = offset * 3
+                        leak_gm = tl.load(static_gates + leak_offset, mask=mask, other=0.0)
+                        leak_ge = tl.load(static_gates + leak_offset + 1, mask=mask, other=0.0)
+                        gated_mask = tl.load(static_gates + leak_offset + 2, mask=mask, other=0.0)
+                        gm_value = gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm
+                        ge_value = gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge
+                    else:
+                        gm_value = gated_gm
+                        ge_value = gated_ge
+                else:
+                    gm_value = tl.load(gm_density + offset, mask=mask, other=0.0)
+                    ge_value = tl.load(ge_density + offset, mask=mask, other=0.0)
+                gm_abs = gm_value * area_value
+                ge_abs = ge_value * area_value
                 charge = cm * (vi_value - ve_value)
                 iout = tl.load(i_outward_abs + offset, mask=mask, other=0.0)
                 icorr = tl.load(i_corr_abs + offset, mask=mask, other=0.0)
@@ -188,8 +257,32 @@ if triton is not None and tl is not None:
         vi_value = tl.load(vi + offset, mask=mask, other=0.0)
         ve_value = tl.load(ve + offset, mask=mask, other=0.0)
         area_value = tl.load(area + offset, mask=mask, other=0.0)
-        gm_abs = tl.load(gm_density + offset, mask=mask, other=0.0) * area_value
-        ge_abs = tl.load(ge_density + offset, mask=mask, other=0.0) * area_value
+        if FUSED_MEMBRANE:
+            gated_gm, gated_ge = _generated_membrane_at(
+                vi_value - ve_value,
+                gates,
+                dt,
+                membrane_parameters,
+                gates_out,
+                offset,
+                mask,
+                LINEARIZE_PREVIOUS,
+            )
+            if BLEND_STATIC_GATES:
+                leak_offset = offset * 3
+                leak_gm = tl.load(static_gates + leak_offset, mask=mask, other=0.0)
+                leak_ge = tl.load(static_gates + leak_offset + 1, mask=mask, other=0.0)
+                gated_mask = tl.load(static_gates + leak_offset + 2, mask=mask, other=0.0)
+                gm_value = gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm
+                ge_value = gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge
+            else:
+                gm_value = gated_gm
+                ge_value = gated_ge
+        else:
+            gm_value = tl.load(gm_density + offset, mask=mask, other=0.0)
+            ge_value = tl.load(ge_density + offset, mask=mask, other=0.0)
+        gm_abs = gm_value * area_value
+        ge_abs = ge_value * area_value
         charge = cm * (vi_value - ve_value)
         iout = tl.load(i_outward_abs + offset, mask=mask, other=0.0)
         icorr = tl.load(i_corr_abs + offset, mask=mask, other=0.0)
@@ -247,8 +340,28 @@ if triton is not None and tl is not None:
             tl.store(out0 + offset, x0, mask=mask)
             tl.store(out1 + offset, x1, mask=mask)
 
+    def _make_tiled_block_thomas_kernel(generated_membrane_at):
+        namespace = dict(_tiled_block_thomas_fused_loop_kernel_template.__globals__)
+        namespace["_generated_membrane_at"] = generated_membrane_at
+        function = FunctionType(
+            _tiled_block_thomas_fused_loop_kernel_template.__code__,
+            namespace,
+            name=_tiled_block_thomas_fused_loop_kernel_template.__name__,
+            argdefs=_tiled_block_thomas_fused_loop_kernel_template.__defaults__,
+            closure=_tiled_block_thomas_fused_loop_kernel_template.__closure__,
+        )
+        function.__module__ = __name__
+        function.__qualname__ = _tiled_block_thomas_fused_loop_kernel_template.__qualname__
+        return triton.jit(function)
+
+    _tiled_block_thomas_fused_loop_kernel = _make_tiled_block_thomas_kernel(
+        _unused_generated_membrane_at
+    )
+    _GENERATED_THOMAS_KERNELS = {}
+
 else:
     _tiled_block_thomas_fused_loop_kernel = None
+    _GENERATED_THOMAS_KERNELS = {}
 
 
 def jax_triton_thomas_dependency_skip_reason() -> str | None:
@@ -290,7 +403,12 @@ def solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
     extracellular_drive_abs: Any,
     *,
     block_b: int = 128,
-) -> tuple[Any, Any]:
+    membrane_plan: Any | None = None,
+    gates: Any | None = None,
+    static_gates: Any | None = None,
+    dt_ms: Any | None = None,
+    linearize_previous: bool = False,
+) -> tuple[Any, ...]:
     """Assemble and solve ``[Nx, B]`` systems with the retained GPU route."""
 
     skip_reason = jax_triton_thomas_dependency_skip_reason()
@@ -319,11 +437,9 @@ def solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
     cx_over_dt = _space_tensor_xb(cx_over_dt, batch_size=batch_size, nx=nx, name="cx_over_dt")
     off0 = _edge_tensor_xb(off0, batch_size=batch_size, nx=nx, name="off0")
     off1 = _edge_tensor_xb(off1, batch_size=batch_size, nx=nx, name="off1")
-    dynamic = tuple(
+    physical = tuple(
         _space_tensor_xb(value, batch_size=batch_size, nx=nx, name=name)
         for name, value in (
-            ("gm_density", gm_density),
-            ("ge_density", ge_density),
             ("area", area),
             ("iinj_abs", iinj_abs),
             ("i_outward_abs", i_outward_abs),
@@ -332,9 +448,65 @@ def solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
         )
     )
 
+    dummy = jnp.zeros((1,), dtype=vi.dtype)
+    if membrane_plan is None:
+        gm_xb = _space_tensor_xb(
+            gm_density, batch_size=batch_size, nx=nx, name="gm_density"
+        )
+        ge_xb = _space_tensor_xb(
+            ge_density, batch_size=batch_size, nx=nx, name="ge_density"
+        )
+        gates_input = dummy
+        static_input = dummy
+        dt_input = dummy
+        parameters_input = dummy
+        gate_shape = jax.ShapeDtypeStruct(dummy.shape, dummy.dtype)
+        kernel = _tiled_block_thomas_fused_loop_kernel
+        source_hash = _KERNEL_SOURCE_HASH
+    else:
+        if gates is None or dt_ms is None:
+            raise ValueError("Fused membrane execution requires gates and dt_ms.")
+        gates_input = jnp.asarray(gates, dtype=vi.dtype)
+        expected_gate_shape = (nx, batch_size, int(membrane_plan.gate_count))
+        if tuple(gates_input.shape) != expected_gate_shape:
+            raise ValueError(
+                f"gates must have shape {expected_gate_shape}, got {gates_input.shape}."
+            )
+        if membrane_plan.blends_static_gates:
+            if static_gates is None:
+                raise ValueError("Static gate blending requires static_gates.")
+            static_input = jnp.asarray(static_gates, dtype=vi.dtype)
+            if tuple(static_input.shape) != (nx, batch_size, 3):
+                raise ValueError(
+                    "static_gates must have shape "
+                    f"({nx}, {batch_size}, 3), got {static_input.shape}."
+                )
+        else:
+            static_input = dummy
+        dt_input = jnp.asarray(dt_ms, dtype=vi.dtype).reshape((1,))
+        parameters_input = jnp.stack(
+            tuple(
+                jnp.asarray(value, dtype=vi.dtype)
+                for value in membrane_plan.parameter_values
+            )
+        )
+        gate_shape = jax.ShapeDtypeStruct(gates_input.shape, gates_input.dtype)
+        cache_key = str(membrane_plan.module.CACHE_KEY)
+        kernel = _GENERATED_THOMAS_KERNELS.get(cache_key)
+        if kernel is None:
+            kernel = _make_tiled_block_thomas_kernel(
+                membrane_plan.module.advance_gates_and_membrane_terms_at
+            )
+            _GENERATED_THOMAS_KERNELS[cache_key] = kernel
+        source_hash = (
+            f"{_KERNEL_SOURCE_HASH}:{cache_key}:{membrane_plan.module.SOURCE_HASH}"
+        )
+        gm_xb = dummy
+        ge_xb = dummy
+
     work_shape = jax.ShapeDtypeStruct(vi.shape, vi.dtype)
     grid = ((batch_size + int(block_b) - 1) // int(block_b),)
-    *_, out0, out1 = cached_triton_call(
+    *_, gates_out, out0, out1 = cached_triton_call(
         a00_static,
         a11_static,
         cm_over_dt,
@@ -343,18 +515,31 @@ def solve_double_cable_physical_jax_triton_tiled_thomas_loop_xb(
         off1,
         vi,
         ve,
-        *dynamic,
-        kernel=_tiled_block_thomas_fused_loop_kernel,
-        source_hash=_KERNEL_SOURCE_HASH,
-        out_shape=(work_shape,) * 6,
+        gm_xb,
+        ge_xb,
+        gates_input,
+        static_input,
+        dt_input,
+        parameters_input,
+        *physical,
+        kernel=kernel,
+        source_hash=source_hash,
+        out_shape=((work_shape,) * 4 + (gate_shape, work_shape, work_shape)),
         grid=grid,
         name="axonscope_double_cable_tiled_thomas",
         N=nx,
         B=batch_size,
+        FUSED_MEMBRANE=membrane_plan is not None,
+        BLEND_STATIC_GATES=(
+            False if membrane_plan is None else membrane_plan.blends_static_gates
+        ),
+        LINEARIZE_PREVIOUS=bool(linearize_previous),
         BLOCK_B=int(block_b),
         num_warps=_num_warps_for_block_b(int(block_b)),
         num_stages=1,
     )
+    if membrane_plan is not None:
+        return gates_out, out0, out1
     return out0, out1
 
 

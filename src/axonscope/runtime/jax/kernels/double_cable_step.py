@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 
 from ..cable_geometry import Array
 from .double_cable_linear import (
@@ -193,10 +194,15 @@ def solve_double_cable_batch_step(
     return_node_first: bool = False,
     static_gates: Array | None = None,
     membrane_terms: tuple[Array, Array] | None = None,
-) -> tuple[Array, Array]:
+    membrane_plan: Any | None = None,
+    dt_ms: Any | None = None,
+    linearize_previous: bool = False,
+) -> tuple[Array, ...]:
     """Solve one batched double-cable implicit step."""
 
-    if membrane_terms is None:
+    if membrane_plan is not None:
+        Gm_den = GE_den = 0.0
+    elif membrane_terms is None:
         Gm_den, GE_den = batch_membrane_conductance_terms(
             gates_new,
             backend=backend,
@@ -208,6 +214,19 @@ def solve_double_cable_batch_step(
     if double_cable_block_solver == "jax_triton_loop_xb":
         if linear_static_xb is None:
             raise ValueError("linear_static_xb is required for jax_triton_loop_xb.")
+        gates_xb = gates_new
+        if membrane_plan is not None and tuple(gates_new.shape[:2]) == (
+            batch_size,
+            nx,
+        ):
+            gates_xb = jnp.swapaxes(gates_new, 0, 1)
+        static_gates_xb = static_gates
+        if (
+            membrane_plan is not None
+            and static_gates is not None
+            and tuple(static_gates.shape[:2]) == (batch_size, nx)
+        ):
+            static_gates_xb = jnp.swapaxes(static_gates, 0, 1)
         return solve_double_cable_physical_system_jax_triton_loop_xb(
             static=linear_static_xb,
             Vi=double_cable_space_to_xb(Vi, batch_size=batch_size, nx=nx),
@@ -244,6 +263,11 @@ def solve_double_cable_batch_step(
             ),
             block_b=tiled_thomas_block_b,
             return_node_first=return_node_first,
+            membrane_plan=membrane_plan,
+            gates=gates_xb,
+            static_gates=static_gates_xb,
+            dt_ms=dt_ms,
+            linearize_previous=linearize_previous,
         )
 
     raise ValueError(
