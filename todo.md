@@ -930,13 +930,24 @@ runtime reconstruction path.
   `4.945` to `3.599 s` at Naxon=4096 (`-27.2%`). Median complete recruitment
   sweeps are `1.218` and `4.119 s`, respectively; artifacts end in
   `axs-p17-sg-time-d{1024,4096}-5623f0a`.
-- [ ] Apply and benchmark the same dynamic-gate/invariant-layout separation on
+- [x] Apply and benchmark the same dynamic-gate/invariant-layout separation on
   the canonical single-cable GPU observer path. Replace the existing carry in
   the shared-rank1, factorized, and zero-stimulation scans through one common
-  capability-based mechanism; do not add parallel scan variants. Profile
-  Naxon={1024,4096} on P100, report cuSPARSE versus membrane/layout/observer
-  time, cold and warm end-to-end timing, memory, and exact activation/result
-  equivalence. Retain it only if the complete single-cable workload improves.
+  capability-based mechanism; no parallel scan variants were added. The exact
+  Naxon=1024 P100 trace reduces device time from `2238.4` to `2079.4 ms`
+  (`-7.1%`) and profiled `simulation.run_pool` from `2793.5` to `2524.4 ms`
+  (`-9.6%`). The two cuSPARSE kernels remain unchanged at about `1168 ms`
+  combined and now occupy `56%` of device time; the `111 ms`
+  `loop_multiply_fusion` disappears. Repeated unprofiled medians reduce warm
+  `simulation.run_pool` from `2.359` to `2.191 s` at Naxon=1024 (`-7.1%`) and
+  from `8.920` to `8.373 s` at Naxon=4096 (`-6.1%`); cold times fall from
+  `6.622` to `6.000 s` and `15.590` to `15.065 s`. Activation counts remain
+  exactly `0 85 197 326 433` and `2 383 878 1340 1768`. The logical temporal
+  gate carry falls from seven to four float columns (`-42.9%`); do not infer
+  the same process-level peak-memory reduction through JAX GPU preallocation.
+  A local CPU Naxon=128 control and the full `724 passed, 1 skipped` suite also
+  pass. Artifacts end in `axs-p17-sg-single-trace-1024-dd62242` and
+  `axs-p17-sg-single-time-{1024,4096}-dd62242`.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
 - [ ] If P16 leaves material membrane/gate cost after layout and generic

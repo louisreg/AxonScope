@@ -62,6 +62,11 @@ artifacts ending in `axs-p17-membrane-trace-d1024-p100-d8ccff1` and
 3000-step double-cable workload before and after removing invariant layout
 columns from the temporal scan carry. Repeated unprofiled scaling results are
 stored in artifacts ending in `axs-p17-sg-time-d{1024,4096}-5623f0a`.
+The corresponding single-cable P100 artifacts end in
+`axs-p17-sg-single-trace-1024-dd62242` and
+`axs-p17-sg-single-time-{1024,4096}-dd62242`; they use the same five-amplitude,
+3000-step workload and compare against the P16 baseline artifacts for
+Naxon={1024,4096} plus the Naxon=1024 warm trace.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
