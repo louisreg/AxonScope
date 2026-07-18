@@ -1049,118 +1049,68 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
 ) -> tuple[Array, Array, tuple[Array, ...], ThresholdObserverState]:
     """Run one observer chunk with sparse Iinj and pre-lowered factorized Vstim."""
 
-    def one_batch(
-        Vm0_row,
-        gates0_row,
-        state0_row,
-        observer_state_row,
-        raster_probe_indices_row,
-        raster_probe_mask_row,
-        dl_row,
-        d_static_row,
-        du_row,
-        Cm_row,
-        I_background_row,
-        Iinj_values_mid,
-        Iinj_indices,
-        Iinj_mask,
-        current_mid_row_A,
-        forcing_footprint_mV_per_A,
-    ):
-        safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
+    def row_step(carry, step_inputs, row_inputs):
+        Iinj_values, current_A, local_step = step_inputs
+        (
+            safe_iinj_indices,
+            Iinj_mask,
+            forcing_footprint_mV_per_A,
+            raster_probe_indices_row,
+            raster_probe_mask_row,
+            dl_row,
+            d_static_row,
+            du_row,
+            Cm_row,
+            I_background_row,
+        ) = row_inputs
+        Vm, gates, observer_state, *extra = carry
+        extra = tuple(extra)
+        Iinj = jnp.zeros_like(Vm).at[safe_iinj_indices].add(
+            jnp.where(Iinj_mask, Iinj_values, 0.0)
+        )
+        vstim_force = jnp.sum(
+            current_A[:, None] * forcing_footprint_mV_per_A,
+            axis=0,
+        )
 
-        def step(carry, step_inputs):
-            Iinj_values, current_A, local_step = step_inputs
-            Vm, gates, observer_state, *extra = carry
-            extra = tuple(extra)
-            Iinj = jnp.zeros_like(Vm).at[safe_iinj_indices].add(
-                jnp.where(Iinj_mask, Iinj_values, 0.0)
-            )
-            vstim_force = jnp.sum(
-                current_A[:, None] * forcing_footprint_mV_per_A,
-                axis=0,
-            )
-
-            gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
-            if stateless_vm_only:
-                linearization_gates = gates if has_driven_extracellular else gates_pred
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
-            else:
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
-                step_plan_pred = membrane.prepare_membrane_step(
-                    V_mV=Vm,
-                    gates_prev=gates,
-                    gates_new=gates_pred,
-                    state=extra,
-                    dt=dt_ms,
-                    I_ion=Iion_pred,
-                    I_background=I_background_row,
-                )
-                linearization_gates = step_plan_pred.linearization_gates
-                if has_driven_extracellular:
-                    linearization_gates = gates
-                explicit_outward_current = step_plan_pred.explicit_outward_current
-                correction_current = step_plan_pred.correction_current
-
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + dt_ms * vstim_force
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
-                )
-            )
-            Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
-
-            if stateless_vm_only:
-                observer_state = update_threshold_observer_state_scalar_from_tables(
-                    observer_state,
-                    vm_mV=Vm_new,
-                    step_index=time_start_index + local_step,
-                    probe_indices=raster_probe_indices_row,
-                    probe_mask=raster_probe_mask_row,
-                    thresholds_mV=raster_thresholds_mV,
-                blanking_ms=raster_blanking_ms,
-                reset_thresholds_mV=raster_reset_thresholds_mV,
-                    refractory_ms=raster_refractory_ms,
-                    temporal_stride=raster_temporal_stride,
-                dt_ms=dt_ms,
-                retention=observer_retention,
-                )
-                return (Vm_new, gates_pred, observer_state, *extra), None
-
-            gates_new = membrane.final_gate_update(
+        gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+        if stateless_vm_only:
+            linearization_gates = gates if has_driven_extracellular else gates_pred
+            explicit_outward_current = I_background_row
+            correction_current = jnp.zeros_like(Vm)
+        else:
+            Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+            step_plan_pred = membrane.prepare_membrane_step(
+                V_mV=Vm,
                 gates_prev=gates,
-                V_mV_prev=Vm,
-                V_mV_new=Vm_new,
-                dt=dt_ms,
-                gates_predictor=gates_pred,
-            )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
-            step_plan = membrane.prepare_membrane_step(
-                V_mV=Vm_new,
-                gates_prev=gates,
-                gates_new=gates_new,
+                gates_new=gates_pred,
                 state=extra,
                 dt=dt_ms,
-                I_ion=Iion_new,
+                I_ion=Iion_pred,
                 I_background=I_background_row,
             )
-            state_new = membrane.finalize_membrane_step(
-                V_mV_prev=Vm,
-                V_mV_new=Vm_new,
-                gates_prev=gates,
-                gates_new=gates_new,
-                state_prev=extra,
-                step_plan=step_plan,
-                dt=dt_ms,
-            )
+            linearization_gates = step_plan_pred.linearization_gates
+            if has_driven_extracellular:
+                linearization_gates = gates
+            explicit_outward_current = step_plan_pred.explicit_outward_current
+            correction_current = step_plan_pred.correction_current
+
+        Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+        d = d_static_row + (dt_ms / Cm_row) * Gm
+        rhs = (
+            Vm
+            + dt_ms * vstim_force
+            + (dt_ms / Cm_row)
+            * (GE + Iinj - explicit_outward_current - correction_current)
+        )
+        Vm_new = jax.lax.linalg.tridiagonal_solve(
+            dl_row,
+            d,
+            du_row,
+            rhs[:, None],
+        )[:, 0]
+
+        if stateless_vm_only:
             observer_state = update_threshold_observer_state_scalar_from_tables(
                 observer_state,
                 vm_mV=Vm_new,
@@ -1168,56 +1118,66 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                 probe_indices=raster_probe_indices_row,
                 probe_mask=raster_probe_mask_row,
                 thresholds_mV=raster_thresholds_mV,
+                blanking_ms=raster_blanking_ms,
+                reset_thresholds_mV=raster_reset_thresholds_mV,
+                refractory_ms=raster_refractory_ms,
+                temporal_stride=raster_temporal_stride,
+                dt_ms=dt_ms,
+                retention=observer_retention,
+            )
+            return (Vm_new, gates_pred, observer_state, *extra), None
+
+        gates_new = membrane.final_gate_update(
+            gates_prev=gates,
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            dt=dt_ms,
+            gates_predictor=gates_pred,
+        )
+        Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+        step_plan = membrane.prepare_membrane_step(
+            V_mV=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state=extra,
+            dt=dt_ms,
+            I_ion=Iion_new,
+            I_background=I_background_row,
+        )
+        state_new = membrane.finalize_membrane_step(
+            V_mV_prev=Vm,
+            V_mV_new=Vm_new,
+            gates_prev=gates,
+            gates_new=gates_new,
+            state_prev=extra,
+            step_plan=step_plan,
+            dt=dt_ms,
+        )
+        observer_state = update_threshold_observer_state_scalar_from_tables(
+            observer_state,
+            vm_mV=Vm_new,
+            step_index=time_start_index + local_step,
+            probe_indices=raster_probe_indices_row,
+            probe_mask=raster_probe_mask_row,
+            thresholds_mV=raster_thresholds_mV,
             blanking_ms=raster_blanking_ms,
             reset_thresholds_mV=raster_reset_thresholds_mV,
             refractory_ms=raster_refractory_ms,
             temporal_stride=raster_temporal_stride,
             dt_ms=dt_ms,
             retention=observer_retention,
-            )
-            return (Vm_new, gates_new, observer_state, *state_new), None
-
-        final_carry, _ = jax.lax.scan(
-            step,
-            (Vm0_row, gates0_row, observer_state_row, *state0_row),
-            (
-                Iinj_values_mid,
-                jnp.swapaxes(current_mid_row_A, 0, 1),
-                jnp.arange(
-                    Iinj_values_mid.shape[0],
-                    dtype=jnp.asarray(time_start_index).dtype,
-                ),
-            ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        return (Vm_new, gates_new, observer_state, *state_new), None
 
-    state_axes = tuple(0 for _ in state0)
-    observer_axes = 0
-    return jax.vmap(
-        one_batch,
-        in_axes=(
-            0,
-            0,
-            state_axes,
-            observer_axes,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ),
-    )(
-        Vm0_mV,
-        gates0,
-        state0,
-        observer_state0,
+    safe_iinj_indices = jnp.where(
+        intracellular_current_density_mask,
+        intracellular_current_density_indices,
+        0,
+    )
+    row_inputs = (
+        safe_iinj_indices,
+        intracellular_current_density_mask,
+        extracellular_forcing_footprint_mV_per_A,
         raster_probe_indices,
         raster_probe_mask,
         dl,
@@ -1225,12 +1185,28 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         du,
         Cm_uF_cm2,
         I_background,
-        intracellular_current_density_values_mid,
-        intracellular_current_density_indices,
-        intracellular_current_density_mask,
-        extracellular_current_mid_A,
-        extracellular_forcing_footprint_mV_per_A,
     )
+
+    def batch_step(carry, step_inputs):
+        return jax.vmap(row_step, in_axes=(0, (0, 0, None), 0))(
+            carry,
+            step_inputs,
+            row_inputs,
+        )
+
+    final_carry, _ = jax.lax.scan(
+        batch_step,
+        (Vm0_mV, gates0, observer_state0, *state0),
+        (
+            jnp.swapaxes(intracellular_current_density_values_mid, 0, 1),
+            jnp.moveaxis(extracellular_current_mid_A, -1, 0),
+            jnp.arange(
+                intracellular_current_density_values_mid.shape[1],
+                dtype=jnp.asarray(time_start_index).dtype,
+            ),
+        ),
+    )
+    return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
 
 @partial(
     jax.jit,
