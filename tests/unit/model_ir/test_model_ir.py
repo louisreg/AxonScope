@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -376,6 +378,116 @@ def test_source_codegen_adds_runtime_targets_without_rewriting_cached_artifacts(
     assert third.cache.cache_hit is True
     assert third.cache.key == first.cache.key
     assert third.cache.loaded_modules["jax"] is first.cache.loaded_modules["jax"]
+
+
+def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
+    tmp_path,
+    monkeypatch,
+):
+    triton = ModuleType("triton")
+    language = ModuleType("triton.language")
+    triton.jit = lambda function: function
+    language.abs = np.abs
+    language.exp = np.exp
+    language.log = np.log
+    language.maximum = np.maximum
+    language.minimum = np.minimum
+    language.sigmoid = lambda value: 1.0 / (1.0 + np.exp(-value))
+    language.sqrt = np.sqrt
+    language.where = np.where
+    triton.language = language
+    monkeypatch.setitem(sys.modules, "triton", triton)
+    monkeypatch.setitem(sys.modules, "triton.language", language)
+
+    compiled = compile_model_source_file(
+        HH_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("numpy", "triton"),
+        load_generated_modules=("numpy", "triton"),
+    )
+    numpy_model = compiled.cache.loaded_modules["numpy"]
+    triton_model = compiled.cache.loaded_modules["triton"]
+    triton_source = (compiled.cache.directory / "triton_model.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert triton_model.TARGET == "triton"
+    assert "import triton.language as tl" in triton_source
+    assert "@triton.jit\ndef gate_terms" in triton_source
+    assert "tl.exp" in triton_source
+    assert json.loads(
+        (compiled.cache.directory / "manifest.json").read_text(encoding="utf-8")
+    )["targets"] == ["numpy", "triton"]
+
+    values = {
+        "Vm": np.asarray([-79.0, -64.0, -39.0], dtype=np.float32),
+        "m": np.asarray([0.05, 0.10, 0.20], dtype=np.float32),
+        "h": np.asarray([0.70, 0.60, 0.40], dtype=np.float32),
+        "n": np.asarray([0.20, 0.30, 0.40], dtype=np.float32),
+        **{
+            entry["name"]: entry["default"]
+            for entry in numpy_model.RUNTIME_CONTRACT["parameters"]
+        },
+    }
+    for function_name, arg_names in (
+        ("gate_terms", numpy_model.GATE_ARG_NAMES),
+        ("membrane_terms", numpy_model.MEMBRANE_ARG_NAMES),
+    ):
+        args = tuple(values[name] for name in arg_names)
+        expected = getattr(numpy_model, function_name)(*args)
+        actual = getattr(triton_model, function_name)(*args)
+        for actual_value, expected_value in zip(actual, expected, strict=True):
+            np.testing.assert_allclose(actual_value, expected_value, rtol=1e-6)
+
+    dt = np.float32(0.005)
+    gate_terms = numpy_model.gate_terms(
+        *(values[name] for name in numpy_model.GATE_ARG_NAMES)
+    )
+    alpha = np.stack(gate_terms[0::3], axis=-1)
+    beta = np.stack(gate_terms[1::3], axis=-1)
+    q10 = np.stack(
+        [np.broadcast_to(value, values["Vm"].shape) for value in gate_terms[2::3]],
+        axis=-1,
+    )
+    alpha *= q10
+    beta *= q10
+    sum_ab = np.maximum(alpha + beta, np.float32(1e-12))
+    gates_prev = np.stack([values[name] for name in ("m", "h", "n")], axis=-1)
+    denominator = np.maximum(1.0 / dt + 0.5 * sum_ab, np.float32(1e-12))
+    gates_new = (
+        alpha / denominator
+        + ((1.0 / dt) - 0.5 * sum_ab) / denominator * gates_prev
+    )
+    fused_spec = triton_model.RUNTIME_CONTRACT["functions"][
+        "advance_gates_and_membrane_terms"
+    ]
+    fused_values = {**values, "dt": dt, "linearize_previous": False}
+    actual = triton_model.advance_gates_and_membrane_terms(
+        *(fused_values[name] for name in fused_spec["args"])
+    )
+    for index in range(gates_new.shape[-1]):
+        np.testing.assert_allclose(actual[index], gates_new[:, index], rtol=1e-5)
+    linearized_values = {
+        **values,
+        **{
+            name: gates_new[:, index]
+            for index, name in enumerate(("m", "h", "n"))
+        },
+    }
+    membrane_terms = numpy_model.membrane_terms(
+        *(linearized_values[name] for name in numpy_model.MEMBRANE_ARG_NAMES)
+    )
+    expected_gm = sum(membrane_terms[0::2])
+    expected_ge = sum(
+        conductance * reversal
+        for conductance, reversal in zip(
+            membrane_terms[0::2],
+            membrane_terms[1::2],
+            strict=True,
+        )
+    )
+    np.testing.assert_allclose(actual[-2], expected_gm, rtol=1e-6)
+    np.testing.assert_allclose(actual[-1], expected_ge, rtol=1e-6)
 
 
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):

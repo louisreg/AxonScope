@@ -965,6 +965,16 @@ runtime reconstruction path.
     updated gates, diagonal, and RHS while retaining the canonical cuSPARSE
     solve. Do not add a second single-cable solver route or a model-specific
     kernel. Artifact ends in `axs-p17-single-hlo-1024-7e7c7d9`.
+  - `source_codegen.v20` now admits an incremental `triton_model.py` target
+    without importing Triton on the normal CPU/JAX path. For stateless models,
+    it emits scalar generated `gate_terms`, `membrane_terms`, and one fused
+    `advance_gates_and_membrane_terms` operation derived entirely from the
+    membrane graph. The fused operation updates every gate and computes shared
+    `Gm`/`GE` once, with old/new-gate linearization selected by the caller. A
+    CPU façade test checks HH gate, conductance, reversal-weighted conductance,
+    and fused-update equivalence against `numpy_model.py`. This is compiler
+    groundwork only: keep this item open until a real Triton outer kernel
+    replaces the existing single-cable JAX preparation work and wins on P100.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a

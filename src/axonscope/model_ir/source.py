@@ -42,7 +42,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v19"
+SOURCE_COMPILER_VERSION = "source_codegen.v20"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -143,6 +143,7 @@ class _CodegenTargetSpec:
     target: str
     import_line: str
     intrinsic_prelude: str
+    function_decorator: str = ""
 
 
 def compile_model_source_file(
@@ -2784,10 +2785,12 @@ def _generated_cache_files(
 
 def _normalize_codegen_targets(targets: tuple[str, ...]) -> tuple[str, ...]:
     unique = tuple(dict.fromkeys(str(target) for target in targets))
-    unknown = tuple(target for target in unique if target not in {"jax", "numpy"})
+    unknown = tuple(
+        target for target in unique if target not in {"jax", "numpy", "triton"}
+    )
     if unknown:
         raise ValueError(f"Unknown generated model target(s): {unknown!r}.")
-    return tuple(target for target in ("jax", "numpy") if target in unique)
+    return tuple(target for target in ("jax", "numpy", "triton") if target in unique)
 
 
 def _manifest_targets(manifest_path: Path) -> tuple[str, ...]:
@@ -2972,6 +2975,8 @@ def _generated_module_file_name(target: str) -> str:
         return "jax_model.py"
     if target == "numpy":
         return "numpy_model.py"
+    if target == "triton":
+        return "triton_model.py"
     raise ValueError(f"Unknown generated module target {target!r}.")
 
 
@@ -3017,7 +3022,7 @@ def _generated_module_source(
     )
     args = ", ".join(arg_names)
     body_lines = [
-        f"{name} = {_expression_source(expression)}"
+        f"{name} = {_expression_source(expression, target=target)}"
         for name, expression in selected_assignments.items()
     ]
     body_lines.append("return " + ", ".join(output_names))
@@ -3046,11 +3051,13 @@ def _generated_module_source(
         "gate_terms",
         metadata=metadata,
         outputs=gate_outputs,
+        target=target,
     )
     membrane_source = _generated_term_function_source(
         "membrane_terms",
         metadata=metadata,
         outputs=membrane_outputs,
+        target=target,
     )
     gate_arg_names = _expression_arg_names(
         metadata,
@@ -3113,7 +3120,12 @@ def _generated_module_source(
         ),
     }
     runtime_sources = {
-        name: _generated_term_function_source(name, metadata=metadata, outputs=outputs)
+        name: _generated_term_function_source(
+            name,
+            metadata=metadata,
+            outputs=outputs,
+            target=target,
+        )
         for name, outputs in runtime_outputs.items()
     }
     runtime_functions = {
@@ -3142,6 +3154,19 @@ def _generated_module_source(
             },
         }
     )
+    fused_membrane_source = ""
+    if target == "triton" and not membrane_states and step is None:
+        fused_membrane_source, fused_membrane_function = (
+            _generated_triton_fused_membrane_function_source(
+                model,
+                metadata=metadata,
+                gate_outputs=gate_outputs,
+                membrane_outputs=membrane_outputs,
+            )
+        )
+        runtime_functions["advance_gates_and_membrane_terms"] = (
+            fused_membrane_function
+        )
     runtime_contract = _generated_runtime_contract(
         model,
         metadata=metadata,
@@ -3163,8 +3188,9 @@ def _generated_module_source(
         f"{gate_source}\n"
         f"{membrane_source}\n"
         + "".join(f"{source}\n" for source in runtime_sources.values())
+        + fused_membrane_source
         + (
-            f"def model_step({args}):\n"
+            f"{target_spec.function_decorator}def model_step({args}):\n"
             f"{body}\n\n"
             f"RUNTIME_CONTRACT = {runtime_contract!r}\n"
             "RUNTIME_CONTRACT_VERSION = 'jax_membrane_runtime.v3'\n"
@@ -3310,11 +3336,13 @@ def _generated_term_function_source(
     *,
     metadata: dict[str, Any],
     outputs: tuple[tuple[str, Expression], ...],
+    target: str = "jax",
 ) -> str:
+    decorator = _target_codegen_spec(target).function_decorator
     expressions = tuple(expression for _, expression in outputs)
     arg_names = _expression_arg_names(metadata, expressions)
     if not expressions:
-        return f"def {function_name}():\n    return ()\n"
+        return f"{decorator}def {function_name}():\n    return ()\n"
 
     unique_expressions: list[Expression] = []
     output_locals: list[str] = []
@@ -3325,11 +3353,108 @@ def _generated_term_function_source(
         except ValueError:
             index = len(unique_expressions)
             unique_expressions.append(expression)
-            body_lines.append(f"_term_{index} = {_expression_source(expression)}")
+            body_lines.append(
+                f"_term_{index} = {_expression_source(expression, target=target)}"
+            )
         output_locals.append(f"_term_{index}")
     body_lines.append("return " + ", ".join(output_locals))
     body = "\n".join("    " + line for line in body_lines)
-    return f"def {function_name}({', '.join(arg_names)}):\n{body}\n"
+    return f"{decorator}def {function_name}({', '.join(arg_names)}):\n{body}\n"
+
+
+def _generated_triton_fused_membrane_function_source(
+    model: ModelIR,
+    *,
+    metadata: dict[str, Any],
+    gate_outputs: tuple[tuple[str, Expression], ...],
+    membrane_outputs: tuple[tuple[str, Expression], ...],
+) -> tuple[str, dict[str, tuple[str, ...]]]:
+    """Emit one scalar stateless gate-update plus Gm/GE Triton operation."""
+
+    gate_names = tuple(gate.state for gate in model.gates)
+    expressions = tuple(expression for _, expression in (*gate_outputs, *membrane_outputs))
+    expression_args = _expression_arg_names(metadata, expressions)
+    extra_args = tuple(name for name in expression_args if name not in gate_names)
+    arg_names = ("dt", "linearize_previous", *gate_names, *extra_args)
+    body_lines: list[str] = []
+    gate_new_names: list[str] = []
+    all_cn = all(gate.update is GateUpdateKind.CRANK_NICOLSON for gate in model.gates)
+    for index, (gate, outputs) in enumerate(
+        zip(model.gates, _batched(gate_outputs, 3), strict=True)
+    ):
+        (_, alpha), (_, beta), (_, q10_factor) = outputs
+        body_lines.extend(
+            (
+                f"_alpha_{index} = ({_expression_source(alpha, target='triton')}) * ({_expression_source(q10_factor, target='triton')})",
+                f"_beta_{index} = ({_expression_source(beta, target='triton')}) * ({_expression_source(q10_factor, target='triton')})",
+                f"_sum_{index} = tl.maximum(_alpha_{index} + _beta_{index}, 1e-12)",
+            )
+        )
+        gate_new = f"_gate_new_{index}"
+        gate_new_names.append(gate_new)
+        if all_cn:
+            body_lines.extend(
+                (
+                    f"_denom_{index} = tl.maximum(1.0 / dt + 0.5 * _sum_{index}, 1e-12)",
+                    f"{gate_new} = _alpha_{index} / _denom_{index} + ((1.0 / dt) - 0.5 * _sum_{index}) / _denom_{index} * {gate.state}",
+                )
+            )
+        else:
+            body_lines.extend(
+                (
+                    f"_g_inf_{index} = _alpha_{index} / _sum_{index}",
+                    f"{gate_new} = _g_inf_{index} - (_g_inf_{index} - {gate.state}) * tl.exp(-dt * _sum_{index})",
+                )
+            )
+    for gate_name, gate_new in zip(gate_names, gate_new_names, strict=True):
+        body_lines.append(
+            f"{gate_name} = tl.where(linearize_previous, {gate_name}, {gate_new})"
+        )
+    conductances = tuple(expression for _, expression in membrane_outputs[0::2])
+    reversals = tuple(expression for _, expression in membrane_outputs[1::2])
+    conductance_locals: list[str] = []
+    reversal_locals: list[str] = []
+    for index, (conductance, reversal) in enumerate(
+        zip(conductances, reversals, strict=True)
+    ):
+        conductance_name = f"_conductance_{index}"
+        reversal_name = f"_reversal_{index}"
+        conductance_locals.append(conductance_name)
+        reversal_locals.append(reversal_name)
+        body_lines.extend(
+            (
+                f"{conductance_name} = {_expression_source(conductance, target='triton')}",
+                f"{reversal_name} = {_expression_source(reversal, target='triton')}",
+            )
+        )
+    gm_source = " + ".join(conductance_locals) or "0.0"
+    ge_source = " + ".join(
+        f"{conductance} * {reversal}"
+        for conductance, reversal in zip(
+            conductance_locals,
+            reversal_locals,
+            strict=True,
+        )
+    ) or "0.0"
+    body_lines.extend((f"_gm = {gm_source}", f"_ge = {ge_source}"))
+    return_values = (*gate_new_names, "_gm", "_ge")
+    body_lines.append("return " + ", ".join(return_values))
+    body = "\n".join("    " + line for line in body_lines)
+    outputs = (
+        *(f"gate_new:{name}" for name in gate_names),
+        "total_conductance",
+        "reversal_conductance",
+    )
+    source = (
+        "@triton.jit\n"
+        f"def advance_gates_and_membrane_terms({', '.join(arg_names)}):\n"
+        f"{body}\n\n"
+    )
+    return source, {"args": arg_names, "outputs": outputs}
+
+
+def _batched(values: tuple[Any, ...], size: int) -> tuple[tuple[Any, ...], ...]:
+    return tuple(values[index : index + size] for index in range(0, len(values), size))
 
 
 def _expression_arg_names(
@@ -3360,6 +3485,13 @@ def _target_codegen_spec(target: str) -> _CodegenTargetSpec:
             target="numpy",
             import_line="import numpy as xp",
             intrinsic_prelude=_XP_INTRINSIC_PRELUDE,
+        )
+    if target == "triton":
+        return _CodegenTargetSpec(
+            target="triton",
+            import_line="import triton\nimport triton.language as tl",
+            intrinsic_prelude=_TRITON_INTRINSIC_PRELUDE,
+            function_decorator="@triton.jit\n",
         )
     raise ValueError(f"Unknown codegen target {target!r}.")
 
@@ -3404,6 +3536,57 @@ _XP_INTRINSIC_PRELUDE = (
     "def vtrap(x, y):\n"
     "    z = x / y\n"
     "    return xp.where(xp.abs(z) < 1e-6, y * (1.0 - z / 2.0), x / (xp.exp(z) - 1.0))\n\n"
+)
+
+
+_TRITON_INTRINSIC_PRELUDE = (
+    "dimensionless = 1.0\n"
+    "mV = 1.0\n"
+    "ms = 1.0\n"
+    "mS_per_cm2 = 1.0\n"
+    "uA_per_cm2 = 1.0\n"
+    "ohm_cm2 = 1.0\n"
+    "degC = 1.0\n"
+    "per_ms = 1.0\n"
+    "per_ms_per_mV = 1.0\n"
+    "per_ms_per_mM = 1.0\n"
+    "mM = 1.0\n"
+    "mM_per_uA_cm2_ms = 1.0\n"
+    "gate = 1.0\n\n"
+    "@triton.jit\n"
+    "def expm1(x):\n"
+    "    return tl.exp(x) - 1.0\n\n"
+    "@triton.jit\n"
+    "def log1p(x):\n"
+    "    return tl.log(1.0 + x)\n\n"
+    "@triton.jit\n"
+    "def clip(x, lower, upper):\n"
+    "    return tl.minimum(tl.maximum(x, lower), upper)\n\n"
+    "@triton.jit\n"
+    "def tanh(x):\n"
+    "    return 2.0 * tl.sigmoid(2.0 * x) - 1.0\n\n"
+    "@triton.jit\n"
+    "def sigmoid(x):\n"
+    "    return tl.sigmoid(x)\n\n"
+    "@triton.jit\n"
+    "def q10(base, celsius, reference):\n"
+    "    return tl.exp(tl.log(base) * ((celsius - reference) / 10.0))\n\n"
+    "@triton.jit\n"
+    "def alpha_from_inf_tau(x_inf, tau):\n"
+    "    return x_inf / tau\n\n"
+    "@triton.jit\n"
+    "def beta_from_inf_tau(x_inf, tau):\n"
+    "    return (1.0 - x_inf) / tau\n\n"
+    "@triton.jit\n"
+    "def rates_from_tau_inf(x_inf, tau):\n"
+    "    return x_inf / tau, (1.0 - x_inf) / tau\n\n"
+    "@triton.jit\n"
+    "def safe_exp(x):\n"
+    "    return tl.where(x < -100.0, 0.0, tl.exp(x))\n\n"
+    "@triton.jit\n"
+    "def vtrap(x, y):\n"
+    "    z = x / y\n"
+    "    return tl.where(tl.abs(z) < 1e-6, y * (1.0 - z / 2.0), x / (tl.exp(z) - 1.0))\n\n"
 )
 
 
@@ -3485,12 +3668,12 @@ def _exported_return_names(metadata: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def _expression_source(expression: Expression) -> str:
+def _expression_source(expression: Expression, *, target: str = "jax") -> str:
     if isinstance(expression, Symbol):
         return expression.name
     if isinstance(expression, BinaryOp):
-        left = _expression_source(expression.left)
-        right = _expression_source(expression.right)
+        left = _expression_source(expression.left, target=target)
+        right = _expression_source(expression.right, target=target)
         op = {
             "add": "+",
             "sub": "-",
@@ -3506,10 +3689,23 @@ def _expression_source(expression: Expression) -> str:
     if isinstance(expression, Literal):
         return repr(expression.value)
     if isinstance(expression, UnaryOp):
-        return f"(-{_expression_source(expression.operand)})"
+        return f"(-{_expression_source(expression.operand, target=target)})"
     if isinstance(expression, Call):
-        args = ", ".join(_expression_source(arg) for arg in expression.args)
-        return f"{expression.intrinsic}({args})"
+        args = ", ".join(
+            _expression_source(arg, target=target) for arg in expression.args
+        )
+        intrinsic = expression.intrinsic
+        if target == "triton":
+            intrinsic = {
+                "abs": "tl.abs",
+                "exp": "tl.exp",
+                "log": "tl.log",
+                "maximum": "tl.maximum",
+                "minimum": "tl.minimum",
+                "sqrt": "tl.sqrt",
+                "where": "tl.where",
+            }.get(intrinsic, intrinsic)
+        return f"{intrinsic}({args})"
     raise SourceModelCompileError(
         f"Cannot generate source for expression {expression.__class__.__name__}."
     )
