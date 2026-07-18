@@ -320,11 +320,12 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
         )
 
     records: list[dict[str, Any]] = []
-    for label in ("cache_miss", "cache_replay"):
+    for label in ("cache_miss", "cache_replay", "dynamic_values_replay"):
         child_output = output / label
         command = _compilation_cache_child_command(
             args,
             child_output,
+            dynamic_values=label == "dynamic_values_replay",
         )
         before_xla = _cache_tree_snapshot(xla_cache_root)
         before_triton = _cache_tree_snapshot(triton_cache_root)
@@ -377,14 +378,24 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
 
     miss = records[0]
     hit = records[1]
+    dynamic = records[2]
     stablehlo_match = miss["stablehlo_sha256"] == hit["stablehlo_sha256"]
     if not stablehlo_match:
         raise RuntimeError("Compilation replay produced different StableHLO programs.")
+    dynamic_stablehlo_match = (
+        miss["stablehlo_sha256"] == dynamic["stablehlo_sha256"]
+    )
+    if not dynamic_stablehlo_match:
+        raise RuntimeError(
+            "Same-shape dynamic values produced a different StableHLO program."
+        )
     payload = {
         "jax_xla_cache_root": str(xla_cache_root),
         "triton_cache_root": str(triton_cache_root),
         "activation_counts_match": counts_match,
         "stablehlo_match": stablehlo_match,
+        "dynamic_stablehlo_match": dynamic_stablehlo_match,
+        "dynamic_activation_counts": dynamic["activation_counts"],
         "lower_saved_s": miss["lower_s"] - hit["lower_s"],
         "lower_speedup": _ratio(miss["lower_s"], hit["lower_s"]),
         "total_cold_saved_s": miss["total_cold_s"] - hit["total_cold_s"],
@@ -410,7 +421,15 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
 def _compilation_cache_child_command(
     args: argparse.Namespace,
     output: Path,
+    *,
+    dynamic_values: bool,
 ) -> list[str]:
+    seed = int(args.seed) + (1 if dynamic_values else 0)
+    amplitudes = (
+        tuple(float(value) * 0.8 for value in args.amplitudes)
+        if dynamic_values
+        else args.amplitudes
+    )
     command = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -431,7 +450,7 @@ def _compilation_cache_child_command(
         "--axon-count",
         str(args.axon_count),
         "--seed",
-        str(args.seed),
+        str(seed),
         "--mrg-template-count",
         str(args.mrg_template_count),
         "--axon-template-policy",
@@ -441,7 +460,7 @@ def _compilation_cache_child_command(
         "--dt-ms",
         str(args.dt_ms),
         "--amplitudes-uA",
-        ",".join(str(value) for value in args.amplitudes),
+        ",".join(str(value) for value in amplitudes),
         "--time-chunk-steps",
         str(args.time_chunk_steps),
         "--repeats",
@@ -520,6 +539,8 @@ def _write_compilation_cache_replay_report(
             "",
             f"Activation counts match: {payload['activation_counts_match']}",
             f"StableHLO matches: {payload['stablehlo_match']}",
+            f"Dynamic-value StableHLO matches: {payload['dynamic_stablehlo_match']}",
+            f"Dynamic-value activations: {payload['dynamic_activation_counts']}",
             f"Lowering speedup: {payload['lower_speedup']:.3f}x",
             f"Cold-phase speedup: {payload['total_cold_speedup']:.3f}x",
         ]

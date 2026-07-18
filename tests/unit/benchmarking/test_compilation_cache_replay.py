@@ -9,7 +9,7 @@ from benchmark.analysis import jax_triton_validation
 from benchmark.protocols import recruitment_amplitude_batch
 
 
-def test_compilation_cache_replay_uses_two_fresh_processes(
+def test_compilation_cache_replay_uses_fresh_processes(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -82,7 +82,7 @@ def test_compilation_cache_replay_uses_two_fresh_processes(
         == 0
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
     expected_cache = str(tmp_path / "triton_kernel_cache")
     assert {env["AXONSCOPE_TRITON_KERNEL_CACHE"] for _, env in calls} == {
         expected_cache
@@ -112,9 +112,16 @@ def test_compilation_cache_replay_uses_two_fresh_processes(
     replay = json.loads((tmp_path / "compilation_cache_replay.json").read_text())
     assert replay["activation_counts_match"] is True
     assert replay["stablehlo_match"] is True
+    assert replay["dynamic_stablehlo_match"] is True
+    dynamic_command = calls[2][0]
+    assert dynamic_command[dynamic_command.index("--seed") + 1] == "8"
+    assert (
+        dynamic_command[dynamic_command.index("--amplitudes-uA") + 1]
+        == ",".join(str(float(value) * 0.8) for value in args.amplitudes)
+    )
     assert (tmp_path / "double_cable_kernel_validation.json").is_file()
     assert replay["lower_speedup"] == 8.0
     assert [
         process["triton_kernel_cache"]["status"]
         for process in replay["processes"]
-    ] == ["miss", "hit"]
+    ] == ["miss", "hit", "hit"]
