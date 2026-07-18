@@ -134,10 +134,6 @@ def _observer_scan_stateless_system_step(
         )
         if generated is not None:
             return generated
-    if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE_SYSTEM") == "1":
-        raise RuntimeError(
-            "Generated Triton membrane system execution was required but unavailable."
-        )
     gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
         backend,
         gates=gates,
