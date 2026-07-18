@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 import importlib.util
 import sys
 from typing import Any
@@ -18,50 +17,6 @@ from .generated_contract import load_generated_membrane_contract
 
 
 _TRITON_MODULES: dict[str, Any] = {}
-
-
-@dataclass(frozen=True)
-class GeneratedTritonMembranePlan:
-    """Model-generated inputs needed by a cable-owned fused kernel."""
-
-    module: Any
-    parameter_names: tuple[str, ...]
-    parameter_values: tuple[Any, ...]
-    gate_count: int
-    blends_static_gates: bool
-
-
-def generated_triton_membrane_plan(
-    program: Any,
-    *,
-    gate_count: int,
-    blends_static_gates: bool,
-) -> GeneratedTritonMembranePlan | None:
-    """Build the fixed model-agnostic contract consumed by fused solvers."""
-
-    module = load_generated_triton_module(program)
-    if module is None:
-        return None
-    contract = load_generated_membrane_contract(module)
-    helper = contract.functions.get("advance_gates_and_membrane_terms_at")
-    if helper is None or not callable(
-        getattr(module, "advance_gates_and_membrane_terms_at", None)
-    ):
-        return None
-    kernel_spec = contract.function("advance_gates_and_membrane_terms_kernel")
-    parameter_names = tuple(kernel_spec.args[3:])
-    missing = tuple(
-        name for name in parameter_names if name not in program.parameter_values
-    )
-    if missing:
-        raise ValueError(f"Generated Triton membrane parameters are missing: {missing!r}.")
-    return GeneratedTritonMembranePlan(
-        module=module,
-        parameter_names=parameter_names,
-        parameter_values=tuple(program.parameter_values[name] for name in parameter_names),
-        gate_count=int(gate_count),
-        blends_static_gates=bool(blends_static_gates),
-    )
 
 
 def load_generated_triton_module(program: Any) -> Any | None:

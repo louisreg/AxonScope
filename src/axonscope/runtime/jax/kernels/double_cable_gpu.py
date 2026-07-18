@@ -252,17 +252,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
         double_cable_block_solver=double_cable_block_solver,
         tiled_thomas_block_b=tiled_thomas_block_b,
     )
-    generated_membrane_plan = None
-    if stateless_vm_only:
-        plan_factory = getattr(backend, "generated_triton_membrane_plan", None)
-        if callable(plan_factory):
-            generated_membrane_plan = plan_factory()
-    gates0_scan = gates0
-    static_scan_gates = None
-    merge_scan_gates = getattr(backend, "merge_scan_gates", None)
-    split_scan_gates = getattr(backend, "split_scan_gates", None)
-    if stateless_vm_only and callable(split_scan_gates) and callable(merge_scan_gates):
-        gates0_scan, static_scan_gates = split_scan_gates(gates0)
 
     def step(carry, step_inputs):
         if use_factorized_vext:
@@ -289,16 +278,11 @@ def _run_double_cable_batch_stateful_integrated_scan(
         Vm = Vi - Ve
 
         membrane_terms = None
-        if stateless_vm_only and generated_membrane_plan is not None:
-            gates_pred = gates
-            linearization_gates = gates
-            explicit_outward_current_abs = background_abs
-            correction_current_abs = zero_abs
-        elif stateless_vm_only:
+        if stateless_vm_only:
             gates_pred, Gm_den, GE_den = advance_stateless_membrane_terms(
                 backend,
                 gates=gates,
-                static_gates=static_scan_gates,
+                static_gates=None,
                 V_mV=Vm,
                 dt_ms=dt_ms,
                 linearize_previous=has_driven_extracellular,
@@ -324,7 +308,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
             explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
             correction_current_abs = step_plan_pred.correction_current * area_batch
 
-        solved = solve_vi_vperi(
+        Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
@@ -333,15 +317,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
             I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
             membrane_terms=membrane_terms,
-            static_gates=static_scan_gates,
-            membrane_plan=generated_membrane_plan,
-            dt_ms=dt_ms,
-            linearize_previous=has_driven_extracellular,
         )
-        if generated_membrane_plan is None:
-            Vi_new, Ve_new = solved
-        else:
-            gates_pred, Vi_new, Ve_new = solved
         Vm_new = Vi_new - Ve_new
 
         output = _record_vm_batch(
@@ -403,16 +379,13 @@ def _run_double_cable_batch_stateful_integrated_scan(
         )
     final_carry, trace = jax.lax.scan(
         step,
-        (Vi0_mV, Ve0_mV, gates0_scan, *state0),
+        (Vi0_mV, Ve0_mV, gates0, *state0),
         scan_inputs,
     )
-    gates_final = final_carry[2]
-    if static_scan_gates is not None:
-        gates_final = merge_scan_gates(gates_final, static_scan_gates)
     return (
         final_carry[0],
         final_carry[1],
-        gates_final,
+        final_carry[2],
         tuple(final_carry[3:]),
         jnp.swapaxes(trace, 0, 1),
     )
@@ -603,11 +576,6 @@ def _run_double_cable_batch_observer_integrated_scan(
         tiled_thomas_block_b=tiled_thomas_block_b,
         return_node_first=use_node_first_state,
     )
-    generated_membrane_plan = None
-    if stateless_vm_only:
-        plan_factory = getattr(backend, "generated_triton_membrane_plan", None)
-        if callable(plan_factory):
-            generated_membrane_plan = plan_factory()
 
     gates0_scan = jnp.swapaxes(gates0, 0, 1) if use_node_first_state else gates0
     split_scan_gates = getattr(backend, "split_scan_gates", None)
@@ -661,12 +629,7 @@ def _run_double_cable_batch_observer_integrated_scan(
         Vm = Vi - Ve
 
         membrane_terms = None
-        if stateless_vm_only and generated_membrane_plan is not None:
-            gates_pred = gates
-            linearization_gates = gates
-            explicit_outward_current_abs = background_abs
-            correction_current_abs = zero_abs
-        elif stateless_vm_only:
+        if stateless_vm_only:
             gates_pred, Gm_den, GE_den = advance_stateless_membrane_terms(
                 backend,
                 gates=gates,
@@ -696,7 +659,7 @@ def _run_double_cable_batch_observer_integrated_scan(
             explicit_outward_current_abs = step_plan_pred.explicit_outward_current * area_batch
             correction_current_abs = step_plan_pred.correction_current * area_batch
 
-        solved = solve_vi_vperi(
+        Vi_new, Ve_new = solve_vi_vperi(
             Vi=Vi,
             Ve=Ve,
             gates_new=linearization_gates,
@@ -706,14 +669,7 @@ def _run_double_cable_batch_observer_integrated_scan(
             extracellular_drive_abs=extracellular_drive_abs,
             static_gates=static_scan_gates,
             membrane_terms=membrane_terms,
-            membrane_plan=generated_membrane_plan,
-            dt_ms=dt_ms,
-            linearize_previous=has_driven_extracellular,
         )
-        if generated_membrane_plan is None:
-            Vi_new, Ve_new = solved
-        else:
-            gates_pred, Vi_new, Ve_new = solved
         Vm_new = Vi_new - Ve_new
 
         observer_state = update_threshold_observer_state_batch_from_tables(

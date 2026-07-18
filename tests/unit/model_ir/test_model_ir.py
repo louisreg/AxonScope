@@ -417,9 +417,6 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert "import triton.language as tl" in triton_source
     assert "@triton.jit\ndef gate_terms" in triton_source
     assert "@triton.jit\ndef advance_gates_and_membrane_terms_kernel" in triton_source
-    assert "@triton.jit\ndef advance_gates_and_membrane_terms_at" in triton_source
-    assert "parameters_ptr + 0" in triton_source
-    assert "return gm, ge" in triton_source
     assert "tl.exp" in triton_source
     assert " ** " not in triton_source
     assert "tl.exp(tl.log(3.0)" in triton_source
@@ -473,18 +470,8 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     fused_kernel_spec = triton_model.RUNTIME_CONTRACT["functions"][
         "advance_gates_and_membrane_terms_kernel"
     ]
-    fused_at_spec = triton_model.RUNTIME_CONTRACT["functions"][
-        "advance_gates_and_membrane_terms_at"
-    ]
     assert fused_kernel_spec["args"][:3] == ("Vm", "gates", "dt")
     assert fused_kernel_spec["outputs"] == ("gates_out", "gm_out", "ge_out")
-    assert fused_at_spec["args"][:5] == (
-        "Vm",
-        "gates",
-        "dt",
-        "parameters",
-        "gates_out",
-    )
     fused_values = {**values, "dt": dt, "linearize_previous": False}
     actual = triton_model.advance_gates_and_membrane_terms(
         *(fused_values[name] for name in fused_spec["args"])

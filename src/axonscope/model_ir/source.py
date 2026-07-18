@@ -42,7 +42,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v25"
+SOURCE_COMPILER_VERSION = "source_codegen.v24"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -3182,19 +3182,6 @@ def _generated_module_source(
         runtime_functions["advance_gates_and_membrane_terms"] = (
             fused_membrane_function
         )
-        runtime_functions["advance_gates_and_membrane_terms_at"] = {
-            "args": (
-                "Vm",
-                "gates",
-                "dt",
-                "parameters",
-                "gates_out",
-                "offset",
-                "mask",
-                "linearize_previous",
-            ),
-            "outputs": ("total_conductance", "reversal_conductance"),
-        }
         runtime_functions["advance_gates_and_membrane_terms_kernel"] = (
             fused_membrane_kernel_function
         )
@@ -3486,52 +3473,6 @@ def _generated_triton_fused_membrane_function_source(
         f"{body}\n\n"
     )
     parameter_args = tuple(name for name in extra_args if name != "Vm")
-    pointer_helper_loads = (
-        "    dt = tl.load(dt_ptr)",
-        *(
-            f"    {name} = tl.load(parameters_ptr + {index})"
-            for index, name in enumerate(parameter_args)
-        ),
-        *(
-            f"    {name} = tl.load(gates_ptr + offset * {len(gate_names)} + {index}, mask=mask, other=0.0)"
-            for index, name in enumerate(gate_names)
-        ),
-    )
-    pointer_helper_args = (
-        "Vm",
-        "gates_ptr",
-        "dt_ptr",
-        "parameters_ptr",
-        "gates_out_ptr",
-        "offset",
-        "mask",
-        "linearize_previous: tl.constexpr",
-    )
-    pointer_helper_results = (
-        *(f"gate_new_{index}" for index in range(len(gate_names))),
-        "gm",
-        "ge",
-    )
-    pointer_helper_call_args = (
-        "dt",
-        "linearize_previous",
-        *gate_names,
-        *("Vm" if name == "Vm" else name for name in extra_args),
-    )
-    pointer_helper_stores = tuple(
-        f"    tl.store(gates_out_ptr + offset * {len(gate_names)} + {index}, gate_new_{index}, mask=mask)"
-        for index in range(len(gate_names))
-    )
-    source += (
-        "@triton.jit\n"
-        f"def advance_gates_and_membrane_terms_at({', '.join(pointer_helper_args)}):\n"
-        + "\n".join(pointer_helper_loads)
-        + "\n"
-        + f"    {', '.join(pointer_helper_results)} = advance_gates_and_membrane_terms({', '.join(pointer_helper_call_args)})\n"
-        + "\n".join(pointer_helper_stores)
-        + "\n"
-        + "    return gm, ge\n\n"
-    )
     pointer_args = (
         "Vm",
         "gates",

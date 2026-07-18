@@ -240,15 +240,6 @@ class UniformMembraneBackend:
             linearize_previous=linearize_previous,
         )
 
-    def generated_triton_membrane_plan(self):
-        from .triton_generated import generated_triton_membrane_plan
-
-        return generated_triton_membrane_plan(
-            self.ion_channel,
-            gate_count=self.n_gates_max,
-            blends_static_gates=False,
-        )
-
 
 class HeterogeneousMembraneGroup(NamedTuple):
     model: Any
@@ -769,15 +760,6 @@ class GatedLeakStackMembraneBackend:
             gates_new,
             gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
             gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
-        )
-
-    def generated_triton_membrane_plan(self):
-        from .triton_generated import generated_triton_membrane_plan
-
-        return generated_triton_membrane_plan(
-            self.gated_model,
-            gate_count=self.gated_gate_count,
-            blends_static_gates=True,
         )
 
 
