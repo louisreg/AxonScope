@@ -27,6 +27,44 @@ def _empty_recording_matrix(vm: Array) -> Array:
     return jnp.zeros((vm.shape[0], 0), dtype=vm.dtype)
 
 
+def _split_observer_scan_gates(
+    backend,
+    gates: Array,
+    *,
+    stateless_vm_only: bool,
+) -> tuple[Array, Array | None]:
+    if not stateless_vm_only:
+        return gates, None
+    split = getattr(backend, "split_scan_gates", None)
+    merge = getattr(backend, "merge_scan_gates", None)
+    if not callable(split) or not callable(merge):
+        return gates, None
+    return split(gates)
+
+
+def _merge_observer_scan_gates(
+    backend,
+    gates: Array,
+    static_gates: Array | None,
+) -> Array:
+    if static_gates is None:
+        return gates
+    return backend.merge_scan_gates(gates, static_gates)
+
+
+def _observer_scan_membrane_conductance_terms(
+    backend,
+    gates: Array,
+    static_gates: Array | None,
+) -> tuple[Array, Array]:
+    if static_gates is None:
+        return backend.membrane_conductance_terms(gates)
+    batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
+    if not callable(batch_terms):
+        raise TypeError("A split gate carry requires batch membrane terms.")
+    return batch_terms(gates, static_gates=static_gates)
+
+
 @partial(
     jax.jit,
     static_argnames=(
@@ -651,6 +689,11 @@ def _run_single_cable_vstim_batch_observer_scan(
         Iinj_mid,
         vext_mid,
     ):
+        gates0_row, static_scan_gates = _split_observer_scan_gates(
+            backend,
+            gates0_row,
+            stateless_vm_only=stateless_vm_only,
+        )
         vstim_forcing_mid = jax.vmap(
             lambda values: apply_diffusion_operator(values, lower_row, diag_row, upper_row)
         )(vext_mid)
@@ -682,7 +725,11 @@ def _run_single_cable_vstim_batch_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = _observer_scan_membrane_conductance_terms(
+                backend,
+                linearization_gates,
+                static_scan_gates,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -765,7 +812,12 @@ def _run_single_cable_vstim_batch_observer_scan(
                 jnp.arange(Iinj_mid.shape[0], dtype=jnp.asarray(time_start_index).dtype),
             ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        final_gates = _merge_observer_scan_gates(
+            backend,
+            final_carry[1],
+            static_scan_gates,
+        )
+        return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
     observer_axes = 0
@@ -849,6 +901,12 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
         current_mid_row_A,
         forcing_footprint_mV_per_A,
     ):
+        gates0_row, static_scan_gates = _split_observer_scan_gates(
+            backend,
+            gates0_row,
+            stateless_vm_only=stateless_vm_only,
+        )
+
         def step(carry, step_inputs):
             Iinj, current_A, local_step = step_inputs
             Vm, gates, observer_state, *extra = carry
@@ -880,7 +938,11 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = _observer_scan_membrane_conductance_terms(
+                backend,
+                linearization_gates,
+                static_scan_gates,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -966,7 +1028,12 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                 ),
             ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        final_gates = _merge_observer_scan_gates(
+            backend,
+            final_carry[1],
+            static_scan_gates,
+        )
+        return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
     observer_axes = 0
@@ -1067,6 +1134,11 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         current_mid_row_A,
         forcing_footprint_mV_per_A,
     ):
+        gates0_row, static_scan_gates = _split_observer_scan_gates(
+            backend,
+            gates0_row,
+            stateless_vm_only=stateless_vm_only,
+        )
         safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
 
         def step(carry, step_inputs):
@@ -1103,7 +1175,11 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = _observer_scan_membrane_conductance_terms(
+                backend,
+                linearization_gates,
+                static_scan_gates,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -1189,7 +1265,12 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                 ),
             ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        final_gates = _merge_observer_scan_gates(
+            backend,
+            final_carry[1],
+            static_scan_gates,
+        )
+        return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
     observer_axes = 0
@@ -1295,6 +1376,11 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
         Iinj_mask,
         forcing_footprint_mV_per_A,
     ):
+        gates0_row, static_scan_gates = _split_observer_scan_gates(
+            backend,
+            gates0_row,
+            stateless_vm_only=stateless_vm_only,
+        )
         safe_iinj_indices = (
             jnp.where(Iinj_mask, Iinj_indices, 0)
             if has_sparse_iinj
@@ -1336,7 +1422,11 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = _observer_scan_membrane_conductance_terms(
+                backend,
+                linearization_gates,
+                static_scan_gates,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -1422,7 +1512,12 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                 ),
             ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        final_gates = _merge_observer_scan_gates(
+            backend,
+            final_carry[1],
+            static_scan_gates,
+        )
+        return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
     observer_axes = 0
@@ -1525,6 +1620,11 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
         Iinj_indices,
         Iinj_mask,
     ):
+        gates0_row, static_scan_gates = _split_observer_scan_gates(
+            backend,
+            gates0_row,
+            stateless_vm_only=stateless_vm_only,
+        )
         safe_iinj_indices = jnp.where(Iinj_mask, Iinj_indices, 0)
 
         def step(carry, step_inputs):
@@ -1555,7 +1655,11 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = _observer_scan_membrane_conductance_terms(
+                backend,
+                linearization_gates,
+                static_scan_gates,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -1639,7 +1743,12 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                 ),
             ),
         )
-        return final_carry[0], final_carry[1], tuple(final_carry[3:]), final_carry[2]
+        final_gates = _merge_observer_scan_gates(
+            backend,
+            final_carry[1],
+            static_scan_gates,
+        )
+        return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
     observer_axes = 0

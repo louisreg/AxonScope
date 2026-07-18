@@ -948,6 +948,14 @@ runtime reconstruction path.
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a
   solver-specific blocking path before that contract exists.
+- [ ] Last resort only: if post-fusion profiles still show generated
+  exponential gate-rate evaluation as a material end-to-end bottleneck,
+  prototype voltage-indexed rate tables from the membrane compiler contract.
+  Quantify interpolation error over the validated voltage/temperature/
+  parameter domain, table memory and cache behavior, compile cost, CPU/GPU
+  timing, and complete simulation equivalence. Retain this only for a large,
+  reproducible total-runtime gain; do not make approximate rate tables the
+  default merely because an isolated exponential microbenchmark is faster.
 - [x] Validate built-ins, stateful models, composition, parameter overrides,
   recording labels/groups, diagnostics, numerical equivalence against the
   Model IR oracle, cache invalidation, generated-code inspection, and cold/warm
