@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from functools import partial
-import os
 
 import jax
 import jax.numpy as jnp
@@ -258,13 +257,6 @@ def _run_double_cable_batch_stateful_integrated_scan(
         plan_factory = getattr(backend, "generated_triton_membrane_plan", None)
         if callable(plan_factory):
             generated_membrane_plan = plan_factory()
-        if (
-            generated_membrane_plan is None
-            and os.environ.get("AXONSCOPE_REQUIRE_FUSED_TRITON_DOUBLE_MEMBRANE") == "1"
-        ):
-            raise RuntimeError(
-                "Fused Triton double-cable membrane execution was required but unavailable."
-            )
     gates0_scan = gates0
     static_scan_gates = None
     merge_scan_gates = getattr(backend, "merge_scan_gates", None)
@@ -616,13 +608,6 @@ def _run_double_cable_batch_observer_integrated_scan(
         plan_factory = getattr(backend, "generated_triton_membrane_plan", None)
         if callable(plan_factory):
             generated_membrane_plan = plan_factory()
-        if (
-            generated_membrane_plan is None
-            and os.environ.get("AXONSCOPE_REQUIRE_FUSED_TRITON_DOUBLE_MEMBRANE") == "1"
-        ):
-            raise RuntimeError(
-                "Fused Triton double-cable membrane execution was required but unavailable."
-            )
 
     gates0_scan = jnp.swapaxes(gates0, 0, 1) if use_node_first_state else gates0
     split_scan_gates = getattr(backend, "split_scan_gates", None)
