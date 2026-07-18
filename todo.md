@@ -930,6 +930,13 @@ runtime reconstruction path.
   `4.945` to `3.599 s` at Naxon=4096 (`-27.2%`). Median complete recruitment
   sweeps are `1.218` and `4.119 s`, respectively; artifacts end in
   `axs-p17-sg-time-d{1024,4096}-5623f0a`.
+- [ ] Apply and benchmark the same dynamic-gate/invariant-layout separation on
+  the canonical single-cable GPU observer path. Replace the existing carry in
+  the shared-rank1, factorized, and zero-stimulation scans through one common
+  capability-based mechanism; do not add parallel scan variants. Profile
+  Naxon={1024,4096} on P100, report cuSPARSE versus membrane/layout/observer
+  time, cold and warm end-to-end timing, memory, and exact activation/result
+  equivalence. Retain it only if the complete single-cable workload improves.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
 - [ ] If P16 leaves material membrane/gate cost after layout and generic
