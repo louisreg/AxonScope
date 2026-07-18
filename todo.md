@@ -1017,6 +1017,23 @@ runtime reconstruction path.
     coherence; that test passed immediately in isolation. Artifacts end in
     `axs-p17-double-mem-guard-v3-5ea8a2a` and
     `axs-p17-double-mem-time-{1024,4096}-5ea8a2a`.
+  - A direct P100 experiment inlined the generated gate update and `Gm/GE`
+    evaluation into each node of the existing tiled-Thomas recurrence. The
+    strict fused-route smoke compiled and preserved exact activation counts,
+    and Perfetto confirmed that all 3000 standalone membrane kernels
+    disappeared. However, the fused Thomas kernel cost `662.2 ms`, versus
+    `423.4 + 192.6 = 616.0 ms` for the retained Thomas plus membrane kernels,
+    indicating register-pressure/instruction-overlap loss. At Naxon=1024,
+    median unprofiled warm `simulation.run_pool` changed only from `1.048 s`
+    to `1.039 s` (`-0.9%`), while the complete sweep regressed from `1.143 s`
+    to `1.153 s` (`+0.9%`) and cold compilation became materially slower.
+    The production experiment was reverted under the P16/P17 retention rule.
+    Artifacts end in `axs-p17-double-fused-smoke-08ad0d2`,
+    `axs-p17-double-fused-trace-1024-08ad0d2`, and
+    `axs-p17-double-fused-time-1024-08ad0d2`. Do not retry same-step inlining
+    as launch-only fusion; the next kernel experiment must amortize execution
+    across temporal steps or otherwise demonstrate a 10-15% total-runtime
+    gain.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a

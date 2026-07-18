@@ -86,6 +86,16 @@ guarded artifact ending in `axs-p17-double-mem-guard-v3-5ea8a2a` and timed by
 the artifacts ending in `axs-p17-double-mem-time-{1024,4096}-5ea8a2a`. These
 retain the canonical node-first observer scan and fused tiled-Thomas solve,
 with exact activation counts and dense-kernel validation.
+A later direct same-step fusion of generated membrane equations inside the
+Thomas recurrence was rejected. The guarded smoke, Perfetto trace, and
+unprofiled Naxon=1024 timing artifacts end in
+`axs-p17-double-fused-smoke-08ad0d2`,
+`axs-p17-double-fused-trace-1024-08ad0d2`, and
+`axs-p17-double-fused-time-1024-08ad0d2`. The standalone membrane launches
+disappeared, but the combined kernel was slower than the two retained kernels;
+warm run-pool improved by only `0.9%`, the complete sweep regressed by `0.9%`,
+and cold compilation worsened. Use these artifacts as evidence against
+launch-only inlining, not as a production baseline.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
