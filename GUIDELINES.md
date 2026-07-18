@@ -84,7 +84,7 @@ Current focus after the P9 closeout:
 | 7 - Performance evidence | Done for current evidence layer | Estimates, hotpath metadata, memory pressure reporting, footprint reuse evidence. |
 | 7.5 - Generic solver-side observers | Superseded | Broad observer path removed from active direction; `PeakVoltage` remains post-hoc. |
 | 7.6.1-7.6.2 - Hotpath/memory cleanup | Done for evidence layer | Sparse/zero inputs, compact observer outputs, runtime caches, chunking, profiler traces. |
-| 7.6.3 - Exact double-cable GPU solver | Closed for current evidence | CPU double-cable is Thomas-only; GPU double-cable keeps typed explicit routes, with tiled Thomas as the promotion candidate pending the full policy matrix. |
+| 7.6.3 - Exact cable GPU solvers | Closed for current evidence | CPU single-cable keeps JAX tridiagonal and CPU double-cable is Thomas-only; CUDA single- and double-cable execution use the retained exact Triton tiled-Thomas kernels behind typed execution policy. |
 | 7.6.5 - Execution envelope and forcing | Done for current JAX lowering cleanup | Prepare/dispatch/probe-plan rebuilds are reduced, `Vext`/`Iinj` lowering is centralized, and retained dense forcing is explicit backend fallback behavior. |
 | 7.6.6 - GPU dispatch scheduling | Planned | Memory-aware bucketing/coalescing before optional async scheduling. |
 | 7.6.7 - VmRaster redesign | Done for current strict path | One threshold-style VmRaster primitive, packed in solver as `observations["vm_raster"]`, decoded post-hoc. |
@@ -1013,8 +1013,10 @@ Policy:
 - CPU double-cable is Thomas-only: `auto` resolves to `thomas`, and the only
   explicit CPU double-cable route is
   `axs.runtime.jax.cpu.DoubleCableSolver.thomas()`;
-- GPU double-cable defaults remain benchmark-backed JAX PCR policy until the
-  P11C-F/P11C-G matrix decides whether Triton should be promoted;
+- CPU single-cable lowers to the portable JAX tridiagonal solve;
+- CUDA single-cable lowers to one guarded internal exact scalar tiled-Thomas
+  Triton route; it is not a separate public solver choice;
+- GPU double-cable lowers to the retained looped jax-triton tiled-Thomas route;
 - solver-specific options must live under typed solver policy values, not in
   `BatchOptions`;
 - benchmark CLIs may keep string flags, but active benchmark workloads must
@@ -1022,11 +1024,9 @@ Policy:
 
 Do not expose approximate double-cable surrogate, split iterative, associative-transfer, Pallas,
 static Triton, CUDA FFI, or other custom-kernel candidates as public solver
-choices while they remain archived or standby evidence. The looped jax-triton
-tiled-Thomas route may be selectable through typed
-`axs.runtime.jax.gpu.DoubleCableSolver.tiled_thomas(...)`
-while it is validated, but it must not become default policy without fresh P11C
-benchmark evidence.
+choices while they remain archived or standby evidence. Retained custom
+kernels stay backend-internal unless a genuine user-facing policy distinction
+is supported by fresh benchmark and validation evidence.
 
 `BatchOptions` and `BatchRecording` are currently public advanced execution
 knobs for batch-kernel retained Vm policy and time chunking. They are not the

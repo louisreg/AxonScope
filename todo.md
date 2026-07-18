@@ -14,8 +14,8 @@ ranking the remaining high-impact optimization gates.
   closed. The remaining P14B architecture items are retained as non-blocking
   convergence work rather than silently discarded.
 - The production runtime is JAX. CPU double-cable uses Thomas; GPU
-  double-cable uses the Triton tiled-Thomas route; single-cable uses the JAX
-  tridiagonal route.
+  double-cable uses the Triton tiled-Thomas route. Single-cable uses the JAX
+  tridiagonal route on CPU and the exact Triton tiled-Thomas route on CUDA.
 - The strict solver-side threshold route now has three retention policies:
   compact activation keeps one boolean per row and definition, compact latency
   keeps one first-crossing `int32`, and VmRaster remains the temporal reference
@@ -25,15 +25,12 @@ ranking the remaining high-impact optimization gates.
   use compact activation when their criterion is activation-only. P15 still
   needs bounded crossing, spike, and propagation event states.
 - The remaining optimization work proceeds in this measured order:
-  1. P17B benchmark an exact scalar tiled-Thomas Triton replacement for the
-     single-cable cuSPARSE solve; promote it only for a repeatable 15% or
-     larger end-to-end/solver-interval gain at Naxon=1024/4096.
-  2. P14B represent translated fibers as shared geometry/cable templates plus
+  1. P14B represent translated fibers as shared geometry/cable templates plus
      row-specific intrinsic shifts, removing repeated shifted-layout builds.
-  3. P14D make one prepared runnable plan reusable across compatible calls,
+  2. P14D make one prepared runnable plan reusable across compatible calls,
      including device arrays, factorized footprints, and observer plans.
-  4. P18 complete and validate membrane models.
-  5. P19 perform pre-v1 cleanup and public-surface convergence.
+  3. P18 complete and validate membrane models.
+  4. P19 perform pre-v1 cleanup and public-surface convergence.
 
 Latest fast validation recorded by the compact-activation checkpoint:
 
@@ -1148,11 +1145,20 @@ Retain this as solve-only evidence, not an end-to-end claim. Artifact:
   persistent replay, and realistic warm throughput are recorded above. No
   material cable-assembly boundary is established, so do not fuse it during
   this promotion.
-- [ ] Promote the winner by replacing the existing internal GPU single-cable
+- [x] Promote the winner by replacing the existing internal GPU single-cable
   solve, with no public policy or retained alternative route, only if repeated
   Naxon=1024/4096 runs improve the total solver interval or `run_pool` by at
   least 15%, preserve numerical behavior, and do not create an unacceptable
   cold/cache regression. Otherwise archive the prototype and close the gate.
+  Commit `1e17d6c` moves the validated kernel to
+  `runtime/jax/kernels/triton_single_cable.py`, selects it through CUDA
+  lowering, guards the resolved GPU route and optional dependencies, and
+  removes the benchmark injection flag. CPU lowering keeps the JAX
+  tridiagonal solve. Fresh production P100 artifacts end in
+  `axs-p17b-single-production-{1024,4096}-1e17d6c`: median warm wall/run-pool
+  are `1.948/1.791 s` at N=1024 and `5.718/5.222 s` at N=4096, with explicit
+  `jax_triton_tiled_thomas_xb` route metadata and the retained activation
+  counts. The local post-promotion suite passes with `734 passed, 1 skipped`.
 
 ### P18 - Membrane Model Completion And Validation
 

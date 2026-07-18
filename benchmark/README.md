@@ -97,10 +97,10 @@ warm run-pool improved by only `0.9%`, the complete sweep regressed by `0.9%`,
 and cold compilation worsened. Use these artifacts as evidence against
 launch-only inlining, not as a production baseline.
 
-P17B gates a benchmark-only exact scalar tiled-Thomas Triton candidate before
-any single-cable runtime change. It compares node-first `[Nx, B]` systems with
-the canonical JAX/cuSPARSE solve, validates a subset with dense NumPy, and
-reports first-call and warm timings across launch widths:
+P17B established the retained exact scalar tiled-Thomas CUDA route for
+single-cable execution. The regression gate compares production node-first
+`[Nx, B]` systems with the portable JAX/cuSPARSE solve, validates a subset with
+dense NumPy, and reports first-call and warm timings across launch widths:
 
 ```bash
 python benchmark/run.py \
@@ -112,9 +112,11 @@ python benchmark/run.py \
   --output benchmark/results/p17b_single_cable_triton_gate
 ```
 
-This candidate remains under `benchmark/solvers/`. Promote it only by replacing
-the canonical internal GPU solve after the numerical gate and the 15% realistic
-end-to-end retention threshold pass; do not expose a public solver policy.
+The production kernel lives in
+`src/axonscope/runtime/jax/kernels/triton_single_cable.py`; the benchmark owns
+only the comparison harness. CUDA execution resolves one guarded internal
+route, while CPU execution retains JAX tridiagonal lowering. Install the
+optional GPU stack with `pip install 'axonscope[gpu]'`.
 The first P100 solve-only artifact ends in
 `axs-p17b-single-thomas-gate-fc4ae5c`. For `Nx=200`, Triton-128 improved warm
 solve time from `0.773` to `0.450 ms` at `B=5120` (`1.72x`) and from `2.412` to
@@ -143,6 +145,11 @@ contiguous node-first batch-lane accesses, one 128-thread program per tile,
 39 `b32` plus 35 `b64` virtual registers, and no shared/local memory or
 `ld.local`/`st.local` spill traffic. The measured gate does not justify cable
 assembly fusion during the initial production replacement.
+Fresh production artifacts ending in
+`axs-p17b-single-production-{1024,4096}-1e17d6c` reproduce the promoted route
+without a benchmark flag. Median warm wall/run-pool are `1.948/1.791 s` at
+N=1024 and `5.718/5.222 s` at N=4096, with retained activation counts and
+explicit `jax_triton_tiled_thomas_xb` route metadata.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
