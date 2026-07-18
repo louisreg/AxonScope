@@ -49,10 +49,13 @@ Current focus after the P9 closeout:
   required user knowledge.
 - treat Model IR as a compiler representation, not the long-term numerical
   runtime source. Runtime-specific generated modules are content-addressed per
-  model and target, generated lazily, and own every model-specific numerical
-  function consumed by that runtime. A cached runtime artifact must be reusable
-  without regenerating an already valid target file; Model IR may remain beside
-  it for validation, inspection, composition, and reference execution.
+  model and target, generated lazily, and own every model-specific runtime fact:
+  numerical functions, canonical parameter metadata, state and gate policies,
+  observables, diagnostics, initialization, and stateful step hooks. A cached
+  runtime artifact must be reusable without regenerating an already valid
+  target file or rebuilding its execution contract from Model IR; Model IR may
+  remain beside it for validation, inspection, composition, and reference
+  execution.
 - keep built-in membrane model truth in `src/axonscope/membranes/models/`: each
   model file owns its equations, unit-bearing defaults, public aliases, and
   derived parameter logic. Public constructors, `model_ir`, solvers, and

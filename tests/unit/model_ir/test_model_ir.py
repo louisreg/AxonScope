@@ -19,6 +19,9 @@ from axonscope.runtime.jax.membranes.backend import (
     UniformMembraneBackend,
 )
 from axonscope.runtime.jax.membranes.compile import compile_membrane_model
+from axonscope.runtime.jax.membranes.generated_contract import (
+    load_generated_jax_membrane_contract,
+)
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
 from axonscope.membranes.model import MembraneModel
@@ -281,6 +284,38 @@ def test_source_codegen_cache_hit_loads_graph_without_ast_parse(tmp_path, monkey
     assert second.model.parameters[0].default == 30_000.0
     assert second.model.parameters[1].default == -60.0
     assert structural_hash(second.model) == structural_hash(first.model)
+
+
+def test_source_codegen_cache_keeps_canonical_defaults_across_overrides(tmp_path):
+    first = compile_model_source_file(
+        PASSIVE_SOURCE,
+        parameter_defaults={"Rm": 30_000.0},
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+    second = compile_model_source_file(
+        PASSIVE_SOURCE,
+        cache_root=tmp_path,
+        generated_targets=("jax",),
+        load_generated_modules=("jax",),
+    )
+
+    assert first.model.parameters[0].default == 30_000.0
+    assert second.model.parameters[0].default == 10_000.0
+    assert second.cache.cache_hit is True
+    assert second.cache.key == first.cache.key
+
+    contract = load_generated_jax_membrane_contract(
+        second.cache.loaded_modules["jax"]
+    )
+    assert contract.model_name == "passive"
+    assert contract.parameter_defaults() == {"Rm": 10_000.0, "EL": -70.0}
+    assert contract.current_names == ("I_l",)
+    assert contract.conductance_names == ("g_l",)
+    assert contract.structural_hash == membrane_program_from_model_ir(
+        second.model
+    ).structural_hash
 
 
 def test_source_codegen_adds_runtime_targets_without_rewriting_cached_artifacts(tmp_path):

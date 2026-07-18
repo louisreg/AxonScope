@@ -36,6 +36,12 @@ def test_stateful_public_membranes_compile_through_model_ir():
 
         assert is_jax_membrane_program_kind(membrane, kind)
         assert membrane.membrane_state_specs()
+        assert membrane.generated_contract is not None
+        assert membrane.generated_contract.has_step_program
+        assert (
+            membrane.generated_contract.prepare_state_update_names
+            or membrane.generated_contract.finalize_state_update_names
+        )
 
 
 def test_stateful_dynamics_stay_out_of_axon_templates():

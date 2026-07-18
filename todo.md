@@ -879,6 +879,10 @@ runtime reconstruction path.
   content-addressed cache directories; JAX currently requests `jax_model.py`.
 - [x] Move stateless gate rates, Q10 factors, conductances, and reversal terms
   into generated model-agnostic JAX functions.
+- [x] Introduce a versioned, typed JAX runtime contract in `jax_model.py` for
+  canonical parameter metadata, names/groups, states, gate policies,
+  diagnostics, step-hook declarations, and structural identity. Keep generated
+  cache contents canonical across per-instance parameter overrides.
 - [ ] Generate parameter defaults; names/units; gate, state, current,
   observable, and diagnostic metadata; update policy; auxiliary state and
   initialization; stateful prepare/finalize; recording contracts; signatures;

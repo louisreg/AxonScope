@@ -9,10 +9,14 @@ import numpy as np
 
 from axonscope.runtime.jax.membranes.backend import MembraneStateSpec, MembraneStepPlan
 from axonscope.model_ir import ModelIR, MembraneProgram, membrane_program_from_model_ir
-from axonscope.model_ir.interpreter import NumpyModelInterpreter
+from axonscope.model_ir.interpreter import NumpyModelInterpreter, parameter_defaults
 from axonscope.utils.settings import dtype
 
 from .model_ir_lowering import JaxModelIRLowering
+from .generated_contract import (
+    GeneratedJaxMembraneContract,
+    load_generated_jax_membrane_contract,
+)
 
 
 class JaxMembraneProgram:
@@ -32,10 +36,21 @@ class JaxMembraneProgram:
         self.program = program
         self.model_ir = program.model
         self.dtype = normalize_jax_dtype(dtype_local)
+        self.generated_contract: GeneratedJaxMembraneContract | None = None
+        parameter_values = None
+        if generated_module is not None:
+            self.generated_contract = load_generated_jax_membrane_contract(
+                generated_module
+            )
+            _validate_generated_contract(self.generated_contract, program)
+            parameter_values = self.generated_contract.parameter_values(
+                parameter_defaults(self.model_ir)
+            )
         self.lowering = JaxModelIRLowering(
             self.model_ir,
             dtype=self.dtype,
             generated_module=generated_module,
+            parameter_values=parameter_values,
         )
         self.q10 = dtype(self._representative_q10())
         self._static_signature_cache: tuple[Any, ...] | None = None
@@ -91,7 +106,7 @@ class JaxMembraneProgram:
             return cached
         fallback = None
         values = []
-        for index, name in enumerate(self.program.conductance_parameter_names):
+        for index, name in enumerate(self._conductance_parameter_names):
             if name is not None and name in self.lowering.parameters:
                 values.append(self.lowering.parameters[name])
                 continue
@@ -145,7 +160,7 @@ class JaxMembraneProgram:
         beta = q10 * beta
         sum_ab = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))
         dt_local = jnp.asarray(dt, dtype=self.dtype)
-        if all(gate.update.value == "crank_nicolson" for gate in self.model_ir.gates):
+        if all(mode == "crank_nicolson" for mode in self._gate_update_modes):
             denom = jnp.maximum(
                 1.0 / dt_local + 0.5 * sum_ab,
                 jnp.asarray(1e-12, dtype=self.dtype),
@@ -164,21 +179,21 @@ class JaxMembraneProgram:
         gates_predictor: jnp.ndarray,
     ) -> jnp.ndarray:
         _ = V_mV_prev
-        if self.program.final_gate_update_mode == "post_solve_voltage":
+        if self._final_gate_update_mode == "post_solve_voltage":
             return self.cn_gate_update(g_prev=gates_prev, V_mV=V_mV_new, dt=dt)
         return gates_predictor
 
     def supports_stateless_vm_only_fast_path(self) -> bool:
         return (
             self.membrane_state_specs() == ()
-            and self.program.final_gate_update_mode != "post_solve_voltage"
-            and self.model_ir.step_program is None
+            and self._final_gate_update_mode != "post_solve_voltage"
+            and not self._has_step_program
         )
 
     def g_funcs(self, gates: jnp.ndarray, g_bar: jnp.ndarray) -> jnp.ndarray:
         overrides = {
             name: g_bar[index]
-            for index, name in enumerate(self.program.conductance_parameter_names)
+            for index, name in enumerate(self._conductance_parameter_names)
             if name is not None and index < int(g_bar.shape[0])
         }
         return self.lowering.conductances(gates, parameters=overrides)
@@ -210,12 +225,18 @@ class JaxMembraneProgram:
         return self.lowering.membrane_conductance_terms(gates, state=state)
 
     def gate_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.gate_names
         return self.program.gate_names
 
     def conductance_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.conductance_names
         return self.program.conductance_names
 
     def current_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.current_names
         return self.program.current_names
 
     def membrane_state_specs(self) -> tuple[MembraneStateSpec, ...]:
@@ -224,7 +245,7 @@ class JaxMembraneProgram:
             return cached
         specs = tuple(
             MembraneStateSpec(name)
-            for name in self.program.membrane_state_display_names
+            for name in self._membrane_state_display_names
         )
         self._membrane_state_specs_cache = specs
         return specs
@@ -338,6 +359,8 @@ class JaxMembraneProgram:
         )
 
     def diagnostic_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.diagnostic_names
         return self.program.diagnostic_names
 
     def compute_step_diagnostics(
@@ -376,9 +399,70 @@ class JaxMembraneProgram:
             raise ValueError("JaxMembraneProgram requires a common q10 across gates.")
         return first
 
+    @property
+    def _conductance_parameter_names(self) -> tuple[str | None, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.conductance_parameter_names
+        return self.program.conductance_parameter_names
+
+    @property
+    def _gate_update_modes(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.gate_update_modes
+        return tuple(gate.update.value for gate in self.model_ir.gates)
+
+    @property
+    def _final_gate_update_mode(self) -> str:
+        if self.generated_contract is not None:
+            return self.generated_contract.final_gate_update_mode
+        return self.program.final_gate_update_mode
+
+    @property
+    def _has_step_program(self) -> bool:
+        if self.generated_contract is not None:
+            return self.generated_contract.has_step_program
+        return self.model_ir.step_program is not None
+
+    @property
+    def _membrane_state_display_names(self) -> tuple[str, ...]:
+        if self.generated_contract is not None:
+            return self.generated_contract.membrane_state_display_names
+        return self.program.membrane_state_display_names
+
 
 def is_jax_membrane_program_kind(model: Any, kind: str) -> bool:
     return isinstance(model, JaxMembraneProgram) and model.program.name == kind
+
+
+def _validate_generated_contract(
+    contract: GeneratedJaxMembraneContract,
+    program: MembraneProgram,
+) -> None:
+    expected = {
+        "model_name": program.name,
+        "structural_hash": program.structural_hash,
+        "gate_state_names": program.gate_state_names,
+        "membrane_state_names": program.membrane_state_names,
+        "gate_names": program.gate_names,
+        "current_names": program.current_names,
+        "current_groups": program.current_groups,
+        "conductance_names": program.conductance_names,
+        "conductance_groups": program.conductance_groups,
+        "conductance_parameter_names": program.conductance_parameter_names,
+        "diagnostic_names": program.diagnostic_names,
+        "final_gate_update_mode": program.final_gate_update_mode,
+    }
+    mismatches = tuple(
+        name
+        for name, value in expected.items()
+        if getattr(contract, name) != value
+    )
+    if mismatches:
+        names = ", ".join(mismatches)
+        raise ValueError(
+            "Generated JAX membrane contract does not match compiled model: "
+            f"{names}."
+        )
 
 
 def normalize_jax_dtype(dtype_local: Any | None) -> jnp.dtype:

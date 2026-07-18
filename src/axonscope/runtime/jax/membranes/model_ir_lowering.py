@@ -67,12 +67,18 @@ class JaxModelIRLowering:
         *,
         dtype: jnp.dtype,
         generated_module: Any | None = None,
+        parameter_values: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.dtype = dtype
+        resolved_parameters = (
+            parameter_defaults(model)
+            if parameter_values is None
+            else parameter_values
+        )
         self.parameters = {
             key: jnp.asarray(value, dtype=dtype)
-            for key, value in parameter_defaults(model).items()
+            for key, value in resolved_parameters.items()
         }
         self.program = membrane_program_from_model_ir(model)
         self.gate_state_names = self.program.gate_state_names
