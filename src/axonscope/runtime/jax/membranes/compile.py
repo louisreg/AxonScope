@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,7 @@ def compile_membrane_model(
     cached_runtime: GeneratedSourceRuntimeResult | None = None
     cached_composite: _CachedCompositeRuntime | None = None
     lowered = None
+    generated_targets = _runtime_codegen_targets()
 
     with benchmark_span("runtime.prepare.membrane_compile.source_lowering"):
         try:
@@ -79,7 +81,7 @@ def compile_membrane_model(
                 lowered = lower_membrane_model_with_sources(
                     model,
                     load_generated_modules=("jax", "numpy"),
-                    generated_targets=("jax", "numpy"),
+                    generated_targets=generated_targets,
                 )
         except ValueError as exc:
             raise ValueError(f"Unknown membrane model kind: {model.kind!r}") from exc
@@ -98,6 +100,8 @@ def compile_membrane_model(
         composite_cache = ensure_generated_model_ir_runtime(
             lowered.model,
             cache_identity=_composite_cache_identity(model, lowered.source_results),
+            load_generated_modules=("jax", "numpy"),
+            generated_targets=generated_targets,
         )
     _record_membrane_source_compile_metadata(
         model.kind,
@@ -171,7 +175,8 @@ def _load_cached_generated_runtime(model: Any) -> GeneratedSourceRuntimeResult |
     return load_generated_source_runtime(
         source_path,
         model_class_name=model.source_class,
-        targets=("jax", "numpy"),
+        targets=_runtime_codegen_targets(),
+        load_targets=("jax", "numpy"),
     )
 
 
@@ -191,7 +196,8 @@ def _load_cached_composite_runtime(model: Any) -> _CachedCompositeRuntime | None
     identity = _composite_cache_identity(model, tuple(source_results))
     cache = load_generated_model_ir_runtime(
         cache_identity=identity,
-        targets=("jax", "numpy"),
+        targets=_runtime_codegen_targets(),
+        load_targets=("jax", "numpy"),
     )
     if cache is None:
         return None
@@ -232,11 +238,22 @@ def _codegen_cache_metadata(cache: GeneratedCodeCache) -> dict[str, Any]:
     return {
         "compiler": SOURCE_COMPILER_VERSION,
         "contract": SOURCE_CONTRACT_VERSION,
+        "directory": str(cache.directory),
         "files": tuple(path.name for path in cache.generated_files),
         "key": cache.key,
         "manifest": cache.manifest_path.name,
         "targets": tuple(sorted(cache.loaded_modules)),
     }
+
+
+def _runtime_codegen_targets() -> tuple[str, ...]:
+    targets = ["jax", "numpy"]
+    if (
+        importlib.util.find_spec("triton") is not None
+        and importlib.util.find_spec("jax_triton") is not None
+    ):
+        targets.append("triton")
+    return tuple(targets)
 
 
 def compile_axon_membrane(

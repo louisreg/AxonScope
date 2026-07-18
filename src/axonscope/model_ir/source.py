@@ -243,6 +243,7 @@ def load_generated_source_runtime(
     model_class_name: str | None = None,
     cache_root: str | os.PathLike[str] | None = None,
     targets: tuple[str, ...] = ("jax", "numpy"),
+    load_targets: tuple[str, ...] | None = None,
 ) -> GeneratedSourceRuntimeResult | None:
     """Load cached runtime modules without parsing source or loading Model IR."""
 
@@ -256,6 +257,11 @@ def load_generated_source_runtime(
         model_class_name=model_class_name,
         cache_root=cache_root,
         targets=normalized_targets,
+        load_targets=(
+            None
+            if load_targets is None
+            else _normalize_codegen_targets(load_targets)
+        ),
     )
 
 
@@ -340,6 +346,7 @@ def load_generated_model_ir_runtime(
     cache_identity: Any,
     cache_root: str | os.PathLike[str] | None = None,
     targets: tuple[str, ...] = ("jax", "numpy"),
+    load_targets: tuple[str, ...] | None = None,
 ) -> GeneratedCodeCache | None:
     """Load targets for a compiled-graph identity without loading its graph."""
 
@@ -365,7 +372,11 @@ def load_generated_model_ir_runtime(
         loaded_modules=_load_generated_modules(
             generated_files,
             key=key,
-            targets=targets,
+            targets=(
+                targets
+                if load_targets is None
+                else _normalize_codegen_targets(load_targets)
+            ),
         ),
     )
 
@@ -3156,7 +3167,11 @@ def _generated_module_source(
     )
     fused_membrane_source = ""
     if target == "triton" and not membrane_states and step is None:
-        fused_membrane_source, fused_membrane_function = (
+        (
+            fused_membrane_source,
+            fused_membrane_function,
+            fused_membrane_kernel_function,
+        ) = (
             _generated_triton_fused_membrane_function_source(
                 model,
                 metadata=metadata,
@@ -3166,6 +3181,9 @@ def _generated_module_source(
         )
         runtime_functions["advance_gates_and_membrane_terms"] = (
             fused_membrane_function
+        )
+        runtime_functions["advance_gates_and_membrane_terms_kernel"] = (
+            fused_membrane_kernel_function
         )
     runtime_contract = _generated_runtime_contract(
         model,
@@ -3368,7 +3386,11 @@ def _generated_triton_fused_membrane_function_source(
     metadata: dict[str, Any],
     gate_outputs: tuple[tuple[str, Expression], ...],
     membrane_outputs: tuple[tuple[str, Expression], ...],
-) -> tuple[str, dict[str, tuple[str, ...]]]:
+) -> tuple[
+    str,
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[str, ...]],
+]:
     """Emit one scalar stateless gate-update plus Gm/GE Triton operation."""
 
     gate_names = tuple(gate.state for gate in model.gates)
@@ -3450,7 +3472,75 @@ def _generated_triton_fused_membrane_function_source(
         f"def advance_gates_and_membrane_terms({', '.join(arg_names)}):\n"
         f"{body}\n\n"
     )
-    return source, {"args": arg_names, "outputs": outputs}
+    parameter_args = tuple(name for name in extra_args if name != "Vm")
+    pointer_args = (
+        "Vm",
+        "gates",
+        "dt",
+        *parameter_args,
+    )
+    load_lines = (
+        "    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)",
+        "    mask = offsets < TOTAL",
+        "    Vm = tl.load(Vm_ptr + offsets, mask=mask, other=0.0)",
+        "    dt = tl.load(dt_ptr)",
+        *(
+            f"    {name} = tl.load({name}_ptr)"
+            for name in parameter_args
+        ),
+        *(
+            f"    {name} = tl.load(gates_ptr + offsets * {len(gate_names)} + {index}, mask=mask, other=0.0)"
+            for index, name in enumerate(gate_names)
+        ),
+    )
+    helper_args = (
+        "dt",
+        "LINEARIZE_PREVIOUS",
+        *gate_names,
+        *("Vm" if name == "Vm" else name for name in extra_args),
+    )
+    result_names = (
+        *(f"gate_new_{index}" for index in range(len(gate_names))),
+        "gm",
+        "ge",
+    )
+    store_lines = (
+        *(
+            f"    tl.store(gates_out_ptr + offsets * {len(gate_names)} + {index}, gate_new_{index}, mask=mask)"
+            for index in range(len(gate_names))
+        ),
+        "    tl.store(gm_out_ptr + offsets, gm, mask=mask)",
+        "    tl.store(ge_out_ptr + offsets, ge, mask=mask)",
+    )
+    kernel_args = (
+        "Vm_ptr",
+        "gates_ptr",
+        "dt_ptr",
+        *(f"{name}_ptr" for name in parameter_args),
+        "gates_out_ptr",
+        "gm_out_ptr",
+        "ge_out_ptr",
+        "TOTAL: tl.constexpr",
+        "LINEARIZE_PREVIOUS: tl.constexpr",
+        "BLOCK_SIZE: tl.constexpr",
+    )
+    source += (
+        "@triton.jit\n"
+        f"def advance_gates_and_membrane_terms_kernel({', '.join(kernel_args)}):\n"
+        + "\n".join(load_lines)
+        + "\n"
+        + f"    {', '.join(result_names)} = advance_gates_and_membrane_terms({', '.join(helper_args)})\n"
+        + "\n".join(store_lines)
+        + "\n\n"
+    )
+    return (
+        source,
+        {"args": arg_names, "outputs": outputs},
+        {
+            "args": pointer_args,
+            "outputs": ("gates_out", "gm_out", "ge_out"),
+        },
+    )
 
 
 def _batched(values: tuple[Any, ...], size: int) -> tuple[tuple[Any, ...], ...]:

@@ -25,6 +25,7 @@ from axonscope.runtime.jax.membranes.compile import compile_membrane_model
 from axonscope.runtime.jax.membranes.generated_contract import (
     load_generated_membrane_contract,
 )
+import axonscope.runtime.jax.membranes.triton_generated as triton_generated
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.membranes.compiler import lower_membrane_model_to_ir
 from axonscope.membranes.model import MembraneModel
@@ -387,6 +388,7 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     triton = ModuleType("triton")
     language = ModuleType("triton.language")
     triton.jit = lambda function: function
+    language.constexpr = object()
     language.abs = np.abs
     language.exp = np.exp
     language.log = np.log
@@ -414,6 +416,7 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert triton_model.TARGET == "triton"
     assert "import triton.language as tl" in triton_source
     assert "@triton.jit\ndef gate_terms" in triton_source
+    assert "@triton.jit\ndef advance_gates_and_membrane_terms_kernel" in triton_source
     assert "tl.exp" in triton_source
     assert json.loads(
         (compiled.cache.directory / "manifest.json").read_text(encoding="utf-8")
@@ -461,6 +464,11 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     fused_spec = triton_model.RUNTIME_CONTRACT["functions"][
         "advance_gates_and_membrane_terms"
     ]
+    fused_kernel_spec = triton_model.RUNTIME_CONTRACT["functions"][
+        "advance_gates_and_membrane_terms_kernel"
+    ]
+    assert fused_kernel_spec["args"][:3] == ("Vm", "gates", "dt")
+    assert fused_kernel_spec["outputs"] == ("gates_out", "gm_out", "ge_out")
     fused_values = {**values, "dt": dt, "linearize_previous": False}
     actual = triton_model.advance_gates_and_membrane_terms(
         *(fused_values[name] for name in fused_spec["args"])
@@ -488,6 +496,44 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     )
     np.testing.assert_allclose(actual[-2], expected_gm, rtol=1e-6)
     np.testing.assert_allclose(actual[-1], expected_ge, rtol=1e-6)
+
+    call: dict[str, object] = {}
+
+    def fake_cached_triton_call(*args, **kwargs):
+        call["args"] = args
+        call["kwargs"] = kwargs
+        return tuple(
+            jnp.zeros(shape.shape, dtype=shape.dtype)
+            for shape in kwargs["out_shape"]
+        )
+
+    monkeypatch.setattr(
+        triton_generated,
+        "cached_triton_call",
+        fake_cached_triton_call,
+    )
+    parameter_values = {
+        entry["name"]: entry["default"]
+        for entry in triton_model.RUNTIME_CONTRACT["parameters"]
+    }
+    outputs = triton_generated.advance_generated_membrane_terms(
+        triton_model,
+        values["Vm"],
+        gates_prev,
+        dt,
+        parameter_values=parameter_values,
+        linearize_previous=False,
+    )
+    assert tuple(output.shape for output in outputs) == (
+        gates_prev.shape,
+        values["Vm"].shape,
+        values["Vm"].shape,
+    )
+    call_kwargs = call["kwargs"]
+    assert call_kwargs["TOTAL"] == values["Vm"].size
+    assert call_kwargs["LINEARIZE_PREVIOUS"] is False
+    assert call_kwargs["grid"] == (1,)
+    assert call_kwargs["vmap_flatten_elements"] is True
 
 
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):

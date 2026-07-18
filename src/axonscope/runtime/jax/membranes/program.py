@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
@@ -150,6 +151,29 @@ class JaxMembraneProgram:
             return dict(self._codegen_cache)
         assert self.program is not None
         return dict(self.program.codegen_cache)
+
+    def generated_target_path(self, target: str) -> Path | None:
+        """Return one available generated runtime artifact without loading it."""
+
+        cache = self.codegen_cache
+        directory = cache.get("directory")
+        file_name = {
+            "jax": "jax_model.py",
+            "numpy": "numpy_model.py",
+            "triton": "triton_model.py",
+        }.get(str(target))
+        if not isinstance(directory, str) or file_name is None:
+            return None
+        if file_name not in cache.get("files", ()):
+            return None
+        path = Path(directory) / file_name
+        return path if path.is_file() else None
+
+    @property
+    def parameter_values(self) -> dict[str, Any]:
+        """Return runtime parameter values for generated target adapters."""
+
+        return dict(self._parameter_values)
 
     @property
     def g_bar(self) -> jnp.ndarray:

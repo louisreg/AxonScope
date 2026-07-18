@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import jax
+import jax.numpy as jnp
 from jax import extend as jex
 from jax._src import core
 from jax.interpreters import ad, batching, mlir, xla
@@ -60,6 +61,7 @@ def cached_triton_call(
     enable_fp_fusion: bool = True,
     input_output_aliases: dict[int, int] | None = None,
     serialized_metadata: bytes = b"",
+    vmap_flatten_elements: bool = False,
     **metaparams: Any,
 ) -> Any:
     """Call a fixed Triton kernel through a persistent compiled-call cache."""
@@ -108,6 +110,7 @@ def cached_triton_call(
         enable_fp_fusion=bool(enable_fp_fusion),
         input_output_aliases=tuple(sorted((input_output_aliases or {}).items())),
         serialized_metadata=bytes(serialized_metadata),
+        vmap_flatten_elements=bool(vmap_flatten_elements),
         metaparams=tuple(sorted(metaparams.items())),
     )
     if single_output:
@@ -136,9 +139,11 @@ def _cached_triton_kernel_call_lowering(
     enable_fp_fusion: bool,
     input_output_aliases: tuple[tuple[int, int], ...],
     serialized_metadata: bytes,
+    vmap_flatten_elements: bool,
     metaparams: tuple[tuple[str, Any], ...],
 ) -> Any:
     del out_shapes
+    del vmap_flatten_elements
 
     import jax_triton.triton_lib as jtlib
     from jax._src.lib import gpu_triton as triton_kernel_call_lib
@@ -256,13 +261,44 @@ def _raise_on_jvp(*args: Any, **kwargs: Any) -> None:
     raise NotImplementedError("Cached AxonScope Triton calls do not support JVP.")
 
 
-def _raise_on_vmap(*args: Any, **kwargs: Any) -> None:
-    del args, kwargs
-    raise NotImplementedError("Cached AxonScope Triton calls do not support vmap.")
+def _batch_cached_triton_call(
+    args: tuple[Any, ...],
+    batch_dims: tuple[int | None, ...],
+    **params: Any,
+) -> tuple[list[Any], tuple[int, ...]]:
+    if not params.get("vmap_flatten_elements", False):
+        raise NotImplementedError("Cached AxonScope Triton call does not support vmap.")
+    mapped = tuple(
+        (arg, dim) for arg, dim in zip(args, batch_dims, strict=True) if dim is not None
+    )
+    if not mapped:
+        outputs = _cached_triton_kernel_call_p.bind(*args, **params)
+        return outputs, tuple(None for _ in outputs)
+    batch_size = int(mapped[0][0].shape[int(mapped[0][1])])
+    if any(int(arg.shape[int(dim)]) != batch_size for arg, dim in mapped):
+        raise ValueError("Generated Triton vmap inputs have inconsistent batch sizes.")
+    batched_args = tuple(
+        arg if dim is None or int(dim) == 0 else jnp.moveaxis(arg, int(dim), 0)
+        for arg, dim in zip(args, batch_dims, strict=True)
+    )
+    out_shapes = tuple(
+        jax.ShapeDtypeStruct((batch_size, *shape.shape), shape.dtype)
+        for shape in params["out_shapes"]
+    )
+    metaparams = dict(params["metaparams"])
+    total = int(metaparams["TOTAL"]) * batch_size
+    block_size = int(metaparams["BLOCK_SIZE"])
+    metaparams["TOTAL"] = total
+    rebound = dict(params)
+    rebound["out_shapes"] = out_shapes
+    rebound["grid"] = ((total + block_size - 1) // block_size,)
+    rebound["metaparams"] = tuple(sorted(metaparams.items()))
+    outputs = _cached_triton_kernel_call_p.bind(*batched_args, **rebound)
+    return outputs, tuple(0 for _ in outputs)
 
 
 ad.primitive_jvps[_cached_triton_kernel_call_p] = _raise_on_jvp
-batching.primitive_batchers[_cached_triton_kernel_call_p] = _raise_on_vmap
+batching.primitive_batchers[_cached_triton_kernel_call_p] = _batch_cached_triton_call
 
 
 def _kernel_cache_payload(

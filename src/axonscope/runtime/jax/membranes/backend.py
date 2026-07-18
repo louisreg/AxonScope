@@ -170,6 +170,33 @@ class UniformMembraneBackend:
     def background_current(self) -> Array1D:
         return self.ion_channel.I_background(self.Nx)
 
+    def generated_triton_advance_membrane_terms(
+        self,
+        *,
+        g_prev: jnp.ndarray,
+        V_mV: jnp.ndarray,
+        dt: Any,
+        linearize_previous: bool,
+        static_gates: jnp.ndarray | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
+        _ = static_gates
+        from .triton_generated import (
+            advance_generated_membrane_terms,
+            load_generated_triton_module,
+        )
+
+        module = load_generated_triton_module(self.ion_channel)
+        if module is None:
+            return None
+        return advance_generated_membrane_terms(
+            module,
+            V_mV,
+            g_prev,
+            dt,
+            parameter_values=self.ion_channel.parameter_values,
+            linearize_previous=linearize_previous,
+        )
+
 
 class HeterogeneousMembraneGroup(NamedTuple):
     model: Any
@@ -648,6 +675,49 @@ class GatedLeakStackMembraneBackend:
 
     def background_current(self) -> Array1D:
         return jnp.zeros((self.Nx,), dtype=self.dtype)
+
+    def generated_triton_advance_membrane_terms(
+        self,
+        *,
+        g_prev: jnp.ndarray,
+        V_mV: jnp.ndarray,
+        dt: Any,
+        linearize_previous: bool,
+        static_gates: jnp.ndarray | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
+        from .triton_generated import (
+            advance_generated_membrane_terms,
+            load_generated_triton_module,
+        )
+
+        module = load_generated_triton_module(self.gated_model)
+        if module is None:
+            return None
+        gates_new, gated_gm, gated_ge = advance_generated_membrane_terms(
+            module,
+            V_mV,
+            g_prev[..., : self.gated_gate_count],
+            dt,
+            parameter_values=self.gated_model.parameter_values,
+            linearize_previous=linearize_previous,
+        )
+        if static_gates is None:
+            leak_gm = g_prev[..., self._leak_g_col]
+            leak_ge = g_prev[..., self._leak_ge_col]
+            gated_mask = g_prev[..., self._gated_mask_col]
+            gates_new = self.merge_scan_gates(
+                gates_new,
+                g_prev[..., self.gated_gate_count :],
+            )
+        else:
+            leak_gm = static_gates[..., 0]
+            leak_ge = static_gates[..., 1]
+            gated_mask = static_gates[..., 2]
+        return (
+            gates_new,
+            gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
+            gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
+        )
 
 
 @dataclass(frozen=True)
