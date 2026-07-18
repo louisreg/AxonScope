@@ -7,8 +7,8 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-17 after validating compact activation at P14E scale and
-implementing compact first-crossing latency.
+Updated on 2026-07-19 after closing same-step membrane/Thomas fusion and
+ranking the remaining high-impact optimization gates.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -24,12 +24,16 @@ implementing compact first-crossing latency.
   axis; it no longer expands `Namplitude x Naxon` Python objects. Large sweeps
   use compact activation when their criterion is activation-only. P15 still
   needs bounded crossing, spike, and propagation event states.
-- Work proceeds in dependency order:
-  1. P15 compact activation, spike, and propagation observers.
-  2. P16 low-level JAX temporal solver and dispatch optimization.
-  3. P17 autonomous generated membrane runtime contracts.
-  4. P18 membrane-model completion and validation.
-  5. P19 pre-v1 cleanup and public-surface convergence.
+- The remaining optimization work proceeds in this measured order:
+  1. P17B benchmark an exact scalar tiled-Thomas Triton replacement for the
+     single-cable cuSPARSE solve; promote it only for a repeatable 15% or
+     larger end-to-end/solver-interval gain at Naxon=1024/4096.
+  2. P14B represent translated fibers as shared geometry/cable templates plus
+     row-specific intrinsic shifts, removing repeated shifted-layout builds.
+  3. P14D make one prepared runnable plan reusable across compatible calls,
+     including device arrays, factorized footprints, and observer plans.
+  4. P18 complete and validate membrane models.
+  5. P19 perform pre-v1 cleanup and public-surface convergence.
 
 Latest fast validation recorded by the compact-activation checkpoint:
 
@@ -279,6 +283,19 @@ raises population construction from `4.49/4.57/4.98/7.09/17.54/36.78 s`.
 `dispatch.build_plan` remains `0.15-0.32 s`, membrane stacking remains
 `0.20-0.43 s`, and 1024 cable templates collapse to only 57 unique membrane
 rows. Optimize shifted MRG geometry/layout construction before membrane codegen.
+
+- [ ] Replace shift-distinct geometry templates with one canonical
+  model-agnostic representation of `shared intrinsic geometry + row shift`
+  wherever translation leaves compartment lengths, cable coefficients, and
+  membrane rows unchanged. Positions and sampled footprints remain
+  row-specific. Validate custom layouts and reject transformations that alter
+  topology or section parameters instead of silently treating them as shifts.
+- [ ] Benchmark the canonical shifted representation at 4096 rows with
+  `3/11/32/128/512/1024` distinct shifts. Report construction wall/RSS,
+  template and flattened-layout counts, prepared-row time, dispatch/runtime
+  signatures, CPU/GPU simulation equivalence, and exact position/footprint
+  translation. Require a clear user-visible cold/startup gain before changing
+  public construction semantics.
 
 First canonical NumPy-row lowering on 2026-07-15: `PreparedCohort` now builds
 one read-only `MaterializedAxonRows` table inside `runtime.prepare`; positions,
@@ -542,6 +559,18 @@ footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
   membrane/cable runtime rows, and device arrays across amplitude values.
   Current first-amplitude `runtime.prepare` is about `7.24 s` for single 4096
   despite the batch runtime itself being found in cache.
+- [ ] Promote that reuse to one immutable prepared runnable plan shared across
+  compatible `run()`/protocol/study calls. The runner owns materialization,
+  grouping, device placement, executable lookup, and invalidation; callers
+  provide only typed dynamic operands. Preserve the canonical
+  `AxonSimulation(...).run()` result workflow and discuss any public lifecycle
+  or inspection change before implementation.
+- [ ] Benchmark fresh miss, same-object hit, separately reconstructed
+  structural hit, dynamic-value reuse, and explicit invalidation at
+  Naxon=1024/4096. Attribute source construction, plan build, host lowering,
+  host-to-device transfer, compile/cache replay, solve, result assembly, RSS,
+  and device memory. Require at least a 15% repeated-call wall-time gain or a
+  multi-second cold reduction on the realistic workloads.
 - [ ] Keep one prepared factorized extracellular plan per source cohort and
   vary only temporal scales/indices. Eliminate repeated row scans and
   footprint-key reconstruction caused solely by replacing stimulus objects.
@@ -950,7 +979,7 @@ runtime reconstruction path.
   `axs-p17-sg-single-time-{1024,4096}-dd62242`.
 - [ ] Emit equivalent target-specific metadata/functions for future runtimes
   rather than making them consume JAX artifacts.
-- [ ] If P16 leaves material membrane/gate cost after layout and generic
+- [x] If P16 leaves material membrane/gate cost after layout and generic
   assembly optimization, let the generated contract optionally emit
   model-agnostic Triton membrane operations that can be fused with temporal
   execution. Keep equations and parameters generated from the membrane source,
@@ -1034,18 +1063,14 @@ runtime reconstruction path.
     as launch-only fusion; the next kernel experiment must amortize execution
     across temporal steps or otherwise demonstrate a 10-15% total-runtime
     gain.
-- [ ] Once generated membrane and observer operations can share a temporal
-  program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
-  registers, memory, compile cost, and numerical equivalence. Do not add a
-  solver-specific blocking path before that contract exists.
-- [ ] Last resort only: if post-fusion profiles still show generated
-  exponential gate-rate evaluation as a material end-to-end bottleneck,
-  prototype voltage-indexed rate tables from the membrane compiler contract.
-  Quantify interpolation error over the validated voltage/temperature/
-  parameter domain, table memory and cache behavior, compile cost, CPU/GPU
-  timing, and complete simulation equivalence. Retain this only for a large,
-  reproducible total-runtime gain; do not make approximate rate tables the
-  default merely because an isolated exponential microbenchmark is faster.
+- [x] Reject temporal blocking and voltage-indexed rate tables for the current
+  P17 closure. Same-step fusion already increased the combined kernel cost,
+  while its best unprofiled warm change was below 1% and the sweep regressed.
+  Temporal blocking would repeat that register-heavy body, and rate tables
+  would add approximation, memory, and a substantial validation burden without
+  a credible measured end-to-end payoff. Reopen only after new hardware,
+  membrane equations, or a profile demonstrates a realistic gain above the
+  10-15% retention threshold.
 - [x] Validate built-ins, stateful models, composition, parameter overrides,
   recording labels/groups, diagnostics, numerical equivalence against the
   Model IR oracle, cache invalidation, generated-code inspection, and cold/warm
@@ -1058,6 +1083,37 @@ runtime reconstruction path.
   missing JAX/NumPy targets fail explicitly and production programs retain no
   Model IR graph. `JaxModelIRLowering` remains an internal numerical oracle for
   compiler tests, not an `AxonSimulation` execution route.
+
+### P17B - Exact Single-Cable GPU Solver Gate
+
+Primary objective: determine whether one exact scalar tiled-Thomas Triton
+kernel can replace the canonical single-cable cuSPARSE solve with a clear
+end-to-end gain. This is a benchmark gate, not permission to add a second
+production solver route.
+
+- [ ] Capture a fresh retained single-cable P100 baseline at
+  `Naxon={1024,4096}`, `Nx=200`, five amplitudes, compact activation, and the
+  existing factorized stimulus path. Record cold/warm run-pool, complete
+  sweep, solver interval, cuSPARSE kernels, assembly/membrane/observer kernels,
+  compile/cache replay, and memory without timing-distorting device sampling.
+- [ ] Implement a benchmark-only exact scalar Thomas kernel over node-first
+  `[Nx, B]` systems using the existing jax-triton persistent custom-call cache.
+  Start with solve-only coefficients matching the current JAX tridiagonal
+  system; do not fuse generated membrane equations or introduce model-specific
+  logic.
+- [ ] Validate the kernel against dense NumPy and the canonical CPU/GPU solver
+  across representative `Nx`, batch tails, heterogeneous coefficients,
+  intracellular/extracellular forcing, zero stimulation, float32 precision,
+  and near-threshold activation outputs.
+- [ ] Profile memory coalescing, forward/backward recurrence cost, kernel
+  count, registers/spills, compile time, and warm throughput. Only after the
+  solve-only result is understood, test cable assembly inside the same kernel
+  if the profile identifies a material boundary.
+- [ ] Promote the winner by replacing the existing internal GPU single-cable
+  solve, with no public policy or retained alternative route, only if repeated
+  Naxon=1024/4096 runs improve the total solver interval or `run_pool` by at
+  least 15%, preserve numerical behavior, and do not create an unacceptable
+  cold/cache regression. Otherwise archive the prototype and close the gate.
 
 ### P18 - Membrane Model Completion And Validation
 

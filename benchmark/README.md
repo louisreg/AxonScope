@@ -97,6 +97,25 @@ warm run-pool improved by only `0.9%`, the complete sweep regressed by `0.9%`,
 and cold compilation worsened. Use these artifacts as evidence against
 launch-only inlining, not as a production baseline.
 
+P17B gates a benchmark-only exact scalar tiled-Thomas Triton candidate before
+any single-cable runtime change. It compares node-first `[Nx, B]` systems with
+the canonical JAX/cuSPARSE solve, validates a subset with dense NumPy, and
+reports first-call and warm timings across launch widths:
+
+```bash
+python benchmark/run.py \
+  --script single_cable_triton_gate \
+  --platform gpu \
+  --nx 200 \
+  --batch-sizes 5120,20480 \
+  --block-b 64,128,256 \
+  --output benchmark/results/p17b_single_cable_triton_gate
+```
+
+This candidate remains under `benchmark/solvers/`. Promote it only by replacing
+the canonical internal GPU solve after the numerical gate and the 15% realistic
+end-to-end retention threshold pass; do not expose a public solver policy.
+
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
 Real execution writes timing, memory, environment, raw activation rows, and

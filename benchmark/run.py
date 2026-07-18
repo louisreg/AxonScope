@@ -12,6 +12,7 @@ from benchmark.curves import recruitment_curves, threshold_curves
 from benchmark.dispatcher import group_scheduling
 from benchmark.examples import basic_examples, with_nrv_examples
 from benchmark.protocols import recruitment_amplitude_batch
+from benchmark.solvers import single_cable_triton_gate
 from benchmark.workloads.curve_options import PRESETS
 
 
@@ -22,6 +23,7 @@ SCRIPTS = {
     "threshold_curves": threshold_curves,
     "recruitment_curves": recruitment_curves,
     "recruitment_amplitude_batch": recruitment_amplitude_batch,
+    "single_cable_triton_gate": single_cable_triton_gate,
 }
 
 
