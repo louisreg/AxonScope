@@ -418,8 +418,9 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert "@triton.jit\ndef gate_terms" in triton_source
     assert "@triton.jit\ndef advance_gates_and_membrane_terms_kernel" in triton_source
     assert "tl.exp" in triton_source
-    assert "3.0 **" not in triton_source
+    assert " ** " not in triton_source
     assert "tl.exp(tl.log(3.0)" in triton_source
+    assert "(m) * (m) * (m)" in triton_source
     assert json.loads(
         (compiled.cache.directory / "manifest.json").read_text(encoding="utf-8")
     )["targets"] == ["numpy", "triton"]

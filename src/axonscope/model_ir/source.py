@@ -42,7 +42,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v23"
+SOURCE_COMPILER_VERSION = "source_codegen.v24"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -3764,14 +3764,17 @@ def _expression_source(expression: Expression, *, target: str = "jax") -> str:
     if isinstance(expression, BinaryOp):
         left = _expression_source(expression.left, target=target)
         right = _expression_source(expression.right, target=target)
-        if (
-            target == "triton"
-            and expression.op == "pow"
-            and isinstance(expression.left, Literal)
-            and isinstance(expression.left.value, (int, float))
-            and float(expression.left.value) > 0.0
-            and not isinstance(expression.right, Literal)
-        ):
+        if target == "triton" and expression.op == "pow":
+            if (
+                isinstance(expression.right, Literal)
+                and isinstance(expression.right.value, (int, float))
+                and float(expression.right.value).is_integer()
+            ):
+                exponent = int(expression.right.value)
+                if exponent == 0:
+                    return "1.0"
+                product = " * ".join(f"({left})" for _ in range(abs(exponent)))
+                return f"(1.0 / ({product}))" if exponent < 0 else f"({product})"
             return f"tl.exp(tl.log({left}) * ({right}))"
         op = {
             "add": "+",
