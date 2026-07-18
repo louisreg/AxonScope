@@ -320,12 +320,11 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
         )
 
     records: list[dict[str, Any]] = []
-    for index, label in enumerate(("cache_miss", "cache_replay")):
+    for label in ("cache_miss", "cache_replay"):
         child_output = output / label
         command = _compilation_cache_child_command(
             args,
             child_output,
-            validate=args.validate_double_cable_kernel and index == 1,
         )
         before_xla = _cache_tree_snapshot(xla_cache_root)
         before_triton = _cache_tree_snapshot(triton_cache_root)
@@ -362,6 +361,15 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
             _cache_tree_snapshot(triton_cache_root),
         )
         records.append(record)
+
+    if args.validate_double_cable_kernel:
+        from benchmark.analysis.jax_triton_validation import (
+            validate_double_cable_tiled_thomas,
+        )
+
+        validate_double_cable_tiled_thomas(
+            output / "double_cable_kernel_validation.json"
+        )
 
     counts_match = records[0]["activation_counts"] == records[1]["activation_counts"]
     if not counts_match:
@@ -402,8 +410,6 @@ def _run_compilation_cache_replay(args: argparse.Namespace, output: Path) -> int
 def _compilation_cache_child_command(
     args: argparse.Namespace,
     output: Path,
-    *,
-    validate: bool,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -451,8 +457,6 @@ def _compilation_cache_child_command(
     ]
     if args.disable_batch_membrane_capability:
         command.append("--disable-batch-membrane-capability")
-    if validate:
-        command.append("--validate-double-cable-kernel")
     return command
 
 

@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from benchmark.analysis import jax_triton_validation
 from benchmark.protocols import recruitment_amplitude_batch
 
 
@@ -70,6 +71,11 @@ def test_compilation_cache_replay_uses_two_fresh_processes(
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(recruitment_amplitude_batch.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        jax_triton_validation,
+        "validate_double_cable_tiled_thomas",
+        lambda path: path.write_text("{}", encoding="utf-8"),
+    )
 
     assert (
         recruitment_amplitude_batch._run_compilation_cache_replay(args, tmp_path)
@@ -98,12 +104,15 @@ def test_compilation_cache_replay_uses_two_fresh_processes(
         command[command.index("--platform") + 1] == "gpu"
         for command, _ in calls
     )
-    assert "--validate-double-cable-kernel" not in calls[0][0]
-    assert "--validate-double-cable-kernel" in calls[1][0]
+    assert all(
+        "--validate-double-cable-kernel" not in command
+        for command, _ in calls
+    )
 
     replay = json.loads((tmp_path / "compilation_cache_replay.json").read_text())
     assert replay["activation_counts_match"] is True
     assert replay["stablehlo_match"] is True
+    assert (tmp_path / "double_cable_kernel_validation.json").is_file()
     assert replay["lower_speedup"] == 8.0
     assert [
         process["triton_kernel_cache"]["status"]
