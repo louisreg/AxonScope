@@ -10,6 +10,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
+from axonscope.benchmarking import record_benchmark_metadata
 from axonscope.runtime.jax.kernels.triton_call_cache import cached_triton_call
 
 from .generated_contract import load_generated_membrane_contract
@@ -80,6 +81,12 @@ def advance_generated_membrane_terms(
     missing = tuple(name for name in parameter_names if name not in parameter_values)
     if missing:
         raise ValueError(f"Generated Triton membrane parameters are missing: {missing!r}.")
+    record_benchmark_metadata(
+        generated_triton_membrane=True,
+        generated_triton_membrane_cache_key=str(module.CACHE_KEY),
+        generated_triton_membrane_gate_count=int(gate_values.shape[-1]),
+        generated_triton_membrane_linearize_previous=bool(linearize_previous),
+    )
 
     dt = jnp.asarray(dt_ms, dtype=Vm.dtype)
     parameters = tuple(
