@@ -115,3 +115,96 @@ def advance_generated_membrane_terms(
         vmap_flatten_elements=True,
     )
     return gates_out, gm, ge
+
+
+def advance_generated_membrane_system(
+    module: Any,
+    Vm_mV: Any,
+    gates: Any,
+    dt_ms: Any,
+    d_static: Any,
+    dt_over_cm: Any,
+    rhs_additive: Any,
+    *,
+    parameter_values: Mapping[str, Any],
+    linearize_previous: bool,
+    stacked_terms: tuple[Any, Any, Any] | None = None,
+    block_size: int = 256,
+) -> tuple[Any, Any, Any]:
+    """Run generated gate, membrane, diagonal, and RHS assembly in one kernel."""
+
+    Vm = jnp.asarray(Vm_mV)
+    gate_values = jnp.asarray(gates)
+    if Vm.dtype != jnp.float32 or gate_values.dtype != jnp.float32:
+        raise TypeError("Generated Triton membrane kernels require float32 inputs.")
+    if gate_values.shape[:-1] != Vm.shape:
+        raise ValueError(
+            "Generated Triton membrane gates must have shape "
+            f"{Vm.shape} + (Ngates,), got {gate_values.shape}."
+        )
+    system_values = tuple(
+        jnp.asarray(value, dtype=Vm.dtype)
+        for value in (d_static, dt_over_cm, rhs_additive)
+    )
+    if any(value.shape != Vm.shape for value in system_values):
+        raise ValueError("Generated Triton membrane system arrays must match Vm shape.")
+    if int(block_size) < 1:
+        raise ValueError("block_size must be >= 1.")
+
+    function_name = (
+        "advance_gates_and_stacked_membrane_system_kernel"
+        if stacked_terms is not None
+        else "advance_gates_and_membrane_system_kernel"
+    )
+    contract = load_generated_membrane_contract(module)
+    kernel_spec = contract.function(function_name)
+    parameter_names = (
+        kernel_spec.args[6:-3]
+        if stacked_terms is not None
+        else kernel_spec.args[6:]
+    )
+    missing = tuple(name for name in parameter_names if name not in parameter_values)
+    if missing:
+        raise ValueError(f"Generated Triton membrane parameters are missing: {missing!r}.")
+    parameters = tuple(
+        jnp.asarray(parameter_values[name], dtype=Vm.dtype)
+        for name in parameter_names
+    )
+    stacked_values: tuple[Any, ...] = ()
+    if stacked_terms is not None:
+        stacked_values = tuple(
+            jnp.asarray(value, dtype=Vm.dtype) for value in stacked_terms
+        )
+        if any(value.shape != Vm.shape for value in stacked_values):
+            raise ValueError("Generated stacked membrane arrays must match Vm shape.")
+
+    record_benchmark_metadata(
+        generated_triton_membrane_system=True,
+        generated_triton_membrane_system_stacked=stacked_terms is not None,
+        generated_triton_membrane_cache_key=str(module.CACHE_KEY),
+    )
+    dt = jnp.asarray(dt_ms, dtype=Vm.dtype)
+    vm_shape = jax.ShapeDtypeStruct(Vm.shape, Vm.dtype)
+    gate_shape = jax.ShapeDtypeStruct(gate_values.shape, gate_values.dtype)
+    total = int(Vm.size)
+    grid = ((total + int(block_size) - 1) // int(block_size),)
+    kernel = getattr(module, function_name)
+    return cached_triton_call(
+        Vm,
+        gate_values,
+        dt,
+        *system_values,
+        *parameters,
+        *stacked_values,
+        kernel=kernel,
+        source_hash=f"{module.CACHE_KEY}:{module.SOURCE_HASH}:{function_name}",
+        out_shape=(gate_shape, vm_shape, vm_shape),
+        grid=grid,
+        name=f"axonscope_generated_membrane_system_{module.CACHE_KEY[:12]}",
+        TOTAL=total,
+        LINEARIZE_PREVIOUS=bool(linearize_previous),
+        BLOCK_SIZE=int(block_size),
+        num_warps=4,
+        num_stages=1,
+        vmap_flatten_elements=True,
+    )

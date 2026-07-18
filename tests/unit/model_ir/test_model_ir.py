@@ -417,6 +417,11 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert "import triton.language as tl" in triton_source
     assert "@triton.jit\ndef gate_terms" in triton_source
     assert "@triton.jit\ndef advance_gates_and_membrane_terms_kernel" in triton_source
+    assert "@triton.jit\ndef advance_gates_and_membrane_system_kernel" in triton_source
+    assert (
+        "@triton.jit\ndef advance_gates_and_stacked_membrane_system_kernel"
+        in triton_source
+    )
     assert "tl.exp" in triton_source
     assert json.loads(
         (compiled.cache.directory / "manifest.json").read_text(encoding="utf-8")
@@ -469,6 +474,26 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     ]
     assert fused_kernel_spec["args"][:3] == ("Vm", "gates", "dt")
     assert fused_kernel_spec["outputs"] == ("gates_out", "gm_out", "ge_out")
+    system_kernel_spec = triton_model.RUNTIME_CONTRACT["functions"][
+        "advance_gates_and_membrane_system_kernel"
+    ]
+    stacked_system_kernel_spec = triton_model.RUNTIME_CONTRACT["functions"][
+        "advance_gates_and_stacked_membrane_system_kernel"
+    ]
+    assert system_kernel_spec["args"][:6] == (
+        "Vm",
+        "gates",
+        "dt",
+        "d_static",
+        "dt_over_cm",
+        "rhs_additive",
+    )
+    assert system_kernel_spec["outputs"] == ("gates_out", "d_out", "rhs_out")
+    assert stacked_system_kernel_spec["args"][-3:] == (
+        "leak_gm",
+        "leak_ge",
+        "gated_mask",
+    )
     fused_values = {**values, "dt": dt, "linearize_previous": False}
     actual = triton_model.advance_gates_and_membrane_terms(
         *(fused_values[name] for name in fused_spec["args"])
@@ -534,6 +559,57 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert call_kwargs["LINEARIZE_PREVIOUS"] is False
     assert call_kwargs["grid"] == (1,)
     assert call_kwargs["vmap_flatten_elements"] is True
+
+    d_static = jnp.full(values["Vm"].shape, 2.0, dtype=jnp.float32)
+    dt_over_cm = jnp.full(values["Vm"].shape, 0.25, dtype=jnp.float32)
+    rhs_additive = jnp.full(values["Vm"].shape, 0.5, dtype=jnp.float32)
+    stacked_terms = (
+        jnp.full(values["Vm"].shape, 0.1, dtype=jnp.float32),
+        jnp.full(values["Vm"].shape, -6.5, dtype=jnp.float32),
+        jnp.ones(values["Vm"].shape, dtype=jnp.float32),
+    )
+    system_outputs = triton_generated.advance_generated_membrane_system(
+        triton_model,
+        values["Vm"],
+        gates_prev,
+        dt,
+        d_static,
+        dt_over_cm,
+        rhs_additive,
+        parameter_values=parameter_values,
+        linearize_previous=False,
+        stacked_terms=stacked_terms,
+    )
+    assert tuple(output.shape for output in system_outputs) == (
+        gates_prev.shape,
+        values["Vm"].shape,
+        values["Vm"].shape,
+    )
+    system_args = call["args"]
+    for actual_value, expected_value in zip(
+        system_args[:6],
+        (
+            values["Vm"],
+            gates_prev,
+            jnp.asarray(dt),
+            d_static,
+            dt_over_cm,
+            rhs_additive,
+        ),
+        strict=True,
+    ):
+        np.testing.assert_array_equal(actual_value, expected_value)
+    for actual_value, expected_value in zip(
+        system_args[-3:],
+        stacked_terms,
+        strict=True,
+    ):
+        np.testing.assert_array_equal(actual_value, expected_value)
+    system_kwargs = call["kwargs"]
+    assert system_kwargs["kernel"] is (
+        triton_model.advance_gates_and_stacked_membrane_system_kernel
+    )
+    assert system_kwargs["vmap_flatten_elements"] is True
 
 
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):

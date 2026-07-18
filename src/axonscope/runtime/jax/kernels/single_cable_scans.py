@@ -104,6 +104,51 @@ def _observer_scan_stateless_membrane_step(
     return gates_pred, Gm, GE
 
 
+def _observer_scan_stateless_system_step(
+    backend,
+    *,
+    gates: Array,
+    static_gates: Array | None,
+    Vm: Array,
+    dt_ms: Array,
+    d_static: Array,
+    dt_over_cm: Array,
+    rhs_additive: Array,
+    linearize_previous: bool,
+) -> tuple[Array, Array, Array]:
+    generated_step = getattr(
+        backend,
+        "generated_triton_advance_membrane_system",
+        None,
+    )
+    if callable(generated_step):
+        generated = generated_step(
+            g_prev=gates,
+            V_mV=Vm,
+            dt=dt_ms,
+            d_static=d_static,
+            dt_over_cm=dt_over_cm,
+            rhs_additive=rhs_additive,
+            linearize_previous=linearize_previous,
+            static_gates=static_gates,
+        )
+        if generated is not None:
+            return generated
+    gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+        backend,
+        gates=gates,
+        static_gates=static_gates,
+        Vm=Vm,
+        dt_ms=dt_ms,
+        linearize_previous=linearize_previous,
+    )
+    return (
+        gates_pred,
+        d_static + dt_over_cm * Gm,
+        Vm + rhs_additive + dt_over_cm * GE,
+    )
+
+
 @partial(
     jax.jit,
     static_argnames=(
@@ -742,16 +787,21 @@ def _run_single_cable_vstim_batch_observer_scan(
             extra = tuple(extra)
 
             if stateless_vm_only:
-                gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+                dt_over_cm = dt_ms / Cm_row
+                gates_pred, d, rhs = _observer_scan_stateless_system_step(
                     backend,
                     gates=gates,
                     static_gates=static_scan_gates,
                     Vm=Vm,
                     dt_ms=dt_ms,
+                    d_static=d_static_row,
+                    dt_over_cm=dt_over_cm,
+                    rhs_additive=(
+                        dt_ms * vstim_force
+                        + dt_over_cm * (Iinj - I_background_row)
+                    ),
                     linearize_previous=has_driven_extracellular,
                 )
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
             else:
                 gates_pred = backend.cn_gate_update(
                     g_prev=gates,
@@ -778,18 +828,18 @@ def _run_single_cable_vstim_batch_observer_scan(
                     linearization_gates,
                     static_scan_gates,
                 )
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + dt_ms * vstim_force
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
+                d = d_static_row + (dt_ms / Cm_row) * Gm
+                rhs = (
+                    Vm
+                    + dt_ms * vstim_force
+                    + (dt_ms / Cm_row)
+                    * (
+                        GE
+                        + Iinj
+                        - explicit_outward_current
+                        - correction_current
+                    )
                 )
-            )
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
@@ -965,16 +1015,21 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
             )
 
             if stateless_vm_only:
-                gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+                dt_over_cm = dt_ms / Cm_row
+                gates_pred, d, rhs = _observer_scan_stateless_system_step(
                     backend,
                     gates=gates,
                     static_gates=static_scan_gates,
                     Vm=Vm,
                     dt_ms=dt_ms,
+                    d_static=d_static_row,
+                    dt_over_cm=dt_over_cm,
+                    rhs_additive=(
+                        dt_ms * vstim_force
+                        + dt_over_cm * (Iinj - I_background_row)
+                    ),
                     linearize_previous=has_driven_extracellular,
                 )
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
             else:
                 gates_pred = backend.cn_gate_update(
                     g_prev=gates,
@@ -1002,18 +1057,18 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     linearization_gates,
                     static_scan_gates,
                 )
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + dt_ms * vstim_force
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
+                d = d_static_row + (dt_ms / Cm_row) * Gm
+                rhs = (
+                    Vm
+                    + dt_ms * vstim_force
+                    + (dt_ms / Cm_row)
+                    * (
+                        GE
+                        + Iinj
+                        - explicit_outward_current
+                        - correction_current
+                    )
                 )
-            )
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
@@ -1213,16 +1268,21 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
             )
 
             if stateless_vm_only:
-                gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+                dt_over_cm = dt_ms / Cm_row
+                gates_pred, d, rhs = _observer_scan_stateless_system_step(
                     backend,
                     gates=gates,
                     static_gates=static_scan_gates,
                     Vm=Vm,
                     dt_ms=dt_ms,
+                    d_static=d_static_row,
+                    dt_over_cm=dt_over_cm,
+                    rhs_additive=(
+                        dt_ms * vstim_force
+                        + dt_over_cm * (Iinj - I_background_row)
+                    ),
                     linearize_previous=has_driven_extracellular,
                 )
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
             else:
                 gates_pred = backend.cn_gate_update(
                     g_prev=gates,
@@ -1250,18 +1310,18 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     linearization_gates,
                     static_scan_gates,
                 )
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + dt_ms * vstim_force
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
+                d = d_static_row + (dt_ms / Cm_row) * Gm
+                rhs = (
+                    Vm
+                    + dt_ms * vstim_force
+                    + (dt_ms / Cm_row)
+                    * (
+                        GE
+                        + Iinj
+                        - explicit_outward_current
+                        - correction_current
+                    )
                 )
-            )
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
@@ -1471,16 +1531,21 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
             vstim_force = current_A * forcing_footprint_mV_per_A
 
             if stateless_vm_only:
-                gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+                dt_over_cm = dt_ms / Cm_row
+                gates_pred, d, rhs = _observer_scan_stateless_system_step(
                     backend,
                     gates=gates,
                     static_gates=static_scan_gates,
                     Vm=Vm,
                     dt_ms=dt_ms,
+                    d_static=d_static_row,
+                    dt_over_cm=dt_over_cm,
+                    rhs_additive=(
+                        dt_ms * vstim_force
+                        + dt_over_cm * (Iinj - I_background_row)
+                    ),
                     linearize_previous=has_driven_extracellular,
                 )
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
             else:
                 gates_pred = backend.cn_gate_update(
                     g_prev=gates,
@@ -1508,18 +1573,18 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     linearization_gates,
                     static_scan_gates,
                 )
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + dt_ms * vstim_force
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
+                d = d_static_row + (dt_ms / Cm_row) * Gm
+                rhs = (
+                    Vm
+                    + dt_ms * vstim_force
+                    + (dt_ms / Cm_row)
+                    * (
+                        GE
+                        + Iinj
+                        - explicit_outward_current
+                        - correction_current
+                    )
                 )
-            )
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:
@@ -1717,16 +1782,18 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
             )
 
             if stateless_vm_only:
-                gates_pred, Gm, GE = _observer_scan_stateless_membrane_step(
+                dt_over_cm = dt_ms / Cm_row
+                gates_pred, d, rhs = _observer_scan_stateless_system_step(
                     backend,
                     gates=gates,
                     static_gates=static_scan_gates,
                     Vm=Vm,
                     dt_ms=dt_ms,
+                    d_static=d_static_row,
+                    dt_over_cm=dt_over_cm,
+                    rhs_additive=dt_over_cm * (Iinj - I_background_row),
                     linearize_previous=False,
                 )
-                explicit_outward_current = I_background_row
-                correction_current = jnp.zeros_like(Vm)
             else:
                 gates_pred = backend.cn_gate_update(
                     g_prev=gates,
@@ -1752,17 +1819,17 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     linearization_gates,
                     static_scan_gates,
                 )
-            d = d_static_row + (dt_ms / Cm_row) * Gm
-            rhs = (
-                Vm
-                + (dt_ms / Cm_row)
-                * (
-                    GE
-                    + Iinj
-                    - explicit_outward_current
-                    - correction_current
+                d = d_static_row + (dt_ms / Cm_row) * Gm
+                rhs = (
+                    Vm
+                    + (dt_ms / Cm_row)
+                    * (
+                        GE
+                        + Iinj
+                        - explicit_outward_current
+                        - correction_current
+                    )
                 )
-            )
             Vm_new = jax.lax.linalg.tridiagonal_solve(dl_row, d, du_row, rhs[:, None])[:, 0]
 
             if stateless_vm_only:

@@ -42,7 +42,7 @@ from .validation import assert_valid_model_ir
 
 
 SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v21"
+SOURCE_COMPILER_VERSION = "source_codegen.v22"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -3171,6 +3171,8 @@ def _generated_module_source(
             fused_membrane_source,
             fused_membrane_function,
             fused_membrane_kernel_function,
+            fused_membrane_system_kernel_function,
+            fused_stacked_membrane_system_kernel_function,
         ) = (
             _generated_triton_fused_membrane_function_source(
                 model,
@@ -3184,6 +3186,12 @@ def _generated_module_source(
         )
         runtime_functions["advance_gates_and_membrane_terms_kernel"] = (
             fused_membrane_kernel_function
+        )
+        runtime_functions["advance_gates_and_membrane_system_kernel"] = (
+            fused_membrane_system_kernel_function
+        )
+        runtime_functions["advance_gates_and_stacked_membrane_system_kernel"] = (
+            fused_stacked_membrane_system_kernel_function
         )
     runtime_contract = _generated_runtime_contract(
         model,
@@ -3390,8 +3398,10 @@ def _generated_triton_fused_membrane_function_source(
     str,
     dict[str, tuple[str, ...]],
     dict[str, tuple[str, ...]],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[str, ...]],
 ]:
-    """Emit one scalar stateless gate-update plus Gm/GE Triton operation."""
+    """Emit scalar membrane terms and fused stateless Triton outer kernels."""
 
     gate_names = tuple(gate.state for gate in model.gates)
     expressions = tuple(expression for _, expression in (*gate_outputs, *membrane_outputs))
@@ -3533,12 +3543,116 @@ def _generated_triton_fused_membrane_function_source(
         + "\n".join(store_lines)
         + "\n\n"
     )
+    system_pointer_args = (
+        "Vm",
+        "gates",
+        "dt",
+        "d_static",
+        "dt_over_cm",
+        "rhs_additive",
+        *parameter_args,
+    )
+    system_load_lines = (
+        *load_lines,
+        "    d_static = tl.load(d_static_ptr + offsets, mask=mask, other=0.0)",
+        "    dt_over_cm = tl.load(dt_over_cm_ptr + offsets, mask=mask, other=0.0)",
+        "    rhs_additive = tl.load(rhs_additive_ptr + offsets, mask=mask, other=0.0)",
+    )
+    system_store_lines = (
+        *(
+            f"    tl.store(gates_out_ptr + offsets * {len(gate_names)} + {index}, gate_new_{index}, mask=mask)"
+            for index in range(len(gate_names))
+        ),
+        "    tl.store(d_out_ptr + offsets, d_static + dt_over_cm * gm, mask=mask)",
+        "    tl.store(rhs_out_ptr + offsets, Vm + rhs_additive + dt_over_cm * ge, mask=mask)",
+    )
+    system_kernel_args = (
+        "Vm_ptr",
+        "gates_ptr",
+        "dt_ptr",
+        "d_static_ptr",
+        "dt_over_cm_ptr",
+        "rhs_additive_ptr",
+        *(f"{name}_ptr" for name in parameter_args),
+        "gates_out_ptr",
+        "d_out_ptr",
+        "rhs_out_ptr",
+        "TOTAL: tl.constexpr",
+        "LINEARIZE_PREVIOUS: tl.constexpr",
+        "BLOCK_SIZE: tl.constexpr",
+    )
+    source += (
+        "@triton.jit\n"
+        f"def advance_gates_and_membrane_system_kernel({', '.join(system_kernel_args)}):\n"
+        + "\n".join(system_load_lines)
+        + "\n"
+        + f"    {', '.join(result_names)} = advance_gates_and_membrane_terms({', '.join(helper_args)})\n"
+        + "\n".join(system_store_lines)
+        + "\n\n"
+    )
+    stacked_pointer_args = (
+        *system_pointer_args,
+        "leak_gm",
+        "leak_ge",
+        "gated_mask",
+    )
+    stacked_load_lines = (
+        *system_load_lines,
+        "    leak_gm = tl.load(leak_gm_ptr + offsets, mask=mask, other=0.0)",
+        "    leak_ge = tl.load(leak_ge_ptr + offsets, mask=mask, other=0.0)",
+        "    gated_mask = tl.load(gated_mask_ptr + offsets, mask=mask, other=0.0)",
+    )
+    stacked_store_lines = (
+        *(
+            f"    tl.store(gates_out_ptr + offsets * {len(gate_names)} + {index}, gate_new_{index}, mask=mask)"
+            for index in range(len(gate_names))
+        ),
+        "    gm = gated_mask * gm + (1.0 - gated_mask) * leak_gm",
+        "    ge = gated_mask * ge + (1.0 - gated_mask) * leak_ge",
+        "    tl.store(d_out_ptr + offsets, d_static + dt_over_cm * gm, mask=mask)",
+        "    tl.store(rhs_out_ptr + offsets, Vm + rhs_additive + dt_over_cm * ge, mask=mask)",
+    )
+    stacked_kernel_args = (
+        "Vm_ptr",
+        "gates_ptr",
+        "dt_ptr",
+        "d_static_ptr",
+        "dt_over_cm_ptr",
+        "rhs_additive_ptr",
+        *(f"{name}_ptr" for name in parameter_args),
+        "leak_gm_ptr",
+        "leak_ge_ptr",
+        "gated_mask_ptr",
+        "gates_out_ptr",
+        "d_out_ptr",
+        "rhs_out_ptr",
+        "TOTAL: tl.constexpr",
+        "LINEARIZE_PREVIOUS: tl.constexpr",
+        "BLOCK_SIZE: tl.constexpr",
+    )
+    source += (
+        "@triton.jit\n"
+        f"def advance_gates_and_stacked_membrane_system_kernel({', '.join(stacked_kernel_args)}):\n"
+        + "\n".join(stacked_load_lines)
+        + "\n"
+        + f"    {', '.join(result_names)} = advance_gates_and_membrane_terms({', '.join(helper_args)})\n"
+        + "\n".join(stacked_store_lines)
+        + "\n\n"
+    )
     return (
         source,
         {"args": arg_names, "outputs": outputs},
         {
             "args": pointer_args,
             "outputs": ("gates_out", "gm_out", "ge_out"),
+        },
+        {
+            "args": system_pointer_args,
+            "outputs": ("gates_out", "d_out", "rhs_out"),
+        },
+        {
+            "args": stacked_pointer_args,
+            "outputs": ("gates_out", "d_out", "rhs_out"),
         },
     )
 
