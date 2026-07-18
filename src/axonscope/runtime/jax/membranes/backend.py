@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import fields, is_dataclass
+import os
 from typing import Any, ClassVar, NamedTuple, Protocol
 
 import jax
@@ -10,6 +11,48 @@ import numpy as np
 # ---------------------- Type aliases ----------------------
 Array1D = jnp.ndarray  # shape (N,)
 Array2D = jnp.ndarray  # shape (N, n_gates)
+
+
+def advance_stateless_membrane_terms(
+    backend: Any,
+    *,
+    gates: jnp.ndarray,
+    static_gates: jnp.ndarray | None,
+    V_mV: jnp.ndarray,
+    dt_ms: Any,
+    linearize_previous: bool,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """Advance gates and return the conductance terms used by one solve."""
+
+    generated_step = getattr(
+        backend,
+        "generated_triton_advance_membrane_terms",
+        None,
+    )
+    if callable(generated_step):
+        generated = generated_step(
+            g_prev=gates,
+            V_mV=V_mV,
+            dt=dt_ms,
+            linearize_previous=linearize_previous,
+            static_gates=static_gates,
+        )
+        if generated is not None:
+            return generated
+    if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
+        raise RuntimeError(
+            "Generated Triton membrane execution was required but unavailable."
+        )
+    gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+    linearization_gates = gates if linearize_previous else gates_pred
+    if static_gates is None:
+        Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+    else:
+        batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
+        if not callable(batch_terms):
+            raise TypeError("A split gate carry requires batch membrane terms.")
+        Gm, GE = batch_terms(linearization_gates, static_gates=static_gates)
+    return gates_pred, Gm, GE
 
 
 class MembraneStepPlan(NamedTuple):

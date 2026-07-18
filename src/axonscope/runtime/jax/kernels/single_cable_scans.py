@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from functools import partial
-import os
 
 import jax
 import jax.numpy as jnp
 
 from axonscope.runtime.jax.cable_geometry import Array, apply_diffusion_operator
+from axonscope.runtime.jax.membranes.backend import advance_stateless_membrane_terms
 from axonscope.runtime.jax.recording.observer import (
     ObserverRetention,
     ThresholdObserverState,
@@ -53,19 +53,6 @@ def _merge_observer_scan_gates(
     return backend.merge_scan_gates(gates, static_gates)
 
 
-def _observer_scan_membrane_conductance_terms(
-    backend,
-    gates: Array,
-    static_gates: Array | None,
-) -> tuple[Array, Array]:
-    if static_gates is None:
-        return backend.membrane_conductance_terms(gates)
-    batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
-    if not callable(batch_terms):
-        raise TypeError("A split gate carry requires batch membrane terms.")
-    return batch_terms(gates, static_gates=static_gates)
-
-
 def _observer_scan_stateless_membrane_step(
     backend,
     *,
@@ -75,33 +62,14 @@ def _observer_scan_stateless_membrane_step(
     dt_ms: Array,
     linearize_previous: bool,
 ) -> tuple[Array, Array, Array]:
-    generated_step = getattr(
+    return advance_stateless_membrane_terms(
         backend,
-        "generated_triton_advance_membrane_terms",
-        None,
+        gates=gates,
+        static_gates=static_gates,
+        V_mV=Vm,
+        dt_ms=dt_ms,
+        linearize_previous=linearize_previous,
     )
-    if callable(generated_step):
-        generated = generated_step(
-            g_prev=gates,
-            V_mV=Vm,
-            dt=dt_ms,
-            linearize_previous=linearize_previous,
-            static_gates=static_gates,
-        )
-        if generated is not None:
-            return generated
-    if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
-        raise RuntimeError(
-            "Generated Triton membrane execution was required but unavailable."
-        )
-    gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
-    linearization_gates = gates if linearize_previous else gates_pred
-    Gm, GE = _observer_scan_membrane_conductance_terms(
-        backend,
-        linearization_gates,
-        static_gates,
-    )
-    return gates_pred, Gm, GE
 
 
 @partial(

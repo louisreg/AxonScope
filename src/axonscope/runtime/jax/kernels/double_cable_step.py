@@ -192,15 +192,19 @@ def solve_double_cable_batch_step(
     tiled_thomas_block_b: int,
     return_node_first: bool = False,
     static_gates: Array | None = None,
+    membrane_terms: tuple[Array, Array] | None = None,
 ) -> tuple[Array, Array]:
     """Solve one batched double-cable implicit step."""
 
-    Gm_den, GE_den = batch_membrane_conductance_terms(
-        gates_new,
-        backend=backend,
-        row_indices=row_indices,
-        static_gates=static_gates,
-    )
+    if membrane_terms is None:
+        Gm_den, GE_den = batch_membrane_conductance_terms(
+            gates_new,
+            backend=backend,
+            row_indices=row_indices,
+            static_gates=static_gates,
+        )
+    else:
+        Gm_den, GE_den = membrane_terms
     if double_cable_block_solver == "jax_triton_loop_xb":
         if linear_static_xb is None:
             raise ValueError("linear_static_xb is required for jax_triton_loop_xb.")

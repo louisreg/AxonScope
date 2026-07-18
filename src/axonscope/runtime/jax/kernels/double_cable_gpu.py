@@ -7,6 +7,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
+from axonscope.runtime.jax.membranes.backend import advance_stateless_membrane_terms
 from axonscope.runtime.jax.recording.observer import (
     ObserverRetention,
     ThresholdObserverState,
@@ -276,12 +277,22 @@ def _run_double_cable_batch_stateful_integrated_scan(
         extra = tuple(extra)
         Vm = Vi - Ve
 
-        gates_pred = batch_gate_update(gates, Vm)
+        membrane_terms = None
         if stateless_vm_only:
-            linearization_gates = gates if has_driven_extracellular else gates_pred
+            gates_pred, Gm_den, GE_den = advance_stateless_membrane_terms(
+                backend,
+                gates=gates,
+                static_gates=None,
+                V_mV=Vm,
+                dt_ms=dt_ms,
+                linearize_previous=has_driven_extracellular,
+            )
+            linearization_gates = gates_pred
+            membrane_terms = (Gm_den, GE_den)
             explicit_outward_current_abs = background_abs
             correction_current_abs = zero_abs
         else:
+            gates_pred = batch_gate_update(gates, Vm)
             Iion_pred = batch_currents(Vm, gates_pred)
             step_plan_pred = batch_prepare_membrane_step(
                 Vm,
@@ -305,6 +316,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
             I_outward_abs=explicit_outward_current_abs,
             I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
+            membrane_terms=membrane_terms,
         )
         Vm_new = Vi_new - Ve_new
 
@@ -616,12 +628,22 @@ def _run_double_cable_batch_observer_integrated_scan(
         extra = tuple(extra)
         Vm = Vi - Ve
 
-        gates_pred = batch_gate_update(gates, Vm)
+        membrane_terms = None
         if stateless_vm_only:
-            linearization_gates = gates if has_driven_extracellular else gates_pred
+            gates_pred, Gm_den, GE_den = advance_stateless_membrane_terms(
+                backend,
+                gates=gates,
+                static_gates=static_scan_gates,
+                V_mV=Vm,
+                dt_ms=dt_ms,
+                linearize_previous=has_driven_extracellular,
+            )
+            linearization_gates = gates_pred
+            membrane_terms = (Gm_den, GE_den)
             explicit_outward_current_abs = background_abs
             correction_current_abs = zero_abs
         else:
+            gates_pred = batch_gate_update(gates, Vm)
             Iion_pred = batch_currents(Vm, gates_pred)
             step_plan_pred = batch_prepare_membrane_step(
                 Vm,
@@ -646,6 +668,7 @@ def _run_double_cable_batch_observer_integrated_scan(
             I_corr_abs=correction_current_abs,
             extracellular_drive_abs=extracellular_drive_abs,
             static_gates=static_scan_gates,
+            membrane_terms=membrane_terms,
         )
         Vm_new = Vi_new - Ve_new
 
