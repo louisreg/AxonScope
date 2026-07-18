@@ -115,6 +115,12 @@ python benchmark/run.py \
 This candidate remains under `benchmark/solvers/`. Promote it only by replacing
 the canonical internal GPU solve after the numerical gate and the 15% realistic
 end-to-end retention threshold pass; do not expose a public solver policy.
+The first P100 solve-only artifact ends in
+`axs-p17b-single-thomas-gate-fc4ae5c`. For `Nx=200`, Triton-128 improved warm
+solve time from `0.773` to `0.450 ms` at `B=5120` (`1.72x`) and from `2.412` to
+`0.565 ms` at `B=20480` (`4.27x`), with `1.907e-5` maximum absolute difference.
+Its first Triton startup/compile cost was `3.73 s`, so persistent-cache replay
+and realistic temporal integration remain mandatory before promotion.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.

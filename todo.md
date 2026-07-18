@@ -1096,11 +1096,19 @@ production solver route.
   existing factorized stimulus path. Record cold/warm run-pool, complete
   sweep, solver interval, cuSPARSE kernels, assembly/membrane/observer kernels,
   compile/cache replay, and memory without timing-distorting device sampling.
-- [ ] Implement a benchmark-only exact scalar Thomas kernel over node-first
+- [x] Implement a benchmark-only exact scalar Thomas kernel over node-first
   `[Nx, B]` systems using the existing jax-triton persistent custom-call cache.
   Start with solve-only coefficients matching the current JAX tridiagonal
   system; do not fuse generated membrane equations or introduce model-specific
   logic.
+
+First P100 solve-only gate on 2026-07-19 (`fc4ae5c`, `Nx=200`) validates dense
+NumPy and JAX/cuSPARSE equivalence with `1.907e-5` maximum absolute error. At
+`B=5120`, warm JAX/Triton-128 timings are `0.773/0.450 ms` (`1.72x`); at
+`B=20480`, they are `2.412/0.565 ms` (`4.27x`). The first Triton startup plus
+compile costs `3.73 s`; later launch-width specializations cost `0.12-0.14 s`.
+Retain this as solve-only evidence, not an end-to-end claim. Artifact:
+`axs-p17b-single-thomas-gate-fc4ae5c`.
 - [ ] Validate the kernel against dense NumPy and the canonical CPU/GPU solver
   across representative `Nx`, batch tails, heterogeneous coefficients,
   intracellular/extracellular forcing, zero stimulation, float32 precision,
