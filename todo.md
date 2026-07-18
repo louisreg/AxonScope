@@ -997,6 +997,26 @@ runtime reconstruction path.
     stayed exact, but the full spread is only `0.26%`; retain the simple
     `256x4` launch and no public/internal tuning policy. Artifacts end in
     `axs-p17-mem-b{128w4,256w4,256w8,512w8}-da19b9d`.
+  - The canonical stateless double-cable GPU recording and observer scans now
+    consume the same generated gate plus `Gm`/`GE` operation and pass those
+    terms into the existing fused physical assembly plus tiled-Thomas kernel;
+    no second double-cable solver route was added. `source_codegen.v24` also
+    lowers Triton tensor powers explicitly, using exact multiplication for
+    integer gate powers and `exp(log(base) * exponent)` otherwise, so generated
+    models do not depend on Python power overloads absent from Triton 3.6.
+    Against the retained two-drive, five-amplitude P100 baseline, median warm
+    `simulation.run_pool` falls from `1.111` to `1.048 s` at Naxon=1024
+    (`-5.6%`) and from `3.599` to `3.370 s` at Naxon=4096 (`-6.4%`); complete
+    sweep medians fall from `1.218` to `1.143 s` (`-6.2%`) and from `4.119` to
+    `3.884 s` (`-5.7%`). Cold `run_pool` improves by `14%/25%`, with the usual
+    higher compile-time variance. Activation counts remain exactly
+    `0 N N N N`, the generated-route guard passes, and the active Thomas kernel
+    still validates against dense NumPy. Local generated-contract and
+    solver/architecture suites pass `76` and `126` tests. The full unit run
+    reached `726 passed, 1 skipped` with one unrelated transient NaN in layout
+    coherence; that test passed immediately in isolation. Artifacts end in
+    `axs-p17-double-mem-guard-v3-5ea8a2a` and
+    `axs-p17-double-mem-time-{1024,4096}-5ea8a2a`.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a

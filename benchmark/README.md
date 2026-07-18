@@ -81,6 +81,11 @@ was reverted; its audit artifacts end in `axs-p17-system-smoke-10c14e2` and
 Generated-kernel launch tuning is recorded in artifacts ending in
 `axs-p17-mem-b{128w4,256w4,256w8,512w8}-da19b9d`; the complete warm run-pool
 spread was only `0.26%`, so the default `256x4` launch remains fixed.
+The corresponding generated double-cable membrane route is validated by the
+guarded artifact ending in `axs-p17-double-mem-guard-v3-5ea8a2a` and timed by
+the artifacts ending in `axs-p17-double-mem-time-{1024,4096}-5ea8a2a`. These
+retain the canonical node-first observer scan and fused tiled-Thomas solve,
+with exact activation counts and dense-kernel validation.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
