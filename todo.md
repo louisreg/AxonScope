@@ -965,16 +965,32 @@ runtime reconstruction path.
     updated gates, diagonal, and RHS while retaining the canonical cuSPARSE
     solve. Do not add a second single-cable solver route or a model-specific
     kernel. Artifact ends in `axs-p17-single-hlo-1024-7e7c7d9`.
-  - `source_codegen.v20` now admits an incremental `triton_model.py` target
+  - `source_codegen.v21` emits an incremental `triton_model.py` target
     without importing Triton on the normal CPU/JAX path. For stateless models,
     it emits scalar generated `gate_terms`, `membrane_terms`, and one fused
     `advance_gates_and_membrane_terms` operation derived entirely from the
     membrane graph. The fused operation updates every gate and computes shared
     `Gm`/`GE` once, with old/new-gate linearization selected by the caller. A
     CPU façade test checks HH gate, conductance, reversal-weighted conductance,
-    and fused-update equivalence against `numpy_model.py`. This is compiler
-    groundwork only: keep this item open until a real Triton outer kernel
-    replaces the existing single-cable JAX preparation work and wins on P100.
+    and fused-update equivalence against `numpy_model.py`. One generated outer
+    kernel now replaces the existing gate plus `Gm`/`GE` work in all five
+    canonical stateless single-cable observer scans; an explicit benchmark
+    guard rejects fallback execution. On the Naxon=1024, five-amplitude,
+    3000-step P100 workload, median warm `simulation.run_pool` falls from
+    `2.191` to `2.068 s` (`-5.6%`) with exact `0 85 197 326 433` activation
+    counts. The guarded smoke and timing artifacts end in
+    `axs-p17-generated-membrane-guard-66f9546` and
+    `axs-p17-generated-membrane-time-n1024-911e5d7`.
+  - A follow-up `source_codegen.v22` experiment also emitted diagonal and RHS
+    directly from the generated kernel for uniform and generic active/leak
+    stacks. It compiled under a stricter P100 guard and matched local CPU at
+    Naxon=128 (`0 52`) plus the Naxon=1024 reference (`0 85 197 326 433`), but
+    median warm `simulation.run_pool` only moved from `2.0684` to `2.0655 s`
+    (`-0.14%`) and cold time rose slightly. The experiment was reverted rather
+    than retaining another low-value contract surface. Evidence ends in
+    `axs-p17-system-smoke-10c14e2` and `axs-p17-system-time-1024-10c14e2`.
+    Keep this item open: a larger gain now requires reducing temporal/custom-
+    call boundaries, not moving the final two elementwise expressions.
 - [ ] Once generated membrane and observer operations can share a temporal
   program, benchmark temporal blocking `K={2,4,8,16}` by total runtime,
   registers, memory, compile cost, and numerical equivalence. Do not add a
@@ -990,8 +1006,8 @@ runtime reconstruction path.
 - [x] Validate built-ins, stateful models, composition, parameter overrides,
   recording labels/groups, diagnostics, numerical equivalence against the
   Model IR oracle, cache invalidation, generated-code inspection, and cold/warm
-  performance. The final focused/full local passes complete with `115 passed`
-  and `724 passed, 1 skipped`; P17 cache evidence is recorded under
+  performance. The latest focused/full local passes complete with `129 passed`
+  and `725 passed, 1 skipped`; P17 cache evidence is recorded under
   `benchmark/results/p17_composite_generated_runtime_local_20260718/`.
 - [x] Remove the JAX Model IR production fallback. Cache misses and hits for
   single-source stateless/stateful membranes and stateless composites now

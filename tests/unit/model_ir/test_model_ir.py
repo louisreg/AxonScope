@@ -535,6 +535,20 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert call_kwargs["grid"] == (1,)
     assert call_kwargs["vmap_flatten_elements"] is True
 
+    monkeypatch.setenv("AXONSCOPE_GENERATED_TRITON_MEMBRANE_BLOCK_SIZE", "128")
+    monkeypatch.setenv("AXONSCOPE_GENERATED_TRITON_MEMBRANE_NUM_WARPS", "8")
+    triton_generated.advance_generated_membrane_terms(
+        triton_model,
+        values["Vm"],
+        gates_prev,
+        dt,
+        parameter_values=parameter_values,
+        linearize_previous=False,
+    )
+    tuned_kwargs = call["kwargs"]
+    assert tuned_kwargs["BLOCK_SIZE"] == 128
+    assert tuned_kwargs["num_warps"] == 8
+
 
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):
     compiled = compile_model_source_file(PASSIVE_SOURCE, cache_root=tmp_path)

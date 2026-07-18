@@ -70,6 +70,14 @@ Naxon={1024,4096} plus the Naxon=1024 warm trace.
 The compiler-IR capture ending in `axs-p17-single-hlo-1024-7e7c7d9` attributes
 the remaining single-cable gate, conductance, and assembly fusions before the
 generated Triton experiment.
+The generated membrane outer-kernel smoke/timing artifacts end in
+`axs-p17-generated-membrane-guard-66f9546` and
+`axs-p17-generated-membrane-time-n1024-911e5d7`. They retain the canonical
+single-cable observer scans and replace generated gate plus `Gm`/`GE` work
+behind a guard that rejects JAX fallback. A subsequent diagonal/RHS fusion was
+numerically valid but performance-neutral (`-0.14%` median warm run-pool) and
+was reverted; its audit artifacts end in `axs-p17-system-smoke-10c14e2` and
+`axs-p17-system-time-1024-10c14e2`.
 
 Current real runs support AxonScope point-source activation-threshold and
 recruitment curves. `--dry-run` still only writes `cases.csv` for case review.
