@@ -16,9 +16,9 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from benchmark.solvers.single_cable_triton import (
-    dependency_skip_reason,
-    solve_tridiagonal_xb,
+from axonscope.runtime.jax.kernels.triton_single_cable import (
+    single_cable_triton_dependency_skip_reason,
+    solve_single_cable_tridiagonal_xb,
 )
 
 
@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(config, indent=2))
         return 0
 
-    skip_reason = dependency_skip_reason()
+    skip_reason = single_cable_triton_dependency_skip_reason()
     if skip_reason is not None:
         raise RuntimeError(skip_reason)
 
@@ -113,8 +113,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             for block_b in block_sizes:
                 candidate = jax.jit(
-                    lambda dl, d, du, rhs, block_b=block_b: solve_tridiagonal_xb(
-                        dl, d, du, rhs, block_b=block_b
+                    lambda dl, d, du, rhs, block_b=block_b: (
+                        solve_single_cable_tridiagonal_xb(
+                            dl, d, du, rhs, block_b=block_b
+                        )
                     )
                 )
                 candidate_times, candidate_result = _time_callable(

@@ -60,6 +60,7 @@ from axonscope.runtime.jax.preparation.shape_bucketing import (
 )
 from axonscope.runtime.jax.kernels.double_cable import DoubleCableBatchKernel
 from axonscope.runtime.jax.kernels.single_cable import SingleCableVStimBatchKernel
+from axonscope.runtime.jax.policy.engine_types import GPU_SINGLE_CABLE_SOLVER
 from axonscope.solvers.options import BatchOptions, SolverOptions
 from axonscope.recording import RecordingPlan
 
@@ -329,6 +330,33 @@ def _guard_gpu_observer_extracellular_route(
             "Split unsupported stimulation rows or use an explicitly recorded "
             "Vm workflow."
         )
+
+
+def _guard_single_cable_gpu_solver_route(*, runtime_context: Any | None) -> str:
+    """Require the retained Triton solve for JAX CUDA single-cable execution."""
+
+    solver_engine = _runtime_context_solver_engine(runtime_context)
+    platform = getattr(runtime_context, "platform", None)
+    if platform is None:
+        platform = getattr(solver_engine, "platform", None)
+    if str(platform).lower() not in {"cuda", "gpu"}:
+        return "jax_tridiagonal"
+
+    route = None if solver_engine is None else solver_engine.single_cable_solver
+    if route != GPU_SINGLE_CABLE_SOLVER:
+        raise RuntimeError(
+            "JAX GPU single-cable execution resolved to the wrong solver route "
+            f"{route!r}; expected {GPU_SINGLE_CABLE_SOLVER!r}."
+        )
+
+    from axonscope.runtime.jax.kernels.triton_single_cable import (
+        single_cable_triton_dependency_skip_reason,
+    )
+
+    skip_reason = single_cable_triton_dependency_skip_reason()
+    if skip_reason is not None:
+        raise RuntimeError(skip_reason)
+    return GPU_SINGLE_CABLE_SOLVER
 
 
 def _requires_factorized_gpu_observer_route(
@@ -778,6 +806,10 @@ def _enqueue_single_cable_batch_group(
 ) -> PendingJaxBatchGroup:
     """Enqueue a homogeneous single-cable group through imposed-field batching."""
 
+    policy_single_cable_solver = _guard_single_cable_gpu_solver_route(
+        runtime_context=runtime_context
+    )
+
     prepared = _prepare_jax_batch_group(
         group,
         kernel_group=group,
@@ -846,7 +878,10 @@ def _enqueue_single_cable_batch_group(
         kernel_options=kernel_options,
         lowered_inputs=lowered_inputs,
         observers=observers,
-        solver_policy="jax_single_cable_tridiagonal",
+        solver_policy=policy_single_cable_solver,
+    )
+    record_benchmark_metadata(
+        execution_policy_single_cable_solver=policy_single_cable_solver
     )
     _emit_kernel_compile_progress(
         group=group,

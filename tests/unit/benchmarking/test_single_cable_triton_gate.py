@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from benchmark.solvers.single_cable_triton import dependency_skip_reason
-from benchmark.solvers import single_cable_triton
+from axonscope.runtime.jax.kernels import triton_single_cable
+from axonscope.runtime.jax.kernels.triton_single_cable import (
+    single_cable_triton_dependency_skip_reason,
+)
 from benchmark.solvers.single_cable_triton_gate import (
     _jax_solve_xb,
     _print_summary,
@@ -14,7 +16,7 @@ from benchmark.solvers.single_cable_triton_gate import (
 
 
 def test_benchmark_candidate_is_import_safe_without_gpu_stack():
-    reason = dependency_skip_reason()
+    reason = single_cable_triton_dependency_skip_reason()
 
     assert reason is None or isinstance(reason, str)
 
@@ -58,9 +60,30 @@ def test_custom_vmap_collapses_rows_to_one_node_first_solve(monkeypatch):
         calls.append(rhs.shape)
         return rhs + 3.0
 
-    monkeypatch.setattr(single_cable_triton, "solve_tridiagonal_xb", fake_solve)
+    monkeypatch.setattr(
+        triton_single_cable,
+        "solve_single_cable_tridiagonal_xb",
+        fake_solve,
+    )
     rows = jnp.arange(20, dtype=jnp.float32).reshape((4, 5))
-    actual = jax.vmap(single_cable_triton.solve_tridiagonal_row)(
+    from axonscope.runtime.jax.kernels import single_cable_scans
+
+    monkeypatch.setattr(
+        single_cable_scans,
+        "solve_single_cable_tridiagonal_xb",
+        fake_solve,
+    )
+    monkeypatch.setattr(
+        single_cable_scans,
+        "single_cable_triton_import_skip_reason",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        single_cable_scans.jax.lax,
+        "platform_dependent",
+        lambda *operands, cuda, default: cuda(*operands),
+    )
+    actual = jax.vmap(single_cable_scans._solve_single_cable_tridiagonal_row)(
         rows, rows + 10.0, rows, rows
     )
 

@@ -19,17 +19,69 @@ from axonscope.runtime.jax.recording.observer import (
 )
 
 from .inputs import _record_vm_row
+from .triton_single_cable import (
+    single_cable_triton_import_skip_reason,
+    solve_single_cable_tridiagonal_xb,
+)
 
 
-def _solve_single_cable_tridiagonal_row(
+def _solve_single_cable_tridiagonal_jax_row(
     dl: Array,
     d: Array,
     du: Array,
     rhs: Array,
 ) -> Array:
-    """Solve one row; benchmark gates may replace this single internal seam."""
+    """Solve one scalar system through the canonical portable JAX operation."""
 
     return jax.lax.linalg.tridiagonal_solve(dl, d, du, rhs[:, None])[:, 0]
+
+
+_solve_single_cable_tridiagonal_row = jax.custom_batching.custom_vmap(
+    _solve_single_cable_tridiagonal_jax_row
+)
+
+
+@_solve_single_cable_tridiagonal_row.def_vmap
+def _solve_single_cable_tridiagonal_vmap(
+    axis_size: int,
+    in_batched: tuple[bool, bool, bool, bool],
+    dl: Array,
+    d: Array,
+    du: Array,
+    rhs: Array,
+) -> tuple[Array, bool]:
+    """Lower a batched row solve to the retained platform-specific route."""
+
+    del axis_size
+    if not all(in_batched):
+        raise ValueError(
+            "Every single-cable tridiagonal operand must share the axon batch axis."
+        )
+
+    def solve_jax_rows(*operands: Array) -> Array:
+        return jax.vmap(_solve_single_cable_tridiagonal_jax_row)(*operands)
+
+    if single_cable_triton_import_skip_reason() is not None or dl.dtype != jnp.float32:
+        return solve_jax_rows(dl, d, du, rhs), True
+
+    def solve_triton_rows(*operands: Array) -> Array:
+        lower, diagonal, upper, values = operands
+        return solve_single_cable_tridiagonal_xb(
+            lower.T,
+            diagonal.T,
+            upper.T,
+            values.T,
+        ).T
+
+    solution = jax.lax.platform_dependent(
+        dl,
+        d,
+        du,
+        rhs,
+        cuda=solve_triton_rows,
+        default=solve_jax_rows,
+    )
+    return solution, True
 
 
 def _record_matrix_row(values: Array, record_indices: Array, *, record_full: bool) -> Array:

@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+CPU_SINGLE_CABLE_SOLVER = "jax_tridiagonal"
+GPU_SINGLE_CABLE_SOLVER = "jax_triton_tiled_thomas_xb"
+
+
 @dataclass(frozen=True)
 class JaxSolverEngine:
     """Resolved backend-local solver engine.
@@ -22,4 +26,8 @@ class JaxSolverEngine:
     tiled_thomas_block_b: int | None = None
 
 
-__all__ = ["JaxSolverEngine"]
+__all__ = [
+    "CPU_SINGLE_CABLE_SOLVER",
+    "GPU_SINGLE_CABLE_SOLVER",
+    "JaxSolverEngine",
+]

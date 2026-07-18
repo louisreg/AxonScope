@@ -390,10 +390,49 @@ def test_jax_solver_engine_resolves_typed_solver_policy():
     assert cpu_engine.double_cable_block_solver == "thomas"
     assert gpu_engine is not None
     assert gpu_engine.name == "jax_gpu_tiled_thomas"
-    assert gpu_engine.single_cable_solver == "jax_tridiagonal"
+    assert gpu_engine.single_cable_solver == "jax_triton_tiled_thomas_xb"
     assert gpu_engine.double_cable_block_solver == "jax_triton_loop_xb"
     assert gpu_engine.allow_internal_double_cable_block_solver is True
     assert gpu_engine.tiled_thomas_block_b == 64
+
+
+def test_single_cable_gpu_route_guard_requires_retained_solver(monkeypatch):
+    from types import SimpleNamespace
+
+    from axonscope.runtime.jax import group_runner
+    from axonscope.runtime.jax.kernels import triton_single_cable
+    from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
+
+    wrong = SimpleNamespace(
+        platform="gpu",
+        solver_engine=JaxSolverEngine(
+            name="wrong",
+            platform="gpu",
+            single_cable_solver="jax_tridiagonal",
+            double_cable_block_solver=None,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="wrong solver route"):
+        group_runner._guard_single_cable_gpu_solver_route(runtime_context=wrong)
+
+    monkeypatch.setattr(
+        triton_single_cable,
+        "single_cable_triton_dependency_skip_reason",
+        lambda: None,
+    )
+    retained = SimpleNamespace(
+        platform="gpu",
+        solver_engine=JaxSolverEngine(
+            name="retained",
+            platform="gpu",
+            single_cable_solver="jax_triton_tiled_thomas_xb",
+            double_cable_block_solver=None,
+        ),
+    )
+    assert (
+        group_runner._guard_single_cable_gpu_solver_route(runtime_context=retained)
+        == "jax_triton_tiled_thomas_xb"
+    )
 
 
 def test_runtime_solver_route_report_resolves_once_from_execution_policy():
@@ -418,7 +457,7 @@ def test_runtime_solver_route_report_resolves_once_from_execution_policy():
     assert route.single_cable is not None
     assert route.single_cable.cable == "single_cable"
     assert route.single_cable.requested == "jax_tridiagonal"
-    assert route.single_cable.runtime_route == "jax_tridiagonal"
+    assert route.single_cable.runtime_route == "jax_triton_tiled_thomas_xb"
     assert route.double_cable is not None
     assert route.double_cable.cable == "double_cable"
     assert route.double_cable.requested == "tiled_thomas"

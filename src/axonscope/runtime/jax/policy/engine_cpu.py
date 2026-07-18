@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from axonscope.runtime.jax.policy.engine_types import JaxSolverEngine
+from axonscope.runtime.jax.policy.engine_types import (
+    CPU_SINGLE_CABLE_SOLVER,
+    JaxSolverEngine,
+)
 from axonscope.runtime.jax.policy.engine_common import (
     resolve_double_cable_policy,
     resolve_single_cable_policy,
@@ -25,7 +28,7 @@ def resolve_cpu_solver_engine(policy: SolverPolicy) -> JaxSolverEngine:
         return JaxSolverEngine(
             name="jax_cpu_thomas",
             platform="cpu",
-            single_cable_solver=single_cable.value,
+            single_cable_solver=CPU_SINGLE_CABLE_SOLVER,
             double_cable_block_solver="thomas",
         )
     raise ValueError(

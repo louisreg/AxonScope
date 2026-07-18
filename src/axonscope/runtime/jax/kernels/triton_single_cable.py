@@ -1,4 +1,4 @@
-"""Benchmark-only exact scalar Thomas solver implemented with jax-triton."""
+"""Exact node-first single-cable Thomas solver implemented with jax-triton."""
 
 from __future__ import annotations
 
@@ -91,18 +91,28 @@ else:
     _tiled_scalar_thomas_loop_kernel = None
 
 
-def dependency_skip_reason() -> str | None:
-    """Return why the benchmark-only candidate cannot run."""
+def single_cable_triton_import_skip_reason() -> str | None:
+    """Return why the optional Triton lowering cannot be imported."""
 
     if importlib.util.find_spec("triton") is None:
         return "Python package 'triton' is not installed."
     if importlib.util.find_spec("jax_triton") is None:
         return "Python package 'jax-triton' is not installed."
     try:
-        import jax
         import jax_triton  # noqa: F401
     except (ImportError, ModuleNotFoundError) as exc:
         return f"Could not import jax_triton: {exc}"
+    return None
+
+
+def single_cable_triton_dependency_skip_reason() -> str | None:
+    """Return why the retained CUDA single-cable route cannot run."""
+
+    import_reason = single_cable_triton_import_skip_reason()
+    if import_reason is not None:
+        return import_reason
+    import jax
+
     try:
         devices = jax.devices("gpu")
     except RuntimeError as exc:
@@ -112,7 +122,7 @@ def dependency_skip_reason() -> str | None:
     return None
 
 
-def solve_tridiagonal_xb(
+def solve_single_cable_tridiagonal_xb(
     dl: Any,
     d: Any,
     du: Any,
@@ -122,7 +132,7 @@ def solve_tridiagonal_xb(
 ) -> Any:
     """Solve independent node-first ``[Nx, B]`` scalar systems exactly."""
 
-    skip_reason = dependency_skip_reason()
+    skip_reason = single_cable_triton_import_skip_reason()
     if skip_reason is not None:
         raise RuntimeError(skip_reason)
     if int(block_b) < 1:
@@ -151,7 +161,7 @@ def solve_tridiagonal_xb(
         source_hash=_KERNEL_SOURCE_HASH,
         out_shape=(out_shape, out_shape),
         grid=((batch_size + int(block_b) - 1) // int(block_b),),
-        name="axonscope_benchmark_single_cable_tiled_thomas",
+        name="axonscope_single_cable_tiled_thomas",
         N=nx,
         B=batch_size,
         BLOCK_B=int(block_b),
@@ -159,60 +169,6 @@ def solve_tridiagonal_xb(
         num_stages=1,
     )
     return solution
-
-
-def solve_tridiagonal_row(dl: Any, d: Any, du: Any, rhs: Any) -> Any:
-    """Solve one row while collapsing an enclosing axon vmap to one GPU call."""
-
-    return _solve_tridiagonal_row_custom_vmap(dl, d, du, rhs)
-
-
-def _solve_tridiagonal_row_impl(dl: Any, d: Any, du: Any, rhs: Any) -> Any:
-    import jax.numpy as jnp
-
-    values = solve_tridiagonal_xb(
-        jnp.asarray(dl)[:, None],
-        jnp.asarray(d)[:, None],
-        jnp.asarray(du)[:, None],
-        jnp.asarray(rhs)[:, None],
-    )
-    return values[:, 0]
-
-
-try:
-    from jax import custom_batching
-except ModuleNotFoundError:  # pragma: no cover - JAX is a project dependency.
-    _solve_tridiagonal_row_custom_vmap = _solve_tridiagonal_row_impl
-else:
-    _solve_tridiagonal_row_custom_vmap = custom_batching.custom_vmap(
-        _solve_tridiagonal_row_impl
-    )
-
-    @_solve_tridiagonal_row_custom_vmap.def_vmap
-    def _solve_tridiagonal_row_vmap(
-        axis_size: int,
-        in_batched: tuple[bool, bool, bool, bool],
-        dl: Any,
-        d: Any,
-        du: Any,
-        rhs: Any,
-    ) -> tuple[Any, bool]:
-        del axis_size
-        if not all(in_batched):
-            raise ValueError(
-                "The benchmark Triton row solver requires every tridiagonal "
-                "operand to share the axon batch axis."
-            )
-        solution_xb = solve_tridiagonal_xb(dl.T, d.T, du.T, rhs.T)
-        return solution_xb.T, True
-
-
-def install_single_cable_scan_candidate() -> None:
-    """Install the candidate at the benchmark-only single-cable solve boundary."""
-
-    from axonscope.runtime.jax.kernels import single_cable_scans
-
-    single_cable_scans._solve_single_cable_tridiagonal_row = solve_tridiagonal_row
 
 
 def _num_warps_for_block_b(block_b: int) -> int:
@@ -224,8 +180,7 @@ def _num_warps_for_block_b(block_b: int) -> int:
 
 
 __all__ = [
-    "dependency_skip_reason",
-    "install_single_cable_scan_candidate",
-    "solve_tridiagonal_row",
-    "solve_tridiagonal_xb",
+    "single_cable_triton_dependency_skip_reason",
+    "single_cable_triton_import_skip_reason",
+    "solve_single_cable_tridiagonal_xb",
 ]
