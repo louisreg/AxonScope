@@ -197,39 +197,6 @@ class UniformMembraneBackend:
             linearize_previous=linearize_previous,
         )
 
-    def generated_triton_advance_membrane_system(
-        self,
-        *,
-        g_prev: jnp.ndarray,
-        V_mV: jnp.ndarray,
-        dt: Any,
-        d_static: jnp.ndarray,
-        dt_over_cm: jnp.ndarray,
-        rhs_additive: jnp.ndarray,
-        linearize_previous: bool,
-        static_gates: jnp.ndarray | None = None,
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
-        _ = static_gates
-        from .triton_generated import (
-            advance_generated_membrane_system,
-            load_generated_triton_module,
-        )
-
-        module = load_generated_triton_module(self.ion_channel)
-        if module is None:
-            return None
-        return advance_generated_membrane_system(
-            module,
-            V_mV,
-            g_prev,
-            dt,
-            d_static,
-            dt_over_cm,
-            rhs_additive,
-            parameter_values=self.ion_channel.parameter_values,
-            linearize_previous=linearize_previous,
-        )
-
 
 class HeterogeneousMembraneGroup(NamedTuple):
     model: Any
@@ -750,45 +717,6 @@ class GatedLeakStackMembraneBackend:
             gates_new,
             gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
             gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
-        )
-
-    def generated_triton_advance_membrane_system(
-        self,
-        *,
-        g_prev: jnp.ndarray,
-        V_mV: jnp.ndarray,
-        dt: Any,
-        d_static: jnp.ndarray,
-        dt_over_cm: jnp.ndarray,
-        rhs_additive: jnp.ndarray,
-        linearize_previous: bool,
-        static_gates: jnp.ndarray | None = None,
-    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
-        if static_gates is None:
-            return None
-        from .triton_generated import (
-            advance_generated_membrane_system,
-            load_generated_triton_module,
-        )
-
-        module = load_generated_triton_module(self.gated_model)
-        if module is None:
-            return None
-        return advance_generated_membrane_system(
-            module,
-            V_mV,
-            g_prev[..., : self.gated_gate_count],
-            dt,
-            d_static,
-            dt_over_cm,
-            rhs_additive,
-            parameter_values=self.gated_model.parameter_values,
-            linearize_previous=linearize_previous,
-            stacked_terms=(
-                static_gates[..., 0],
-                static_gates[..., 1],
-                static_gates[..., 2],
-            ),
         )
 
 
