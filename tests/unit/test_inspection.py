@@ -64,8 +64,8 @@ def test_inspect_simulation_prints_planning_dispatch_and_prepare():
     assert report.dispatch_groups[0].will_batch is True
     assert report.preparations[0].x_positions_shape == (2, 5)
     assert report.membrane_sources[0].unique_membrane_count == 1
-    assert report.membrane_sources[0].kinds == ("hodgkin_huxley",)
-    assert report.membrane_sources[0].source_count == 1
+    assert report.membrane_sources[0].kinds == ("composite",)
+    assert report.membrane_sources[0].source_count == 2
     assert set(report.membrane_sources[0].cache_statuses) <= {"hit", "miss"}
     assert report.membrane_sources[0].cache_reasons
     assert report.membrane_sources[0].cache_keys

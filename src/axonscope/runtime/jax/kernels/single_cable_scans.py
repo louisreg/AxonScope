@@ -212,7 +212,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
             else:
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -227,7 +227,10 @@ def _run_single_cable_vstim_batch_stateful_scan(
                     linearization_gates = gates
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = backend.membrane_conductance_terms(
+                linearization_gates,
+                state=extra,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -301,7 +304,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -492,7 +495,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
             else:
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -508,7 +511,10 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
-            Gm, GE = backend.membrane_conductance_terms(linearization_gates)
+            Gm, GE = backend.membrane_conductance_terms(
+                linearization_gates,
+                state=extra,
+            )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
                 Vm
@@ -582,7 +588,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -792,7 +798,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     V_mV=Vm,
                     dt=dt_ms,
                 )
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -811,6 +817,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     backend,
                     linearization_gates,
                     static_scan_gates,
+                    state=extra,
                 )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -850,7 +857,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -1015,7 +1022,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     V_mV=Vm,
                     dt=dt_ms,
                 )
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -1035,6 +1042,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     backend,
                     linearization_gates,
                     static_scan_gates,
+                    state=extra,
                 )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -1074,7 +1082,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -1263,7 +1271,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     V_mV=Vm,
                     dt=dt_ms,
                 )
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -1283,6 +1291,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     backend,
                     linearization_gates,
                     static_scan_gates,
+                    state=extra,
                 )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -1322,7 +1331,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -1521,7 +1530,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     V_mV=Vm,
                     dt=dt_ms,
                 )
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -1541,6 +1550,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     backend,
                     linearization_gates,
                     static_scan_gates,
+                    state=extra,
                 )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -1580,7 +1590,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,
@@ -1767,7 +1777,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     V_mV=Vm,
                     dt=dt_ms,
                 )
-                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred)
+                Iion_pred = backend.currents(V_mV=Vm, gates=gates_pred, state=extra)
                 step_plan_pred = membrane.prepare_membrane_step(
                     V_mV=Vm,
                     gates_prev=gates,
@@ -1785,6 +1795,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     backend,
                     linearization_gates,
                     static_scan_gates,
+                    state=extra,
                 )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -1823,7 +1834,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                 dt=dt_ms,
                 gates_predictor=gates_pred,
             )
-            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new)
+            Iion_new = backend.currents(V_mV=Vm_new, gates=gates_new, state=extra)
             step_plan = membrane.prepare_membrane_step(
                 V_mV=Vm_new,
                 gates_prev=gates,

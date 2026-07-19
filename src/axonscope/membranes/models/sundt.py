@@ -45,10 +45,10 @@ class Sundt(Model):
     gml: Dimensionless = 1.0
     gnabar: ConductanceDensity = 40.0 * mS / cm2
     gkdrbar: ConductanceDensity = 40.0 * mS / cm2
-    ena: Voltage = 45.0 * mV
+    ena: Voltage = 50.0 * mV
     ek: Voltage = -90.0 * mV
     Rm: ResistanceArea = 1.0e4 * ohm * cm2
-    El: Voltage = -70.0 * mV
+    El: Voltage = -60.0 * mV
 
     @mechanism("na_hh")
     def na_hh_rates(self, Vm: Voltage):

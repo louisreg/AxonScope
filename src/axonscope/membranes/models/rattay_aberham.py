@@ -36,7 +36,7 @@ class RattayAberham(Model):
     gkbar: ConductanceDensity = 36.0 * mS / cm2
     gl: ConductanceDensity = 0.3 * mS / cm2
     el: Voltage = -59.4 * mV
-    ena: Voltage = 50.0 * mV
+    ena: Voltage = 45.0 * mV
     ek: Voltage = -82.0 * mV
 
     @rates

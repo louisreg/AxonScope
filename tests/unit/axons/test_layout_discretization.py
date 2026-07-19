@@ -14,6 +14,7 @@ from axonscope.stimulation import Stimulus
 L = 1000.0                          # Axon length [µm]
 Nx = 101                            # Number of compartments (Nodes)
 d = 1.0                             # Axon diameter [µm]
+ENA = 50.0                          # Pin the historical membrane variant used by this mesh test [mV]
 TSIM = 5.0                          # Total simulation time [ms]
 DT = 0.001                          # Time step [ms]
 AMPLITUDE = 5.0                     # Current amplitude [nA]
@@ -106,10 +107,15 @@ def test_layout_discretization_coherence():
     # ------------------------------------------------------------------
     
     # Axon A: Initialization via length and compartment count.
-    axon_L_Nx = RattayAberham(length=L * axs.um, diameter=d * axs.um, compartments=Nx)
+    axon_L_Nx = RattayAberham(
+        length=L * axs.um,
+        diameter=d * axs.um,
+        compartments=Nx,
+        ena=ENA,
+    )
     
     # Axon B: Initialization via explicit compartment coordinates.
-    axon_x_vec = RattayAberham(x=x_uniform * axs.um, diameter=d * axs.um)
+    axon_x_vec = RattayAberham(x=x_uniform * axs.um, diameter=d * axs.um, ena=ENA)
     
     print("\n--- Running Uniform Initialization Test (length/compartments vs x_um) ---")
     
@@ -137,7 +143,11 @@ def test_layout_discretization_coherence():
     # ------------------------------------------------------------------
 
     # Axon C: Non-uniform explicit grid
-    axon_non_uniform = RattayAberham(x=x_non_uniform * axs.um, diameter=d * axs.um)
+    axon_non_uniform = RattayAberham(
+        x=x_non_uniform * axs.um,
+        diameter=d * axs.um,
+        ena=ENA,
+    )
     
     print("\n--- Running Focused Grid Simulation (Coherence Test) ---")
     

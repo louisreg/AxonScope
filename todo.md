@@ -28,7 +28,7 @@ Latest fast validation:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-740 passed, 1 skipped
+747 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -55,11 +55,17 @@ pytest -q tests/unit --tb=short
 
 ### P18 - Membrane Model Completion And Validation
 
+- [ ] Complete the existing-model NRV fidelity audit recorded in
+  `docs/architecture/p18_nrv_model_audit_2026_07_19.md`.
+  - [x] Pin the official NRV source revision and map every retained built-in to
+    its wrapper and MOD mechanisms.
+  - [x] Align HH, Rattay-Aberham, and Sundt effective defaults with NRV.
+  - [x] Repair the canonical stateful single-cable path and validate all seven
+    retained active models with the NRV velocity campaign.
+  - [ ] Restore focused Vm, current, gate, and state trajectory comparisons;
+    do not infer fine observable equivalence from propagation alone.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models through
   the canonical membrane-source and generated-runtime contracts.
-- [ ] Re-check every built-in membrane model against its NRV implementation;
-  audit formulas, defaults, states, temperature behavior, and recording
-  semantics that may have been lost during translation.
 - [ ] Finish missing Gaines and Markov model families.
 - [ ] Add focused numerical references and runnable advanced examples for each
   retained public model.

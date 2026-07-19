@@ -4,7 +4,12 @@ import pytest
 import axonscope as axs
 from axonscope import AxonInstance
 from axonscope.analysis import conduction_velocity, rasterize
-from axonscope.axons.unmyelinated import HodgkinHuxley
+from axonscope.axons.unmyelinated import (
+    HodgkinHuxley,
+    Schild94,
+    Schild97,
+    Tigerholm,
+)
 from axonscope.stimulation import Stimulus
 from axonscope.timebase import simulation_step_count
 
@@ -57,6 +62,43 @@ def test_single_row_batch_route_returns_finite_output():
     assert result.t.shape == (nt,)
     assert not np.any(np.isnan(np.asarray(result.Vm)))
     np.testing.assert_allclose(np.asarray(result.t[0]), dt, atol=1e-8, rtol=0.0)
+
+
+@pytest.mark.parametrize(
+    "axon",
+    (
+        Tigerholm(length=100.0 * axs.um, diameter=1.0 * axs.um, compartments=5),
+        Schild94(length=100.0 * axs.um, diameter=0.8 * axs.um, compartments=5),
+        Schild97(length=100.0 * axs.um, diameter=0.8 * axs.um, compartments=5),
+    ),
+    ids=("tigerholm", "schild94", "schild97"),
+)
+def test_stateful_membranes_execute_through_single_row_batch_route(axon):
+    result = _run_public(AxonInstance(axon), tsim=0.01, dt=0.005)
+
+    assert result.diagnostics["dispatch_method"] == "batch-single-cable"
+    assert np.all(np.isfinite(np.asarray(result.Vm)))
+
+
+def test_stateful_membrane_executes_through_compact_observer_route():
+    axon = AxonInstance(
+        Tigerholm(length=100.0 * axs.um, diameter=1.0 * axs.um, compartments=5)
+    )
+    activation = axs.analysis.Activation(
+        threshold=-100.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+
+    result = axs.AxonSimulation(
+        axon,
+        duration=0.01 * axs.ms,
+        dt=0.005 * axs.ms,
+        recording=axs.Recording.none(),
+        observers=(activation,),
+    ).run()
+
+    assert result.observations is not None
+    assert bool(np.asarray(result.observations["activation"].values)[0])
 
 
 def test_single_row_batch_route_propagates_action_potential():

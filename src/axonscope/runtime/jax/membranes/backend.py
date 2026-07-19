@@ -17,11 +17,14 @@ def membrane_conductance_terms_with_static_gates(
     backend: Any,
     gates: jnp.ndarray,
     static_gates: jnp.ndarray | None,
+    state: tuple[jnp.ndarray, ...] = (),
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Evaluate conductance terms from compact or complete gate storage."""
 
     if static_gates is None:
-        return backend.membrane_conductance_terms(gates)
+        return backend.membrane_conductance_terms(gates, state=state)
+    if state:
+        raise TypeError("A split gate carry does not support membrane state.")
     batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
     if not callable(batch_terms):
         raise TypeError("A split gate carry requires batch membrane terms.")
@@ -159,11 +162,20 @@ class MembraneBackend(Protocol):
 
     def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D: ...
 
-    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D: ...
+    def currents(
+        self,
+        V_mV: Array1D,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> Array1D: ...
 
     def total_conductance(self, gates: Array2D) -> Array1D: ...
 
-    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]: ...
+    def membrane_conductance_terms(
+        self,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> tuple[Array1D, Array1D]: ...
 
     def background_current(self) -> Array1D: ...
 
@@ -214,14 +226,23 @@ class UniformMembraneBackend:
     def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
         return self.ion_channel.cn_gate_update(g_prev=g_prev, V_mV=V_mV, dt=dt)
 
-    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
-        return self.ion_channel.currents(V_mV=V_mV, gates=gates)
+    def currents(
+        self,
+        V_mV: Array1D,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> Array1D:
+        return self.ion_channel.currents(V_mV=V_mV, gates=gates, state=state)
 
     def total_conductance(self, gates: Array2D) -> Array1D:
         return self.ion_channel.total_conductance(gates)
 
-    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
-        return self.ion_channel.membrane_conductance_terms(gates)
+    def membrane_conductance_terms(
+        self,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> tuple[Array1D, Array1D]:
+        return self.ion_channel.membrane_conductance_terms(gates, state=state)
 
     def background_current(self) -> Array1D:
         return self.ion_channel.I_background(self.Nx)
@@ -409,9 +430,16 @@ class HeterogeneousMembraneBackend:
             out = out.at[idx, :n_g].set(g_new)
         return out
 
-    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+    def currents(
+        self,
+        V_mV: Array1D,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> Array1D:
         if V_mV.shape[0] != self.Nx:
             raise ValueError(f"V_mV must have shape ({self.Nx},), got {V_mV.shape}.")
+        if state:
+            raise TypeError("Heterogeneous membrane state is not supported.")
         out = jnp.zeros((self.Nx,), dtype=self.dtype)
         for group in self.groups:
             model = group.model
@@ -432,7 +460,13 @@ class HeterogeneousMembraneBackend:
             out = out.at[idx].set(model.total_conductance(gi))
         return out
 
-    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
+    def membrane_conductance_terms(
+        self,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> tuple[Array1D, Array1D]:
+        if state:
+            raise TypeError("Heterogeneous membrane state is not supported.")
         if gates.shape != (self.Nx, self.n_gates_max):
             raise ValueError(
                 f"gates must have shape ({self.Nx}, {self.n_gates_max}), got {gates.shape}."
@@ -530,19 +564,32 @@ class PaddedMembraneBackend:
             )
         )
 
-    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
+    def currents(
+        self,
+        V_mV: Array1D,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> Array1D:
         return self._pad_space(
             self.backend.currents(
                 V_mV=V_mV[: self.nx],
                 gates=self._local_gates(gates),
+                state=tuple(value[: self.nx] for value in state),
             )
         )
 
     def total_conductance(self, gates: Array2D) -> Array1D:
         return self._pad_space(self.backend.total_conductance(self._local_gates(gates)))
 
-    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
-        Gm, GE = self.backend.membrane_conductance_terms(self._local_gates(gates))
+    def membrane_conductance_terms(
+        self,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> tuple[Array1D, Array1D]:
+        Gm, GE = self.backend.membrane_conductance_terms(
+            self._local_gates(gates),
+            state=tuple(value[: self.nx] for value in state),
+        )
         return self._pad_space(Gm), self._pad_space(GE)
 
     def background_current(self) -> Array1D:
@@ -656,12 +703,14 @@ class GatedLeakStackMembraneBackend:
         *,
         V_mV: Array1D,
         gates: Array2D,
+        state: tuple[Array1D, ...] = (),
     ) -> Array1D:
         _ = row_index
         gated_mask = gates[:, self._gated_mask_col]
         gated_current = self.gated_model.currents(
             V_mV=V_mV,
             gates=self._gated_gates(gates),
+            state=state,
         )
         leak_current = gates[:, self._leak_g_col] * V_mV - gates[:, self._leak_ge_col]
         return gated_mask * gated_current + (1.0 - gated_mask) * leak_current
@@ -670,11 +719,13 @@ class GatedLeakStackMembraneBackend:
         self,
         row_index,
         gates: Array2D,
+        state: tuple[Array1D, ...] = (),
     ) -> tuple[Array1D, Array1D]:
         _ = row_index
         gated_mask = gates[:, self._gated_mask_col]
         gated_gm, gated_ge = self.gated_model.membrane_conductance_terms(
-            self._gated_gates(gates)
+            self._gated_gates(gates),
+            state=state,
         )
         leak_gm = gates[:, self._leak_g_col]
         leak_ge = gates[:, self._leak_ge_col]
@@ -719,15 +770,24 @@ class GatedLeakStackMembraneBackend:
     def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
         return self.cn_gate_update_for_row(0, g_prev=g_prev, V_mV=V_mV, dt=dt)
 
-    def currents(self, V_mV: Array1D, gates: Array2D) -> Array1D:
-        return self.currents_for_row(0, V_mV=V_mV, gates=gates)
+    def currents(
+        self,
+        V_mV: Array1D,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> Array1D:
+        return self.currents_for_row(0, V_mV=V_mV, gates=gates, state=state)
 
     def total_conductance(self, gates: Array2D) -> Array1D:
         gm, _ = self.membrane_conductance_terms(gates)
         return gm
 
-    def membrane_conductance_terms(self, gates: Array2D) -> tuple[Array1D, Array1D]:
-        return self.membrane_conductance_terms_for_row(0, gates)
+    def membrane_conductance_terms(
+        self,
+        gates: Array2D,
+        state: tuple[Array1D, ...] = (),
+    ) -> tuple[Array1D, Array1D]:
+        return self.membrane_conductance_terms_for_row(0, gates, state=state)
 
     def background_current(self) -> Array1D:
         return jnp.zeros((self.Nx,), dtype=self.dtype)
