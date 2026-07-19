@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import axonscope as axs
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
 from benchmark.protocols import recruitment_amplitude_batch
 from axonscope.dispatcher import build_dispatch_plan
@@ -141,6 +142,51 @@ def test_translated_mrg_workload_shares_structural_materialization() -> None:
     assert len({id(row.axon) for row in pool}) == 6
     assert cohort.materialized_axons.template_count == 3
     assert cohort.materialized_axons.translated_row_count > 0
+
+
+def test_translated_mrg_workload_samples_row_specific_footprints() -> None:
+    args = recruitment_amplitude_batch.build_parser().parse_args(
+        [
+            "--workload",
+            "p14_realistic",
+            "--cable",
+            "double",
+            "--axon-count",
+            "12",
+            "--mrg-template-count",
+            "6",
+            "--mrg-shift-semantics",
+            "translation",
+        ]
+    )
+    recruitment_amplitude_batch._resolve_workload_args(args)
+
+    pool, *_ = recruitment_amplitude_batch._build_workload(args)
+
+    for row in pool:
+        footprint = row.extracellular_stimulation.drives[0].footprint
+        positions_um = row.axon.layout.position_values(unit="micrometer")
+        metadata = footprint.metadata
+        electrode = axs.analytical.PointSourceElectrode(
+            x=float(metadata["electrode_x_um"]) * axs.um,
+            y=float(metadata["electrode_y_um"]) * axs.um,
+            z=float(metadata["electrode_z_um"]) * axs.um,
+            min_distance=5.0 * axs.um,
+        )
+        expected = electrode.footprint_for_axon(
+            positions_um * 1e-6,
+            sigma_S_m=float(metadata["sigma_S_m"]),
+            axon_y_um=float(metadata["axon_y_um"]),
+            axon_z_um=float(metadata["axon_z_um"]),
+        )
+
+        np.testing.assert_array_equal(footprint.positions_um, positions_um)
+        np.testing.assert_allclose(
+            footprint.values_for_axon(),
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 def test_p14_dry_run_records_workload_shape(tmp_path: Path) -> None:

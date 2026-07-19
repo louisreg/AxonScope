@@ -7,8 +7,8 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-19 after closing same-step membrane/Thomas fusion and
-promoting the first P14B translated-layout representation.
+Updated on 2026-07-19 after closing same-step membrane/Thomas fusion and the
+P14B translated-layout CPU/P100 validation gate.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -25,19 +25,17 @@ promoting the first P14B translated-layout representation.
   use compact activation when their criterion is activation-only. P15 still
   needs bounded crossing, spike, and propagation event states.
 - The remaining optimization work proceeds in this measured order:
-  1. P14B represent translated fibers as shared geometry/cable templates plus
-     row-specific intrinsic shifts, removing repeated shifted-layout builds.
-  2. P14D make one prepared runnable plan reusable across compatible calls,
+  1. P14D make one prepared runnable plan reusable across compatible calls,
      including device arrays, factorized footprints, and observer plans.
-  3. P18 complete and validate membrane models.
-  4. P19 perform pre-v1 cleanup and public-surface convergence.
+  2. P18 complete and validate membrane models.
+  3. P19 perform pre-v1 cleanup and public-surface convergence.
 
 Latest fast validation recorded by the compact-activation checkpoint:
 
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-739 passed, 1 skipped
+740 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -287,7 +285,7 @@ rows. Optimize shifted MRG geometry/layout construction before membrane codegen.
   membrane rows unchanged. Positions and sampled footprints remain
   row-specific. Validate custom layouts and reject transformations that alter
   topology or section parameters instead of silently treating them as shifts.
-- [ ] Benchmark the canonical shifted representation at 4096 rows with
+- [x] Benchmark the canonical shifted representation at 4096 rows with
   `3/11/32/128/512/1024` distinct shifts. Report construction wall/RSS,
   template and flattened-layout counts, prepared-row time, dispatch/runtime
   signatures, CPU/GPU simulation equivalence, and exact position/footprint
@@ -315,17 +313,27 @@ row-specific test footprints rather than repeated cable/membrane geometry.
 Artifacts are
 `benchmark/results/p14b_translated_layout_local_4096_t{3,11,32,128,512}_20260719`,
 `benchmark/results/p14b_translated_layout_local_4096_t1024_v2_20260719`, and
-`benchmark/results/p14b_phase_layout_local_4096_t1024_20260719`. Complete the
-CPU/GPU numerical/footprint gate before checking the benchmark item above. The
-full CPU 196-row/196-shift control preserves exactly `0/190/196` activations at
+`benchmark/results/p14b_phase_layout_local_4096_t1024_20260719`. The full CPU
+196-row/196-shift control preserves exactly `0/190/196` activations at
 `0/150/300 uA` between shared and deliberately distinct translated layouts;
 artifacts are
 `benchmark/results/p14b_translated_layout_cpu_196_t196_full_20260719` and
 `benchmark/results/p14b_translated_layout_cpu_196_t196_distinct_full_20260719`.
-P100 submission
-`axs-p14b-translated-4096-25354f5` was accepted and entered `RUNNING`, but the
-Kaggle API subsequently denied access to the private kernel; recover that run
-or rerun the same gate before making the GPU claim.
+The matching 4096-row/1024-shift Kaggle runs preserve exactly `0/3960/4096`
+activations at `0/150/300 uA` on both backends. CPU uses the canonical Thomas
+route and P100 uses `jax_triton_loop_xb`; compact activation is retained and
+there is no VmRaster fallback. Warm `simulation.run_pool` is `253.351 s` on
+CPU and `1.832 s` on P100 (`138.3x`), while warm solver-pipeline time is
+`253.303/1.778 s` (`142.4x`). One-shot cold is `263.006/18.037 s` (`14.6x`):
+source construction remains host-bound at `5.114/6.274 s`, whereas cold
+`run_pool` is `257.351/11.077 s` (`23.2x`). The translated source consumes
+`17.85 MiB` RSS on Kaggle, consistent with the local `17.32 MiB`; the
+materialized population has three structural/flattened templates for 4096 rows
+and 1024 translated descriptions. A focused footprint guard independently
+reconstructs each row's analytical point-source footprint from its translated
+positions. Artifacts are the Kaggle result directories ending in
+`axs-p14b-translated-4096-25354f5` and
+`axs-p14b-translated-cpu-4096-9c93cf3`.
 
 First canonical NumPy-row lowering on 2026-07-15: `PreparedCohort` now builds
 one read-only `MaterializedAxonRows` table inside `runtime.prepare`; positions,

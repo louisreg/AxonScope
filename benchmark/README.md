@@ -575,6 +575,19 @@ geometries. Add `--mrg-shift-semantics translation` to instead translate three
 shared intrinsic layouts while retaining row-specific positions and
 footprints; this is the P14B canonical translated-layout benchmark.
 
+The P14B acceptance matrix is recorded locally under result directories
+beginning with `p14b_translated_layout_local_4096_` for
+`3/11/32/128/512/1024` shifts. At 1024 shifts, construction takes `5.74 s`
+with `17.32 MiB` RSS delta and materialization takes `48.98 ms`; genuine MRG
+phase geometries take `26.57 s` and `59.2 MiB`. Matching 4096-row Kaggle
+artifacts end in `axs-p14b-translated-4096-25354f5` for P100 and
+`axs-p14b-translated-cpu-4096-9c93cf3` for CPU. Both return exactly
+`0/3960/4096` activations. Warm `simulation.run_pool` is `1.832 s` on P100
+versus `253.351 s` on CPU (`138.3x`), using the expected Triton tiled-Thomas
+and CPU Thomas routes respectively. The three shared structural templates
+retain row-specific positions and analytical footprints across 1024 translated
+descriptions.
+
 Use `--time-chunk-steps default` or omit the option to keep AxonScope's
 recording-specific default; for observer-only runs this currently means the
 stable VmRaster default. Use `--time-chunk-steps unchunked` or `none` to force
