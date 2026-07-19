@@ -55,7 +55,7 @@ class VelocitySpec:
     threshold_mV: float
     exclude_radius_um: float
     velocity_rtol: float
-    velocity_fit_mode: Literal["direct", "symmetric", "raster", "crossing", "crossing_symmetric"] = "direct"
+    velocity_fit_mode: Literal["direct", "symmetric", "raster", "crossing", "crossing_symmetric"] = "crossing_symmetric"
     raster_min_distance_ms: float = 0.2
     representative_index: int = 1
 
@@ -614,7 +614,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
     failures = []
     for d, v_as, v_nrv in zip(spec.diameters_um, vel_as, vel_nrv, strict=True):
         err = abs(v_as - v_nrv)
-        tol = max(0.5, spec.velocity_rtol * max(abs(v_nrv), 1e-12))
+        tol = max(0.01, spec.velocity_rtol * max(abs(v_nrv), 1e-12))
         if not np.isfinite(v_as) or not np.isfinite(v_nrv):
             failures.append(f"{spec.name} d={d:.3f} um produced non-finite velocity.")
             continue

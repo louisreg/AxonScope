@@ -26,21 +26,21 @@ The audit keeps four different claims separate:
    state trajectories were compared directly.
 
 Passing an integrated campaign does not by itself prove every internal
-observable. The dormant dense-observable campaign must be restored before the
-fourth claim is made.
+observable. The intracellular and extracellular dense-observable campaigns are
+therefore run separately from the velocity campaign.
 
 ## Existing Model Status
 
 | AxonScope model | NRV source | Current status |
 | --- | --- | --- |
 | Passive | NEURON `pas` | Source mapped; dedicated passive numerical campaign passes. |
-| Hodgkin-Huxley | NEURON `hh` plus `pas` | Defaults corrected to NRV's 32 degC template and additional `pas` leak. Integrated velocity campaign passes. |
-| Rattay-Aberham | `RattayAberham.mod` plus `pas` | Sodium reversal corrected from 50 to 45 mV. Integrated velocity campaign passes. |
-| Sundt | `nahh.mod`, `kdr.mod`, and `pas` | Sodium and leak reversals corrected to 50 and -60 mV. Integrated velocity campaign passes. |
-| Tigerholm | Tigerholm mechanism set in `_unmyelinated.py` | Stateful current and reversal-term execution repaired. Integrated velocity campaign passes. Fine current/state comparison remains. |
-| Schild 1994 | Schild mechanism set with `naf.mod` and `nas.mod` | Stateful current and reversal-term execution repaired. Integrated velocity campaign passes. Fine current/state comparison remains. |
-| Schild 1997 | Schild mechanism set with `naf97mean.mod` and `nas97mean.mod` | Stateful current and reversal-term execution repaired. Integrated velocity campaign passes. Fine current/state comparison remains. |
-| MRG / AxNode | `AXNODE.mod` plus the MRG cable assembly | AxNode formulas and defaults match the MOD source. Fresh morphology, compartment, node-delay, passive, and velocity campaigns pass. |
+| Hodgkin-Huxley | NEURON `hh` plus `pas` | Defaults corrected to NRV's 32 degC template and additional `pas` leak. Velocity and detailed Vm/current/gate campaigns pass. |
+| Rattay-Aberham | `RattayAberham.mod` plus `pas` | Sodium reversal corrected from 50 to 45 mV and gate updates aligned with NEURON `cnexp`. Velocity and detailed Vm/current/gate campaigns pass. |
+| Sundt | `nahh.mod`, `kdr.mod`, and `pas` | Sodium and leak reversals corrected to 50 and -60 mV. Velocity and detailed Vm/current/gate campaigns pass. |
+| Tigerholm | Tigerholm mechanism set in `_unmyelinated.py` | Stateful execution, a float32-stable slow-inactivation rate, and NEURON `cnexp` gate ordering are aligned. Velocity and detailed Vm/current/gate/state campaigns pass. |
+| Schild 1994 | Schild mechanism set with `naf.mod` and `nas.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
+| Schild 1997 | Schild mechanism set with `naf97mean.mod` and `nas97mean.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
+| MRG / AxNode | `AXNODE.mod` plus the MRG cable assembly | AxNode formulas and defaults match the MOD source. Fresh morphology, compartment, node-delay, passive, velocity, and Vm campaigns pass. |
 
 The runtime defect found during this audit was model agnostic. Stateful models
 passed their state to `prepare_membrane_step()` and `finalize_membrane_step()`
@@ -48,6 +48,13 @@ but not to the current and membrane conductance/reversal evaluations. This made
 Tigerholm and both Schild models fail before a solve and would have used stale
 reversal terms even after a narrow crash-only fix. The canonical single-cable
 scan now forwards the same state tuple through all membrane evaluations.
+
+The reactivated diameter campaign also exposed an unrelated model-agnostic
+runtime defect. Batched static JAX arrays were cached by `id(...)` without
+retaining or validating the source object. Recycled Python identities could
+therefore select cable coefficients from another diameter, causing intermittent
+NaNs or failed propagation. Source identity is now weakly validated on every
+identity-based cache hit.
 
 ## Missing NRV Families
 
@@ -71,19 +78,21 @@ tests/unit/solvers/test_single_row_batch_runtime_path.py
 11 passed
 
 tests/unit
-747 passed, 1 skipped
+748 passed, 1 skipped
 
 tests/nrv/velocity_vs_diameter/test_velocity_systematic_vs_nrv.py
 7 passed
 
-tests/nrv/numerics/test_passive_vs_nrv.py
-tests/nrv/numerics/test_mrg_morphology_vs_nrv.py
-tests/nrv/numerics/test_mrg_compartment_geometry_vs_nrv.py
-tests/nrv/numerics/test_mrg_node_delay_vs_nrv.py
-86 passed
+tests/nrv/intracellular/test_intracellular_systematic_vs_nrv.py
+7 passed
+
+tests/nrv/extracellular/test_extracellular_systematic_vs_nrv.py
+7 passed
+
+tests/nrv
+116 passed
 ```
 
-Both the intracellular and extracellular systematic suites currently skip all
-seven models with the reason `dense observable NRV comparison awaits
-batch-native observables` (`14 skipped` across the two suites). Restoring those
-campaigns is the next existing-model audit task.
+The systematic velocity campaign now uses crossing-time regression with a
+strict `0.01 m/s` absolute tolerance floor. The previous `0.5 m/s` floor could
+accept a zero velocity for unmyelinated fibers and is not retained.

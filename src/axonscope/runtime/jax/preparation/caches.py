@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import weakref
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Callable
 
 from axonscope.runtime.jax.types import SolverRuntime
 
@@ -11,7 +12,10 @@ from axonscope.runtime.jax.types import SolverRuntime
 _BATCH_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _BATCH_STATIC_RUNTIME_CACHE: OrderedDict[tuple[Any, ...], SolverRuntime] = OrderedDict()
 _SINGLE_CABLE_FACTORIZED_FORCING_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
-_BATCHED_STATIC_ARRAY_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_BATCHED_STATIC_ARRAY_CACHE: OrderedDict[
+    tuple[Any, ...],
+    tuple[tuple[Callable[[], Any], ...] | None, Any],
+] = OrderedDict()
 _RUNTIME_CACHE_MAX_SIZE = 64
 
 
@@ -51,16 +55,54 @@ def store_single_cable_factorized_forcing(key: tuple[Any, ...], forcing: Any) ->
     _cache_store(_SINGLE_CABLE_FACTORIZED_FORCING_CACHE, key, forcing)
 
 
-def get_batched_static_array(key: tuple[Any, ...]) -> Any | None:
+def get_batched_static_array(
+    key: tuple[Any, ...],
+    *,
+    sources: tuple[Any, ...] | None = None,
+) -> Any | None:
     """Return a cached batched static kernel array."""
 
-    return _cache_get(_BATCHED_STATIC_ARRAY_CACHE, key)
+    entry = _BATCHED_STATIC_ARRAY_CACHE.get(key)
+    if entry is None:
+        return None
+    source_refs, values = entry
+    if sources is not None and not _same_live_sources(source_refs, sources):
+        _BATCHED_STATIC_ARRAY_CACHE.pop(key, None)
+        return None
+    _BATCHED_STATIC_ARRAY_CACHE.move_to_end(key)
+    return values
 
 
-def store_batched_static_array(key: tuple[Any, ...], values: Any) -> None:
+def store_batched_static_array(
+    key: tuple[Any, ...],
+    values: Any,
+    *,
+    sources: tuple[Any, ...] | None = None,
+) -> None:
     """Store a batched static kernel array."""
 
-    _cache_store(_BATCHED_STATIC_ARRAY_CACHE, key, values)
+    source_refs = (
+        None
+        if sources is None
+        else tuple(_identity_ref(source) for source in sources)
+    )
+    _cache_store(_BATCHED_STATIC_ARRAY_CACHE, key, (source_refs, values))
+
+
+def _identity_ref(source: Any) -> Callable[[], Any]:
+    try:
+        return weakref.ref(source)
+    except TypeError:
+        return lambda: source
+
+
+def _same_live_sources(
+    refs: tuple[Callable[[], Any], ...] | None,
+    sources: tuple[Any, ...],
+) -> bool:
+    return refs is not None and len(refs) == len(sources) and all(
+        ref() is source for ref, source in zip(refs, sources, strict=True)
+    )
 
 
 def clear_batch_runtime_caches() -> None:

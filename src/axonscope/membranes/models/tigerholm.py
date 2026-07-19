@@ -38,7 +38,7 @@ class Tigerholm(Model):
         "display_name": "Tigerholm C-fiber",
         "family": "tigerholm",
         "source_reference": "Tigerholm et al. 2014 C-fiber membrane model",
-        "final_gate_update": "post_solve_voltage",
+        "final_gate_update": "predictor",
         "stateful": "concentrations",
         "gate_trace_observables": ("w_kna",),
         "temperature_reference": "mixed channel-specific q10 references",
@@ -115,10 +115,8 @@ class Tigerholm(Model):
             + (0.00092 / ms)
             / (1.0 + exp((Vm + 93.9 * mV) / (16.6 * mV)))
         ) * qt_nav17
-        beta_s_nattxs: Rate = (
-            (132.05 / ms)
-            - (132.05 / ms)
-            / (1.0 + exp((Vm - 384.9 * mV) / (28.5 * mV)))
+        beta_s_nattxs: Rate = (132.05 / ms) / (
+            1.0 + exp(-((Vm - 384.9 * mV) / (28.5 * mV)))
         ) * qt_nav17
         self.keep(
             alpha_m_nattxs,

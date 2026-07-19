@@ -173,7 +173,7 @@ def test_membrane_program_exposes_backend_neutral_runtime_contract():
     assert program.conductance_groups == ((0,), (1,), (2, 3))
     assert program.conductance_parameter_names == ("gnabar", "gkbar", "gl", "gl")
     assert program.diagnostic_names == ()
-    assert program.final_gate_update_mode == "post_solve_voltage"
+    assert program.final_gate_update_mode == "predictor"
     assert program.source_provenance["kind"] == "composite"
     assert len(program.source_provenance["components"]) == 2
     assert program.structural_hash == structural_hash(model)
@@ -1358,6 +1358,7 @@ def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
     assert compiled.function_name == "initials,nav17,nav18,nav19,ks,kf,kdr,hcn,currents,step"
     assert model.metadata["source_function"] == compiled.function_name
     assert model.metadata["display_name"] == "Tigerholm C-fiber"
+    assert model.metadata["final_gate_update"] == "predictor"
     assert model.metadata["internal_outputs"] == (
         "i_na_dyn",
         "i_k_dyn",
@@ -1615,7 +1616,7 @@ def test_rattay_model_ir_keeps_specific_rates_visible():
     assert model.name == "rattay_aberham"
     assert [state.name for state in model.states] == ["m", "h", "n"]
     assert [current.name for current in model.currents] == ["I_na", "I_k", "I_l"]
-    assert model.metadata["final_gate_update"] == "post_solve_voltage"
+    assert model.metadata["final_gate_update"] == "predictor"
     assert_valid_model_ir(model)
 
 

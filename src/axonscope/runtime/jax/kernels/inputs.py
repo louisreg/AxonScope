@@ -31,11 +31,11 @@ def _cached_broadcast_batch_leading(values: Array, batch_size: int) -> Array:
         arr=arr,
         batch_size=batch_size,
     )
-    cached = get_batched_static_array(key)
+    cached = get_batched_static_array(key, sources=(values,))
     if cached is not None:
         return cached
     out = jnp.broadcast_to(arr, (batch_size, *arr.shape))
-    store_batched_static_array(key, out)
+    store_batched_static_array(key, out, sources=(values,))
     return out
 
 def _cached_constant_batched_space_array(
@@ -87,7 +87,7 @@ def _cached_single_cable_tridiagonal_coefficients(
         float(dt_ms),
         _current_jax_device_key(),
     )
-    cached = get_batched_static_array(key)
+    cached = get_batched_static_array(key, sources=(lower, diag, upper))
     if cached is not None:
         return cached
     dt_arr = jnp.asarray(dt, dtype=diag_arr.dtype)
@@ -96,7 +96,7 @@ def _cached_single_cable_tridiagonal_coefficients(
         jnp.ones_like(diag_arr) - dt_arr * diag_arr,
         -dt_arr * upper,
     )
-    store_batched_static_array(key, coeffs)
+    store_batched_static_array(key, coeffs, sources=(lower, diag, upper))
     return coeffs
 
 def _normalize_batch_options(options: BatchOptions | None) -> BatchOptions:
@@ -469,11 +469,11 @@ def _as_cached_batched_space_array(
             arr=arr,
             batch_size=batch_size,
         )
-        cached = get_batched_static_array(key)
+        cached = get_batched_static_array(key, sources=(values,))
         if cached is not None:
             return cached
         out = jnp.broadcast_to(arr[jnp.newaxis, :], (batch_size, nx))
-        store_batched_static_array(key, out)
+        store_batched_static_array(key, out, sources=(values,))
         return out
     if arr.ndim == 2:
         if arr.shape[1:] != (nx,):
@@ -489,11 +489,11 @@ def _as_cached_batched_space_array(
                 arr=arr,
                 batch_size=batch_size,
             )
-            cached = get_batched_static_array(key)
+            cached = get_batched_static_array(key, sources=(values,))
             if cached is not None:
                 return cached
             out = jnp.broadcast_to(arr, (batch_size, nx))
-            store_batched_static_array(key, out)
+            store_batched_static_array(key, out, sources=(values,))
             return out
         raise ValueError(f"{name} batch size must be 1 or {batch_size}, got {arr.shape[0]}.")
     raise ValueError(f"{name} must have shape (Nx,) or (B, Nx), got {arr.shape}.")
@@ -566,11 +566,11 @@ def _as_cached_batched_scalar_or_space_array(
             arr=arr,
             batch_size=batch_size,
         )
-        cached = get_batched_static_array(key)
+        cached = get_batched_static_array(key, sources=(values,))
         if cached is not None:
             return cached
         out = jnp.broadcast_to(arr[jnp.newaxis], (batch_size,))
-        store_batched_static_array(key, out)
+        store_batched_static_array(key, out, sources=(values,))
         return out
     if arr.ndim == 1 and arr.shape == (batch_size,):
         return arr

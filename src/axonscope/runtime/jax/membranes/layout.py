@@ -245,8 +245,9 @@ class HeterogeneousMembraneModel:
         self,
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
+        V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
-        _ = state
+        _ = state, V_mV
         out = self._empty_trace(len(self._gate_names))
         name_to_col = {name: i for i, name in enumerate(self._gate_names)}
         for i, model in enumerate(self.models):

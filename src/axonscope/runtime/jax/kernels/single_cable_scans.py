@@ -253,7 +253,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
                 )
                 gates_out = (
                     _record_matrix_row(
-                        membrane.gate_trace_matrix(gates_pred, extra),
+                        membrane.gate_trace_matrix(gates_pred, extra, Vm_new),
                         record_indices_row,
                         record_full=record_full,
                     )
@@ -330,7 +330,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
             )
             gates_out = (
                 _record_matrix_row(
-                    membrane.gate_trace_matrix(gates_new, state_new),
+                    membrane.gate_trace_matrix(gates_new, state_new, Vm_new),
                     record_indices_row,
                     record_full=record_full,
                 )
@@ -537,7 +537,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 )
                 gates_out = (
                     _record_matrix_row(
-                        membrane.gate_trace_matrix(gates_pred, extra),
+                        membrane.gate_trace_matrix(gates_pred, extra, Vm_new),
                         record_indices_row,
                         record_full=record_full,
                     )
@@ -614,7 +614,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
             )
             gates_out = (
                 _record_matrix_row(
-                    membrane.gate_trace_matrix(gates_new, state_new),
+                    membrane.gate_trace_matrix(gates_new, state_new, Vm_new),
                     record_indices_row,
                     record_full=record_full,
                 )

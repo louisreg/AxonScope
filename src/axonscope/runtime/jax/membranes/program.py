@@ -416,12 +416,13 @@ class JaxMembraneProgram:
         self,
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
+        V_mV: jnp.ndarray | None = None,
     ) -> jnp.ndarray:
         base = jnp.asarray(gates, dtype=self.dtype)
         if not self._gate_trace_observable_names:
             return base
         extras = [
-            self.lowering.observable_matrix(name, base, state=state)
+            self.lowering.observable_matrix(name, base, V_mV=V_mV, state=state)
             for name in self._gate_trace_observable_names
         ]
         return jnp.concatenate([base, jnp.stack(extras, axis=1)], axis=1)

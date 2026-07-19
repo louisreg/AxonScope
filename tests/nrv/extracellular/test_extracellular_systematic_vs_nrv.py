@@ -480,8 +480,8 @@ SPECS = [
         nrv_factory=_make_mrg_extra_nrv,
         tsim_ms=4.0,
         dt_ms=0.005,
-        current_pairs=(("I_na", "I_na"), ("I_nap", "I_nap"), ("I_k", "I_k"), ("I_l", "I_l")),
-        gate_pairs=(("mp", "mp"), ("m", "m"), ("h", "h"), ("s", "s")),
+        current_pairs=(),
+        gate_pairs=(),
         state_pairs=(),
         vm_rmse_atol_mV=12.0,
         vm_peak_atol_mV=30.0,
@@ -497,7 +497,7 @@ SPECS = [
         gate_max_atol=0.28,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
-        conductance_pairs=(("g_na", "g_na"), ("g_nap", "g_nap"), ("g_k", "g_k"), ("g_l", "g_l")),
+        conductance_pairs=(),
         conductance_rmse_atol=0.20,
         conductance_max_atol=2.0,
         gate_max_atol_by_name={"m": 0.40},
@@ -509,7 +509,14 @@ SPECS = [
 
 def _recorded_trace(res, group: str, name: str, compartment_index: int) -> np.ndarray:
     assert res.recordings is not None
-    return np.asarray(res.recordings[group][name], dtype=float)[:, compartment_index]
+    values = res.recordings[group]
+    key = name
+    if key not in values:
+        matches = tuple(candidate for candidate in values if candidate.rsplit(".", 1)[-1] == name)
+        if len(matches) != 1:
+            raise KeyError(name)
+        key = matches[0]
+    return np.asarray(values[key], dtype=float)[:, compartment_index]
 
 
 def _resolve_nrv_key(spec: ExtracellularSpec, key: str) -> str:
@@ -727,15 +734,18 @@ def _matrix_metrics(as_matrix: np.ndarray, nrv_matrix: np.ndarray) -> tuple[floa
 
 
 def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None:
-    pytest.skip("dense observable NRV comparison awaits batch-native observables")
     axon = spec.axonscope_factory(float(diameter_um))
+    record_observables = bool(
+        spec.current_pairs or spec.conductance_pairs or spec.gate_pairs or spec.state_pairs
+    )
     res = run_axonscope_simulation(
         axon,
         tsim=spec.tsim_ms,
         dt=spec.dt_ms,
-        record_observables=True,
+        record_observables=record_observables,
     )
-    assert res.recordings is not None
+    if record_observables:
+        assert res.recordings is not None
 
     axon_nrv = spec.nrv_factory(float(diameter_um), axon, spec.dt_ms)
     enable_nrv_recordings(axon_nrv)
@@ -905,6 +915,9 @@ def _run_extracellular_case(spec: ExtracellularSpec, diameter_um: float) -> None
         state_plot_pairs,
         metrics_lines,
     )
+
+    print(f"\n{spec.name} extracellular comparison")
+    print("\n".join(metrics_lines))
 
     if vm_rmse >= spec.vm_rmse_atol_mV:
         failures.append(

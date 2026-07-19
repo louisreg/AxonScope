@@ -62,7 +62,7 @@ pytest -q tests/unit --tb=short
   - [x] Align HH, Rattay-Aberham, and Sundt effective defaults with NRV.
   - [x] Repair the canonical stateful single-cable path and validate all seven
     retained active models with the NRV velocity campaign.
-  - [ ] Restore focused Vm, current, gate, and state trajectory comparisons;
+  - [x] Restore focused Vm, current, gate, and state trajectory comparisons;
     do not infer fine observable equivalence from propagation alone.
 - [ ] Implement Nav1.x-family and other Markov-based membrane models through
   the canonical membrane-source and generated-runtime contracts.

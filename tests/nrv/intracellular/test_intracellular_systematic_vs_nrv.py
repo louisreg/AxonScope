@@ -140,7 +140,14 @@ def _trace_metrics(ref: np.ndarray, test: np.ndarray) -> tuple[float, float, flo
 
 def _recorded_trace(res, group: str, name: str, compartment_index: int) -> np.ndarray:
     assert res.recordings is not None
-    return np.asarray(res.recordings[group][name], dtype=float)[:, compartment_index]
+    values = res.recordings[group]
+    key = name
+    if key not in values:
+        matches = tuple(candidate for candidate in values if candidate.rsplit(".", 1)[-1] == name)
+        if len(matches) != 1:
+            raise KeyError(name)
+        key = matches[0]
+    return np.asarray(values[key], dtype=float)[:, compartment_index]
 
 
 def _nrv_trace(results_nrv, key: str, row_index: int, t_dst_ms: np.ndarray) -> np.ndarray:
@@ -293,15 +300,16 @@ def _plot_intracellular_report(
 
 
 def _run_intracellular_spec(spec: IntracellularSpec) -> None:
-    pytest.skip("dense observable NRV comparison awaits batch-native observables")
     axon = spec.axonscope_factory()
+    record_observables = bool(spec.current_pairs or spec.gate_pairs or spec.state_pairs)
     res = run_axonscope_simulation(
         axon,
         tsim=spec.tsim_ms,
         dt=spec.dt_ms,
-        record_observables=True,
+        record_observables=record_observables,
     )
-    assert res.recordings is not None
+    if record_observables:
+        assert res.recordings is not None
     failures: list[str] = []
 
     axon_nrv = spec.nrv_factory(axon, spec.dt_ms)
@@ -406,6 +414,8 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
         gate_plot_pairs,
         state_plot_pairs,
     )
+    print(f"\n{spec.name} intracellular comparison")
+    print("\n".join(metrics_lines))
 
     assert np.isfinite(np.asarray(res.Vm)).all()
     if not (vm_rmse < spec.vm_rmse_atol_mV):
@@ -432,6 +442,7 @@ def _make_hh_axon():
     )
     sim = AxonInstance(ax)
     sim.add_current_clamp(position=500.0 * um, current=Stimulus.pulse(start=1.0 * ms, duration=1.0 * ms, amplitude=2.0))
+    sim.comparison_sample_position_um = 750.0
     return sim
 
 
@@ -779,8 +790,8 @@ SPECS = [
         tsim_ms=4.0,
         dt_ms=0.005,
         matrix_mode="all",
-        current_pairs=(("I_na", "I_na"), ("I_nap", "I_nap"), ("I_k", "I_k"), ("I_l", "I_l")),
-        gate_pairs=(("mp", "mp"), ("m", "m"), ("h", "h"), ("s", "s")),
+        current_pairs=(),
+        gate_pairs=(),
         state_pairs=(),
         vm_rmse_atol_mV=6.0,
         vm_peak_atol_mV=12.0,

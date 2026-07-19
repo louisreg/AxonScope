@@ -19,6 +19,11 @@ from axonscope.runtime.jax.preparation.base import (
     prepare_solver_runtime,
     sample_extracellular_potential_mV,
 )
+from axonscope.runtime.jax.preparation.caches import (
+    clear_batch_runtime_caches,
+    get_batched_static_array,
+    store_batched_static_array,
+)
 from axonscope.runtime.jax.membranes.program import JaxMembraneProgram
 from axonscope.runtime.solver_axon import build_solver_axon
 from axonscope.solvers import SolverOptions
@@ -37,6 +42,19 @@ from axonscope.utils import units
 
 class _UnsupportedIntracellularContext(IntracellularContext):
     pass
+
+
+def test_batched_static_array_cache_rejects_recycled_source_identity():
+    clear_batch_runtime_caches()
+    source = jnp.asarray([1.0, 2.0])
+    other_source = jnp.asarray([3.0, 4.0])
+    cached = jnp.asarray([[1.0, 2.0]])
+    key = ("identity-key", id(source))
+
+    store_batched_static_array(key, cached, sources=(source,))
+
+    assert get_batched_static_array(key, sources=(source,)) is cached
+    assert get_batched_static_array(key, sources=(other_source,)) is None
 
 
 def _attach_point_source_stimulation(

@@ -28,6 +28,7 @@ def run_axonscope_simulation(
             gates=True,
             currents=True,
             conductances=True,
+            state_variables=True,
         )
     return axs.AxonSimulation(
         axon,
@@ -242,25 +243,22 @@ def velocity_from_crossing_times(
 
     active = np.isfinite(tc_ms)
     if fit_mode == "symmetric":
-        center_idx = int(np.argmin(np.abs(x - float(center_x_um))))
-        center_t_ms = float(tc_ms[center_idx])
-        if not np.isfinite(center_t_ms):
-            return 0.0
         dist_um = np.abs(x - float(center_x_um))
-        delay_ms = tc_ms - center_t_ms
         mask = active & (dist_um > float(exclude_radius_um))
         if np.count_nonzero(mask) < 2:
             return 0.0
         dist = dist_um[mask]
-        delay = delay_ms[mask]
+        crossing = tc_ms[mask]
         dist_round = np.round(dist, 6)
         uniq = np.unique(dist_round)
         if uniq.size < 2:
             return 0.0
         dist_u = np.asarray(uniq, dtype=float)
-        delay_u = np.asarray([delay[dist_round == u].mean() for u in uniq], dtype=float)
-        coeff = np.polyfit(delay_u * 1e-3, dist_u * 1e-6, 1)
-        return abs(float(coeff[0]))
+        crossing_u = np.asarray([crossing[dist_round == u].mean() for u in uniq], dtype=float)
+        slope_s_per_m = float(np.polyfit(dist_u * 1e-6, crossing_u * 1e-3, 1)[0])
+        if not np.isfinite(slope_s_per_m) or slope_s_per_m <= 0.0:
+            return 0.0
+        return 1.0 / slope_s_per_m
 
     left_mask = active & (x < float(center_x_um) - float(exclude_radius_um))
     right_mask = active & (x > float(center_x_um) + float(exclude_radius_um))

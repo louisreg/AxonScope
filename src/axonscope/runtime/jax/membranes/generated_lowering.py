@@ -365,6 +365,7 @@ class GeneratedJaxMembraneLowering:
         name: str,
         gates: Any,
         *,
+        V_mV: Any | None = None,
         state: tuple[Any, ...] = (),
         parameters: dict[str, Any] | None = None,
     ) -> jnp.ndarray:
@@ -377,11 +378,16 @@ class GeneratedJaxMembraneLowering:
         gates_array = jnp.asarray(gates, dtype=self.dtype)
         node_count = int(gates_array.shape[0]) if gates_array.ndim else 1
         spec = self.contract.function("model_step")
-        if "Vm" in spec.args:
+        if "Vm" in spec.args and V_mV is None:
             raise ValueError(f"Observable {name!r} requires membrane voltage.")
         outputs = self._call(
             "model_step",
-            self._state_env(gates_array, state=state, parameters=parameters),
+            self._state_env(
+                gates_array,
+                state=state,
+                V=V_mV,
+                parameters=parameters,
+            ),
             node_count=node_count,
         )
         return outputs[output_name]

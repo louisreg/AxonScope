@@ -25,7 +25,7 @@ class RattayAberham(Model):
         "display_name": "Rattay-Aberham active membrane",
         "family": "rattay_aberham",
         "source_reference": "Rattay and Aberham 1993 electrical stimulation axon model",
-        "final_gate_update": "post_solve_voltage",
+        "final_gate_update": "predictor",
         "temperature_reference": "6.3 degC with fitted q10 at 37 degC defaults",
         "current_sign_convention": "outward_positive",
         "notes": "HH-like Na, K, and leak membrane used for stimulation examples.",
