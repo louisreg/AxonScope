@@ -316,8 +316,16 @@ Artifacts are
 `benchmark/results/p14b_translated_layout_local_4096_t{3,11,32,128,512}_20260719`,
 `benchmark/results/p14b_translated_layout_local_4096_t1024_v2_20260719`, and
 `benchmark/results/p14b_phase_layout_local_4096_t1024_20260719`. Complete the
-full shift-count matrix and CPU/GPU numerical/footprint gate before checking
-the benchmark item above.
+CPU/GPU numerical/footprint gate before checking the benchmark item above. The
+full CPU 196-row/196-shift control preserves exactly `0/190/196` activations at
+`0/150/300 uA` between shared and deliberately distinct translated layouts;
+artifacts are
+`benchmark/results/p14b_translated_layout_cpu_196_t196_full_20260719` and
+`benchmark/results/p14b_translated_layout_cpu_196_t196_distinct_full_20260719`.
+P100 submission
+`axs-p14b-translated-4096-25354f5` was accepted and entered `RUNNING`, but the
+Kaggle API subsequently denied access to the private kernel; recover that run
+or rerun the same gate before making the GPU claim.
 
 First canonical NumPy-row lowering on 2026-07-15: `PreparedCohort` now builds
 one read-only `MaterializedAxonRows` table inside `runtime.prepare`; positions,
