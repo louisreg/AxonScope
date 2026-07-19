@@ -64,11 +64,25 @@ pytest -q tests/unit --tb=short
     retained active models with the NRV velocity campaign.
   - [x] Restore focused Vm, current, gate, and state trajectory comparisons;
     do not infer fine observable equivalence from propagation alone.
-- [ ] Implement Nav1.x-family and other Markov-based membrane models through
-  the canonical membrane-source and generated-runtime contracts.
-- [ ] Finish missing Gaines and Markov model families.
+- [ ] Implement the Balbi et al. ModelDB 230137 Nav1.x family through one
+  model-agnostic Markov membrane contract and the generated runtime.
+  - [ ] Add a compiler-level coupled-state transition representation and a
+    stable generated JAX update that preserves non-negative occupancies and
+    unit total probability; do not encode Nav-specific state logic in the
+    solver or approximate NEURON's sparse kinetic solve with scalar Euler
+    updates.
+  - [ ] Represent the shared six-state `C1/C2/O1/O2/I1/I2` topology once and
+    provide the complete Nav1.1 through Nav1.9 parameter sets without nine
+    duplicated execution paths.
+  - [ ] Reproduce the ModelDB voltage-clamp validation surface: I-V curves,
+    normalized conductance-voltage curves, steady-state availability, and
+    recovery from fast inactivation.
+  - [ ] Integrate selectable isoforms into axon membrane composition, including
+    NRV's Nav1.1/Nav1.6 MRG-node substitutions, through the same canonical
+    generated-runtime path.
+- [ ] Finish the missing Gaines motor and sensory model families.
 - [ ] Add focused numerical references and runnable advanced examples for each
-  retained public model.
+  retained public model and each public Nav1.x validation workflow.
 
 ### P19 - Pre-V1 Cleanup And Public Surface
 
