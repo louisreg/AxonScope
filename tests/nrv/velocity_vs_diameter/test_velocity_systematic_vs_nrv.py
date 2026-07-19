@@ -33,6 +33,7 @@ from tests.nrv._helpers import (
     normalize_nrv_matrix,
     run_axonscope_simulation,
     select_nearest_rows,
+    symmetric_crossing_curve,
     velocity_from_crossing_times,
     velocity_from_peak_times,
 )
@@ -40,6 +41,7 @@ from tests.nrv._helpers import (
 pytestmark = pytest.mark.nrv_velocity
 
 FIG_DIR = Path("figures/nrv_tests/velocity_vs_diameter")
+VELOCITY_RTOL = 0.02
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,6 @@ class VelocitySpec:
     plot_mode: Literal["all", "nodes"]
     threshold_mV: float
     exclude_radius_um: float
-    velocity_rtol: float
     velocity_fit_mode: Literal["direct", "symmetric", "raster", "crossing", "crossing_symmetric"] = "crossing_symmetric"
     raster_min_distance_ms: float = 0.2
     representative_index: int = 1
@@ -293,7 +294,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=0.0,
         exclude_radius_um=25.0,
-        velocity_rtol=0.15,
         representative_index=3,
     ),
     VelocitySpec(
@@ -305,9 +305,8 @@ SPECS = [
         dt_ms=0.005,
         velocity_mode="all",
         plot_mode="all",
-        threshold_mV=0.0,
+        threshold_mV=-30.0,
         exclude_radius_um=25.0,
-        velocity_rtol=0.12,
         representative_index=4,
     ),
     VelocitySpec(
@@ -321,7 +320,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=0.0,
         exclude_radius_um=50.0,
-        velocity_rtol=0.15,
         representative_index=2,
     ),
     VelocitySpec(
@@ -335,7 +333,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=-10.0,
         exclude_radius_um=200.0,
-        velocity_rtol=0.18,
         representative_index=2,
     ),
     VelocitySpec(
@@ -349,7 +346,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=-10.0,
         exclude_radius_um=100.0,
-        velocity_rtol=0.18,
         representative_index=2,
     ),
     VelocitySpec(
@@ -363,7 +359,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=-10.0,
         exclude_radius_um=100.0,
-        velocity_rtol=0.15,
         representative_index=1,
     ),
     VelocitySpec(
@@ -377,7 +372,6 @@ SPECS = [
         plot_mode="all",
         threshold_mV=0.0,
         exclude_radius_um=100.0,
-        velocity_rtol=0.12,
         velocity_fit_mode="crossing_symmetric",
         representative_index=1,
     ),
@@ -413,8 +407,8 @@ def _plot_velocity_report(
 
     axs[0, 1].plot(diameters_um, err_pct, "o-", color="tab:red", lw=2)
     axs[0, 1].axhline(0.0, color="k", lw=1)
-    axs[0, 1].axhline(100.0 * spec.velocity_rtol, color="gray", ls="--", lw=1)
-    axs[0, 1].axhline(-100.0 * spec.velocity_rtol, color="gray", ls="--", lw=1)
+    axs[0, 1].axhline(100.0 * VELOCITY_RTOL, color="gray", ls="--", lw=1)
+    axs[0, 1].axhline(-100.0 * VELOCITY_RTOL, color="gray", ls="--", lw=1)
     axs[0, 1].set_title("Relative error")
     axs[0, 1].set_xlabel("Diameter [um]")
     axs[0, 1].set_ylabel("Error [%]")
@@ -447,15 +441,33 @@ def _plot_velocity_report(
     if rep_velocity_payload is not None:
         fig2, ax = plt.subplots(1, 1, figsize=(7, 5), constrained_layout=True)
         x_um, tc_as, tc_nrv, diameter_um, center_x_um = rep_velocity_payload
-        dist = np.abs(np.asarray(x_um, dtype=float) - float(center_x_um))
-        center_idx = int(np.argmin(np.abs(np.asarray(x_um, dtype=float) - float(center_x_um))))
-        delay_as = np.asarray(tc_as, dtype=float) - float(tc_as[center_idx])
-        delay_nrv = np.asarray(tc_nrv, dtype=float) - float(tc_nrv[center_idx])
-        ax.plot(dist, delay_as, "o-", lw=2, label="AxonScope")
-        ax.plot(dist, delay_nrv, "s--", lw=2.2, label="NRV")
+        max_radius_um = 0.9 * float(
+            np.max(np.abs(np.asarray(x_um, dtype=float) - float(center_x_um)))
+        )
+        for crossings, marker, linestyle, label in (
+            (tc_as, "o", "-", "AxonScope"),
+            (tc_nrv, "s", "--", "NRV"),
+        ):
+            dist, crossing = symmetric_crossing_curve(
+                x_um,
+                crossings,
+                center_x_um=center_x_um,
+                exclude_radius_um=spec.exclude_radius_um,
+                max_radius_um=max_radius_um,
+            )
+            slope, intercept = np.polyfit(dist, crossing, 1)
+            delay = crossing - intercept
+            ax.plot(dist, delay, marker=marker, ls=linestyle, lw=2, label=label)
+            ax.plot(
+                dist,
+                slope * dist,
+                color=ax.lines[-1].get_color(),
+                alpha=0.35,
+                lw=1,
+            )
         ax.set_title(f"{spec.name} d={diameter_um:.1f} um crossing-delay curve")
         ax.set_xlabel("Distance from center [um]")
-        ax.set_ylabel("Delay from center crossing [ms]")
+        ax.set_ylabel("Delay from fitted propagation origin [ms]")
         ax.grid(True, alpha=0.3)
         ax.legend()
         fig2_path = FIG_DIR / f"{spec.name}_velocity_vs_diameter_delay_curve.png"
@@ -540,6 +552,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
                 fit_mode="direct",
             )
         elif spec.velocity_fit_mode == "crossing_symmetric":
+            max_radius_um = 0.9 * float(np.max(np.abs(x_as_vel - center_x_um)))
             v_as = velocity_from_crossing_times(
                 x_as_vel,
                 vm_as_vel,
@@ -547,6 +560,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
                 center_x_um=center_x_um,
                 threshold_mV=spec.threshold_mV,
                 exclude_radius_um=spec.exclude_radius_um,
+                max_radius_um=max_radius_um,
                 fit_mode="symmetric",
             )
             v_nrv = velocity_from_crossing_times(
@@ -556,6 +570,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
                 center_x_um=center_x_um,
                 threshold_mV=spec.threshold_mV,
                 exclude_radius_um=spec.exclude_radius_um,
+                max_radius_um=max_radius_um,
                 fit_mode="symmetric",
             )
         else:
@@ -614,7 +629,7 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
     failures = []
     for d, v_as, v_nrv in zip(spec.diameters_um, vel_as, vel_nrv, strict=True):
         err = abs(v_as - v_nrv)
-        tol = max(0.01, spec.velocity_rtol * max(abs(v_nrv), 1e-12))
+        tol = max(0.001, VELOCITY_RTOL * max(abs(v_nrv), 1e-12))
         if not np.isfinite(v_as) or not np.isfinite(v_nrv):
             failures.append(f"{spec.name} d={d:.3f} um produced non-finite velocity.")
             continue

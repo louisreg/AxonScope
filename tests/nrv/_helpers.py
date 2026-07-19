@@ -226,6 +226,35 @@ def crossing_times(vm_space_time: np.ndarray, t_ms: np.ndarray, threshold_mV: fl
     return np.asarray([first_cross_time(vm[i], t_ms, threshold_mV) for i in range(vm.shape[0])], dtype=float)
 
 
+def symmetric_crossing_curve(
+    x_um: np.ndarray,
+    crossing_ms: np.ndarray,
+    *,
+    center_x_um: float,
+    exclude_radius_um: float = 0.0,
+    max_radius_um: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return finite bilateral crossing times grouped by distance from stimulation."""
+
+    x = np.asarray(x_um, dtype=float).ravel()
+    crossing = np.asarray(crossing_ms, dtype=float).ravel()
+    if x.shape != crossing.shape:
+        raise ValueError("x_um and crossing_ms must have the same shape.")
+    dist_um = np.abs(x - float(center_x_um))
+    mask = np.isfinite(crossing) & (dist_um > float(exclude_radius_um))
+    if max_radius_um is not None:
+        mask &= dist_um < float(max_radius_um)
+    dist = dist_um[mask]
+    crossing = crossing[mask]
+    dist_round = np.round(dist, 6)
+    unique_dist = np.unique(dist_round)
+    grouped_crossing = np.asarray(
+        [crossing[dist_round == value].mean() for value in unique_dist],
+        dtype=float,
+    )
+    return np.asarray(unique_dist, dtype=float), grouped_crossing
+
+
 def velocity_from_crossing_times(
     x_um: np.ndarray,
     vm_space_time: np.ndarray,
@@ -234,6 +263,7 @@ def velocity_from_crossing_times(
     center_x_um: float,
     threshold_mV: float,
     exclude_radius_um: float = 0.0,
+    max_radius_um: float | None = None,
     fit_mode: Literal["direct", "symmetric"] = "direct",
 ) -> float:
     x = np.asarray(x_um, dtype=float).ravel()
@@ -243,18 +273,15 @@ def velocity_from_crossing_times(
 
     active = np.isfinite(tc_ms)
     if fit_mode == "symmetric":
-        dist_um = np.abs(x - float(center_x_um))
-        mask = active & (dist_um > float(exclude_radius_um))
-        if np.count_nonzero(mask) < 2:
+        dist_u, crossing_u = symmetric_crossing_curve(
+            x,
+            tc_ms,
+            center_x_um=center_x_um,
+            exclude_radius_um=exclude_radius_um,
+            max_radius_um=max_radius_um,
+        )
+        if dist_u.size < 4:
             return 0.0
-        dist = dist_um[mask]
-        crossing = tc_ms[mask]
-        dist_round = np.round(dist, 6)
-        uniq = np.unique(dist_round)
-        if uniq.size < 2:
-            return 0.0
-        dist_u = np.asarray(uniq, dtype=float)
-        crossing_u = np.asarray([crossing[dist_round == u].mean() for u in uniq], dtype=float)
         slope_s_per_m = float(np.polyfit(dist_u * 1e-6, crossing_u * 1e-3, 1)[0])
         if not np.isfinite(slope_s_per_m) or slope_s_per_m <= 0.0:
             return 0.0

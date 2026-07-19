@@ -93,6 +93,7 @@ tests/nrv
 116 passed
 ```
 
-The systematic velocity campaign now uses crossing-time regression with a
-strict `0.01 m/s` absolute tolerance floor. The previous `0.5 m/s` floor could
-accept a zero velocity for unmyelinated fibers and is not retained.
+The systematic velocity campaign now uses bilateral crossing-time regression
+with a shared `2%` relative tolerance and a `0.001 m/s` numerical floor. The
+previous `0.5 m/s` floor could accept a zero velocity for unmyelinated fibers
+and is not retained.
