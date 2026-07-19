@@ -19,9 +19,9 @@ Updated on 2026-07-19 after closing the pre-P18 performance ledger.
 - Compact activation, latency, spike-count, and bounded spike-time states are
   available. VmRaster remains the temporal reference where history is needed.
 - The active order is P18 membrane completion, then P19 pre-v1 convergence.
-- Reusable runnable plans are a future lifecycle phase, not an unfinished P14
-  optimization: current structural preparation is below 3% of realistic warm
-  `run_pool` time.
+- P20 tracks the future lazy runnable-plan and distributed-runner architecture.
+  It is not an unfinished P14 optimization: current structural preparation is
+  below 3% of realistic warm `run_pool` time.
 
 Latest fast validation:
 
@@ -100,26 +100,51 @@ README and public-example audits are complete.
 
 ## Future Product Phases
 
-### Reusable Runnable Plans
+### P20 - Lazy Runnable Plans And Distributed Runner
 
-Revisit this as a deliberate lifecycle architecture phase only when repeated
-calls are a concrete product workflow or new measurements show material cold
-or startup cost.
+Axons, populations, simulations, recruitment curves, sweeps, and studies should
+produce immutable runnable simulation plans. One runner executes one or many
+plans and owns all eager work. This is a future architecture replacement, not a
+wrapper around the current dispatcher.
 
-- [ ] Keep construction outside execution lazy: axons, populations, protocols,
-  sweeps, and studies compose lightweight immutable simulation descriptions.
-  Canonicalize unit-bearing values once per unique scientific template;
-  materialization, code generation, and device placement begin only in
-  `run()`, `estimate()`, or `inspect()`.
-- [ ] Map those descriptions onto one immutable internal prepared plan consumed
-  by `AxonSimulation(...).run()`. Do not introduce a parallel public execution
-  path. Discuss any lifecycle, result, inspection, progress, or output change.
-- [ ] Reuse compatible dispatch groups, spatial rows, observer probe plans,
-  membrane/cable rows, factorized footprints, device arrays, and executable
-  lookup across calls while accepting only typed dynamic operands.
-- [ ] Benchmark fresh miss, same-object hit, reconstructed structural hit,
-  dynamic-value reuse, and explicit invalidation at Naxon=1024/4096. Require at
-  least 15% repeated-call wall-time gain or a multi-second cold reduction.
+- [ ] Before implementation, use Graphify to audit the complete pre-runner
+  architecture: `Axon`, `AxonPopulation`, `AxonSimulation`, protocols, studies,
+  dispatch plans, preparation caches, runtime execution, results, inspection,
+  and progress reporting. Identify what can move, merge, or disappear.
+- [ ] Define one backend-neutral immutable `RunnablePlan` contract for a single
+  simulation and composed plans for populations, sweeps, recruitment curves,
+  and studies. Plans describe work and expected results; they do not allocate
+  runtime arrays, place device data, compile kernels, or execute eagerly.
+- [ ] Make everything outside the runner lazy. Canonicalize unit-bearing values
+  once per unique scientific template, but defer numerical materialization,
+  grouping, signatures, generated-code loading, device placement, compilation,
+  scheduling, and result allocation until runner execution or an explicit
+  `estimate()`/`inspect()` request.
+- [ ] Implement one runner for one or many plans. It owns dependency ordering,
+  compatible grouping, reusable prepared state, execution policies, device
+  assignment, failure propagation, cancellation, progress, and canonical
+  result assembly.
+- [ ] Replace the existing simulation/protocol dispatcher and execution routes
+  with the runner once validated. Remove superseded builders, caches, wrappers,
+  and call paths; do not retain legacy aliases, a parallel optimized path, or a
+  hidden fallback.
+- [ ] Design the runner dispatcher for one or many local GPUs and HPC workers.
+  Separate backend-neutral scheduling from JAX device execution; model device
+  topology, memory budgets, affinity, work placement, cache locality, and
+  deterministic result ordering without exposing backend internals publicly.
+- [ ] Support synchronous execution first, then benchmark asynchronous overlap
+  only for genuinely independent heterogeneous groups. Require bounded pending
+  memory, observable device-idle reduction, deterministic failures/results, and
+  an end-to-end gain before enabling it by default.
+- [ ] Preserve the canonical `AxonSimulation(...).run()` workflow, public
+  results, inspection, and progress semantics unless a change is discussed
+  first. Public objects may become plan factories, but users should not need to
+  understand dispatcher or runtime internals.
+- [ ] Validate single plans, mixed populations, native numeric axes, studies,
+  cache invalidation, cancellation, CPU, single GPU, multi-GPU, and an HPC
+  smoke path. Benchmark fresh miss, same-object and structural reuse, dynamic
+  operands, transfers, compilation, solve, result assembly, RSS, device memory,
+  scheduler overhead, and scaling efficiency at Naxon=1024/4096.
 
 ### Future Runtime Targets
 
@@ -150,6 +175,11 @@ activation. A public block result requires a dedicated scientific campaign.
 - [ ] Implement callable threshold curves, block-threshold curves, recruitment
   curves, conduction validation, parameter sweeps, reuse/retention policies,
   and canonical study results.
+- [ ] Evaluate optimization/search algorithms built from or compatible with
+  scikit-learn for study parameter exploration, including grid/random sampling
+  and surrogate-model-guided search. Keep the study contract independent of
+  scikit-learn, compare it with SciPy or dedicated optimization packages, and
+  make any dependency optional.
 - [ ] Define final schemas, typed serialization, and persistence strategy.
 
 ### External Integration
@@ -157,12 +187,9 @@ activation. A public block result requires a dedicated scientific campaign.
 - [ ] Continue NRV hardening only where its package contract is stable. Keep
   geometry in `examples/with_nrv` or benchmarks and avoid duplicating the
   sampled-footprint path in `axonscope.integrations.nrv`.
-- [ ] Work on HPC integration, including cache sharing, scheduling, artifact
-  retention, and reproducible benchmark execution.
-- [ ] Benchmark async JAX scheduling for forced heterogeneous groups
-  (incompatible membrane contracts, cable/Nx shapes, or temporal signatures).
-  Sweep 2/4/8 groups and require device-idle evidence, bounded pending memory,
-  deterministic ordering, and end-to-end gain.
+- [ ] Build HPC integration through the P20 runner after its local multi-device
+  contract is stable, including cache sharing, remote scheduling, artifact
+  retention, failure recovery, and reproducible benchmark execution.
 - [ ] Implement the CPU/NRV FEM-footprint path from
   `ideas/fem_axon_gpu_coupling_design.md` before GPU FEM. Separate FEM solve,
   first footprint, cached sampling, and AxonScope solve; cache field bases and
