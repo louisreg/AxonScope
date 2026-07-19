@@ -55,7 +55,7 @@ pytest -q tests/unit --tb=short
 
 ### P18 - Membrane Model Completion And Validation
 
-- [ ] Complete the existing-model NRV fidelity audit recorded in
+- [x] Complete the existing-model NRV fidelity audit recorded in
   `docs/architecture/p18_nrv_model_audit_2026_07_19.md`.
   - [x] Pin the official NRV source revision and map every retained built-in to
     its wrapper and MOD mechanisms.

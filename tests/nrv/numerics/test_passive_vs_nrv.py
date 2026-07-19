@@ -1,112 +1,122 @@
-# tests/physics/test_compare_nrv_physics.py
-import numpy as np
-import matplotlib.pyplot as plt
-import pytest
+from __future__ import annotations
+
 from pathlib import Path
-from axonscope import AxonInstance, ms, um
-from axonscope import membranes
+
+import matplotlib.pyplot as plt
+import nrv
+import numpy as np
+import pytest
+
+from axonscope import AxonInstance, membranes, ms, um
 from axonscope.axons import Axon, Layout, Section
 from axonscope.stimulation import Stimulus
 from axonscope.utils import units
 from tests.nrv._helpers import run_axonscope_simulation
 
-import sys
-sys.path.append("./external/")
-#from uNRV import Axon as NRV_axon #for comparison  --> importing uNRV AND nrv crashes but no passive in NRV :(
 
 pytestmark = pytest.mark.nrv_numerics
 
-def test_compare_nrv_physics(save_dir="figures/physics_tests"):
-    # ---- Parameters ----
-    L = 1_000        # µm
-    d = 5            # µm
-    Nx = 101
-    Cm = 10.0        # µF/cm^2
-    Gl = 1e-4        # S/cm^2
-    EL = -70.0       # mV
-    rho = 100.0      # ohm*cm
-    I_inj_nA = 10    # nA
-    t_start = 2      # ms
-    t_on = 1         # ms
-    Tsim = 10        # ms
 
-    # ---- Create output directory ----
-    save_path = Path(save_dir)
-    save_path.mkdir(parents=True, exist_ok=True)
+def test_passive_current_definition_matches_nrv_pas(save_dir="figures/physics_tests"):
+    length_um = 1_000.0
+    diameter_um = 5.0
+    compartments = 101
+    capacitance_uF_cm2 = 10.0
+    leak_S_cm2 = 1e-4
+    reversal_mV = -70.0
+    axial_resistivity_ohm_cm = 100.0
+    current_nA = 10.0
+    start_ms = 0.5
+    duration_ms = 0.5
+    tsim_ms = 4.0
+    dt_ms = 0.01
 
-    # ---- Python Axon ----
-    
-    axon_py = Axon(
+    axon = Axon(
         layout=Layout.single_uniform(
             Section(
                 "passive",
-                membrane=membranes.Passive(Rm=1 / Gl, EL=EL),
-                diameter=units.Q_(d, "micrometer"),
-                Ra=units.Q_(rho, "ohm * centimeter"),
-                Cm=units.Q_(Cm, "microfarad / centimeter ** 2"),
+                membrane=membranes.Passive(Rm=1.0 / leak_S_cm2, EL=reversal_mV),
+                diameter=units.Q_(diameter_um, "micrometer"),
+                Ra=units.Q_(axial_resistivity_ohm_cm, "ohm * centimeter"),
+                Cm=units.Q_(capacitance_uF_cm2, "microfarad / centimeter ** 2"),
             ),
-            length=units.Q_(L, "micrometer"),
-            compartments=Nx,
+            length=units.Q_(length_um, "micrometer"),
+            compartments=compartments,
         ),
-        v_init=units.Q_(EL, "millivolt"),
+        v_init=units.Q_(reversal_mV, "millivolt"),
     )
-    sim_py = AxonInstance(axon_py)
-    sim_py.add_current_clamp(position=(0.5 * L) * um, current=Stimulus.pulse(start=t_start * ms, duration=t_on * ms, amplitude=I_inj_nA))
-    
-    res = run_axonscope_simulation(sim_py, tsim=Tsim, dt=1e-3)
-    dt = (res.t[1]-res.t[0])
-
-    
-    """
-    # ---- NRV Axon ----
-    axon_nrv = NRV_axon(
-        y=0,
-        z=0,
-        d=d,
-        L = L,
-        Nsec = Nx,
-        passif_cable = True,
-        Ra = rho,
-        cm = Cm,
-        e_pas = EL,
-        g_pas = Gl,
-        dt = dt,
-        V_init = EL
+    simulation = AxonInstance(axon)
+    simulation.add_current_clamp(
+        position=0.5 * length_um * um,
+        current=Stimulus.pulse(
+            start=start_ms * ms,
+            duration=duration_ms * ms,
+            amplitude=current_nA,
+        ),
     )
-    axon_nrv.insert_I_Clamp(0.5, t_start, t_on, I_inj_nA)
-    results_NRV = axon_nrv.simulate(t_sim=Tsim)
-    
-    """
-    # ---- Choose positions along the axon ----
-    x_positions = [0, L/3, L/2, 2*L/3, L]
-    x_um = axon_py.layout.position_values(unit="micrometer")
-    indices = [np.argmin(np.abs(x_um - xp)) for xp in x_positions]
-    
-    fig, ax_x = plt.subplots(figsize=(8,5))
-    for idx, xp in zip(indices, x_positions):
-        ax_x.plot(res.t, res.Vm[:, idx], label=f'x = {xp:.1f} µm')
-    
-    ax_x.set_xlabel('Time [ms]')
-    ax_x.set_ylabel('V_m [mV]')
-    ax_x.legend()
-    ax_x.grid(True)
+    result = run_axonscope_simulation(
+        simulation,
+        tsim=tsim_ms,
+        dt=dt_ms,
+        record_observables=True,
+    )
 
-    #t = results_NRV['t'].ravel()          # s'assure que t est 1D
-    #x_rec = results_NRV['x_rec']          # positions [µm]
-    #Vm = results_NRV['V_mem']             # shape (Nt, Nx)
+    axon_nrv = nrv.unmyelinated(
+        0,
+        0,
+        diameter_um,
+        length_um,
+        model="HH",
+        dt=dt_ms,
+        Nsec=1,
+        Nseg_per_sec=compartments,
+        v_init=reversal_mV,
+        T=32.0,
+        include_passive_leak=True,
+        g_pas=leak_S_cm2,
+        e_pas=reversal_mV,
+    )
+    for section in axon_nrv.unmyelinated_sections:
+        section.gnabar_hh = 0.0
+        section.gkbar_hh = 0.0
+        section.gl_hh = 0.0
+        section.g_pas = leak_S_cm2
+        section.e_pas = reversal_mV
+        section.cm = capacitance_uF_cm2
+        section.Ra = axial_resistivity_ohm_cm
+    axon_nrv.insert_I_Clamp(0.5, start_ms, duration_ms, current_nA)
+    axon_nrv.record_V_mem = True
+    reference = axon_nrv.simulate(t_sim=tsim_ms)
 
-    #L_p = x_rec[-1]
-    #x_positions = [0, L_p/3, L_p/2, 2*L_p/3, L_p]
-    #indices = [np.argmin(np.abs(x_rec - xp)) for xp in x_positions]
+    t_as = np.asarray(result.t, dtype=float)
+    t_nrv = np.asarray(reference["t"], dtype=float)
+    vm_nrv = np.asarray(reference["V_mem"], dtype=float)
+    center_as = compartments // 2
+    center_nrv = vm_nrv.shape[0] // 2
+    vm_reference = np.interp(t_as, t_nrv, vm_nrv[center_nrv])
+    current_reference = leak_S_cm2 * (vm_reference - reversal_mV)
+    assert result.recordings is not None
+    current_as = 1e-3 * np.asarray(result.recordings["currents"]["I_l"][:, center_as])
 
-    
-    #for idx, xp in zip(indices, x_positions):
-    #    ax_x.plot(t, Vm[idx, :],'--', label=f"x = {xp:.1f} µm - NRV")
-    ax_x.legend()
-    filename = save_path / "axon_compare_passive_nrv.png"
-    fig.savefig(filename)
-    plt.close(fig)
+    expected_current_as = leak_S_cm2 * (result.Vm[:, center_as] - reversal_mV)
+    np.testing.assert_allclose(current_as, expected_current_as, rtol=2e-5, atol=2e-6)
+    assert all(section.g_pas == leak_S_cm2 for section in axon_nrv.unmyelinated_sections)
+    assert all(section.e_pas == reversal_mV for section in axon_nrv.unmyelinated_sections)
 
-
-    
-##
+    output = Path(save_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    figure, axes = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+    axes[0].plot(t_as, result.Vm[:, center_as], label="AxonScope")
+    axes[0].plot(t_as, vm_reference, "--", label="NRV passive reference")
+    axes[0].set_ylabel("Vm [mV]")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    axes[1].plot(t_as, current_as, label="AxonScope")
+    axes[1].plot(t_as, current_reference, "--", label="NRV pas equation")
+    axes[1].set_xlabel("Time [ms]")
+    axes[1].set_ylabel("I_l [mA/cm2]")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    figure.tight_layout()
+    figure.savefig(output / "axon_compare_passive_nrv.png", dpi=150)
+    plt.close(figure)

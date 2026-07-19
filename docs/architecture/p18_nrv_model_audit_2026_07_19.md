@@ -33,14 +33,14 @@ therefore run separately from the velocity campaign.
 
 | AxonScope model | NRV source | Current status |
 | --- | --- | --- |
-| Passive | NEURON `pas` | Source mapped; dedicated passive numerical campaign passes. |
+| Passive | NEURON `pas` | The configured NRV mechanism and AxonScope recording satisfy the same `g_pas * (Vm - e_pas)` current definition; cable numerics remain covered separately. |
 | Hodgkin-Huxley | NEURON `hh` plus `pas` | Defaults corrected to NRV's 32 degC template and additional `pas` leak. Velocity and detailed Vm/current/gate campaigns pass. |
 | Rattay-Aberham | `RattayAberham.mod` plus `pas` | Sodium reversal corrected from 50 to 45 mV and gate updates aligned with NEURON `cnexp`. Velocity and detailed Vm/current/gate campaigns pass. |
 | Sundt | `nahh.mod`, `kdr.mod`, and `pas` | Sodium and leak reversals corrected to 50 and -60 mV. Velocity and detailed Vm/current/gate campaigns pass. |
-| Tigerholm | Tigerholm mechanism set in `_unmyelinated.py` | Stateful execution, a float32-stable slow-inactivation rate, and NEURON `cnexp` gate ordering are aligned. Velocity and detailed Vm/current/gate/state campaigns pass. |
+| Tigerholm | Tigerholm mechanism set in `_unmyelinated.py` | Stateful execution, dynamic Nernst reversals, the HCN Na/K split, Na/K pump stoichiometry, concentration budgets, a float32-stable slow-inactivation rate, and NEURON `cnexp` gate ordering are aligned. Velocity and detailed Vm/current/gate campaigns pass. |
 | Schild 1994 | Schild mechanism set with `naf.mod` and `nas.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
 | Schild 1997 | Schild mechanism set with `naf97mean.mod` and `nas97mean.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
-| MRG / AxNode | `AXNODE.mod` plus the MRG cable assembly | AxNode formulas and defaults match the MOD source. Fresh morphology, compartment, node-delay, passive, velocity, and Vm campaigns pass. |
+| MRG / AxNode | `AXNODE.mod` plus the MRG cable assembly | The four AxNode current formulas (`I_na`, `I_nap`, `I_k`, `I_l`) and defaults match the MOD source. Fresh morphology, compartment, node-delay, passive, velocity, and Vm campaigns pass. Dense current traces are not claimed because the double-cable path intentionally does not support dense observable recording. |
 
 The runtime defect found during this audit was model agnostic. Stateful models
 passed their state to `prepare_membrane_step()` and `finalize_membrane_step()`
@@ -55,6 +55,28 @@ retaining or validating the source object. Recycled Python identities could
 therefore select cable coefficients from another diameter, causing intermittent
 NaNs or failed propagation. Source identity is now weakly validated on every
 identity-based cache hit.
+
+The detailed current audit found a Tigerholm-specific semantic mismatch that
+propagation tests had hidden. NRV's `I_na` and `I_k` are NEURON ion totals:
+they use concentration-dependent reversal potentials, split HCN equally
+between Na and K, include the Na/K pump, and drive the `naoi`/`koi`
+concentration mechanisms. AxonScope had instead recorded static channel
+component summaries and omitted HCN/pump terms from the concentration budgets.
+The canonical source model now exposes the same ion totals while retaining one
+stateful solver path. At the intracellular reference point this reduced the
+Tigerholm Vm RMSE from `0.3214` to `0.0723 mV`, Na-current RMSE from `0.0278`
+to `0.0187 mA/cm2`, and K-current RMSE from `0.0666` to `0.0095 mA/cm2`.
+
+Integer-lag diagnostics over +/-3 time steps select zero lag for the Rattay
+and corrected Tigerholm Na/K traces. Their remaining peak-local current error
+therefore comes from small gate-trajectory differences, not from a shifted
+recording convention. Focused Rattay and Tigerholm current tolerances are now
+model-scale checks rather than the previous broad multi-model placeholders.
+The HH, Sundt, Schild 1994, and Schild 1997 current thresholds were likewise
+replaced with model-scale limits after fresh integrated runs. Passive current
+is checked against the configured NRV `pas` equation, while MRG/AxNode is
+checked directly against all four `AXNODE.mod` current equations because dense
+double-cable current recording is outside the supported recording contract.
 
 ## Missing NRV Families
 
@@ -78,7 +100,7 @@ tests/unit/solvers/test_single_row_batch_runtime_path.py
 11 passed
 
 tests/unit
-748 passed, 1 skipped
+749 passed, 1 skipped
 
 tests/nrv/velocity_vs_diameter/test_velocity_systematic_vs_nrv.py
 7 passed

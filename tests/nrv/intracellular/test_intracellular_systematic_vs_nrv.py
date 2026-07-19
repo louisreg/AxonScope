@@ -138,6 +138,33 @@ def _trace_metrics(ref: np.ndarray, test: np.ndarray) -> tuple[float, float, flo
     return rmse, max_abs, q99_abs
 
 
+def _best_integer_lag(
+    ref: np.ndarray,
+    test: np.ndarray,
+    *,
+    max_lag_steps: int = 3,
+) -> tuple[int, float]:
+    """Return the integer sample lag minimizing RMSE on the shared interval."""
+
+    ref_values = np.asarray(ref, dtype=float)
+    test_values = np.asarray(test, dtype=float)
+    candidates: list[tuple[float, int]] = []
+    for lag in range(-max_lag_steps, max_lag_steps + 1):
+        if lag < 0:
+            ref_slice = ref_values[-lag:]
+            test_slice = test_values[:lag]
+        elif lag > 0:
+            ref_slice = ref_values[:-lag]
+            test_slice = test_values[lag:]
+        else:
+            ref_slice = ref_values
+            test_slice = test_values
+        rmse, _, _ = _trace_metrics(ref_slice, test_slice)
+        candidates.append((rmse, lag))
+    best_rmse, best_lag = min(candidates)
+    return best_lag, best_rmse
+
+
 def _recorded_trace(res, group: str, name: str, compartment_index: int) -> np.ndarray:
     assert res.recordings is not None
     values = res.recordings[group]
@@ -347,8 +374,10 @@ def _run_intracellular_spec(spec: IntracellularSpec) -> None:
             t_as,
         )
         rmse, max_abs, q99_abs = _trace_metrics(nrv_trace, as_trace)
+        best_lag, best_lag_rmse = _best_integer_lag(nrv_trace, as_trace)
         metrics_lines.append(
-            f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f}"
+            f"{as_name:12s}: rmse={rmse:8.4f} q99={q99_abs:8.4f} max={max_abs:8.4f} "
+            f"best_lag={best_lag:+d} ({best_lag_rmse:8.4f})"
         )
         if not (rmse < spec.current_rmse_atol):
             failures.append(
@@ -625,8 +654,8 @@ SPECS = [
         state_pairs=(),
         vm_rmse_atol_mV=5.0,
         vm_peak_atol_mV=5.0,
-        current_rmse_atol=4.0,
-        current_max_atol=15.0,
+        current_rmse_atol=0.015,
+        current_max_atol=0.04,
         gate_rmse_atol=0.05,
         gate_max_atol=0.15,
         state_rmse_atol=0.0,
@@ -642,12 +671,12 @@ SPECS = [
         current_pairs=(("I_na", "I_na"), ("I_k", "I_k"), ("I_l", "I_l")),
         gate_pairs=(("m", "m"), ("n", "n"), ("h", "h")),
         state_pairs=(),
-        vm_rmse_atol_mV=5.0,
-        vm_peak_atol_mV=5.0,
-        current_rmse_atol=4.0,
-        current_max_atol=15.0,
-        gate_rmse_atol=0.05,
-        gate_max_atol=0.15,
+        vm_rmse_atol_mV=0.01,
+        vm_peak_atol_mV=0.01,
+        current_rmse_atol=0.02,
+        current_max_atol=0.50,
+        gate_rmse_atol=0.015,
+        gate_max_atol=0.06,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
     ),
@@ -663,8 +692,8 @@ SPECS = [
         state_pairs=(),
         vm_rmse_atol_mV=5.0,
         vm_peak_atol_mV=6.0,
-        current_rmse_atol=5.0,
-        current_max_atol=18.0,
+        current_rmse_atol=0.01,
+        current_max_atol=0.25,
         gate_rmse_atol=0.06,
         gate_max_atol=0.18,
         state_rmse_atol=0.0,
@@ -699,12 +728,12 @@ SPECS = [
             ("nf_h", "nf_h"),
         ),
         state_pairs=(),
-        vm_rmse_atol_mV=5.0,
-        vm_peak_atol_mV=10.0,
-        current_rmse_atol=12.0,
-        current_max_atol=40.0,
-        gate_rmse_atol=0.10,
-        gate_max_atol=0.30,
+        vm_rmse_atol_mV=0.10,
+        vm_peak_atol_mV=0.10,
+        current_rmse_atol=0.025,
+        current_max_atol=0.35,
+        gate_rmse_atol=0.015,
+        gate_max_atol=0.04,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
         nrv_only_observables=("I_ca",),
@@ -737,8 +766,8 @@ SPECS = [
         state_pairs=(("c_kca", "c_ka"),),
         vm_rmse_atol_mV=5.0,
         vm_peak_atol_mV=10.0,
-        current_rmse_atol=15.0,
-        current_max_atol=45.0,
+        current_rmse_atol=0.02,
+        current_max_atol=0.35,
         gate_rmse_atol=0.12,
         gate_max_atol=0.35,
         state_rmse_atol=0.12,
@@ -776,8 +805,8 @@ SPECS = [
         state_pairs=(("c_kca", "c_ka"),),
         vm_rmse_atol_mV=5.0,
         vm_peak_atol_mV=10.0,
-        current_rmse_atol=15.0,
-        current_max_atol=45.0,
+        current_rmse_atol=0.06,
+        current_max_atol=0.20,
         gate_rmse_atol=0.12,
         gate_max_atol=0.35,
         state_rmse_atol=0.12,
@@ -795,12 +824,13 @@ SPECS = [
         state_pairs=(),
         vm_rmse_atol_mV=6.0,
         vm_peak_atol_mV=12.0,
-        current_rmse_atol=60.0,
-        current_max_atol=180.0,
+        current_rmse_atol=0.0,
+        current_max_atol=0.0,
         gate_rmse_atol=0.08,
         gate_max_atol=0.25,
         state_rmse_atol=0.0,
         state_max_atol=0.0,
+        nrv_only_observables=("I_na", "I_nap", "I_k", "I_l"),
     ),
 ]
 

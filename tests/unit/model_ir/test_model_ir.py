@@ -1408,6 +1408,9 @@ def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
         "I_na",
         "I_na",
         "I_na",
+        "I_na",
+        "I_na",
+        "I_k",
         "I_k",
         "I_k",
         "I_k",
@@ -1429,7 +1432,10 @@ def test_tigerholm_source_exports_stateful_terms_without_return_soup(tmp_path):
     assert "def q10(base, celsius, reference):" in generated
     assert "def alpha_from_inf_tau(x_inf, tau):" in generated
     assert "def rates_from_tau_inf(x_inf, tau):" in generated
-    assert "return I_na_nav17, I_na_nav18, I_na_nav19" in generated
+    assert (
+        "return I_na_nav17, I_na_nav18, I_na_nav19, I_na_h, I_na_pump, "
+        "I_k_ks, I_k_kf, I_k_kdr, I_k_kna, I_k_h, I_k_pump"
+    ) in generated
 
 
 def test_schild_sources_export_full_calcium_step_program(tmp_path):

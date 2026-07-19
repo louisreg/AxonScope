@@ -44,8 +44,9 @@ class Tigerholm(Model):
         "temperature_reference": "mixed channel-specific q10 references",
         "current_sign_convention": "outward_positive",
         "notes": (
-            "Stateful Na/K concentration dynamics with static public component "
-            "currents and dynamic correction terms for the solver."
+            "Stateful Na/K concentration dynamics and public ionic currents use "
+            "the same dynamic reversal potentials, HCN split, and Na/K pump "
+            "stoichiometry as the NRV mechanisms."
         ),
     }
     nai_fixed: Concentration = 11.4 * mM
@@ -330,13 +331,24 @@ class Tigerholm(Model):
             "I_na_nav17",
             "I_na_nav18",
             "I_na_nav19",
+            "I_na_h",
+            "I_na_pump",
             "I_k_ks",
             "I_k_kf",
             "I_k_kdr",
             "I_k_kna",
             "I_k_h",
+            "I_k_pump",
         ),
         observables=("g_na", "g_k", "w_kna"),
+        conductances={
+            "I_na_pump": "g_pump_zero",
+            "I_k_pump": "g_pump_zero",
+        },
+        reversals={
+            "I_na_pump": "e_pump_zero",
+            "I_k_pump": "e_pump_zero",
+        },
         internal=(
             "i_na_dyn",
             "i_k_dyn",
@@ -374,26 +386,13 @@ class Tigerholm(Model):
         g_nav17: ConductanceDensity = self.gbar_nav17 * (m_nattxs**3) * h_nattxs * s_nattxs
         g_nav18: ConductanceDensity = self.gbar_nav18 * (m_nav18**3) * h_nav18 * s_nav18 * u_nav18
         g_nav19: ConductanceDensity = self.gbar_nav19 * m_nav19 * h_nav19 * s_nav19
-        g_na: ConductanceDensity = g_nav17 + g_nav18 + g_nav19
+        g_na_channels: ConductanceDensity = g_nav17 + g_nav18 + g_nav19
 
         g_ks: ConductanceDensity = self.gbar_ks * (0.25 * ns_ks + 0.75 * nf_ks)
         g_kf: ConductanceDensity = self.gbar_kf * m_kf * h_kf
         g_kdr: ConductanceDensity = self.gbar_kdr * (n_kdr**4)
         g_h: ConductanceDensity = self.gbar_h * (0.5 * ns_h + 0.5 * nf_h)
-        w_kna_static: Dimensionless = 0.37 / (1.0 + (38.7 / (self.nai_fixed / (1.0 * mM))) ** 3.5)
-        g_kna_static: ConductanceDensity = self.gbar_kna * w_kna_static
         g_k_without_h: ConductanceDensity = g_ks + g_kf + g_kdr
-        eh_static: Voltage = 0.5 * (self.ena + self.ek)
-
-        pump_f_nai_static: Dimensionless = 1.62 / (
-            1.0 + (6.7 / ((self.nai_fixed / (1.0 * mM)) + 8.0)) ** 3
-        ) + 1.0 / (1.0 + (67.6 / ((self.nai_fixed / (1.0 * mM)) + 8.0)) ** 3)
-        pump_static: CurrentDensity = (
-            -0.5
-            * self.pump_smalla
-            / ((1.0 + 1.0 / (self.pump_ko / (1.0 * mM))) ** 2)
-            * pump_f_nai_static
-        )
 
         rt_over_f: Voltage = (
             8.314
@@ -407,27 +406,34 @@ class Tigerholm(Model):
         w_kna: Dimensionless = 0.37 / (1.0 + (38.7 / (nai / (1.0 * mM))) ** 3.5)
         g_kna_dyn: ConductanceDensity = self.gbar_kna * w_kna
 
-        I_na_nav17: CurrentDensity = g_nav17 * (Vm - self.ena)
-        I_na_nav18: CurrentDensity = g_nav18 * (Vm - self.ena)
-        I_na_nav19: CurrentDensity = g_nav19 * (Vm - self.ena)
-        I_k_ks: CurrentDensity = g_ks * (Vm - self.ek)
-        I_k_kf: CurrentDensity = g_kf * (Vm - self.ek)
-        I_k_kdr: CurrentDensity = g_kdr * (Vm - self.ek)
-        I_k_kna: CurrentDensity = g_kna_static * (Vm - self.ek)
-        I_k_h: CurrentDensity = g_h * (Vm - eh_static)
-
-        i_na_dyn: CurrentDensity = g_na * (Vm - e_na_dyn)
-        i_k_dyn: CurrentDensity = (
-            g_k_without_h * (Vm - e_k_dyn)
-            + 0.5 * g_h * (Vm - e_k_dyn)
-            + g_kna_dyn * (Vm - e_k_dyn)
-        )
         pump_f_nai_dyn: Dimensionless = 1.62 / (
             1.0 + (6.7 / ((nai / (1.0 * mM)) + 8.0)) ** 3
         ) + 1.0 / (1.0 + (67.6 / ((nai / (1.0 * mM)) + 8.0)) ** 3)
-        pump_dyn: CurrentDensity = (
-            -0.5 * self.pump_smalla / ((1.0 + 1.0 / (ko / (1.0 * mM))) ** 2) * pump_f_nai_dyn
+        I_k_pump: CurrentDensity = (
+            self.pump_smalla
+            / ((1.0 + 1.0 / (ko / (1.0 * mM))) ** 2)
+            * pump_f_nai_dyn
         )
+        I_na_pump: CurrentDensity = -1.5 * I_k_pump
+        pump_dyn: CurrentDensity = I_na_pump + I_k_pump
+
+        I_na_nav17: CurrentDensity = g_nav17 * (Vm - e_na_dyn)
+        I_na_nav18: CurrentDensity = g_nav18 * (Vm - e_na_dyn)
+        I_na_nav19: CurrentDensity = g_nav19 * (Vm - e_na_dyn)
+        I_na_h: CurrentDensity = 0.5 * g_h * (Vm - e_na_dyn)
+        I_k_ks: CurrentDensity = g_ks * (Vm - e_k_dyn)
+        I_k_kf: CurrentDensity = g_kf * (Vm - e_k_dyn)
+        I_k_kdr: CurrentDensity = g_kdr * (Vm - e_k_dyn)
+        I_k_kna: CurrentDensity = g_kna_dyn * (Vm - e_k_dyn)
+        I_k_h: CurrentDensity = 0.5 * g_h * (Vm - e_k_dyn)
+        i_na_dyn: CurrentDensity = (
+            I_na_nav17 + I_na_nav18 + I_na_nav19 + I_na_h + I_na_pump
+        )
+        i_k_dyn: CurrentDensity = I_k_ks + I_k_kf + I_k_kdr + I_k_kna + I_k_h + I_k_pump
+        g_na: ConductanceDensity = g_na_channels + 0.5 * g_h
+        g_k: ConductanceDensity = g_k_without_h + g_kna_dyn + 0.5 * g_h
+        g_pump_zero: ConductanceDensity = 0.0 * mS / cm2
+        e_pump_zero: Voltage = 0.0 * mV
 
         diameter_value_um: Dimensionless = self.diameter_um / (1.0 * um)
         nai_factor: Dimensionless = (40.0 / (96485.0 * diameter_value_um)) * mM_per_uA_cm2_ms
@@ -437,24 +443,9 @@ class Tigerholm(Model):
         nao_inf: Concentration = 154.0 * mM
         ko_inf: Concentration = self.pump_ko
 
-        delta_e_na: Voltage = e_na_dyn - self.ena
-        delta_e_k: Voltage = e_k_dyn - self.ek
-        correction_current: CurrentDensity = (
-            -g_na * delta_e_na
-            - (g_k_without_h + g_kna_dyn) * delta_e_k
-            - 0.5 * g_h * (delta_e_na + delta_e_k)
-            + (g_kna_dyn - g_kna_static) * (Vm - self.ek)
-            + (pump_dyn - pump_static)
-        )
-        ion_current: CurrentDensity = (
-            g_na * (Vm - self.ena)
-            + g_k_without_h * (Vm - self.ek)
-            + g_kna_static * (Vm - self.ek)
-            + g_h * (Vm - eh_static)
-        )
-        total_outward_current: CurrentDensity = ion_current + pump_static
-        explicit_outward_current: CurrentDensity = pump_static
-        g_k: ConductanceDensity = g_k_without_h + g_kna_static + g_h
+        total_outward_current: CurrentDensity = i_na_dyn + i_k_dyn
+        explicit_outward_current: CurrentDensity = pump_dyn
+        correction_current: CurrentDensity = 0.0 * uA / cm2
         self.keep(
             i_na_dyn,
             i_k_dyn,
@@ -472,11 +463,14 @@ class Tigerholm(Model):
             I_na_nav17,
             I_na_nav18,
             I_na_nav19,
+            I_na_h,
+            I_na_pump,
             I_k_ks,
             I_k_kf,
             I_k_kdr,
             I_k_kna,
             I_k_h,
+            I_k_pump,
             g_na,
             g_k,
             w_kna,
