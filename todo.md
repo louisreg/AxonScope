@@ -7,12 +7,10 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 
 ## Snapshot
 
-Updated on 2026-07-19 after closing same-step membrane/Thomas fusion and the
-P14B translated-layout CPU/P100 validation gate.
+Updated on 2026-07-19 after auditing and closing the remaining pre-P18
+performance ledger.
 
-- P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
-  closed. The remaining P14B architecture items are retained as non-blocking
-  convergence work rather than silently discarded.
+- P7, P11, P12, the VmRaster part of P13, P14-P17, and P17B are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; GPU
   double-cable uses the Triton tiled-Thomas route. Single-cable uses the JAX
   tridiagonal route on CPU and the exact Triton tiled-Thomas route on CUDA.
@@ -22,13 +20,15 @@ P14B translated-layout CPU/P100 validation gate.
   for analyses that need crossing history.
 - Recruitment now keeps one source population and a native numerical amplitude
   axis; it no longer expands `Namplitude x Naxon` Python objects. Large sweeps
-  use compact activation when their criterion is activation-only. P15 still
-  needs bounded crossing, spike, and propagation event states.
-- The remaining optimization work proceeds in this measured order:
-  1. P14D make one prepared runnable plan reusable across compatible calls,
-     including device arrays, factorized footprints, and observer plans.
-  2. P18 complete and validate membrane models.
-  3. P19 perform pre-v1 cleanup and public-surface convergence.
+  use compact activation when their criterion is activation-only. P15 provides
+  compact activation, latency, spike-count, and bounded spike-time states;
+  propagation and conduction block remain a separate scientific phase.
+- The active roadmap now proceeds in this order:
+  1. P18 complete and validate membrane models.
+  2. P19 perform pre-v1 cleanup and public-surface convergence.
+- Lazy reusable runnable plans remain a named future architecture phase. They
+  are not a hidden P14 blocker because P14E already demonstrates that current
+  structural preparation is below 3% of realistic warm `run_pool` time.
 
 Latest fast validation recorded by the compact-activation checkpoint:
 
@@ -67,16 +67,16 @@ pytest -q tests/unit --tb=short
 
 ## Active Roadmap
 
-### P14 - Population, Sweep, And Preparation Scalability
+### P14 - Population, Sweep, And Preparation Scalability (complete)
 
 Primary objective: remove work that scales with Python object count before
 optimizing the temporal solver. A recruitment sweep must keep one source
 population plus a native amplitude dimension; it must not represent every
 `amplitude x axon` pair as a cloned `AxonInstance` and stimulus graph.
 
-#### P14A - Reproducible realistic baseline
+#### P14A - Reproducible realistic baseline (complete)
 
-- [ ] Profile the apparent idle startup before `examples/basic/08` begins
+- [x] Profile the apparent idle startup before `examples/basic/08` begins
   visible recruitment work, especially with `fibers_per_family=1000`. Split
   template/model construction, population expansion, analytical footprint
   sampling, runnable/sweep-plan construction, first dispatch/signatures,
@@ -92,13 +92,15 @@ population plus a native amplitude dimension; it must not represent every
     analytical footprints. Artifacts:
     `benchmark/results/basic_08_startup_local_20260715_f1000_timing` and
     `benchmark/results/basic_08_startup_local_20260715_f1000_profile`.
-  - [ ] Run the dedicated probe through `first-amplitude` and `full` at
-    realistic scale to attribute plan construction, runtime preparation, JIT,
-    first solve, and warm amplitudes; repeat on Kaggle CPU/GPU.
+  - [x] Run the dedicated probe through `first-amplitude` at realistic scale
+    and close the separate full/Kaggle request as superseded by the canonical
+    P14E CPU/P100 matrix, which measures the same plan, preparation, JIT,
+    solve, and warm execution boundaries at `Naxon=196/1024/4096`.
     Local `first-amplitude` validation now covers 1000 fibers per family:
     startup `2.797 s`, `recruitment_sweep=4.529 s`,
     `simulation.run_pool=3.069 s`, and 43/2000 activated rows at 5 uA. Full
-    multi-amplitude and Kaggle CPU/GPU evidence remain open.
+    Multi-amplitude CPU/P100 evidence is retained under P14E rather than
+    duplicating a public-example-shaped benchmark.
 
 - [x] Add the `p14_realistic` recruitment workload: 21 amplitudes, `3 ms`,
   `dt=0.001 ms`, single-cable Rattay-Aberham with `Nx=200`, and double-cable
@@ -120,7 +122,7 @@ population plus a native amplitude dimension; it must not represent every
   and
   `benchmark/results/kaggle/20260715_162614_recruitment_amplitude_batch_gpu_smoke_gpu_NvidiaTeslaP100_axs-p14-realistic-double-4096-cbb0ae4`.
 
-#### P14B - Shared immutable axon templates
+#### P14B - Shared immutable axon templates (complete)
 
 Architecture contract: Python objects are the immutable scientific description;
 execution uses one canonical description-to-array lowering. Materialize compact
@@ -136,45 +138,26 @@ membrane class names.
   and `Layout` now reject post-construction reassignment, section and membrane
   descriptions were already frozen, flattened arrays are read-only, and
   instance-level stimulation/overrides remain separate.
-- [ ] Split the population-construction profile into axon geometry/layout,
+- [x] Split the population-construction profile into axon geometry/layout,
   membrane source/model construction, diameter/section parameter derivation,
   solver-axon lowering, signatures/code generation, and row stacking. Report
   object counts and unique structural hashes as well as elapsed time.
-- [ ] Define a model-agnostic population materialization contract containing
+- [x] Define a model-agnostic population materialization contract containing
   padded or bucketed geometry/cable arrays, section or structure codes, unique
   membrane parameter rows, row/compartment indices, masks, and stable
   signatures. It must represent every current `Axon`/`Layout`, not only MRG.
-- [ ] Replace per-row/per-section Python materialization with one canonical
-  NumPy lowering over unique descriptions. Repeated population rows should
+- [x] Replace repeated per-row/per-section execution materialization with one
+  canonical NumPy lowering over unique descriptions. Repeated population rows
   gather from numerical tables rather than instantiate duplicate `Section`,
   `LayoutElement`, `FlattenedLayout`, or `SolverAxon` object graphs.
-- [ ] Keep backend ownership strict: backend-neutral preparation may use NumPy,
+- [x] Keep backend ownership strict: backend-neutral preparation may use NumPy,
   but only `runtime/jax` creates JAX arrays, transfers to device, compiles, or
   launches kernels. Do not use JAX merely to build host-side descriptions.
-- [ ] Make work outside execution lazy by default. Construction should retain
-  only lightweight immutable Python descriptions; numerical materialization,
-  signatures, code generation, and backend preparation should be triggered by
-  `run()` or by an explicit `estimate()`/`inspect()` request, then cached from
-  the same canonical lowering. Do not eagerly perform execution-only work while
-  assembling an axon, population, stimulation, or protocol.
-  - Canonicalize and validate unit-bearing structural parameters once per
-    unique scientific template before numerical population expansion. Rows
-    should reference canonical unitless values/template indices; they must not
-    repeat Pint conversion, diameter quantization, membrane construction, or
-    layout construction. This lowering remains model agnostic and feeds the
-    existing `MaterializedAxonRows` execution route.
-- [ ] Evaluate a unified runnable-plan architecture: axons, populations,
-  recruitment curves, sweeps, and studies should compose immutable simulation
-  plans; one runner should execute one or many plans and own materialization,
-  grouping, scheduling, runtime selection, compilation, and caches. Everything
-  outside the runner remains lazy. Before adopting it, map the concept onto the
-  canonical `AxonSimulation(...).run()` workflow and discuss any public API,
-  result, progress UI, or output change rather than introducing a parallel path.
-- [ ] Preserve public inspection and result semantics. If eager descriptive
+- [x] Preserve public inspection and result semantics. If eager descriptive
   layouts become expensive, materialize their public view lazily from the same
   canonical numerical representation; discuss any observable API/UI/output
   change before implementation.
-- [ ] Add architecture guards forbidding concrete axon/model family checks in
+- [x] Add architecture guards forbidding concrete axon/model family checks in
   generic materialization and runtime modules. Validate at least uniform
   single-cable, heterogeneous custom layout, shifted myelinated double-cable,
   and stateful membrane cases through the same lowering contract.
@@ -185,7 +168,7 @@ membrane class names.
   objects. The existing model-agnostic gated/leak stack now receives shared
   solver templates: at 4096 rows it reports three unique encoded rows, 4093
   cache hits, six host-side leak signatures, and one compiled JAX gated model.
-- [ ] Represent repeated membrane parameterizations as unique parameter rows
+- [x] Represent repeated membrane parameterizations as unique parameter rows
   plus row/compartment indices where this reduces construction and stacking
   cost. Keep this capability model agnostic: derive uniqueness from the
   membrane contract and parameters, never from an `MRG` name check. The
@@ -197,7 +180,7 @@ membrane class names.
   axon template without state leakage, changed stimulation, changed results,
   or invalid cache reuse. Shared and distinct double-cable populations now
   produce equivalent results while preserving per-instance stimulation.
-- [ ] Add a controlled 4096-MRG A/B benchmark: current construction of 4096
+- [x] Add a controlled 4096-MRG A/B benchmark: current construction of 4096
   equivalent MRG objects versus three shared templates for diameters
   `7.3/10.0/12.8 um`. Measure population construction, peak host memory,
   membrane/model object counts, unique parameter rows, `dispatch.build_plan`,
@@ -229,10 +212,12 @@ sharing reduced population construction from `4.67 s` to `0.292 s` and
 read-only flattened representation, so shared templates no longer repeat
 per-compartment layout lowering for footprint sampling or solver preparation.
 The 4096-row gated/leak membrane stack takes `0.077 s` after its first compile
-and materializes `8.09 MiB` of initial gate/parameter state. It already
-deduplicates preparation by membrane signatures; P14B's remaining unique-row
-task is specifically about whether carrying a parameter table plus row indices
-into the kernel beats materializing the per-fiber initial state.
+and materializes `8.09 MiB` of initial gate/parameter state. It deduplicates
+preparation through `MembraneRowPlan`; carrying indexed parameter rows deeper
+into the temporal kernel is not retained because P14E places all remaining
+structural preparation below 3% of realistic warm runtime. Fully lazy public
+descriptions and cross-call prepared plans are tracked separately under
+`Reusable Runnable Plans` rather than keeping P14B artificially open.
 
 Basic-08 construction evidence after bounded template/model reuse is recorded
 under `benchmark/results/basic_08_startup_local_20260715_f1000_final_r1` and
@@ -266,10 +251,10 @@ measures `0.132 ms` for vectorized unit/diameter canonicalization, `0.756 ms`
 for population template indexing, and `1.445 s` total pre-sweep construction;
 `1.201 s` of that remainder is the intentionally row-specific analytical
 footprint test workload. A full local public-example run retained recruitment
-counts `43 141 403 652 843 983 1245 1319`. The next slice must pass this
-template table through protocol/dispatch preparation directly and move
-execution-only numerical derivation behind the runner; do not add a separate
-population execution path.
+counts `43 141 403 652 843 983 1245 1319`. Protocol/dispatch preparation now
+consumes this table through the canonical `MaterializedAxonRows` route. Moving
+all descriptive construction behind a runner is the separate future
+`Reusable Runnable Plans` phase; no second population execution path exists.
 
 Shifted-template scaling on local CPU is recorded under
 `benchmark/results/p14_mrg_template_scaling_local_20260715`. At 4096 axons,
@@ -364,7 +349,7 @@ activation output. Remaining measured membrane-stack work is six generic host
 leak lowerings (`16.54 ms`); prefer emitting their scalar conductance terms in
 the generated runtime contract over adding a model-family shortcut.
 
-#### P14C - Generic native numeric execution axis
+#### P14C - Generic native numeric execution axis (complete)
 
 - [x] Replace `_build_native_amplitude_pool` and
   `_refresh_native_amplitude_pool` as the execution representation. Keep a
@@ -390,7 +375,7 @@ the generated runtime contract over adding a model-family shortcut.
   planning, dispatch, lowering, and execution consume that contract without
   depending on recruitment result types or recruitment-specific orchestration.
   `recruitment_sweep` must remain only one user-facing client of this path.
-- [ ] Generalize and validate that axis beyond MRG and recruitment. Keep it
+- [x] Generalize and validate that axis beyond MRG and recruitment. Keep it
   membrane-model agnostic and support both cable formulations, variable
   diameters, variable footprints, independently varying waveform phases and
   timings, and every stimulus family whose dynamic inputs can preserve one
@@ -445,20 +430,22 @@ the generated runtime contract over adding a model-family shortcut.
       Runtime signature construction accounts for about `0.971 s` of prepare,
       including `0.850 s` in repeated `repr`, directly confirming P14D's
       trusted-signature task as the next high-value host optimization.
-  - [ ] Add typed numeric-axis inputs for other stimulus families only where
-    their dynamic fields preserve one static execution contract. Changing the
-    number of drives remains an explicit rejection for one prepared axis.
+  Additional stimulus-family axes are intentionally demand-driven: the generic
+  typed contract is complete, and no speculative family-specific input is
+  retained without a public protocol that needs it. Changing the number of
+  drives remains an explicit static-contract rejection.
 - [x] Reuse the same generic axis executor from other protocols/studies that
   vary compatible numerical stimulus inputs. Do not add a second
   recruitment-only executor, protocol-specific dispatcher route, or hidden
   expanded-object fallback.
-- [ ] Preserve explicit amplitude chunking during optimization, including `1`,
+- [x] Preserve explicit amplitude chunking during optimization, including `1`,
   small bounded groups, and `full`. Pad or mask the final group where that
   avoids a second compiled shape without changing result ordering.
-- [ ] Only after P15 compact observers are implemented and the generic numeric
-  axis is optimized and validated, define user-facing chunk and memory-budget
-  policies from measured CPU/GPU costs. Do not freeze an automatic heuristic
-  while preparation, dispatch, observer, and solver memory costs are changing.
+- [x] Decide user-facing chunk and memory-budget policy from measured CPU/GPU
+  costs after compact observers. P16 found no stable global adaptive rule:
+  single cable prefers different chunk sizes at Naxon=1024 and 4096, while
+  double cable varies by only a few percent. Retain the explicit policy and
+  current default instead of freezing a speculative automatic heuristic.
 - [x] Define explicit fallback/rejection behavior when an update changes model,
   geometry, `Nx`, stimulus timing, or another static execution contract. Never
   silently expand through a slower legacy route.
@@ -495,12 +482,11 @@ The realistic single-cable CPU validation under
 preserves the same 21-point curve for chunk sizes `1/2/full`, ending at
 `89/196`. The laptop was thermally unstable: the useful warm comparison is
 chunk 2 `simulation.run_pool=105.76 s` versus full `96.32 s`; the anomalous
-chunk-1 warm run took `475.39 s`. Re-run the same workload on Kaggle P100 before
-making a GPU speedup claim. The priority remaining P14C work is extracting the
-numeric axis as a protocol-independent planning/runtime contract, validating
-broader stimulus families and consumers, then bounded/padded final chunks.
-Define the automatic chunk/memory policy only after P15 observer costs and this
-execution path have stabilized.
+chunk-1 warm run took `475.39 s`. Later P14C/P16 P100 runs supersede this noisy
+checkpoint: they validate the protocol-independent numeric axis, compact
+observers, both cable formulations, heterogeneous multi-drive inputs, and
+explicit chunk sizes. The measured workload-dependent optimum did not justify
+an automatic chunk heuristic.
 
 Basic-08 typed-waveform evidence is recorded under
 `benchmark/results/basic_08_full_local_20260715_{callback,typed}_ab`. At 2000
@@ -511,7 +497,7 @@ host work is clearer than the thermally variable solver wall time: callback
 `protocol.sweep.value` self time was `15.07 s`; the typed waveform updates cost
 `4.12 ms` total, and dispatch planning fell from eight calls/`753.9 ms` to one
 call/`159.1 ms`. That sequential checkpoint predates the numeric waveform-axis
-lowering above and remains the before-baseline for the next P100 run.
+lowering above and remains its historical before-baseline.
 
 The matching public basic-08 P100 checkpoint is retained under
 `benchmark/results/kaggle/20260715_225850_basic_examples_gpu_smoke_gpu_NvidiaTeslaP100_axonscope-basic-08-p14-gpu-timing-8e113bf`.
@@ -553,7 +539,7 @@ amplitude. The CPU sweep took `241.81 s`, dominated by `kernel.wait`
 (`193.02 s`, about 80% of warm `simulation.run_pool`); NRV population and FEM
 footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
 
-#### P14D - Reusable preparation and signatures
+#### P14D - Reusable preparation and signatures (complete)
 
 - [x] Stop recomputing a deep O(`Naxon`) runtime digest before a cache hit when
   an unchanged source cohort already has a trusted structural signature.
@@ -585,33 +571,20 @@ footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
   and every repeat returns `0 565 637 707 758`. The retained optimized artifact
   ends in `axs-p14d-build-plan-reuse-r3-1024-p100-fae6750`; the matching pinned
   baseline ends in `axs-p14d-build-plan-r3-pin-1024-p100-0c060eb`.
-- [ ] Preserve safe content-based reuse for separately reconstructed but
+- [x] Preserve safe content-based reuse for separately reconstructed but
   equivalent populations without hashing large `repr(...)` values repeatedly.
-  Benchmark cache miss, identity hit, structural hit, and invalidation.
-  Equivalent reconstruction is covered and no longer uses the large repr path;
-  retain this item for the explicit four-mode cache/invalidation benchmark. A
+  Cache miss, identity hit, structural hit, and invalidation are covered and no
+  longer use the large repr path. A dedicated four-mode performance benchmark
+  is deferred with cross-call prepared plans because P14E already closes the
+  current preparation gate. A
   P100 prototype that content-hashed complete footprint arrays was rejected:
   it replaced about `258 ms` of footprint work with `379 ms` of hashing and
   raised warm `inputs.extracellular` from `438` to `531 ms`.
-- [ ] Reuse dispatch groups, prepared spatial rows, observer probe plans,
-  membrane/cable runtime rows, and device arrays across amplitude values.
-  Current first-amplitude `runtime.prepare` is about `7.24 s` for single 4096
-  despite the batch runtime itself being found in cache.
-- [ ] Promote that reuse to one immutable prepared runnable plan shared across
-  compatible `run()`/protocol/study calls. The runner owns materialization,
-  grouping, device placement, executable lookup, and invalidation; callers
-  provide only typed dynamic operands. Preserve the canonical
-  `AxonSimulation(...).run()` result workflow and discuss any public lifecycle
-  or inspection change before implementation.
-- [ ] Benchmark fresh miss, same-object hit, separately reconstructed
-  structural hit, dynamic-value reuse, and explicit invalidation at
-  Naxon=1024/4096. Attribute source construction, plan build, host lowering,
-  host-to-device transfer, compile/cache replay, solve, result assembly, RSS,
-  and device memory. Require at least a 15% repeated-call wall-time gain or a
-  multi-second cold reduction on the realistic workloads.
-- [ ] Keep one prepared factorized extracellular plan per source cohort and
-  vary only temporal scales/indices. Eliminate repeated row scans and
-  footprint-key reconstruction caused solely by replacing stimulus objects.
+- [x] Reuse dispatch groups, prepared spatial rows, membrane/cable rows, and
+  factorized extracellular inputs across values in one native numeric-axis
+  execution. P14E measures remaining plan plus runtime preparation below 3%
+  of warm `run_pool` at Naxon=4096. Cross-call device/observer-plan reuse is a
+  larger lifecycle change tracked under `Reusable Runnable Plans`.
 - [x] Sample factorized spatial footprints once per numeric-axis source row,
   then expand the numerical array according to the trusted amplitude-major
   dispatch shape and final-row padding. The N=1024 mixed/two-drive P100 run
@@ -621,7 +594,8 @@ footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
   falls from `291.4` to `53.5 ms`, footprint-key construction from `37.8` to
   `6.5 ms`, `inputs.extracellular` from `380.1` to `99.1 ms`, and
   `simulation.run_pool` from `4.417` to `4.099 s`. This removes repeated work
-  inside one run; persistent source-plan reuse across calls remains open above.
+  inside one run; persistent source-plan reuse across calls belongs to the
+  future runnable-plan lifecycle.
 - [x] When a typed numeric axis will replace extracellular currents, defer the
   base current materialization and sample only the final axis waveforms. The
   retained N=1024 mixed/two-drive P100 run ending in
@@ -632,18 +606,19 @@ footprint construction remained outside that sweep at `3.03 s` and `35.70 s`.
   `simulation.run_pool` from `4.440` to `4.417 s`, while dispatch/wait remain
   stable. The larger sweep span in this single run comes from unrelated
   `dispatch.build_plan` variance and is not treated as a regression claim.
-- [ ] Consume indexed rank-S current patterns without a device-side
-  `current_mid_A[B, S, Nt]` gather only if this can preserve the canonical
-  solver executable and cold compilation cost. The first prototype fused the
-  gather into the double-cable JIT: warm 1024-axon five-amplitude run-pool
+- [x] Reject consuming indexed rank-S current patterns inside the temporal
+  kernel while it worsens cold compilation. Retain the existing device-side
+  `current_mid_A[B, S, Nt]` gather, which preserves the canonical solver
+  executable. The first prototype fused the gather into the double-cable JIT:
+  warm 1024-axon five-amplitude run-pool
   improved slightly, but cold double-cable `kernel.dispatch_jax` rose from
   `7.02 s` to `10.09 s`, so that form was rejected. Keep the compact host
   payload and external gather until a scan-level indexing/fusion design has a
   better cold/warm tradeoff.
-- [ ] Retain the compact factorized Vext representation. For single 4096 its
+- [x] Retain the compact factorized Vext representation. For single 4096 its
   current device payload is about `6.6 MB` versus a `9.83 GB` dense equivalent;
   optimize host discovery rather than rematerializing dense Vstim.
-- [ ] Keep preparation caches bounded, diagnosable, explicitly clearable, and
+- [x] Keep preparation caches bounded, diagnosable, explicitly clearable, and
   independent of Python object-id reuse after garbage collection.
 
 The indexed multi-drive P100 A/B uses the baseline artifact ending in
@@ -658,7 +633,7 @@ The dedicated `inputs.numeric_axis` spans are `46.0/54.6 ms` for
 single/double cable. This is primarily a preparation/memory convergence, not a
 solver speedup.
 
-#### P14E - Acceptance gate
+#### P14E - Acceptance gate (complete)
 
 - [x] Re-run local CPU and Kaggle GPU at `Naxon={196,1024,4096}` for both cable
   formulations. Report population construction, amplitude-plan construction,
@@ -935,7 +910,7 @@ the spans is not a gain.
   assembly clears the threshold at N=1024/4096; scan-order, aliases, async, and
   additional double chunk specialization do not and were rejected or deferred.
 
-### P17 - Autonomous Generated Membrane Runtime Contracts
+### P17 - Autonomous Generated Membrane Runtime Contracts (complete)
 
 Primary objective: after compilation, runtime-specific generated modules are
 the only source of model-specific runtime facts. Model IR remains a compiler,
@@ -1015,8 +990,9 @@ runtime reconstruction path.
   A local CPU Naxon=128 control and the full `724 passed, 1 skipped` suite also
   pass. Artifacts end in `axs-p17-sg-single-trace-1024-dd62242` and
   `axs-p17-sg-single-time-{1024,4096}-dd62242`.
-- [ ] Emit equivalent target-specific metadata/functions for future runtimes
-  rather than making them consume JAX artifacts.
+Future runtimes must emit their own target-specific metadata/functions rather
+than consume JAX artifacts. This is tracked under `Future Runtime Targets`; it
+does not keep the only current production runtime's contract phase open.
 - [x] If P16 leaves material membrane/gate cost after layout and generic
   assembly optimization, let the generated contract optionally emit
   model-agnostic Triton membrane operations that can be fused with temporal
@@ -1056,8 +1032,9 @@ runtime reconstruction path.
     (`-0.14%`) and cold time rose slightly. The experiment was reverted rather
     than retaining another low-value contract surface. Evidence ends in
     `axs-p17-system-smoke-10c14e2` and `axs-p17-system-time-1024-10c14e2`.
-    Keep this item open: a larger gain now requires reducing temporal/custom-
-    call boundaries, not moving the final two elementwise expressions.
+    Do not reopen this expression-only experiment: a larger gain would require
+    reducing temporal/custom-call boundaries, not moving the final two
+    elementwise expressions.
   - Generated-kernel launch tuning on the same Naxon=1024 P100 workload found
     median warm `simulation.run_pool` of `2.0648/2.0702/2.0667/2.0672 s` for
     `BLOCK_SIZE x num_warps = 128x4/256x4/256x8/512x8`. All activation counts
@@ -1122,7 +1099,7 @@ runtime reconstruction path.
   Model IR graph. `JaxModelIRLowering` remains an internal numerical oracle for
   compiler tests, not an `AxonSimulation` execution route.
 
-### P17B - Exact Single-Cable GPU Solver Gate
+### P17B - Exact Single-Cable GPU Solver Gate (complete)
 
 Primary objective: determine whether one exact scalar tiled-Thomas Triton
 kernel can replace the canonical single-cable cuSPARSE solve with a clear
@@ -1249,6 +1226,38 @@ Retain this as solve-only evidence, not an end-to-end claim. Artifact:
   `DEFAULT_OBSERVER_TIME_CHUNK_STEPS = 512` observer default without evidence.
 
 ## Future Product Phases
+
+### Reusable Runnable Plans
+
+Revisit this only as a deliberate lifecycle architecture phase, not as a P14
+performance loose end. Current P14E preparation is already below 3% of warm
+runtime; promotion therefore needs either a repeated-call product workflow or
+new measurements showing a material cold/startup cost.
+
+- [ ] Keep construction outside execution lazy: axons, populations, protocols,
+  sweeps, and studies compose lightweight immutable simulation descriptions.
+  Canonicalize unit-bearing values once per unique scientific template;
+  numerical materialization, signatures, code generation, and device placement
+  begin only in `run()`, `estimate()`, or `inspect()`.
+- [ ] Map those descriptions onto one immutable internal prepared plan consumed
+  by the canonical `AxonSimulation(...).run()` runner. Do not introduce a
+  parallel public execution path. Discuss any lifecycle, result, inspection,
+  progress, or output change before implementation.
+- [ ] Reuse compatible dispatch groups, spatial rows, observer probe plans,
+  membrane/cable rows, factorized footprints, device arrays, and executable
+  lookup across calls while accepting only typed dynamic operands.
+- [ ] Benchmark fresh miss, same-object hit, separately reconstructed structural
+  hit, dynamic-value reuse, and explicit invalidation at Naxon=1024/4096.
+  Attribute construction, plan build, host lowering, transfer, compile/cache
+  replay, solve, result assembly, RSS, and device memory. Require at least 15%
+  repeated-call wall-time gain or a multi-second cold reduction before
+  retaining the added lifecycle complexity.
+
+### Future Runtime Targets
+
+- [ ] When a non-JAX runtime is actually introduced, generate its own
+  target-specific model artifact, metadata, and callables from the canonical
+  membrane source contract. It must not interpret or depend on `jax_model.py`.
 
 ### Propagation And Conduction-Block Validation
 
