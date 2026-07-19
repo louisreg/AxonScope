@@ -115,6 +115,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--mrg-shift-semantics",
+        choices=("phase", "translation"),
+        default="phase",
+        help=(
+            "Interpret generated MRG shifts as motif phase shifts or as pure "
+            "translations of shared intrinsic layouts."
+        ),
+    )
+    parser.add_argument(
         "--axon-template-policy",
         choices=("shared", "distinct"),
         default="shared",
@@ -948,6 +957,7 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
     pool: list[axs.AxonInstance] = []
     unmyelinated_templates: dict[float, tuple[Any, Any]] = {}
     mrg_templates: dict[tuple[Any, ...], Any] = {}
+    mrg_translation_bases: dict[tuple[Any, ...], Any] = {}
     for diameter_um, y, z in zip(
         unmyelinated_diameters_um,
         unmyelinated_y,
@@ -1009,7 +1019,11 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
                 axs.axons.mrg_like_nodes_from_length(
                     diameter,
                     fiber_length,
-                    x_shift=x_shift,
+                    x_shift=(
+                        None
+                        if args.mrg_shift_semantics == "translation"
+                        else x_shift
+                    ),
                 ),
             )
             compartments: Any = 1
@@ -1029,13 +1043,31 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
             else None
         )
         if axon is None:
-            axon = axs.axons.MRG(
-                diameter=diameter,
-                nodes=nodes,
-                length=fiber_length,
-                x_shift=x_shift,
-                compartments=compartments,
-            )
+            if args.mrg_shift_semantics == "translation":
+                base_key = template_key[:3] + template_key[4:]
+                base = (
+                    mrg_translation_bases.get(base_key)
+                    if args.axon_template_policy == "shared"
+                    else None
+                )
+                if base is None:
+                    base = axs.axons.MRG(
+                        diameter=diameter,
+                        nodes=nodes,
+                        length=fiber_length,
+                        compartments=compartments,
+                    )
+                    if args.axon_template_policy == "shared":
+                        mrg_translation_bases[base_key] = base
+                axon = _translate_axon(base, x_shift)
+            else:
+                axon = axs.axons.MRG(
+                    diameter=diameter,
+                    nodes=nodes,
+                    length=fiber_length,
+                    x_shift=x_shift,
+                    compartments=compartments,
+                )
             if args.axon_template_policy == "shared":
                 mrg_templates[template_key] = axon
         extracellular = axs.analytical.point_source_stimulation(
@@ -1079,6 +1111,14 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
         population_unique_membrane_models=len(unique_membranes),
         population_requested_mrg_templates=int(args.mrg_template_count),
         population_realized_mrg_templates=len(mrg_templates),
+        population_mrg_shift_semantics=str(args.mrg_shift_semantics),
+        population_mrg_translation_base_layouts=len(mrg_translation_bases),
+        population_layout_translation_templates=len(
+            {
+                id(axon.layout._translation_template_token)
+                for axon in unique_axons.values()
+            }
+        ),
     )
 
     criterion = axs.analysis.ActivationCriterion(
@@ -1097,6 +1137,18 @@ def _build_workload(args: argparse.Namespace) -> RecruitmentWorkload:
     )
 
     return tuple(pool), update_point_source_current, current_steps, criterion
+
+
+def _translate_axon(axon: axs.axons.Axon, x_shift: Any) -> axs.axons.Axon:
+    """Return one descriptive axon with the same structure at a translated x."""
+
+    return axs.axons.Axon(
+        layout=axon.layout.with_x_shift(x_shift),
+        formulation=axon.formulation,
+        diameter=axon.diameter * axs.um,
+        v_init=axon.v_init * axs.mV,
+        temperature=axon.temperature * axs.degC,
+    )
 
 
 def _cable_counts(cable: str, axon_count: int) -> tuple[int, int]:
@@ -1264,6 +1316,7 @@ def _write_manifest(
         "drive_count": args.drive_count,
         "axon_template_policy": args.axon_template_policy,
         "mrg_template_count": args.mrg_template_count,
+        "mrg_shift_semantics": args.mrg_shift_semantics,
         "policies": [policy.label for policy in policies],
         "fibers_per_family": args.fibers_per_family,
         "n_axons": args.axon_count,

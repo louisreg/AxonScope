@@ -568,10 +568,12 @@ double-cable axon templates by default, matching basic 08. Use
 it deliberately restores per-row template construction inside this benchmark
 and is not a second production execution path.
 
-Use `--mrg-template-count N` to vary exact MRG geometry diversity while keeping
-the realistic diameter set fixed at `7.3/10.0/12.8 um`. Values above three add
-intrinsic node shifts, which isolates the cost of shifted cable layouts from
-membrane-model diversity.
+Use `--mrg-template-count N` to vary MRG layout diversity while keeping the
+realistic diameter set fixed at `7.3/10.0/12.8 um`. By default, values above
+three add motif phase shifts, which may alter end sections and are distinct
+geometries. Add `--mrg-shift-semantics translation` to instead translate three
+shared intrinsic layouts while retaining row-specific positions and
+footprints; this is the P14B canonical translated-layout benchmark.
 
 Use `--time-chunk-steps default` or omit the option to keep AxonScope's
 recording-specific default; for observer-only runs this currently means the

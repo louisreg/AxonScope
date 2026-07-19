@@ -26,8 +26,10 @@ def test_materialized_rows_deduplicate_shared_descriptions():
 
     assert rows.size == 3
     assert rows.template_count == 1
+    assert rows.translated_row_count == 0
     assert rows.nx == 5
     np.testing.assert_array_equal(rows.row_template_indices, [0, 0, 0])
+    np.testing.assert_array_equal(rows.row_x_shifts_um, [0.0, 0.0, 0.0])
     np.testing.assert_allclose(rows.x_positions_m, rows.x_um[[0, 0, 0]] * 1e-6)
     assert not rows.x_um.flags.writeable
 
@@ -80,6 +82,103 @@ def test_materialized_rows_accept_shifted_double_cable_and_stateful_models():
     assert rows.formulations == ("double-cable", "single-cable")
     assert rows.membrane_models[0]
     assert rows.membrane_models[1]
+
+
+def test_materialized_rows_share_explicit_layout_translations():
+    section = axs.axons.Section(
+        "axon",
+        membrane=axs.membranes.Passive(),
+        diameter=1.0 * axs.um,
+    )
+    base_layout = axs.axons.Layout.single_uniform(
+        section,
+        length=100.0 * axs.um,
+        compartments=17,
+    )
+    base = build_solver_axon(axs.axons.Axon(layout=base_layout))
+    shifted = build_solver_axon(
+        axs.axons.Axon(layout=base_layout.with_x_shift(25.0 * axs.um))
+    )
+
+    rows = MaterializedAxonRows.from_solver_axons((base, shifted))
+
+    assert rows.template_count == 1
+    assert rows.translated_row_count == 1
+    np.testing.assert_array_equal(rows.row_template_indices, [0, 0])
+    np.testing.assert_allclose(rows.row_x_shifts_um, [0.0, 25.0])
+    np.testing.assert_allclose(rows.x_positions_m[0], base.x_um * 1e-6)
+    np.testing.assert_allclose(rows.x_positions_m[1], shifted.x_um * 1e-6)
+
+
+def test_materialized_rows_share_heterogeneous_custom_layout_translations():
+    proximal = axs.axons.Section(
+        "proximal",
+        membrane=axs.membranes.Passive(Rm=1.0e4 * axs.ohm * axs.cm**2),
+        diameter=1.0 * axs.um,
+    )
+    distal = axs.axons.Section(
+        "distal",
+        membrane=axs.membranes.Passive(Rm=2.0e4 * axs.ohm * axs.cm**2),
+        diameter=0.8 * axs.um,
+    )
+    base_layout = axs.axons.Layout.sequence(
+        [proximal, distal],
+        section_lengths=np.asarray([40.0, 60.0]) * axs.um,
+        compartments=[2, 3],
+        lengths=100.0 * axs.um,
+    )
+    base = build_solver_axon(axs.axons.Axon(layout=base_layout))
+    shifted = build_solver_axon(
+        axs.axons.Axon(layout=base_layout.with_x_shift(-17.0 * axs.um))
+    )
+
+    rows = MaterializedAxonRows.from_solver_axons((base, shifted))
+
+    assert rows.template_count == 1
+    assert rows.translated_row_count == 1
+    np.testing.assert_allclose(rows.row_x_shifts_um, [0.0, -17.0])
+    np.testing.assert_allclose(rows.x_positions_m[1], shifted.x_um * 1e-6)
+
+
+def test_materialized_rows_do_not_share_mrg_phase_shifts():
+    base = build_solver_axon(axs.axons.MRG(diameter=10.0 * axs.um, nodes=5))
+    phase_shifted = build_solver_axon(
+        axs.axons.MRG(
+            diameter=10.0 * axs.um,
+            nodes=5,
+            x_shift=80.0 * axs.um,
+        )
+    )
+
+    rows = MaterializedAxonRows.from_solver_axons((base, phase_shifted))
+
+    assert rows.template_count == 2
+    np.testing.assert_array_equal(rows.row_template_indices, [0, 1])
+    np.testing.assert_array_equal(rows.row_x_shifts_um, [0.0, 0.0])
+
+
+def test_materialized_rows_do_not_share_translations_with_cable_overrides():
+    base = axs.axons.MRG(diameter=10.0 * axs.um, nodes=5)
+    translated = axs.axons.Axon(
+        layout=base.layout.with_x_shift(25.0 * axs.um),
+        formulation=base.formulation,
+        diameter=base.diameter * axs.um,
+    )
+    base_instance = axs.AxonInstance(base)
+    translated_instance = axs.AxonInstance(translated)
+    translated_instance.set_extracellular_layer(
+        xg_S_per_cm2=np.full((translated.n_compartments,), 1e-3),
+    )
+
+    rows = MaterializedAxonRows.from_solver_axons(
+        (
+            build_solver_axon(base_instance),
+            build_solver_axon(translated_instance),
+        )
+    )
+
+    assert rows.template_count == 2
+    assert rows.translated_row_count == 0
 
 
 def test_materialized_rows_reject_too_small_target_width():

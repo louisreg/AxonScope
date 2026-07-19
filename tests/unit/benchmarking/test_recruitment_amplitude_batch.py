@@ -9,6 +9,8 @@ import pytest
 
 from benchmark.analysis.run_pool_detail import write_run_pool_detail
 from benchmark.protocols import recruitment_amplitude_batch
+from axonscope.dispatcher import build_dispatch_plan
+from axonscope.preparation.cohort import PreparedCohort
 
 
 def test_p14_realistic_defaults_match_reference_workload() -> None:
@@ -113,6 +115,32 @@ def test_mrg_template_population_caps_templates_at_row_count() -> None:
     )
 
     assert len(set(zip(diameters, shifts, strict=True))) == 8
+
+
+def test_translated_mrg_workload_shares_structural_materialization() -> None:
+    args = recruitment_amplitude_batch.build_parser().parse_args(
+        [
+            "--workload",
+            "p14_realistic",
+            "--cable",
+            "double",
+            "--axon-count",
+            "12",
+            "--mrg-template-count",
+            "6",
+            "--mrg-shift-semantics",
+            "translation",
+        ]
+    )
+    recruitment_amplitude_batch._resolve_workload_args(args)
+
+    pool, *_ = recruitment_amplitude_batch._build_workload(args)
+    plan = build_dispatch_plan(pool)
+    cohort = PreparedCohort.from_dispatch_group(plan.groups[0])
+
+    assert len({id(row.axon) for row in pool}) == 6
+    assert cohort.materialized_axons.template_count == 3
+    assert cohort.materialized_axons.translated_row_count > 0
 
 
 def test_p14_dry_run_records_workload_shape(tmp_path: Path) -> None:

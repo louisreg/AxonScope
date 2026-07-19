@@ -8,7 +8,7 @@ cleanup remains in `docs/architecture/todo_archive_before_cleanup_2026_07_12.md`
 ## Snapshot
 
 Updated on 2026-07-19 after closing same-step membrane/Thomas fusion and
-ranking the remaining high-impact optimization gates.
+promoting the first P14B translated-layout representation.
 
 - P7, P11, P12, the VmRaster part of P13, and the P14 performance gate are
   closed. The remaining P14B architecture items are retained as non-blocking
@@ -37,7 +37,7 @@ Latest fast validation recorded by the compact-activation checkpoint:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-705 passed, 1 skipped
+739 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -281,7 +281,7 @@ raises population construction from `4.49/4.57/4.98/7.09/17.54/36.78 s`.
 `0.20-0.43 s`, and 1024 cable templates collapse to only 57 unique membrane
 rows. Optimize shifted MRG geometry/layout construction before membrane codegen.
 
-- [ ] Replace shift-distinct geometry templates with one canonical
+- [x] Replace shift-distinct geometry templates with one canonical
   model-agnostic representation of `shared intrinsic geometry + row shift`
   wherever translation leaves compartment lengths, cable coefficients, and
   membrane rows unchanged. Positions and sampled footprints remain
@@ -293,6 +293,31 @@ rows. Optimize shifted MRG geometry/layout construction before membrane codegen.
   signatures, CPU/GPU simulation equivalence, and exact position/footprint
   translation. Require a clear user-visible cold/startup gain before changing
   public construction semantics.
+
+The first translated-layout slice is now canonical inside the existing
+materialization path. `Layout.with_x_shift()` preserves an opaque structural
+token, `SolverAxon` carries that provenance, and `MaterializedAxonRows` stores
+one exact cable/membrane template plus `row_x_shifts_um`. It validates all
+cable and periaxonal arrays before sharing; custom heterogeneous layouts share,
+while MRG motif phase shifts and row-specific cable overrides remain distinct.
+No optimized/legacy runtime branch was added. On the local 4096-row/1024-shift
+control, removing repeated membrane-signature validation reduced
+`runtime.prepare.materialize_axons` from `1015.8 ms` to `49.0 ms` (`20.7x`).
+At matching 1024-layout diversity, canonical translation built the source
+population in `5.74 s` with `17.3 MiB` RSS delta, versus `26.57 s` and
+`59.2 MiB` for genuine MRG phase geometries (`4.63x` construction gain). The
+full local `3/11/32/128/512/1024` matrix measured source construction at
+`4.65/4.55/4.33/4.60/4.97/5.74 s`, RSS delta at
+`11.72/11.73/11.88/12.32/14.51/17.32 MiB`, and axon materialization at
+`8.44/7.45/8.40/12.41/27.88/48.98 ms`. Thus the remaining roughly one second
+between 3 and 1024 shifts belongs to lightweight translated descriptions and
+row-specific test footprints rather than repeated cable/membrane geometry.
+Artifacts are
+`benchmark/results/p14b_translated_layout_local_4096_t{3,11,32,128,512}_20260719`,
+`benchmark/results/p14b_translated_layout_local_4096_t1024_v2_20260719`, and
+`benchmark/results/p14b_phase_layout_local_4096_t1024_20260719`. Complete the
+full shift-count matrix and CPU/GPU numerical/footprint gate before checking
+the benchmark item above.
 
 First canonical NumPy-row lowering on 2026-07-15: `PreparedCohort` now builds
 one read-only `MaterializedAxonRows` table inside `runtime.prepare`; positions,

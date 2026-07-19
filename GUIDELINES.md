@@ -956,6 +956,12 @@ parameter tables plus row/compartment indices, masks, and stable signatures.
 The JAX stage consumes those numerical contracts and owns `jax.Array` creation,
 device transfer, compilation, and kernels.
 
+Pure intrinsic translations created through `Layout.with_x_shift()` share one
+solver geometry/cable template plus a row-specific x shift. Motif phase
+changes, topology changes, section-parameter changes, and simulation-level
+cable overrides are distinct templates; never infer translation sharing from
+approximately equal flattened arrays.
+
 Lowering and runtime code must dispatch by typed capabilities, structure, shape,
 and parameter signatures. It must not select optimized execution paths from
 concrete authoring class names such as `MRG`, `RattayAberham`, or a particular

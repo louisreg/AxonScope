@@ -201,6 +201,9 @@ def _prepare_jax_batch_group(
             record_benchmark_metadata(
                 materialized_axon_rows=cohort.materialized_axons.size,
                 materialized_axon_templates=cohort.materialized_axons.template_count,
+                materialized_axon_translated_rows=(
+                    cohort.materialized_axons.translated_row_count
+                ),
                 materialized_axon_nbytes=cohort.materialized_axons.nbytes,
                 membrane_parameter_rows=cohort.membrane_rows.unique_count,
                 membrane_parameter_cache_hits=cohort.membrane_rows.cache_hits,

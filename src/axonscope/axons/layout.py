@@ -263,6 +263,7 @@ class Layout:
             )
         )
         self._flattened_cache = None
+        self._translation_template_token = object()
         self._template_frozen = True
 
     @classmethod
@@ -410,7 +411,7 @@ class Layout:
     def with_x_shift(self, x_shift: units.length_t | None) -> "Layout":
         """Return the same layout description with a different local x-shift."""
 
-        return Layout(
+        shifted = Layout(
             self.elements,
             total_length=(
                 None
@@ -424,6 +425,12 @@ class Layout:
             ),
             x_shift=x_shift,
         )
+        object.__setattr__(
+            shifted,
+            "_translation_template_token",
+            self._translation_template_token,
+        )
+        return shifted
 
     def _flattened(self):
         """Return solver-facing per-compartment arrays derived from this layout."""

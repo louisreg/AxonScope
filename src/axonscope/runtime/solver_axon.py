@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -64,6 +64,8 @@ class SolverAxon:
     xg_S_cm2: np.ndarray
     xc_uF_cm2: np.ndarray
     has_heterogeneous_cable_properties: bool
+    layout_translation_token: object = field(repr=False, compare=False)
+    layout_x_shift_um: float = field(repr=False, compare=False)
 
     @property
     def is_double_cable(self) -> bool:
@@ -193,6 +195,8 @@ def build_solver_axon(axon: "Axon | AxonInstance") -> SolverAxon:
         xg_S_cm2=xg,
         xc_uF_cm2=xc,
         has_heterogeneous_cable_properties=has_heterogeneous,
+        layout_translation_token=axon.layout._translation_template_token,
+        layout_x_shift_um=float(axon.layout.x_shift_um),
     )
 
 

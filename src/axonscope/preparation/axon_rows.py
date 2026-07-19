@@ -22,6 +22,7 @@ class MaterializedAxonRows:
     """
 
     row_template_indices: np.ndarray
+    row_x_shifts_um: np.ndarray
     template_nx: np.ndarray
     has_heterogeneous_cable_properties: np.ndarray
     valid_mask: np.ndarray
@@ -44,6 +45,7 @@ class MaterializedAxonRows:
     def __post_init__(self) -> None:
         arrays = (
             self.row_template_indices,
+            self.row_x_shifts_um,
             self.template_nx,
             self.has_heterogeneous_cable_properties,
             self.valid_mask,
@@ -79,15 +81,36 @@ class MaterializedAxonRows:
 
         templates: list[SolverAxon] = []
         template_by_identity: dict[int, int] = {}
+        template_indices_by_translation_token: dict[int, list[int]] = {}
         row_indices = np.empty((len(rows),), dtype=np.int32)
+        row_x_shifts_um = np.empty((len(rows),), dtype=np.float64)
         for row_index, row in enumerate(rows):
             identity = id(row)
             template_index = template_by_identity.get(identity)
             if template_index is None:
-                template_index = len(templates)
-                templates.append(row)
+                token_key = id(row.layout_translation_token)
+                candidates = template_indices_by_translation_token.get(token_key, ())
+                template_index = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if _shares_translation_template(templates[candidate], row)
+                    ),
+                    None,
+                )
+                if template_index is None:
+                    template_index = len(templates)
+                    templates.append(row)
+                    template_indices_by_translation_token.setdefault(
+                        token_key,
+                        [],
+                    ).append(template_index)
                 template_by_identity[identity] = template_index
             row_indices[row_index] = template_index
+            row_x_shifts_um[row_index] = (
+                float(row.layout_x_shift_um)
+                - float(templates[template_index].layout_x_shift_um)
+            )
 
         max_nx = max(int(row.n_compartments) for row in templates)
         resolved_nx = max_nx if target_nx is None else int(target_nx)
@@ -104,6 +127,7 @@ class MaterializedAxonRows:
 
         return cls(
             row_template_indices=row_indices,
+            row_x_shifts_um=row_x_shifts_um,
             template_nx=template_nx,
             has_heterogeneous_cable_properties=np.asarray(
                 [row.has_heterogeneous_cable_properties for row in templates],
@@ -150,6 +174,12 @@ class MaterializedAxonRows:
         return int(self.template_nx.shape[0])
 
     @property
+    def translated_row_count(self) -> int:
+        """Number of rows represented as a translation of a stored template."""
+
+        return int(np.count_nonzero(self.row_x_shifts_um))
+
+    @property
     def nx(self) -> int:
         """Padded spatial width of materialized template rows."""
 
@@ -163,6 +193,7 @@ class MaterializedAxonRows:
             int(array.nbytes)
             for array in (
                 self.row_template_indices,
+                self.row_x_shifts_um,
                 self.template_nx,
                 self.has_heterogeneous_cable_properties,
                 self.valid_mask,
@@ -198,9 +229,43 @@ class MaterializedAxonRows:
         """Return population-major padded positions in meters."""
 
         positions = self.gather_space(self.x_um).astype(float, copy=True)
+        positions += self.row_x_shifts_um[:, None]
         positions *= 1e-6
         positions.setflags(write=False)
         return positions
+
+
+_TRANSLATION_SHARED_ARRAY_FIELDS = (
+    "compartment_lengths_um",
+    "dx_cm",
+    "diam_um",
+    "Ra_ohm_cm",
+    "Cm_uF_cm2",
+    "section_indices",
+    "xraxial_MOhm_per_cm",
+    "xg_S_cm2",
+    "xc_uF_cm2",
+)
+
+
+def _shares_translation_template(template: SolverAxon, row: SolverAxon) -> bool:
+    """Return whether two rows differ only by an explicit layout translation."""
+
+    if template.layout_translation_token is not row.layout_translation_token:
+        return False
+    if (
+        template.formulation != row.formulation
+        or template.dtype != row.dtype
+        or template.n_compartments != row.n_compartments
+        or template.length_um != row.length_um
+        or template.has_heterogeneous_cable_properties
+        != row.has_heterogeneous_cable_properties
+    ):
+        return False
+    return all(
+        np.array_equal(getattr(template, field), getattr(row, field))
+        for field in _TRANSLATION_SHARED_ARRAY_FIELDS
+    )
 
 
 def _stack_space(
