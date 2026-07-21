@@ -13,15 +13,6 @@ Array1D = jnp.ndarray  # shape (N,)
 Array2D = jnp.ndarray  # shape (N, n_gates)
 
 
-class ActiveScanGateLayout(NamedTuple):
-    """Invariant layout needed to project compact scan gates to cable space."""
-
-    full_static_gates: jnp.ndarray
-    active_indices: jnp.ndarray
-    active_slots: jnp.ndarray
-    node_first: bool
-
-
 def membrane_conductance_terms_with_static_gates(
     backend: Any,
     gates: jnp.ndarray,
@@ -633,8 +624,6 @@ class GatedLeakStackMembraneBackend:
     dtype: jnp.dtype
     gated_gate_count: int
     gated_channel_count: int
-    active_indices_by_row: tuple[tuple[int, ...], ...] = ()
-    active_counts_by_row: tuple[int, ...] = ()
 
     supports_node_first_batch: ClassVar[bool] = True
 
@@ -665,136 +654,22 @@ class GatedLeakStackMembraneBackend:
     def _gated_gates(self, gates: Array2D) -> Array2D:
         return gates[:, : self.gated_gate_count]
 
-    @property
-    def active_slot_count(self) -> int:
-        if not self.active_indices_by_row:
-            return self.target_nx
-        return len(self.active_indices_by_row[0])
-
-    def split_scan_gates(
-        self,
-        gates: jnp.ndarray,
-        *,
-        node_first: bool = False,
-    ) -> tuple[jnp.ndarray, jnp.ndarray | ActiveScanGateLayout]:
+    def split_scan_gates(self, gates: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Separate evolving gates from invariant compartment layout values."""
 
-        dynamic_gates = gates[..., : self.gated_gate_count]
-        full_static_gates = gates[..., self.gated_gate_count :]
-        if not self.active_indices_by_row:
-            return dynamic_gates, full_static_gates
-
-        active_indices = jnp.asarray(self.active_indices_by_row, dtype=jnp.int32)
-        active_counts = jnp.asarray(self.active_counts_by_row, dtype=jnp.int32)
-        active_slots = (
-            jnp.arange(self.active_slot_count, dtype=jnp.int32)[None, :]
-            < active_counts[:, None]
-        )
-        if node_first:
-            active_indices = active_indices.T
-            active_slots = active_slots.T
-            compact_gates = jnp.take_along_axis(
-                dynamic_gates,
-                active_indices[..., None],
-                axis=0,
-            )
-        else:
-            compact_gates = jnp.take_along_axis(
-                dynamic_gates,
-                active_indices[..., None],
-                axis=1,
-            )
-        return compact_gates, ActiveScanGateLayout(
-            full_static_gates=full_static_gates,
-            active_indices=active_indices,
-            active_slots=active_slots,
-            node_first=node_first,
+        return (
+            gates[..., : self.gated_gate_count],
+            gates[..., self.gated_gate_count :],
         )
 
     def merge_scan_gates(
         self,
         dynamic_gates: jnp.ndarray,
-        static_gates: jnp.ndarray | ActiveScanGateLayout,
+        static_gates: jnp.ndarray,
     ) -> jnp.ndarray:
         """Restore the canonical runtime gate array at a scan boundary."""
 
-        if isinstance(static_gates, ActiveScanGateLayout):
-            full_static_gates = static_gates.full_static_gates
-            dense_shape = (*full_static_gates.shape[:-1], self.gated_gate_count)
-            dense_gates = jnp.zeros(dense_shape, dtype=dynamic_gates.dtype)
-            values = dynamic_gates * static_gates.active_slots[..., None]
-            if static_gates.node_first:
-                row_indices = jnp.arange(full_static_gates.shape[1])[None, :]
-                dense_gates = dense_gates.at[
-                    static_gates.active_indices,
-                    row_indices,
-                ].add(values)
-            else:
-                row_indices = jnp.arange(full_static_gates.shape[0])[:, None]
-                dense_gates = dense_gates.at[
-                    row_indices,
-                    static_gates.active_indices,
-                ].add(values)
-            return jnp.concatenate([dense_gates, full_static_gates], axis=-1)
         return jnp.concatenate([dynamic_gates, static_gates], axis=-1)
-
-    def _voltage_for_dynamic_gates(
-        self,
-        gates: jnp.ndarray,
-        V_mV: jnp.ndarray,
-    ) -> jnp.ndarray:
-        if not self.active_indices_by_row or gates.shape[:-1] == V_mV.shape:
-            return V_mV
-        active_indices = jnp.asarray(self.active_indices_by_row, dtype=jnp.int32)
-        if gates.shape[0] == self.active_slot_count and V_mV.shape[0] == self.target_nx:
-            return jnp.take_along_axis(V_mV, active_indices.T, axis=0)
-        return jnp.take_along_axis(V_mV, active_indices, axis=1)
-
-    def _expand_active_terms(
-        self,
-        active_gm: jnp.ndarray,
-        active_ge: jnp.ndarray,
-        layout: ActiveScanGateLayout,
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        leak_gm = layout.full_static_gates[..., 0]
-        leak_ge = layout.full_static_gates[..., 1]
-        if layout.node_first:
-            row_indices = jnp.arange(leak_gm.shape[1])[None, :]
-            leak_gm_active = jnp.take_along_axis(
-                leak_gm,
-                layout.active_indices,
-                axis=0,
-            )
-            leak_ge_active = jnp.take_along_axis(
-                leak_ge,
-                layout.active_indices,
-                axis=0,
-            )
-            Gm = leak_gm.at[layout.active_indices, row_indices].add(
-                (active_gm - leak_gm_active) * layout.active_slots
-            )
-            GE = leak_ge.at[layout.active_indices, row_indices].add(
-                (active_ge - leak_ge_active) * layout.active_slots
-            )
-            return Gm, GE
-        row_indices = jnp.arange(leak_gm.shape[0])[:, None]
-        leak_gm_active = jnp.take_along_axis(
-            leak_gm,
-            layout.active_indices,
-            axis=1,
-        )
-        leak_ge_active = jnp.take_along_axis(
-            leak_ge,
-            layout.active_indices,
-            axis=1,
-        )
-        Gm = leak_gm.at[row_indices, layout.active_indices].add(
-            (active_gm - leak_gm_active) * layout.active_slots
-        )
-        GE = leak_ge.at[row_indices, layout.active_indices].add(
-            (active_ge - leak_ge_active) * layout.active_slots
-        )
-        return Gm, GE
 
     def init_gates(self, V0_mV: Array1D) -> Array2D:
         gated_gates = self.gated_model.init_gates(V0_mV)
@@ -827,7 +702,6 @@ class GatedLeakStackMembraneBackend:
         """Update every compatible row through one flattened membrane call."""
 
         batch_shape = g_prev.shape[:-1]
-        V_mV = self._voltage_for_dynamic_gates(g_prev, V_mV)
         gated_gates = self.gated_model.cn_gate_update(
             g_prev=g_prev[..., : self.gated_gate_count].reshape(
                 (-1, self.gated_gate_count)
@@ -883,7 +757,7 @@ class GatedLeakStackMembraneBackend:
         self,
         gates: jnp.ndarray,
         *,
-        static_gates: jnp.ndarray | ActiveScanGateLayout | None = None,
+        static_gates: jnp.ndarray | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Evaluate every compatible row through one flattened membrane call."""
 
@@ -899,8 +773,6 @@ class GatedLeakStackMembraneBackend:
             gated_mask = gates[..., self._gated_mask_col]
             leak_gm = gates[..., self._leak_g_col]
             leak_ge = gates[..., self._leak_ge_col]
-        elif isinstance(static_gates, ActiveScanGateLayout):
-            return self._expand_active_terms(gated_gm, gated_ge, static_gates)
         else:
             leak_gm = static_gates[..., 0]
             leak_ge = static_gates[..., 1]
@@ -946,7 +818,7 @@ class GatedLeakStackMembraneBackend:
         V_mV: jnp.ndarray,
         dt: Any,
         linearize_previous: bool,
-        static_gates: jnp.ndarray | ActiveScanGateLayout | None = None,
+        static_gates: jnp.ndarray | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
         from .triton_generated import (
             advance_generated_membrane_terms,
@@ -956,7 +828,6 @@ class GatedLeakStackMembraneBackend:
         module = load_generated_triton_module(self.gated_model)
         if module is None:
             return None
-        V_mV = self._voltage_for_dynamic_gates(g_prev, V_mV)
         gates_new, gated_gm, gated_ge = advance_generated_membrane_terms(
             module,
             V_mV,
@@ -973,9 +844,6 @@ class GatedLeakStackMembraneBackend:
                 gates_new,
                 g_prev[..., self.gated_gate_count :],
             )
-        elif isinstance(static_gates, ActiveScanGateLayout):
-            Gm, GE = self._expand_active_terms(gated_gm, gated_ge, static_gates)
-            return gates_new, Gm, GE
         else:
             leak_gm = static_gates[..., 0]
             leak_ge = static_gates[..., 1]

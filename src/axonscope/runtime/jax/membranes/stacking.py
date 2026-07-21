@@ -60,7 +60,6 @@ class _EncodedGatedLeakRow:
     background: np.ndarray
     gated_model: Any
     gated_signature: tuple[Any, ...]
-    gated_indices: np.ndarray
     gated_count: int
     leak_count: int
 
@@ -158,28 +157,12 @@ def try_stack_gated_leak_membrane_from_group(
         )
     gated_gate_count = len(gated_model.gate_names())
     gated_channel_count = int(gated_model.g_bar.shape[0])
-    max_gated_count = max(encoded.gated_count for encoded in encoded_rows)
-    unique_active_indices = np.zeros(
-        (len(encoded_rows), max_gated_count),
-        dtype=np.int32,
-    )
-    for row_index, encoded in enumerate(encoded_rows):
-        unique_active_indices[row_index, : encoded.gated_count] = encoded.gated_indices
-    active_indices_rows = unique_active_indices[membrane_rows.row_parameter_indices]
-    active_counts_rows = np.asarray(
-        [encoded.gated_count for encoded in encoded_rows],
-        dtype=np.int32,
-    )[membrane_rows.row_parameter_indices]
     backend = GatedLeakStackMembraneBackend(
         gated_model=gated_model,
         target_nx=int(target_nx),
         dtype=dtype_local,
         gated_gate_count=gated_gate_count,
         gated_channel_count=gated_channel_count,
-        active_indices_by_row=tuple(
-            tuple(int(value) for value in row) for row in active_indices_rows
-        ),
-        active_counts_by_row=tuple(int(value) for value in active_counts_rows),
     )
     return GatedLeakMembraneStack(
         backend=backend,
@@ -333,7 +316,6 @@ def _encode_gated_leak_group_row(
         background=np.zeros((int(target_nx),), dtype=np_dtype),
         gated_model=gated_model,
         gated_signature=gated_signature,
-        gated_indices=gated_indices,
         gated_count=gated_count,
         leak_count=leak_count,
     )

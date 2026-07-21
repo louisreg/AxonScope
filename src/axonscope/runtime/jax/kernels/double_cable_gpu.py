@@ -585,10 +585,7 @@ def _run_double_cable_batch_observer_integrated_scan(
         and callable(split_scan_gates)
         and callable(merge_scan_gates)
     ):
-        gates0_scan, static_scan_gates = split_scan_gates(
-            gates0_scan,
-            node_first=True,
-        )
+        gates0_scan, static_scan_gates = split_scan_gates(gates0_scan)
     else:
         static_scan_gates = None
 
