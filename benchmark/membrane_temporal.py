@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=tuple(_PRESETS), default="quick")
     parser.add_argument("--platform", choices=("cpu", "gpu"), default="cpu")
-    parser.add_argument("--models", default="hh,nav16,mixed")
+    parser.add_argument("--models", default="passive,hh,nav16,mixed")
     parser.add_argument("--cables", default="single,double")
     parser.add_argument("--double-layouts", default="uniform,node_localized")
     parser.add_argument("--axons")
@@ -231,6 +231,8 @@ def _measure_case(
 
 
 def _membrane(name: str):
+    if name == "passive":
+        return axs.membranes.Passive()
     if name == "hh":
         return axs.membranes.HodgkinHuxley()
     if name == "nav16":
@@ -241,7 +243,9 @@ def _membrane(name: str):
         return axs.membranes.Composite(
             {"hh": axs.membranes.HodgkinHuxley(), "nav16": axs.membranes.Nav16()}
         )
-    raise ValueError(f"unknown membrane {name!r}; expected hh, nav16, or mixed")
+    raise ValueError(
+        f"unknown membrane {name!r}; expected passive, hh, nav16, or mixed"
+    )
 
 
 def _axon(

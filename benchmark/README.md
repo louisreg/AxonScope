@@ -80,9 +80,9 @@ versus 485 ms for 204,800 identical sites. GPU and full temporal-solver
 evidence remain required before closing the P18 runtime task.
 
 `benchmark/membrane_temporal.py` supplies that full temporal baseline through
-the canonical public `AxonSimulation.run()` route. It compares HH-only,
-Nav1.6 Markov, and mixed HH+Markov membranes in single-cable, uniform
-double-cable, and node-localized double-cable layouts. Each case retains the
+the canonical public `AxonSimulation.run()` route. It compares a passive cable
+floor, HH-only, Nav1.6 Markov, and mixed HH+Markov membranes in single-cable,
+uniform double-cable, and node-localized double-cable layouts. Each case retains the
 runtime span detail and reports construction, cold/warm run time, active
 kinetic compartments, and evolving-state bytes. A single center-Vm trace is
 retained so the benchmark exercises a valid minimal public recording route

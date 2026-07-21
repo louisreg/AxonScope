@@ -118,8 +118,11 @@ pytest -q tests/unit --tb=short
       the fraction of runtime spent in membrane update versus cable solve.
       `benchmark/membrane_temporal.py` now defines the canonical HH-only,
       Nav1.6, and mixed HH+Markov workload matrix through
-      `AxonSimulation.run()`; local CPU and P100 evidence still needs to be
-      collected and analyzed before checking this item.
+      `AxonSimulation.run()`, plus a passive cable-floor ablation. The first
+      P100 Naxon=1024/4096 campaign exposed and fixed generic double-cable GPU
+      batching and optional generated-Triton capability bugs; final passive
+      CPU/P100 ablation and integrated membrane/cable analysis remain before
+      checking this item.
     - [ ] Validate the matrix-free conserved update against the retained dense
       solve for random valid transition graphs, all Nav1.x voltage-clamp
       protocols, spike waveform, threshold, velocity, and recruitment. Test
