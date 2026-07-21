@@ -136,6 +136,9 @@ def _with_batched_single_cable_runtime(
     runtime: SolverRuntime,
     group: DispatchGroup,
     materialized_axons: MaterializedAxonRows,
+    membrane_rows: MembraneRowPlan,
+    *,
+    solver_options: SolverOptions | None,
 ) -> SolverRuntime:
     """Return `runtime` with cable arrays stacked over the batch axis."""
 
@@ -151,8 +154,16 @@ def _with_batched_single_cable_runtime(
             dtype_local=runtime.membrane.dtype,
             include_area=False,
         )
+    membrane_signatures = {item.membrane_signature for item in group.items}
+    if len(membrane_signatures) == 1:
+        return replace(runtime, cable=cable)
     return replace(
-        runtime,
+        _with_batched_membrane_runtime(
+            runtime,
+            group,
+            membrane_rows,
+            solver_options=solver_options,
+        ),
         cable=cable,
     )
 
@@ -191,6 +202,27 @@ def _with_batched_double_cable_runtime(
             materialized_axons,
             dtype_local=dtype_local,
         )
+    return replace(
+        _with_batched_membrane_runtime(
+            runtime,
+            group,
+            membrane_rows,
+            solver_options=solver_options,
+        ),
+        cable=cable,
+        extracellular=extracellular,
+    )
+
+
+def _with_batched_membrane_runtime(
+    runtime: SolverRuntime,
+    group: DispatchGroup,
+    membrane_rows: MembraneRowPlan,
+    *,
+    solver_options: SolverOptions | None,
+) -> SolverRuntime:
+    """Stack row-specific membranes while preserving shared cable arrays."""
+
     with benchmark_span(
         "runtime.prepare.stack_membrane",
         group_id=group.group_id,
@@ -202,10 +234,10 @@ def _with_batched_double_cable_runtime(
             runtime,
             group,
             membrane_rows,
-            dtype_local=dtype_local,
+            dtype_local=runtime.membrane.dtype,
             solver_options=solver_options,
         )
-    return replace(runtime, membrane=membrane, cable=cable, extracellular=extracellular)
+    return replace(runtime, membrane=membrane)
 
 
 def _stack_membrane_runtime(
@@ -267,6 +299,10 @@ def _stack_membrane_runtime(
                 gated_leak_stack.background_rows,
                 dtype=dtype_local,
             )
+            parameter_rows_device = {
+                name: jnp.asarray(values, dtype=dtype_local)
+                for name, values in gated_leak_stack.parameter_rows.items()
+            }
         return replace(
             runtime.membrane,
             backend=gated_leak_stack.backend,
@@ -276,6 +312,7 @@ def _stack_membrane_runtime(
             gates0=gates0_device,
             state0=(),
             background_current=background_device,
+            parameter_rows=parameter_rows_device,
         )
     representative_index = next(
         (

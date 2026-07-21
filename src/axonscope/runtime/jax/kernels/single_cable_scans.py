@@ -127,6 +127,7 @@ def _observer_scan_stateless_membrane_step(
     Vm: Array,
     dt_ms: Array,
     linearize_previous: bool,
+    parameters: dict[str, Array] | None = None,
 ) -> tuple[Array, Array, Array]:
     return advance_stateless_membrane_terms(
         backend,
@@ -135,6 +136,7 @@ def _observer_scan_stateless_membrane_step(
         V_mV=Vm,
         dt_ms=dt_ms,
         linearize_previous=linearize_previous,
+        parameters=parameters,
     )
 
 
@@ -173,6 +175,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     intracellular_current_density_mid: Array,
     extracellular_potential_mid_mV: Array,
@@ -184,6 +187,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         lower_row,
         diag_row,
@@ -206,7 +210,10 @@ def _run_single_cable_vstim_batch_stateful_scan(
             Vm, gates, *extra = carry
             extra = tuple(extra)
 
-            gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            update_kwargs = dict(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            if parameter_row is not None:
+                update_kwargs["parameters"] = parameter_row
+            gates_pred = backend.cn_gate_update(**update_kwargs)
             if stateless_vm_only:
                 linearization_gates = gates if has_driven_extracellular else gates_pred
                 explicit_outward_current = I_background_row
@@ -227,9 +234,12 @@ def _run_single_cable_vstim_batch_stateful_scan(
                     linearization_gates = gates
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
+            term_kwargs: dict[str, Any] = {"state": extra}
+            if parameter_row is not None:
+                term_kwargs["parameters"] = parameter_row
             Gm, GE = backend.membrane_conductance_terms(
                 linearization_gates,
-                state=extra,
+                **term_kwargs,
             )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -383,12 +393,14 @@ def _run_single_cable_vstim_batch_stateful_scan(
         return final_carry[0], final_carry[1], tuple(final_carry[2:]), vm_trace, recording_trace
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             0,
             0,
@@ -405,6 +417,7 @@ def _run_single_cable_vstim_batch_stateful_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         lower,
         diag,
@@ -454,6 +467,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     intracellular_current_density_mid: Array,
     extracellular_current_mid_A: Array,
@@ -466,6 +480,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         lower_row,
         diag_row,
@@ -489,7 +504,10 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 axis=0,
             )
 
-            gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            update_kwargs = dict(g_prev=gates, V_mV=Vm, dt=dt_ms)
+            if parameter_row is not None:
+                update_kwargs["parameters"] = parameter_row
+            gates_pred = backend.cn_gate_update(**update_kwargs)
             if stateless_vm_only:
                 linearization_gates = gates if has_driven_extracellular else gates_pred
                 explicit_outward_current = I_background_row
@@ -511,9 +529,12 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
                 explicit_outward_current = step_plan_pred.explicit_outward_current
                 correction_current = step_plan_pred.correction_current
 
+            term_kwargs: dict[str, Any] = {"state": extra}
+            if parameter_row is not None:
+                term_kwargs["parameters"] = parameter_row
             Gm, GE = backend.membrane_conductance_terms(
                 linearization_gates,
-                state=extra,
+                **term_kwargs,
             )
             d = d_static_row + (dt_ms / Cm_row) * Gm
             rhs = (
@@ -667,12 +688,14 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
         return final_carry[0], final_carry[1], tuple(final_carry[2:]), vm_trace, recording_trace
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             0,
             0,
@@ -690,6 +713,7 @@ def _run_single_cable_factorized_vstim_batch_stateful_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         lower,
         diag,
@@ -733,6 +757,7 @@ def _run_single_cable_vstim_batch_observer_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: Array,
     raster_probe_indices: Array,
@@ -752,6 +777,7 @@ def _run_single_cable_vstim_batch_observer_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         observer_state_row,
         raster_probe_indices_row,
@@ -789,6 +815,7 @@ def _run_single_cable_vstim_batch_observer_scan(
                     Vm=Vm,
                     dt_ms=dt_ms,
                     linearize_previous=has_driven_extracellular,
+                    parameters=parameter_row,
                 )
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
@@ -909,13 +936,33 @@ def _run_single_cable_vstim_batch_observer_scan(
         return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     observer_axes = 0
     return jax.vmap(
         one_batch,
-        in_axes=(0, 0, state_axes, observer_axes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        in_axes=(
+            0,
+            0,
+            parameter_axes,
+            state_axes,
+            observer_axes,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ),
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         observer_state0,
         raster_probe_indices,
@@ -957,6 +1004,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: Array,
     raster_probe_indices: Array,
@@ -977,6 +1025,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         observer_state_row,
         raster_probe_indices_row,
@@ -1013,6 +1062,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
                     Vm=Vm,
                     dt_ms=dt_ms,
                     linearize_previous=has_driven_extracellular,
+                    parameters=parameter_row,
                 )
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
@@ -1137,12 +1187,14 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
         return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     observer_axes = 0
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             observer_axes,
             0,
@@ -1159,6 +1211,7 @@ def _run_single_cable_factorized_vstim_batch_observer_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         observer_state0,
         raster_probe_indices,
@@ -1198,6 +1251,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: Array,
     raster_probe_indices: Array,
@@ -1220,6 +1274,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         observer_state_row,
         raster_probe_indices_row,
@@ -1262,6 +1317,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
                     Vm=Vm,
                     dt_ms=dt_ms,
                     linearize_previous=has_driven_extracellular,
+                    parameters=parameter_row,
                 )
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
@@ -1386,12 +1442,14 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
         return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     observer_axes = 0
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             observer_axes,
             0,
@@ -1410,6 +1468,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         observer_state0,
         raster_probe_indices,
@@ -1453,6 +1512,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: Array,
     raster_probe_indices: Array,
@@ -1475,6 +1535,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         observer_state_row,
         raster_probe_indices_row,
@@ -1521,6 +1582,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
                     Vm=Vm,
                     dt_ms=dt_ms,
                     linearize_previous=has_driven_extracellular,
+                    parameters=parameter_row,
                 )
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
@@ -1645,12 +1707,14 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
         return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     observer_axes = 0
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             observer_axes,
             0,
@@ -1668,6 +1732,7 @@ def _run_single_cable_shared_rank1_vstim_batch_sparse_observer_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         observer_state0,
         raster_probe_indices,
@@ -1709,6 +1774,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
     I_background: Array,
     Vm0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: Array,
     raster_probe_indices: Array,
@@ -1729,6 +1795,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
     def one_batch(
         Vm0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         observer_state_row,
         raster_probe_indices_row,
@@ -1768,6 +1835,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
                     Vm=Vm,
                     dt_ms=dt_ms,
                     linearize_previous=False,
+                    parameters=parameter_row,
                 )
                 explicit_outward_current = I_background_row
                 correction_current = jnp.zeros_like(Vm)
@@ -1888,12 +1956,14 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
         return final_carry[0], final_gates, tuple(final_carry[3:]), final_carry[2]
 
     state_axes = tuple(0 for _ in state0)
+    parameter_axes = None if membrane_parameters is None else 0
     observer_axes = 0
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
+            parameter_axes,
             state_axes,
             observer_axes,
             0,
@@ -1913,6 +1983,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_scan(
     )(
         Vm0_mV,
         gates0,
+        membrane_parameters,
         state0,
         observer_state0,
         raster_probe_indices,

@@ -36,6 +36,7 @@ class GatedLeakMembraneStack:
     gates0_rows: np.ndarray
     background_rows: np.ndarray
     membrane_static: Any
+    parameter_rows: dict[str, np.ndarray]
     gated_count: int
     leak_count: int
     source: str
@@ -50,6 +51,7 @@ class _GatedLeakMember:
     role: str
     model: Any | None = None
     gated_signature: tuple[Any, ...] | None = None
+    parameter_values: dict[str, Any] | None = None
     leak_g: float = 0.0
     leak_ge: float = 0.0
 
@@ -60,6 +62,7 @@ class _EncodedGatedLeakRow:
     background: np.ndarray
     gated_model: Any
     gated_signature: tuple[Any, ...]
+    parameter_values: dict[str, Any]
     gated_count: int
     leak_count: int
 
@@ -79,7 +82,7 @@ def try_stack_gated_leak_membrane_from_group(
         return None
     np_dtype = np.dtype(dtype_local)
     gated_model: Any | None = None
-    gated_signature: tuple[Any, ...] | None = None
+    gated_execution_signature: tuple[Any, ...] | None = None
     gated_count = 0
     leak_count = 0
     encoded_rows: list[_EncodedGatedLeakRow] = []
@@ -113,13 +116,17 @@ def try_stack_gated_leak_membrane_from_group(
                 member_by_model_index=member_by_model_index,
                 initial_gates_by_signature=initial_gates_by_signature,
                 host_leak_signatures=host_leak_signatures,
+                compatible_gated_model=gated_model,
             )
             if encoded is None:
                 return None
-            if gated_signature is None:
-                gated_signature = encoded.gated_signature
+            execution_signature = tuple(
+                encoded.gated_model.execution_structure_signature()
+            )
+            if gated_execution_signature is None:
+                gated_execution_signature = execution_signature
                 gated_model = encoded.gated_model
-            elif encoded.gated_signature != gated_signature:
+            elif execution_signature != gated_execution_signature:
                 return None
             encoded_rows.append(encoded)
 
@@ -137,7 +144,7 @@ def try_stack_gated_leak_membrane_from_group(
         int(frequency) * int(encoded.leak_count)
         for frequency, encoded in zip(frequencies, encoded_rows, strict=True)
     )
-    if gated_count == 0 or leak_count == 0:
+    if gated_count == 0:
         return None
     with benchmark_span(
         "runtime.prepare.membrane_gather_rows",
@@ -157,6 +164,23 @@ def try_stack_gated_leak_membrane_from_group(
         )
     gated_gate_count = len(gated_model.gate_names())
     gated_channel_count = int(gated_model.g_bar.shape[0])
+    parameter_names = tuple(sorted(encoded_rows[0].parameter_values))
+    if any(
+        tuple(sorted(encoded.parameter_values)) != parameter_names
+        for encoded in encoded_rows
+    ):
+        return None
+    unique_parameter_rows = {
+        name: np.asarray(
+            [encoded.parameter_values[name] for encoded in encoded_rows],
+            dtype=np_dtype,
+        )
+        for name in parameter_names
+    }
+    parameter_rows = {
+        name: np.ascontiguousarray(values[membrane_rows.row_parameter_indices])
+        for name, values in unique_parameter_rows.items()
+    }
     backend = GatedLeakStackMembraneBackend(
         gated_model=gated_model,
         target_nx=int(target_nx),
@@ -169,6 +193,7 @@ def try_stack_gated_leak_membrane_from_group(
         gates0_rows=gates_rows,
         background_rows=background_rows,
         membrane_static=gated_model,
+        parameter_rows=parameter_rows,
         gated_count=gated_count,
         leak_count=leak_count,
         source="solver_axon_membrane_models",
@@ -192,6 +217,7 @@ def _encode_gated_leak_group_row(
     member_by_model_index: dict[int, _GatedLeakMember | None],
     initial_gates_by_signature: dict[tuple[Any, ...], np.ndarray],
     host_leak_signatures: set[tuple[Any, ...]],
+    compatible_gated_model: JaxMembraneProgram | None,
 ) -> _EncodedGatedLeakRow | None:
     solver_axon = item.solver_axon
     row_nx = int(solver_axon.n_compartments)
@@ -203,6 +229,7 @@ def _encode_gated_leak_group_row(
 
     gated_model: Any | None = None
     gated_signature: tuple[Any, ...] | None = None
+    gated_parameter_values: dict[str, Any] | None = None
     unique_model_indices, first_positions = np.unique(
         model_indices,
         return_index=True,
@@ -237,7 +264,22 @@ def _encode_gated_leak_group_row(
                 member = _try_host_stateless_leak_member(model, dtype=np_dtype)
                 if member is not None:
                     host_leak_signatures.add(signature)
-                else:
+                elif compatible_gated_model is not None:
+                    parameter_values = _compatible_generated_parameter_values(
+                        compatible_gated_model,
+                        model,
+                    )
+                    member = (
+                        None
+                        if parameter_values is None
+                        else _GatedLeakMember(
+                            role="gated",
+                            model=compatible_gated_model,
+                            gated_signature=signature,
+                            parameter_values=parameter_values,
+                        )
+                    )
+                if member is None:
                     compiled = compile_membrane_model(
                         model,
                         solver_options=solver_options,
@@ -260,10 +302,15 @@ def _encode_gated_leak_group_row(
             if gated_signature is None:
                 gated_signature = executable_signature
                 gated_model = member.model
+                gated_parameter_values = member.parameter_values
             elif executable_signature != gated_signature:
                 return None
 
-    if gated_model is None or gated_signature is None:
+    if (
+        gated_model is None
+        or gated_signature is None
+        or gated_parameter_values is None
+    ):
         return None
     gated_gate_count = len(gated_model.gate_names())
     leak_g_col = int(gated_gate_count)
@@ -280,6 +327,7 @@ def _encode_gated_leak_group_row(
                 row_gated_gates = gated_model.init_gates_host(
                     np.asarray([vm0], dtype=np_dtype),
                     dtype_local=np_dtype,
+                    parameters=gated_parameter_values,
                 )[0]
             else:
                 row_gated_gates = np.asarray(
@@ -316,6 +364,7 @@ def _encode_gated_leak_group_row(
         background=np.zeros((int(target_nx),), dtype=np_dtype),
         gated_model=gated_model,
         gated_signature=gated_signature,
+        parameter_values=gated_parameter_values,
         gated_count=gated_count,
         leak_count=leak_count,
     )
@@ -333,11 +382,13 @@ def _try_host_stateless_leak_member(
         "runtime.prepare.membrane_host_leak",
         membrane_kind=descriptor.kind,
     ):
-        source_path = (
-            membrane_source_path(descriptor.kind)
-            if descriptor.source_path is None
-            else descriptor.source_path
-        )
+        if descriptor.source_path is None:
+            try:
+                source_path = membrane_source_path(descriptor.kind)
+            except ValueError:
+                return None
+        else:
+            source_path = descriptor.source_path
         cached = load_generated_source_runtime(
             source_path,
             model_class_name=descriptor.source_class,
@@ -415,6 +466,7 @@ def _gated_leak_member(
                 if gated_signature is None
                 else gated_signature
             ),
+            parameter_values=model.parameter_values,
         )
     if int(model.g_bar.shape[0]) != 1:
         return None
@@ -425,6 +477,29 @@ def _gated_leak_member(
         leak_g=float(g),
         leak_ge=float(g * e_rev),
     )
+
+
+def _compatible_generated_parameter_values(
+    program: JaxMembraneProgram,
+    model: Any,
+) -> dict[str, Any] | None:
+    """Map one structurally compatible description onto generated parameters."""
+
+    descriptor = ensure_membrane_model(model)
+    expected = set(program.parameter_values)
+    if descriptor.kind != "composite":
+        values = {str(name): value for name, value in descriptor.params.items()}
+        return values if set(values) == expected else None
+
+    values: dict[str, Any] = {}
+    for index, component in enumerate(descriptor.components):
+        for name, value in component.params.items():
+            prefixed = f"c{index}__{name}"
+            runtime_name = prefixed if prefixed in expected else str(name)
+            if runtime_name not in expected or runtime_name in values:
+                return None
+            values[runtime_name] = value
+    return values if set(values) == expected else None
 
 
 __all__ = [

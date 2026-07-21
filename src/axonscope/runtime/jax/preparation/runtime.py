@@ -23,6 +23,7 @@ from axonscope.runtime.jax.preparation.caches import (
 from axonscope.runtime.jax.preparation.stacking import (
     _cable_runtime_from_numpy_arrays,
     _with_batched_double_cable_runtime,
+    _with_batched_membrane_runtime,
     _with_batched_single_cable_runtime,
 )
 from axonscope.runtime.jax.preparation.base import (
@@ -124,7 +125,16 @@ def prepare_batch_runtime(
                     runtime,
                     group,
                     materialized_axons,
+                    membrane_rows,
+                    solver_options=solver_options,
                 )
+        elif len({item.membrane_signature for item in group.items}) > 1:
+            runtime = _with_batched_membrane_runtime(
+                runtime,
+                group,
+                membrane_rows,
+                solver_options=solver_options,
+            )
         store_batch_static_runtime(static_cache_key, runtime)
         static_cache_state = "miss"
 

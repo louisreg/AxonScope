@@ -117,6 +117,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     area_cm2: Array,
     Cm_abs: Array,
@@ -286,6 +287,7 @@ def _run_double_cable_batch_stateful_integrated_scan(
                 V_mV=Vm,
                 dt_ms=dt_ms,
                 linearize_previous=has_driven_extracellular,
+                parameters=membrane_parameters,
             )
             linearization_gates = gates_pred
             membrane_terms = (Gm_den, GE_den)
@@ -415,6 +417,7 @@ def _run_double_cable_batch_observer_integrated_scan(
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: ThresholdObserverState,
     raster_probe_indices: Array,
@@ -637,6 +640,7 @@ def _run_double_cable_batch_observer_integrated_scan(
                 V_mV=Vm,
                 dt_ms=dt_ms,
                 linearize_previous=has_driven_extracellular,
+                parameters=membrane_parameters,
             )
             linearization_gates = gates_pred
             membrane_terms = (Gm_den, GE_den)

@@ -1011,6 +1011,118 @@ def test_pool_dispatch_parameter_batched_mrg_matches_scalar_rows():
         )
 
 
+def _nav_parameterized_axon(model_class, *, mode: str):
+    active = axs.membranes.Composite(
+        {"sodium": model_class(), "leak": axs.membranes.Passive()}
+    )
+    if mode == "single":
+        model = axs.axons.Unmyelinated(
+            membrane=active,
+            length=100.0 * axs.um,
+            diameter=1.0 * axs.um,
+            compartments=9,
+            v_init=-70.0 * axs.mV,
+        )
+    else:
+        passive = axs.membranes.Passive()
+        model = axs.axons.MRG(
+            diameter=10.0 * axs.um,
+            nodes=3,
+            compartments={"node": 1, "MYSA": 1, "FLUT": 1, "STIN": 1},
+            membranes=axs.membranes.SectionLayout(
+                node=active,
+                mysa=passive,
+                flut=passive,
+                stin=passive,
+            ),
+            v_init=-70.0 * axs.mV,
+        )
+    return axs.AxonInstance(model)
+
+
+@pytest.mark.parametrize(
+    ("mode", "dispatch_method", "atol"),
+    (
+        ("single", "batch-single-cable", 2e-6),
+        ("double", "batch-double-cable", 1e-2),
+    ),
+)
+def test_pool_batches_generated_parameter_rows_without_isoform_fragmentation(
+    mode,
+    dispatch_method,
+    atol,
+):
+    axons = [
+        _nav_parameterized_axon(axs.membranes.Nav11, mode=mode),
+        _nav_parameterized_axon(axs.membranes.Nav16, mode=mode),
+    ]
+
+    plan = build_dispatch_plan(axons)
+    fast_stack = membrane_stacking.try_stack_gated_leak_membrane_from_group(
+        plan.groups[0],
+        _membrane_row_plan(plan.groups[0]),
+        target_nx=plan.groups[0].nx,
+        dtype_local=plan.groups[0].items[0].solver_axon.dtype,
+        solver_options=None,
+        compiled_models_by_signature={},
+    )
+    batched = _run_simulation(
+        axons,
+        duration=0.02 * axs.ms,
+        dt=0.01 * axs.ms,
+        recording=axs.Recording.voltage(),
+    )
+    scalar = [
+        _run_simulation(
+            [axon],
+            duration=0.02 * axs.ms,
+            dt=0.01 * axs.ms,
+            recording=axs.Recording.voltage(),
+        )[0]
+        for axon in axons
+    ]
+
+    assert len(plan.groups) == 1
+    assert plan.groups[0].size == 2
+    assert fast_stack is not None
+    assert fast_stack.jax_compiled_model_count == 1
+    assert fast_stack.parameter_rows["gbar"].shape == (2,)
+    assert any(
+        values[0] != values[1] for values in fast_stack.parameter_rows.values()
+    )
+    assert {result.diagnostics["dispatch_method"] for result in batched} == {
+        dispatch_method
+    }
+    for row_index, (batched_row, scalar_row) in enumerate(
+        zip(batched, scalar, strict=True)
+    ):
+        np.testing.assert_allclose(
+            np.asarray(batched_row.Vm),
+            np.asarray(scalar_row.Vm),
+            rtol=2e-6,
+            atol=atol,
+            err_msg=f"row {row_index}",
+        )
+
+    activation = axs.analysis.Activation(
+        threshold=-80.0 * axs.mV,
+        target=axs.positions.CENTER,
+    )
+    observed = run_pool(
+        axons,
+        tsim_ms=0.02,
+        dt_ms=0.01,
+        batch_options=BatchOptions.none(),
+        observers=(activation,),
+    )
+    assert len(observed) == 1
+    assert observed[0].observations is not None
+    np.testing.assert_array_equal(
+        observed[0].observations["activation"].values,
+        [True, True],
+    )
+
+
 def test_run_pool_returns_internal_dispatch_results():
     axon = _hh_axon(nx=11, amp_nA=0.1, y_um=12.0, z_um=34.0)
 

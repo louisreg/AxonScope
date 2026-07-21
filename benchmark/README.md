@@ -81,9 +81,10 @@ evidence remain required before closing the P18 runtime task.
 
 `benchmark/membrane_temporal.py` supplies that full temporal baseline through
 the canonical public `AxonSimulation.run()` route. It compares a passive cable
-floor, HH-only, Nav1.6 Markov, and mixed HH+Markov membranes in single-cable,
-uniform double-cable, and node-localized double-cable layouts. Each case retains the
-runtime span detail and reports construction, cold/warm run time, active
+floor, HH-only, Nav1.6 Markov, mixed HH+Markov, and a `nav_isoforms` population
+cycling through Nav1.1-Nav1.9. It covers single-cable, uniform double-cable, and
+node-localized double-cable layouts. Each case retains the runtime span detail
+and reports construction, cold/warm run time, dispatch-group count, active
 kinetic compartments, and evolving-state bytes. A single center-Vm trace is
 retained so the benchmark exercises a valid minimal public recording route
 without adding a membrane-dependent solver observer:
@@ -94,7 +95,17 @@ MPLBACKEND=Agg python benchmark/run.py \
 MPLBACKEND=Agg python benchmark/run.py \
   --script membrane_temporal --preset gpu_realistic --platform gpu \
   --case-filter nav16_double_node_localized
+MPLBACKEND=Agg python benchmark/membrane_temporal.py \
+  --platform cpu --models nav16,nav_isoforms --axons 900
 ```
+
+The local Naxon=900 parameter-axis smoke in
+`benchmark/results/p18_parameter_batching_local_n900_reuse/` keeps all nine
+isoforms in one dispatch group for both cable formulations. The generated
+membrane stack builds no additional JAX program per isoform and lowers its
+cold row-stacking span from about 90-105 ms to about 14 ms. Warm single-cable
+time is comparable to the homogeneous Nav1.6 case; GPU evidence is required
+before interpreting the noisier laptop double-cable ratio.
 
 The 2026-07-21 matched 100-step CPU/P100 campaign uses 201 single-cable or
 221 double-cable compartments per axon at Naxon 1024/4096. P100 warm time is

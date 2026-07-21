@@ -152,16 +152,23 @@ def _measure_case(
     memory_trace: str,
 ) -> dict[str, object]:
     build_start = perf_counter()
-    membrane = _membrane(case.membrane)
-    axon = _axon(
-        membrane,
-        cable=case.cable,
-        layout=case.layout,
-        single_compartments=single_compartments,
-        nodes=nodes,
+    membranes = _membranes(case.membrane)
+    axon_templates = tuple(
+        _axon(
+            membrane,
+            cable=case.cable,
+            layout=case.layout,
+            single_compartments=single_compartments,
+            nodes=nodes,
+        )
+        for membrane in membranes
     )
+    axon = axon_templates[0]
     population = axs.AxonPopulation(
-        (axon for _ in range(case.n_axons)),
+        (
+            axon_templates[index % len(axon_templates)]
+            for index in range(case.n_axons)
+        ),
         name=case.name,
     )
     simulation = axs.AxonSimulation(
@@ -179,6 +186,7 @@ def _measure_case(
     build_ms = 1e3 * (perf_counter() - build_start)
 
     run_ms: list[float] = []
+    last_result = None
     with axs.benchmark(
         output,
         print_summary=False,
@@ -203,19 +211,29 @@ def _measure_case(
                 phase=phase,
                 run_index=run_index,
             ):
-                simulation.run()
+                last_result = simulation.run()
             run_ms.append(1e3 * (perf_counter() - start))
 
-    state_count = len(membrane.explain().recording_outputs.gates)
+    state_count = len(membranes[0].explain().recording_outputs.gates)
     active_compartments = _active_compartments(axon, layout=case.layout)
     dense_state_bytes = case.n_axons * axon.n_compartments * state_count * 4
     compact_state_bytes = case.n_axons * active_compartments * state_count * 4
+    assert last_result is not None
+    dispatch_group_ids = {
+        int(result.diagnostics["dispatch_group_id"]) for result in last_result
+    }
+    dispatch_methods = sorted(
+        {str(result.diagnostics["dispatch_method"]) for result in last_result}
+    )
     return {
         "case": case.name,
         "membrane": case.membrane,
         "cable": case.cable,
         "layout": case.layout,
         "n_axons": case.n_axons,
+        "membrane_parameter_sets": len(membranes),
+        "dispatch_group_count": len(dispatch_group_ids),
+        "dispatch_methods": dispatch_methods,
         "compartments_per_axon": axon.n_compartments,
         "active_compartments_per_axon": active_compartments,
         "evolving_states_per_active_compartment": state_count,
@@ -230,21 +248,46 @@ def _measure_case(
     }
 
 
-def _membrane(name: str):
+def _membranes(name: str) -> tuple[object, ...]:
     if name == "passive":
-        return axs.membranes.Passive()
+        return (axs.membranes.Passive(),)
     if name == "hh":
-        return axs.membranes.HodgkinHuxley()
+        return (axs.membranes.HodgkinHuxley(),)
     if name == "nav16":
-        return axs.membranes.Composite(
-            {"sodium": axs.membranes.Nav16(), "leak": axs.membranes.Passive()}
+        return (
+            axs.membranes.Composite(
+                {"sodium": axs.membranes.Nav16(), "leak": axs.membranes.Passive()}
+            ),
+        )
+    if name == "nav_isoforms":
+        return tuple(
+            axs.membranes.Composite(
+                {"sodium": model(), "leak": axs.membranes.Passive()}
+            )
+            for model in (
+                axs.membranes.Nav11,
+                axs.membranes.Nav12,
+                axs.membranes.Nav13,
+                axs.membranes.Nav14,
+                axs.membranes.Nav15,
+                axs.membranes.Nav16,
+                axs.membranes.Nav17,
+                axs.membranes.Nav18,
+                axs.membranes.Nav19,
+            )
         )
     if name == "mixed":
-        return axs.membranes.Composite(
-            {"hh": axs.membranes.HodgkinHuxley(), "nav16": axs.membranes.Nav16()}
+        return (
+            axs.membranes.Composite(
+                {
+                    "hh": axs.membranes.HodgkinHuxley(),
+                    "nav16": axs.membranes.Nav16(),
+                }
+            ),
         )
     raise ValueError(
-        f"unknown membrane {name!r}; expected passive, hh, nav16, or mixed"
+        f"unknown membrane {name!r}; expected passive, hh, nav16, "
+        "nav_isoforms, or mixed"
     )
 
 

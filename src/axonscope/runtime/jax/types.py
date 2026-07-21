@@ -33,6 +33,7 @@ class MembraneRuntime:
     background_current: Array
     observable_names: dict[str, tuple[str, ...]]
     diagnostic_names: tuple[str, ...]
+    parameter_rows: dict[str, Array] | None = None
 
 
 @dataclass(frozen=True)

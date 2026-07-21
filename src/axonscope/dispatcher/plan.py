@@ -523,7 +523,7 @@ def _solver_dispatch_metadata(
     membrane_group_signature = (
         _unique_membrane_structures(membrane_structure_sequence)
         if mode == "double"
-        else membrane_signature
+        else membrane_structure_sequence
     )
     nx_signature = None if mode == "double" else int(solver_axon.n_compartments)
     return _SolverDispatchMetadata(
@@ -595,11 +595,24 @@ def _model_structure_signature(model: Any, cache: dict[int, Any]) -> Any:
         return cached
     kind = getattr(model, "kind", None)
     if kind is not None:
-        component_structures = tuple(
-            _model_structure_signature(component, cache)
-            for component in getattr(model, "components", ())
-        )
-        signature = ("membrane", kind, component_structures)
+        components = tuple(getattr(model, "components", ()))
+        if components:
+            component_structures = tuple(
+                _model_structure_signature(component, cache)
+                for component in components
+            )
+            signature = ("membrane_composite", component_structures)
+        else:
+            source_path = getattr(model, "source_path", None)
+            source_class = getattr(model, "source_class", None)
+            if source_path is not None and source_class is not None:
+                signature = (
+                    "membrane_source",
+                    str(source_path),
+                    str(source_class),
+                )
+            else:
+                signature = ("membrane", kind)
     else:
         implementation = getattr(model, "_implementation", None)
         if implementation is not None:

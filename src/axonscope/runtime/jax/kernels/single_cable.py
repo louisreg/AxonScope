@@ -455,6 +455,7 @@ def _run_single_cable_vstim_batch_array_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 intracellular_current_density_mid=iinj_chunk,
                 extracellular_potential_mid_mV=vext_chunk,
@@ -599,6 +600,7 @@ def _run_single_cable_factorized_vstim_batch_array_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 intracellular_current_density_mid=iinj_chunk,
                 extracellular_current_mid_A=current_chunk,
@@ -768,6 +770,7 @@ def _run_single_cable_factorized_vstim_batch_observer_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 observer_state0=observer_state0,
                 raster_probe_indices=raster_probe_indices,
@@ -956,6 +959,7 @@ def _run_single_cable_vstim_batch_observer_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 observer_state0=observer_state0,
                 raster_probe_indices=raster_probe_indices,
@@ -1223,6 +1227,7 @@ def _run_single_cable_factorized_vstim_batch_sparse_observer_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 observer_state0=observer_state0,
                 raster_probe_indices=raster_probe_indices,
@@ -1423,6 +1428,7 @@ def _run_single_cable_zero_vstim_batch_sparse_observer_chunks(
                 I_background=background,
                 Vm0_mV=Vm,
                 gates0=gates,
+                membrane_parameters=membrane_runtime.parameter_rows,
                 state0=state,
                 observer_state0=observer_state0,
                 raster_probe_indices=raster_probe_indices,
@@ -1490,8 +1496,19 @@ def _initial_single_cable_batch_state(
         nx=runtime.membrane.Nx,
     ):
         membrane_runtime = runtime.membrane
-        Vm = _cached_broadcast_batch_leading(membrane_runtime.Vm0_mV, batch_size)
-        gates = _cached_broadcast_batch_leading(membrane_runtime.gates0, batch_size)
+        Vm = _as_cached_batched_space_array(
+            "Vm0_mV",
+            membrane_runtime.Vm0_mV,
+            nx=membrane_runtime.Nx,
+            dtype_local=membrane_runtime.dtype,
+            batch_size=batch_size,
+        )
+        gates0 = jnp.asarray(membrane_runtime.gates0)
+        gates = (
+            gates0
+            if gates0.ndim >= 3 and int(gates0.shape[0]) == int(batch_size)
+            else _cached_broadcast_batch_leading(gates0, batch_size)
+        )
         state = tuple(
             _cached_broadcast_batch_leading(values, batch_size)
             for values in membrane_runtime.state0

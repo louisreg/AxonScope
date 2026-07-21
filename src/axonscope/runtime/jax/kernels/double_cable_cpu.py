@@ -101,6 +101,7 @@ def _run_double_cable_batch_stateful_scan(
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     area_cm2: Array,
     Cm_abs: Array,
@@ -165,6 +166,7 @@ def _run_double_cable_batch_stateful_scan(
         Vi0_row,
         Ve0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         area_row,
         Cm_abs_row,
@@ -208,7 +210,14 @@ def _run_double_cable_batch_stateful_scan(
         ) -> tuple[Array, Array]:
             row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
             if callable(row_terms):
-                Gm_den, GE_den = row_terms(row_index, gates_new)
+                if parameter_row is None:
+                    Gm_den, GE_den = row_terms(row_index, gates_new)
+                else:
+                    Gm_den, GE_den = row_terms(
+                        row_index,
+                        gates_new,
+                        parameters=parameter_row,
+                    )
             else:
                 Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
             Gm_abs = Gm_den * area_row
@@ -287,12 +296,10 @@ def _run_double_cable_batch_stateful_scan(
 
             row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
             if callable(row_gate_update):
-                gates_pred = row_gate_update(
-                    row_index,
-                    g_prev=gates,
-                    V_mV=Vm,
-                    dt=dt_ms,
-                )
+                update_kwargs = dict(g_prev=gates, V_mV=Vm, dt=dt_ms)
+                if parameter_row is not None:
+                    update_kwargs["parameters"] = parameter_row
+                gates_pred = row_gate_update(row_index, **update_kwargs)
             else:
                 gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
 
@@ -426,6 +433,7 @@ def _run_double_cable_batch_stateful_scan(
         else 0
     )
     footprint_in_axes = None if footprint_mV_per_A is None else 0
+    parameter_in_axes = None if membrane_parameters is None else 0
     record_indices_axes = 0 if jnp.asarray(record_indices).ndim == 2 else None
     return jax.vmap(
         one_batch,
@@ -433,6 +441,7 @@ def _run_double_cable_batch_stateful_scan(
             0,
             0,
             0,
+            parameter_in_axes,
             state_axes,
             space_in_axes,
             space_in_axes,
@@ -458,6 +467,7 @@ def _run_double_cable_batch_stateful_scan(
         Vi0_mV,
         Ve0_mV,
         gates0,
+        membrane_parameters,
         state0,
         area_cm2,
         Cm_abs,
@@ -503,6 +513,7 @@ def _run_double_cable_batch_observer_scan(
     Vi0_mV: Array,
     Ve0_mV: Array,
     gates0: Array,
+    membrane_parameters: dict[str, Array] | None,
     state0: tuple[Array, ...],
     observer_state0: ThresholdObserverState,
     raster_probe_indices: Array,
@@ -575,6 +586,7 @@ def _run_double_cable_batch_observer_scan(
         Vi0_row,
         Ve0_row,
         gates0_row,
+        parameter_row,
         state0_row,
         area_row,
         Cm_abs_row,
@@ -623,7 +635,14 @@ def _run_double_cable_batch_observer_scan(
         ) -> tuple[Array, Array]:
             row_terms = getattr(backend, "membrane_conductance_terms_for_row", None)
             if callable(row_terms):
-                Gm_den, GE_den = row_terms(row_index, gates_new)
+                if parameter_row is None:
+                    Gm_den, GE_den = row_terms(row_index, gates_new)
+                else:
+                    Gm_den, GE_den = row_terms(
+                        row_index,
+                        gates_new,
+                        parameters=parameter_row,
+                    )
             else:
                 Gm_den, GE_den = backend.membrane_conductance_terms(gates_new)
             Gm_abs = Gm_den * area_row
@@ -700,12 +719,10 @@ def _run_double_cable_batch_observer_scan(
 
             row_gate_update = getattr(backend, "cn_gate_update_for_row", None)
             if callable(row_gate_update):
-                gates_pred = row_gate_update(
-                    row_index,
-                    g_prev=gates,
-                    V_mV=Vm,
-                    dt=dt_ms,
-                )
+                update_kwargs = dict(g_prev=gates, V_mV=Vm, dt=dt_ms)
+                if parameter_row is not None:
+                    update_kwargs["parameters"] = parameter_row
+                gates_pred = row_gate_update(row_index, **update_kwargs)
             else:
                 gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=Vm, dt=dt_ms)
 
@@ -850,12 +867,14 @@ def _run_double_cable_batch_observer_scan(
         else 0
     )
     footprint_in_axes = None if footprint_mV_per_A is None else 0
+    parameter_in_axes = None if membrane_parameters is None else 0
     return jax.vmap(
         one_batch,
         in_axes=(
             0,
             0,
             0,
+            parameter_in_axes,
             state_axes,
             space_in_axes,
             space_in_axes,
@@ -883,6 +902,7 @@ def _run_double_cable_batch_observer_scan(
         Vi0_mV,
         Ve0_mV,
         gates0,
+        membrane_parameters,
         state0,
         area_cm2,
         Cm_abs,

@@ -18,12 +18,15 @@ def membrane_conductance_terms_with_static_gates(
     gates: jnp.ndarray,
     static_gates: jnp.ndarray | None,
     state: tuple[jnp.ndarray, ...] = (),
+    parameters: dict[str, jnp.ndarray] | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Evaluate conductance terms from compact or complete gate storage."""
 
     if static_gates is None:
         batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
         if callable(batch_terms):
+            if parameters is not None:
+                return batch_terms(gates, parameters=parameters)
             return batch_terms(gates)
         if gates.ndim == 2:
             return backend.membrane_conductance_terms(gates, state=state)
@@ -35,6 +38,12 @@ def membrane_conductance_terms_with_static_gates(
     batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
     if not callable(batch_terms):
         raise TypeError("A split gate carry requires batch membrane terms.")
+    if parameters is not None:
+        return batch_terms(
+            gates,
+            static_gates=static_gates,
+            parameters=parameters,
+        )
     return batch_terms(gates, static_gates=static_gates)
 
 
@@ -46,6 +55,7 @@ def advance_stateless_membrane_terms(
     V_mV: jnp.ndarray,
     dt_ms: Any,
     linearize_previous: bool,
+    parameters: dict[str, jnp.ndarray] | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Advance gates and return the conductance terms used by one solve."""
 
@@ -55,13 +65,16 @@ def advance_stateless_membrane_terms(
         None,
     )
     if callable(generated_step):
-        generated = generated_step(
+        generated_kwargs = dict(
             g_prev=gates,
             V_mV=V_mV,
             dt=dt_ms,
             linearize_previous=linearize_previous,
             static_gates=static_gates,
         )
+        if parameters is not None:
+            generated_kwargs["parameters"] = parameters
+        generated = generated_step(**generated_kwargs)
         if generated is not None:
             return generated
     if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
@@ -70,7 +83,15 @@ def advance_stateless_membrane_terms(
         )
     batch_update = getattr(backend, "batch_cn_gate_update", None)
     if callable(batch_update):
-        gates_pred = batch_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+        if parameters is None:
+            gates_pred = batch_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+        else:
+            gates_pred = batch_update(
+                g_prev=gates,
+                V_mV=V_mV,
+                dt=dt_ms,
+                parameters=parameters,
+            )
     elif gates.ndim == 2:
         gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
     else:
@@ -86,6 +107,7 @@ def advance_stateless_membrane_terms(
         backend,
         linearization_gates,
         static_gates,
+        parameters=parameters,
     )
     return gates_pred, Gm, GE
 
@@ -683,13 +705,20 @@ class GatedLeakStackMembraneBackend:
         g_prev: Array2D,
         V_mV: Array1D,
         dt: float,
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> Array2D:
         _ = row_index
-        gated_gates = self.gated_model.cn_gate_update(
+        update_kwargs = dict(
             g_prev=self._gated_gates(g_prev),
             V_mV=V_mV,
             dt=dt,
         )
+        if parameters is not None:
+            update_kwargs["parameters"] = self._broadcast_parameter_row(
+                parameters,
+                int(V_mV.shape[0]),
+            )
+        gated_gates = self.gated_model.cn_gate_update(**update_kwargs)
         return jnp.concatenate([gated_gates, g_prev[:, self.gated_gate_count :]], axis=1)
 
     def batch_cn_gate_update(
@@ -698,17 +727,24 @@ class GatedLeakStackMembraneBackend:
         g_prev: jnp.ndarray,
         V_mV: jnp.ndarray,
         dt: float,
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> jnp.ndarray:
         """Update every compatible row through one flattened membrane call."""
 
         batch_shape = g_prev.shape[:-1]
-        gated_gates = self.gated_model.cn_gate_update(
+        flat_parameters = self._flatten_parameter_rows(parameters, batch_shape)
+        update_kwargs = dict(
             g_prev=g_prev[..., : self.gated_gate_count].reshape(
                 (-1, self.gated_gate_count)
             ),
             V_mV=V_mV.reshape((-1,)),
             dt=dt,
-        ).reshape((*batch_shape, self.gated_gate_count))
+        )
+        if flat_parameters is not None:
+            update_kwargs["parameters"] = flat_parameters
+        gated_gates = self.gated_model.cn_gate_update(**update_kwargs).reshape(
+            (*batch_shape, self.gated_gate_count)
+        )
         if int(g_prev.shape[-1]) == self.gated_gate_count:
             return gated_gates
         return self.merge_scan_gates(
@@ -739,12 +775,19 @@ class GatedLeakStackMembraneBackend:
         row_index,
         gates: Array2D,
         state: tuple[Array1D, ...] = (),
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> tuple[Array1D, Array1D]:
         _ = row_index
         gated_mask = gates[:, self._gated_mask_col]
+        term_kwargs: dict[str, Any] = {"state": state}
+        if parameters is not None:
+            term_kwargs["parameters"] = self._broadcast_parameter_row(
+                parameters,
+                int(gates.shape[0]),
+            )
         gated_gm, gated_ge = self.gated_model.membrane_conductance_terms(
             self._gated_gates(gates),
-            state=state,
+            **term_kwargs,
         )
         leak_gm = gates[:, self._leak_g_col]
         leak_ge = gates[:, self._leak_ge_col]
@@ -758,14 +801,18 @@ class GatedLeakStackMembraneBackend:
         gates: jnp.ndarray,
         *,
         static_gates: jnp.ndarray | None = None,
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Evaluate every compatible row through one flattened membrane call."""
 
         batch_shape = gates.shape[:-1]
+        term_kwargs: dict[str, Any] = {}
+        flat_parameters = self._flatten_parameter_rows(parameters, batch_shape)
+        if flat_parameters is not None:
+            term_kwargs["parameters"] = flat_parameters
         gated_gm, gated_ge = self.gated_model.membrane_conductance_terms(
-            gates[..., : self.gated_gate_count].reshape(
-                (-1, self.gated_gate_count)
-            )
+            gates[..., : self.gated_gate_count].reshape((-1, self.gated_gate_count)),
+            **term_kwargs,
         )
         gated_gm = gated_gm.reshape(batch_shape)
         gated_ge = gated_ge.reshape(batch_shape)
@@ -786,8 +833,21 @@ class GatedLeakStackMembraneBackend:
         gated_mask = gates[:, self._gated_mask_col : self._gated_mask_col + 1]
         return gated_mask * self.gated_model.conductances(self._gated_gates(gates))
 
-    def cn_gate_update(self, g_prev: Array2D, V_mV: Array1D, dt: float) -> Array2D:
-        return self.cn_gate_update_for_row(0, g_prev=g_prev, V_mV=V_mV, dt=dt)
+    def cn_gate_update(
+        self,
+        g_prev: Array2D,
+        V_mV: Array1D,
+        dt: float,
+        *,
+        parameters: dict[str, jnp.ndarray] | None = None,
+    ) -> Array2D:
+        return self.cn_gate_update_for_row(
+            0,
+            g_prev=g_prev,
+            V_mV=V_mV,
+            dt=dt,
+            parameters=parameters,
+        )
 
     def currents(
         self,
@@ -805,8 +865,15 @@ class GatedLeakStackMembraneBackend:
         self,
         gates: Array2D,
         state: tuple[Array1D, ...] = (),
+        *,
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> tuple[Array1D, Array1D]:
-        return self.membrane_conductance_terms_for_row(0, gates, state=state)
+        return self.membrane_conductance_terms_for_row(
+            0,
+            gates,
+            state=state,
+            parameters=parameters,
+        )
 
     def background_current(self) -> Array1D:
         return jnp.zeros((self.Nx,), dtype=self.dtype)
@@ -819,6 +886,7 @@ class GatedLeakStackMembraneBackend:
         dt: Any,
         linearize_previous: bool,
         static_gates: jnp.ndarray | None = None,
+        parameters: dict[str, jnp.ndarray] | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
         from .triton_generated import (
             advance_generated_membrane_terms,
@@ -833,7 +901,11 @@ class GatedLeakStackMembraneBackend:
             V_mV,
             g_prev[..., : self.gated_gate_count],
             dt,
-            parameter_values=self.gated_model.parameter_values,
+            parameter_values=(
+                self.gated_model.parameter_values
+                if parameters is None
+                else self._flatten_parameter_rows(parameters, g_prev.shape[:-1])
+            ),
             linearize_previous=linearize_previous,
         )
         if static_gates is None:
@@ -853,6 +925,47 @@ class GatedLeakStackMembraneBackend:
             gated_mask * gated_gm + (1.0 - gated_mask) * leak_gm,
             gated_mask * gated_ge + (1.0 - gated_mask) * leak_ge,
         )
+
+    @staticmethod
+    def _broadcast_parameter_row(
+        parameters: dict[str, jnp.ndarray],
+        node_count: int,
+    ) -> dict[str, jnp.ndarray]:
+        return {
+            name: jnp.broadcast_to(values, (node_count,))
+            for name, values in parameters.items()
+        }
+
+    @staticmethod
+    def _flatten_parameter_rows(
+        parameters: dict[str, jnp.ndarray] | None,
+        batch_shape: tuple[int, ...],
+    ) -> dict[str, jnp.ndarray] | None:
+        if parameters is None:
+            return None
+        if len(batch_shape) == 1:
+            return {
+                name: jnp.broadcast_to(values, batch_shape).reshape((-1,))
+                for name, values in parameters.items()
+            }
+        if len(batch_shape) != 2:
+            raise ValueError("Batched membrane parameters require two spatial axes.")
+        row_count = next(iter(parameters.values())).shape[0]
+        if batch_shape[0] == row_count and batch_shape[1] != row_count:
+            row_first = True
+        elif batch_shape[1] == row_count:
+            row_first = False
+        else:
+            raise ValueError(
+                "Membrane parameter rows do not match either batch spatial axis."
+            )
+        return {
+            name: jnp.broadcast_to(
+                values[:, None] if row_first else values[None, :],
+                batch_shape,
+            ).reshape((-1,))
+            for name, values in parameters.items()
+        }
 
 
 @dataclass(frozen=True)
