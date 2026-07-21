@@ -69,6 +69,7 @@ def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
         "recruitment_amplitude_batch",
         "dispatcher_group_scheduling",
         "single_cable_triton_gate",
+        "membrane_temporal",
     }
 
     assert run_benchmark(["--list"]) == 0
@@ -78,6 +79,7 @@ def test_benchmark_launcher_lists_curve_and_example_scripts_and_presets(capsys):
     assert "with_nrv_examples" in out
     assert "threshold_curves" in out
     assert "single_cable_triton_gate" in out
+    assert "membrane_temporal" in out
     assert "recruitment_curves" in out
     assert "recruitment_amplitude_batch" in out
     assert "dispatcher_group_scheduling" in out

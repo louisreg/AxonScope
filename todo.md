@@ -28,7 +28,7 @@ Latest fast validation:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-786 passed, 1 skipped
+788 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -112,7 +112,7 @@ pytest -q tests/unit --tb=short
     recording contract, and canonical result model remain the only paths.
   - [ ] Complete the exact generated Markov runtime evidence gate before any
     custom GPU kernel or approximate production update.
-    - [ ] Add integrated temporal profiles for uniform and section-localized
+    - [x] Add integrated temporal profiles for uniform and section-localized
       kinetics in both single- and double-cable simulations. Cover CPU locally
       and P100 GPU, cold and warm execution, Naxon scaling, state memory, and
       the fraction of runtime spent in membrane update versus cable solve.
@@ -120,9 +120,14 @@ pytest -q tests/unit --tb=short
       Nav1.6, and mixed HH+Markov workload matrix through
       `AxonSimulation.run()`, plus a passive cable-floor ablation. The first
       P100 Naxon=1024/4096 campaign exposed and fixed generic double-cable GPU
-      batching and optional generated-Triton capability bugs; final passive
-      CPU/P100 ablation and integrated membrane/cable analysis remain before
-      checking this item.
+      batching and optional generated-Triton capability bugs. The matched
+      passive CPU/P100 ablation now estimates the integrated membrane fraction:
+      at Naxon 4096 it is 54% for uniform Nav1.6 and 62% for uniform mixed
+      HH+Nav1.6 double cable, falling to 24% and 40% when active membranes are
+      limited to 21/221 compartments. That localized layout still carries
+      90.5% inactive dense state bytes, making generic active-site compaction
+      the next evidence-backed runtime target. Evidence and commands are in
+      `benchmark/README.md`.
     - [ ] Validate the matrix-free conserved update against the retained dense
       solve for random valid transition graphs, all Nav1.x voltage-clamp
       protocols, spike waveform, threshold, velocity, and recruitment. Test

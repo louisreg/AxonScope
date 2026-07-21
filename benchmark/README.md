@@ -96,6 +96,30 @@ MPLBACKEND=Agg python benchmark/run.py \
   --case-filter nav16_double_node_localized
 ```
 
+The 2026-07-21 matched 100-step CPU/P100 campaign uses 201 single-cable or
+221 double-cable compartments per axon at Naxon 1024/4096. P100 warm time is
+solver-bound: `kernel.wait` accounts for 62-90% of complete run time, while
+`runtime.prepare` is about 0.1 ms and `kernel.dispatch_jax` is 2.5-7.7 ms.
+At Naxon 4096, the passive cable floor is 55.0 ms single and 70.3 ms double.
+The corresponding Nav1.6 runs are 130.6/151.7 ms and mixed HH+Nav1.6 runs are
+160.2/185.4 ms. Passive subtraction therefore estimates membrane work at
+58%/54% for uniform Nav1.6 and 66%/62% for the uniform mixed model. With active
+membranes limited to 21 of 221 double-cable compartments, those estimates fall
+to 24% and 40%, while 90.5% of the current dense state allocation remains
+inactive. This supports generic active-site compaction before a custom Markov
+GPU kernel.
+
+The same local CPU runs are 13.6-63.9x slower than P100, depending on model,
+layout, and Naxon; laptop variance makes this a directional comparison. P100
+cold single-cable runs still cost 7-24 s, including the passive ablation, while
+double-cable cold runs cost roughly 0.9-2.7 s. The next cold-start audit should
+therefore target single-cable HLO and persistent executable-cache replay rather
+than Markov equations alone. Retained artifacts are:
+
+- `benchmark/results/p18_membrane_temporal_{active,passive}_cpu_20260721/`
+- Kaggle run `axs-p18-membrane-temporal-fe19dcf`
+- Kaggle run `axs-p18-passive-floor-302cd2b`
+
 `benchmark/curves/nav_isoform_voltage_clamp.py` reproduces the four ModelDB
 230137 Nav1.1-Nav1.9 validation surfaces without adding a public clamp runtime:
 I-V, normalized G-V, steady-state availability, and recovery from fast
