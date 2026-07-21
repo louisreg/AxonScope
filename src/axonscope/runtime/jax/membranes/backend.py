@@ -22,7 +22,14 @@ def membrane_conductance_terms_with_static_gates(
     """Evaluate conductance terms from compact or complete gate storage."""
 
     if static_gates is None:
-        return backend.membrane_conductance_terms(gates, state=state)
+        batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
+        if callable(batch_terms):
+            return batch_terms(gates)
+        if gates.ndim == 2:
+            return backend.membrane_conductance_terms(gates, state=state)
+        if state:
+            raise TypeError("Generic batched membrane terms do not support state.")
+        return jax.vmap(backend.membrane_conductance_terms)(gates)
     if state:
         raise TypeError("A split gate carry does not support membrane state.")
     batch_terms = getattr(backend, "batch_membrane_conductance_terms", None)
@@ -61,7 +68,19 @@ def advance_stateless_membrane_terms(
         raise RuntimeError(
             "Generated Triton membrane execution was required but unavailable."
         )
-    gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+    batch_update = getattr(backend, "batch_cn_gate_update", None)
+    if callable(batch_update):
+        gates_pred = batch_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+    elif gates.ndim == 2:
+        gates_pred = backend.cn_gate_update(g_prev=gates, V_mV=V_mV, dt=dt_ms)
+    else:
+        gates_pred = jax.vmap(
+            lambda gates_row, voltage_row: backend.cn_gate_update(
+                g_prev=gates_row,
+                V_mV=voltage_row,
+                dt=dt_ms,
+            )
+        )(gates, V_mV)
     linearization_gates = gates if linearize_previous else gates_pred
     Gm, GE = membrane_conductance_terms_with_static_gates(
         backend,

@@ -38,6 +38,35 @@ def test_stateless_membrane_step_prefers_generated_terms():
         np.testing.assert_array_equal(actual_value, expected_value)
 
 
+def test_stateless_membrane_step_batches_canonical_spatial_backend():
+    class Backend:
+        def cn_gate_update(self, *, g_prev, V_mV, dt):
+            assert g_prev.shape == (3, 2)
+            assert V_mV.shape == (3,)
+            return g_prev + V_mV[:, None] * dt
+
+        def membrane_conductance_terms(self, gates, state=()):
+            assert gates.shape == (3, 2)
+            assert state == ()
+            return gates.sum(axis=-1), gates[..., 0]
+
+    gates = jnp.arange(12, dtype=jnp.float32).reshape((2, 3, 2))
+    voltage = jnp.arange(6, dtype=jnp.float32).reshape((2, 3))
+    actual_gates, actual_gm, actual_ge = advance_stateless_membrane_terms(
+        Backend(),
+        gates=gates,
+        static_gates=None,
+        V_mV=voltage,
+        dt_ms=jnp.asarray(0.5, dtype=jnp.float32),
+        linearize_previous=False,
+    )
+
+    expected_gates = gates + voltage[..., None] * 0.5
+    np.testing.assert_array_equal(actual_gates, expected_gates)
+    np.testing.assert_array_equal(actual_gm, expected_gates.sum(axis=-1))
+    np.testing.assert_array_equal(actual_ge, expected_gates[..., 0])
+
+
 def test_double_cable_gpu_solve_reuses_precomputed_membrane_terms(monkeypatch):
     batch_size = 2
     nx = 3
