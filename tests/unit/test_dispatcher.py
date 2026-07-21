@@ -861,6 +861,15 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
         V_mV=voltage,
         dt=0.005,
     )
+    node_dynamic_gates, node_static_gates = backend.split_scan_gates(
+        jnp.swapaxes(gates, 0, 1),
+        node_first=True,
+    )
+    node_dynamic_updated = backend.batch_cn_gate_update(
+        g_prev=node_dynamic_gates,
+        V_mV=jnp.swapaxes(voltage, 0, 1),
+        dt=0.005,
+    )
     expected_gm, expected_ge = jax.vmap(
         lambda row: backend.membrane_conductance_terms_for_row(0, row)
     )(actual_gates)
@@ -869,11 +878,33 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
         dynamic_updated,
         static_gates=static_gates,
     )
+    node_gm, node_ge = backend.batch_membrane_conductance_terms(
+        node_dynamic_updated,
+        static_gates=node_static_gates,
+    )
+    gated_mask = gates[..., backend._gated_mask_col : backend._gated_mask_col + 1]
+    expected_compact_gates = jnp.concatenate(
+        [
+            expected_gates[..., : backend.gated_gate_count] * gated_mask,
+            gates[..., backend.gated_gate_count :],
+        ],
+        axis=-1,
+    )
 
     np.testing.assert_allclose(actual_gates, expected_gates, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(
         backend.merge_scan_gates(dynamic_updated, static_gates),
-        expected_gates,
+        expected_compact_gates,
+        rtol=1e-6,
+        atol=1e-7,
+    )
+    np.testing.assert_allclose(
+        jnp.swapaxes(
+            backend.merge_scan_gates(node_dynamic_updated, node_static_gates),
+            0,
+            1,
+        ),
+        expected_compact_gates,
         rtol=1e-6,
         atol=1e-7,
     )
@@ -881,6 +912,8 @@ def test_gated_leak_stack_batch_capability_matches_row_operations(monkeypatch):
     np.testing.assert_allclose(actual_ge, expected_ge, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(split_gm, expected_gm, rtol=1e-6, atol=1e-7)
     np.testing.assert_allclose(split_ge, expected_ge, rtol=1e-6, atol=1e-7)
+    np.testing.assert_allclose(jnp.swapaxes(node_gm, 0, 1), expected_gm, rtol=1e-6)
+    np.testing.assert_allclose(jnp.swapaxes(node_ge, 0, 1), expected_ge, rtol=1e-6)
 
 
 def test_gated_leak_stack_avoids_jax_gate_initialization(monkeypatch):
