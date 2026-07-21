@@ -164,24 +164,13 @@ pytest -q tests/unit --tb=short
       layouts in both single- and double-cable formulations, and compare Vm,
       every dynamic state, currents, threshold, and velocity against the
       canonical split path at multiple `dt` values.
-  - [ ] Evaluate generic active-site membrane-state compaction before table or
-    custom-kernel work.
-    - [ ] Quantify wasted state bytes and updates in current heterogeneous and
-      gated/leak layouts at realistic node/internode ratios and Naxon
-      1024/4096. The current dense `[batch, Nx, n_gates_max]` route is the
-      baseline, not a second path to preserve.
-    - [ ] If the audit predicts a material end-to-end gain, replace dense
-      inactive gate storage with a runtime-generated active-site projection for
-      any section-localized membrane model, not a Nav- or MRG-specific backend.
-      Gather active Vm, update compact state, and project conductance/current
-      contributions back into the canonical cable arrays. A compartment may
-      carry HH-like and Markov components together; compaction must preserve
-      their generated composition and may use distinct active-site projections
-      for distinct dynamic state blocks when that is measurably beneficial.
-    - [ ] Benchmark state-last, node-first, and compact active-site layouts on
-      CPU/P100 rather than prescribing state-major layout a priori. Validate
-      homogeneous/unmyelinated no-regression and identical single-/double-cable
-      results before retaining compaction.
+  - [x] Evaluate and reject generic active-site membrane-state compaction before
+    table or custom-kernel work. The realistic localized layout wastes 90.5% of
+    dense dynamic-state bytes, but a canonical gather/update/scatter prototype
+    changed P100 warm time by only 0.98x-1.02x for HH, Nav1.6, and mixed
+    HH+Markov at Naxon 1024/4096 while usually increasing cold compilation.
+    Per-step projection traffic cancels the smaller kinetic update, so commit
+    `f67987d` was reverted by `ab89c42`; no parallel compact path remains.
   - [ ] Audit parameter batching for multiple isoforms and mutants sharing one
     generated source/topology. Reuse the existing membrane row plan and
     structural signatures; avoid one dispatch group or executable per parameter

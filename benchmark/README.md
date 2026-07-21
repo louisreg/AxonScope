@@ -120,6 +120,15 @@ than Markov equations alone. Retained artifacts are:
 - Kaggle run `axs-p18-membrane-temporal-fe19dcf`
 - Kaggle run `axs-p18-passive-floor-302cd2b`
 
+A follow-up generic active-site projection removed 90.5% of localized dynamic
+state from the scan carry, but its per-step gather/scatter did not improve the
+integrated P100 workload. Against `axs-p18-membrane-temporal-fe19dcf`, run
+`axs-p18-active-compaction-f67987d` changed warm time by 0.98x-1.02x across
+HH, Nav1.6, and mixed HH+Markov double-cable cases at Naxon 1024/4096 and made
+most cold runs slower. The prototype was therefore reverted; dense node-first
+state remains canonical until a fused projection can remove, rather than move,
+the traffic.
+
 `benchmark/curves/nav_isoform_voltage_clamp.py` reproduces the four ModelDB
 230137 Nav1.1-Nav1.9 validation surfaces without adding a public clamp runtime:
 I-V, normalized G-V, steady-state availability, and recovery from fast
