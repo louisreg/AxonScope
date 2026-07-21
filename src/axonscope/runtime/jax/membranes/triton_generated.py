@@ -58,9 +58,13 @@ def advance_generated_membrane_terms(
     parameter_values: Mapping[str, Any],
     linearize_previous: bool,
     block_size: int = 256,
-) -> tuple[Any, Any, Any]:
+) -> tuple[Any, Any, Any] | None:
     """Run one generated gate-update plus Gm/GE kernel over flat compartments."""
 
+    contract = load_generated_membrane_contract(module)
+    kernel_name = "advance_gates_and_membrane_terms_kernel"
+    if not contract.has_function(kernel_name):
+        return None
     Vm = jnp.asarray(Vm_mV)
     gate_values = jnp.asarray(gates)
     if Vm.dtype != jnp.float32 or gate_values.dtype != jnp.float32:
@@ -73,8 +77,7 @@ def advance_generated_membrane_terms(
     if int(block_size) < 1:
         raise ValueError("block_size must be >= 1.")
 
-    contract = load_generated_membrane_contract(module)
-    kernel_spec = contract.function("advance_gates_and_membrane_terms_kernel")
+    kernel_spec = contract.function(kernel_name)
     if kernel_spec.args[:3] != ("Vm", "gates", "dt"):
         raise ValueError("Generated Triton membrane kernel has an invalid signature.")
     parameter_names = kernel_spec.args[3:]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -7,6 +9,7 @@ from axonscope.runtime.jax.kernels import double_cable_step
 from axonscope.runtime.jax.membranes.backend import (
     advance_stateless_membrane_terms,
 )
+from axonscope.runtime.jax.membranes import triton_generated
 
 
 def test_stateless_membrane_step_prefers_generated_terms():
@@ -65,6 +68,26 @@ def test_stateless_membrane_step_batches_canonical_spatial_backend():
     np.testing.assert_array_equal(actual_gates, expected_gates)
     np.testing.assert_array_equal(actual_gm, expected_gates.sum(axis=-1))
     np.testing.assert_array_equal(actual_ge, expected_gates[..., 0])
+
+
+def test_generated_triton_step_declines_contract_without_optional_kernel(monkeypatch):
+    contract = SimpleNamespace(has_function=lambda name: False)
+    monkeypatch.setattr(
+        triton_generated,
+        "load_generated_membrane_contract",
+        lambda module: contract,
+    )
+
+    actual = triton_generated.advance_generated_membrane_terms(
+        SimpleNamespace(),
+        jnp.zeros((2,), dtype=jnp.float32),
+        jnp.zeros((2, 1), dtype=jnp.float32),
+        jnp.asarray(0.005, dtype=jnp.float32),
+        parameter_values={},
+        linearize_previous=False,
+    )
+
+    assert actual is None
 
 
 def test_double_cable_gpu_solve_reuses_precomputed_membrane_terms(monkeypatch):

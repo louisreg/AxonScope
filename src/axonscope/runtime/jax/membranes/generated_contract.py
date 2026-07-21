@@ -141,6 +141,11 @@ class GeneratedMembraneContract:
                 f"Generated membrane contract has no {name!r} function."
             ) from exc
 
+    def has_function(self, name: str) -> bool:
+        """Return whether the generated target declares an optional entrypoint."""
+
+        return name in self.functions
+
 
 def load_generated_membrane_contract(
     module: Any,
