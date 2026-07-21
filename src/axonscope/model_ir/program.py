@@ -35,6 +35,8 @@ class MembraneProgram:
 
     model: ModelIR
     name: str
+    hh_gate_state_names: tuple[str, ...]
+    kinetic_state_names: tuple[str, ...]
     gate_state_names: tuple[str, ...]
     membrane_state_names: tuple[str, ...]
     gate_trace_observable_names: tuple[str, ...]
@@ -64,7 +66,13 @@ class MembraneProgram:
 def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
     """Derive the backend-neutral membrane program contract from Model IR."""
 
-    gate_state_names = tuple(gate.state for gate in model.gates)
+    hh_gate_state_names = tuple(gate.state for gate in model.gates)
+    kinetic_state_names = tuple(
+        state_name
+        for block in model.kinetics
+        for state_name in block.states
+    )
+    gate_state_names = (*hh_gate_state_names, *kinetic_state_names)
     gate_state_set = set(gate_state_names)
     membrane_state_names = tuple(
         state.name for state in model.states if state.name not in gate_state_set
@@ -77,10 +85,10 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
     default_label = str(model.metadata.get("component_label", model.name))
     public_gate_state_names = tuple(
         state_display_names.get(
-            gate.state,
-            _qualified_public_name(default_label, gate.state),
+            state_name,
+            _qualified_public_name(default_label, state_name),
         )
-        for gate in model.gates
+        for state_name in gate_state_names
     )
     public_gate_trace_observable_names = tuple(
         observable_display_names.get(
@@ -125,6 +133,8 @@ def membrane_program_from_model_ir(model: ModelIR) -> MembraneProgram:
     return MembraneProgram(
         model=model,
         name=model.name,
+        hh_gate_state_names=hh_gate_state_names,
+        kinetic_state_names=kinetic_state_names,
         gate_state_names=gate_state_names,
         membrane_state_names=membrane_state_names,
         gate_trace_observable_names=gate_trace_observable_names,

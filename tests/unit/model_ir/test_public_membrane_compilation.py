@@ -46,6 +46,8 @@ def test_stateful_public_membranes_compile_to_generated_runtime():
         assert set(membrane.generated_contract.functions) == {
             "init_state",
             "gate_terms",
+            "kinetic_terms",
+            "kinetic_initials",
             "membrane_terms",
             "reversal_terms",
             "model_step",

@@ -24,6 +24,10 @@ from .schema import (
     Gate,
     GateUpdateKind,
     Input,
+    KineticBlock,
+    KineticInitialization,
+    KineticTransition,
+    KineticUpdateKind,
     LinearizationGateSource,
     MODEL_IR_SCHEMA_VERSION,
     ModelIR,
@@ -41,8 +45,8 @@ from .serialization import canonical_json, model_ir_from_json, structural_hash
 from .validation import assert_valid_model_ir
 
 
-SOURCE_CONTRACT_VERSION = "plain_python_membrane.v1"
-SOURCE_COMPILER_VERSION = "source_codegen.v24"
+SOURCE_CONTRACT_VERSION = "plain_python_membrane.v2"
+SOURCE_COMPILER_VERSION = "source_codegen.v25"
 SOURCE_CACHE_INDEX_VERSION = "source_cache_index.v1"
 _SIDE_EFFECT_CALLS = {
     "__import__",
@@ -419,6 +423,7 @@ def _source_program(
         else {}
     )
     declared_states = _declared_model_states(scope)
+    declared_kinetics = _declared_markov_blocks(scope)
     export_groups = _declared_model_export_groups(scope)
     dynamics = _declared_model_dynamics(scope)
     exported_returns = export_groups["currents"] + export_groups["observables"]
@@ -434,6 +439,7 @@ def _source_program(
             dynamics=dynamics,
         )
         _merge_parameter_metadata(metadata, class_parameters)
+        _merge_kinetic_metadata(metadata, declared_kinetics)
         return _SourceProgram(
             metadata=metadata,
             functions=(function,),
@@ -465,6 +471,7 @@ def _source_program(
         if isinstance(declaration.get("metadata"), dict):
             metadata["metadata"] = declaration["metadata"]
     _merge_parameter_metadata(metadata, class_parameters)
+    _merge_kinetic_metadata(metadata, declared_kinetics)
     if dynamics and "step" not in metadata:
         metadata["step"] = _step_metadata_from_dynamics(
             dynamics,
@@ -472,6 +479,79 @@ def _source_program(
         )
     _merge_source_metadata_descriptions(metadata, declared_states, export_groups)
     return _SourceProgram(metadata=metadata, functions=functions, function_names=names)
+
+
+def _declared_markov_blocks(tree: ast.Module) -> tuple[dict[str, Any], ...]:
+    blocks: list[dict[str, Any]] = []
+    for function in tree.body:
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for decorator in function.decorator_list:
+            section_name = _decorator_section_name(decorator)
+            if section_name is None or not section_name.startswith("markov:"):
+                continue
+            if not isinstance(decorator, ast.Call):
+                raise SourceModelCompileError("@markov must be called with metadata.")
+            values = {
+                keyword.arg: _metadata_value(keyword.value)
+                for keyword in decorator.keywords
+                if keyword.arg is not None
+            }
+            if any(keyword.arg is None for keyword in decorator.keywords):
+                raise SourceModelCompileError("@markov does not support **kwargs.")
+            states = _string_sequence(values.get("states"), label="@markov.states")
+            if len(states) < 2:
+                raise SourceModelCompileError("@markov requires at least two states.")
+            raw_transitions = values.get("transitions")
+            if not isinstance(raw_transitions, tuple | list):
+                raise SourceModelCompileError("@markov.transitions must be a sequence.")
+            transitions: list[tuple[str, str, str]] = []
+            for index, raw in enumerate(raw_transitions):
+                if not isinstance(raw, tuple | list) or len(raw) not in {3, 4}:
+                    raise SourceModelCompileError(
+                        "@markov transition entries must contain source, target, "
+                        "forward rate, and optionally backward rate."
+                    )
+                if not all(isinstance(value, str) for value in raw):
+                    raise SourceModelCompileError(
+                        f"@markov.transitions[{index}] must contain only names."
+                    )
+                source, target, forward = raw[:3]
+                transitions.append((source, target, forward))
+                if len(raw) == 4:
+                    transitions.append((target, source, raw[3]))
+            blocks.append(
+                {
+                    "name": section_name.split(":", 1)[1],
+                    "function": function.name,
+                    "states": states,
+                    "transitions": tuple(transitions),
+                    "initialization": str(values.get("initialization", "stationary")),
+                    "conserve_probability": bool(
+                        values.get("conserve_probability", True)
+                    ),
+                }
+            )
+    return tuple(blocks)
+
+
+def _string_sequence(value: Any, *, label: str) -> tuple[str, ...]:
+    if isinstance(value, str) or not isinstance(value, tuple | list):
+        raise SourceModelCompileError(f"{label} must be a sequence of names.")
+    if not all(isinstance(item, str) for item in value):
+        raise SourceModelCompileError(f"{label} must contain only names.")
+    return tuple(value)
+
+
+def _merge_kinetic_metadata(
+    metadata: dict[str, Any],
+    kinetics: tuple[dict[str, Any], ...],
+) -> None:
+    if not kinetics:
+        return
+    if "kinetics" in metadata:
+        raise SourceModelCompileError("Kinetic blocks are declared more than once.")
+    metadata["kinetics"] = kinetics
 
 
 def _declared_model_states(tree: ast.Module) -> dict[str, dict[str, Any]]:
@@ -983,6 +1063,10 @@ def _decorator_section_name(node: ast.AST) -> str | None:
             arg = node.args[0]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 return f"mechanism:{arg.value}"
+        if node.func.id == "markov" and node.args:
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return f"markov:{arg.value}"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         if node.func.attr in {"currents", "initials", "rates", "step"}:
             return node.func.attr
@@ -994,6 +1078,10 @@ def _decorator_section_name(node: ast.AST) -> str | None:
             arg = node.args[0]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 return f"mechanism:{arg.value}"
+        if node.func.attr == "markov" and node.args:
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                return f"markov:{arg.value}"
     return None
 
 
@@ -1166,7 +1254,10 @@ def _infer_model_metadata(
             if default_node is None:
                 if arg.arg in states:
                     _merge_symbol(states, arg.arg, states[arg.arg], section="state")
-                elif spec["role"] == SemanticRole.GATE.value:
+                elif spec["role"] in {
+                    SemanticRole.GATE.value,
+                    SemanticRole.OCCUPANCY.value,
+                }:
                     _merge_symbol(states, arg.arg, spec, section="state")
                 else:
                     _merge_symbol(inputs, arg.arg, spec, section="input")
@@ -1389,7 +1480,11 @@ def _annotation_spec(annotation: ast.AST | None, *, label: str) -> dict[str, str
     role = (
         SemanticRole.GATE.value
         if _annotation_is_gate(annotation)
-        else _role_value_for_unit(unit)
+        else (
+            SemanticRole.OCCUPANCY.value
+            if _annotation_is_occupancy(annotation)
+            else _role_value_for_unit(unit)
+        )
     )
     return {"unit": unit, "role": role}
 
@@ -1435,6 +1530,7 @@ def _annotation_type_unit(annotation: ast.AST | None) -> str | None:
         "CurrentDensity": units.CURRENT_DENSITY_UA_CM2,
         "Dimensionless": units.DIMENSIONLESS,
         "Gate": units.DIMENSIONLESS,
+        "Occupancy": units.DIMENSIONLESS,
         "Length": "micrometer",
         "Rate": units.RATE_PER_MS,
         "RatePerConcentration": units.RATE_PER_MS_PER_MM,
@@ -1451,6 +1547,14 @@ def _annotation_is_gate(annotation: ast.AST | None) -> bool:
         return annotation.id in {"gate", "Gate"}
     if isinstance(annotation, ast.Attribute) and isinstance(annotation.value, ast.Name):
         return annotation.attr in {"gate", "Gate"}
+    return False
+
+
+def _annotation_is_occupancy(annotation: ast.AST | None) -> bool:
+    if isinstance(annotation, ast.Name):
+        return annotation.id in {"occupancy", "Occupancy"}
+    if isinstance(annotation, ast.Attribute) and isinstance(annotation.value, ast.Name):
+        return annotation.attr in {"occupancy", "Occupancy"}
     return False
 
 
@@ -1979,6 +2083,10 @@ def _build_model_ir(
         for state in states
         if state.quantity.role is SemanticRole.GATE
     )
+    kinetics = tuple(
+        _kinetic_block_from_spec(spec, env)
+        for spec in metadata.get("kinetics", ())
+    )
     currents = tuple(
         _current_from_spec(current_name, current_spec, env)
         for current_name, current_spec in _required_dict(metadata, "currents").items()
@@ -1999,6 +2107,7 @@ def _build_model_ir(
         parameters=parameters,
         states=states,
         gates=gates,
+        kinetics=kinetics,
         currents=currents,
         observables=observables,
         step_program=step_program,
@@ -2082,6 +2191,8 @@ def _source_section_metadata(
         }
         if section_name.startswith("mechanism:"):
             section["mechanism"] = section_name.split(":", 1)[1]
+        if section_name.startswith("markov:"):
+            section["markov"] = section_name.split(":", 1)[1]
         sections.append(section)
     return tuple(sections)
 
@@ -2158,6 +2269,27 @@ def _gate_from_state(state: State, env: dict[str, Expression]) -> Gate:
         beta=_lookup_expression(f"beta_{state.name}", env),
         update=GateUpdateKind.RUSH_LARSEN,
         q10=q10,
+    )
+
+
+def _kinetic_block_from_spec(
+    spec: dict[str, Any],
+    env: dict[str, Expression],
+) -> KineticBlock:
+    return KineticBlock(
+        name=str(spec["name"]),
+        states=tuple(str(name) for name in spec["states"]),
+        transitions=tuple(
+            KineticTransition(
+                source=str(source),
+                target=str(target),
+                rate=_lookup_expression(str(rate_name), env),
+            )
+            for source, target, rate_name in spec["transitions"]
+        ),
+        update=KineticUpdateKind.BACKWARD_EULER,
+        initialization=KineticInitialization(str(spec["initialization"])),
+        conserve_probability=bool(spec["conserve_probability"]),
     )
 
 
@@ -3050,6 +3182,25 @@ def _generated_module_source(
             ),
         )
     )
+    kinetic_outputs = tuple(
+        (
+            f"rate:{block_index}:{transition_index}:{transition.source}:{transition.target}",
+            transition.rate,
+        )
+        for block_index, block in enumerate(model.kinetics)
+        for transition_index, transition in enumerate(block.transitions)
+    )
+    state_by_name = {state.name: state for state in model.states}
+    kinetic_initial_outputs = tuple(
+        (
+            state_name,
+            state_by_name[state_name].initial
+            if state_by_name[state_name].initial is not None
+            else literal(0.0),
+        )
+        for block in model.kinetics
+        for state_name in block.states
+    )
     membrane_outputs = tuple(
         item
         for index, current in enumerate(model.currents)
@@ -3064,6 +3215,18 @@ def _generated_module_source(
         outputs=gate_outputs,
         target=target,
     )
+    kinetic_source = _generated_term_function_source(
+        "kinetic_terms",
+        metadata=metadata,
+        outputs=kinetic_outputs,
+        target=target,
+    )
+    kinetic_initial_source = _generated_term_function_source(
+        "kinetic_initials",
+        metadata=metadata,
+        outputs=kinetic_initial_outputs,
+        target=target,
+    )
     membrane_source = _generated_term_function_source(
         "membrane_terms",
         metadata=metadata,
@@ -3074,11 +3237,19 @@ def _generated_module_source(
         metadata,
         tuple(expression for _, expression in gate_outputs),
     )
+    kinetic_arg_names = _expression_arg_names(
+        metadata,
+        tuple(expression for _, expression in kinetic_outputs),
+    )
+    kinetic_initial_arg_names = _expression_arg_names(
+        metadata,
+        tuple(expression for _, expression in kinetic_initial_outputs),
+    )
     membrane_arg_names = _expression_arg_names(
         metadata,
         tuple(expression for _, expression in membrane_outputs),
     )
-    gate_state_names = {gate.state for gate in model.gates}
+    gate_state_names = set(membrane_program_from_model_ir(model).gate_state_names)
     membrane_states = tuple(
         state for state in model.states if state.name not in gate_state_names
     )
@@ -3155,6 +3326,14 @@ def _generated_module_source(
                 "args": gate_arg_names,
                 "outputs": tuple(name for name, _ in gate_outputs),
             },
+            "kinetic_terms": {
+                "args": kinetic_arg_names,
+                "outputs": tuple(name for name, _ in kinetic_outputs),
+            },
+            "kinetic_initials": {
+                "args": kinetic_initial_arg_names,
+                "outputs": tuple(name for name, _ in kinetic_initial_outputs),
+            },
             "membrane_terms": {
                 "args": membrane_arg_names,
                 "outputs": tuple(name for name, _ in membrane_outputs),
@@ -3166,7 +3345,7 @@ def _generated_module_source(
         }
     )
     fused_membrane_source = ""
-    if target == "triton" and not membrane_states and step is None:
+    if target == "triton" and not membrane_states and step is None and not model.kinetics:
         (
             fused_membrane_source,
             fused_membrane_function,
@@ -3204,6 +3383,8 @@ def _generated_module_source(
         f"{target_spec.import_line}\n\n"
         f"{target_spec.intrinsic_prelude}"
         f"{gate_source}\n"
+        f"{kinetic_source}\n"
+        f"{kinetic_initial_source}\n"
         f"{membrane_source}\n"
         + "".join(f"{source}\n" for source in runtime_sources.values())
         + fused_membrane_source
@@ -3211,7 +3392,7 @@ def _generated_module_source(
             f"{target_spec.function_decorator}def model_step({args}):\n"
             f"{body}\n\n"
             f"RUNTIME_CONTRACT = {runtime_contract!r}\n"
-            "RUNTIME_CONTRACT_VERSION = 'jax_membrane_runtime.v3'\n"
+            "RUNTIME_CONTRACT_VERSION = 'jax_membrane_runtime.v4'\n"
         )
     )
 
@@ -3258,7 +3439,7 @@ def _generated_runtime_contract(
     program = membrane_program_from_model_ir(model)
     step = model.step_program
     return {
-        "version": "jax_membrane_runtime.v3",
+        "version": "jax_membrane_runtime.v4",
         "model_name": program.name,
         "functions": functions,
         "inputs": tuple(
@@ -3298,7 +3479,32 @@ def _generated_runtime_contract(
             )
         ),
         "gate_state_names": program.gate_state_names,
-        "gate_update_modes": tuple(gate.update.value for gate in model.gates),
+        "hh_gate_state_names": program.hh_gate_state_names,
+        "kinetic_state_names": program.kinetic_state_names,
+        "kinetic_blocks": tuple(
+            {
+                "name": block.name,
+                "states": block.states,
+                "state_indices": tuple(
+                    program.gate_state_names.index(name) for name in block.states
+                ),
+                "transitions": tuple(
+                    {
+                        "source": block.states.index(transition.source),
+                        "target": block.states.index(transition.target),
+                        "output": f"rate:{block_index}:{transition_index}:{transition.source}:{transition.target}",
+                    }
+                    for transition_index, transition in enumerate(block.transitions)
+                ),
+                "initialization": block.initialization.value,
+                "conserve_probability": block.conserve_probability,
+            }
+            for block_index, block in enumerate(model.kinetics)
+        ),
+        "gate_update_modes": (
+            tuple(gate.update.value for gate in model.gates)
+            + tuple("backward_euler" for _ in program.kinetic_state_names)
+        ),
         "membrane_state_names": program.membrane_state_names,
         "gate_trace_observable_names": program.gate_trace_observable_names,
         "gate_names": program.gate_names,

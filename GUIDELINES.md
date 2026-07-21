@@ -47,6 +47,21 @@ Current focus after the P9 closeout:
   equations in ordinary Python source, not intermediate representations or
   builder DSLs. Model IR is internal compiler vocabulary and must not become
   required user knowledge.
+- make that single Python membrane language cover three composable forms of
+  dynamics: independent HH-like gates expressed as alpha/beta or steady-state
+  and time-constant equations; coupled Markov-like occupancies expressed as
+  named states and transitions; and general auxiliary state updates for
+  concentrations, pumps, buffers, dynamic reversal potentials, and other
+  stateful mechanisms. One membrane may freely combine all three forms with
+  passive terms, currents, observables, diagnostics, and custom initialization.
+  These are source-level kinetic forms, not separate model classes, compilers,
+  runtime backends, or execution paths.
+- require the final membrane language to express every retained built-in model
+  naturally, including unit-bearing and derived parameters, aliases,
+  temperature scaling, piecewise equations, current linearization, explicit
+  solver corrections, and prepare/finalize state semantics. When that
+  authoring surface changes, migrate built-ins and public examples directly and
+  remove the superseded vocabulary instead of retaining compatibility paths.
 - treat Model IR as a compiler representation, not the long-term numerical
   runtime source. Runtime-specific generated modules are content-addressed per
   model and target, generated lazily, and own every model-specific runtime fact:

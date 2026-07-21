@@ -45,6 +45,7 @@ from axonscope.model_ir import (
     assert_valid_model_ir,
     call,
     compile_model_source_file,
+    compose_model_ir,
     derive_model_step_contract,
     literal,
     membrane_program_from_model_ir,
@@ -108,7 +109,7 @@ def test_passive_model_ir_is_valid_and_exposes_fusion_terms():
     assert [current.name for current in model.currents] == ["I_l"]
     assert [parameter.name for parameter in model.parameters] == ["Rm", "EL"]
     assert model.parameters[0].quantity.unit == RESISTANCE_AREA_OHM_CM2
-    assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+    assert model.metadata["source_contract"] == "plain_python_membrane.v2"
     assert len(model.metadata["source_hash"]) == 40
     provenance = model.metadata["source_provenance"]
     assert provenance["contract"] == model.metadata["source_contract"]
@@ -759,6 +760,120 @@ class TopLevelUnits(axs.membranes.Model):
 
     assert compiled.model.name == "top_level_units"
     assert [parameter.name for parameter in compiled.model.parameters] == ["Rm", "EL"]
+
+
+def test_unified_source_contract_compiles_mixed_hh_and_markov_kinetics(tmp_path):
+    source = tmp_path / "mixed_kinetics.py"
+    source.write_text(
+        """
+from axonscope.membranes.model import Model, currents, markov, rates, state
+from axonscope.membranes.types import ConductanceDensity, CurrentDensity, Gate, Occupancy, Rate, Voltage
+from axonscope.utils.units import cm2, mS, mV, ms
+
+class MixedKinetics(Model):
+    model_kind = "mixed_kinetics"
+
+    kx_alpha: Rate = 1.0 / ms
+    kx_beta: Rate = 3.0 / ms
+    co_rate: Rate = 1.0 / ms
+    oc_rate: Rate = 2.0 / ms
+    gxbar: ConductanceDensity = 1.0 * mS / cm2
+    gobar: ConductanceDensity = 2.0 * mS / cm2
+    ex: Voltage = -70.0 * mV
+    eo: Voltage = 40.0 * mV
+
+    c: Occupancy = state(1.0)
+    o: Occupancy = state(0.0)
+
+    @rates
+    def rates(self, Vm: Voltage):
+        alpha_x: Rate = self.kx_alpha
+        beta_x: Rate = self.kx_beta
+        self.keep(alpha_x, beta_x)
+
+    @markov(
+        "channel",
+        states=("c", "o"),
+        transitions=(("c", "o", "k_co", "k_oc"),),
+    )
+    def channel(self, Vm: Voltage):
+        k_co: Rate = self.co_rate
+        k_oc: Rate = self.oc_rate
+        self.keep(k_co, k_oc)
+
+    @currents
+    def currents(self, Vm: Voltage, x: Gate, c: Occupancy, o: Occupancy):
+        g_x: ConductanceDensity = self.gxbar * x
+        g_o: ConductanceDensity = self.gobar * o
+        I_x: CurrentDensity = g_x * (Vm - self.ex)
+        I_o: CurrentDensity = g_o * (Vm - self.eo)
+        return I_x, I_o, g_x, g_o
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    compiled = compile_model_source_file(
+        source,
+        cache_root=tmp_path / "cache",
+        load_generated_modules=("jax", "numpy"),
+    )
+    model = compiled.model
+    program = membrane_program_from_model_ir(model)
+    assert program.hh_gate_state_names == ("x",)
+    assert program.kinetic_state_names == ("c", "o")
+    assert program.gate_state_names == ("x", "c", "o")
+    assert len(model.kinetics) == 1
+    assert len(model.kinetics[0].transitions) == 2
+    restored = model_ir_from_json(
+        (compiled.cache.directory / "optimized_graph.json").read_text(encoding="utf-8")
+    )
+    assert restored.kinetics == model.kinetics
+    composite = compose_model_ir(
+        (model, model),
+        component_labels=("left", "right"),
+    )
+    assert tuple(block.name for block in composite.kinetics) == (
+        "c0__channel",
+        "c1__channel",
+    )
+    assert membrane_program_from_model_ir(composite).kinetic_state_names == (
+        "c0__c",
+        "c0__o",
+        "c1__c",
+        "c1__o",
+    )
+
+    reference = NumpyModelInterpreter(model, dtype=np.float64)
+    initial = reference.init_gates([-60.0, -40.0])
+    np.testing.assert_allclose(initial[:, 0], 0.25)
+    np.testing.assert_allclose(initial[:, 1:], [[2.0 / 3.0, 1.0 / 3.0]] * 2)
+    updated = reference.gate_update(initial, [-60.0, -40.0], 0.1)
+    np.testing.assert_allclose(np.sum(updated[:, 1:], axis=1), 1.0)
+
+    generated = JaxMembraneProgram.from_generated_module(
+        compiled.cache.loaded_modules["jax"],
+        parameter_overrides={},
+        host_module=compiled.cache.loaded_modules["numpy"],
+    )
+    generated_initial = np.asarray(
+        generated.init_gates(jnp.asarray([-60.0, -40.0], dtype=jnp.float32))
+    )
+    generated_updated = np.asarray(
+        generated.cn_gate_update(
+            jnp.asarray(generated_initial),
+            jnp.asarray([-60.0, -40.0], dtype=jnp.float32),
+            0.1,
+        )
+    )
+    np.testing.assert_allclose(generated_initial, initial, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(generated_updated, updated, rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(
+        generated.init_gates_host(
+            np.asarray([-60.0, -40.0]),
+            dtype_local=np.dtype(np.float64),
+        ),
+        initial,
+    )
 
 
 def test_source_compiler_topologically_orders_equations(tmp_path):
@@ -1449,7 +1564,7 @@ def test_schild_sources_export_full_calcium_step_program(tmp_path):
         assert model.name == name
         assert name + ".py" in model.metadata["source"]
         assert model.metadata["family"] == "schild"
-        assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+        assert model.metadata["source_contract"] == "plain_python_membrane.v2"
         assert next(
             parameter for parameter in model.parameters if parameter.name == "diameter_um"
         ).quantity.unit == "micrometer"
@@ -1528,7 +1643,7 @@ def test_schild_public_descriptors_compile_source_and_keep_dynamic_kca_initial()
     ):
         model = lower_membrane_model_to_ir(public_model)
         assert expected_source in model.metadata["source"]
-        assert model.metadata["source_contract"] == "plain_python_membrane.v1"
+        assert model.metadata["source_contract"] == "plain_python_membrane.v2"
         c_kca = next(state for state in model.states if state.name == "c_kca")
         assert c_kca.initial is not None
         interpreter = NumpyModelInterpreter(model, dtype=np.float64)

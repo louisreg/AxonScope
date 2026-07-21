@@ -308,8 +308,17 @@ def _prepare_uniform_model_ir_initial_arrays(
 
     _ = backend
     np_dtype = np.dtype(dtype_local)
-    vm0_np = np.full((nx,), float(getattr(axon, "v_init", 0.0)), dtype=np_dtype)
-    gates_np = membrane.init_gates_host(vm0_np, dtype_local=np_dtype)
+    v_init = float(getattr(axon, "v_init", 0.0))
+    vm0_np = np.full((nx,), v_init, dtype=np_dtype)
+    gate_row = membrane.init_gates_host(
+        np.asarray([v_init], dtype=np_dtype),
+        dtype_local=np_dtype,
+    )[0]
+    gates_np = np.array(
+        np.broadcast_to(gate_row, (nx, gate_row.shape[0])),
+        dtype=np_dtype,
+        copy=True,
+    )
     background_np = np.zeros((nx,), dtype=np_dtype)
     return (
         jnp.asarray(vm0_np, dtype=dtype_local),

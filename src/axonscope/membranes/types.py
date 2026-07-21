@@ -17,6 +17,7 @@ ConductanceDensity: TypeAlias = Any
 CurrentDensity: TypeAlias = Any
 Dimensionless: TypeAlias = Any
 Gate: TypeAlias = Any
+Occupancy: TypeAlias = Any
 Length: TypeAlias = Any
 Rate: TypeAlias = Any
 RatePerConcentration: TypeAlias = Any
@@ -34,6 +35,7 @@ __all__ = [
     "CurrentDensity",
     "Dimensionless",
     "Gate",
+    "Occupancy",
     "Length",
     "Rate",
     "RatePerConcentration",

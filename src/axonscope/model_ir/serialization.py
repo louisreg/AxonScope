@@ -26,6 +26,10 @@ from .schema import (
     Gate,
     GateUpdateKind,
     Input,
+    KineticBlock,
+    KineticInitialization,
+    KineticTransition,
+    KineticUpdateKind,
     LinearizationGateSource,
     ModelIR,
     MODEL_IR_SCHEMA_VERSION,
@@ -162,6 +166,9 @@ def model_ir_from_data(data: Any) -> ModelIR:
             _function_from_data(item) for item in mapping.get("functions", ())
         ),
         gates=tuple(_gate_from_data(item) for item in mapping.get("gates", ())),
+        kinetics=tuple(
+            _kinetic_block_from_data(item) for item in mapping.get("kinetics", ())
+        ),
         currents=tuple(_current_from_data(item) for item in mapping.get("currents", ())),
         observables=tuple(
             _observable_from_data(item) for item in mapping.get("observables", ())
@@ -267,6 +274,39 @@ def _gate_from_data(data: Any) -> Gate:
         beta=expression_from_data(mapping["beta"]),
         update=GateUpdateKind(str(mapping.get("update", GateUpdateKind.RUSH_LARSEN.value))),
         q10=None if q10 is None else expression_from_data(q10),
+    )
+
+
+def _kinetic_transition_from_data(data: Any) -> KineticTransition:
+    mapping = _typed_mapping(data, "KineticTransition")
+    return KineticTransition(
+        source=str(mapping["source"]),
+        target=str(mapping["target"]),
+        rate=expression_from_data(mapping["rate"]),
+    )
+
+
+def _kinetic_block_from_data(data: Any) -> KineticBlock:
+    mapping = _typed_mapping(data, "KineticBlock")
+    return KineticBlock(
+        name=str(mapping["name"]),
+        states=tuple(str(name) for name in mapping.get("states", ())),
+        transitions=tuple(
+            _kinetic_transition_from_data(item)
+            for item in mapping.get("transitions", ())
+        ),
+        update=KineticUpdateKind(
+            str(mapping.get("update", KineticUpdateKind.BACKWARD_EULER.value))
+        ),
+        initialization=KineticInitialization(
+            str(
+                mapping.get(
+                    "initialization",
+                    KineticInitialization.STATIONARY.value,
+                )
+            )
+        ),
+        conserve_probability=bool(mapping.get("conserve_probability", True)),
     )
 
 

@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from .expressions import BinaryOp, Call, Expression, Literal, Symbol, UnaryOp
-from .schema import Current, Gate, Input, ModelIR, Observable, Parameter, State
+from .schema import Current, Gate, Input, KineticBlock, KineticTransition, ModelIR, Observable, Parameter, State
 from .validation import assert_valid_model_ir
 
 
@@ -43,6 +43,7 @@ def compose_model_ir(
     parameters: list[Parameter] = []
     states: list[State] = []
     gates: list[Gate] = []
+    kinetics: list[KineticBlock] = []
     currents: list[Current] = []
     observables: list[Observable] = []
     state_public_names: dict[str, str] = {}
@@ -94,6 +95,10 @@ def compose_model_ir(
                 state.name,
             )
         gates.extend(_rename_gate(gate, renames) for gate in component.gates)
+        kinetics.extend(
+            _rename_kinetic_block(block, renames, prefix=f"c{index}__")
+            for block in component.kinetics
+        )
         currents.extend(_rename_current(current, renames) for current in component.currents)
         for observable in component.observables:
             renamed_observable = _rename_observable(
@@ -125,6 +130,7 @@ def compose_model_ir(
             parameters=tuple(parameters),
             states=tuple(states),
             gates=tuple(gates),
+            kinetics=tuple(kinetics),
             currents=tuple(currents),
             observables=tuple(observables),
             metadata=metadata,
@@ -209,6 +215,27 @@ def _rename_gate(gate: Gate, renames: dict[str, str]) -> Gate:
         alpha=rewrite_symbols(gate.alpha, renames),
         beta=rewrite_symbols(gate.beta, renames),
         q10=None if gate.q10 is None else rewrite_symbols(gate.q10, renames),
+    )
+
+
+def _rename_kinetic_block(
+    block: KineticBlock,
+    renames: dict[str, str],
+    *,
+    prefix: str,
+) -> KineticBlock:
+    return replace(
+        block,
+        name=f"{prefix}{block.name}",
+        states=tuple(renames.get(name, name) for name in block.states),
+        transitions=tuple(
+            KineticTransition(
+                source=renames.get(transition.source, transition.source),
+                target=renames.get(transition.target, transition.target),
+                rate=rewrite_symbols(transition.rate, renames),
+            )
+            for transition in block.transitions
+        ),
     )
 
 

@@ -82,6 +82,30 @@ def mechanism(name: str, **metadata: Any) -> Callable[[SectionFunction], Section
     return section(f"mechanism:{name}", **metadata)
 
 
+def markov(
+    name: str,
+    *,
+    states: Sequence[str],
+    transitions: Sequence[tuple[str, str, str] | tuple[str, str, str, str]],
+    initialization: str = "stationary",
+    conserve_probability: bool = True,
+) -> Callable[[SectionFunction], SectionFunction]:
+    """Mark a method as one coupled Markov-like kinetic mechanism.
+
+    Each transition is ``(source, target, forward_rate)`` or
+    ``(source, target, forward_rate, backward_rate)``. Rate names refer to
+    annotated locals defined by the decorated ordinary-Python method.
+    """
+
+    return section(
+        f"markov:{name}",
+        states=tuple(str(value) for value in states),
+        transitions=tuple(tuple(str(value) for value in item) for item in transitions),
+        initialization=str(initialization),
+        conserve_probability=bool(conserve_probability),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StateDeclaration:
     """Runtime placeholder for class-based source-model state declarations."""
@@ -99,7 +123,7 @@ def state(
     source: str | None = None,
     bounds: tuple[Any, Any] | None = None,
 ) -> Any:
-    """Declare a non-gate membrane state in a class-based model."""
+    """Declare an occupancy or auxiliary state in a class-based model."""
 
     declaration = StateDeclaration(
         initial,
@@ -128,6 +152,7 @@ class Model(metaclass=_MembraneModelClass):
     dtype: Any = field(default=np.float32, repr=False, compare=False)
 
     model_kind: ClassVar[str | None] = None
+    source_model: ClassVar[type["Model"] | None] = None
     metadata: ClassVar[Mapping[str, Any]] = MappingProxyType({})
     parameter_aliases: ClassVar[Mapping[str, str]] = MappingProxyType({})
 
@@ -156,21 +181,26 @@ class Model(metaclass=_MembraneModelClass):
     def source_path(cls) -> str:
         """Return the Python source file that defines this model class."""
 
-        source = inspect.getsourcefile(cls)
+        source_class = cls.source_model or cls
+        source = inspect.getsourcefile(source_class)
         if source is None:
-            raise TypeError(f"Cannot locate source file for membrane model {cls.__qualname__}.")
+            raise TypeError(
+                "Cannot locate source file for membrane model "
+                f"{source_class.__qualname__}."
+            )
         return source
 
     @classmethod
     def source_class(cls) -> str:
         """Return the class name selected by the source compiler."""
 
-        return cls.__name__
+        return (cls.source_model or cls).__name__
 
     def _raw_parameter_values(self) -> dict[str, Any]:
         if not is_dataclass(self):
             return {}
         values: dict[str, Any] = {}
+        delegated_source = self.__class__.source_model is not None
         provided_aliases = dict(getattr(self, "_provided_parameter_aliases", {}))
         for field_info in fields(self):
             if (
@@ -180,7 +210,11 @@ class Model(metaclass=_MembraneModelClass):
             ):
                 continue
             value = getattr(self, field_info.name)
-            if field_info.default is not MISSING and _matches_default(value, field_info.default):
+            if (
+                not delegated_source
+                and field_info.default is not MISSING
+                and _matches_default(value, field_info.default)
+            ):
                 continue
             values[provided_aliases.get(field_info.name, field_info.name)] = value
         return values

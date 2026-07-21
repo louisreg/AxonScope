@@ -116,6 +116,7 @@ def compile_membrane_model(
                 parameter_overrides=cached_composite.parameter_overrides,
                 dtype_local=model.dtype,
                 codegen_cache=_codegen_cache_metadata(cached_composite.cache),
+                public_model_name=model.kind,
             )
         if cached_runtime is not None:
             return JaxMembraneProgram.from_generated_module(
@@ -126,6 +127,7 @@ def compile_membrane_model(
                 },
                 dtype_local=model.dtype,
                 codegen_cache=_codegen_cache_metadata(cached_runtime.cache),
+                public_model_name=model.kind,
             )
         assert lowered is not None
         if composite_cache is not None:
@@ -139,6 +141,7 @@ def compile_membrane_model(
                 },
                 dtype_local=model.dtype,
                 codegen_cache=_codegen_cache_metadata(composite_cache),
+                public_model_name=model.kind,
             )
         if len(lowered.source_results) != 1:
             raise RuntimeError(
@@ -161,6 +164,7 @@ def compile_membrane_model(
             },
             dtype_local=model.dtype,
             codegen_cache=_codegen_cache_metadata(source_cache),
+            public_model_name=model.kind,
         )
 
 

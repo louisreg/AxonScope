@@ -151,6 +151,7 @@ class MembraneSourceExplanation:
     parameters: tuple[MembraneSourceSymbol, ...]
     states: tuple[MembraneSourceSymbol, ...]
     gates: tuple[str, ...]
+    kinetics: tuple[str, ...]
     currents: tuple[str, ...]
     observables: tuple[str, ...]
     diagnostics: tuple[str, ...]
@@ -201,15 +202,21 @@ def explain(model: MembraneModel) -> MembraneModelExplanation:
 
     lowered_model = lower_membrane_model_to_ir(membrane)
     program = membrane_program_from_model_ir(lowered_model)
+    def public_names(names: tuple[str, ...]) -> tuple[str, ...]:
+        return _public_recording_names(
+            names,
+            source_model_name=program.name,
+            public_model_name=membrane.kind,
+        )
     return MembraneModelExplanation(
         model_kind=membrane.kind,
         components=_component_explanations(membrane),
         recording_outputs=MembraneRecordingOutputExplanation(
-            gates=program.gate_names,
+            gates=public_names(program.gate_names),
             currents=program.current_names,
             conductances=program.conductance_names,
-            states=program.membrane_state_display_names,
-            observables=program.observable_display_names,
+            states=public_names(program.membrane_state_display_names),
+            observables=public_names(program.observable_display_names),
             current_aggregates=_aggregate_names(program.current_names, program.current_groups),
             conductance_aggregates=_aggregate_names(
                 program.conductance_names,
@@ -217,6 +224,23 @@ def explain(model: MembraneModel) -> MembraneModelExplanation:
             ),
         ),
         sources=sources,
+    )
+
+
+def _public_recording_names(
+    names: tuple[str, ...],
+    *,
+    source_model_name: str,
+    public_model_name: str,
+) -> tuple[str, ...]:
+    if source_model_name == public_model_name:
+        return names
+    prefix = f"{source_model_name}."
+    return tuple(
+        f"{public_model_name}.{name.removeprefix(prefix)}"
+        if name.startswith(prefix)
+        else name
+        for name in names
     )
 
 
@@ -281,6 +305,7 @@ def format_membrane_model_explanation(report: MembraneModelExplanation) -> str:
                 f"    parameters={_format_symbols(source.parameters)}",
                 f"    states={_format_symbols(source.states)}",
                 f"    gates={_format_names(source.gates)}",
+                f"    kinetics={_format_names(source.kinetics)}",
                 f"    currents={_format_names(source.currents)}",
                 f"    observables={_format_names(source.observables)}",
                 f"    diagnostics={_format_names(source.diagnostics)}",
@@ -397,6 +422,10 @@ def _explain_source(source: GeneratedMembraneCodeInspection) -> MembraneSourceEx
         parameters=tuple(_symbol(parameter) for parameter in compiled_model.parameters),
         states=tuple(_symbol(state) for state in compiled_model.states),
         gates=tuple(gate.name for gate in compiled_model.gates),
+        kinetics=tuple(
+            f"{block.name}({', '.join(block.states)})"
+            for block in compiled_model.kinetics
+        ),
         currents=tuple(current.name for current in compiled_model.currents),
         observables=tuple(observable.name for observable in compiled_model.observables),
         diagnostics=_diagnostics(compiled_model),

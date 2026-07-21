@@ -91,6 +91,8 @@ def validate_model_ir(
                     )
                 )
 
+    _validate_kinetic_blocks(model, env, registry, issues)
+
     for current in model.currents:
         spec = _infer(current.current, env, registry, issues, f"current.{current.name}")
         if spec.unit != current.quantity.unit:
@@ -152,6 +154,67 @@ def validate_model_ir(
         _validate_step_program(model, env, registry, issues)
 
     return tuple(issues)
+
+
+def _validate_kinetic_blocks(
+    model: ModelIR,
+    env: dict[str, QuantitySpec],
+    registry: IntrinsicRegistry,
+    issues: list[ValidationIssue],
+) -> None:
+    states = {state.name: state for state in model.states}
+    gate_states = {gate.state for gate in model.gates}
+    seen_states: set[str] = set()
+    seen_names: set[str] = set()
+    for block in model.kinetics:
+        path = f"kinetic.{block.name}"
+        if block.name in seen_names:
+            issues.append(ValidationIssue(path, "duplicate kinetic block name"))
+        seen_names.add(block.name)
+        if len(block.states) < 2:
+            issues.append(ValidationIssue(path, "requires at least two states"))
+        if len(set(block.states)) != len(block.states):
+            issues.append(ValidationIssue(path, "contains duplicate states"))
+        overlap = seen_states.intersection(block.states)
+        if overlap:
+            issues.append(
+                ValidationIssue(path, f"states belong to multiple blocks: {sorted(overlap)!r}")
+            )
+        seen_states.update(block.states)
+        for state_name in block.states:
+            state = states.get(state_name)
+            if state is None:
+                issues.append(ValidationIssue(path, f"references unknown state {state_name!r}"))
+            elif state.quantity.role is not SemanticRole.OCCUPANCY:
+                issues.append(
+                    ValidationIssue(path, f"state {state_name!r} must have occupancy role")
+                )
+            if state_name in gate_states:
+                issues.append(
+                    ValidationIssue(path, f"state {state_name!r} is also an HH gate")
+                )
+        known = set(block.states)
+        for index, transition in enumerate(block.transitions):
+            transition_path = f"{path}.transition[{index}]"
+            if transition.source not in known or transition.target not in known:
+                issues.append(
+                    ValidationIssue(
+                        transition_path,
+                        "transition endpoints must belong to the same kinetic block",
+                    )
+                )
+            if transition.source == transition.target:
+                issues.append(ValidationIssue(transition_path, "self transitions are invalid"))
+            spec = _infer(transition.rate, env, registry, issues, transition_path)
+            if spec.unit not in {DIMENSIONLESS, RATE_PER_MS} and not is_dimensionless(spec.unit):
+                issues.append(
+                    ValidationIssue(
+                        transition_path,
+                        f"rate expression must be dimensionless or {RATE_PER_MS!r}, got {spec.unit!r}",
+                    )
+                )
+        if not block.transitions:
+            issues.append(ValidationIssue(path, "requires at least one transition"))
 
 
 def _validate_component_metadata(model: ModelIR, issues: list[ValidationIssue]) -> None:

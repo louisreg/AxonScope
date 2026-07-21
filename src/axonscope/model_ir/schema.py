@@ -13,7 +13,7 @@ from axonscope.utils.units import DIMENSIONLESS
 from .expressions import Expression, Symbol, symbol
 
 
-MODEL_IR_SCHEMA_VERSION = "model_ir.v1"
+MODEL_IR_SCHEMA_VERSION = "model_ir.v2"
 
 
 class Variability(Enum):
@@ -36,6 +36,7 @@ class SemanticRole(Enum):
     RESISTANCE_AREA = "resistance_area"
     TEMPERATURE = "temperature"
     GATE = "gate"
+    OCCUPANCY = "occupancy"
     DIMENSIONLESS = "dimensionless"
     UNKNOWN = "unknown"
 
@@ -43,6 +44,15 @@ class SemanticRole(Enum):
 class GateUpdateKind(Enum):
     RUSH_LARSEN = "rush_larsen"
     CRANK_NICOLSON = "crank_nicolson"
+
+
+class KineticUpdateKind(Enum):
+    BACKWARD_EULER = "backward_euler"
+
+
+class KineticInitialization(Enum):
+    STATIONARY = "stationary"
+    DECLARED = "declared"
 
 
 class LinearizationGateSource(Enum):
@@ -148,6 +158,29 @@ class Gate:
 
 
 @dataclass(frozen=True, slots=True)
+class KineticTransition:
+    source: str
+    target: str
+    rate: Expression
+
+
+@dataclass(frozen=True, slots=True)
+class KineticBlock:
+    """One coupled finite-state kinetic mechanism."""
+
+    name: str
+    states: tuple[str, ...]
+    transitions: tuple[KineticTransition, ...]
+    update: KineticUpdateKind = KineticUpdateKind.BACKWARD_EULER
+    initialization: KineticInitialization = KineticInitialization.STATIONARY
+    conserve_probability: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "states", tuple(self.states))
+        object.__setattr__(self, "transitions", tuple(self.transitions))
+
+
+@dataclass(frozen=True, slots=True)
 class Current:
     """A linearizable outward membrane-current contribution."""
 
@@ -213,6 +246,7 @@ class ModelIR:
     states: tuple[State, ...] = ()
     functions: tuple[FunctionDef, ...] = ()
     gates: tuple[Gate, ...] = ()
+    kinetics: tuple[KineticBlock, ...] = ()
     currents: tuple[Current, ...] = ()
     observables: tuple[Observable, ...] = ()
     step_program: StepProgram | None = None
@@ -225,6 +259,7 @@ class ModelIR:
         object.__setattr__(self, "states", tuple(self.states))
         object.__setattr__(self, "functions", tuple(self.functions))
         object.__setattr__(self, "gates", tuple(self.gates))
+        object.__setattr__(self, "kinetics", tuple(self.kinetics))
         object.__setattr__(self, "currents", tuple(self.currents))
         object.__setattr__(self, "observables", tuple(self.observables))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))

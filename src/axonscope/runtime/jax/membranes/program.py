@@ -37,6 +37,7 @@ class JaxMembraneProgram:
         host_module: Any | None = None,
         parameter_overrides: dict[str, Any] | None = None,
         codegen_cache: dict[str, Any] | None = None,
+        public_model_name: str | None = None,
     ) -> None:
         if program is None and generated_module is None:
             raise ValueError("A membrane program or generated module is required.")
@@ -72,6 +73,13 @@ class JaxMembraneProgram:
             self._parameter_values = parameter_defaults(program.model)
             self.lowering = JaxModelIRLowering(program.model, dtype=self.dtype)
         self._codegen_cache = dict(codegen_cache or {})
+        source_model_name = (
+            self.generated_contract.model_name
+            if self.generated_contract is not None
+            else program.name
+        )
+        self.model_name = source_model_name if public_model_name is None else str(public_model_name)
+        self._source_model_name = source_model_name
         self.q10 = dtype(self._representative_q10())
         self._static_signature_cache: tuple[Any, ...] | None = None
         self._g_bar_cache: jnp.ndarray | None = None
@@ -103,6 +111,7 @@ class JaxMembraneProgram:
         dtype_local: jnp.dtype | None = None,
         host_module: Any | None = None,
         codegen_cache: dict[str, Any] | None = None,
+        public_model_name: str | None = None,
     ) -> "JaxMembraneProgram":
         """Build directly from an autonomous generated runtime artifact."""
 
@@ -113,6 +122,7 @@ class JaxMembraneProgram:
             host_module=host_module,
             parameter_overrides=parameter_overrides,
             codegen_cache=codegen_cache,
+            public_model_name=public_model_name,
         )
 
     @property
@@ -133,6 +143,7 @@ class JaxMembraneProgram:
                 (name, _parameter_signature_value(value))
                 for name, value in sorted(self._parameter_values.items())
             ),
+            self.model_name,
             self._final_gate_update_mode,
         )
         self._static_signature_cache = signature
@@ -273,32 +284,75 @@ class JaxMembraneProgram:
         values = raw if isinstance(raw, tuple) else (raw,)
         if len(values) != len(spec.outputs):
             raise ValueError("Generated host gate output count is inconsistent.")
-        alpha = np.stack(
-            [np.broadcast_to(value, V.shape) for value in values[0::3]], axis=1
-        ).astype(dtype_local)
-        beta = np.stack(
-            [np.broadcast_to(value, V.shape) for value in values[1::3]], axis=1
-        ).astype(dtype_local)
-        return alpha / np.maximum(alpha + beta, np.asarray(1e-12, dtype=dtype_local))
+        hh_count = len(self.generated_contract.hh_gate_state_names)
+        if hh_count:
+            alpha = np.stack(
+                [np.broadcast_to(value, V.shape) for value in values[0::3]], axis=1
+            ).astype(dtype_local)
+            beta = np.stack(
+                [np.broadcast_to(value, V.shape) for value in values[1::3]], axis=1
+            ).astype(dtype_local)
+            hh = alpha / np.maximum(
+                alpha + beta,
+                np.asarray(1e-12, dtype=dtype_local),
+            )
+        else:
+            hh = np.zeros((V.shape[0], 0), dtype=dtype_local)
+        kinetics = self._init_kinetic_states_host(V, env=env, dtype_local=dtype_local)
+        return np.concatenate((hh, kinetics), axis=1)
+
+    def _init_kinetic_states_host(
+        self,
+        V: np.ndarray,
+        *,
+        env: dict[str, np.ndarray],
+        dtype_local: np.dtype,
+    ) -> np.ndarray:
+        contract = self.generated_contract
+        if contract is None or self._host_module is None or not contract.kinetic_blocks:
+            return np.zeros((V.shape[0], 0), dtype=dtype_local)
+
+        def outputs(function_name: str) -> dict[str, np.ndarray]:
+            function_spec = contract.function(function_name)
+            raw_values = getattr(self._host_module, function_name)(
+                *(env[name] for name in function_spec.args)
+            )
+            values = raw_values if isinstance(raw_values, tuple) else (raw_values,)
+            return {
+                name: np.broadcast_to(value, V.shape).astype(dtype_local)
+                for name, value in zip(function_spec.outputs, values, strict=True)
+            }
+
+        rates = outputs("kinetic_terms")
+        declared = outputs("kinetic_initials")
+        columns: list[np.ndarray] = []
+        for block in contract.kinetic_blocks:
+            width = len(block.states)
+            if block.initialization == "stationary":
+                matrix = np.zeros((V.shape[0], width, width), dtype=dtype_local)
+                for transition in block.transitions:
+                    rate = rates[transition.output]
+                    matrix[:, transition.target, transition.source] += rate
+                    matrix[:, transition.source, transition.source] -= rate
+                matrix[:, -1, :] = np.asarray(1.0, dtype=dtype_local)
+                rhs = np.zeros((V.shape[0], width), dtype=dtype_local)
+                rhs[:, -1] = np.asarray(1.0, dtype=dtype_local)
+                block_values = np.linalg.solve(matrix, rhs[..., None])[..., 0]
+            else:
+                block_values = np.stack(
+                    [declared[name] for name in block.states], axis=1
+                )
+            if block.conserve_probability:
+                block_values = np.maximum(block_values, 0.0)
+                block_values /= np.maximum(
+                    np.sum(block_values, axis=1, keepdims=True),
+                    np.asarray(1e-12, dtype=dtype_local),
+                )
+            columns.extend(block_values[:, index] for index in range(width))
+        return np.stack(columns, axis=1).astype(dtype_local)
 
     def cn_gate_update(self, g_prev: jnp.ndarray, V_mV: jnp.ndarray, dt: float) -> jnp.ndarray:
-        gates = jnp.asarray(g_prev, dtype=self.dtype)
-        if gates.shape[-1] == 0:
-            return gates
-        alpha, beta, q10 = self.lowering.gate_terms(V_mV)
-        alpha = q10 * alpha
-        beta = q10 * beta
-        sum_ab = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))
-        dt_local = jnp.asarray(dt, dtype=self.dtype)
-        if all(mode == "crank_nicolson" for mode in self._gate_update_modes):
-            denom = jnp.maximum(
-                1.0 / dt_local + 0.5 * sum_ab,
-                jnp.asarray(1e-12, dtype=self.dtype),
-            )
-            return alpha / denom + ((1.0 / dt_local) - 0.5 * sum_ab) / denom * gates
-        g_inf = alpha / sum_ab
-        tau = jnp.asarray(1.0, dtype=self.dtype) / sum_ab
-        return g_inf - (g_inf - gates) * jnp.exp(-dt_local / tau)
+        return self.lowering.gate_update(g_prev, V_mV, dt)
 
     def final_gate_update(
         self,
@@ -356,8 +410,10 @@ class JaxMembraneProgram:
 
     def gate_names(self) -> tuple[str, ...]:
         if self.generated_contract is not None:
-            return self.generated_contract.gate_names
-        return self.program.gate_names
+            names = self.generated_contract.gate_names
+        else:
+            names = self.program.gate_names
+        return self._public_names(names)
 
     def conductance_names(self) -> tuple[str, ...]:
         if self.generated_contract is not None:
@@ -521,7 +577,7 @@ class JaxMembraneProgram:
 
     def _representative_q10(self) -> float:
         if self.generated_contract is not None:
-            if not self.generated_contract.gate_state_names:
+            if not self.generated_contract.hh_gate_state_names:
                 return 1.0
             if self._host_module is not None:
                 spec = self.generated_contract.function("gate_terms")
@@ -584,8 +640,21 @@ class JaxMembraneProgram:
     @property
     def _membrane_state_display_names(self) -> tuple[str, ...]:
         if self.generated_contract is not None:
-            return self.generated_contract.membrane_state_display_names
-        return self.program.membrane_state_display_names
+            names = self.generated_contract.membrane_state_display_names
+        else:
+            names = self.program.membrane_state_display_names
+        return self._public_names(names)
+
+    def _public_names(self, names: tuple[str, ...]) -> tuple[str, ...]:
+        if self.model_name == self._source_model_name:
+            return names
+        prefix = f"{self._source_model_name}."
+        return tuple(
+            f"{self.model_name}.{name.removeprefix(prefix)}"
+            if name.startswith(prefix)
+            else name
+            for name in names
+        )
 
     @property
     def _structural_hash(self) -> str:
@@ -626,9 +695,7 @@ class JaxMembraneProgram:
 def is_jax_membrane_program_kind(model: Any, kind: str) -> bool:
     if not isinstance(model, JaxMembraneProgram):
         return False
-    if model.generated_contract is not None:
-        return model.generated_contract.model_name == kind
-    return model.program is not None and model.program.name == kind
+    return model.model_name == kind
 
 
 def _validate_generated_contract(

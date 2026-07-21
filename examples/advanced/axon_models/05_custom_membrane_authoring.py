@@ -7,6 +7,7 @@ This example covers the public P7 membrane-authoring contract:
 
 - a passive leak class with named intermediate equations;
 - a small gated HH-style class with a mechanism section;
+- a coupled two-state Markov channel using the same model language;
 - a non-gate state with step diagnostics;
 - generated-code and source explain reports;
 - a short simulation using the custom membrane;
@@ -23,6 +24,7 @@ from axonscope.membranes.types import (
     CurrentDensity,
     Dimensionless,
     Gate,
+    Occupancy,
     Rate,
     ResistanceArea,
     Time,
@@ -75,6 +77,37 @@ class DemoSodiumLeak(axs.membranes.Model):
         I_na: CurrentDensity = g_na * drive_na
         I_l: CurrentDensity = g_l * drive_l
         return I_na, I_l, g_na, g_l
+
+
+class DemoMarkovSodium(axs.membranes.Model):
+    """Two-state sodium channel with conserved closed/open occupancies."""
+
+    model_kind = "demo_markov_sodium"
+
+    gna: ConductanceDensity = 20.0 * axs.mS_per_cm2
+    ena: Voltage = 45.0 * axs.mV
+    opening_rate: Rate = 0.8 / axs.ms
+    closing_rate: Rate = 0.2 / axs.ms
+
+    closed: Occupancy = axs.membranes.state(1.0)
+    open: Occupancy = axs.membranes.state(0.0)
+
+    @axs.membranes.markov(
+        "sodium",
+        states=("closed", "open"),
+        transitions=(("closed", "open", "alpha", "beta"),),
+        initialization="stationary",
+    )
+    def sodium(self, Vm: Voltage):
+        alpha: Rate = self.opening_rate
+        beta: Rate = self.closing_rate
+        self.keep(alpha, beta)
+
+    @axs.membranes.currents(outputs=("I_na",), observables=("g_na",))
+    def currents(self, Vm: Voltage, closed: Occupancy, open: Occupancy):
+        g_na: ConductanceDensity = self.gna * open
+        I_na: CurrentDensity = g_na * (Vm - self.ena)
+        return I_na, g_na
 
 
 class RelaxingLeak(axs.membranes.Model):
@@ -143,6 +176,7 @@ class InvalidMissingSymbol(axs.membranes.Model):
 def main() -> None:
     print(DemoLeak().explain().format())
     print(DemoSodiumLeak().inspect_generated_code().format())
+    print(DemoMarkovSodium().explain().format())
     print(RelaxingLeak().explain().format())
 
     try:

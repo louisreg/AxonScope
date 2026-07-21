@@ -52,8 +52,73 @@ cache-hit compilation for a labelled composite membrane:
 MPLBACKEND=Agg python benchmark/membrane_runtime_cache.py \
   --models hodgkin_huxley,schild97 \
   --repeats 25 \
-  --output benchmark/results/p17_generated_runtime_cache_local/summary.json
+    --output benchmark/results/p17_generated_runtime_cache_local/summary.json
 ```
+
+`benchmark/membrane_kinetics.py` isolates generated membrane updates and can
+compare the synthetic six-state topology, Nav1.6, Hodgkin-Huxley, and AxNode.
+It reports first-call and warm costs by kinetic node; `--profile-stages` also
+separates rates, static dense assembly, generic dense solve, the retained
+model-agnostic unrolled kinetic solve, and the fused full update:
+
+```bash
+MPLBACKEND=Agg python benchmark/membrane_kinetics.py \
+  --models nav16,hodgkin_huxley,axnode \
+  --axons 1,128,1024 --nodes 200 --repeats 20 --profile-stages \
+  --output benchmark/results/p18_membrane_kinetics_local/comparison.json
+```
+
+The 2026-07-21 local CPU work at 204,800 kinetic nodes reduced the initial
+Nav1.6 warm update from about 114 ms to a same-process median of 6.9 ms. The
+retained generated path assembles the implicit system directly from transition
+rates, eliminates one state for conserved blocks, and avoids materializing the
+29.5 MB `[N, 6, 6]` matrix. In
+`nav16_dense_vs_matrix_free_same_process.json`, the retained dense 5x5
+reference takes 15.0 ms versus 6.9 ms for the matrix-free update (2.17x).
+Uniform stationary initialization is also solved once and broadcast: 1.19 ms
+versus 485 ms for 204,800 identical sites. GPU and full temporal-solver
+evidence remain required before closing the P18 runtime task.
+
+`benchmark/membrane_temporal.py` supplies that full temporal baseline through
+the canonical public `AxonSimulation.run()` route. It compares HH-only,
+Nav1.6 Markov, and mixed HH+Markov membranes in single-cable, uniform
+double-cable, and node-localized double-cable layouts. Each case retains the
+runtime span detail and reports construction, cold/warm run time, active
+kinetic compartments, and evolving-state bytes. A single center-Vm trace is
+retained so the benchmark exercises a valid minimal public recording route
+without adding a membrane-dependent solver observer:
+
+```bash
+MPLBACKEND=Agg python benchmark/run.py \
+  --script membrane_temporal --preset quick --platform cpu
+MPLBACKEND=Agg python benchmark/run.py \
+  --script membrane_temporal --preset gpu_realistic --platform gpu \
+  --case-filter nav16_double_node_localized
+```
+
+`benchmark/curves/nav_isoform_voltage_clamp.py` reproduces the four ModelDB
+230137 Nav1.1-Nav1.9 validation surfaces without adding a public clamp runtime:
+I-V, normalized G-V, steady-state availability, and recovery from fast
+inactivation. It writes one JSON report and four figures:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=benchmark/results/.matplotlib-cache \
+python benchmark/curves/nav_isoform_voltage_clamp.py \
+  --output benchmark/results/p18_nav_voltage_clamp_local
+```
+
+`benchmark/baselines/modeldb_230137_voltage_clamp.py` extracts independent
+I-V/G-V, availability, and recovery
+reference from an externally downloaded and compiled ModelDB 230137 checkout.
+The MOD files are deliberately not vendored. Run the script through headless
+NEURON after compiling `Nav11_a.mod` through `Nav19_a.mod` and `vclmp_pl.mod`,
+then pass its JSON back to the AxonScope runner with
+`--modeldb-reference`. The 2026-07-20 local comparison in
+`benchmark/results/p18_nav_voltage_clamp_local_20260720/` has I-V NRMSE below
+0.272%, G-V NRMSE below 0.223%, availability NRMSE below 0.236%, and recovery
+NRMSE below 1.236% for every isoform. The only larger pointwise current error
+is Nav1.6 exactly at `V = Ena`, where the ideal AxonScope clamp is zero and
+ModelDB's finite-series-resistance clamp is not.
 
 P17 GPU membrane-layout A/B traces reuse
 `benchmark/protocols/recruitment_amplitude_batch.py`. The Naxon=1024 P100

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v3"
+MEMBRANE_RUNTIME_CONTRACT_VERSION = "jax_membrane_runtime.v4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +43,27 @@ class GeneratedFunctionSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class GeneratedKineticTransitionSpec:
+    """One directed transition in a generated kinetic block."""
+
+    source: int
+    target: int
+    output: str
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedKineticBlockSpec:
+    """Runtime metadata for one coupled occupancy-state block."""
+
+    name: str
+    states: tuple[str, ...]
+    state_indices: tuple[int, ...]
+    transitions: tuple[GeneratedKineticTransitionSpec, ...]
+    initialization: str
+    conserve_probability: bool
+
+
+@dataclass(frozen=True, slots=True)
 class GeneratedMembraneContract:
     """Model-specific facts required by the JAX runtime after generation."""
 
@@ -56,6 +77,9 @@ class GeneratedMembraneContract:
     diagnostics: tuple[GeneratedQuantitySpec, ...]
     functions: Mapping[str, GeneratedFunctionSpec]
     gate_state_names: tuple[str, ...]
+    hh_gate_state_names: tuple[str, ...]
+    kinetic_state_names: tuple[str, ...]
+    kinetic_blocks: tuple[GeneratedKineticBlockSpec, ...]
     gate_update_modes: tuple[str, ...]
     membrane_state_names: tuple[str, ...]
     gate_trace_observable_names: tuple[str, ...]
@@ -165,6 +189,12 @@ def load_generated_membrane_contract(
             if isinstance(spec, Mapping)
         },
         gate_state_names=_string_tuple(raw, "gate_state_names"),
+        hh_gate_state_names=_string_tuple(raw, "hh_gate_state_names"),
+        kinetic_state_names=_string_tuple(raw, "kinetic_state_names"),
+        kinetic_blocks=tuple(
+            _kinetic_block_spec(entry)
+            for entry in _mapping_sequence(raw, "kinetic_blocks")
+        ),
         gate_update_modes=_string_tuple(raw, "gate_update_modes"),
         membrane_state_names=_string_tuple(raw, "membrane_state_names"),
         gate_trace_observable_names=_string_tuple(
@@ -215,6 +245,8 @@ def load_generated_membrane_contract(
     required_functions = {
         "init_state",
         "gate_terms",
+        "kinetic_terms",
+        "kinetic_initials",
         "membrane_terms",
         "reversal_terms",
         "model_step",
@@ -227,6 +259,10 @@ def load_generated_membrane_contract(
     if missing_functions:
         names = ", ".join(sorted(missing_functions))
         raise ValueError(f"Generated membrane contract is missing functions: {names}.")
+    if contract.gate_state_names != (
+        contract.hh_gate_state_names + contract.kinetic_state_names
+    ):
+        raise ValueError("Generated membrane kinetic-state metadata is inconsistent.")
     state_names = tuple(value.name for value in contract.states)
     expected_state_names = set(contract.gate_state_names) | set(
         contract.membrane_state_names
@@ -266,7 +302,7 @@ def load_generated_membrane_contract(
     )
     if contract.function("gate_terms").outputs != tuple(
         item
-        for state_name in contract.gate_state_names
+        for state_name in contract.hh_gate_state_names
         for item in (
             f"alpha:{state_name}",
             f"beta:{state_name}",
@@ -274,6 +310,15 @@ def load_generated_membrane_contract(
         )
     ):
         raise ValueError("Generated gate-term signature is inconsistent.")
+    kinetic_outputs = tuple(
+        transition.output
+        for block in contract.kinetic_blocks
+        for transition in block.transitions
+    )
+    if contract.function("kinetic_terms").outputs != kinetic_outputs:
+        raise ValueError("Generated kinetic-term signature is inconsistent.")
+    if contract.function("kinetic_initials").outputs != contract.kinetic_state_names:
+        raise ValueError("Generated kinetic-initial signature is inconsistent.")
     if len(contract.function("membrane_terms").outputs) != 2 * len(
         contract.currents
     ):
@@ -329,6 +374,35 @@ def _quantity_spec(value: Mapping[str, Any]) -> GeneratedQuantitySpec:
         dtype=_required_string(value, "dtype"),
         shape=tuple(value.get("shape", ())),
         role=_required_string(value, "role"),
+    )
+
+
+def _kinetic_block_spec(value: Mapping[str, Any]) -> GeneratedKineticBlockSpec:
+    transitions = tuple(
+        GeneratedKineticTransitionSpec(
+            source=int(entry.get("source", -1)),
+            target=int(entry.get("target", -1)),
+            output=_required_string(entry, "output"),
+        )
+        for entry in _mapping_sequence(value, "transitions")
+    )
+    states = _string_tuple(value, "states")
+    indices = tuple(int(index) for index in value.get("state_indices", ()))
+    if len(states) < 2 or len(states) != len(indices):
+        raise ValueError("Generated kinetic block state metadata is inconsistent.")
+    if not transitions or any(
+        transition.source not in range(len(states))
+        or transition.target not in range(len(states))
+        for transition in transitions
+    ):
+        raise ValueError("Generated kinetic block transitions are inconsistent.")
+    return GeneratedKineticBlockSpec(
+        name=_required_string(value, "name"),
+        states=states,
+        state_indices=indices,
+        transitions=transitions,
+        initialization=_required_string(value, "initialization"),
+        conserve_probability=_required_bool(value, "conserve_probability"),
     )
 
 
@@ -404,6 +478,8 @@ def _index_groups(
 
 
 __all__ = [
+    "GeneratedKineticBlockSpec",
+    "GeneratedKineticTransitionSpec",
     "GeneratedMembraneContract",
     "GeneratedFunctionSpec",
     "GeneratedParameterSpec",

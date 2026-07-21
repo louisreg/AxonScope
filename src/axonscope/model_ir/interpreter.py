@@ -9,7 +9,13 @@ import numpy as np
 
 from .expressions import BinaryOp, Call, Expression, Literal, Symbol, UnaryOp
 from .program import membrane_program_from_model_ir
-from .schema import GateUpdateKind, LinearizationGateSource, ModelIR, StateUpdate
+from .schema import (
+    GateUpdateKind,
+    KineticInitialization,
+    LinearizationGateSource,
+    ModelIR,
+    StateUpdate,
+)
 
 
 def parameter_defaults(model: ModelIR) -> dict[str, float]:
@@ -96,6 +102,8 @@ class NumpyModelInterpreter:
         self.parameters = parameter_defaults(model)
         self.program = membrane_program_from_model_ir(model)
         self.gate_state_names = self.program.gate_state_names
+        self.hh_gate_state_names = self.program.hh_gate_state_names
+        self.kinetic_state_names = self.program.kinetic_state_names
         self.membrane_states = self.program.membrane_states
         self.membrane_state_names = self.program.membrane_state_names
         self.state_names = self.gate_state_names
@@ -132,7 +140,11 @@ class NumpyModelInterpreter:
             )
             for gate in self.model.gates
         ]
-        return _stack_columns(alpha, V.shape[0], self.dtype), _stack_columns(beta, V.shape[0], self.dtype)
+        empty = [np.zeros((V.shape[0],), dtype=self.dtype) for _ in self.kinetic_state_names]
+        return (
+            _stack_columns(alpha + empty, V.shape[0], self.dtype),
+            _stack_columns(beta + empty, V.shape[0], self.dtype),
+        )
 
     def q10_factors(
         self,
@@ -154,6 +166,10 @@ class NumpyModelInterpreter:
                         self.dtype,
                     )
                 )
+        factors.extend(
+            np.ones((V.shape[0],), dtype=self.dtype)
+            for _ in self.kinetic_state_names
+        )
         return _stack_columns(factors, V.shape[0], self.dtype)
 
     def init_gates(
@@ -163,11 +179,17 @@ class NumpyModelInterpreter:
         parameters: dict[str, Any] | None = None,
     ) -> np.ndarray:
         V = np.atleast_1d(np.asarray(V0_mV, dtype=self.dtype))
-        if not self.model.gates:
+        if not self.gate_state_names:
             return np.zeros((V.shape[0], 0), dtype=self.dtype)
         alpha, beta = self.rate_constants(V, parameters=parameters)
-        denom = np.maximum(alpha + beta, self.dtype.type(1e-12))
-        return alpha / denom
+        hh_count = len(self.hh_gate_state_names)
+        denom = np.maximum(
+            alpha[:, :hh_count] + beta[:, :hh_count],
+            self.dtype.type(1e-12),
+        )
+        hh = alpha[:, :hh_count] / denom
+        kinetics = self._init_kinetic_states(V, parameters=parameters)
+        return np.concatenate((hh, kinetics), axis=1)
 
     def init_membrane_state(
         self,
@@ -203,17 +225,111 @@ class NumpyModelInterpreter:
         V = np.atleast_1d(np.asarray(V_mV, dtype=self.dtype))
         if gates.shape[-1] == 0:
             return gates
+        hh_count = len(self.hh_gate_state_names)
         alpha, beta = self.rate_constants(V, parameters=parameters)
         q10 = self.q10_factors(V, parameters=parameters)
+        alpha = alpha[:, :hh_count]
+        beta = beta[:, :hh_count]
+        q10 = q10[:, :hh_count]
         alpha = q10 * alpha
         beta = q10 * beta
         sum_ab = np.maximum(alpha + beta, self.dtype.type(1e-12))
         g_inf = alpha / sum_ab
+        hh_previous = gates[:, :hh_count]
         if all(gate.update is GateUpdateKind.CRANK_NICOLSON for gate in self.model.gates):
             denom = np.maximum(1.0 / dt_ms + 0.5 * sum_ab, self.dtype.type(1e-12))
-            return alpha / denom + ((1.0 / dt_ms) - 0.5 * sum_ab) / denom * gates
-        tau = self.dtype.type(1.0) / sum_ab
-        return g_inf - (g_inf - gates) * np.exp(-self.dtype.type(dt_ms) / tau)
+            hh = alpha / denom + ((1.0 / dt_ms) - 0.5 * sum_ab) / denom * hh_previous
+        else:
+            tau = self.dtype.type(1.0) / sum_ab
+            hh = g_inf - (g_inf - hh_previous) * np.exp(-self.dtype.type(dt_ms) / tau)
+        kinetics = self._update_kinetic_states(
+            gates[:, hh_count:],
+            V,
+            dt_ms,
+            parameters=parameters,
+        )
+        return np.concatenate((hh, kinetics), axis=1)
+
+    def _init_kinetic_states(
+        self,
+        V: np.ndarray,
+        *,
+        parameters: dict[str, Any] | None,
+    ) -> np.ndarray:
+        env = self._base_env(V, parameters=parameters)
+        values: list[np.ndarray] = []
+        states = {state.name: state for state in self.model.states}
+        for block in self.model.kinetics:
+            if block.initialization is KineticInitialization.STATIONARY:
+                matrix = self._kinetic_matrix(block, env, V.shape[0])
+                system = np.array(matrix, copy=True)
+                system[:, -1, :] = self.dtype.type(1.0)
+                rhs = np.zeros((V.shape[0], len(block.states)), dtype=self.dtype)
+                rhs[:, -1] = self.dtype.type(1.0)
+                block_values = np.linalg.solve(system, rhs[..., None])[..., 0]
+            else:
+                block_values = _stack_columns(
+                    [
+                        np.zeros((V.shape[0],), dtype=self.dtype)
+                        if states[name].initial is None
+                        else _as_node_vector(
+                            evaluate_expression_np(states[name].initial, env, dtype=self.dtype),
+                            V.shape[0],
+                            self.dtype,
+                        )
+                        for name in block.states
+                    ],
+                    V.shape[0],
+                    self.dtype,
+                )
+            if block.conserve_probability:
+                block_values = _normalize_probabilities_np(block_values, self.dtype)
+            values.extend(block_values[:, index] for index in range(block_values.shape[1]))
+        return _stack_columns(values, V.shape[0], self.dtype)
+
+    def _update_kinetic_states(
+        self,
+        previous: np.ndarray,
+        V: np.ndarray,
+        dt_ms: Any,
+        *,
+        parameters: dict[str, Any] | None,
+    ) -> np.ndarray:
+        env = self._base_env(V, parameters=parameters)
+        values: list[np.ndarray] = []
+        offset = 0
+        for block in self.model.kinetics:
+            width = len(block.states)
+            matrix = self._kinetic_matrix(block, env, V.shape[0])
+            identity = np.broadcast_to(
+                np.eye(width, dtype=self.dtype),
+                matrix.shape,
+            )
+            block_values = np.linalg.solve(
+                identity - self.dtype.type(dt_ms) * matrix,
+                previous[:, offset : offset + width, None],
+            )[..., 0]
+            if block.conserve_probability:
+                block_values = _normalize_probabilities_np(block_values, self.dtype)
+            values.extend(block_values[:, index] for index in range(width))
+            offset += width
+        return _stack_columns(values, V.shape[0], self.dtype)
+
+    def _kinetic_matrix(self, block: Any, env: dict[str, Any], node_count: int) -> np.ndarray:
+        width = len(block.states)
+        indices = {name: index for index, name in enumerate(block.states)}
+        matrix = np.zeros((node_count, width, width), dtype=self.dtype)
+        for transition in block.transitions:
+            source = indices[transition.source]
+            target = indices[transition.target]
+            rate = _as_node_vector(
+                evaluate_expression_np(transition.rate, env, dtype=self.dtype),
+                node_count,
+                self.dtype,
+            )
+            matrix[:, target, source] += rate
+            matrix[:, source, source] -= rate
+        return matrix
 
     def conductances(
         self,
@@ -693,3 +809,9 @@ def _stack_columns(values: list[np.ndarray], node_count: int, dtype: np.dtype) -
     if not values:
         return np.zeros((node_count, 0), dtype=dtype)
     return np.stack(values, axis=1).astype(dtype, copy=False)
+
+
+def _normalize_probabilities_np(values: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    clipped = np.maximum(values, dtype.type(0.0))
+    total = np.sum(clipped, axis=1, keepdims=True)
+    return clipped / np.maximum(total, dtype.type(1e-12))

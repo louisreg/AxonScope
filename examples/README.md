@@ -49,8 +49,8 @@ still runnable examples, but they explain the moving parts more explicitly.
 - `axon_models/04_non_uniform_activation_function.py`: derive a non-uniform
   unmyelinated discretization from an activation-function proxy.
 - `axon_models/05_custom_membrane_authoring.py`: write custom membrane
-  `Model` classes with units, gates, non-gate state, diagnostics, generated-code
-  inspection, and a short simulation.
+  `Model` classes with units, HH gates, coupled Markov occupancies, auxiliary
+  state, diagnostics, generated-code inspection, and a short simulation.
 - `axon_models/06_composite_recording_names.py`: label `Composite` components
   and inspect the resulting recording names.
 

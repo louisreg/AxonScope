@@ -7,6 +7,10 @@ from typing import Any
 import jax.numpy as jnp
 
 from .generated_contract import GeneratedMembraneContract
+from .kinetics import (
+    dense_kinetic_matrix,
+    solve_kinetic_transitions,
+)
 
 
 class GeneratedJaxMembraneLowering:
@@ -28,6 +32,8 @@ class GeneratedJaxMembraneLowering:
             for name, value in parameter_values.items()
         }
         self.gate_state_names = contract.gate_state_names
+        self.hh_gate_state_names = contract.hh_gate_state_names
+        self.kinetic_state_names = contract.kinetic_state_names
         self.membrane_state_names = contract.membrane_state_names
         self.state_names = contract.gate_state_names
 
@@ -86,10 +92,16 @@ class GeneratedJaxMembraneLowering:
         )
         names = self.contract.function("gate_terms").outputs
         values = tuple(outputs[name] for name in names)
+        alpha = list(values[0::3])
+        beta = list(values[1::3])
+        factors = list(values[2::3])
+        alpha.extend(jnp.zeros((V.shape[0],), dtype=self.dtype) for _ in self.kinetic_state_names)
+        beta.extend(jnp.zeros((V.shape[0],), dtype=self.dtype) for _ in self.kinetic_state_names)
+        factors.extend(jnp.ones((V.shape[0],), dtype=self.dtype) for _ in self.kinetic_state_names)
         return (
-            _stack_columns(values[0::3], V.shape[0], self.dtype),
-            _stack_columns(values[1::3], V.shape[0], self.dtype),
-            _stack_columns(values[2::3], V.shape[0], self.dtype),
+            _stack_columns(tuple(alpha), V.shape[0], self.dtype),
+            _stack_columns(tuple(beta), V.shape[0], self.dtype),
+            _stack_columns(tuple(factors), V.shape[0], self.dtype),
         )
 
     def init_gates(
@@ -102,8 +114,150 @@ class GeneratedJaxMembraneLowering:
         if not self.gate_state_names:
             return jnp.zeros((V.shape[0], 0), dtype=self.dtype)
         alpha, beta = self.rate_constants(V, parameters=parameters)
-        denominator = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))
-        return alpha / denominator
+        hh_count = len(self.hh_gate_state_names)
+        denominator = jnp.maximum(
+            alpha[:, :hh_count] + beta[:, :hh_count],
+            jnp.asarray(1e-12, dtype=self.dtype),
+        )
+        hh = alpha[:, :hh_count] / denominator
+        kinetics = self._init_kinetic_states(V, parameters=parameters)
+        return jnp.concatenate((hh, kinetics), axis=1)
+
+    def gate_update(
+        self,
+        gates_prev: Any,
+        V_mV: Any,
+        dt_ms: Any,
+        *,
+        parameters: dict[str, Any] | None = None,
+    ) -> jnp.ndarray:
+        gates = jnp.asarray(gates_prev, dtype=self.dtype)
+        V = jnp.atleast_1d(jnp.asarray(V_mV, dtype=self.dtype))
+        if gates.shape[-1] == 0:
+            return gates
+        hh_count = len(self.hh_gate_state_names)
+        alpha, beta, q10 = self.gate_terms(V, parameters=parameters)
+        alpha = q10[:, :hh_count] * alpha[:, :hh_count]
+        beta = q10[:, :hh_count] * beta[:, :hh_count]
+        sum_ab = jnp.maximum(alpha + beta, jnp.asarray(1e-12, dtype=self.dtype))
+        dt = jnp.asarray(dt_ms, dtype=self.dtype)
+        previous_hh = gates[:, :hh_count]
+        if all(
+            mode == "crank_nicolson"
+            for mode in self.contract.gate_update_modes[:hh_count]
+        ):
+            denominator = jnp.maximum(
+                1.0 / dt + 0.5 * sum_ab,
+                jnp.asarray(1e-12, dtype=self.dtype),
+            )
+            hh = alpha / denominator + (
+                (1.0 / dt) - 0.5 * sum_ab
+            ) / denominator * previous_hh
+        else:
+            equilibrium = alpha / sum_ab
+            tau = jnp.asarray(1.0, dtype=self.dtype) / sum_ab
+            hh = equilibrium - (equilibrium - previous_hh) * jnp.exp(-dt / tau)
+        kinetics = self._update_kinetic_states(
+            gates[:, hh_count:], V, dt, parameters=parameters
+        )
+        return jnp.concatenate((hh, kinetics), axis=1)
+
+    def _kinetic_rates(
+        self,
+        V: jnp.ndarray,
+        *,
+        parameters: dict[str, Any] | None,
+    ) -> dict[str, jnp.ndarray]:
+        if not self.contract.kinetic_blocks:
+            return {}
+        return self._call(
+            "kinetic_terms",
+            self._base_env(V, parameters=parameters),
+            node_count=V.shape[0],
+        )
+
+    def _kinetic_matrix(
+        self,
+        block: Any,
+        rates: dict[str, jnp.ndarray],
+        node_count: int,
+    ) -> jnp.ndarray:
+        width = len(block.states)
+        return dense_kinetic_matrix(
+            width=width,
+            transitions=self._kinetic_transitions(block, rates),
+            node_count=node_count,
+            dtype=self.dtype,
+        )
+
+    @staticmethod
+    def _kinetic_transitions(
+        block: Any,
+        rates: dict[str, jnp.ndarray],
+    ) -> tuple[tuple[int, int, jnp.ndarray], ...]:
+        return tuple(
+            (transition.source, transition.target, rates[transition.output])
+            for transition in block.transitions
+        )
+
+    def _init_kinetic_states(
+        self,
+        V: jnp.ndarray,
+        *,
+        parameters: dict[str, Any] | None,
+    ) -> jnp.ndarray:
+        if not self.contract.kinetic_blocks:
+            return jnp.zeros((V.shape[0], 0), dtype=self.dtype)
+        rates = self._kinetic_rates(V, parameters=parameters)
+        declared = self._call(
+            "kinetic_initials",
+            self._base_env(V, parameters=parameters),
+            node_count=V.shape[0],
+        )
+        values: list[jnp.ndarray] = []
+        for block in self.contract.kinetic_blocks:
+            if block.initialization == "stationary":
+                matrix = self._kinetic_matrix(block, rates, V.shape[0])
+                system = matrix.at[:, -1, :].set(jnp.asarray(1.0, dtype=self.dtype))
+                rhs = jnp.zeros((V.shape[0], len(block.states)), dtype=self.dtype)
+                rhs = rhs.at[:, -1].set(jnp.asarray(1.0, dtype=self.dtype))
+                block_values = jnp.linalg.solve(system, rhs[..., None])[..., 0]
+            else:
+                block_values = _stack_columns(
+                    tuple(declared[name] for name in block.states),
+                    V.shape[0],
+                    self.dtype,
+                )
+            if block.conserve_probability:
+                block_values = _normalize_probabilities(block_values, self.dtype)
+            values.extend(block_values[:, index] for index in range(len(block.states)))
+        return _stack_columns(tuple(values), V.shape[0], self.dtype)
+
+    def _update_kinetic_states(
+        self,
+        previous: jnp.ndarray,
+        V: jnp.ndarray,
+        dt: jnp.ndarray,
+        *,
+        parameters: dict[str, Any] | None,
+    ) -> jnp.ndarray:
+        rates = self._kinetic_rates(V, parameters=parameters)
+        values: list[jnp.ndarray] = []
+        offset = 0
+        for block in self.contract.kinetic_blocks:
+            width = len(block.states)
+            block_values = solve_kinetic_transitions(
+                width=width,
+                transitions=self._kinetic_transitions(block, rates),
+                previous=previous[:, offset : offset + width],
+                dt=dt,
+                node_count=V.shape[0],
+                dtype=self.dtype,
+                conserve_probability=block.conserve_probability,
+            )
+            values.extend(block_values[:, index] for index in range(width))
+            offset += width
+        return _stack_columns(tuple(values), V.shape[0], self.dtype)
 
     def init_membrane_state(
         self,
@@ -515,6 +669,12 @@ def _stack_columns(
     if not values:
         return jnp.zeros((node_count, 0), dtype=dtype)
     return jnp.stack(values, axis=1).astype(dtype)
+
+
+def _normalize_probabilities(values: jnp.ndarray, dtype: jnp.dtype) -> jnp.ndarray:
+    clipped = jnp.maximum(values, jnp.asarray(0.0, dtype=dtype))
+    total = jnp.sum(clipped, axis=1, keepdims=True)
+    return clipped / jnp.maximum(total, jnp.asarray(1e-12, dtype=dtype))
 
 
 __all__ = ["GeneratedJaxMembraneLowering"]
