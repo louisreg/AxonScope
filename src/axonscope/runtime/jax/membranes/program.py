@@ -149,6 +149,18 @@ class JaxMembraneProgram:
         self._static_signature_cache = signature
         return signature
 
+    def execution_structure_signature(self) -> tuple[Any, ...]:
+        """Return generated execution identity without numeric parameters."""
+
+        return (
+            self.__class__.__module__,
+            self.__class__.__qualname__,
+            str(self.dtype),
+            self._structural_hash,
+            self._source_model_name,
+            self._final_gate_update_mode,
+        )
+
     @property
     def source_provenance(self) -> dict[str, Any]:
         if self.generated_contract is not None:
@@ -247,14 +259,20 @@ class JaxMembraneProgram:
         _, beta = self.exact_rate_constants(V)
         return beta
 
-    def init_gates(self, V0_mV: jnp.ndarray) -> jnp.ndarray:
-        return self.lowering.init_gates(V0_mV)
+    def init_gates(
+        self,
+        V0_mV: jnp.ndarray,
+        *,
+        parameters: dict[str, Any] | None = None,
+    ) -> jnp.ndarray:
+        return self.lowering.init_gates(V0_mV, parameters=parameters)
 
     def init_gates_host(
         self,
         V0_mV: np.ndarray,
         *,
         dtype_local: np.dtype,
+        parameters: dict[str, Any] | None = None,
     ) -> np.ndarray:
         """Initialize gates through the generated NumPy companion artifact."""
 
@@ -269,9 +287,10 @@ class JaxMembraneProgram:
         if not self.generated_contract.gate_state_names:
             return np.zeros((V.shape[0], 0), dtype=dtype_local)
         spec = self.generated_contract.function("gate_terms")
+        parameter_values = self._parameter_values if parameters is None else parameters
         env = {
             name: np.asarray(value, dtype=dtype_local)
-            for name, value in self._parameter_values.items()
+            for name, value in parameter_values.items()
         }
         env["Vm"] = V
         missing = tuple(name for name in spec.args if name not in env)
@@ -351,8 +370,20 @@ class JaxMembraneProgram:
             columns.extend(block_values[:, index] for index in range(width))
         return np.stack(columns, axis=1).astype(dtype_local)
 
-    def cn_gate_update(self, g_prev: jnp.ndarray, V_mV: jnp.ndarray, dt: float) -> jnp.ndarray:
-        return self.lowering.gate_update(g_prev, V_mV, dt)
+    def cn_gate_update(
+        self,
+        g_prev: jnp.ndarray,
+        V_mV: jnp.ndarray,
+        dt: float,
+        *,
+        parameters: dict[str, Any] | None = None,
+    ) -> jnp.ndarray:
+        return self.lowering.gate_update(
+            g_prev,
+            V_mV,
+            dt,
+            parameters=parameters,
+        )
 
     def final_gate_update(
         self,
@@ -405,8 +436,14 @@ class JaxMembraneProgram:
         self,
         gates: jnp.ndarray,
         state: tuple[jnp.ndarray, ...] = (),
+        *,
+        parameters: dict[str, Any] | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        return self.lowering.membrane_conductance_terms(gates, state=state)
+        return self.lowering.membrane_conductance_terms(
+            gates,
+            state=state,
+            parameters=parameters,
+        )
 
     def gate_names(self) -> tuple[str, ...]:
         if self.generated_contract is not None:

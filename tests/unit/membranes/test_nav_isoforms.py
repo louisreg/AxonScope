@@ -126,6 +126,93 @@ def test_nav_isoforms_share_one_generated_source_artifact():
         )
 
 
+def test_nav_isoforms_share_one_vectorized_execution_structure():
+    programs = [
+        compile_membrane_model(axs.membranes.Nav11()),
+        compile_membrane_model(axs.membranes.Nav16()),
+    ]
+    voltage = jnp.asarray([-80.0, -60.0], dtype=jnp.float32)
+    parameters = {
+        name: jnp.asarray(
+            [program.parameter_values[name] for program in programs],
+            dtype=jnp.float32,
+        )
+        for name in programs[0].parameter_values
+    }
+
+    assert programs[0].execution_structure_signature() == (
+        programs[1].execution_structure_signature()
+    )
+    assert programs[0].static_signature() != programs[1].static_signature()
+
+    gates = programs[0].init_gates(voltage, parameters=parameters)
+    host_gates = programs[0].init_gates_host(
+        np.asarray(voltage),
+        dtype_local=np.dtype(np.float32),
+        parameters={name: np.asarray(value) for name, value in parameters.items()},
+    )
+    expected_gates = jnp.concatenate(
+        [
+            program.init_gates(voltage[index : index + 1])
+            for index, program in enumerate(programs)
+        ],
+        axis=0,
+    )
+    expected_host_gates = np.concatenate(
+        [
+            program.init_gates_host(
+                np.asarray(voltage[index : index + 1]),
+                dtype_local=np.dtype(np.float32),
+            )
+            for index, program in enumerate(programs)
+        ],
+        axis=0,
+    )
+    updated = programs[0].cn_gate_update(
+        gates,
+        voltage,
+        0.005,
+        parameters=parameters,
+    )
+    expected_updated = jnp.concatenate(
+        [
+            program.cn_gate_update(
+                expected_gates[index : index + 1],
+                voltage[index : index + 1],
+                0.005,
+            )
+            for index, program in enumerate(programs)
+        ],
+        axis=0,
+    )
+    terms = programs[0].membrane_conductance_terms(
+        updated,
+        parameters=parameters,
+    )
+    expected_terms = tuple(
+        jnp.concatenate(
+            [
+                program.membrane_conductance_terms(
+                    expected_updated[index : index + 1]
+                )[term_index]
+                for index, program in enumerate(programs)
+            ]
+        )
+        for term_index in range(2)
+    )
+
+    np.testing.assert_allclose(gates, expected_gates, rtol=2e-6, atol=1e-7)
+    np.testing.assert_allclose(
+        host_gates,
+        expected_host_gates,
+        rtol=2e-6,
+        atol=1e-7,
+    )
+    np.testing.assert_allclose(updated, expected_updated, rtol=2e-6, atol=1e-7)
+    np.testing.assert_allclose(terms[0], expected_terms[0], rtol=2e-6, atol=1e-7)
+    np.testing.assert_allclose(terms[1], expected_terms[1], rtol=2e-6, atol=1e-7)
+
+
 def test_nav_explanation_keeps_public_identity_and_shared_source_provenance():
     report = axs.membranes.Nav16().explain()
 
