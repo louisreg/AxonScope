@@ -896,7 +896,7 @@ class GatedLeakStackMembraneBackend:
         module = load_generated_triton_module(self.gated_model)
         if module is None:
             return None
-        gates_new, gated_gm, gated_ge = advance_generated_membrane_terms(
+        generated = advance_generated_membrane_terms(
             module,
             V_mV,
             g_prev[..., : self.gated_gate_count],
@@ -908,6 +908,9 @@ class GatedLeakStackMembraneBackend:
             ),
             linearize_previous=linearize_previous,
         )
+        if generated is None:
+            return None
+        gates_new, gated_gm, gated_ge = generated
         if static_gates is None:
             leak_gm = g_prev[..., self._leak_g_col]
             leak_ge = g_prev[..., self._leak_ge_col]

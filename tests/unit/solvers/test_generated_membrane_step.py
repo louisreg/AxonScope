@@ -7,6 +7,7 @@ import numpy as np
 
 from axonscope.runtime.jax.kernels import double_cable_step
 from axonscope.runtime.jax.membranes.backend import (
+    GatedLeakStackMembraneBackend,
     advance_stateless_membrane_terms,
 )
 from axonscope.runtime.jax.membranes import triton_generated
@@ -84,6 +85,35 @@ def test_generated_triton_step_declines_contract_without_optional_kernel(monkeyp
         jnp.zeros((2, 1), dtype=jnp.float32),
         jnp.asarray(0.005, dtype=jnp.float32),
         parameter_values={},
+        linearize_previous=False,
+    )
+
+    assert actual is None
+
+
+def test_gated_stack_propagates_missing_optional_triton_kernel(monkeypatch):
+    monkeypatch.setattr(
+        triton_generated,
+        "load_generated_triton_module",
+        lambda model: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        triton_generated,
+        "advance_generated_membrane_terms",
+        lambda *args, **kwargs: None,
+    )
+    backend = GatedLeakStackMembraneBackend(
+        gated_model=SimpleNamespace(parameter_values={}),
+        target_nx=2,
+        dtype=jnp.float32,
+        gated_gate_count=1,
+        gated_channel_count=1,
+    )
+
+    actual = backend.generated_triton_advance_membrane_terms(
+        g_prev=jnp.zeros((2, 4), dtype=jnp.float32),
+        V_mV=jnp.zeros((2,), dtype=jnp.float32),
+        dt=jnp.asarray(0.005, dtype=jnp.float32),
         linearize_previous=False,
     )
 
