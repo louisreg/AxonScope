@@ -312,7 +312,7 @@ def _stack_membrane_runtime(
             gates0=gates0_device,
             state0=(),
             background_current=background_device,
-            parameter_rows=parameter_rows_device,
+            parameter_rows=parameter_rows_device or None,
         )
     representative_index = next(
         (

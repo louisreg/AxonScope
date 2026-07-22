@@ -107,6 +107,16 @@ cold row-stacking span from about 90-105 ms to about 14 ms. Warm single-cable
 time is comparable to the homogeneous Nav1.6 case; GPU evidence is required
 before interpreting the noisier laptop double-cable ratio.
 
+P100 run `axs-p18-parameter-batch-ef404fa` confirms one group and one generated
+program for all nine isoforms. At Naxon=900 over 4 steps, warm medians are
+11.6 ms heterogeneous versus 12.1 ms homogeneous for single cable, and 16.1
+versus 10.8 ms for double cable. The 100-step double-cable follow-up
+`axs-p18-parameter-batch-long-ef404fa` measures 34.9 versus 21.5 ms. Warm
+`runtime.prepare` remains about 0.1 ms, so the retained double-cable difference
+is the cost of evaluating row-dynamic rate parameters, not dispatch or cache
+fragmentation. The benchmark intentionally reports this homogeneous lower
+bound alongside the heterogeneous production path.
+
 The 2026-07-21 matched 100-step CPU/P100 campaign uses 201 single-cable or
 221 double-cable compartments per axon at Naxon 1024/4096. P100 warm time is
 solver-bound: `kernel.wait` accounts for 62-90% of complete run time, while

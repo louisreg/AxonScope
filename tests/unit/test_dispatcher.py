@@ -1086,7 +1086,8 @@ def test_pool_batches_generated_parameter_rows_without_isoform_fragmentation(
     assert plan.groups[0].size == 2
     assert fast_stack is not None
     assert fast_stack.jax_compiled_model_count == 1
-    assert fast_stack.parameter_rows["gbar"].shape == (2,)
+    assert fast_stack.parameter_rows
+    assert all(values.shape == (2,) for values in fast_stack.parameter_rows.values())
     assert any(
         values[0] != values[1] for values in fast_stack.parameter_rows.values()
     )

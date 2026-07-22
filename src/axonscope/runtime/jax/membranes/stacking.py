@@ -180,6 +180,7 @@ def try_stack_gated_leak_membrane_from_group(
     parameter_rows = {
         name: np.ascontiguousarray(values[membrane_rows.row_parameter_indices])
         for name, values in unique_parameter_rows.items()
+        if not np.array_equal(values, np.broadcast_to(values[:1], values.shape))
     }
     backend = GatedLeakStackMembraneBackend(
         gated_model=gated_model,

@@ -171,11 +171,20 @@ pytest -q tests/unit --tb=short
     HH+Markov at Naxon 1024/4096 while usually increasing cold compilation.
     Per-step projection traffic cancels the smaller kinetic update, so commit
     `f67987d` was reverted by `ab89c42`; no parallel compact path remains.
-  - [ ] Audit parameter batching for multiple isoforms and mutants sharing one
+  - [x] Audit parameter batching for multiple isoforms and mutants sharing one
     generated source/topology. Reuse the existing membrane row plan and
     structural signatures; avoid one dispatch group or executable per parameter
     set when parameters can be carried as a numeric row axis. Test mixed Nav1.x
-    populations, cache identity, compile count, and numerical equivalence.
+    populations, cache identity, compile count, and numerical equivalence. The
+    canonical single- and double-cable scans now carry only parameters that vary
+    between rows; Nav1.1/Nav1.6 dense and VmRaster routes match scalar references,
+    and all nine isoforms use one dispatch group and one generated program.
+    Naxon=900 local and P100 evidence is retained under
+    `benchmark/results/p18_parameter_batching_local_n900_reuse/` and Kaggle runs
+    `axs-p18-parameter-batch-ef404fa` / `axs-p18-parameter-batch-long-ef404fa`.
+    On the 100-step P100 double-cable A/B, dynamic isoform parameters cost
+    34.9 ms warm versus 21.5 ms for homogeneous Nav1.6; this is execution work,
+    not fragmentation (`runtime.prepare` remains about 0.1 ms warm).
   - [ ] Prototype a voltage-tabulated transition operator only as a benchmark
     candidate after the exact-path profiles above.
     - [ ] Generate `M(V, dt) = exp(dt Q(V))` and stationary states from the same
