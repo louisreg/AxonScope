@@ -13,7 +13,7 @@ from axonscope.axons.formulation import (
     resolve_formulation,
 )
 from axonscope.axons.layout import Layout, LayoutElement
-from axonscope.axons.myelinated import MRG, Myelinated
+from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG, Myelinated
 from axonscope.axons.plotting import plot_layout
 from axonscope.axons.section import PeriaxonalLayer, Section
 from axonscope.axons.templates import (
@@ -22,6 +22,8 @@ from axonscope.axons.templates import (
     SectionCompartments,
     build_mrg_like_geometry,
     default_mrg_like_membranes,
+    gaines_motor_membranes,
+    gaines_sensory_membranes,
     layout_from_mrg_like_geometry,
     mrg_like_layout,
     mrg_like_length_from_nodes,
@@ -62,12 +64,16 @@ __all__ = [
     "Schild94",
     "Schild97",
     "Myelinated",
+    "GainesMotor",
+    "GainesSensory",
     "MRG",
     "MRGLikeDoubleCableGeometry",
     "MRGLikeDoubleCableTemplate",
     "SectionCompartments",
     "build_mrg_like_geometry",
     "default_mrg_like_membranes",
+    "gaines_motor_membranes",
+    "gaines_sensory_membranes",
     "layout_from_mrg_like_geometry",
     "mrg_like_layout",
     "mrg_like_length_from_nodes",

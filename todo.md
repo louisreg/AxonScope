@@ -8,7 +8,8 @@ Completed performance evidence and commands live in `benchmark/README.md`.
 
 ## Snapshot
 
-Updated on 2026-07-22 during the P18 generated Markov runtime validation.
+Updated on 2026-07-22 after P18 Gaines validation and future NEURON/recording
+planning.
 
 - P7, P11, P12, the VmRaster part of P13, P14-P17, and P17B are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; CUDA
@@ -281,7 +282,14 @@ pytest -q tests/unit --tb=short
     axon layouts, and the same generated runtime. Use NRV's Nav1.1/Nav1.6
     MRG-node substitution only as an external validation case; do not copy it
     into AxonScope as a special MRG preset or execution path.
-- [ ] Finish the missing Gaines motor and sensory model families.
+- [x] Finish the missing Gaines motor and sensory model families.
+  - [x] Express motor and sensory node/internode mechanisms through shared
+    source-backed membrane topologies and the canonical generated runtime.
+  - [x] Assemble public `GainesMotor` and `GainesSensory` axons on the retained
+    MRG-like double-cable geometry without a model-specific runtime path.
+  - [x] Validate rates, currents, defaults, velocity versus diameter,
+    intracellular Vm, and extracellular Vm/Vext against fresh NRV runs, and
+    add runnable Gaines and MRG-plus-Markov advanced examples.
 - [ ] Add focused numerical references and runnable advanced examples for each
   retained public model and each public Nav1.x validation workflow.
 
@@ -404,6 +412,24 @@ wrapper around the current dispatcher.
 - [ ] When a non-JAX runtime is introduced, generate its own target-specific
   model artifact, metadata, and callables from the canonical membrane source
   contract. It must not interpret or depend on `jax_model.py`.
+
+### NEURON Reference Validation And Full Membrane Recording
+
+- [ ] Add an optional test-only NEURON validation mode that compiles and runs
+  the canonical reference MOD mechanisms for every retained AxonScope membrane
+  model. Pin each upstream source revision and mechanism checksum, then compare
+  initialization, clamp responses, cable simulations, and every available
+  internal trajectory. NEURON remains an independent validation oracle, not a
+  public execution runtime or package dependency.
+- [ ] Extend the canonical public `Recording` and result contracts so users can
+  request every quantity declared by a membrane model: gates such as `m` and
+  `h`, ionic and aggregate currents, conductances, auxiliary states, and all
+  Markov occupancy states. Derive this generically from the membrane contract;
+  do not add model-specific recording paths.
+- [ ] Define explicit full, probe, downsampled, and bounded-retention policies
+  for membrane internals before enabling population-scale recording. Report
+  estimated host/device memory through `estimate()` and preserve the single
+  canonical result model on CPU and GPU.
 
 ### Propagation And Conduction-Block Validation
 

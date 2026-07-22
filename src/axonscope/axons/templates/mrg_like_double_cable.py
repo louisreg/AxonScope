@@ -520,6 +520,52 @@ def default_mrg_like_membranes(
     )
 
 
+def gaines_motor_membranes(
+    *,
+    temperature: temperature_t = _DEFAULT_TEMPERATURE,
+) -> SectionLayout:
+    """Return the Gaines motor membrane assignment for an MRG-like layout."""
+
+    temperature = units.Q_(
+        units.require_temperature_degC(temperature, name="temperature"),
+        "degree_Celsius",
+    )
+    internode = dict(temperature=temperature)
+    return SectionLayout(
+        node=membrane_specs.GainesMotorNode(temperature=temperature),
+        mysa=membrane_specs.GainesMotorInternode(
+            **internode,
+            gl=units.Q_(2.0, "millisiemens / centimeter ** 2"),
+            gkfbar=units.Q_(150.74, "millisiemens / centimeter ** 2"),
+        ),
+        flut=membrane_specs.GainesMotorInternode(**internode),
+        stin=membrane_specs.GainesMotorInternode(**internode),
+    )
+
+
+def gaines_sensory_membranes(
+    *,
+    temperature: temperature_t = _DEFAULT_TEMPERATURE,
+) -> SectionLayout:
+    """Return the Gaines sensory membrane assignment for an MRG-like layout."""
+
+    temperature = units.Q_(
+        units.require_temperature_degC(temperature, name="temperature"),
+        "degree_Celsius",
+    )
+    internode = dict(temperature=temperature)
+    return SectionLayout(
+        node=membrane_specs.GainesSensoryNode(temperature=temperature),
+        mysa=membrane_specs.GainesSensoryInternode(
+            **internode,
+            gl=units.Q_(1.716, "millisiemens / centimeter ** 2"),
+            gkfbar=units.Q_(164.2, "millisiemens / centimeter ** 2"),
+        ),
+        flut=membrane_specs.GainesSensoryInternode(**internode),
+        stin=membrane_specs.GainesSensoryInternode(**internode),
+    )
+
+
 def layout_from_mrg_like_geometry(
     geometry: MRGLikeDoubleCableGeometry,
     *,
@@ -816,6 +862,8 @@ __all__ = [
     "SectionCompartments",
     "build_mrg_like_geometry",
     "default_mrg_like_membranes",
+    "gaines_motor_membranes",
+    "gaines_sensory_membranes",
     "layout_from_mrg_like_geometry",
     "mrg_like_layout",
     "mrg_like_length_from_nodes",

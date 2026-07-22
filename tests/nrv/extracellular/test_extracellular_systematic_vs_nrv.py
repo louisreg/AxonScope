@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import nrv
 
 from axonscope import AxonInstance, S_per_m, degC, mV, ms, um
-from axonscope.axons.myelinated import MRG
+from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
@@ -286,6 +286,76 @@ def _make_mrg_extra_nrv(d: float, axon_as, dt_ms: float):
     return ax
 
 
+def _make_gaines_extra_axon(axon_class, d: float):
+    ax = axon_class(diameter=d * um, nodes=9)
+    _, center_node_pos = _mrg_center_node_pos_um(ax)
+    x0_um = float(ax.length / 2.0)
+    electrode = PointSourceElectrode(
+        x=x0_um * um,
+        y=ELECTRODE_Y_UM * um,
+        z=ELECTRODE_Z_UM * um,
+    )
+    stimulus = Stimulus.biphasic(
+        start=1.0 * ms,
+        cathodic_amplitude=80.0 * 1e-6,
+        cathodic_duration=0.08 * ms,
+        anodic_amplitude=20.0 * 1e-6,
+        interphase=0.04 * ms,
+    )
+    sim = AxonInstance(ax)
+    sim.add_extracellular_stimulation(
+        stimulation=point_source_stimulation(
+            electrode,
+            ax.layout.position_values(unit=um) * um,
+            stimulus=stimulus,
+            sigma=SIGMA_S_M * S_per_m,
+        ),
+        replace=True,
+    )
+    sim.comparison_sample_position_um = center_node_pos
+    return sim
+
+
+def _make_gaines_motor_extra_axon(d: float):
+    return _make_gaines_extra_axon(GainesMotor, d)
+
+
+def _make_gaines_sensory_extra_axon(d: float):
+    return _make_gaines_extra_axon(GainesSensory, d)
+
+
+def _make_gaines_extra_nrv(model: str, d: float, axon_as, dt_ms: float):
+    ax = nrv.myelinated(
+        0,
+        0,
+        d,
+        float(axon_as.length),
+        model=model,
+        dt=dt_ms,
+        node_shift=0,
+        Nseg_per_sec=1,
+        rec="all",
+        T=37.0,
+        v_init=None,
+    )
+    x0_um = float(axon_as.length / 2.0)
+    electrode = nrv.point_source_electrode(x0_um, ELECTRODE_Y_UM, ELECTRODE_Z_UM)
+    stimulus = nrv.stimulus()
+    stimulus.biphasic_pulse(1.0, 80.0, 0.08, 20.0, 0.04)
+    extra = nrv.stimulation("endoneurium_bhadra")
+    extra.add_electrode(electrode, stimulus)
+    ax.attach_extracellular_stimulation(extra)
+    return ax
+
+
+def _make_gaines_motor_extra_nrv(d: float, axon_as, dt_ms: float):
+    return _make_gaines_extra_nrv("Gaines_motor", d, axon_as, dt_ms)
+
+
+def _make_gaines_sensory_extra_nrv(d: float, axon_as, dt_ms: float):
+    return _make_gaines_extra_nrv("Gaines_sensory", d, axon_as, dt_ms)
+
+
 SPECS = [
     ExtracellularSpec(
         name="hh",
@@ -503,6 +573,48 @@ SPECS = [
         gate_max_atol_by_name={"m": 0.40},
         current_time_shift_steps=-1,
         gate_time_shift_steps=1,
+    ),
+    ExtracellularSpec(
+        name="gaines_motor",
+        diameters_um=(8.7, 10.0, 14.0),
+        axonscope_factory=_make_gaines_motor_extra_axon,
+        nrv_factory=_make_gaines_motor_extra_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.001,
+        current_pairs=(),
+        gate_pairs=(),
+        state_pairs=(),
+        vm_rmse_atol_mV=3.0,
+        vm_peak_atol_mV=1.0,
+        vm_matrix_rmse_atol_mV=1.25,
+        vm_matrix_corr_min=0.99,
+        current_rmse_atol=0.0,
+        current_max_atol=0.0,
+        gate_rmse_atol=0.0,
+        gate_max_atol=0.0,
+        state_rmse_atol=0.0,
+        state_max_atol=0.0,
+    ),
+    ExtracellularSpec(
+        name="gaines_sensory",
+        diameters_um=(8.7, 10.0, 14.0),
+        axonscope_factory=_make_gaines_sensory_extra_axon,
+        nrv_factory=_make_gaines_sensory_extra_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.001,
+        current_pairs=(),
+        gate_pairs=(),
+        state_pairs=(),
+        vm_rmse_atol_mV=5.0,
+        vm_peak_atol_mV=1.0,
+        vm_matrix_rmse_atol_mV=1.25,
+        vm_matrix_corr_min=0.99,
+        current_rmse_atol=0.0,
+        current_max_atol=0.0,
+        gate_rmse_atol=0.0,
+        gate_max_atol=0.0,
+        state_rmse_atol=0.0,
+        state_max_atol=0.0,
     ),
 ]
 

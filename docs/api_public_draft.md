@@ -107,6 +107,10 @@ axs.membranes.Tigerholm
 axs.membranes.Schild94
 axs.membranes.Schild97
 axs.membranes.AxNode
+axs.membranes.GainesMotorNode
+axs.membranes.GainesMotorInternode
+axs.membranes.GainesSensoryNode
+axs.membranes.GainesSensoryInternode
 axs.membranes.Composite
 axs.membranes.SectionLayout
 ```

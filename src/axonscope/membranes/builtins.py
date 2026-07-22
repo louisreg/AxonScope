@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from axonscope.membranes.models.axnode import AxNode
+from axonscope.membranes.models.gaines import (
+    GainesMotorInternode,
+    GainesMotorNode,
+    GainesSensoryInternode,
+    GainesSensoryNode,
+)
 from axonscope.membranes.models.hodgkin_huxley import HodgkinHuxley
 from axonscope.membranes.models.nav_isoforms import (
     Nav11,
@@ -24,6 +30,10 @@ from axonscope.membranes.models.tigerholm import Tigerholm
 
 __all__ = [
     "AxNode",
+    "GainesMotorInternode",
+    "GainesMotorNode",
+    "GainesSensoryInternode",
+    "GainesSensoryNode",
     "HodgkinHuxley",
     "Nav11",
     "Nav12",

@@ -41,6 +41,8 @@ therefore run separately from the velocity campaign.
 | Schild 1994 | Schild mechanism set with `naf.mod` and `nas.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
 | Schild 1997 | Schild mechanism set with `naf97mean.mod` and `nas97mean.mod` | Stateful current and reversal-term execution repaired. Velocity and detailed Vm/current/gate/state campaigns pass. |
 | MRG / AxNode | `AXNODE.mod` plus the MRG cable assembly | The four AxNode current formulas (`I_na`, `I_nap`, `I_k`, `I_l`) and defaults match the MOD source. Fresh morphology, compartment, node-delay, passive, velocity, and Vm campaigns pass. Dense current traces are not claimed because the double-cable path intentionally does not support dense observable recording. |
+| Gaines motor | `node_motor.mod`, `mysa_motor.mod`, `flut_motor.mod`, and `stin_motor.mod` plus the myelinated cable assembly | Nodal and internodal rates, currents, Q10 factors, defaults, and section placement match the pinned NRV source. Fresh velocity, intracellular Vm, and extracellular Vm/Vext campaigns pass. |
+| Gaines sensory | `node_sensory.mod`, `mysa_sensory.mod`, `flut_sensory.mod`, and `stin_sensory.mod` plus the myelinated cable assembly | The shared generated membrane topology retains the sensory-specific rates and section parameters. Fresh velocity, intracellular Vm, and extracellular Vm/Vext campaigns pass. |
 
 The runtime defect found during this audit was model agnostic. Stateful models
 passed their state to `prepare_membrane_step()` and `finalize_membrane_step()`
@@ -78,41 +80,42 @@ is checked against the configured NRV `pas` equation, while MRG/AxNode is
 checked directly against all four `AXNODE.mod` current equations because dense
 double-cable current recording is outside the supported recording contract.
 
-## Missing NRV Families
+## Additional P18 Families
 
-NRV also exposes:
+NRV also exposes Gaines motor/sensory fibers and optional Markov Nav1.1/Nav1.6
+node substitutions. Both surfaces are now represented without NRV-specific
+runtime branches:
 
-- Gaines motor and sensory myelinated models;
-- Markov Nav1.1 and Nav1.6 node mechanisms used as optional MRG node
-  replacements.
+- `GainesMotor` and `GainesSensory` use the canonical MRG-like double-cable
+  geometry with generated source-backed node and internode membranes;
+- Nav1.1 and Nav1.6 compose with the retained MRG potassium/leak membrane
+  through public `Composite` and `SectionLayout` objects.
 
-These families have no retained AxonScope implementation yet. They remain P18
-implementation work and must enter through the same membrane-source compiler
-and generated runtime as the existing models.
+NRV remains an independent validation reference. AxonScope does not copy its
+assembly code or introduce Gaines- or Markov-specific solver paths.
 
 ## Fresh Evidence
 
 After the runtime and default corrections:
 
 ```text
-tests/unit/membranes/test_nrv_model_defaults.py
-tests/unit/solvers/test_single_row_batch_runtime_path.py
-11 passed
-
 tests/unit
-749 passed, 1 skipped
+864 passed, 1 skipped
 
 tests/nrv/velocity_vs_diameter/test_velocity_systematic_vs_nrv.py
-7 passed
+9 passed
 
 tests/nrv/intracellular/test_intracellular_systematic_vs_nrv.py
-7 passed
+9 passed
 
 tests/nrv/extracellular/test_extracellular_systematic_vs_nrv.py
-7 passed
+9 passed
+
+tests/nrv/numerics/test_gaines_membranes_vs_nrv.py
+2 passed
 
 tests/nrv
-116 passed
+124 passed
 ```
 
 The systematic velocity campaign now uses bilateral crossing-time regression

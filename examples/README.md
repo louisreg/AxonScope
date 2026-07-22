@@ -53,6 +53,10 @@ still runnable examples, but they explain the moving parts more explicitly.
   state, diagnostics, generated-code inspection, and a short simulation.
 - `axon_models/06_composite_recording_names.py`: label `Composite` components
   and inspect the resulting recording names.
+- `axon_models/07_gaines_motor_sensory.py`: compare the Gaines motor and
+  sensory myelinated families under the same intracellular pulse.
+- `axon_models/08_mrg_markov_nav.py`: replace MRG nodal sodium with a public
+  Nav1.1/Nav1.6 Markov composition while retaining the canonical cable path.
 
 ### Stimulation
 

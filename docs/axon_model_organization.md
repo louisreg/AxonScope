@@ -225,7 +225,8 @@ Defines ready-made unmyelinated templates such as `HodgkinHuxley`,
 
 `src/axonscope/axons/myelinated.py`
 
-Defines myelinated templates such as `MRG`.
+Defines myelinated templates such as `MRG`, `GainesMotor`, and
+`GainesSensory`.
 
 `src/axonscope/axons/templates/mrg_like_double_cable.py`
 

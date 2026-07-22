@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import nrv
 
 from axonscope import AxonInstance, degC, mV, ms, um
-from axonscope.axons.myelinated import MRG
+from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
@@ -641,6 +641,54 @@ def _make_mrg_nrv(axon_as, dt_ms: float):
     return ax
 
 
+def _make_gaines_axon(axon_class):
+    ax = axon_class(diameter=10.0 * um, nodes=7)
+    stim_node = int(ax.node_indices.shape[0] // 2)
+    stim_pos_um = float(axonscope_x_um(ax)[int(ax.node_indices[stim_node])])
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(
+        position=stim_pos_um * um,
+        current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=5.0),
+    )
+    sim.comparison_sample_position_um = stim_pos_um
+    return sim
+
+
+def _make_gaines_motor_axon():
+    return _make_gaines_axon(GainesMotor)
+
+
+def _make_gaines_sensory_axon():
+    return _make_gaines_axon(GainesSensory)
+
+
+def _make_gaines_nrv(model: str, axon_as, dt_ms: float):
+    stim_node = int(axon_as.node_indices.shape[0] // 2)
+    ax = nrv.myelinated(
+        0,
+        0,
+        10.0,
+        float(axon_as.length),
+        model=model,
+        dt=dt_ms,
+        node_shift=0,
+        Nseg_per_sec=1,
+        rec="all",
+        T=37.0,
+        v_init=None,
+    )
+    ax.insert_I_Clamp_node(index=stim_node, t_start=1.0, duration=0.1, amplitude=5.0)
+    return ax
+
+
+def _make_gaines_motor_nrv(axon_as, dt_ms: float):
+    return _make_gaines_nrv("Gaines_motor", axon_as, dt_ms)
+
+
+def _make_gaines_sensory_nrv(axon_as, dt_ms: float):
+    return _make_gaines_nrv("Gaines_sensory", axon_as, dt_ms)
+
+
 SPECS = [
     IntracellularSpec(
         name="hh",
@@ -831,6 +879,46 @@ SPECS = [
         state_rmse_atol=0.0,
         state_max_atol=0.0,
         nrv_only_observables=("I_na", "I_nap", "I_k", "I_l"),
+    ),
+    IntracellularSpec(
+        name="gaines_motor",
+        axonscope_factory=_make_gaines_motor_axon,
+        nrv_factory=_make_gaines_motor_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.005,
+        matrix_mode="all",
+        current_pairs=(),
+        gate_pairs=(),
+        state_pairs=(),
+        vm_rmse_atol_mV=0.05,
+        vm_peak_atol_mV=0.05,
+        current_rmse_atol=0.0,
+        current_max_atol=0.0,
+        gate_rmse_atol=0.0,
+        gate_max_atol=0.0,
+        state_rmse_atol=0.0,
+        state_max_atol=0.0,
+        nrv_only_observables=("I_na", "I_nap", "I_k", "I_kf", "I_q", "I_l"),
+    ),
+    IntracellularSpec(
+        name="gaines_sensory",
+        axonscope_factory=_make_gaines_sensory_axon,
+        nrv_factory=_make_gaines_sensory_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.005,
+        matrix_mode="all",
+        current_pairs=(),
+        gate_pairs=(),
+        state_pairs=(),
+        vm_rmse_atol_mV=0.05,
+        vm_peak_atol_mV=0.05,
+        current_rmse_atol=0.0,
+        current_max_atol=0.0,
+        gate_rmse_atol=0.0,
+        gate_max_atol=0.0,
+        state_rmse_atol=0.0,
+        state_max_atol=0.0,
+        nrv_only_observables=("I_na", "I_nap", "I_k", "I_kf", "I_q", "I_l"),
     ),
 ]
 

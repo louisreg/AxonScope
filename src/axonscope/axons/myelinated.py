@@ -26,6 +26,8 @@ from axonscope.axons.layout import Layout
 from axonscope.axons.templates.mrg_like_double_cable import (
     MRGLikeDoubleCableTemplate,
     SectionCompartments,
+    gaines_motor_membranes,
+    gaines_sensory_membranes,
     mrg_like_layout,
     mrg_like_length_from_nodes,
     mrg_like_nodes_from_length,
@@ -279,7 +281,80 @@ class MRG(Myelinated):
         )
 
 
+class _Gaines(Myelinated):
+    """Shared constructor for the Gaines motor and sensory axon families."""
+
+    _default_v_init: voltage_t
+    _default_membranes = staticmethod(gaines_motor_membranes)
+
+    def __init__(
+        self,
+        *,
+        diameter: length_t,
+        nodes: int,
+        length: length_t | None = None,
+        compartments: SectionCompartments = 1,
+        x_shift: length_t | None = None,
+        membranes: SectionLayout | None = None,
+        formulation: CableFormulation | None = CableFormulation.DOUBLE_CABLE,
+        v_init: voltage_t | None = None,
+        temperature: temperature_t = _DEFAULT_TEMPERATURE,
+        fit_all: bool = False,
+        mysa_length: length_t = _DEFAULT_MYSA_LENGTH,
+        node_length: length_t = _DEFAULT_NODE_LENGTH,
+        axoplasmic_resistivity: axoplasmic_resistivity_t = _DEFAULT_AXOPLASMIC_RESISTIVITY,
+        myelin_capacitance: capacitance_density_t = _DEFAULT_MYELIN_CAPACITANCE,
+        myelin_conductance: conductance_density_t = _DEFAULT_MYELIN_CONDUCTANCE,
+        node_space: length_t = _DEFAULT_NODE_SPACE,
+        flut_space: length_t = _DEFAULT_FLUT_SPACE,
+        stin_space: length_t = _DEFAULT_STIN_SPACE,
+    ) -> None:
+        if membranes is None:
+            membranes = self._default_membranes(temperature=temperature)
+        layout = mrg_like_layout(
+            diameter=diameter,
+            nodes=nodes,
+            length=length,
+            compartments=compartments,
+            x_shift=x_shift,
+            membranes=membranes,
+            temperature=temperature,
+            fit_all=fit_all,
+            mysa_length=mysa_length,
+            node_length=node_length,
+            axoplasmic_resistivity=axoplasmic_resistivity,
+            myelin_capacitance=myelin_capacitance,
+            myelin_conductance=myelin_conductance,
+            node_space=node_space,
+            flut_space=flut_space,
+            stin_space=stin_space,
+        )
+        super().__init__(
+            layout=layout,
+            formulation=formulation,
+            diameter=diameter,
+            v_init=self._default_v_init if v_init is None else v_init,
+            temperature=temperature,
+        )
+
+
+class GainesMotor(_Gaines):
+    """Gaines et al. motor myelinated axon model."""
+
+    _default_v_init = units.Q_(-85.9411, "millivolt")
+    _default_membranes = staticmethod(gaines_motor_membranes)
+
+
+class GainesSensory(_Gaines):
+    """Gaines et al. sensory myelinated axon model."""
+
+    _default_v_init = units.Q_(-79.3565, "millivolt")
+    _default_membranes = staticmethod(gaines_sensory_membranes)
+
+
 __all__ = [
+    "GainesMotor",
+    "GainesSensory",
     "MRG",
     "Myelinated",
     "MRGLikeDoubleCableTemplate",

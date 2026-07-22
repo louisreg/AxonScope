@@ -48,6 +48,10 @@ Built-in model classes:
 - `Schild94`
 - `Schild97`
 - `AxNode`
+- `GainesMotorNode`
+- `GainesMotorInternode`
+- `GainesSensoryNode`
+- `GainesSensoryInternode`
 - `Composite`
 - `SectionLayout`
 
@@ -390,9 +394,9 @@ membrane lowering.
 ## Runtime Boundary
 
 Public axon construction must use `axonscope.membranes` descriptions. Passive,
-Hodgkin-Huxley, Rattay-Aberham, Sundt, AxNode, Tigerholm, Schild, and supported
-composites compile through AxonScope's internal compiler path before reaching
-the active backend runtime.
+Hodgkin-Huxley, Rattay-Aberham, Sundt, AxNode, Gaines, Tigerholm, Schild,
+Nav1.x, and supported composites compile through AxonScope's internal compiler
+path before reaching the active backend runtime.
 
 The runtime bridge is structural: backend kernels consume solver-facing terms
 such as gate updates, ionic current, conductance linearization, state updates,

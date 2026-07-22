@@ -2,6 +2,10 @@
 
 from axonscope.membranes.builtins import (
     AxNode,
+    GainesMotorInternode,
+    GainesMotorNode,
+    GainesSensoryInternode,
+    GainesSensoryNode,
     HodgkinHuxley,
     Nav11,
     Nav12,
@@ -61,6 +65,10 @@ __all__ = [
     "GeneratedMembraneCodeInspection",
     "GeneratedMembraneCodeReport",
     "GeneratedTargetExplanation",
+    "GainesMotorInternode",
+    "GainesMotorNode",
+    "GainesSensoryInternode",
+    "GainesSensoryNode",
     "HodgkinHuxley",
     "Nav11",
     "Nav12",

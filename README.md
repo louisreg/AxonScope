@@ -115,7 +115,8 @@ fields may use canonical suffixes such as `_um`, `_ms`, or `_mV`.
 ## Axons And Membrane Models
 
 Built-in axon templates include Hodgkin-Huxley, Rattay-Aberham, Sundt,
-Tigerholm, Schild94, Schild97, and MRG/AxNode-style myelinated templates.
+Tigerholm, Schild94, Schild97, MRG, and the Gaines motor and sensory
+myelinated families.
 
 Built-in membrane model truth lives in `src/axonscope/membranes/models/`.
 User-authored membranes are plain Python classes. Put custom model classes in a

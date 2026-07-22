@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import nrv
 
 from axonscope import AxonInstance, degC, mV, ms, um
-from axonscope.axons.myelinated import MRG
+from axonscope.axons.myelinated import GainesMotor, GainesSensory, MRG
 from axonscope.axons.unmyelinated import (
     HodgkinHuxley,
     RattayAberham,
@@ -59,6 +59,8 @@ class VelocitySpec:
     velocity_fit_mode: Literal["direct", "symmetric", "raster", "crossing", "crossing_symmetric"] = "crossing_symmetric"
     raster_min_distance_ms: float = 0.2
     representative_index: int = 1
+    require_propagation: bool = False
+    vm_rmse_tolerance_mV: float | None = None
 
 
 def _axonscope_matrix(axon, res, mode: Literal["all", "nodes"]) -> tuple[np.ndarray, np.ndarray]:
@@ -282,6 +284,57 @@ def _make_mrg_nrv(d: float, axon_as, dt_ms: float):
     return ax
 
 
+def _make_gaines_motor_axon(d: float):
+    ax = GainesMotor(diameter=d * um, nodes=11)
+    stim_pos_um = _mrg_stim_position(ax)
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(
+        position=stim_pos_um * um,
+        current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=5.0),
+    )
+    sim.comparison_sample_position_um = stim_pos_um
+    return sim
+
+
+def _make_gaines_sensory_axon(d: float):
+    ax = GainesSensory(diameter=d * um, nodes=11)
+    stim_pos_um = _mrg_stim_position(ax)
+    sim = AxonInstance(ax)
+    sim.add_current_clamp(
+        position=stim_pos_um * um,
+        current=Stimulus.pulse(start=1.0 * ms, duration=0.1 * ms, amplitude=5.0),
+    )
+    sim.comparison_sample_position_um = stim_pos_um
+    return sim
+
+
+def _make_gaines_nrv(model: str, d: float, axon_as, dt_ms: float):
+    center_node = int(axon_as.node_indices.shape[0] // 2)
+    ax = nrv.myelinated(
+        0,
+        0,
+        d,
+        float(axon_as.length),
+        model=model,
+        dt=dt_ms,
+        node_shift=0,
+        Nseg_per_sec=1,
+        rec="all",
+        T=37.0,
+        v_init=None,
+    )
+    ax.insert_I_Clamp_node(index=center_node, t_start=1.0, duration=0.1, amplitude=5.0)
+    return ax
+
+
+def _make_gaines_motor_nrv(d: float, axon_as, dt_ms: float):
+    return _make_gaines_nrv("Gaines_motor", d, axon_as, dt_ms)
+
+
+def _make_gaines_sensory_nrv(d: float, axon_as, dt_ms: float):
+    return _make_gaines_nrv("Gaines_sensory", d, axon_as, dt_ms)
+
+
 SPECS = [
     VelocitySpec(
         name="hh",
@@ -374,6 +427,38 @@ SPECS = [
         exclude_radius_um=100.0,
         velocity_fit_mode="crossing_symmetric",
         representative_index=1,
+    ),
+    VelocitySpec(
+        name="gaines_motor",
+        diameters_um=(5.7, 10.0, 14.0),
+        axonscope_factory=_make_gaines_motor_axon,
+        nrv_factory=_make_gaines_motor_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.005,
+        velocity_mode="nodes",
+        plot_mode="all",
+        threshold_mV=0.0,
+        exclude_radius_um=100.0,
+        velocity_fit_mode="crossing_symmetric",
+        representative_index=1,
+        require_propagation=True,
+        vm_rmse_tolerance_mV=0.05,
+    ),
+    VelocitySpec(
+        name="gaines_sensory",
+        diameters_um=(5.7, 10.0, 14.0),
+        axonscope_factory=_make_gaines_sensory_axon,
+        nrv_factory=_make_gaines_sensory_nrv,
+        tsim_ms=4.0,
+        dt_ms=0.005,
+        velocity_mode="nodes",
+        plot_mode="all",
+        threshold_mV=0.0,
+        exclude_radius_um=100.0,
+        velocity_fit_mode="crossing_symmetric",
+        representative_index=1,
+        require_propagation=True,
+        vm_rmse_tolerance_mV=0.05,
     ),
 ]
 
@@ -633,6 +718,11 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
         if not np.isfinite(v_as) or not np.isfinite(v_nrv):
             failures.append(f"{spec.name} d={d:.3f} um produced non-finite velocity.")
             continue
+        if spec.require_propagation and (v_as <= 0.0 or v_nrv <= 0.0):
+            failures.append(
+                f"{spec.name} d={d:.3f} um did not propagate in both implementations."
+            )
+            continue
         if err > tol:
             failures.append(
                 f"{spec.name} d={d:.3f} um |Δv|={err:.4f} m/s > tol={tol:.4f} m/s "
@@ -641,6 +731,16 @@ def _run_velocity_spec(spec: VelocitySpec) -> None:
 
     if failures:
         raise AssertionError("\n".join(failures))
+
+    if spec.vm_rmse_tolerance_mV is not None:
+        vm_nrv_aligned = interp_rows(rep_payload[4], rep_payload[3], rep_payload[0])
+        vm_rmse = float(np.sqrt(np.mean((rep_payload[2] - vm_nrv_aligned) ** 2)))
+        print(f"{spec.name} representative Vm RMSE={vm_rmse:.6f} mV")
+        if vm_rmse > spec.vm_rmse_tolerance_mV:
+            raise AssertionError(
+                f"{spec.name} representative Vm RMSE={vm_rmse:.6f} mV > "
+                f"{spec.vm_rmse_tolerance_mV:.6f} mV (plot: {fig_path})"
+            )
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])
