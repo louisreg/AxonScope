@@ -57,6 +57,7 @@ def advance_generated_membrane_terms(
     *,
     parameter_values: Mapping[str, Any],
     linearize_previous: bool,
+    allow_kinetics: bool = True,
     block_size: int = 256,
 ) -> tuple[Any, Any, Any] | None:
     """Run one generated gate-update plus Gm/GE kernel over flat compartments."""
@@ -64,6 +65,8 @@ def advance_generated_membrane_terms(
     contract = load_generated_membrane_contract(module)
     kernel_name = "advance_gates_and_membrane_terms_kernel"
     if not contract.has_function(kernel_name):
+        return None
+    if contract.kinetic_blocks and not allow_kinetics:
         return None
     Vm = jnp.asarray(Vm_mV)
     gate_values = jnp.asarray(gates)

@@ -56,6 +56,7 @@ def advance_stateless_membrane_terms(
     dt_ms: Any,
     linearize_previous: bool,
     parameters: dict[str, jnp.ndarray] | None = None,
+    allow_generated_kinetics: bool = True,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """Advance gates and return the conductance terms used by one solve."""
 
@@ -71,6 +72,7 @@ def advance_stateless_membrane_terms(
             dt=dt_ms,
             linearize_previous=linearize_previous,
             static_gates=static_gates,
+            allow_kinetics=allow_generated_kinetics,
         )
         if parameters is not None:
             generated_kwargs["parameters"] = parameters
@@ -296,6 +298,7 @@ class UniformMembraneBackend:
         dt: Any,
         linearize_previous: bool,
         static_gates: jnp.ndarray | None = None,
+        allow_kinetics: bool = True,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
         _ = static_gates
         from .triton_generated import (
@@ -313,6 +316,7 @@ class UniformMembraneBackend:
             dt,
             parameter_values=self.ion_channel.parameter_values,
             linearize_previous=linearize_previous,
+            allow_kinetics=allow_kinetics,
         )
 
 
@@ -887,6 +891,7 @@ class GatedLeakStackMembraneBackend:
         linearize_previous: bool,
         static_gates: jnp.ndarray | None = None,
         parameters: dict[str, jnp.ndarray] | None = None,
+        allow_kinetics: bool = True,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray] | None:
         from .triton_generated import (
             advance_generated_membrane_terms,
@@ -908,6 +913,7 @@ class GatedLeakStackMembraneBackend:
             dt,
             parameter_values=parameter_values,
             linearize_previous=linearize_previous,
+            allow_kinetics=allow_kinetics,
         )
         if generated is None:
             return None

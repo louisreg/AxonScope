@@ -28,7 +28,7 @@ Latest fast validation:
 ```text
 python -m compileall -q src tests/unit
 pytest -q tests/unit --tb=short
-788 passed, 1 skipped
+858 passed, 1 skipped
 ```
 
 ## Non-Negotiables
@@ -64,7 +64,7 @@ pytest -q tests/unit --tb=short
     retained active models with the NRV velocity campaign.
   - [x] Restore focused Vm, current, gate, and state trajectory comparisons;
     do not infer fine observable equivalence from propagation alone.
-- [ ] Implement the Balbi et al. ModelDB 230137 Nav1.x family through one
+- [x] Implement the Balbi et al. ModelDB 230137 Nav1.x family through one
   model-agnostic Markov membrane contract and the generated runtime.
   - [x] Define one unified Python membrane-authoring contract before adding the
     Markov lowering. It must compose independent HH-like gates, coupled
@@ -253,9 +253,18 @@ pytest -q tests/unit --tb=short
       variant cannot clear the integrated retention threshold. Keep the exact
       matrix-free generated update as the only temporal implementation; no
       runtime table path or fallback hierarchy was added.
-  - [ ] Consider Pallas/Triton or CUDA only if the final integrated GPU profile
-    still spends more than 20% in the generated Markov update and a same-shape
-    A/B demonstrates at least 1.3x end-to-end improvement.
+  - [x] Retain a generated Triton local update after the final integrated GPU
+    profile and same-shape A/B cleared the 1.3x end-to-end gate. The compiler
+    emits it model-agnostically from the same HH/Markov contract; no Nav-specific
+    solver code or public backend selector was added. On P100 at Naxon 4096,
+    warm speedup is 1.549x for homogeneous Nav1.6, 1.345x for all nine
+    row-parametric isoforms, and 1.555x for mixed HH+Markov. Corresponding
+    maximum center-Vm differences versus the same-commit JAX route after 100
+    float32 steps are 0.00375 mV or less for Nav and 0.00724 mV for mixed.
+    Compatible uniform double-cable CUDA layouts use the generated kernel;
+    single-cable and node-localized heterogeneous layouts retain their
+    bit-identical canonical route. Do not add projection traffic to force
+    Triton into the localized path.
   - [x] Represent the shared six-state `C1/C2/O1/O2/I1/I2` topology once and
     provide the complete Nav1.1 through Nav1.9 parameter sets without nine
     duplicated execution paths.

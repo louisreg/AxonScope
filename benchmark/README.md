@@ -109,6 +109,32 @@ No runtime table path or broader clamp/cable campaign is retained. The P100
 `summary.json` SHA-256 is
 `92f01e5bfa7613b35dff64e1f737567dff9bfcb1f781e544fdbdeccdc70edaca`.
 
+The exact generated local update is retained as a Triton capability for
+compatible uniform double-cable CUDA layouts. It is emitted model-agnostically
+from the same HH/Markov membrane contract and replaces the corresponding
+generated JAX local update; node-localized heterogeneous layouts remain on
+their canonical JAX lowering because adding a gather/scatter projection would
+repeat the rejected active-site compaction path.
+`benchmark/membrane_temporal.py` exposes
+benchmark-only `--membrane-route jax` and `--save-voltage-values` controls for
+same-commit numerical A/B evidence; these are not runtime or public API
+switches.
+
+On P100 over 100 steps, the final generated-Triton/JAX A/B gives 1.105x/1.345x
+warm speedup for Nav1.1-Nav1.9 parameter rows and 1.308x/1.555x for mixed
+HH+Markov at Naxon 1024/4096. At Naxon 4096, `kernel.wait` falls from 266.9 to
+177.6 ms for the isoform population and from 166.6 to 99.6 ms for the mixed
+model. The earlier homogeneous Nav1.6 A/B gives 1.215x/1.549x. Across the
+same-commit route comparisons, maximum center-Vm differences after 100 float32
+steps are 0.00375 mV for the nine isoforms and 0.00724 mV for mixed HH+Markov;
+single-cable and node-localized results are bit-identical because their
+retained route is unchanged. Evidence is in Kaggle runs
+`axs-p18-markov-large-auto-82c95dc`,
+`axs-p18-markov-large-jax-82c95dc`,
+`axs-p18-markov-fields-82c95dc`, and the homogeneous pair
+`axs-p18-markov-triton-large-d2a5db7` /
+`axs-p18-markov-jax-large-883c15d`.
+
 `benchmark/membrane_temporal.py` supplies that full temporal baseline through
 the canonical public `AxonSimulation.run()` route. It compares a passive cable
 floor, HH-only, Nav1.6 Markov, mixed HH+Markov, and a `nav_isoforms` population

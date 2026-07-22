@@ -91,6 +91,30 @@ def test_generated_triton_step_declines_contract_without_optional_kernel(monkeyp
     assert actual is None
 
 
+def test_generated_triton_step_declines_kinetics_when_not_allowed(monkeypatch):
+    contract = SimpleNamespace(
+        has_function=lambda name: True,
+        kinetic_blocks=(SimpleNamespace(),),
+    )
+    monkeypatch.setattr(
+        triton_generated,
+        "load_generated_membrane_contract",
+        lambda module: contract,
+    )
+
+    actual = triton_generated.advance_generated_membrane_terms(
+        SimpleNamespace(),
+        jnp.zeros((2,), dtype=jnp.float32),
+        jnp.zeros((2, 1), dtype=jnp.float32),
+        jnp.asarray(0.005, dtype=jnp.float32),
+        parameter_values={},
+        linearize_previous=False,
+        allow_kinetics=False,
+    )
+
+    assert actual is None
+
+
 def test_gated_stack_propagates_missing_optional_triton_kernel(monkeypatch):
     monkeypatch.setattr(
         triton_generated,

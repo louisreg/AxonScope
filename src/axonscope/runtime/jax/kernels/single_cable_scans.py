@@ -137,6 +137,7 @@ def _observer_scan_stateless_membrane_step(
         dt_ms=dt_ms,
         linearize_previous=linearize_previous,
         parameters=parameters,
+        allow_generated_kinetics=False,
     )
 
 
