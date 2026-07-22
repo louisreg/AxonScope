@@ -92,10 +92,23 @@ def advance_generated_membrane_terms(
     )
 
     dt = jnp.asarray(dt_ms, dtype=Vm.dtype)
-    parameters = tuple(
-        jnp.asarray(parameter_values[name], dtype=Vm.dtype)
-        for name in parameter_names
-    )
+    parameters: list[Any] = []
+    parameter_is_field: dict[str, bool] = {}
+    for name in parameter_names:
+        value = jnp.asarray(parameter_values[name], dtype=Vm.dtype)
+        if value.size == 1:
+            parameters.append(value.reshape(()))
+            parameter_is_field[name] = False
+            continue
+        try:
+            field = jnp.broadcast_to(value, Vm.shape)
+        except ValueError as exc:
+            raise ValueError(
+                f"Generated Triton membrane parameter {name!r} must be scalar "
+                f"or broadcast to Vm shape {Vm.shape}, got {value.shape}."
+            ) from exc
+        parameters.append(field)
+        parameter_is_field[name] = True
     vm_shape = jax.ShapeDtypeStruct(Vm.shape, Vm.dtype)
     gate_shape = jax.ShapeDtypeStruct(gate_values.shape, gate_values.dtype)
     total = int(Vm.size)
@@ -104,7 +117,7 @@ def advance_generated_membrane_terms(
         Vm,
         gate_values,
         dt,
-        *parameters,
+        *tuple(parameters),
         kernel=module.advance_gates_and_membrane_terms_kernel,
         source_hash=f"{module.CACHE_KEY}:{module.SOURCE_HASH}",
         out_shape=(gate_shape, vm_shape, vm_shape),
@@ -112,6 +125,10 @@ def advance_generated_membrane_terms(
         name=f"axonscope_generated_membrane_{module.CACHE_KEY[:12]}",
         TOTAL=total,
         LINEARIZE_PREVIOUS=bool(linearize_previous),
+        **{
+            f"{name.upper()}_IS_FIELD": parameter_is_field[name]
+            for name in parameter_names
+        },
         BLOCK_SIZE=int(block_size),
         num_warps=4,
         num_stages=1,

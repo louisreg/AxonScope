@@ -538,6 +538,26 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert call_kwargs["LINEARIZE_PREVIOUS"] is False
     assert call_kwargs["grid"] == (1,)
     assert call_kwargs["vmap_flatten_elements"] is True
+    assert not any(
+        value
+        for name, value in call_kwargs.items()
+        if name.endswith("_IS_FIELD")
+    )
+
+    field_parameter = next(iter(parameter_values))
+    parameter_values[field_parameter] = np.full(
+        values["Vm"].shape,
+        parameter_values[field_parameter],
+    )
+    triton_generated.advance_generated_membrane_terms(
+        triton_model,
+        values["Vm"],
+        gates_prev,
+        dt,
+        parameter_values=parameter_values,
+        linearize_previous=False,
+    )
+    assert call["kwargs"][f"{field_parameter.upper()}_IS_FIELD"] is True
 
 
 def test_source_codegen_emits_exact_balbi_markov_triton_update(tmp_path, monkeypatch):

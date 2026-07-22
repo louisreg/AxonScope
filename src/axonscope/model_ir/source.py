@@ -3700,15 +3700,22 @@ def _generated_triton_fused_membrane_function_source(
         "dt",
         *parameter_args,
     )
+    parameter_load_lines = tuple(
+        line
+        for name in parameter_args
+        for line in (
+            f"    if {name.upper()}_IS_FIELD:",
+            f"        {name} = tl.load({name}_ptr + offsets, mask=mask, other=0.0)",
+            "    else:",
+            f"        {name} = tl.load({name}_ptr)",
+        )
+    )
     load_lines = (
         "    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)",
         "    mask = offsets < TOTAL",
         "    Vm = tl.load(Vm_ptr + offsets, mask=mask, other=0.0)",
         "    dt = tl.load(dt_ptr)",
-        *(
-            f"    {name} = tl.load({name}_ptr)"
-            for name in parameter_args
-        ),
+        *parameter_load_lines,
         *(
             f"    {name} = tl.load(gates_ptr + offsets * {len(gate_names)} + {index}, mask=mask, other=0.0)"
             for index, name in enumerate(gate_names)
@@ -3743,6 +3750,7 @@ def _generated_triton_fused_membrane_function_source(
         "ge_out_ptr",
         "TOTAL: tl.constexpr",
         "LINEARIZE_PREVIOUS: tl.constexpr",
+        *(f"{name.upper()}_IS_FIELD: tl.constexpr" for name in parameter_args),
         "BLOCK_SIZE: tl.constexpr",
     )
     source += (
