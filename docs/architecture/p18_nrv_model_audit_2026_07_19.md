@@ -122,3 +122,24 @@ The systematic velocity campaign now uses bilateral crossing-time regression
 with a shared `2%` relative tolerance and a `0.001 m/s` numerical floor. The
 previous `0.5 m/s` floor could accept a zero velocity for unmyelinated fibers
 and is not retained.
+
+## Public Model Coverage
+
+P18 closes only when every retained public family has both focused numerical
+evidence and executable documentation. The retained mapping is:
+
+| Public family | Focused numerical reference | Runnable public example |
+| --- | --- | --- |
+| Passive | `tests/nrv/numerics/test_passive_vs_nrv.py` | `advanced/axon_models/01_layout_options.py` |
+| Hodgkin-Huxley | systematic velocity, intracellular, and extracellular NRV campaigns | `basic/01_first_intracellular_simulation.py` and `basic/06_activation_velocity.py` |
+| Rattay-Aberham | systematic velocity, intracellular, and extracellular NRV campaigns | `basic/05_population_pool_run.py` and `advanced/stimulation/03_intracellular_plus_extracellular.py` |
+| Sundt, Tigerholm, Schild94, Schild97 | systematic velocity, intracellular current/gate/state, and extracellular NRV campaigns | `advanced/axon_models/09_validated_unmyelinated_families.py` |
+| AxNode / MRG | direct AxNode equations plus morphology, node-delay, velocity, intracellular, and extracellular NRV campaigns | `basic/04_extracellular_mrg_simulation.py`, `basic/06_activation_velocity.py`, and `advanced/axon_models/08_mrg_markov_nav.py` |
+| Gaines motor and sensory | direct mechanism equations/defaults plus velocity, intracellular, and extracellular NRV campaigns | `advanced/axon_models/07_gaines_motor_sensory.py` |
+| Nav1.1 through Nav1.9 | `tests/unit/membranes/test_nav_isoforms.py`, independent ModelDB 230137 clamp references, and the canonical cable validation campaign | `advanced/axon_models/10_nav_isoform_catalog.py`; Nav1.1/Nav1.6 MRG composition is shown in `08_mrg_markov_nav.py` |
+
+The four Nav I-V, normalized G-V, availability, and recovery workflows remain
+the runnable validation runner
+`benchmark/curves/nav_isoform_voltage_clamp.py`. They intentionally do not
+appear as public simulation APIs: AxonScope does not yet define a public
+voltage-clamp protocol, and examples must not import runtime compiler internals.

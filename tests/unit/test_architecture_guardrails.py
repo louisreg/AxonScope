@@ -293,6 +293,39 @@ def test_public_builtin_membranes_are_model_classes():
     assert offenders == []
 
 
+def test_retained_model_families_have_runnable_public_examples():
+    examples_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in _python_sources(REPO_ROOT / "examples")
+    )
+    public_axon_families = {
+        "HodgkinHuxley",
+        "RattayAberham",
+        "Sundt",
+        "Tigerholm",
+        "Schild94",
+        "Schild97",
+        "MRG",
+        "GainesMotor",
+        "GainesSensory",
+    }
+    public_membrane_families = {"Passive", "AxNode"}
+    public_nav_isoforms = {f"Nav1{index}" for index in range(1, 10)}
+
+    missing = {
+        name
+        for name in public_axon_families
+        if f"axs.axons.{name}" not in examples_text
+    }
+    missing.update(
+        name
+        for name in public_membrane_families | public_nav_isoforms
+        if f"axs.membranes.{name}" not in examples_text
+    )
+
+    assert missing == set()
+
+
 def test_builtin_axon_model_kwargs_are_forward_only_without_local_defaults():
     from axonscope.axons import unmyelinated
 

@@ -57,6 +57,11 @@ still runnable examples, but they explain the moving parts more explicitly.
   sensory myelinated families under the same intracellular pulse.
 - `axon_models/08_mrg_markov_nav.py`: replace MRG nodal sodium with a public
   Nav1.1/Nav1.6 Markov composition while retaining the canonical cable path.
+- `axon_models/09_validated_unmyelinated_families.py`: compare the Sundt,
+  Tigerholm, Schild94, and Schild97 families with their validated intracellular
+  configurations.
+- `axon_models/10_nav_isoform_catalog.py`: run Nav1.1 through Nav1.9 in one
+  shared public cable composition and compare stimulus/distal traces.
 
 ### Stimulation
 

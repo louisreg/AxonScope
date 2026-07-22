@@ -8,10 +8,9 @@ Completed performance evidence and commands live in `benchmark/README.md`.
 
 ## Snapshot
 
-Updated on 2026-07-22 after P18 Gaines validation and future NEURON/recording
-planning.
+Updated on 2026-07-22 after closing P18 membrane completion and validation.
 
-- P7, P11, P12, the VmRaster part of P13, P14-P17, and P17B are closed.
+- P7, P11, P12, the VmRaster part of P13, and P14-P18 are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; CUDA
   double-cable uses tiled Thomas in Triton. CPU single-cable uses JAX
   tridiagonal solve; CUDA single-cable uses exact tiled Thomas in Triton.
@@ -19,7 +18,7 @@ planning.
   It does not build `Namplitude x Naxon` Python simulation objects.
 - Compact activation, latency, spike-count, and bounded spike-time states are
   available. VmRaster remains the temporal reference where history is needed.
-- The active order is P18 membrane completion, then P19 pre-v1 convergence.
+- The active phase is P19 pre-v1 convergence.
 - P20 tracks the future lazy runnable-plan and distributed-runner architecture.
   It is not an unfinished P14 optimization: current structural preparation is
   below 3% of realistic warm `run_pool` time.
@@ -290,15 +289,23 @@ pytest -q tests/unit --tb=short
   - [x] Validate rates, currents, defaults, velocity versus diameter,
     intracellular Vm, and extracellular Vm/Vext against fresh NRV runs, and
     add runnable Gaines and MRG-plus-Markov advanced examples.
-- [ ] Add focused numerical references and runnable advanced examples for each
+- [x] Add focused numerical references and runnable advanced examples for each
   retained public model and each public Nav1.x validation workflow.
+  - [x] Map Passive, HH, Rattay-Aberham, Sundt, Tigerholm, Schild94/97,
+    AxNode/MRG, Gaines motor/sensory, and Nav1.1-Nav1.9 to their retained
+    numerical references and executable examples in the P18 audit.
+  - [x] Add public examples for the previously undocumented Sundt, Tigerholm,
+    Schild94, Schild97, and Nav1.2-Nav1.5/Nav1.7-Nav1.9 families.
+  - [x] Keep I-V, G-V, availability, and recovery in the runnable ModelDB
+    validation runner until AxonScope has a designed public voltage-clamp API;
+    public examples use only the canonical cable simulation path.
 
 ### P19 - Pre-V1 Cleanup And Public Surface
 
 - [ ] Audit local and remote Git branches, preserve any unmerged work that is
   still relevant, then delete every branch except `main`.
-- [ ] Reorganize `src/`, especially Python modules still at package root, after
-  P18 settles the remaining ownership boundaries.
+- [ ] Reorganize `src/`, especially Python modules still at package root, now
+  that P18 has settled the remaining ownership boundaries.
 - [ ] Inventory every Python module, function, type, and public export.
 - [ ] Use Graphify, `vulture`, source call sites, examples, and tests to remove
   code used only by tests, legacy paths, replaced slow routes, and duplicated
