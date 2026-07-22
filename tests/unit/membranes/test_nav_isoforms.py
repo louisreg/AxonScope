@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -13,6 +14,9 @@ from axonscope.membranes.models.nav_balbi import BalbiNav
 from axonscope.runtime.jax.membranes.compile import (
     compile_axon_membrane,
     compile_membrane_model,
+)
+from axonscope.runtime.jax.membranes.kinetics import (
+    solve_kinetic_step,
 )
 from axonscope.runtime.jax.membranes.program import is_jax_membrane_program_kind
 from axonscope.runtime.solver_axon import build_solver_axon
@@ -290,3 +294,73 @@ def test_nav_stationary_initialization_and_updates_conserve_probability(model_cl
     assert np.all(updated >= -2e-6)
     np.testing.assert_allclose(initial.sum(axis=1), 1.0, atol=2e-6)
     np.testing.assert_allclose(updated.sum(axis=1), 1.0, atol=2e-6)
+
+
+@pytest.mark.parametrize("model_class", NAV_MODELS)
+@pytest.mark.parametrize("dtype", (np.float32, np.float64))
+def test_nav_matrix_free_voltage_grid_matches_dense_reference(
+    model_class,
+    dtype: type[np.floating],
+):
+    rtol = 1.5e-4 if dtype is np.float32 else 3e-11
+    atol = 3e-6 if dtype is np.float32 else 3e-12
+    voltages = np.concatenate(
+        (
+            np.full(4, -120.0),
+            np.linspace(-100.0, 60.0, 17),
+            np.linspace(60.0, -90.0, 16),
+            np.full(4, -90.0),
+        )
+    ).astype(dtype)
+
+    with jax.enable_x64(dtype is np.float64):
+        program = compile_membrane_model(model_class(dtype=dtype))
+        lowering = program.lowering
+        block = program.generated_contract.kinetic_blocks[0]
+        voltage_vector = jnp.asarray(voltages, dtype=lowering.dtype)
+        previous = program.init_gates(
+            jnp.full(voltage_vector.shape, voltages[0], dtype=lowering.dtype)
+        )
+        rates = lowering._kinetic_rates(voltage_vector, parameters=None)
+        matrix = lowering._kinetic_matrix(
+            block, rates, node_count=voltage_vector.shape[0]
+        )
+
+        for dt_ms in (0.001, 0.0125, 0.05, 0.1):
+            matrix_free = program.cn_gate_update(
+                previous,
+                voltage_vector,
+                dt_ms,
+            )
+            dense = solve_kinetic_step(
+                matrix,
+                previous,
+                jnp.asarray(dt_ms, dtype=lowering.dtype),
+            )
+
+            np.testing.assert_allclose(
+                np.asarray(matrix_free),
+                np.asarray(dense),
+                rtol=rtol,
+                atol=atol,
+            )
+            np.testing.assert_allclose(
+                np.asarray(matrix_free).sum(axis=1),
+                1.0,
+                rtol=0.0,
+                atol=atol,
+            )
+            matrix_free_open = np.asarray(matrix_free[:, 2] + matrix_free[:, 3])
+            dense_open = np.asarray(dense[:, 2] + dense[:, 3])
+            np.testing.assert_allclose(
+                matrix_free_open,
+                dense_open,
+                rtol=rtol,
+                atol=atol,
+            )
+            np.testing.assert_allclose(
+                np.asarray(program.currents(voltage_vector, matrix_free)),
+                np.asarray(program.currents(voltage_vector, dense)),
+                rtol=rtol,
+                atol=atol,
+            )

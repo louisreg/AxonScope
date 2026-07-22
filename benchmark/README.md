@@ -79,6 +79,26 @@ Uniform stationary initialization is also solved once and broadcast: 1.19 ms
 versus 485 ms for 204,800 identical sites. GPU and full temporal-solver
 evidence remain required before closing the P18 runtime task.
 
+`benchmark/kinetic_transition_tables.py` is the isolated P18 last-resort table
+candidate. It keeps two operators distinct: an implicit table reproduces the
+canonical `(I - dt Q)^-1` update at grid points, while an exponential table
+tests the design-note proposal `exp(dt Q)` as an explicit change of temporal
+scheme. It supports the shared local/Kaggle launcher:
+
+```bash
+MPLBACKEND=Agg python benchmark/run.py \
+  --script kinetic_transition_tables --preset local_smoke --platform cpu \
+  --output benchmark/results/p18_kinetic_transition_tables_cpu_paired_20260722
+```
+
+At 204,800 Nav1.6 sites, paired local CPU timings show no retained win. Nearest
+lookup is 0.97x-1.01x the exact update and has `2.91e-4` to `1.17e-3` one-step
+error; linear lookup is more accurate (`7.75e-7` to `1.16e-5`) but only
+0.82x-0.86x as fast. The exponential table differs from the canonical step by
+about `1.35e-2` regardless of grid spacing because it changes the integrator,
+not because of interpolation. P100 evidence remains necessary before rejecting
+the table candidate for GPU execution.
+
 `benchmark/membrane_temporal.py` supplies that full temporal baseline through
 the canonical public `AxonSimulation.run()` route. It compares a passive cable
 floor, HH-only, Nav1.6 Markov, mixed HH+Markov, and a `nav_isoforms` population
@@ -116,6 +136,56 @@ versus 10.8 ms for double cable. The 100-step double-cable follow-up
 is the cost of evaluating row-dynamic rate parameters, not dispatch or cache
 fragmentation. The benchmark intentionally reports this homogeneous lower
 bound alongside the heterogeneous production path.
+
+`benchmark/membrane_temporal.py --compilation-cache-replay` reuses the same
+stateful public workload to inspect optimized HLO and exercise JAX's native
+persistent executable cache in fresh processes. Each selected case runs once
+against an empty cache, once with identical inputs, and once with a changed
+dynamic `v_init`; the gate requires an identical exact-result checksum,
+identical StableHLO in both replays, and zero new cache files in the exact
+replay:
+
+```bash
+MPLBACKEND=Agg python benchmark/membrane_temporal.py \
+  --preset quick --platform cpu \
+  --models passive,hh,nav16,mixed --cables single,double \
+  --double-layouts uniform,node_localized --axons 16 \
+  --single-compartments 41 --nodes 5 \
+  --duration-ms 0.05 --dt-ms 0.005 \
+  --output benchmark/results/p18_membrane_cache_replay_cpu_20260722 \
+  --compilation-cache-replay
+```
+
+All 12 retained CPU shapes pass. Fresh-process executable reuse reduces the
+captured compile phase by 8.50x-15.44x and the complete captured cold JIT phase
+by 2.41x-4.16x. Optimized HLO contains 0/7/14/21 exponential operations for
+passive/HH/Nav1.6/mixed programs respectively. Uniform layouts contain no HLO
+gather; node-localized double cable contains three, reflecting its canonical
+heterogeneous membrane projection rather than a fallback route. The aggregate
+report is under `hlo_all/`; the replay JSON SHA-256 is
+`1db12cf42cb4d9cf66968d0cd9fef1f22586602b91d06641ee47bf565b59d984`.
+GPU HLO remains backend-specific and requires a separate P100 capture before
+making CUDA fusion claims.
+
+`benchmark/analysis/full_step_operator.py` formalizes the frozen operator for
+one complete membrane/cable step. It assembles a dense block-lower-triangular
+reference, then compares it with the production matrix-free finite-state
+update followed by the retained scalar or `2 x 2` block Thomas solve:
+
+```bash
+MPLBACKEND=Agg python benchmark/analysis/full_step_operator.py \
+  --output benchmark/results/p18_full_step_operator_local_20260722
+```
+
+Both cable formulations agree with the assembled solve at float64 machine
+precision: `2.22e-16` maximum absolute error for single cable and `3.33e-16`
+for double cable. The three-axon direct-sum reference has zero off-axon
+nonzeros and gives the same result as three independent solves. For 4096
+axons, 201 compartments, and six local states, the conservative explicit CSR
+estimate is 304.58 MiB for single cable and 376.75 MiB for double cable,
+versus 69.09 and 81.62 MiB of production-oriented core arrays. The derivation,
+including its frozen-coefficient/nonlinear boundary, is documented in
+`docs/architecture/p18_full_step_operator.md`.
 
 The 2026-07-21 matched 100-step CPU/P100 campaign uses 201 single-cable or
 221 double-cable compartments per axon at Naxon 1024/4096. P100 warm time is
@@ -173,6 +243,45 @@ then pass its JSON back to the AxonScope runner with
 NRMSE below 1.236% for every isoform. The only larger pointwise current error
 is Nav1.6 exactly at `V = Ena`, where the ideal AxonScope clamp is zero and
 ModelDB's finite-series-resistance clamp is not.
+
+The generated matrix-free update also has an independent algebraic gate in
+`tests/unit/membranes/test_kinetics.py` and
+`tests/unit/membranes/test_nav_isoforms.py`. It compares the production update
+with a fully materialized `(I - dt Q)` solve for random 2/3/6/9-state graphs
+and every Nav1.x isoform, in float32/float64 at 0.001/0.0125/0.05/0.1 ms. The
+2026-07-22 local CPU run passed all 87 focused tests in 22.39 s. A fresh full
+clamp and independent NEURON/ModelDB 230137 comparison is retained in
+`benchmark/results/p18_nav_voltage_clamp_matrix_free_20260722/`. Across all
+isoforms, worst-case NRMSE is 0.272% for I-V, 0.223% for G-V, 0.215% for
+availability, and 0.190% for recovery. The current conserved update does not
+reproduce the long-time float32 drift visible in the superseded artifact,
+whose worst recovery NRMSE was 1.236%. The downloaded official ModelDB archive
+has SHA-256
+`cc05f481e5bf2698bce37aa30758f0ad4970e16edec58243fb994d26aab9234d`;
+the generated reference JSON has SHA-256
+`a6c391453a94b0c7453534c8d528667432198ca719f531e82f3ae2ec055e7c48`.
+
+`benchmark/curves/nav_cable_validation.py` completes the full-cable integration
+gate with one benchmark-only Nav1.6 + Borg KDR + leak composition. It uses the
+canonical public simulation and protocol routes for a 201-compartment
+single cable and an 11-node/111-compartment double cable; no membrane equation
+or solver path is duplicated. The campaign requires a stable subthreshold
+control, distal propagation, finite positive velocity, a bounded threshold,
+and monotone 0-to-100% recruitment for both formulations:
+
+```bash
+MPLBACKEND=Agg python benchmark/curves/nav_cable_validation.py \
+  --output benchmark/results/p18_nav_cable_validation_local_20260722
+```
+
+The 2026-07-22 local CPU artifact passes all ten acceptance checks. Thresholds
+are 5.3125 uA single and 4.6875 uA double; conduction velocities are 0.685 and
+9.297 m/s. Five point-source distances produce monotone recruitment over nine
+amplitudes in both cases. This validates generated-runtime composition and the
+full public workflow only; the composition has no independent physiological
+reference and is not a new built-in axon model. The retained `summary.json`
+SHA-256 is
+`227630793f6866c2eec75b90b998e562ec7719a1ad28fc4fc0c21817b3a89ff3`.
 
 P17 GPU membrane-layout A/B traces reuse
 `benchmark/protocols/recruitment_amplitude_batch.py`. The Naxon=1024 P100

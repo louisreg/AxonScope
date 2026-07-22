@@ -8,7 +8,7 @@ Completed performance evidence and commands live in `benchmark/README.md`.
 
 ## Snapshot
 
-Updated on 2026-07-20 during the P18 Nav1.x implementation and validation.
+Updated on 2026-07-22 during the P18 generated Markov runtime validation.
 
 - P7, P11, P12, the VmRaster part of P13, P14-P17, and P17B are closed.
 - The production runtime is JAX. CPU double-cable uses Thomas; CUDA
@@ -110,7 +110,7 @@ pytest -q tests/unit --tb=short
     separate cable-coupling policies, or Markov-specific solver observers.
     The existing `Model`/`@markov`/`Occupancy`, generated runtime, dispatcher,
     recording contract, and canonical result model remain the only paths.
-  - [ ] Complete the exact generated Markov runtime evidence gate before any
+  - [x] Complete the exact generated Markov runtime evidence gate before any
     custom GPU kernel or approximate production update.
     - [x] Add integrated temporal profiles for uniform and section-localized
       kinetics in both single- and double-cable simulations. Cover CPU locally
@@ -128,42 +128,77 @@ pytest -q tests/unit --tb=short
       90.5% inactive dense state bytes, making generic active-site compaction
       the next evidence-backed runtime target. Evidence and commands are in
       `benchmark/README.md`.
-    - [ ] Validate the matrix-free conserved update against the retained dense
-      solve for random valid transition graphs, all Nav1.x voltage-clamp
-      protocols, spike waveform, threshold, velocity, and recruitment. Test
-      float32/float64 and the supported `dt` range before removing the dense
+    - [x] Complete matrix-free validation before removing the retained dense
       update from benchmark/reference use.
-    - [ ] Inspect HLO and executable-cache replay for each retained shape. Keep
+      - [x] Validate the conserved matrix-free update against an independently
+        materialized full `(I - dt Q)` solve on random valid 2/3/6/9-state
+        transition graphs. Cover float32/float64 and `dt = 0.001, 0.0125,
+        0.05, 0.1 ms`, including state non-negativity and probability
+        conservation.
+      - [x] Validate all Nav1.1-Nav1.9 generated updates over the clamp voltage
+        range and the same dtype/`dt` matrix. Compare complete states, open
+        probability, and current against the independently materialized dense
+        update. The exact unit surface is in
+        `tests/unit/membranes/test_kinetics.py` and
+        `tests/unit/membranes/test_nav_isoforms.py` (87 tests in 22.39 s on
+        the 2026-07-22 local CPU run).
+      - [x] Regenerate the independent ModelDB 230137 reference comparison for
+        the current runtime. The complete clamp artifact is
+        `benchmark/results/p18_nav_voltage_clamp_matrix_free_20260722/` and
+        contains the fresh NEURON reference plus the AxonScope comparison.
+        Across all isoforms, worst-case NRMSE is 0.272% for I-V, 0.223% for
+        G-V, 0.215% for availability, and 0.190% for recovery. The official
+        ModelDB archive SHA-256 is
+        `cc05f481e5bf2698bce37aa30758f0ad4970e16edec58243fb994d26aab9234d`.
+      - [x] Define a canonical excitable Nav + potassium + leak composition,
+        then validate spike waveform, threshold, velocity, and recruitment on
+        full single- and double-cable simulations. Keep this a runtime
+        validation composition until it has its own physiological reference;
+        a Nav sodium channel plus arbitrary leak is not such a reference. The
+        benchmark-only Nav1.6 + Borg KDR + leak composition now runs through
+        the canonical public simulation and protocol routes in
+        `benchmark/curves/nav_cable_validation.py`. The retained 2026-07-22
+        local CPU artifact passes stable-control, distal-propagation, velocity,
+        bounded-threshold, and monotone-recruitment gates for both a full
+        single cable and node-localized double cable; details and the artifact
+        checksum are in `benchmark/README.md`.
+    - [x] Inspect HLO and executable-cache replay for each retained shape. Keep
       topology and immutable parameter-derived constants compile-time static,
       but do not add rate tables while direct rate evaluation remains below 5%
       of the integrated update. Confirm fresh-process hits in the existing JAX
-      persistent cache.
-    - [ ] Formalize the full per-step operator before considering another
+      persistent cache. `benchmark/membrane_temporal.py` now captures the exact
+      stateful recording JIT and runs miss/exact/dynamic-value processes against
+      one shared cache per shape. All 12 passive/HH/Nav1.6/mixed single,
+      double-uniform, and double-node-localized CPU shapes preserve StableHLO,
+      exact replay checksums, and create zero new XLA files on replay; compile
+      speedups are 8.50x-15.44x. HLO confirms no gather in uniform layouts and
+      exactly three in node-localized double layouts. CPU evidence and command
+      are retained in `benchmark/README.md`; GPU HLO remains a separate
+      backend-specific P100 evidence run, not a blocker for the generic cache
+      contract.
+    - [x] Formalize the full per-step operator before considering another
       solver. `Naxon` is an independent batch/direct-sum axis; each axon is a
       block-tridiagonal cable operator coupled to local finite-state blocks at
       its compartments. Demonstrate that with rates frozen at known `V`, the
       current matrix-free local update followed by Thomas is algebraically the
       block elimination of this global triangular system, so materializing one
       sparse `(Naxon * Nx * (1 + S))` matrix would add overhead without coupling
-      information.
-    - [ ] If temporal validation shows that stronger voltage-state coupling is
-      needed, prototype it generically through generated local Jacobians and a
-      per-compartment Schur complement. The local unknown block is the complete
-      generated membrane program and may contain HH-like gates, one or more
-      conserved Markov blocks, and auxiliary states in any supported
-      composition; it must never assume a Markov-only cable. Eliminate all local
-      membrane unknowns, contribute their effective diagonal/RHS terms to the
-      existing scalar single-cable or 2x2 block double-cable system, run the
-      retained CPU/Triton Thomas solver, then back-substitute local states. Do
-      not couple independent axons or replace Thomas with a generic global
-      sparse solve. Retain only with improved numerical behavior and a measured
-      end-to-end benefit over the canonical split update.
-    - [ ] Validate any global-operator/Schur implementation through the same
-      generated entry point for HH-only, Markov-only, mixed HH+Markov, and
-      multiple-kinetic-block membranes. Cover uniform and section-localized
-      layouts in both single- and double-cable formulations, and compare Vm,
-      every dynamic state, currents, threshold, and velocity against the
-      canonical split path at multiple `dt` values.
+      information. The derivation is retained in
+      `docs/architecture/p18_full_step_operator.md`; the executable single- and
+      double-cable proof in `benchmark/analysis/full_step_operator.py` agrees
+      with an assembled direct-sum solve to `3.33e-16` or better and finds zero
+      off-axon nonzeros. At `Naxon=4096`, `Nx=201`, and `S=6`, conservative CSR
+      storage is estimated at 304.58/376.75 MiB for single/double cable versus
+      69.09/81.62 MiB for the production-oriented arrays.
+    - [x] Do not prototype stronger voltage-state coupling without a numerical
+      failure that requires it. Current temporal validation does not provide
+      that trigger, and the frozen-operator proof shows that the canonical
+      local update plus Thomas is already exact block elimination. A future
+      coupled prototype, if justified by new evidence, must use generated local
+      Jacobians and a per-compartment Schur complement for complete HH-like,
+      Markov, mixed, and auxiliary-state programs; it must retain scalar/2x2
+      Thomas, never couple independent axons, and replace the split path only
+      after broader numerical validation and an end-to-end measured benefit.
   - [x] Evaluate and reject generic active-site membrane-state compaction before
     table or custom-kernel work. The realistic localized layout wastes 90.5% of
     dense dynamic-state bytes, but a canonical gather/update/scatter prototype
@@ -187,15 +222,27 @@ pytest -q tests/unit --tb=short
     not fragmentation (`runtime.prepare` remains about 0.1 ms warm).
   - [ ] Prototype a voltage-tabulated transition operator only as a benchmark
     candidate after the exact-path profiles above.
-    - [ ] Generate `M(V, dt) = exp(dt Q(V))` and stationary states from the same
+    - [x] Generate `M(V, dt) = exp(dt Q(V))` and stationary states from the same
       compiled kinetic contract; key any artifact by source/topology,
       parameters, temperature, `dt`, dtype, voltage grid, and compiler version.
       Do not introduce SciPy or table configuration into the simulation API.
+      `benchmark/kinetic_transition_tables.py` keeps this benchmark-only and
+      also generates the canonical implicit `(I - dt Q)^-1` operator so a
+      temporal-scheme change is not confused with interpolation error.
     - [ ] Compare nearest/linear interpolation and multiple voltage spacings
       against the exact matrix-free update over one-step states, long voltage
       trajectories, all clamp surfaces, spike waveform, threshold, velocity,
       and recruitment. Linear interpolation must preserve stochasticity and
       errors must be reported for states, open probability, and current.
+      - [x] Complete the one-step, 300-step trajectory, stochasticity, and local
+        CPU micro-cost gate at 204,800 Nav1.6 sites for 0.25/0.5/1.0 mV grids.
+        Linear implicit lookup has `7.75e-7` to `1.16e-5` one-step error but is
+        0.82x-0.86x as fast as the exact update; nearest lookup is roughly even
+        but less accurate. Exponential lookup differs by about `1.35e-2` even
+        on the finest grid because it changes the canonical time integrator.
+      - [ ] Run the same paired micro gate on P100. Continue to clamp and full
+        cable validation only if a GPU variant can plausibly clear the 1.3x
+        integrated retention threshold.
     - [ ] Retain a generated table implementation only if it is numerically
       accepted and improves the integrated workload by at least 1.3x without
       pathological memory traffic or batch fragmentation. It must replace the

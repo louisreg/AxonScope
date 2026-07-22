@@ -29,6 +29,19 @@ _DOUBLE_CABLE_STATIC_ARGS = _COMMON_STATIC_ARGS | frozenset(
         "tiled_thomas_block_b",
     }
 )
+_RECORDING_STATIC_ARGS = frozenset(
+    {
+        "record_full",
+        "record_gates",
+        "record_currents",
+        "record_conductances",
+        "record_states",
+    }
+)
+_SINGLE_CABLE_RECORDING_STATIC_ARGS = _COMMON_STATIC_ARGS | _RECORDING_STATIC_ARGS
+_DOUBLE_CABLE_RECORDING_STATIC_ARGS = (
+    _DOUBLE_CABLE_STATIC_ARGS | frozenset({"record_full"})
+)
 
 
 def install_production_jax_captures(
@@ -36,21 +49,32 @@ def install_production_jax_captures(
     *,
     cables: tuple[str, ...],
     platform: str,
+    route: str = "observer",
 ) -> None:
-    """Capture the first compact factorized JIT invocation for each cable."""
+    """Capture the first production JIT invocation for each cable and route."""
 
     requested = frozenset(cables)
     unknown = requested - {"single", "double"}
     if unknown:
         raise ValueError(f"unsupported JAX phase-capture cables: {sorted(unknown)}")
+    if route not in {"observer", "recording"}:
+        raise ValueError("route must be 'observer' or 'recording'.")
 
     if "single" in requested:
         import axonscope.runtime.jax.kernels.single_cable as single_cable
 
         _install_capture(
             single_cable,
-            attribute="_run_single_cable_factorized_vstim_batch_sparse_observer_scan",
-            static_args=_SINGLE_CABLE_STATIC_ARGS,
+            attribute=(
+                "_run_single_cable_factorized_vstim_batch_sparse_observer_scan"
+                if route == "observer"
+                else "_run_single_cable_vstim_batch_stateful_scan"
+            ),
+            static_args=(
+                _SINGLE_CABLE_STATIC_ARGS
+                if route == "observer"
+                else _SINGLE_CABLE_RECORDING_STATIC_ARGS
+            ),
             label="single",
             output_dir=output_dir,
         )
@@ -62,11 +86,23 @@ def install_production_jax_captures(
         _install_capture(
             double_cable,
             attribute=(
-                "_run_double_cable_batch_observer_integrated_scan"
+                (
+                    "_run_double_cable_batch_observer_integrated_scan"
+                    if route == "observer"
+                    else "_run_double_cable_batch_stateful_integrated_scan"
+                )
                 if gpu_platform
-                else "_run_double_cable_batch_observer_scan"
+                else (
+                    "_run_double_cable_batch_observer_scan"
+                    if route == "observer"
+                    else "_run_double_cable_batch_stateful_scan"
+                )
             ),
-            static_args=_DOUBLE_CABLE_STATIC_ARGS,
+            static_args=(
+                _DOUBLE_CABLE_STATIC_ARGS
+                if route == "observer"
+                else _DOUBLE_CABLE_RECORDING_STATIC_ARGS
+            ),
             label="double",
             output_dir=output_dir,
         )
@@ -127,6 +163,7 @@ def _install_capture(
 
         payload = {
             "cable": label,
+            "route": "recording" if "stateful" in attribute else "observer",
             "callable": f"{module.__name__}.{attribute}",
             "trace_s": trace_s,
             "lower_s": lower_s,

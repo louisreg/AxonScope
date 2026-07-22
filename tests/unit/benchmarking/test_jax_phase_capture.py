@@ -7,6 +7,7 @@ import jax
 import jax.numpy as jnp
 
 import axonscope.runtime.jax.kernels.double_cable as double_cable
+import axonscope.runtime.jax.kernels.single_cable as single_cable
 from benchmark.analysis.jax_phase_capture import (
     install_production_jax_captures,
 )
@@ -82,3 +83,78 @@ def test_production_double_cable_capture_splits_jax_cold_phases(tmp_path, monkey
     assert payload["dynamic"]["Vi0_mV"][0]["shape"] == [2, 3]
     assert (tmp_path / "double.stablehlo.txt").is_file()
     assert (tmp_path / "double.compiled.optimized_hlo.txt").is_file()
+
+
+def test_production_single_cable_capture_supports_recording_route(
+    tmp_path,
+    monkeypatch,
+):
+    @partial(
+        jax.jit,
+        static_argnames=(
+            "backend",
+            "membrane",
+            "has_driven_extracellular",
+            "stateless_vm_only",
+            "record_full",
+            "record_gates",
+            "record_currents",
+            "record_conductances",
+            "record_states",
+        ),
+    )
+    def fake_kernel(
+        *,
+        backend,
+        membrane,
+        has_driven_extracellular,
+        stateless_vm_only,
+        record_full,
+        record_gates,
+        record_currents,
+        record_conductances,
+        record_states,
+        Vm0_mV,
+    ):
+        _ = (
+            backend,
+            membrane,
+            has_driven_extracellular,
+            stateless_vm_only,
+            record_full,
+            record_gates,
+            record_currents,
+            record_conductances,
+            record_states,
+        )
+        return Vm0_mV + 1.0
+
+    monkeypatch.setattr(
+        single_cable,
+        "_run_single_cable_vstim_batch_stateful_scan",
+        fake_kernel,
+    )
+    install_production_jax_captures(
+        tmp_path,
+        cables=("single",),
+        platform="cpu",
+        route="recording",
+    )
+
+    result = single_cable._run_single_cable_vstim_batch_stateful_scan(
+        backend="backend",
+        membrane="membrane",
+        has_driven_extracellular=False,
+        stateless_vm_only=False,
+        record_full=False,
+        record_gates=False,
+        record_currents=False,
+        record_conductances=False,
+        record_states=False,
+        Vm0_mV=jnp.zeros((2, 3), dtype=jnp.float32),
+    )
+
+    assert jnp.array_equal(result, jnp.ones((2, 3), dtype=jnp.float32))
+    payload = json.loads((tmp_path / "single.jit_phases.json").read_text())
+    assert payload["route"] == "recording"
+    assert payload["static"]["record_full"] is False

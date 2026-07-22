@@ -68,6 +68,7 @@ FUSION_FIELDS = (
     "count_concatenate",
     "count_copy",
     "count_divide",
+    "count_exponential",
     "count_gather",
     "count_multiply",
     "count_negate",
@@ -164,6 +165,9 @@ def analyze_hlo_files(files: Sequence[Path]) -> HloFusionAnalysis:
                 "lines": len(text.splitlines()),
                 "bytes": len(text.encode("utf-8")),
                 "fusion_count": sum(1 for line in text.splitlines() if " fusion(" in line),
+                "count_exponential": len(re.findall(r"\bexponential\(", text)),
+                "count_gather": len(re.findall(r"\bgather\(", text)),
+                "count_custom_call": len(re.findall(r"\bcustom-call\(", text)),
                 "entry_computation_layout": _entry_computation_layout(text),
             }
         )
@@ -329,6 +333,7 @@ def _op_counts(text: str) -> dict[str, int]:
         "count_concatenate": len(re.findall(r"\bconcatenate\(", text)),
         "count_copy": len(re.findall(r"\bcopy\(", text)),
         "count_divide": len(re.findall(r"\bdivide\(", text)),
+        "count_exponential": len(re.findall(r"\bexponential\(", text)),
         "count_gather": len(re.findall(r"\bgather\(", text)),
         "count_multiply": len(re.findall(r"\bmultiply\(", text)),
         "count_negate": len(re.findall(r"\bnegate\(", text)),
@@ -445,12 +450,13 @@ def _write_report(
         "",
         "## Modules",
         "",
-        "| stage | variant | module | lines | fusions |",
-        "| --- | --- | --- | ---: | ---: |",
+        "| stage | variant | module | lines | fusions | exp | gather | custom calls |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in analysis.module_rows:
         lines.append(
-            "| {stage} | {variant} | {module} | {lines} | {fusion_count} |".format(**row)
+            "| {stage} | {variant} | {module} | {lines} | {fusion_count} | "
+            "{count_exponential} | {count_gather} | {count_custom_call} |".format(**row)
         )
     lines.extend(["", "## Largest Fusion Outputs", ""])
     lines.extend(_fusion_table(sorted(analysis.fusion_rows, key=_fusion_sort_key, reverse=True)[:12]))

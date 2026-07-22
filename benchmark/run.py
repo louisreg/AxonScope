@@ -8,7 +8,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from benchmark import membrane_temporal
+from benchmark import kinetic_transition_tables, membrane_temporal
 from benchmark.curves import recruitment_curves, threshold_curves
 from benchmark.dispatcher import group_scheduling
 from benchmark.examples import basic_examples, with_nrv_examples
@@ -26,6 +26,7 @@ SCRIPTS = {
     "recruitment_amplitude_batch": recruitment_amplitude_batch,
     "single_cable_triton_gate": single_cable_triton_gate,
     "membrane_temporal": membrane_temporal,
+    "kinetic_transition_tables": kinetic_transition_tables,
 }
 
 
