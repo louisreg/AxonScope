@@ -540,6 +540,79 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     assert call_kwargs["vmap_flatten_elements"] is True
 
 
+def test_source_codegen_emits_exact_balbi_markov_triton_update(tmp_path, monkeypatch):
+    triton = ModuleType("triton")
+    language = ModuleType("triton.language")
+    triton.jit = lambda function: function
+    language.constexpr = object()
+    language.abs = np.abs
+    language.exp = np.exp
+    language.log = np.log
+    language.maximum = np.maximum
+    language.minimum = np.minimum
+    language.sigmoid = lambda value: 1.0 / (1.0 + np.exp(-value))
+    language.sqrt = np.sqrt
+    language.where = np.where
+    triton.language = language
+    monkeypatch.setitem(sys.modules, "triton", triton)
+    monkeypatch.setitem(sys.modules, "triton.language", language)
+
+    compiled = compile_model_source_file(
+        Path("src/axonscope/membranes/models/nav_balbi.py"),
+        model_class_name="BalbiNav",
+        cache_root=tmp_path,
+        generated_targets=("jax", "numpy", "triton"),
+        load_generated_modules=("jax", "numpy", "triton"),
+    )
+    triton_model = compiled.cache.loaded_modules["triton"]
+    membrane = JaxMembraneProgram.from_generated_module(
+        compiled.cache.loaded_modules["jax"],
+        parameter_overrides={},
+        host_module=compiled.cache.loaded_modules["numpy"],
+    )
+    voltage = np.asarray([-100.0, -70.0, -30.0, 20.0], dtype=np.float32)
+    gates = np.asarray(membrane.init_gates(jnp.asarray(voltage)), dtype=np.float32)
+    gates = 0.8 * gates + 0.2 * np.asarray(
+        [
+            [0.30, 0.20, 0.10, 0.15, 0.15, 0.10],
+            [0.10, 0.20, 0.30, 0.10, 0.20, 0.10],
+            [0.15, 0.15, 0.20, 0.20, 0.15, 0.15],
+            [0.20, 0.10, 0.15, 0.25, 0.10, 0.20],
+        ],
+        dtype=np.float32,
+    )
+    dt = np.float32(0.005)
+    expected_gates = np.asarray(
+        membrane.cn_gate_update(jnp.asarray(gates), jnp.asarray(voltage), dt)
+    )
+    expected_gm, expected_ge = membrane.membrane_conductance_terms(
+        jnp.asarray(expected_gates)
+    )
+
+    function_spec = triton_model.RUNTIME_CONTRACT["functions"][
+        "advance_gates_and_membrane_terms"
+    ]
+    values = {
+        "dt": dt,
+        "linearize_previous": False,
+        "Vm": voltage,
+        **{
+            name: gates[:, index]
+            for index, name in enumerate(membrane.generated_contract.gate_state_names)
+        },
+        **membrane.parameter_values,
+    }
+    actual = triton_model.advance_gates_and_membrane_terms(
+        *(values[name] for name in function_spec["args"])
+    )
+    actual_gates = np.stack(actual[:-2], axis=1)
+
+    np.testing.assert_allclose(actual_gates, expected_gates, rtol=2e-5, atol=2e-6)
+    np.testing.assert_allclose(actual[-2], expected_gm, rtol=2e-5, atol=2e-6)
+    np.testing.assert_allclose(actual[-1], expected_ge, rtol=2e-5, atol=2e-6)
+    np.testing.assert_allclose(actual_gates.sum(axis=1), 1.0, atol=2e-6)
+
+
 def test_model_ir_round_trips_from_codegen_graph_json(tmp_path):
     compiled = compile_model_source_file(PASSIVE_SOURCE, cache_root=tmp_path)
 
@@ -815,6 +888,7 @@ class MixedKinetics(Model):
     compiled = compile_model_source_file(
         source,
         cache_root=tmp_path / "cache",
+        generated_targets=("jax", "numpy", "triton"),
         load_generated_modules=("jax", "numpy"),
     )
     model = compiled.model
@@ -824,6 +898,12 @@ class MixedKinetics(Model):
     assert program.gate_state_names == ("x", "c", "o")
     assert len(model.kinetics) == 1
     assert len(model.kinetics[0].transitions) == 2
+    triton_source = (compiled.cache.directory / "triton_model.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def advance_gates_and_membrane_terms(" in triton_source
+    assert "_gate_new_0" in triton_source
+    assert "_kin_0_x_0" in triton_source
     restored = model_ir_from_json(
         (compiled.cache.directory / "optimized_graph.json").read_text(encoding="utf-8")
     )

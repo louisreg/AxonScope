@@ -3345,7 +3345,7 @@ def _generated_module_source(
         }
     )
     fused_membrane_source = ""
-    if target == "triton" and not membrane_states and step is None and not model.kinetics:
+    if target == "triton" and not membrane_states and step is None:
         (
             fused_membrane_source,
             fused_membrane_function,
@@ -3597,10 +3597,22 @@ def _generated_triton_fused_membrane_function_source(
     dict[str, tuple[str, ...]],
     dict[str, tuple[str, ...]],
 ]:
-    """Emit one scalar stateless gate-update plus Gm/GE Triton operation."""
+    """Emit one scalar stateless local-state update plus Gm/GE operation."""
 
-    gate_names = tuple(gate.state for gate in model.gates)
-    expressions = tuple(expression for _, expression in (*gate_outputs, *membrane_outputs))
+    hh_gate_names = tuple(gate.state for gate in model.gates)
+    kinetic_state_names = tuple(
+        state for block in model.kinetics for state in block.states
+    )
+    gate_names = hh_gate_names + kinetic_state_names
+    kinetic_expressions = tuple(
+        transition.rate
+        for block in model.kinetics
+        for transition in block.transitions
+    )
+    expressions = tuple(
+        expression
+        for _, expression in (*gate_outputs, *membrane_outputs)
+    ) + kinetic_expressions
     expression_args = _expression_arg_names(metadata, expressions)
     extra_args = tuple(name for name in expression_args if name not in gate_names)
     arg_names = ("dt", "linearize_previous", *gate_names, *extra_args)
@@ -3634,6 +3646,9 @@ def _generated_triton_fused_membrane_function_source(
                     f"{gate_new} = _g_inf_{index} - (_g_inf_{index} - {gate.state}) * tl.exp(-dt * _sum_{index})",
                 )
             )
+    kinetic_lines, kinetic_new_names = _generated_triton_kinetic_update_lines(model)
+    body_lines.extend(kinetic_lines)
+    gate_new_names.extend(kinetic_new_names)
     for gate_name, gate_new in zip(gate_names, gate_new_names, strict=True):
         body_lines.append(
             f"{gate_name} = tl.where(linearize_previous, {gate_name}, {gate_new})"
@@ -3747,6 +3762,129 @@ def _generated_triton_fused_membrane_function_source(
             "outputs": ("gates_out", "gm_out", "ge_out"),
         },
     )
+
+
+def _generated_triton_kinetic_update_lines(
+    model: ModelIR,
+) -> tuple[list[str], list[str]]:
+    """Emit scalar backward-Euler solves for every generated kinetic block."""
+
+    lines: list[str] = []
+    outputs: list[str] = []
+    for block_index, block in enumerate(model.kinetics):
+        width = len(block.states)
+        prefix = f"_kin_{block_index}"
+        generator: list[list[list[str]]] = [
+            [[] for _ in range(width)] for _ in range(width)
+        ]
+        for transition_index, transition in enumerate(block.transitions):
+            rate = f"{prefix}_rate_{transition_index}"
+            lines.append(
+                f"{rate} = {_expression_source(transition.rate, target='triton')}"
+            )
+            source = block.states.index(transition.source)
+            target = block.states.index(transition.target)
+            generator[target][source].append(rate)
+            generator[source][source].append(f"-({rate})")
+
+        system = [
+            [
+                _triton_implicit_system_cell(
+                    generator[row][column],
+                    diagonal=row == column,
+                )
+                for column in range(width)
+            ]
+            for row in range(width)
+        ]
+        if block.conserve_probability:
+            solve_width = width - 1
+            eliminated = width - 1
+            reduced = [
+                [
+                    f"({system[row][column]}) - ({system[row][eliminated]})"
+                    for column in range(solve_width)
+                ]
+                for row in range(solve_width)
+            ]
+            rhs = [
+                f"({block.states[row]}) - ({system[row][eliminated]})"
+                for row in range(solve_width)
+            ]
+        else:
+            solve_width = width
+            reduced = system
+            rhs = list(block.states)
+
+        matrix_names = [
+            [f"{prefix}_a_{row}_{column}" for column in range(solve_width)]
+            for row in range(solve_width)
+        ]
+        rhs_names = [f"{prefix}_rhs_{row}" for row in range(solve_width)]
+        for row in range(solve_width):
+            for column in range(solve_width):
+                lines.append(f"{matrix_names[row][column]} = {reduced[row][column]}")
+            lines.append(f"{rhs_names[row]} = {rhs[row]}")
+
+        for pivot in range(solve_width - 1):
+            for row in range(pivot + 1, solve_width):
+                factor = f"{prefix}_factor_{pivot}_{row}"
+                lines.append(
+                    f"{factor} = {matrix_names[row][pivot]} / {matrix_names[pivot][pivot]}"
+                )
+                for column in range(pivot + 1, solve_width):
+                    lines.append(
+                        f"{matrix_names[row][column]} = {matrix_names[row][column]} - "
+                        f"{factor} * {matrix_names[pivot][column]}"
+                    )
+                lines.append(
+                    f"{rhs_names[row]} = {rhs_names[row]} - {factor} * {rhs_names[pivot]}"
+                )
+
+        solution_names = [f"{prefix}_x_{index}" for index in range(solve_width)]
+        for row in range(solve_width - 1, -1, -1):
+            residual_terms = [
+                f"{matrix_names[row][column]} * {solution_names[column]}"
+                for column in range(row + 1, solve_width)
+            ]
+            residual = rhs_names[row]
+            if residual_terms:
+                residual += " - " + " - ".join(residual_terms)
+            lines.append(
+                f"{solution_names[row]} = ({residual}) / {matrix_names[row][row]}"
+            )
+
+        if block.conserve_probability:
+            final_name = f"{prefix}_x_{width - 1}"
+            lines.append(f"{final_name} = 1.0 - " + " - ".join(solution_names))
+            dominant = f"{prefix}_dominant"
+            maximum = f"{prefix}_maximum"
+            lines.extend((f"{dominant} = 0", f"{maximum} = {solution_names[0]}"))
+            for index, solution in enumerate(solution_names[1:], start=1):
+                lines.extend(
+                    (
+                        f"{dominant} = tl.where({solution} > {maximum}, {index}, {dominant})",
+                        f"{maximum} = tl.maximum({maximum}, {solution})",
+                    )
+                )
+            negative = f"{prefix}_negative"
+            lines.append(f"{negative} = tl.minimum({final_name}, 0.0)")
+            for index, solution in enumerate(solution_names):
+                lines.append(
+                    f"{solution} = {solution} + tl.where({dominant} == {index}, {negative}, 0.0)"
+                )
+            lines.append(f"{final_name} = tl.maximum({final_name}, 0.0)")
+            solution_names.append(final_name)
+        outputs.extend(solution_names)
+    return lines, outputs
+
+
+def _triton_implicit_system_cell(terms: list[str], *, diagonal: bool) -> str:
+    generator = " + ".join(terms)
+    if not generator:
+        return "1.0" if diagonal else "0.0"
+    identity = "1.0" if diagonal else "0.0"
+    return f"{identity} - dt * ({generator})"
 
 
 def _batched(values: tuple[Any, ...], size: int) -> tuple[tuple[Any, ...], ...]:

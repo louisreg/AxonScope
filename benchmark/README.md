@@ -96,8 +96,18 @@ lookup is 0.97x-1.01x the exact update and has `2.91e-4` to `1.17e-3` one-step
 error; linear lookup is more accurate (`7.75e-7` to `1.16e-5`) but only
 0.82x-0.86x as fast. The exponential table differs from the canonical step by
 about `1.35e-2` regardless of grid spacing because it changes the integrator,
-not because of interpolation. P100 evidence remains necessary before rejecting
-the table candidate for GPU execution.
+not because of interpolation.
+
+P100 run `axs-p18-rate-table-883c15d` rejects the table candidate for GPU
+execution as well. At 204,800 sites, accurate linear implicit lookup ranges
+from 0.82x to 1.02x the exact generated update. Nearest implicit lookup reaches
+1.24x at 0.25/0.5 mV and 1.37x at 1 mV, but its one-step state error grows from
+`2.91e-4` to `1.17e-3`. Even the inaccurate 1 mV result has an upper-bound
+integrated speedup of only about 1.20x when membrane work is 62% of the full
+run, below the 1.3x retention threshold before accounting for other traffic.
+No runtime table path or broader clamp/cable campaign is retained. The P100
+`summary.json` SHA-256 is
+`92f01e5bfa7613b35dff64e1f737567dff9bfcb1f781e544fdbdeccdc70edaca`.
 
 `benchmark/membrane_temporal.py` supplies that full temporal baseline through
 the canonical public `AxonSimulation.run()` route. It compares a passive cable

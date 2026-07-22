@@ -220,8 +220,8 @@ pytest -q tests/unit --tb=short
     On the 100-step P100 double-cable A/B, dynamic isoform parameters cost
     34.9 ms warm versus 21.5 ms for homogeneous Nav1.6; this is execution work,
     not fragmentation (`runtime.prepare` remains about 0.1 ms warm).
-  - [ ] Prototype a voltage-tabulated transition operator only as a benchmark
-    candidate after the exact-path profiles above.
+  - [x] Evaluate and reject a voltage-tabulated transition operator as a
+    benchmark-only candidate after the exact-path profiles above.
     - [x] Generate `M(V, dt) = exp(dt Q(V))` and stationary states from the same
       compiled kinetic contract; key any artifact by source/topology,
       parameters, temperature, `dt`, dtype, voltage grid, and compiler version.
@@ -229,25 +229,30 @@ pytest -q tests/unit --tb=short
       `benchmark/kinetic_transition_tables.py` keeps this benchmark-only and
       also generates the canonical implicit `(I - dt Q)^-1` operator so a
       temporal-scheme change is not confused with interpolation error.
-    - [ ] Compare nearest/linear interpolation and multiple voltage spacings
+    - [x] Compare nearest/linear interpolation and multiple voltage spacings
       against the exact matrix-free update over one-step states, long voltage
-      trajectories, all clamp surfaces, spike waveform, threshold, velocity,
-      and recruitment. Linear interpolation must preserve stochasticity and
-      errors must be reported for states, open probability, and current.
+      trajectories, and cost. Stop before clamp, spike, threshold, velocity,
+      and recruitment campaigns if the isolated candidate cannot meet the
+      retention threshold. Linear interpolation must preserve stochasticity
+      and errors must be reported for complete states.
       - [x] Complete the one-step, 300-step trajectory, stochasticity, and local
         CPU micro-cost gate at 204,800 Nav1.6 sites for 0.25/0.5/1.0 mV grids.
         Linear implicit lookup has `7.75e-7` to `1.16e-5` one-step error but is
         0.82x-0.86x as fast as the exact update; nearest lookup is roughly even
         but less accurate. Exponential lookup differs by about `1.35e-2` even
         on the finest grid because it changes the canonical time integrator.
-      - [ ] Run the same paired micro gate on P100. Continue to clamp and full
-        cable validation only if a GPU variant can plausibly clear the 1.3x
-        integrated retention threshold.
-    - [ ] Retain a generated table implementation only if it is numerically
-      accepted and improves the integrated workload by at least 1.3x without
-      pathological memory traffic or batch fragmentation. It must replace the
-      exact temporal implementation selected for that runtime policy rather
-      than create a broad fallback hierarchy; otherwise reject it explicitly.
+      - [x] Run the paired micro gate on P100. Accurate linear implicit lookup
+        is 0.82x-1.02x the exact update. Nearest reaches 1.24x-1.37x but has
+        `2.91e-4` to `1.17e-3` one-step state error; even its best result implies
+        only about 1.20x end-to-end at the measured 62% membrane fraction.
+        Run `axs-p18-rate-table-883c15d` therefore fails the 1.3x integrated
+        plausibility gate, so broader physiological validation is deliberately
+        not run.
+    - [x] Reject the generated table implementation: no numerically acceptable
+      variant improves the isolated P100 workload, and the faster nearest
+      variant cannot clear the integrated retention threshold. Keep the exact
+      matrix-free generated update as the only temporal implementation; no
+      runtime table path or fallback hierarchy was added.
   - [ ] Consider Pallas/Triton or CUDA only if the final integrated GPU profile
     still spends more than 20% in the generated Markov update and a same-shape
     A/B demonstrates at least 1.3x end-to-end improvement.
