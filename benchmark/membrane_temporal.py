@@ -91,6 +91,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--case-filter")
     parser.add_argument(
+        "--membrane-route",
+        choices=("auto", "jax"),
+        default="auto",
+        help="Benchmark the production route or force the JAX membrane reference.",
+    )
+    parser.add_argument(
+        "--save-voltage-values",
+        action="store_true",
+        help="Retain result Vm arrays for numerical route comparisons.",
+    )
+    parser.add_argument(
         "--memory-trace",
         choices=("off", "rss", "tracemalloc", "device", "all"),
         default="off",
@@ -113,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--cold-only", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.membrane_route == "jax":
+        _force_jax_membrane_reference()
 
     preset = _PRESETS[args.preset]
     axon_counts = _csv_ints(args.axons or str(preset["axons"]))
@@ -168,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                 repeats=repeats,
                 memory_trace=args.memory_trace,
                 cold_only=args.cold_only,
+                save_voltage_values=args.save_voltage_values,
             )
         )
 
@@ -178,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         "dt_ms": args.dt_ms,
         "v_init_mV": args.v_init_mv,
         "repeats": repeats,
+        "membrane_route": args.membrane_route,
         "rows": rows,
     }
     summary = args.output / "summary.json"
@@ -200,6 +215,7 @@ def _measure_case(
     repeats: int,
     memory_trace: str,
     cold_only: bool,
+    save_voltage_values: bool,
 ) -> dict[str, object]:
     build_start = perf_counter()
     membranes = _membranes(case.membrane)
@@ -271,6 +287,13 @@ def _measure_case(
     dense_state_bytes = case.n_axons * axon.n_compartments * state_count * 4
     compact_state_bytes = case.n_axons * active_compartments * state_count * 4
     assert last_result is not None
+    if save_voltage_values:
+        np.savez_compressed(
+            output / "voltage_values.npz",
+            values=np.stack(
+                [row.voltage_values(unit=axs.mV) for row in last_result],
+            ),
+        )
     dispatch_group_ids = {
         int(result.diagnostics["dispatch_group_id"]) for result in last_result
     }
@@ -310,6 +333,27 @@ def _result_checksum(result) -> str:
         digest.update(str(values.dtype).encode("ascii"))
         digest.update(values.tobytes())
     return digest.hexdigest()
+
+
+def _force_jax_membrane_reference() -> None:
+    """Disable optional generated kernels inside this benchmark process."""
+
+    if os.environ.get("AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE") == "1":
+        raise SystemExit(
+            "--membrane-route jax conflicts with "
+            "AXONSCOPE_REQUIRE_GENERATED_TRITON_MEMBRANE=1."
+        )
+    from axonscope.runtime.jax.membranes.backend import (
+        GatedLeakStackMembraneBackend,
+        UniformMembraneBackend,
+    )
+
+    def unavailable(self, **kwargs):
+        del self, kwargs
+        return None
+
+    UniformMembraneBackend.generated_triton_advance_membrane_terms = unavailable
+    GatedLeakStackMembraneBackend.generated_triton_advance_membrane_terms = unavailable
 
 
 def _run_compilation_cache_replay(
