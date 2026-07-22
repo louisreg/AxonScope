@@ -896,16 +896,17 @@ class GatedLeakStackMembraneBackend:
         module = load_generated_triton_module(self.gated_model)
         if module is None:
             return None
+        parameter_values = dict(self.gated_model.parameter_values)
+        if parameters is not None:
+            parameter_values.update(
+                self._flatten_parameter_rows(parameters, g_prev.shape[:-1])
+            )
         generated = advance_generated_membrane_terms(
             module,
             V_mV,
             g_prev[..., : self.gated_gate_count],
             dt,
-            parameter_values=(
-                self.gated_model.parameter_values
-                if parameters is None
-                else self._flatten_parameter_rows(parameters, g_prev.shape[:-1])
-            ),
+            parameter_values=parameter_values,
             linearize_previous=linearize_previous,
         )
         if generated is None:

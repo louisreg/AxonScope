@@ -120,6 +120,45 @@ def test_gated_stack_propagates_missing_optional_triton_kernel(monkeypatch):
     assert actual is None
 
 
+def test_gated_stack_merges_dynamic_rows_with_model_parameters(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        triton_generated,
+        "load_generated_triton_module",
+        lambda model: SimpleNamespace(),
+    )
+
+    def fake_advance(*args, **kwargs):
+        captured.update(kwargs["parameter_values"])
+        gates = args[2]
+        voltage = args[1]
+        return gates, jnp.zeros_like(voltage), jnp.zeros_like(voltage)
+
+    monkeypatch.setattr(
+        triton_generated,
+        "advance_generated_membrane_terms",
+        fake_advance,
+    )
+    backend = GatedLeakStackMembraneBackend(
+        gated_model=SimpleNamespace(parameter_values={"fixed": 1.0, "var": 2.0}),
+        target_nx=2,
+        dtype=jnp.float32,
+        gated_gate_count=1,
+        gated_channel_count=1,
+    )
+
+    backend.generated_triton_advance_membrane_terms(
+        g_prev=jnp.zeros((2, 4), dtype=jnp.float32),
+        V_mV=jnp.zeros((2,), dtype=jnp.float32),
+        dt=jnp.asarray(0.005, dtype=jnp.float32),
+        linearize_previous=False,
+        parameters={"var": jnp.asarray([3.0, 4.0], dtype=jnp.float32)},
+    )
+
+    assert captured["fixed"] == 1.0
+    np.testing.assert_array_equal(captured["var"], [3.0, 4.0])
+
+
 def test_double_cable_gpu_solve_reuses_precomputed_membrane_terms(monkeypatch):
     batch_size = 2
     nx = 3
