@@ -100,13 +100,17 @@ def advance_generated_membrane_terms(
             parameters.append(value.reshape(()))
             parameter_is_field[name] = False
             continue
-        try:
-            field = jnp.broadcast_to(value, Vm.shape)
-        except ValueError as exc:
-            raise ValueError(
-                f"Generated Triton membrane parameter {name!r} must be scalar "
-                f"or broadcast to Vm shape {Vm.shape}, got {value.shape}."
-            ) from exc
+        if value.size == Vm.size:
+            field = value.reshape(Vm.shape)
+        else:
+            try:
+                field = jnp.broadcast_to(value, Vm.shape)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Generated Triton membrane parameter {name!r} must be "
+                    f"scalar, contain {Vm.size} elements, or broadcast to Vm "
+                    f"shape {Vm.shape}; got {value.shape}."
+                ) from exc
         parameters.append(field)
         parameter_is_field[name] = True
     vm_shape = jax.ShapeDtypeStruct(Vm.shape, Vm.dtype)

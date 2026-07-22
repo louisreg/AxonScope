@@ -559,6 +559,21 @@ def test_source_codegen_emits_scalar_triton_contract_matching_numpy(
     )
     assert call["kwargs"][f"{field_parameter.upper()}_IS_FIELD"] is True
 
+    tiled_vm = np.broadcast_to(values["Vm"], (2, values["Vm"].size))
+    parameter_values[field_parameter] = np.full(
+        tiled_vm.size,
+        parameter_values[field_parameter][0],
+    )
+    triton_generated.advance_generated_membrane_terms(
+        triton_model,
+        tiled_vm,
+        np.broadcast_to(gates_prev, (2, *gates_prev.shape)),
+        dt,
+        parameter_values=parameter_values,
+        linearize_previous=False,
+    )
+    assert call["args"][3].shape == tiled_vm.shape
+
 
 def test_source_codegen_emits_exact_balbi_markov_triton_update(tmp_path, monkeypatch):
     triton = ModuleType("triton")
